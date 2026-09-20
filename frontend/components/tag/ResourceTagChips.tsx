@@ -10,6 +10,7 @@ interface ResourceTagChipsProps {
   resourceType: string;
   resourceId: string;
   max?: number;
+  overflowLabel?: ReactNode;
   refreshKey?: string | number;
   singleLine?: boolean;
   emptyText?: ReactNode;
@@ -28,6 +29,7 @@ export default function ResourceTagChips({
   resourceType,
   resourceId,
   max,
+  overflowLabel,
   refreshKey,
   singleLine,
   emptyText,
@@ -58,6 +60,11 @@ export default function ResourceTagChips({
 
   if (assignments.length === 0) return emptyText ?? null;
   return (
-    <TagChips assignments={assignments} max={max} singleLine={singleLine} />
+    <TagChips
+      assignments={assignments}
+      max={max}
+      overflowLabel={overflowLabel}
+      singleLine={singleLine}
+    />
   );
 }

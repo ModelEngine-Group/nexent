@@ -274,6 +274,45 @@ def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
     return overrides
 
 
+def _agent_capacity_overrides(
+    agent_info: Optional[dict],
+    model_id: Optional[int],
+) -> Dict[str, Any]:
+    """Extract per-agent capacity overrides for the selected model.
+
+    v2.6.0 model_params_override entries may carry capacity fields
+    (context_window_tokens / max_input_tokens / max_output_tokens /
+    default_output_reserve_tokens / tokenizer_family) next to inference
+    params. When present they win over the model-level capacity columns in
+    W1/W2 resolution, mirroring how temperature/top_p overrides win.
+    """
+    if not isinstance(agent_info, dict) or model_id is None:
+        return {}
+    override_map = agent_info.get("model_params_override")
+    if not isinstance(override_map, dict):
+        return {}
+    entry = override_map.get(str(model_id))
+    if not isinstance(entry, dict):
+        return {}
+    overrides: Dict[str, Any] = {}
+    for field in _OPERATOR_OVERRIDE_FIELDS:
+        value = entry.get(field)
+        if value is not None:
+            overrides[field] = value
+    # Per-agent override semantics: a filled value simply replaces the
+    # model-level value for THIS agent. "最大输出Token数" is the field users
+    # expect to control the actual per-request max_tokens, so mirror it into
+    # default_output_reserve_tokens unless the user set the reserve
+    # explicitly. Without this, the request would keep the model-level
+    # reserve (4096) and the filled cap alone would change nothing visible.
+    if (
+        "max_output_tokens" in overrides
+        and "default_output_reserve_tokens" not in overrides
+    ):
+        overrides["default_output_reserve_tokens"] = overrides["max_output_tokens"]
+    return overrides
+
+
 def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
     values = [value for value in field_sources.values() if value]
     if not values:
@@ -363,6 +402,7 @@ def _resolve_context_budget(
 
 def _resolve_input_budget(
     model_info: Optional[dict],
+    capacity_overrides: Optional[Dict[str, Any]] = None,
 ) -> tuple[int, Optional[dict], Optional[ModelCapacitySnapshot]]:
     """Resolve the context-manager input budget for a model_record_t row.
 
@@ -371,6 +411,9 @@ def _resolve_input_budget(
     Falls back to _TOKEN_THRESHOLD_LEGACY_FALLBACK with no snapshot when
     capacity is unknown - this is the migration-window behavior before all
     model rows are backfilled.
+
+    capacity_overrides carries per-agent capacity fields (from
+    model_params_override) that win over the model-level columns.
     """
     if not isinstance(model_info, dict):
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
@@ -383,10 +426,13 @@ def _resolve_input_budget(
             "model_factory/provider is missing; capacity catalog matching is disabled"
         )
     try:
+        operator_overrides = _operator_overrides_from_model_info(model_info)
+        if capacity_overrides:
+            operator_overrides.update(capacity_overrides)
         snapshot = resolve_capacity(
             model_id=model_id,
             provider=provider,
-            operator_overrides=_operator_overrides_from_model_info(model_info),
+            operator_overrides=operator_overrides,
             capability_profiles=CAPABILITY_CATALOG,
         )
         logger.debug(
@@ -1423,9 +1469,14 @@ async def create_agent_config(
         # W1 step 6: derive input budget via ModelCapacityResolver instead of
         # treating model_info["max_tokens"] (a deprecated output cap) as a
         # context threshold. Falls back to a safe constant when capacity is
-        # unknown during the migration window.
+        # unknown during the migration window. Per-agent capacity overrides
+        # (model_params_override) win over the model-level columns.
         input_budget, capacity_snapshot, resolved_capacity_snapshot = (
-            _resolve_input_budget(model_info)
+            _resolve_input_budget(
+                model_info,
+                capacity_overrides=_agent_capacity_overrides(
+                    agent_info, model_id_to_use),
+            )
         )
     else:
         model_name = "main_model"
@@ -2298,12 +2349,27 @@ async def create_agent_run_info(
                         mc.temperature = override_entry["temperature"]
                     if override_entry.get("top_p") is not None:
                         mc.top_p = override_entry["top_p"]
+                    # v2.6.0: capacity fields are overridable per-agent. The
+                    # authoritative consumer for request shaping is the W1/W2
+                    # resolution (agent-selected model), this keeps each
+                    # ModelConfig consistent with its override entry.
+                    for field in _OPERATOR_OVERRIDE_FIELDS:
+                        if override_entry.get(field) is not None:
+                            setattr(mc, field, override_entry[field])
                     override_extra = override_entry.get("extra_params")
                     if override_extra and isinstance(override_extra, dict):
                         merged = dict(mc.extra_body or {})
                         for k, v in override_extra.items():
                             if k == "__custom__" and isinstance(v, dict):
-                                merged.update(v)
+                                for custom_key, custom_value in v.items():
+                                    # A null custom value is an explicit
+                                    # removal marker: the agent opts out of a
+                                    # model-level custom param instead of
+                                    # inheriting it.
+                                    if custom_value is None:
+                                        merged.pop(custom_key, None)
+                                    else:
+                                        merged[custom_key] = custom_value
                             else:
                                 merged[k] = v
                         mc.extra_body = merged if merged else None

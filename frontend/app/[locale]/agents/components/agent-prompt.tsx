@@ -28,6 +28,8 @@ import {
   ModelAdvancedSettingsValue,
   advancedSettingsValueFromRecord,
   buildModelOverrideEntry,
+  diffCustomParamsForSave,
+  mergeCustomParamsForEditing,
 } from "../../models/components/model/ModelAdvancedSettings";
 import type { ModelOverrideMap } from "../../models/components/model/ModelOverrideModal";
 import { canManageModels } from "@/lib/auth";
@@ -208,22 +210,20 @@ export default function AgentPrompt() {
       setEditingOverrideValue(null);
       return;
     }
-    const modelDefaults: Record<string, unknown> = {
-      temperature: (configuringModel as any).temperature,
-      top_p: (configuringModel as any).topP,
-      extra_params: (configuringModel as any).extraParams,
-    };
+    // Only override values are editable in this dialog; model-level defaults
+    // show up as placeholders via inheritedDefaults. Merging model defaults
+    // into the editing state made "deleted" overrides reappear (the model
+    // value was being re-merged as if the user had set it in the override).
     const overrideEntry = modelParamsOverride[String(configuringModel.id)] ?? {};
-    const formRecord: Record<string, unknown> = { ...modelDefaults, ...overrideEntry };
-    if (overrideEntry.extra_params && modelDefaults.extra_params) {
-      formRecord.extra_params = {
-        ...(modelDefaults.extra_params as Record<string, unknown>),
-        ...(overrideEntry.extra_params as Record<string, unknown>),
-      };
-    }
-    setEditingOverrideValue(
-      advancedSettingsValueFromRecord(formRecord as any, inferenceSpecs, (configuringModel as any).type ?? "llm")
+    const base = advancedSettingsValueFromRecord(overrideEntry as any, inferenceSpecs, (configuringModel as any).type ?? "llm");
+    // Custom params are the exception: model-level customs render as plain
+    // editable rows (merged display). Deletion persists as a null marker in
+    // the override entry, so deleted rows do NOT reappear on reopen.
+    base.__custom__ = mergeCustomParamsForEditing(
+      (overrideEntry as any).extra_params?.__custom__,
+      (configuringModel as any).extraParams?.__custom__
     );
+    setEditingOverrideValue(base);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configuringModelId]);
 
@@ -544,10 +544,20 @@ export default function AgentPrompt() {
             );
             const diffValue: ModelAdvancedSettingsValue = {};
             for (const [key, val] of Object.entries(editingOverrideValue)) {
+              // Custom params are diffed per-key below (deleting an
+              // inherited row must persist a removal, not drop the key).
+              if (key === "__custom__") continue;
               const modelVal = modelDefaults[key];
               if (JSON.stringify(modelVal) !== JSON.stringify(val)) {
                 diffValue[key] = val;
               }
+            }
+            const customDiff = diffCustomParamsForSave(
+              editingOverrideValue.__custom__,
+              (configuringModel as any).extraParams?.__custom__
+            );
+            if (Object.keys(customDiff).length > 0) {
+              diffValue.__custom__ = customDiff;
             }
             handleModelParamsOverrideChange(configuringModel.id, diffValue);
           }
@@ -559,7 +569,7 @@ export default function AgentPrompt() {
         okButtonProps={{ disabled: !canManage && !isSpeedMode }}
         width={600}
         centered
-        destroyOnClose={false}
+        destroyOnHidden={false}
         styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
       >
         {configuringModel && (

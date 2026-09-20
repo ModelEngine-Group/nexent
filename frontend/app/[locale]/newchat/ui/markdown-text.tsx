@@ -463,6 +463,7 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   alt,
   ...props
 }) => {
+  const imageSrc = typeof src === "string" ? src : undefined;
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const messageContent = useAuiState(
     (s) => s.message.content as readonly MessageSourcePart[]
@@ -475,7 +476,7 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
           typeof part.url === "string"
       )
     : [];
-  const markerMatch = src?.match(/\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i);
+  const markerMatch = imageSrc?.match(/\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i);
   if (markerMatch) {
     const contentImage = trustedImages.find(
       (image) => image.imageKey === markerMatch[1]
@@ -503,12 +504,12 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   // through PICTURE_WEB. Local storage URLs can be resolved directly because
   // the authenticated file endpoint performs its own access check; this also
   // covers relevant S3 images that were omitted by optional image filtering.
-  const trustedImage = src
-    ? trustedImages.find((image) => image.url === src)
+  const trustedImage = imageSrc
+    ? trustedImages.find((image) => image.url === imageSrc)
     : undefined;
   const verifiedImageUrl =
     trustedImage?.url ||
-    (src && isLocalStorageObjectUrl(src) ? src : undefined);
+    (imageSrc && isLocalStorageObjectUrl(imageSrc) ? imageSrc : undefined);
   if (verifiedImageUrl) {
     return (
       <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
@@ -523,11 +524,11 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
     );
   }
 
-  if (trustedImages.length > 0 || !src) {
+  if (trustedImages.length > 0 || !imageSrc) {
     return null;
   }
 
-  return <AuthenticatedImage src={src} alt={alt} {...props} />;
+  return <AuthenticatedImage src={imageSrc} alt={alt} {...props} />;
 };
 
 const PermanentFileLink: FC<React.ComponentProps<"a">> = ({

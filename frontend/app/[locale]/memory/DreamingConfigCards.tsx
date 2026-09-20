@@ -312,11 +312,11 @@ export function DreamingConfigCards() {
   const lastRunAt = latestRun?.finished_at ?? latestRun?.started_at;
 
   if (loading) {
-    return <Card className="memory-config-card mt-6" loading />;
+    return <Card className="memory-config-card" loading />;
   }
 
   return (
-    <Flex gap={24} className="mt-6" align="stretch">
+    <Flex gap={24} align="stretch">
       <Modal
         title={t("dreaming.advanced.title")}
         open={advancedOpen}

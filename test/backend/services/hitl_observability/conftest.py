@@ -65,7 +65,7 @@ def runtime(monkeypatch, mocker, spans):
         return run_id
 
     service.create.side_effect = create
-    service.snapshot.side_effect = lambda run_id, *_args: {
+    service.light_snapshot.side_effect = lambda run_id, *_args: {
         "run_id": run_id, "conversation_id": int(run_id.split("-")[1]),
         "event_seq": 0, "status": "COMPLETED",
     }
@@ -84,6 +84,16 @@ def runtime(monkeypatch, mocker, spans):
 
     def port_factory(_service, identity, *_args, **_kwargs):
         port = mocker.Mock()
+        chunks = []
+
+        def take_chunks():
+            buffered = list(chunks)
+            chunks.clear()
+            return buffered
+
+        port.add_chunk.side_effect = chunks.append
+        port.peek_chunks.side_effect = lambda: len(chunks)
+        port.take_chunks.side_effect = take_chunks
         port.request_payload = cipher.open(stored[identity["run_id"]])
         port.checkpoint = None
         port.context_snapshot.side_effect = lambda items: items
