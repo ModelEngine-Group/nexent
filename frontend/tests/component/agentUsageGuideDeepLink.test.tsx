@@ -12,7 +12,7 @@ import {
 function DeepLinkHarness({ onReplace }: { onReplace: (path: string) => void }) {
   const consumed = useRef<number | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const target = resolveAgentUsageGuideTarget({
     agentId: 41,
     agents: loaded ? [{ agent_id: 41 }] : [],
@@ -38,24 +38,18 @@ function DeepLinkHarness({ onReplace }: { onReplace: (path: string) => void }) {
     });
     if (action.action === "open") {
       consumed.current = 41;
-      setOpen(true);
+      setMenuOpen(true);
+      onReplace(clearAgentUsageGuidePath("en", 41));
     }
   };
   return (
     <div>
       <span>{target.state}</span>
       <button onClick={load}>load target</button>
-      {open ? (
-        <div role="dialog">
-          Agent 41 guide
-          <button
-            onClick={() => {
-              setOpen(false);
-              onReplace(clearAgentUsageGuidePath("en", 41));
-            }}
-          >
-            close
-          </button>
+      <div aria-current="true">Agent 41 card</div>
+      {menuOpen ? (
+        <div role="menu">
+          <button onClick={() => setMenuOpen(false)}>Usage and sharing</button>
         </div>
       ) : null}
     </div>
@@ -63,25 +57,35 @@ function DeepLinkHarness({ onReplace }: { onReplace: (path: string) => void }) {
 }
 
 describe("usage guide deep-link component state", () => {
-  it("UT-FE-AGUG-023 waits for the URL target then opens and highlights it once", async () => {
+  it("UT-FE-AGUG-023 waits for the URL target then opens its menu while retaining the card", async () => {
     const user = userEvent.setup();
     render(<DeepLinkHarness onReplace={vi.fn()} />);
     expect(screen.getByText("loading")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "load target" }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("Agent 41 guide");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Agent 41 card")).toHaveAttribute(
+      "aria-current",
+      "true"
+    );
     await user.click(screen.getByRole("button", { name: "load target" }));
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
   });
 
-  it("UT-FE-AGUG-024 closes with replace semantics while preserving tab and agent_id", async () => {
+  it("UT-FE-AGUG-024 clears onboarding while retaining target location after the menu closes", async () => {
     const user = userEvent.setup();
     const replace = vi.fn();
     render(<DeepLinkHarness onReplace={replace} />);
     await user.click(screen.getByRole("button", { name: "load target" }));
-    await user.click(screen.getByRole("button", { name: "close" }));
     expect(replace).toHaveBeenCalledOnce();
     expect(replace).toHaveBeenCalledWith(
       "/en/agent-space?tab=mine&agent_id=41"
+    );
+    await user.click(screen.getByRole("button", { name: "Usage and sharing" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByText("Agent 41 card")).toHaveAttribute(
+      "aria-current",
+      "true"
     );
   });
 });

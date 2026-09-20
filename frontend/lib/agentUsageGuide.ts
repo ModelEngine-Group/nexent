@@ -2,7 +2,7 @@ export function buildAgentUsageGuidePath(
   locale: string,
   agentId: number
 ): string {
-  return `/${locale}/agent-space?tab=mine&agent_id=${agentId}&guide=usage`;
+  return `/${locale}/agent-space?tab=mine&agent_id=${agentId}&onboarding=usage-menu`;
 }
 
 export function getAgentPublishCompletion({
@@ -24,10 +24,16 @@ export function clearAgentUsageGuidePath(
 export function parseAgentUsageGuideParams(
   searchParams: Pick<URLSearchParams, "get">
 ): { agentId: number } | null {
-  if (searchParams.get("guide") !== "usage") {
+  if (searchParams.get("onboarding") !== "usage-menu") {
     return null;
   }
 
+  return parseAgentUsageGuideTargetParams(searchParams);
+}
+
+export function parseAgentUsageGuideTargetParams(
+  searchParams: Pick<URLSearchParams, "get">
+): { agentId: number } | null {
   const agentId = Number(searchParams.get("agent_id"));
   return Number.isSafeInteger(agentId) && agentId > 0 ? { agentId } : null;
 }

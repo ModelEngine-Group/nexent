@@ -17,16 +17,17 @@ import {
   getA2AGuideState,
   reduceAgentShareGuideState,
   resolveAgentUsageGuideTarget,
+  parseAgentUsageGuideTargetParams,
   parseAgentUsageGuideParams,
   isAgentSharePath,
   isAnonymousConversationSharePath,
   // @ts-ignore -- Node's built-in TypeScript runner needs the extension.
 } from "../lib/agentUsageGuide.ts";
 
-test("builds the published Agent repository guide URL", () => {
+test("builds the published Agent repository menu onboarding URL", () => {
   assert.equal(
     buildAgentUsageGuidePath("zh", 41),
-    "/zh/agent-space?tab=mine&agent_id=41&guide=usage"
+    "/zh/agent-space?tab=mine&agent_id=41&onboarding=usage-menu"
   );
 });
 
@@ -66,10 +67,10 @@ test("preserves the complete localized Agent share return path", () => {
   );
 });
 
-test("parses and clears one-time Agent usage guide URL state", () => {
+test("separates persistent Agent targeting from one-time menu onboarding", () => {
   assert.deepEqual(
     parseAgentUsageGuideParams(
-      new URLSearchParams("tab=mine&agent_id=41&guide=usage")
+      new URLSearchParams("tab=mine&agent_id=41&onboarding=usage-menu")
     ),
     { agentId: 41 }
   );
@@ -79,8 +80,16 @@ test("parses and clears one-time Agent usage guide URL state", () => {
   );
   assert.equal(
     parseAgentUsageGuideParams(
-      new URLSearchParams("agent_id=nope&guide=usage")
+      new URLSearchParams("agent_id=nope&onboarding=usage-menu")
     ),
+    null
+  );
+  assert.deepEqual(
+    parseAgentUsageGuideTargetParams(new URLSearchParams("agent_id=41")),
+    { agentId: 41 }
+  );
+  assert.equal(
+    parseAgentUsageGuideTargetParams(new URLSearchParams("agent_id=nope")),
     null
   );
   assert.equal(

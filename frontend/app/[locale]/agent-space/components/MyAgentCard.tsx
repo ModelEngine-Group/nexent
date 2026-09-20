@@ -34,6 +34,8 @@ interface MyAgentCardProps {
   onEvaluate: () => void;
   onUsageGuide: () => void;
   highlighted?: boolean;
+  guideMenuOpen?: boolean;
+  onGuideMenuOpenChange?: (open: boolean) => void;
   isApplying?: boolean;
   isDeleting?: boolean;
 }
@@ -62,6 +64,8 @@ export function MyAgentCard({
   onEvaluate,
   onUsageGuide,
   highlighted = false,
+  guideMenuOpen,
+  onGuideMenuOpenChange,
   isApplying = false,
   isDeleting = false,
 }: MyAgentCardProps) {
@@ -118,6 +122,7 @@ export function MyAgentCard({
       key: "usageGuide",
       icon: <Share2 className="size-3.5" aria-hidden />,
       label: t("agentRepository.mine.menu.usageGuide"),
+      className: guideMenuOpen ? "font-semibold" : undefined,
       onClick: onUsageGuide,
     });
   }
@@ -190,7 +195,12 @@ export function MyAgentCard({
         </div>
 
         {canEdit || published ? (
-          <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+          <Dropdown
+            menu={{ items: menuItems }}
+            open={guideMenuOpen}
+            onOpenChange={onGuideMenuOpenChange}
+            trigger={["click"]}
+          >
             <Button
               type="text"
               size="small"

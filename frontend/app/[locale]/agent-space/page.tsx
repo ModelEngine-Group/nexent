@@ -2,25 +2,28 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import {
-  App,
-  Button,
-  ConfigProvider,
-  Empty,
-  Input,
-  Modal,
-  Spin,
-} from "antd";
+import { App, Button, ConfigProvider, Empty, Input, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import { Bot, ChevronLeft, ChevronRight, Inbox, Search, ShieldCheck, User } from "lucide-react";
+import {
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  Inbox,
+  Search,
+  ShieldCheck,
+  User,
+} from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
+import type {
+  TagDefinition,
+  TagResourcePredicate,
+} from "@/types/tagManagement";
 import {
   useAgentRepositoryListingDetail,
   useAgentRepositoryListings,
@@ -33,12 +36,16 @@ import {
   mapRepositoryListingDetail,
   type AgentDetailModalData,
 } from "@/lib/agentRepositoryDetail";
-import type { AgentRepositoryListingItem, MineOwnershipFilter } from "@/types/agentRepository";
+import type {
+  AgentRepositoryListingItem,
+  MineOwnershipFilter,
+} from "@/types/agentRepository";
 import { isNewAgentPaddingItem } from "@/types/agentRepository";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import {
   clearAgentUsageGuidePath,
   parseAgentUsageGuideParams,
+  parseAgentUsageGuideTargetParams,
 } from "@/lib/agentUsageGuide";
 import { cn } from "@/lib/utils";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
@@ -92,7 +99,8 @@ export default function AgentRepositoryPage() {
     TagResourcePredicate[]
   >([]);
   const [repositoryPage, setRepositoryPage] = useState(1);
-  const [mineOwnership, setMineOwnership] = useState<MineOwnershipFilter>("all");
+  const [mineOwnership, setMineOwnership] =
+    useState<MineOwnershipFilter>("all");
   const [minePage, setMinePage] = useState(1);
   const [mineSearch, setMineSearch] = useState("");
   const [mineTagPredicates, setMineTagPredicates] = useState<
@@ -103,7 +111,8 @@ export default function AgentRepositoryPage() {
     null
   );
   const [copyOpen, setCopyOpen] = useState(false);
-  const [copyListing, setCopyListing] = useState<AgentRepositoryListingItem | null>(null);
+  const [copyListing, setCopyListing] =
+    useState<AgentRepositoryListingItem | null>(null);
 
   useEffect(() => {
     const tabParam = searchParams.get("tab");
@@ -125,8 +134,9 @@ export default function AgentRepositoryPage() {
   const isMineTab = tab === AgentRepositoryTab.MINE;
   const { data: tagLibraries } = useTagLibraries();
   const defaultTagLibrary =
-    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
-    null;
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
   const { data: mineTagDefinitions } = useTagDefinitions(
     defaultTagLibrary?.bucket_id ?? null
   );
@@ -145,6 +155,10 @@ export default function AgentRepositoryPage() {
   );
   const usageGuideDeepLink = useMemo(
     () => parseAgentUsageGuideParams(searchParams),
+    [searchParams]
+  );
+  const usageGuideTarget = useMemo(
+    () => parseAgentUsageGuideTargetParams(searchParams),
     [searchParams]
   );
 
@@ -202,12 +216,19 @@ export default function AgentRepositoryPage() {
       ...(mineSearchTagPredicates.length > 0
         ? { search_tag_predicates: mineSearchTagPredicates }
         : {}),
-      ...(mineOwnership === "all" && !mineSearch.trim()
-        && mineTagPredicates.length === 0
+      ...(mineOwnership === "all" &&
+      !mineSearch.trim() &&
+      mineTagPredicates.length === 0
         ? { new_agent_padding: true }
         : {}),
     }),
-    [mineOwnership, minePage, mineSearch, mineSearchTagPredicates, mineTagPredicates]
+    [
+      mineOwnership,
+      minePage,
+      mineSearch,
+      mineSearchTagPredicates,
+      mineTagPredicates,
+    ]
   );
 
   const {
@@ -218,19 +239,17 @@ export default function AgentRepositoryPage() {
     refetch: refetchMine,
   } = useMyEditableAgents(mineListParams, isMineTab);
 
-  const {
-    data: deepLinkMineData,
-    isLoading: isDeepLinkMineLoading,
-  } = useMyEditableAgents(
-    {
-      ownership: "all",
-      agent_id: reviewDeepLink?.agentId ?? usageGuideDeepLink?.agentId,
-      page: 1,
-      page_size: 1,
-      new_agent_padding: false,
-    },
-    isMineTab && (reviewDeepLink != null || usageGuideDeepLink != null)
-  );
+  const { data: deepLinkMineData, isLoading: isDeepLinkMineLoading } =
+    useMyEditableAgents(
+      {
+        ownership: "all",
+        agent_id: reviewDeepLink?.agentId ?? usageGuideTarget?.agentId,
+        page: 1,
+        page_size: 1,
+        new_agent_padding: false,
+      },
+      isMineTab && (reviewDeepLink != null || usageGuideTarget != null)
+    );
 
   const { data: mineCountData } = useMyEditableAgents(
     { page: 1, page_size: 1, ownership: "all" },
@@ -364,10 +383,9 @@ export default function AgentRepositoryPage() {
       status: "not_shared",
     });
 
-  const updatingRepositoryId =
-    updateStatusMutation.isPending
-      ? updateStatusMutation.variables?.agentRepositoryId ?? null
-      : null;
+  const updatingRepositoryId = updateStatusMutation.isPending
+    ? (updateStatusMutation.variables?.agentRepositoryId ?? null)
+    : null;
 
   const listings = data?.items ?? [];
   const repositoryPagination = data?.pagination;
@@ -557,10 +575,13 @@ export default function AgentRepositoryPage() {
                   onViewDetail={handleMineViewDetail}
                   reviewDeepLink={reviewDeepLink}
                   usageGuideDeepLink={usageGuideDeepLink}
+                  usageGuideTarget={usageGuideTarget}
                   deepLinkFallbackAgent={deepLinkFallbackAgent}
                   deepLinkFallbackLoading={isDeepLinkMineLoading}
                   onReviewDeepLinkConsumed={handleReviewDeepLinkConsumed}
-                  onUsageGuideDeepLinkConsumed={handleUsageGuideDeepLinkConsumed}
+                  onUsageGuideDeepLinkConsumed={
+                    handleUsageGuideDeepLinkConsumed
+                  }
                 />
               ) : null}
             </div>
@@ -716,7 +737,9 @@ function RepositoryView({
                 <AgentRepositoryCard
                   listing={listing}
                   showAdminMenu={showAdminMenu}
-                  isTakingDown={updatingRepositoryId === listing.agent_repository_id}
+                  isTakingDown={
+                    updatingRepositoryId === listing.agent_repository_id
+                  }
                   onCopyClick={onCopyClick}
                   onDetailClick={onDetailClick}
                   onTakeDown={() => confirmTakeDown(listing)}

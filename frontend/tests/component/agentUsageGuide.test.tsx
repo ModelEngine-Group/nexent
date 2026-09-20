@@ -66,7 +66,14 @@ function renderWithProviders(node: React.ReactNode) {
   );
 }
 
-function renderCard(agent: MyEditableAgentItem, onUsageGuide = vi.fn()) {
+function renderCard(
+  agent: MyEditableAgentItem,
+  onUsageGuide = vi.fn(),
+  guideMenuProps: Pick<
+    React.ComponentProps<typeof MyAgentCard>,
+    "guideMenuOpen" | "onGuideMenuOpenChange"
+  > = {}
+) {
   renderWithProviders(
     <MyAgentCard
       agent={agent}
@@ -77,6 +84,7 @@ function renderCard(agent: MyEditableAgentItem, onUsageGuide = vi.fn()) {
       onDelete={vi.fn()}
       onEvaluate={vi.fn()}
       onUsageGuide={onUsageGuide}
+      {...guideMenuProps}
     />
   );
   return onUsageGuide;
@@ -119,6 +127,22 @@ describe("Agent usage guide component coverage", () => {
       name: "agentRepository.mine.menu.usageGuide",
     });
     await user.click(usageGuideItem);
+    expect(onUsageGuide).toHaveBeenCalledOnce();
+  });
+
+  it("opens a published target card menu without opening the usage guide modal", async () => {
+    const onUsageGuide = renderCard(editableAgent, vi.fn(), {
+      guideMenuOpen: true,
+      onGuideMenuOpenChange: vi.fn(),
+    });
+
+    const usageGuideItem = await screen.findByRole("menuitem", {
+      name: "agentRepository.mine.menu.usageGuide",
+    });
+    expect(usageGuideItem.className).toContain("font-semibold");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await userEvent.setup().click(usageGuideItem);
     expect(onUsageGuide).toHaveBeenCalledOnce();
   });
 

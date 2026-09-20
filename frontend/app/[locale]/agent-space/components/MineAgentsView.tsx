@@ -97,6 +97,7 @@ interface MineAgentsViewProps {
   onViewDetail: (agentId: number, versionNo: number) => void;
   reviewDeepLink?: ReviewDeepLinkTarget | null;
   usageGuideDeepLink?: UsageGuideDeepLinkTarget | null;
+  usageGuideTarget?: UsageGuideDeepLinkTarget | null;
   deepLinkFallbackAgent?: MyEditableAgentItem | null;
   deepLinkFallbackLoading?: boolean;
   onReviewDeepLinkConsumed?: () => void;
@@ -124,6 +125,7 @@ export function MineAgentsView({
   onViewDetail,
   reviewDeepLink = null,
   usageGuideDeepLink = null,
+  usageGuideTarget = null,
   deepLinkFallbackAgent = null,
   deepLinkFallbackLoading = false,
   onReviewDeepLinkConsumed,
@@ -154,6 +156,9 @@ export function MineAgentsView({
     useState<MyEditableAgentItem | null>(null);
   const [usageGuideAgent, setUsageGuideAgent] =
     useState<MyEditableAgentItem | null>(null);
+  const [guidedMenuAgentId, setGuidedMenuAgentId] = useState<number | null>(
+    null
+  );
   const consumedDeepLinkRef = useRef<number | null>(null);
   const consumedUsageGuideRef = useRef<number | null>(null);
 
@@ -164,11 +169,11 @@ export function MineAgentsView({
   });
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
-  const usageGuideTarget = useMemo(
+  const usageGuideTargetState = useMemo(
     () =>
-      usageGuideDeepLink
+      usageGuideTarget
         ? resolveAgentUsageGuideTarget({
-            agentId: usageGuideDeepLink.agentId,
+            agentId: usageGuideTarget.agentId,
             agents,
             fallbackAgent: deepLinkFallbackAgent,
             isListLoading: isLoading,
@@ -182,14 +187,14 @@ export function MineAgentsView({
       deepLinkFallbackAgent,
       deepLinkFallbackLoading,
       isLoading,
-      usageGuideDeepLink,
+      usageGuideTarget,
     ]
   );
   const displayedAgents = useMemo(() => {
-    if (usageGuideTarget?.state !== "found") {
+    if (usageGuideTargetState?.state !== "found") {
       return agents;
     }
-    const targetAgent = usageGuideTarget.agent;
+    const targetAgent = usageGuideTargetState.agent;
     if (
       isNewAgentPaddingItem(targetAgent) ||
       agents.some(
@@ -201,11 +206,11 @@ export function MineAgentsView({
       return agents;
     }
     return [targetAgent, ...agents];
-  }, [agents, usageGuideTarget]);
+  }, [agents, usageGuideTargetState]);
   const highlightedAgentId =
-    usageGuideTarget?.state === "found" &&
-    !isNewAgentPaddingItem(usageGuideTarget.agent)
-      ? usageGuideTarget.agent.agent_id
+    usageGuideTargetState?.state === "found" &&
+    !isNewAgentPaddingItem(usageGuideTargetState.agent)
+      ? usageGuideTargetState.agent.agent_id
       : null;
 
   const handleCreateAgent = () => {
@@ -421,13 +426,13 @@ export function MineAgentsView({
       return;
     }
 
-    if (!usageGuideTarget) {
+    if (!usageGuideTargetState) {
       return;
     }
     const openAction = getAgentUsageGuideOpenAction({
       agentId: usageGuideDeepLink.agentId,
       consumedAgentId: consumedUsageGuideRef.current,
-      target: usageGuideTarget,
+      target: usageGuideTargetState,
     });
     if (openAction.action === "ignore" || openAction.action === "wait") {
       return;
@@ -442,18 +447,18 @@ export function MineAgentsView({
     if (isNewAgentPaddingItem(openAction.agent)) {
       return;
     }
-    setUsageGuideAgent(openAction.agent);
+    setGuidedMenuAgentId(openAction.agent.agent_id);
     consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
-  }, [onUsageGuideDeepLinkConsumed, t, usageGuideDeepLink, usageGuideTarget]);
+    onUsageGuideDeepLinkConsumed?.();
+  }, [
+    onUsageGuideDeepLinkConsumed,
+    t,
+    usageGuideDeepLink,
+    usageGuideTargetState,
+  ]);
 
   const closeUsageGuide = () => {
-    const wasOpenedByDeepLink =
-      usageGuideAgent?.agent_id === usageGuideDeepLink?.agentId &&
-      consumedUsageGuideRef.current === usageGuideDeepLink?.agentId;
     setUsageGuideAgent(null);
-    if (wasOpenedByDeepLink) {
-      onUsageGuideDeepLinkConsumed?.();
-    }
   };
 
   const handleSetNotShared = async () => {
@@ -642,8 +647,19 @@ export function MineAgentsView({
                     onViewReview={(mode) => handleViewReview(agent, mode)}
                     onDelete={() => handleDeleteAgent(agent)}
                     onEvaluate={() => handleEvaluate(agent)}
-                    onUsageGuide={() => setUsageGuideAgent(agent)}
+                    onUsageGuide={() => {
+                      setGuidedMenuAgentId(null);
+                      setUsageGuideAgent(agent);
+                    }}
                     highlighted={highlightedAgentId === agent.agent_id}
+                    guideMenuOpen={
+                      guidedMenuAgentId === agent.agent_id ? true : undefined
+                    }
+                    onGuideMenuOpenChange={(open) => {
+                      if (!open && guidedMenuAgentId === agent.agent_id) {
+                        setGuidedMenuAgentId(null);
+                      }
+                    }}
                     isApplying={
                       applyingAgentId === agent.agent_id &&
                       createListingMutation.isPending
