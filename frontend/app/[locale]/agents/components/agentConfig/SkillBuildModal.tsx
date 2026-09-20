@@ -682,6 +682,13 @@ export default function SkillBuildModal({
       if (event.type === "agent_new_run" || event.type === "step_count") {
         setIsStreaming(true);
       }
+      if (
+        event.type === "model_attempt_control" &&
+        event.phase === "rollback"
+      ) {
+        rollbackDraftStream();
+        return;
+      }
       if (event.type === "skill_body" || event.type === "file_content") {
         beginDraftStream();
         setIsStreaming(true);
