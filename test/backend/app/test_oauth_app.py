@@ -58,7 +58,9 @@ class _UnauthorizedError(Exception):
 
 
 class _TenantResourceLimitError(Exception):
-    pass
+    def __init__(self, message, **kwargs):
+        super().__init__(message)
+        self.details = kwargs
 
 
 exceptions_mock = MagicMock()
@@ -66,6 +68,11 @@ exceptions_mock.OAuthProviderError = _OAuthProviderError
 exceptions_mock.OAuthLinkError = _OAuthLinkError
 exceptions_mock.UnauthorizedError = _UnauthorizedError
 exceptions_mock.TenantResourceLimitError = _TenantResourceLimitError
+exceptions_mock.tenant_resource_limit_error_payload = lambda error: {
+    "code": "120104",
+    "message": str(error),
+    "details": error.details,
+}
 sys.modules["consts.exceptions"] = exceptions_mock
 
 sys.modules["database"] = MagicMock()
@@ -369,9 +376,9 @@ class TestCallback(unittest.TestCase):
 
         response = client.get("/user/oauth/callback?provider=github&code=limit_code")
 
-        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
         data = response.json()
-        self.assertEqual(data["data"]["oauth_error"], "tenant_resource_limit_exceeded")
+        self.assertEqual(data["code"], "120104")
         self.assertIn("maximum 10000", data["message"])
 
     def test_new_unbound_oauth_requires_account_completion(self):

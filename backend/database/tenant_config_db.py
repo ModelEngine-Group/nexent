@@ -101,9 +101,14 @@ def insert_config(insert_data: Dict[str, Any]):
                     TenantConfig.delete_flag == "N",
                 ).distinct().count()
                 if tenant_count >= MAX_TENANT_COUNT:
-                    raise TenantResourceLimitError(
+                    error = TenantResourceLimitError(
                         f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
                     )
+                    error.resource = "tenants"
+                    error.scope = "platform"
+                    error.limit = MAX_TENANT_COUNT
+                    error.current_count = tenant_count
+                    raise error
             session.add(TenantConfig(**insert_data))
             session.commit()
             return True
@@ -129,9 +134,14 @@ def create_tenant_with_default_group(
             TenantConfig.delete_flag == "N",
         ).distinct().count()
         if tenant_count >= MAX_TENANT_COUNT:
-            raise TenantResourceLimitError(
+            error = TenantResourceLimitError(
                 f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
             )
+            error.resource = "tenants"
+            error.scope = "platform"
+            error.limit = MAX_TENANT_COUNT
+            error.current_count = tenant_count
+            raise error
 
         session.add(TenantConfig(
             tenant_id=tenant_id,
