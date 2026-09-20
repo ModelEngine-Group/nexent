@@ -1,7 +1,7 @@
 """Unit test for application.py execute_attempt async consumer loop.
 
-Covers the _flush_if_due batch/threshold flush (peek-then-take, begin_emit /
-end_emit lifecycle) and the final flush in the ``finally`` block. No real
+Covers the _flush_if_due batch/threshold flush (peek-then-drain_and_emit) and
+the final flush in the ``finally`` block. No real
 database or agent — every collaborator is mocked. This lets us exercise the
 patch lines added in the HITL reorder PR without depending on the full
 Postgres-backed test suite.
@@ -43,7 +43,7 @@ def _build_port_class(on_finish):
         def __init__(self, *a, **kw):
             self._chunk_buffer = []
             self._chunk_buffer_lock = threading.Lock()
-            self._emit_in_flight = threading.Event()
+            self._emit_lock = threading.Lock()
             self.service = MagicMock()
             self.run_id = "run-1"
             self.tenant_id = "tenant-1"
@@ -183,9 +183,9 @@ async def test_flush_if_due_uses_peek_then_take_without_transiently_empty_buffer
         f"Expected >=3 chunks persisted, got {total_persisted} batches={port._emits}"
     )
 
-    # begin_emit must have been paired with end_emit — otherwise we would
-    # have seen _emit_in_flight still set after the loop.
-    assert not port._emit_in_flight.is_set(), "begin_emit without end_emit leaked"
+    # Every drain must have released the emit lock — a leak would deadlock
+    # the worker's flush before its next HITL transaction.
+    assert not port._emit_lock.locked(), "drain_and_emit leaked the emit lock"
 
 
 # --- exception / finally path coverage ---------------------------------------
@@ -259,7 +259,7 @@ async def test_leftover_chunks_flush_in_finally_before_failed_finish():
     # The two buffered chunks were flushed by the finally block, before finish.
     assert port._emits == [["chunk-0", "chunk-1"]], port._emits
     assert refs["finish_calls"] == ["failed"]
-    assert not port._emit_in_flight.is_set(), "begin_emit without end_emit leaked"
+    assert not port._emit_lock.locked(), "drain_and_emit leaked the emit lock"
 
 
 async def test_cancelled_error_cancels_scope_and_reraises_without_finish():

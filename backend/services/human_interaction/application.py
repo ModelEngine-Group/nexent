@@ -173,24 +173,21 @@ async def execute_attempt(job, lease):
             """Flush buffered chunks on the interval/batch trigger to keep DB order.
 
             The async loop flushes on its own; the worker flushes again before
-            each HITL transaction. Peek first and never take-put-back — that
-            would open a transiently empty window the worker's idle poll can
-            mistake for "async is done".
+            each HITL transaction.
             """
             nonlocal last_flush
-            if (time.monotonic() - last_flush >= _FLUSH_INTERVAL
-                    or port.peek_chunks() >= _FLUSH_BATCH):
-                buffered = port.take_chunks()
-                if buffered:
-                    try:
-                        port.begin_emit()
-                        await run_blocking(
-                            "hitl-port-emit_chunks", port.emit_chunks, buffered,
-                            lane="control-io", owner=__name__,
-                        )
-                        last_flush = time.monotonic()
-                    finally:
-                        port.end_emit()
+            if ((time.monotonic() - last_flush >= _FLUSH_INTERVAL
+                    or port.peek_chunks() >= _FLUSH_BATCH)
+                    and port.peek_chunks()):
+                # drain_and_emit runs take_chunks + emit_chunks in one
+                # emit-lock critical section on the lane thread, so it cannot
+                # interleave with the worker's flush — seq order stays
+                # production order.
+                await run_blocking(
+                    "hitl-port-drain_and_emit", port.drain_and_emit,
+                    lane="control-io", owner=__name__,
+                )
+                last_flush = time.monotonic()
 
         chunk_iter = _stream_agent_chunks(
             agent_request=request, user_id=identity["user_id"], tenant_id=identity["tenant_id"],
@@ -234,16 +231,10 @@ async def execute_attempt(job, lease):
             except Exception:
                 pass
             # Final flush so leftover chunks precede finish() in DB order.
-            leftover = port.take_chunks()
-            if leftover:
-                try:
-                    port.begin_emit()
-                    await run_blocking(
-                        "hitl-port-emit_chunks", port.emit_chunks, leftover,
-                        lane="control-io", owner=__name__,
-                    )
-                finally:
-                    port.end_emit()
+            await run_blocking(
+                "hitl-port-drain_and_emit", port.drain_and_emit,
+                lane="control-io", owner=__name__,
+            )
         await run_blocking(
             "hitl-port-finish", port.finish, run_info.attempt_outcome or "failed", lane="control-io",
             owner=__name__,

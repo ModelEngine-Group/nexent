@@ -23,8 +23,9 @@ class RuntimeInteractionPort:
         ``_chunk_buffer`` stages processed observer chunks: the async consumer
         appends via add_chunk and the worker flushes before each HITL event so
         chunk rows precede human_interaction rows in DB event order.
-        ``_emit_in_flight`` marks an in-flight hand-off to the DB thread so an
-        empty buffer is not mistaken for "async is idle".
+        ``_emit_lock`` serializes every take_chunks + emit_chunks critical
+        section (async drain_and_emit and the worker's own flush), so a held
+        lock also means "a drain is in flight and its chunks are uncommitted".
         """
         self.service = service
         self.repository = service.repository
@@ -40,7 +41,7 @@ class RuntimeInteractionPort:
         self.stop_event = stop_event
         self._chunk_buffer: list[str] = []
         self._chunk_buffer_lock = threading.Lock()
-        self._emit_in_flight = threading.Event()
+        self._emit_lock = threading.Lock()
         with self.transaction() as tx:
             self.checkpoint = self.cipher.open(tx.run.checkpoint)
             self.request_payload = self.cipher.open(tx.run.request_payload)
@@ -62,48 +63,59 @@ class RuntimeInteractionPort:
         with self._chunk_buffer_lock:
             return len(self._chunk_buffer)
 
-    def begin_emit(self) -> None:
-        """Signal that the async consumer is handing chunks to run_blocking(emit_chunks)."""
-        self._emit_in_flight.set()
+    def drain_and_emit(self) -> None:
+        """Atomically drain and persist buffered chunks. Lane-thread only.
 
-    def end_emit(self) -> None:
-        """Signal that the async consumer's run_blocking(emit_chunks) has returned."""
-        self._emit_in_flight.clear()
+        take_chunks and emit_chunks share one critical section under the emit
+        lock so a concurrent flush can never interleave DB seq assignment —
+        the seq order then always matches the chunk production order.
+        """
+        with self._emit_lock:
+            chunks = self.take_chunks()
+            if not chunks:
+                return
+            try:
+                self.emit_chunks(chunks)
+            except Exception:
+                # Never lose drained chunks; put them back for retry.
+                for chunk in chunks:
+                    self.add_chunk(chunk)
+                raise
 
     def flush_chunks_until_idle(self, *, max_wait_ms: int = 500, settle_ms: int = 20) -> None:
         """Wait for the async consumer to drain the observer queue, then persist.
 
-        Worker-thread only. Returns once the buffer has stayed empty for
-        ``settle_ms`` with no in-flight emit; ``max_wait_ms`` is a hard
-        upper bound measured from entry and never resets.
+        Worker-thread only. take_chunks and emit_chunks run inside the same
+        emit-lock critical section as the async drain_and_emit, so concurrent
+        flushes cannot reorder seq assignment. ``max_wait_ms`` bounds how long
+        we wait for NEW chunks — it must NOT fire while another drain holds
+        the lock, because its chunks are produced before this HITL event but
+        still uncommitted; returning early would order HITL rows ahead of
+        them. The deadline may therefore only fire once the lock is free.
         """
         hard_deadline = time.monotonic() + max_wait_ms / 1000.0
         idle_since: float | None = None
 
         while True:
             now = time.monotonic()
-            if now >= hard_deadline:
+            if now >= hard_deadline and not self._emit_lock.locked():
                 break
-
-            chunks = self.take_chunks()
-            if chunks:
-                try:
-                    self.emit_chunks(chunks)
-                except Exception:
-                    # Never lose drained chunks; put them back for retry.
-                    for chunk in chunks:
-                        self.add_chunk(chunk)
-                    raise
-                idle_since = None
-            elif self._emit_in_flight.is_set():
-                # Empty buffer is not idle while an emit is in flight.
-                idle_since = None
-            elif idle_since is None:
-                idle_since = now
-            elif now - idle_since >= settle_ms / 1000.0:
-                break
-
-            time.sleep(min(settle_ms / 1000.0, hard_deadline - now))
+            with self._emit_lock:
+                chunks = self.take_chunks()
+                if chunks:
+                    try:
+                        self.emit_chunks(chunks)
+                    except Exception:
+                        # Never lose drained chunks; put them back for retry.
+                        for chunk in chunks:
+                            self.add_chunk(chunk)
+                        raise
+                    idle_since = None
+                elif idle_since is None:
+                    idle_since = now
+                elif now - idle_since >= settle_ms / 1000.0:
+                    break
+            time.sleep(min(settle_ms / 1000.0, max(hard_deadline - now, 0.0)))
 
     @contextmanager
     def transaction(self, *, receipt=False):
