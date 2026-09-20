@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from consts.exceptions import TenantResourceLimitError
 
+from services.audit_service import AUDIT_RESULT_FAILURE, AUDIT_RESULT_SUCCESS, record_auth_event
 from services.cas_service import (
     CAS_SERVER_URL,
     CasAuthenticationError,
@@ -43,21 +44,31 @@ async def login(redirect: str = Query("/", description="URL to return to after l
 
 
 @router.get("/callback")
-async def callback(ticket: str = "", redirect: str = "/"):
+async def callback(request: Request, ticket: str = "", redirect: str = "/"):
     try:
         result = await login_with_ticket(ticket, redirect)
+        result_user = (result or {}).get("user") or {}
+        record_auth_event("cas_login", AUDIT_RESULT_SUCCESS, request=request,
+                          user_id=result_user.get("id"),
+                          user_email=result_user.get("email"))
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "CAS login successful", "data": result},
         )
     except CasAuthenticationError as exc:
         logger.warning("CAS callback rejected: %s", exc)
+        record_auth_event("cas_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="auth_failed")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="CAS authentication failed")
     except TenantResourceLimitError as exc:
         logger.warning("CAS callback rejected by tenant resource limit: %s", exc)
+        record_auth_event("cas_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="tenant_resource_limit")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except Exception as exc:
         logger.error(f"CAS callback failed: {exc}")
+        record_auth_event("cas_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="internal_error")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="CAS login failed")
 
 
@@ -112,6 +123,9 @@ async def _handle_logout_request(
     )
     result = revoke_from_logout_request(logout_request)
     logger.info("CAS SLO %s revoke result: %s", endpoint, result)
+    if logout_request:
+        record_auth_event("cas_logout", AUDIT_RESULT_SUCCESS, request=request,
+                          details={"endpoint": endpoint})
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={"message": "success", "data": result},

@@ -12,6 +12,7 @@ from consts.model import OAuthCompleteRequest
 from consts.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError
 from consts.oauth_providers import get_all_provider_definitions
 from database.oauth_account_db import get_oauth_account_by_provider
+from services.audit_service import AUDIT_RESULT_FAILURE, AUDIT_RESULT_SUCCESS, record_auth_event
 from services.oauth_service import (
     complete_pending_oauth_account,
     create_or_update_oauth_account,
@@ -94,6 +95,7 @@ async def link(provider: str, authorization: Optional[str] = Header(None)):
 
 @router.get("/callback")
 async def callback(
+    request: Request,
     provider: str,
     code: str = "",
     state: str = "",
@@ -101,6 +103,9 @@ async def callback(
     error_description: Optional[str] = None,
 ):
     if error:
+        record_auth_event("oauth_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="provider_error",
+                          details={"provider": provider, "oauth_error": error})
         return JSONResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             content={
@@ -113,6 +118,8 @@ async def callback(
         )
 
     if not code:
+        record_auth_event("oauth_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="no_code", details={"provider": provider})
         return JSONResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             content={
@@ -125,6 +132,8 @@ async def callback(
         )
 
     if provider not in get_all_provider_definitions():
+        record_auth_event("oauth_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="unsupported_provider", details={"provider": provider})
         return JSONResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             content={
@@ -209,6 +218,9 @@ async def callback(
         expiry_seconds = JWT_EXPIRY_SECONDS
         expires_at = calculate_expires_at(jwt_token)
 
+        record_auth_event("oauth_login", AUDIT_RESULT_SUCCESS, request=request,
+                          user_id=str(supabase_user_id), user_email=email,
+                          details={"provider": provider, "linked": bool(link_user_id)})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -230,6 +242,9 @@ async def callback(
 
     except TenantResourceLimitError as e:
         logger.warning(f"OAuth callback rejected by tenant resource limit for provider={provider}: {e}")
+        record_auth_event("oauth_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="tenant_resource_limit",
+                          details={"provider": provider})
         return JSONResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             content={
@@ -242,6 +257,9 @@ async def callback(
         )
     except OAuthLinkError as e:
         logger.warning(f"OAuth callback link failed for provider={provider}: {e}")
+        record_auth_event("oauth_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="oauth_account_already_bound",
+                          details={"provider": provider})
         return JSONResponse(
             status_code=HTTPStatus.BAD_REQUEST,
             content={
@@ -254,6 +272,8 @@ async def callback(
         )
     except Exception as e:
         logger.error(f"OAuth callback failed for provider={provider}: {e}")
+        record_auth_event("oauth_login", AUDIT_RESULT_FAILURE, request=request,
+                          reason="callback_failed", details={"provider": provider})
         return JSONResponse(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             content={
@@ -301,6 +321,10 @@ async def complete(
             password=request_data.password,
             invite_code=request_data.invite_code,
         )
+        result_user = (result or {}).get("user") or {}
+        record_auth_event("oauth_signup", AUDIT_RESULT_SUCCESS, request=request,
+                          user_id=result_user.get("id"),
+                          user_email=result_user.get("email") or request_data.email)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "OAuth account completed", "data": result},
@@ -311,18 +335,29 @@ async def complete(
             if "Email already exists" in str(e)
             else HTTPStatus.BAD_REQUEST
         )
+        record_auth_event("oauth_signup", AUDIT_RESULT_FAILURE, request=request,
+                          reason="email_already_exists" if status_code == HTTPStatus.CONFLICT
+                          else "oauth_link_error")
         raise HTTPException(status_code=status_code, detail=str(e))
     except TenantResourceLimitError as e:
+        record_auth_event("oauth_signup", AUDIT_RESULT_FAILURE, request=request,
+                          reason="tenant_resource_limit")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except PydanticValidationError as e:
+        record_auth_event("oauth_signup", AUDIT_RESULT_FAILURE, request=request,
+                          reason="validation_error")
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=e.errors(),
         )
     except OAuthProviderError as e:
+        record_auth_event("oauth_signup", AUDIT_RESULT_FAILURE, request=request,
+                          reason="provider_error")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to complete OAuth account: {e}")
+        record_auth_event("oauth_signup", AUDIT_RESULT_FAILURE, request=request,
+                          reason="internal_error")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to complete OAuth account",
@@ -352,13 +387,19 @@ async def get_accounts(authorization: Optional[str] = Header(None)):
 
 
 @router.delete("/accounts/{provider}")
-async def delete_account(provider: str, authorization: Optional[str] = Header(None)):
+async def delete_account(
+    request: Request,
+    provider: str,
+    authorization: Optional[str] = Header(None),
+):
     if not authorization:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
 
     try:
         user_id, _ = get_current_user_id(authorization)
         unlink_account(user_id, provider)
+        record_auth_event("oauth_unlink", AUDIT_RESULT_SUCCESS, request=request,
+                          user_id=user_id, details={"provider": provider})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -367,11 +408,17 @@ async def delete_account(provider: str, authorization: Optional[str] = Header(No
             },
         )
     except OAuthLinkError as e:
+        record_auth_event("oauth_unlink", AUDIT_RESULT_FAILURE, request=request,
+                          reason="binding_not_found", details={"provider": provider})
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except UnauthorizedError:
+        record_auth_event("oauth_unlink", AUDIT_RESULT_FAILURE, request=request,
+                          reason="unauthorized", details={"provider": provider})
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
     except Exception as e:
         logger.error(f"Failed to unlink OAuth account: {e}")
+        record_auth_event("oauth_unlink", AUDIT_RESULT_FAILURE, request=request,
+                          reason="internal_error", details={"provider": provider})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to unlink OAuth account",

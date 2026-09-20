@@ -114,6 +114,8 @@ oauth_service_mock.get_oauth_config = MagicMock(
     }
 )
 sys.modules["services"] = MagicMock()
+audit_service_mock = MagicMock()
+sys.modules["services.audit_service"] = audit_service_mock
 sys.modules["services.oauth_service"] = oauth_service_mock
 
 nexent_mock = MagicMock()

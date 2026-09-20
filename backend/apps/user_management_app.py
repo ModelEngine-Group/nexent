@@ -19,6 +19,7 @@ from consts.exceptions import (
     ValidationError,
 )
 from consts.error_code import ErrorCode
+from services.audit_service import AUDIT_RESULT_FAILURE, AUDIT_RESULT_SUCCESS, record_auth_event
 from services.cas_service import build_logout_url, CasAuthenticationError
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
@@ -57,22 +58,32 @@ async def service_health():
 
 
 @router.post("/signup")
-async def signup(request: UserSignUpRequest):
+async def signup(request: UserSignUpRequest, http_request: Request):
     """User registration"""
     try:
         user_data = await signup_user_with_invitation(email=request.email,
                                                       password=request.password,
                                                       invite_code=request.invite_code,
                                                       auto_login=request.auto_login)
+        signup_user_info = (user_data or {}).get("user") or {}
+        record_auth_event("user_signup", AUDIT_RESULT_SUCCESS,
+                          request=http_request,
+                          user_id=signup_user_info.get("id"),
+                          user_email=signup_user_info.get("email") or request.email,
+                          details={"registration_type": (user_data or {}).get("registration_type")})
         success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": success_message, "data": user_data})
     except NoInviteCodeException as e:
         logging.error(f"User registration failed by invite code: {str(e)}")
+        record_auth_event("user_signup", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="invite_code_not_configured")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="INVITE_CODE_NOT_CONFIGURED")
     except IncorrectInviteCodeException as e:
         logging.error(f"User registration failed by invite code: {str(e)}")
+        record_auth_event("user_signup", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="invite_code_invalid")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="INVITE_CODE_INVALID")
     except ValidationError as e:
@@ -83,43 +94,65 @@ async def signup(request: UserSignUpRequest):
         else:
             logging.warning(
                 f"User registration rejected by validation: {detail}")
+        record_auth_event("user_signup", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="validation_error")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=detail)
     except UserRegistrationException as e:
         logging.error(
             f"User registration failed by registration service: {str(e)}")
+        record_auth_event("user_signup", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="registration_service_error")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="REGISTRATION_SERVICE_ERROR")
     except AuthWeakPasswordError as e:
         logging.error(f"User registration failed by weak password: {str(e)}")
+        record_auth_event("user_signup", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="weak_password")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                             detail="WEAK_PASSWORD")
     except AuthApiError as e:
         logging.error(f"User registration failed by auth error: {str(e)}")
+        record_auth_event("user_signup", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="email_already_exists")
         raise HTTPException(status_code=HTTPStatus.CONFLICT,
                             detail="EMAIL_ALREADY_EXISTS")
     except Exception as e:
         logging.error(f"User registration failed, unknown error: {str(e)}")
+        record_auth_event("user_signup", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="internal_error")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="UNKNOWN_ERROR")
 
 
 @router.post("/signin")
-async def signin(request: UserSignInRequest):
+async def signin(request: UserSignInRequest, http_request: Request):
     """User login"""
     try:
         signin_content = await signin_user(email=request.email,
                                            password=request.password)
+        signin_data = (signin_content or {}).get("data") or {}
+        signin_user_info = signin_data.get("user") or {}
+        record_auth_event("user_signin", AUDIT_RESULT_SUCCESS,
+                          request=http_request,
+                          user_id=signin_user_info.get("id"),
+                          user_email=signin_user_info.get("email") or request.email)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content=signin_content)
     except AuthApiError as e:
         logging.error(f"User login failed: {str(e)}")
+        record_auth_event("user_signin", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="invalid_credentials")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                             detail="Email or password error")
     except ValidationError as e:
         logging.warning(f"User login rejected by feature flag: {str(e)}")
+        record_auth_event("user_signin", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="feature_flag_rejected")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"User login failed, unknown error: {str(e)}")
+        record_auth_event("user_signin", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_email=request.email, reason="internal_error")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="Login failed")
 
@@ -174,6 +207,15 @@ async def logout(request: Request):
                 # Ignore sign out errors to keep logout idempotent
                 logging.warning(
                     f"Sign out encountered an error but will be ignored: {str(signout_err)}")
+        logout_user_id, logout_tenant_id = None, None
+        if authorization:
+            try:
+                logout_user_id, logout_tenant_id = get_current_user_id(authorization)
+            except Exception:
+                pass
+        record_auth_event("user_logout", AUDIT_RESULT_SUCCESS, request=request,
+                          user_id=logout_user_id, tenant_id=logout_tenant_id,
+                          session_id=session_id)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={
                                 "message": "Logout successful",
@@ -311,25 +353,34 @@ async def revoke_user_account(request: Request):
 
         # Disallow admin revocation by this endpoint
         if user_role == "admin":
+            record_auth_event("account_revoke", AUDIT_RESULT_FAILURE, request=request,
+                              user_id=user_id, tenant_id=tenant_id, reason="admin_forbidden")
             raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
                                 detail="Admin account cannot be deleted via this endpoint")
 
         # Orchestrate revoke for regular user
         await delete_user_and_cleanup(user_id=user_id, tenant_id=tenant_id)
 
+        record_auth_event("account_revoke", AUDIT_RESULT_SUCCESS, request=request,
+                          user_id=user_id, tenant_id=tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "User account revoked"})
     except UnauthorizedError as e:
+        record_auth_event("account_revoke", AUDIT_RESULT_FAILURE, request=request,
+                          reason="unauthorized")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
         logging.error(f"User revoke failed: {str(e)}")
+        record_auth_event("account_revoke", AUDIT_RESULT_FAILURE, request=request,
+                          reason="internal_error")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="User revoke failed")
 
 
 @router.post("/tokens")
 async def create_token_endpoint(
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Create a new token for the authenticated user.
@@ -348,6 +399,8 @@ async def create_token_endpoint(
                                 detail="Unauthorized: missing user_id in JWT token")
 
         result = create_token(str(user_id))
+        record_auth_event("token_create", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id, details={"token_id": result.get("token_id")})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": result}
@@ -356,6 +409,8 @@ async def create_token_endpoint(
         raise e
     except Exception as e:
         logging.error(f"Failed to create token: {str(e)}", exc_info=e)
+        record_auth_event("token_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          reason="internal_error")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
@@ -400,6 +455,7 @@ async def list_tokens_endpoint(
 @router.delete("/tokens/{token_id}")
 async def delete_token_endpoint(
     token_id: int,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Soft delete a token.
@@ -418,9 +474,14 @@ async def delete_token_endpoint(
 
         success = delete_token(token_id, str(user_id))
         if not success:
+            record_auth_event("token_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                              user_id=user_id, reason="token_not_found",
+                              details={"token_id": token_id})
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="Token not found or not owned by user")
 
+        record_auth_event("token_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id, details={"token_id": token_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": {"token_id": token_id}}
@@ -429,6 +490,8 @@ async def delete_token_endpoint(
         raise e
     except Exception as e:
         logging.error(f"Failed to delete token: {str(e)}", exc_info=e)
+        record_auth_event("token_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          reason="internal_error")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
@@ -436,6 +499,7 @@ async def delete_token_endpoint(
 @router.put("/password")
 async def update_password_endpoint(
     request: UpdatePasswordRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Update current user's password.
@@ -443,6 +507,7 @@ async def update_password_endpoint(
     This endpoint requires the user to provide their current password for verification
     before setting a new password.
     """
+    user_id = None
     try:
         if not authorization:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
@@ -460,6 +525,8 @@ async def update_password_endpoint(
         )
 
         logger.info(f"Password updated successfully for user {user_id}")
+        record_auth_event("password_update", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id)
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -468,12 +535,19 @@ async def update_password_endpoint(
 
     except UnauthorizedError as e:
         logger.warning(f"Password update unauthorized for user: {str(e)}")
+        record_auth_event("password_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason="invalid_old_password")
         raise AppException(ErrorCode.PROFILE_INVALID_CREDENTIALS, str(e))
     except AppException as e:
         logger.warning(
             f"Password update business error: {e.error_code} - {str(e)}")
+        record_auth_event("password_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id,
+                          reason=getattr(getattr(e, "error_code", None), "name", "") or "app_error")
         raise e  # Let app_exception_handler format the response
     except Exception as e:
         logging.error(f"Failed to update password: {str(e)}", exc_info=e)
+        record_auth_event("password_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason="internal_error")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="Internal Server Error")
