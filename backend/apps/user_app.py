@@ -4,7 +4,7 @@ User management API endpoints
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
@@ -12,6 +12,12 @@ from consts.model import (
     UserListRequest, UserUpdateRequest
 )
 from consts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError
+from services.audit_service import (
+    AUDIT_RESULT_FAILURE,
+    AUDIT_RESULT_SUCCESS,
+    reason_from_exception,
+    record_auth_event,
+)
 from services.user_service import (
     delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 )
@@ -93,7 +99,8 @@ async def get_users_endpoint(
 async def update_user_endpoint(
     user_id: str,
     request: UserUpdateRequest,
-    authorization: Optional[str] = Header(None)
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
 ) -> JSONResponse:
     """
     Update user information
@@ -101,11 +108,13 @@ async def update_user_endpoint(
     Args:
         user_id: User identifier
         request: User update request containing role
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Updated user information
     """
+    current_user_id, requester_tenant_id = None, None
     try:
         # Get current user ID from token for access control
         current_user_id, requester_tenant_id, requester_role = get_current_user_context(authorization)
@@ -120,6 +129,12 @@ async def update_user_endpoint(
         )
 
         logger.info(f"Updated user {user_id} by user {current_user_id}")
+        changes = {key: value for key, value in request.model_dump().items() if value is not None}
+        if changes.get("email"):
+            changes["email"] = str(changes["email"])
+        record_auth_event("user_update", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=current_user_id, tenant_id=requester_tenant_id,
+                          details={"target_user_id": user_id, "changes": changes})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -130,19 +145,39 @@ async def update_user_endpoint(
         )
 
     except UnauthorizedError as exc:
+        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, tenant_id=requester_tenant_id,
+                          reason=reason_from_exception(exc),
+                          details={"target_user_id": user_id})
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except ForbiddenError as exc:
+        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, tenant_id=requester_tenant_id,
+                          reason=reason_from_exception(exc),
+                          details={"target_user_id": user_id})
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except NotFoundException as exc:
+        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, tenant_id=requester_tenant_id,
+                          reason=reason_from_exception(exc),
+                          details={"target_user_id": user_id})
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except ValueError as exc:
         logger.warning(f"User update validation error for user {user_id}: {str(exc)}")
+        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, tenant_id=requester_tenant_id,
+                          reason=reason_from_exception(exc),
+                          details={"target_user_id": user_id})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error updating user {user_id}: {str(exc)}")
+        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, tenant_id=requester_tenant_id,
+                          reason=reason_from_exception(exc),
+                          details={"target_user_id": user_id})
         # Include the actual error message for debugging
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -153,7 +188,8 @@ async def update_user_endpoint(
 @router.delete("/{user_id}")
 async def delete_user_endpoint(
     user_id: str,
-    authorization: Optional[str] = Header(None)
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
 ) -> JSONResponse:
     """
     Permanently delete user and all related data.
@@ -166,11 +202,13 @@ async def delete_user_endpoint(
 
     Args:
         user_id: User identifier
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Success status
     """
+    current_user_id = None
     try:
         # Get current user ID from token for access control
         current_user_id, _ = get_current_user_id(authorization)
@@ -186,6 +224,9 @@ async def delete_user_endpoint(
         await delete_user_and_cleanup(user_id, tenant_id)
 
         logger.info(f"Permanently deleted user {user_id} by admin {current_user_id}")
+        record_auth_event("user_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=current_user_id,
+                          details={"target_user_id": user_id, "target_tenant_id": tenant_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -196,12 +237,18 @@ async def delete_user_endpoint(
 
     except ValueError as exc:
         logger.warning(f"User deletion validation error for user {user_id}: {str(exc)}")
+        record_auth_event("user_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_user_id": user_id})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error deleting user {user_id}: {str(exc)}")
+        record_auth_event("user_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_user_id": user_id})
         # Include the actual error message for debugging
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

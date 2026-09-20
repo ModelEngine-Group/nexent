@@ -35,7 +35,12 @@ from services.api_key_service import (
     refresh_user_api_key,
     revoke_user_api_keys,
 )
-from services.audit_service import AUDIT_RESULT_FAILURE, AUDIT_RESULT_SUCCESS, record_auth_event
+from services.audit_service import (
+    AUDIT_RESULT_FAILURE,
+    AUDIT_RESULT_SUCCESS,
+    reason_from_exception,
+    record_auth_event,
+)
 from services.northbound_service import (
     NorthboundContext,
     get_conversation_history,
@@ -195,16 +200,6 @@ def _raise_api_key_http_exception(exc: Exception) -> None:
     raise exc
 
 
-def _api_key_failure_reason(exc: Exception) -> str:
-    if isinstance(exc, ForbiddenError):
-        return "forbidden"
-    if isinstance(exc, NotFoundException):
-        return "not_found"
-    if isinstance(exc, (PydanticValidationError, ValidationError, ValueError)):
-        return "validation_error"
-    return "internal_error"
-
-
 @router.post(
     "/api-users/batch",
     status_code=HTTPStatus.CREATED,
@@ -237,7 +232,7 @@ async def create_api_users_batch_endpoint(
     except Exception as exc:
         record_auth_event("northbound_api_users_batch_create", AUDIT_RESULT_FAILURE,
                           request=request, user_id=ctx.user_id, tenant_id=ctx.tenant_id,
-                          reason=_api_key_failure_reason(exc),
+                          reason=reason_from_exception(exc),
                           details={"request_id": ctx.request_id,
                                    "role": payload.role,
                                    "group_id": payload.group_id,
@@ -270,7 +265,7 @@ async def refresh_api_key_endpoint(
     except Exception as exc:
         record_auth_event("northbound_api_key_refresh", AUDIT_RESULT_FAILURE, request=request,
                           user_id=ctx.user_id, tenant_id=ctx.tenant_id,
-                          reason=_api_key_failure_reason(exc),
+                          reason=reason_from_exception(exc),
                           details={"request_id": ctx.request_id,
                                    "target_user_id": payload.user_id,
                                    "target_email": str(payload.email) if payload.email else None})
@@ -306,7 +301,7 @@ async def revoke_api_key_endpoint(
     except Exception as exc:
         record_auth_event("northbound_api_key_revoke", AUDIT_RESULT_FAILURE, request=request,
                           user_id=ctx.user_id, tenant_id=ctx.tenant_id,
-                          reason=_api_key_failure_reason(exc),
+                          reason=reason_from_exception(exc),
                           details={"request_id": ctx.request_id,
                                    "target_user_id": getattr(target, "user_id", None),
                                    "target_email": str(target.email) if target and target.email else None})

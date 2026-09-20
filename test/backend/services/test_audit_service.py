@@ -158,3 +158,26 @@ class TestRecordAuthEvent:
         message = caplog.records[-1].getMessage()
         assert "result=failure" in message
         assert "reason=invalid_old_password" in message
+
+
+class TestReasonFromException:
+    def test_maps_domain_exceptions(self):
+        # Runtime code imports domain exceptions via the bare `consts` path
+        # (backend/ is the import root in the serving process); use the same
+        # path here so isinstance checks inside reason_from_exception match.
+        from consts.exceptions import (
+            DuplicateError,
+            ForbiddenError,
+            NotFoundException,
+            UnauthorizedError,
+            ValidationError,
+        )
+        from backend.services.audit_service import reason_from_exception
+
+        assert reason_from_exception(UnauthorizedError("x")) == "unauthorized"
+        assert reason_from_exception(ForbiddenError("x")) == "forbidden"
+        assert reason_from_exception(NotFoundException("x")) == "not_found"
+        assert reason_from_exception(DuplicateError("x")) == "duplicate"
+        assert reason_from_exception(ValidationError("x")) == "validation_error"
+        assert reason_from_exception(ValueError("x")) == "validation_error"
+        assert reason_from_exception(RuntimeError("x")) == "internal_error"

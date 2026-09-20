@@ -907,3 +907,47 @@ class TestDefaultGroupManagement:
             assert response.status_code == HTTPStatus.NOT_FOUND
             data = response.json()
             assert "Tenant not found" in data["detail"]
+
+
+class TestGroupMemberAuditEntries:
+    def test_member_add_success_emits_audit_entry(self, caplog):
+        import logging
+
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+                patch('apps.group_app.add_user_to_single_group') as mock_add:
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_add.return_value = {"added": True}
+
+            with caplog.at_level(logging.INFO, logger="audit.auth"):
+                response = client.post(
+                    "/groups/7/members",
+                    headers={"Authorization": "Bearer token"},
+                    json={"user_id": "user-9"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        message = caplog.records[-1].getMessage()
+        assert "[AUTH_AUDIT]" in message
+        assert "event=group_member_add" in message
+        assert "result=success" in message
+        assert "user_id=admin-1" in message
+        assert 'details={"target_group_id":7,"target_user_id":"user-9"}' in message
+
+    def test_member_add_unauthorized_emits_reason(self, caplog):
+        import logging
+
+        with patch('apps.group_app.get_current_user_id') as mock_get_user:
+            mock_get_user.side_effect = UnauthorizedError("invalid token")
+
+            with caplog.at_level(logging.INFO, logger="audit.auth"):
+                response = client.post(
+                    "/groups/7/members",
+                    headers={"Authorization": "Bearer token"},
+                    json={"user_id": "user-9"},
+                )
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        message = caplog.records[-1].getMessage()
+        assert "event=group_member_add" in message
+        assert "result=failure" in message
+        assert "reason=unauthorized" in message

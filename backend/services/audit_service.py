@@ -19,6 +19,15 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import Request
+from pydantic import ValidationError as PydanticValidationError
+
+from consts.exceptions import (
+    DuplicateError,
+    ForbiddenError,
+    NotFoundException,
+    UnauthorizedError,
+    ValidationError,
+)
 
 logger = logging.getLogger("audit.auth")
 
@@ -97,6 +106,21 @@ def format_audit_entry(
         f"details={details_json}",
     ]
     return " ".join(parts)
+
+
+def reason_from_exception(exc: Exception) -> str:
+    """Map common backend domain exceptions to a snake_case audit reason code."""
+    if isinstance(exc, UnauthorizedError):
+        return "unauthorized"
+    if isinstance(exc, ForbiddenError):
+        return "forbidden"
+    if isinstance(exc, NotFoundException):
+        return "not_found"
+    if isinstance(exc, DuplicateError):
+        return "duplicate"
+    if isinstance(exc, (ValidationError, ValueError, PydanticValidationError)):
+        return "validation_error"
+    return "internal_error"
 
 
 def record_auth_event(

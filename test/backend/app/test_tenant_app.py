@@ -53,6 +53,13 @@ tenant_service_module.update_tenant_info = MagicMock()
 tenant_service_module.delete_tenant = AsyncMock(return_value=True)
 services_module.tenant_service = tenant_service_module
 
+audit_service_module = types.ModuleType("services.audit_service")
+audit_service_module.AUDIT_RESULT_SUCCESS = "success"
+audit_service_module.AUDIT_RESULT_FAILURE = "failure"
+audit_service_module.record_auth_event = MagicMock()
+audit_service_module.reason_from_exception = MagicMock(return_value="internal_error")
+services_module.audit_service = audit_service_module
+
 utils_module = types.ModuleType("utils")
 auth_utils_module = types.ModuleType("utils.auth_utils")
 auth_utils_module.get_current_user_id = MagicMock()
@@ -61,6 +68,7 @@ utils_module.auth_utils = auth_utils_module
 
 sys.modules["services"] = services_module
 sys.modules["services.tenant_service"] = tenant_service_module
+sys.modules["services.audit_service"] = audit_service_module
 sys.modules["utils"] = utils_module
 sys.modules["utils.auth_utils"] = auth_utils_module
 

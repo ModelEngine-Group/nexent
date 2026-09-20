@@ -4,7 +4,7 @@ Invitation management API endpoints
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
@@ -12,6 +12,12 @@ from consts.model import (
     InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
 )
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
+from services.audit_service import (
+    AUDIT_RESULT_FAILURE,
+    AUDIT_RESULT_SUCCESS,
+    reason_from_exception,
+    record_auth_event,
+)
 from services.invitation_service import (
     create_invitation_code, update_invitation_code, get_invitation_by_code,
     check_invitation_available, use_invitation_code, update_invitation_code_status,
@@ -86,6 +92,7 @@ async def list_invitations_endpoint(
 @router.post("")
 async def create_invitation_endpoint(
     request: InvitationCreateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -93,11 +100,13 @@ async def create_invitation_endpoint(
 
     Args:
         request: Invitation creation request
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Created invitation information
     """
+    user_id = None
     try:
         # Get current user ID from token
         user_id, _ = get_current_user_id(authorization)
@@ -122,6 +131,12 @@ async def create_invitation_endpoint(
         )
 
         logger.info(f"Created invitation code {invitation_info['invitation_code']} (type: {request.code_type}) for tenant {tenant_id} by user {user_id}")
+        record_auth_event("invitation_create", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id,
+                          details={"target_tenant_id": tenant_id,
+                                   "code_type": request.code_type,
+                                   "invitation_code": (invitation_info or {}).get("invitation_code"),
+                                   "capacity": request.capacity})
 
         return JSONResponse(
             status_code=HTTPStatus.CREATED,
@@ -133,36 +148,48 @@ async def create_invitation_endpoint(
 
     except ValueError as exc:
         logger.warning(f"Invalid invitation creation parameters: {str(exc)}")
+        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Invitation creation rejected by feature flag: {str(exc)}")
+        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except DuplicateError as exc:
         logger.warning(f"Duplicate invitation code: {str(exc)}")
+        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,
             detail=str(exc)
         )
     except NotFoundException as exc:
         logger.warning(f"User not found during invitation creation: {str(exc)}")
+        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation creation attempt: {str(exc)}")
+        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error during invitation creation: {str(exc)}")
+        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to create invitation code"
@@ -173,6 +200,7 @@ async def create_invitation_endpoint(
 async def update_invitation_endpoint(
     invitation_code: str,
     request: InvitationUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -181,11 +209,13 @@ async def update_invitation_endpoint(
     Args:
         invitation_code: Invitation code
         request: Invitation update request
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Success status
     """
+    user_id = None
     try:
         # Get current user ID from token
         user_id, _ = get_current_user_id(authorization)
@@ -220,6 +250,10 @@ async def update_invitation_endpoint(
             raise ValidationError("Failed to update invitation code")
 
         logger.info(f"Updated invitation code {invitation_code} by user {user_id}")
+        record_auth_event("invitation_update", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id,
+                          details={"invitation_code": invitation_code,
+                                   "updated_fields": sorted(updates.keys())})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -230,18 +264,27 @@ async def update_invitation_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Invitation not found for update: {str(exc)}")
+        record_auth_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Invitation update validation error: {str(exc)}")
+        record_auth_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation update attempt: {str(exc)}")
+        record_auth_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
@@ -251,6 +294,9 @@ async def update_invitation_endpoint(
         logger.error(f"Unexpected error during invitation update: {str(exc)}")
         logger.error(f"Exception type: {type(exc).__name__}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
+        record_auth_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to update invitation code"
@@ -334,6 +380,7 @@ async def check_invitation_code_endpoint(invitation_code: str) -> JSONResponse:
 @router.delete("/{invitation_code}")
 async def delete_invitation_endpoint(
     invitation_code: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -341,11 +388,13 @@ async def delete_invitation_endpoint(
 
     Args:
         invitation_code: Invitation code to delete
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Success status
     """
+    user_id = None
     try:
         # Get current user ID from token
         user_id, _ = get_current_user_id(authorization)
@@ -367,6 +416,8 @@ async def delete_invitation_endpoint(
             raise ValidationError("Failed to delete invitation code")
 
         logger.info(f"Deleted invitation code {invitation_code} by user {user_id}")
+        record_auth_event("invitation_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id, details={"invitation_code": invitation_code})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -377,24 +428,36 @@ async def delete_invitation_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Invitation not found for deletion: {str(exc)}")
+        record_auth_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Invitation deletion validation error: {str(exc)}")
+        record_auth_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation deletion attempt: {str(exc)}")
+        record_auth_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error during invitation deletion: {str(exc)}")
+        record_auth_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to delete invitation code"
@@ -438,6 +501,7 @@ async def check_invitation_available_endpoint(invitation_code: str) -> JSONRespo
 @router.post("/{invitation_code}/use")
 async def use_invitation_endpoint(
     invitation_code: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -445,11 +509,13 @@ async def use_invitation_endpoint(
 
     Args:
         invitation_code: Invitation code to use
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Usage result
     """
+    current_user_id = None
     try:
         # Get current user ID from token
         current_user_id, _ = get_current_user_id(authorization)
@@ -463,6 +529,9 @@ async def use_invitation_endpoint(
         )
 
         logger.info(f"User {current_user_id} used invitation code {invitation_code}")
+        record_auth_event("invitation_use", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=current_user_id,
+                          details={"invitation_code": invitation_code})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -474,18 +543,27 @@ async def use_invitation_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Invitation code not available: {str(exc)}")
+        record_auth_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation usage attempt: {str(exc)}")
+        record_auth_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error using invitation code: {str(exc)}")
+        record_auth_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to use invitation code"
@@ -493,13 +571,16 @@ async def use_invitation_endpoint(
 
 
 @router.post("/{invitation_code}/update-status")
-async def update_invitation_status_endpoint(invitation_code: str) -> JSONResponse:
+async def update_invitation_status_endpoint(
+    invitation_code: str,
+    http_request: Request,
+) -> JSONResponse:
     """
     Update invitation code status based on expiry and usage
 
     Args:
         invitation_code: Invitation code
-        authorization: Bearer token for authentication
+        http_request: FastAPI request object for audit context
 
     Returns:
         JSONResponse: Status update result
@@ -517,6 +598,10 @@ async def update_invitation_status_endpoint(invitation_code: str) -> JSONRespons
 
         message = "Invitation status updated" if status_updated else "Invitation status unchanged"
 
+        record_auth_event("invitation_status_update", AUDIT_RESULT_SUCCESS, request=http_request,
+                          details={"invitation_code": invitation_code,
+                                   "status_updated": bool(status_updated)})
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -530,12 +615,18 @@ async def update_invitation_status_endpoint(invitation_code: str) -> JSONRespons
 
     except NotFoundException as exc:
         logger.warning(f"Invitation not found for status update: {str(exc)}")
+        record_auth_event("invitation_status_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error updating invitation status: {str(exc)}")
+        record_auth_event("invitation_status_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          reason=reason_from_exception(exc),
+                          details={"invitation_code": invitation_code})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to update invitation status"

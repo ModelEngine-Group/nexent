@@ -4,7 +4,7 @@ Group management API endpoints
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
@@ -14,6 +14,12 @@ from consts.model import (
     GroupMembersUpdateRequest
 )
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from services.audit_service import (
+    AUDIT_RESULT_FAILURE,
+    AUDIT_RESULT_SUCCESS,
+    reason_from_exception,
+    record_auth_event,
+)
 from services.group_service import (
     create_group, get_group_info, update_group, delete_group,
     add_user_to_single_group, remove_user_from_single_group, get_group_users,
@@ -30,6 +36,7 @@ router = APIRouter(prefix="/groups", tags=["groups"])
 @router.post("", response_model=None)
 async def create_group_endpoint(
     request: GroupCreateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -37,11 +44,13 @@ async def create_group_endpoint(
 
     Args:
         request: Group creation request
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Created group information
     """
+    user_id = None
     try:
         # Get current user ID from token
         user_id, _ = get_current_user_id(authorization)
@@ -55,6 +64,11 @@ async def create_group_endpoint(
         )
 
         logger.info(f"Created group '{request.group_name}' in tenant {request.tenant_id} by user {user_id}")
+        record_auth_event("group_create", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id,
+                          details={"target_tenant_id": request.tenant_id,
+                                   "group_name": request.group_name,
+                                   "target_group_id": (group_info or {}).get("group_id")})
 
         return JSONResponse(
             status_code=HTTPStatus.CREATED,
@@ -66,18 +80,24 @@ async def create_group_endpoint(
 
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group creation attempt: {str(exc)}")
+        record_auth_event("group_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Group creation validation error: {str(exc)}")
+        record_auth_event("group_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error during group creation: {str(exc)}")
+        record_auth_event("group_create", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to create group"
@@ -193,6 +213,7 @@ async def get_groups_endpoint(
 async def update_group_endpoint(
     group_id: int,
     request: GroupUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -201,11 +222,13 @@ async def update_group_endpoint(
     Args:
         group_id: Group identifier
         request: Group update request
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Success status
     """
+    user_id = None
     try:
         # Get current user ID from token
         user_id, _ = get_current_user_id(authorization)
@@ -231,6 +254,10 @@ async def update_group_endpoint(
             raise ValidationError("Failed to update group")
 
         logger.info(f"Updated group {group_id} by user {user_id}")
+        record_auth_event("group_update", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id,
+                          details={"target_group_id": group_id,
+                                   "updated_fields": sorted(updates.keys())})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -241,24 +268,36 @@ async def update_group_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Group not found for update: {group_id}")
+        record_auth_event("group_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Group update validation error: {str(exc)}")
+        record_auth_event("group_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group update attempt: {str(exc)}")
+        record_auth_event("group_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error during group update: {str(exc)}")
+        record_auth_event("group_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to update group"
@@ -268,6 +307,7 @@ async def update_group_endpoint(
 @router.delete("/{group_id}")
 async def delete_group_endpoint(
     group_id: int,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -275,11 +315,13 @@ async def delete_group_endpoint(
 
     Args:
         group_id: Group identifier
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Success status
     """
+    user_id = None
     try:
         # Get current user ID from token
         user_id, _ = get_current_user_id(authorization)
@@ -294,6 +336,8 @@ async def delete_group_endpoint(
             raise ValidationError("Failed to delete group")
 
         logger.info(f"Deleted group {group_id} by user {user_id}")
+        record_auth_event("group_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id, details={"target_group_id": group_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -304,24 +348,36 @@ async def delete_group_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Group not found for deletion: {group_id}")
+        record_auth_event("group_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Group deletion validation error: {str(exc)}")
+        record_auth_event("group_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group deletion attempt: {str(exc)}")
+        record_auth_event("group_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error during group deletion: {str(exc)}")
+        record_auth_event("group_delete", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to delete group"
@@ -332,6 +388,7 @@ async def delete_group_endpoint(
 async def add_user_to_group_endpoint(
     group_id: int,
     request: GroupUserRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -340,11 +397,13 @@ async def add_user_to_group_endpoint(
     Args:
         group_id: Group identifier
         request: User addition request containing user_id
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Group membership result
     """
+    current_user_id = None
     try:
         # Validate request - only user_id should be provided in body
         if request.group_ids is not None:
@@ -361,6 +420,9 @@ async def add_user_to_group_endpoint(
         )
 
         logger.info(f"Added user {request.user_id} to group {group_id} by user {current_user_id}")
+        record_auth_event("group_member_add", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=current_user_id,
+                          details={"target_group_id": group_id, "target_user_id": request.user_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -372,24 +434,36 @@ async def add_user_to_group_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Group or user not found: {str(exc)}")
+        record_auth_event("group_member_add", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "target_user_id": request.user_id})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Group membership validation error: {str(exc)}")
+        record_auth_event("group_member_add", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "target_user_id": request.user_id})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group membership modification: {str(exc)}")
+        record_auth_event("group_member_add", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "target_user_id": request.user_id})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error adding user to group: {str(exc)}")
+        record_auth_event("group_member_add", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "target_user_id": request.user_id})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to add user to group"
@@ -400,6 +474,7 @@ async def add_user_to_group_endpoint(
 async def remove_user_from_group_endpoint(
     group_id: int,
     user_id: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -408,11 +483,13 @@ async def remove_user_from_group_endpoint(
     Args:
         group_id: Group identifier
         user_id: User identifier
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Success status
     """
+    current_user_id = None
     try:
         # Get current user ID from token
         current_user_id, _ = get_current_user_id(authorization)
@@ -428,6 +505,9 @@ async def remove_user_from_group_endpoint(
             raise ValidationError("Failed to remove user from group")
 
         logger.info(f"Removed user {user_id} from group {group_id} by user {current_user_id}")
+        record_auth_event("group_member_remove", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=current_user_id,
+                          details={"target_group_id": group_id, "target_user_id": user_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -438,24 +518,36 @@ async def remove_user_from_group_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Group or user not found: {str(exc)}")
+        record_auth_event("group_member_remove", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "target_user_id": user_id})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Group membership removal validation error: {str(exc)}")
+        record_auth_event("group_member_remove", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "target_user_id": user_id})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group membership modification: {str(exc)}")
+        record_auth_event("group_member_remove", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "target_user_id": user_id})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error removing user from group: {str(exc)}")
+        record_auth_event("group_member_remove", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "target_user_id": user_id})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to remove user from group"
@@ -504,6 +596,7 @@ async def get_group_users_endpoint(group_id: int) -> JSONResponse:
 async def update_group_members_endpoint(
     group_id: int,
     request: GroupMembersUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -512,11 +605,13 @@ async def update_group_members_endpoint(
     Args:
         group_id: Group identifier
         request: Request containing the list of user IDs to set as group members
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Update results with counts
     """
+    current_user_id = None
     try:
         # Get current user ID from token
         current_user_id, _ = get_current_user_id(authorization)
@@ -529,6 +624,9 @@ async def update_group_members_endpoint(
         )
 
         logger.info(f"Updated group {group_id} members by user {current_user_id}: {result}")
+        record_auth_event("group_member_update", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=current_user_id,
+                          details={"target_group_id": group_id, "user_ids": request.user_ids})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -540,24 +638,36 @@ async def update_group_members_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Group not found for member update: {group_id}")
+        record_auth_event("group_member_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "user_ids": request.user_ids})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Group members update validation error: {str(exc)}")
+        record_auth_event("group_member_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "user_ids": request.user_ids})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized group members update attempt: {str(exc)}")
+        record_auth_event("group_member_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "user_ids": request.user_ids})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error during group members update: {str(exc)}")
+        record_auth_event("group_member_update", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_group_id": group_id, "user_ids": request.user_ids})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to update group members"
@@ -567,6 +677,7 @@ async def update_group_members_endpoint(
 @router.post("/members/batch")
 async def add_user_to_groups_endpoint(
     request: GroupUserRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -574,11 +685,13 @@ async def add_user_to_groups_endpoint(
 
     Args:
         request: Batch user addition request containing user_id and group_ids
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Batch operation results
     """
+    current_user_id = None
     try:
         # Validate request for batch operation
         if request.group_ids is None or len(request.group_ids) == 0:
@@ -595,6 +708,10 @@ async def add_user_to_groups_endpoint(
         )
 
         logger.info(f"Batch added user {request.user_id} to {len(request.group_ids)} groups by user {current_user_id}")
+        record_auth_event("group_member_batch_add", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=current_user_id,
+                          details={"target_user_id": request.user_id,
+                                   "target_group_ids": request.group_ids})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -606,18 +723,30 @@ async def add_user_to_groups_endpoint(
 
     except ValidationError as exc:
         logger.warning(f"Batch user addition validation error: {str(exc)}")
+        record_auth_event("group_member_batch_add", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_user_id": request.user_id,
+                                   "target_group_ids": request.group_ids})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized batch group membership modification: {str(exc)}")
+        record_auth_event("group_member_batch_add", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_user_id": request.user_id,
+                                   "target_group_ids": request.group_ids})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error in batch user addition: {str(exc)}")
+        record_auth_event("group_member_batch_add", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=current_user_id, reason=reason_from_exception(exc),
+                          details={"target_user_id": request.user_id,
+                                   "target_group_ids": request.group_ids})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to add user to groups"
@@ -663,6 +792,7 @@ async def get_tenant_default_group_endpoint(tenant_id: str) -> JSONResponse:
 async def set_tenant_default_group_endpoint(
     tenant_id: str,
     request: SetDefaultGroupRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -671,11 +801,13 @@ async def set_tenant_default_group_endpoint(
     Args:
         tenant_id: Tenant identifier
         request: Request containing the default group ID to set
+        http_request: FastAPI request object for audit context
         authorization: Bearer token for authentication
 
     Returns:
         JSONResponse: Success status
     """
+    user_id = None
     try:
         # Get current user ID from token
         user_id, _ = get_current_user_id(authorization)
@@ -691,6 +823,10 @@ async def set_tenant_default_group_endpoint(
             raise ValidationError("Failed to set default group")
 
         logger.info(f"Set default group {request.default_group_id} for tenant {tenant_id} by user {user_id}")
+        record_auth_event("group_default_set", AUDIT_RESULT_SUCCESS, request=http_request,
+                          user_id=user_id,
+                          details={"target_tenant_id": tenant_id,
+                                   "target_group_id": request.default_group_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -705,24 +841,40 @@ async def set_tenant_default_group_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Tenant or group not found: {str(exc)}")
+        record_auth_event("group_default_set", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_tenant_id": tenant_id,
+                                   "target_group_id": request.default_group_id})
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(exc)
         )
     except ValidationError as exc:
         logger.warning(f"Validation error setting default group: {str(exc)}")
+        record_auth_event("group_default_set", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_tenant_id": tenant_id,
+                                   "target_group_id": request.default_group_id})
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized attempt to set default group: {str(exc)}")
+        record_auth_event("group_default_set", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_tenant_id": tenant_id,
+                                   "target_group_id": request.default_group_id})
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
         )
     except Exception as exc:
         logger.error(f"Unexpected error setting default group for tenant {tenant_id}: {str(exc)}")
+        record_auth_event("group_default_set", AUDIT_RESULT_FAILURE, request=http_request,
+                          user_id=user_id, reason=reason_from_exception(exc),
+                          details={"target_tenant_id": tenant_id,
+                                   "target_group_id": request.default_group_id})
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to set default group"
