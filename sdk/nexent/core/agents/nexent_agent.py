@@ -912,6 +912,7 @@ class NexentAgent:
                 user_id=self.user_id,
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
+                output_protocol=getattr(agent_config, "output_protocol", "code_action"),
                 workspace_path=self.workspace_path,
             )
             agent.stop_event = self.stop_event
@@ -1143,7 +1144,11 @@ class NexentAgent:
                             })
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
-                        if hasattr(step_log, "error") and step_log.error is not None:
+                        if (
+                            hasattr(step_log, "error")
+                            and step_log.error is not None
+                            and not getattr(step_log, "_suppress_user_error", False)
+                        ):
                             # Action-step failures are observations in the ReAct loop:
                             # the model receives them and can repair/retry on the next
                             # step. Surface them as warnings so the UI does not imply
