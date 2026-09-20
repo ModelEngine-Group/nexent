@@ -927,37 +927,12 @@ const HomeContent: FC = () => {
                     void changeAgentTopology(runtime, onBack).catch((error) =>
                       message.error(error.message)
                     ),
-                  skills: [
-                    ...(workbenchState.config.mode === "generic_chat" ||
-                    workbenchState.config.mode === "multi_agent_chat"
-                      ? workbenchBootstrap?.generic_agent
-                          ?.default_skill_resources || []
-                      : []
-                    ).map((skill) => ({
-                      id: skill.skill_id,
-                      name: skill.name,
-                      removable: false,
-                    })),
-                    ...workbenchState.config.skill_mounts
-                      .filter(
-                        (mount) =>
-                          !(
-                            (workbenchState.config.mode === "generic_chat" ||
-                              workbenchState.config.mode ===
-                                "multi_agent_chat") &&
-                            workbenchBootstrap?.generic_agent?.default_skill_resources.some(
-                              (skill) => skill.skill_id === mount.skill_id
-                            )
-                          )
-                      )
-                      .map((mount) => ({
-                        id: mount.skill_id,
-                        name:
-                          workbenchState.skillNames[mount.skill_id] ||
-                          `#${mount.skill_id}`,
-                        removable: true,
-                      })),
-                  ],
+                  skills: workbenchState.config.skill_mounts.map((mount) => ({
+                    id: mount.skill_id,
+                    name:
+                      workbenchState.skillNames[mount.skill_id] ||
+                      `#${mount.skill_id}`,
+                  })),
                 }
           }
           onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}

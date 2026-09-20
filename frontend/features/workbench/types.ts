@@ -62,7 +62,7 @@ export interface WorkbenchBootstrap {
 export interface WorkbenchResourceControls {
   agentName?: string;
   agents?: Array<{ id: number; name: string; remove: () => void }>;
-  skills: Array<{ id: number; name: string; removable?: boolean }>;
+  skills: Array<{ id: number; name: string }>;
   onSelectAgent: () => void;
   onRemoveAgent: () => void;
   creationActions?: import("react").ReactNode;

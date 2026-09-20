@@ -42,8 +42,7 @@ export function SelectedResourceChips({
       key: `skill:${skill.id}`,
       label: `Skill · ${skill.name}`,
       edit: onEditSkill,
-      remove:
-        skill.removable === false ? undefined : () => onRemoveSkill?.(skill.id),
+      remove: () => onRemoveSkill?.(skill.id),
     })),
     ...(["local", "aidp"] as const).flatMap((source) => {
       if (!scope || scope[source].mode === "disabled") return [];
@@ -90,17 +89,15 @@ export function SelectedResourceChips({
           >
             {chip.label}
           </button>
-          {chip.remove && (
-            <button
-              type="button"
-              disabled={disabled}
-              className="px-2 py-1 hover:text-destructive focus-visible:ring-2"
-              aria-label={`移除 ${chip.label}`}
-              onClick={chip.remove}
-            >
-              ×
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={disabled}
+            className="px-2 py-1 hover:text-destructive focus-visible:ring-2"
+            aria-label={`移除 ${chip.label}`}
+            onClick={chip.remove}
+          >
+            ×
+          </button>
         </span>
       ))}
     </div>
