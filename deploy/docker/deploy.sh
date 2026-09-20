@@ -55,6 +55,7 @@ IS_MAINLAND=""
 ENABLE_TERMINAL=""
 VERSION_CHOICE=""
 ROOT_DIR_PARAM=""
+
 # Suppress the orphan warning
 export COMPOSE_IGNORE_ORPHANS=True
 
@@ -1219,11 +1220,6 @@ prepare_directory_and_data() {
   else
     echo "   ⚠️ official-skills-zip directory not found, skipping skills copy"
   fi
-
-  # Reserve the official-agent mount point. Official bundles are installed by
-  # the standalone official-agent deployment flow after Nexent is installed.
-  mkdir -p "$NEXENT_USER_DIR/official-agents"
-  chmod 775 "$NEXENT_USER_DIR/official-agents"
 
   # Export for docker-compose
   export NEXENT_USER_DIR
