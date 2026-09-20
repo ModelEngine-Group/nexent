@@ -19,6 +19,8 @@ const ACTIVE_STATUSES = new Set([
   "RECOVERY_REQUIRED",
 ]);
 const STREAM_RECONNECT_STATUSES = new Set(["READY", "RUNNING"]);
+// Safety-net snapshot poll while a run is active (see the polling effect below).
+const ACTIVE_SNAPSHOT_POLL_INTERVAL_MS = 5000;
 const TERMINAL_STATUSES = new Set([
   "COMPLETED",
   "FAILED",
@@ -299,6 +301,20 @@ export function useHumanInteractionController({
 
   const scopedRun = run?.conversation_id === conversationId ? run : null;
   const active = Boolean(scopedRun && ACTIVE_STATUSES.has(scopedRun.status));
+
+  // Safety-net polling: the SSE stream is the primary delivery channel, but a
+  // silently stalled connection (hung dev proxy, half-open socket that never
+  // raises an error event) must not hide a pending form until a manual page
+  // refresh. The read-only snapshot is cheap; poll it at a low frequency while
+  // the scoped run is still active. Calls share the refresh() throttle and
+  // in-flight guard, so live SSE delivery simply coalesces with these ticks.
+  useEffect(() => {
+    if (!available || !conversationId || !active) return;
+    const timer = setInterval(() => {
+      void refresh();
+    }, ACTIVE_SNAPSHOT_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [available, conversationId, active, refresh]);
 
   const control = useCallback(
     async (action: "pause" | "terminate") => {
