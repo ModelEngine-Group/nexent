@@ -120,6 +120,8 @@ def _is_timeout_error(exc: BaseException) -> bool:
 
 
 class OpenAIModel(OpenAIServerModel):
+    supports_deferred_attempt_commit = True
+
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
@@ -278,6 +280,7 @@ class OpenAIModel(OpenAIServerModel):
                  _token_tracker=None, context_budget_snapshot: Optional[ContextBudgetSnapshot] = None,
                  context_rebuild=None, _overflow_recovery_ordinal: int = 0,
                  _model_attempts_used: int = 0,
+                 _defer_attempt_commit: bool = False,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
@@ -321,6 +324,7 @@ class OpenAIModel(OpenAIServerModel):
                     context_rebuild=context_rebuild,
                     _overflow_recovery_ordinal=_overflow_recovery_ordinal,
                     _model_attempts_used=_model_attempts_used,
+                    _defer_attempt_commit=_defer_attempt_commit,
                     **kwargs,
                 )
 
@@ -721,10 +725,19 @@ class OpenAIModel(OpenAIServerModel):
                         )
                     message.raw = current_request
                     message.role = MessageRole.ASSISTANT
-                    commit_attempt = getattr(self.observer, "commit_model_attempt", None)
-                    if callable(commit_attempt):
-                        commit_attempt(attempt_id, attempt)
-                    self._monitoring.add_span_event("model_attempt_commit", {
+                    message.model_attempt_id = attempt_id
+                    message.model_attempt_number = attempt
+                    message.model_attempt_commit_deferred = _defer_attempt_commit
+                    attempt_event = (
+                        "model_attempt_commit_deferred"
+                        if _defer_attempt_commit
+                        else "model_attempt_commit"
+                    )
+                    if not _defer_attempt_commit:
+                        commit_attempt = getattr(self.observer, "commit_model_attempt", None)
+                        if callable(commit_attempt):
+                            commit_attempt(attempt_id, attempt)
+                    self._monitoring.add_span_event(attempt_event, {
                         "attempt_id": attempt_id,
                         "attempt": attempt,
                     })
@@ -839,6 +852,7 @@ class OpenAIModel(OpenAIServerModel):
                         context_rebuild=context_rebuild,
                         _overflow_recovery_ordinal=_overflow_recovery_ordinal + 1,
                         _model_attempts_used=attempt,
+                        _defer_attempt_commit=_defer_attempt_commit,
                         **kwargs,
                     )
                 is_timeout = _is_timeout_error(e)

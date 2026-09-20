@@ -1701,6 +1701,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const parentReasoning = createReasoningAccumulator(contentParts);
     const nl2SkillFilePartIndices = new Map<string, number>();
     let nl2SkillSummaryPartIndex: number | null = null;
+    type Nl2SkillAttemptCheckpoint = {
+      files: Map<string, { index: number; part: any }>;
+      summary: { index: number; part: any } | null;
+    };
+    const nl2SkillAttemptCheckpoints = new Map<
+      string,
+      Nl2SkillAttemptCheckpoint
+    >();
     const classifyNl2SkillFile = (
       path: string
     ): Pick<Nl2SkillFileCardData, "kind" | "language"> => {
@@ -1892,6 +1900,66 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         }
       }
     };
+    const beginNl2SkillAttempt = (attemptId: string) => {
+      if (!isNl2Skill) return;
+      const files = new Map<string, { index: number; part: any }>();
+      for (const [path, index] of nl2SkillFilePartIndices) {
+        const part = contentParts[index];
+        files.set(path, {
+          index,
+          part: {
+            ...part,
+            data:
+              part?.data && typeof part.data === "object"
+                ? { ...part.data }
+                : part?.data,
+          },
+        });
+      }
+      const summary =
+        nl2SkillSummaryPartIndex === null
+          ? null
+          : {
+              index: nl2SkillSummaryPartIndex,
+              part: { ...contentParts[nl2SkillSummaryPartIndex] },
+            };
+      nl2SkillAttemptCheckpoints.set(attemptId, { files, summary });
+    };
+    const resolveNl2SkillAttempt = (
+      attemptId: string,
+      phase: "rollback" | "commit"
+    ) => {
+      if (!isNl2Skill) return;
+      const checkpoint = nl2SkillAttemptCheckpoints.get(attemptId);
+      nl2SkillAttemptCheckpoints.delete(attemptId);
+      if (phase !== "rollback" || !checkpoint) return;
+
+      const createdIndices = new Set<number>();
+      for (const [path, index] of nl2SkillFilePartIndices) {
+        if (!checkpoint.files.has(path)) createdIndices.add(index);
+      }
+      if (
+        checkpoint.summary === null &&
+        nl2SkillSummaryPartIndex !== null
+      ) {
+        createdIndices.add(nl2SkillSummaryPartIndex);
+      }
+      for (const index of [...createdIndices].sort((a, b) => b - a)) {
+        removeContentPart(index);
+      }
+
+      nl2SkillFilePartIndices.clear();
+      for (const [path, snapshot] of checkpoint.files) {
+        contentParts[snapshot.index] = snapshot.part;
+        nl2SkillFilePartIndices.set(path, snapshot.index);
+      }
+      if (checkpoint.summary) {
+        contentParts[checkpoint.summary.index] = checkpoint.summary.part;
+        nl2SkillSummaryPartIndex = checkpoint.summary.index;
+      } else {
+        nl2SkillSummaryPartIndex = null;
+      }
+    };
     const handleModelAttemptControl = (chunk: SseChunk): boolean => {
       if (
         chunk.type !== "model_attempt_control" ||
@@ -1904,11 +1972,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (!top) {
         if (chunk.phase === "begin") {
           parentReasoning.beginAttempt(chunk.attempt_id);
+          beginNl2SkillAttempt(chunk.attempt_id);
         } else if (chunk.phase === "rollback") {
+          resolveNl2SkillAttempt(chunk.attempt_id, "rollback");
           parentReasoning.rollbackAttempt(chunk.attempt_id);
         } else {
+          resolveNl2SkillAttempt(chunk.attempt_id, "commit");
           parentReasoning.commitAttempt(chunk.attempt_id);
         }
+        if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
         return true;
       }
 

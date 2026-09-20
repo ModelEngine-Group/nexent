@@ -2238,6 +2238,34 @@ def test_call_without_tracker_creates_tracker(openai_model_instance):
     mock_tracker.record_token.assert_called()
 
 
+def test_call_can_defer_successful_attempt_commit_for_core_agent(openai_model_instance):
+    """CoreAgent may validate a successful stream before committing it to clients."""
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = '<code>final_answer("ok")</code>'
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.choices[0].finish_reason = "stop"
+    mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    openai_model_instance.observer.reset_mock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        result = openai_model_instance(
+            messages=[{"role": "user", "content": "hello"}],
+            _token_tracker=MagicMock(),
+            _defer_attempt_commit=True,
+        )
+
+    openai_model_instance.observer.begin_model_attempt.assert_called_once()
+    openai_model_instance.observer.commit_model_attempt.assert_not_called()
+    openai_model_instance.observer.rollback_model_attempt.assert_not_called()
+    assert result.model_attempt_commit_deferred is True
+    assert isinstance(result.model_attempt_id, str)
+    assert result.model_attempt_number == 1
+
+
 def test_call_token_estimation_with_list_content(openai_model_instance):
     """Test __call__ method extracts text from list-formatted content when usage info is None (line 220)."""
 
