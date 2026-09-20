@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import {
   Alert,
   Button,
+  Card,
   Col,
   Row,
   App,
@@ -25,22 +26,10 @@ import {
   Table,
   Space,
 } from "antd";
-import {
-  Plus,
-  ShieldCheck,
-  RefreshCw,
-  SlidersHorizontal,
-  Trash2,
-  Edit3,
-} from "lucide-react";
+import { Plus, ShieldCheck, RefreshCw, Trash2, Edit3 } from "lucide-react";
 import { ExclamationCircleFilled } from "@ant-design/icons";
 
-import {
-  MODEL_TYPES,
-  MODEL_STATUS,
-  LAYOUT_CONFIG,
-  MODEL_SOURCES,
-} from "@/const/modelConfig";
+import { MODEL_TYPES, MODEL_STATUS, MODEL_SOURCES } from "@/const/modelConfig";
 import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
@@ -55,7 +44,7 @@ import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import log from "@/lib/logger";
 
 import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
-import { DefaultModelDialog } from "./model/DefaultModelDialog";
+import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -80,59 +69,6 @@ const DEFAULT_USAGE_I18N_KEYS: Record<string, string> = {
   "voice.tts": "modelConfig.option.ttsModel",
   "voice.stt": "modelConfig.option.sttModel",
 };
-
-// Model data structure
-const getModelData = (t: any) => ({
-  llm: {
-    title: t("modelConfig.category.llm"),
-    options: [{ id: "main", name: t("modelConfig.option.mainModel") }],
-  },
-  embedding: {
-    title: t("modelConfig.category.embedding"),
-    options: [
-      {
-        id: MODEL_TYPES.EMBEDDING,
-        name: t("modelConfig.option.embeddingModel"),
-      },
-      {
-        id: MODEL_TYPES.MULTI_EMBEDDING,
-        name: t("modelConfig.option.multiEmbeddingModel"),
-      },
-    ],
-  },
-  reranker: {
-    title: t("modelConfig.category.reranker"),
-    options: [{ id: "reranker", name: t("modelConfig.option.rerankerModel") }],
-  },
-  multimodal: {
-    title: t("modelConfig.category.multimodal"),
-    options: [
-      {
-        id: MODEL_TYPES.VLM,
-        name: t("modelConfig.option.imageUnderstandingModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM2,
-        name: t("modelConfig.option.imageGenerationModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM3,
-        name: t("modelConfig.option.videoUnderstandingModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM4,
-        name: t("modelConfig.option.audioUnderstandingModel"),
-      },
-    ],
-  },
-  voice: {
-    title: t("modelConfig.category.voice"),
-    options: [
-      { id: MODEL_TYPES.TTS, name: t("modelConfig.option.ttsModel") },
-      { id: MODEL_TYPES.STT, name: t("modelConfig.option.sttModel") },
-    ],
-  },
-});
 
 // Define the methods exposed by the component
 export interface ModelConfigSectionRef {
@@ -174,8 +110,6 @@ export const ModelConfigSection = forwardRef<
   const [capacityCoverage, setCapacityCoverage] =
     useState<CapacityCoverage | null>(null);
 
-  // Default model dialog
-  const [isDefaultDialogOpen, setIsDefaultDialogOpen] = useState(false);
   // Single model edit dialog
   const [editingCardModel, setEditingCardModel] = useState<ModelOption | null>(
     null
@@ -185,9 +119,9 @@ export const ModelConfigSection = forwardRef<
   const [searchKeyword, setSearchKeyword] = useState<string>("");
   const [filterType, setFilterType] = useState<ModelType | "all">("all");
   const [filterSource, setFilterSource] = useState<ModelSource | "all">("all");
-  const [filterStatus, setFilterStatus] = useState<
-    ModelConnectStatus | "all"
-  >("all");
+  const [filterStatus, setFilterStatus] = useState<ModelConnectStatus | "all">(
+    "all"
+  );
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(12);
 
@@ -235,12 +169,14 @@ export const ModelConfigSection = forwardRef<
   }, [modelConfig]);
 
   /* ------------------ Missing field highlight ------------------ */
+  // v2.6.1 redesign: the default-model slots are always visible inline (the
+  // old flow opened the DefaultModelDialog first), so highlighting only needs
+  // to mark the slot and scroll it into view.
   useEffect(() => {
     const handleHighlightMissingField = (event: any) => {
       const { field } = event.detail;
       if (field === "llm.main" || field === "embedding.embedding") {
         setErrorFields((prev) => ({ ...prev, [field]: true }));
-        setIsDefaultDialogOpen(true);
         setTimeout(() => {
           const el = document.querySelector<HTMLElement>(
             `[data-error-field="${field}"]`
@@ -249,7 +185,10 @@ export const ModelConfigSection = forwardRef<
         }, 100);
       }
     };
-    window.addEventListener("highlightMissingField", handleHighlightMissingField);
+    window.addEventListener(
+      "highlightMissingField",
+      handleHighlightMissingField
+    );
     return () =>
       window.removeEventListener(
         "highlightMissingField",
@@ -285,12 +224,9 @@ export const ModelConfigSection = forwardRef<
   };
 
   /* ------------------ Card-level edit / delete ------------------ */
-  const handleCardEdit = useCallback(
-    (model: ModelOption) => {
-      setEditingCardModel(model);
-    },
-    []
-  );
+  const handleCardEdit = useCallback((model: ModelOption) => {
+    setEditingCardModel(model);
+  }, []);
 
   const handleCardDelete = useCallback(
     async (model: ModelOption) => {
@@ -445,9 +381,7 @@ export const ModelConfigSection = forwardRef<
         dataIndex: "source",
         key: "source",
         width: 130,
-        render: (source: ModelSource) => (
-          <Tag>{source}</Tag>
-        ),
+        render: (source: ModelSource) => <Tag>{source}</Tag>,
       },
       {
         title: t("modelConfig.table.col.connectStatus", {
@@ -492,7 +426,8 @@ export const ModelConfigSection = forwardRef<
         key: "maxOutput",
         width: 100,
         render: (_: any, m: ModelOption) => {
-          if (!m.maxOutputTokens) return <span className="text-gray-400">—</span>;
+          if (!m.maxOutputTokens)
+            return <span className="text-gray-400">—</span>;
           return <span>{m.maxOutputTokens.toLocaleString()}</span>;
         },
       },
@@ -662,12 +597,14 @@ export const ModelConfigSection = forwardRef<
       const llmMain = cfg.llm.displayName;
       const llmMainExists = exists(llmMain, (m) => m.type === MODEL_TYPES.LLM);
       const embedding = cfg.embedding.displayName;
-      const embeddingExists = exists(embedding, (m) =>
-        m.type === MODEL_TYPES.EMBEDDING
+      const embeddingExists = exists(
+        embedding,
+        (m) => m.type === MODEL_TYPES.EMBEDDING
       );
       const multiEmbedding = cfg.multiEmbedding.displayName;
-      const multiEmbeddingExists = exists(multiEmbedding, (m) =>
-        m.type === MODEL_TYPES.MULTI_EMBEDDING
+      const multiEmbeddingExists = exists(
+        multiEmbedding,
+        (m) => m.type === MODEL_TYPES.MULTI_EMBEDDING
       );
       const rerank = cfg.rerank.displayName;
       const rerankExists = exists(rerank, (m) => m.type === MODEL_TYPES.RERANK);
@@ -783,8 +720,10 @@ export const ModelConfigSection = forwardRef<
   ) => {
     if (isVerifying) return;
     if (allModels.length === 0) return;
-    const currentSelectedModels: Record<string, Record<string, string>> =
-      modelsToCheck || structuredClone(selectedModels);
+    const currentSelectedModels: Record<
+      string,
+      Record<string, string>
+    > = modelsToCheck || structuredClone(selectedModels);
 
     let hasSelectedModels = false;
     outer: for (const cat in currentSelectedModels) {
@@ -948,7 +887,9 @@ export const ModelConfigSection = forwardRef<
             );
           } catch (error: any) {
             log.error(
-              t("modelConfig.error.verifyCustomModel", { model: m.displayName }),
+              t("modelConfig.error.verifyCustomModel", {
+                model: m.displayName,
+              }),
               error
             );
             updateModelStatus(m.displayName, m.type, MODEL_STATUS.UNAVAILABLE);
@@ -966,10 +907,7 @@ export const ModelConfigSection = forwardRef<
   };
 
   /* ------------------ Verify single ------------------ */
-  const verifyOneModel = async (
-    displayName: string,
-    modelType: ModelType
-  ) => {
+  const verifyOneModel = async (displayName: string, modelType: ModelType) => {
     if (!displayName) return;
     updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
     if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
@@ -1167,19 +1105,34 @@ export const ModelConfigSection = forwardRef<
   /* ------------------ Select options ------------------ */
   const modelTypeOptions = useMemo(() => {
     const list: { value: ModelType | "all"; label: string }[] = [
-      { value: "all", label: t("model.filter.allTypes", { defaultValue: "全部类型" }) },
+      {
+        value: "all",
+        label: t("model.filter.allTypes", { defaultValue: "全部类型" }),
+      },
     ];
     const map: [ModelType, string][] = [
       [MODEL_TYPES.LLM, t("model.type.llm", { defaultValue: "大语言模型" })],
-      [MODEL_TYPES.EMBEDDING, t("model.type.embedding", { defaultValue: "文本嵌入" })],
+      [
+        MODEL_TYPES.EMBEDDING,
+        t("model.type.embedding", { defaultValue: "文本嵌入" }),
+      ],
       [
         MODEL_TYPES.MULTI_EMBEDDING,
         t("model.type.multiEmbedding", { defaultValue: "多模态嵌入" }),
       ],
       [MODEL_TYPES.RERANK, t("model.type.rerank", { defaultValue: "重排" })],
-      [MODEL_TYPES.VLM, t("model.type.imageUnderstanding", { defaultValue: "图像理解" })],
-      [MODEL_TYPES.VLM2, t("model.type.imageGeneration", { defaultValue: "图像生成" })],
-      [MODEL_TYPES.VLM3, t("model.type.videoUnderstanding", { defaultValue: "视频理解" })],
+      [
+        MODEL_TYPES.VLM,
+        t("model.type.imageUnderstanding", { defaultValue: "图像理解" }),
+      ],
+      [
+        MODEL_TYPES.VLM2,
+        t("model.type.imageGeneration", { defaultValue: "图像生成" }),
+      ],
+      [
+        MODEL_TYPES.VLM3,
+        t("model.type.videoUnderstanding", { defaultValue: "视频理解" }),
+      ],
       [MODEL_TYPES.STT, t("model.type.stt", { defaultValue: "语音识别" })],
       [MODEL_TYPES.TTS, t("model.type.tts", { defaultValue: "语音合成" })],
     ];
@@ -1189,14 +1142,20 @@ export const ModelConfigSection = forwardRef<
 
   const modelSourceOptions = useMemo(() => {
     const list: { value: ModelSource | "all"; label: string }[] = [
-      { value: "all", label: t("model.filter.allSources", { defaultValue: "全部来源" }) },
+      {
+        value: "all",
+        label: t("model.filter.allSources", { defaultValue: "全部来源" }),
+      },
     ];
     const sMap: [ModelSource, string][] = [
       [MODEL_SOURCES.MODELENGINE, "ModelEngine"],
       [MODEL_SOURCES.SILICON, "SiliconFlow"],
       [MODEL_SOURCES.OPENAI, "OpenAI"],
       [MODEL_SOURCES.OPENAI_API_COMPATIBLE, "OpenAI-API-Compatible"],
-      [MODEL_SOURCES.CUSTOM, t("model.source.custom", { defaultValue: "自定义" })],
+      [
+        MODEL_SOURCES.CUSTOM,
+        t("model.source.custom", { defaultValue: "自定义" }),
+      ],
       [MODEL_SOURCES.DASHSCOPE, "DashScope"],
       [MODEL_SOURCES.TOKENPONY, "TokenPony"],
       [MODEL_SOURCES.VOLCENGINE, "VolcEngine"],
@@ -1233,229 +1192,280 @@ export const ModelConfigSection = forwardRef<
     [t]
   );
 
+  /* ==================== v2.6.1 redesign: derived slot data ==================== */
+  const modelSlots = useMemo(() => buildModelSlots(t), [t]);
+  const configuredSlotCount = useMemo(
+    () =>
+      Object.values(selectedModels).reduce(
+        (acc, opts) => acc + Object.values(opts).filter(Boolean).length,
+        0
+      ),
+    [selectedModels]
+  );
+
   /* ==================== Render ==================== */
   return (
     <>
-      <div
-        style={{
-          width: "100%",
-          margin: "0 auto",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
-      >
-        {/* -------------------- Button row -------------------- */}
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "flex-start",
-            gap: 8,
-            paddingRight: 12,
-            paddingTop: 16,
-            marginLeft: 4,
-            minHeight: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
-            marginBottom: 16,
-          }}
-        >
-          <Button
-            type="primary"
-            size="middle"
-            icon={<SlidersHorizontal size={16} />}
-            onClick={() => setIsDefaultDialogOpen(true)}
-            ghost
-          >
-            <span className="button-text-full">
-              {t("modelConfig.button.setDefaultModels", {
-                defaultValue: "设置默认模型",
-              })}
-            </span>
-          </Button>
-          {modelEngineEnable && (
-            <Button
-              type="primary"
-              size="middle"
-              onClick={handleSyncModels}
-              icon={<RefreshCw size={16} />}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.syncModelEngine")}
-              </span>
-            </Button>
-          )}
-          {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
-          <Can permission="model:create">
-            <Button
-              type="primary"
-              size="middle"
-              icon={<Plus size={16} />}
-              onClick={() => setIsAddModalV2Open(true)}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.addModel", {
-                  defaultValue: "添加模型",
+      <div className="flex w-full flex-col gap-8">
+        {/* ========== Section 1: 默认配置 (inline slots, v0 redesign) ========== */}
+        <section>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h3 className="text-base font-semibold text-foreground">
+                {t("modelConfig.section.defaultConfig", {
+                  defaultValue: "默认配置",
+                })}
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                {t("modelConfig.section.defaultConfigHint", {
+                  defaultValue: "未配置模型时默认选用以下模型",
                 })}
               </span>
-            </Button>
-          </Can>
-          <Button
-            type="primary"
-            size="middle"
-            icon={<ShieldCheck size={16} />}
-            onClick={verifyModels}
-            loading={isVerifying}
-          >
-            <span className="button-text-full">
-              {t("modelConfig.button.checkConnectivity")}
-            </span>
-          </Button>
-        </div>
-
-        {/* -------------------- Capacity coverage warning -------------------- */}
-        {capacityCoverage && capacityCoverage.bareCount > 0 && (
-          <Alert
-            type="warning"
-            showIcon
-            title={t("modelConfig.capacityCoverage.warning", {
-              bareCount: capacityCoverage.bareCount,
-              total: capacityCoverage.totalLlmVlm,
-            })}
-            description={t("modelConfig.capacityCoverage.description", {
-              suggestionCount: capacityCoverage.bareModels.filter(
-                (m) => m.suggestionAvailable
-              ).length,
-            })}
-          />
-        )}
-
-        {/* -------------------- Filter bar -------------------- */}
-        <Row gutter={[12, 8]} style={{ padding: "0 4px" }} align="middle">
-          <Col xs={24} md={8} lg={8}>
-            <Input.Search
-              allowClear
-              enterButton
-              placeholder={t("modelConfig.search.placeholder", {
-                defaultValue: "搜索模型名 / 自定义名称 / API 地址",
-              })}
-              value={searchKeyword}
-              onChange={(e) => setSearchKeyword(e.target.value)}
-              onSearch={(v) => setSearchKeyword(v)}
-            />
-          </Col>
-          <Col xs={12} sm={8} md={5} lg={5}>
-            <Select
-              style={{ width: "100%" }}
-              value={filterType}
-              onChange={(v) => setFilterType(v as ModelType | "all")}
-              options={modelTypeOptions}
-            />
-          </Col>
-          <Col xs={12} sm={8} md={5} lg={5}>
-            <Select
-              style={{ width: "100%" }}
-              value={filterSource}
-              onChange={(v) => setFilterSource(v as ModelSource | "all")}
-              options={modelSourceOptions}
-            />
-          </Col>
-          <Col xs={12} sm={8} md={5} lg={5}>
-            <Select
-              style={{ width: "100%" }}
-              value={filterStatus}
-              onChange={(v) =>
-                setFilterStatus(v as ModelConnectStatus | "all")
-              }
-              options={statusOptions}
-            />
-          </Col>
-          <Col
-            xs={12}
-            sm={24}
-            md={1}
-            lg={1}
-            style={{ textAlign: "right", color: "#94a3b8", fontSize: 12 }}
-          >
-            <Tooltip
-              title={t("modelConfig.search.totalCount", {
-                count: filteredModels.length,
-                defaultValue: `共 ${filteredModels.length} 条匹配`,
-              })}
-            >
-              <Tag color="geekblue" style={{ margin: 0 }}>
-                {filteredModels.length}/{models.length}
+              <Tag color="blue" className="m-0 tabular-nums">
+                {t("modelConfig.section.configuredCount", {
+                  configured: configuredSlotCount,
+                  total: modelSlots.length,
+                  defaultValue: `已配置 ${configuredSlotCount}/${modelSlots.length}`,
+                })}
               </Tag>
-            </Tooltip>
-          </Col>
-        </Row>
-
-        {/* -------------------- Model table (v2.6.0: replaces card grid) -------------------- */}
-        <div
-          style={{
-            width: "100%",
-            padding: "0 4px",
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 240,
-          }}
-        >
-          {filteredModels.length === 0 ? (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Empty
-                description={t("modelConfig.list.empty", {
-                  defaultValue: "暂无匹配的模型，请更换筛选条件或新增模型",
-                })}
-              />
             </div>
-          ) : (
-            <Table
-              size="small"
-              rowKey={(r) => `${r.id}-${r.displayName}-${r.type}`}
-              columns={modelTableColumns}
-              dataSource={filteredModels}
-              pagination={{
-                current: page,
-                pageSize,
-                total: filteredModels.length,
-                showSizeChanger: true,
-                pageSizeOptions: ["8", "12", "24", "48"],
-                showTotal: (total, range) =>
-                  t("modelConfig.pagination.showTotal", {
-                    range0: range[0],
-                    range1: range[1],
-                    total,
-                    defaultValue: `第 ${range[0]}-${range[1]} / 共 ${total} 条`,
-                  }),
-                onChange: (p, ps) => {
-                  setPage(p);
-                  setPageSize(ps);
-                },
-              }}
-              scroll={{ x: 980 }}
+            <Button
+              size="middle"
+              icon={<ShieldCheck size={16} />}
+              onClick={verifyModels}
+              loading={isVerifying}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.checkConnectivity")}
+              </span>
+            </Button>
+          </div>
+
+          <Card styles={{ body: { padding: 20 } }}>
+            {/* Legend */}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b pb-4 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {t("modelConfig.section.legendTitle", {
+                  defaultValue: "配置说明",
+                })}
+              </span>
+              <span>
+                {t("modelConfig.section.legendRequired", {
+                  defaultValue: "标注（必填）的模型系统运行必须配置",
+                })}
+              </span>
+              <span>
+                {t("modelConfig.section.legendRecommended", {
+                  defaultValue: "标注（推荐）的模型按需推荐配置",
+                })}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-emerald-500" />
+                {t("modelConfig.section.legendDot", {
+                  defaultValue: "圆点代表已连通",
+                })}
+              </span>
+            </div>
+
+            {/* Flat slot grid (replaces the DefaultModelDialog) */}
+            <div className="grid grid-cols-1 gap-x-8 gap-y-5 pt-5 md:grid-cols-2 xl:grid-cols-3">
+              {modelSlots.map((slot) => (
+                <ModelSlotSelect
+                  key={slot.fieldKey}
+                  slot={slot}
+                  models={models}
+                  value={selectedModels[slot.category]?.[slot.option] ?? ""}
+                  error={!!errorFields[slot.fieldKey]}
+                  onChange={(displayName) =>
+                    handleModelChange(slot.category, slot.option, displayName)
+                  }
+                />
+              ))}
+            </div>
+          </Card>
+        </section>
+
+        {/* ========== Section 2: 模型库 ========== */}
+        <section className="flex w-full flex-col gap-3">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h3 className="text-base font-semibold text-foreground">
+                {t("modelConfig.section.modelLibrary", {
+                  defaultValue: "模型库",
+                })}
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                {t("modelConfig.section.modelLibraryHint", {
+                  defaultValue: "管理已添加的全部模型",
+                })}
+              </span>
+              <Tag color="geekblue" className="m-0 tabular-nums">
+                {models.length}
+              </Tag>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {modelEngineEnable && (
+                <Button
+                  size="middle"
+                  onClick={handleSyncModels}
+                  icon={<RefreshCw size={16} />}
+                >
+                  <span className="button-text-full">
+                    {t("modelConfig.button.syncModelEngine")}
+                  </span>
+                </Button>
+              )}
+              {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
+              <Can permission="model:create">
+                <Button
+                  type="primary"
+                  size="middle"
+                  icon={<Plus size={16} />}
+                  onClick={() => setIsAddModalV2Open(true)}
+                >
+                  <span className="button-text-full">
+                    {t("modelConfig.button.addModel", {
+                      defaultValue: "添加模型",
+                    })}
+                  </span>
+                </Button>
+              </Can>
+            </div>
+          </div>
+
+          {/* -------------------- Capacity coverage warning -------------------- */}
+          {capacityCoverage && capacityCoverage.bareCount > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              title={t("modelConfig.capacityCoverage.warning", {
+                bareCount: capacityCoverage.bareCount,
+                total: capacityCoverage.totalLlmVlm,
+              })}
+              description={t("modelConfig.capacityCoverage.description", {
+                suggestionCount: capacityCoverage.bareModels.filter(
+                  (m) => m.suggestionAvailable
+                ).length,
+              })}
             />
           )}
-        </div>
+
+          {/* -------------------- Filter bar -------------------- */}
+          <Row gutter={[12, 8]} align="middle">
+            <Col xs={24} md={8} lg={8}>
+              <Input.Search
+                allowClear
+                enterButton
+                placeholder={t("modelConfig.search.placeholder", {
+                  defaultValue: "搜索模型名 / 自定义名称 / API 地址",
+                })}
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                onSearch={(v) => setSearchKeyword(v)}
+              />
+            </Col>
+            <Col xs={12} sm={8} md={5} lg={5}>
+              <Select
+                style={{ width: "100%" }}
+                value={filterType}
+                onChange={(v) => setFilterType(v as ModelType | "all")}
+                options={modelTypeOptions}
+              />
+            </Col>
+            <Col xs={12} sm={8} md={5} lg={5}>
+              <Select
+                style={{ width: "100%" }}
+                value={filterSource}
+                onChange={(v) => setFilterSource(v as ModelSource | "all")}
+                options={modelSourceOptions}
+              />
+            </Col>
+            <Col xs={12} sm={8} md={5} lg={5}>
+              <Select
+                style={{ width: "100%" }}
+                value={filterStatus}
+                onChange={(v) =>
+                  setFilterStatus(v as ModelConnectStatus | "all")
+                }
+                options={statusOptions}
+              />
+            </Col>
+            <Col
+              xs={12}
+              sm={24}
+              md={1}
+              lg={1}
+              style={{ textAlign: "right", color: "#94a3b8", fontSize: 12 }}
+            >
+              <Tooltip
+                title={t("modelConfig.search.totalCount", {
+                  count: filteredModels.length,
+                  defaultValue: `共 ${filteredModels.length} 条匹配`,
+                })}
+              >
+                <Tag color="geekblue" style={{ margin: 0 }}>
+                  {filteredModels.length}/{models.length}
+                </Tag>
+              </Tooltip>
+            </Col>
+          </Row>
+
+          {/* -------------------- Model table -------------------- */}
+          <div
+            style={{
+              width: "100%",
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 240,
+            }}
+          >
+            {filteredModels.length === 0 ? (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Empty
+                  description={t("modelConfig.list.empty", {
+                    defaultValue: "暂无匹配的模型，请更换筛选条件或新增模型",
+                  })}
+                />
+              </div>
+            ) : (
+              <Table
+                size="small"
+                rowKey={(r) => `${r.id}-${r.displayName}-${r.type}`}
+                columns={modelTableColumns}
+                dataSource={filteredModels}
+                pagination={{
+                  current: page,
+                  pageSize,
+                  total: filteredModels.length,
+                  showSizeChanger: true,
+                  pageSizeOptions: ["8", "12", "24", "48"],
+                  showTotal: (total, range) =>
+                    t("modelConfig.pagination.showTotal", {
+                      range0: range[0],
+                      range1: range[1],
+                      total,
+                      defaultValue: `第 ${range[0]}-${range[1]} / 共 ${total} 条`,
+                    }),
+                  onChange: (p, ps) => {
+                    setPage(p);
+                    setPageSize(ps);
+                  },
+                }}
+                scroll={{ x: 980 }}
+              />
+            )}
+          </div>
+        </section>
 
         {/* -------------------- Dialogs -------------------- */}
-        <DefaultModelDialog
-          open={isDefaultDialogOpen}
-          models={models}
-          selectedModels={selectedModels}
-          errorFields={errorFields}
-          onClose={() => setIsDefaultDialogOpen(false)}
-          onChange={handleModelChange}
-          onVerifyModel={verifyOneModel}
-        />
-
         {/* v2.6.0: new Add Model dialog (Tabs: batch import / custom access) */}
         <ModelAddDialogV2
           isOpen={isAddModalV2Open}
