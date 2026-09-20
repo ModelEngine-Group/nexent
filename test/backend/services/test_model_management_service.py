@@ -211,6 +211,7 @@ consts_provider_mod.DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compati
 consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 consts_provider_mod.DASHSCOPE_STT_BASE_URL = consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL
 consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
+consts_provider_mod.MODEL_ENGINE_URL_MARKER = "open/router"
 sys.modules["consts.provider"] = consts_provider_mod
 
 # Stub services.model_provider_service used by service
@@ -1801,7 +1802,7 @@ async def test_update_single_model_for_tenant_open_router_url_keeps_ssl_verify_f
             "model_id": 1,
             "model_type": "llm",
             "display_name": "name",
-            "base_url": "https://141.111.135.222:30012/open/router/v1",
+            "base_url": "https://modelengine.example.com/open/router/v1",
         },
     ]
     model_data = {
