@@ -11,25 +11,11 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import {
-  Alert,
-  Button,
-  Card,
-  Col,
-  Row,
-  App,
-  Input,
-  Select,
-  Empty,
-  Tooltip,
-  Tag,
-  Table,
-  Space,
-} from "antd";
-import { Plus, ShieldCheck, RefreshCw, Trash2, Edit3 } from "lucide-react";
+import { Alert, App, Button, Card, Tag } from "antd";
+import { Plus, ShieldCheck, RefreshCw } from "lucide-react";
 import { ExclamationCircleFilled } from "@ant-design/icons";
 
-import { MODEL_TYPES, MODEL_STATUS, MODEL_SOURCES } from "@/const/modelConfig";
+import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
@@ -37,38 +23,16 @@ import {
   CapacityCoverage,
   ModelOption,
   ModelType,
-  ModelSource,
   ModelConnectStatus,
 } from "@/types/modelConfig";
-import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import log from "@/lib/logger";
 
 import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
 import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
+import { ModelLibraryList } from "./model/ModelLibraryList";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
 import { useModelList } from "@/hooks/model/useModelList";
-
-// Fallback labels (zh-CN) for connect statuses missing a translation entry.
-const CONNECT_STATUS_FALLBACK_LABELS: Record<string, string> = {
-  available: "可用",
-  unavailable: "不可用",
-  detecting: "检测中",
-  not_detected: "未检测",
-};
-
-const DEFAULT_USAGE_I18N_KEYS: Record<string, string> = {
-  "llm.main": "modelConfig.option.mainModel",
-  "embedding.embedding": "modelConfig.option.embeddingModel",
-  "embedding.multi_embedding": "modelConfig.option.multiEmbeddingModel",
-  "reranker.reranker": "modelConfig.option.rerankerModel",
-  "multimodal.vlm": "modelConfig.option.imageUnderstandingModel",
-  "multimodal.vlm2": "modelConfig.option.imageGenerationModel",
-  "multimodal.vlm3": "modelConfig.option.videoUnderstandingModel",
-  "multimodal.vlm4": "modelConfig.option.audioUnderstandingModel",
-  "voice.tts": "modelConfig.option.ttsModel",
-  "voice.stt": "modelConfig.option.sttModel",
-};
 
 // Define the methods exposed by the component
 export interface ModelConfigSectionRef {
@@ -114,16 +78,6 @@ export const ModelConfigSection = forwardRef<
   const [editingCardModel, setEditingCardModel] = useState<ModelOption | null>(
     null
   );
-
-  // Filter & pagination
-  const [searchKeyword, setSearchKeyword] = useState<string>("");
-  const [filterType, setFilterType] = useState<ModelType | "all">("all");
-  const [filterSource, setFilterSource] = useState<ModelSource | "all">("all");
-  const [filterStatus, setFilterStatus] = useState<ModelConnectStatus | "all">(
-    "all"
-  );
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(12);
 
   const { invalidate } = useModelList();
   // Error state management
@@ -209,19 +163,6 @@ export const ModelConfigSection = forwardRef<
     }
     return result;
   }, [selectedModels]);
-
-  /* ------------------ v2.6.0: Table columns (replaces ModelItemCard grid) ------------------ */
-  const modelTypeColors: Record<string, string> = {
-    [MODEL_TYPES.LLM]: "blue",
-    [MODEL_TYPES.EMBEDDING]: "geekblue",
-    [MODEL_TYPES.MULTI_EMBEDDING]: "cyan",
-    [MODEL_TYPES.RERANK]: "purple",
-    [MODEL_TYPES.STT]: "orange",
-    [MODEL_TYPES.TTS]: "magenta",
-    [MODEL_TYPES.VLM]: "green",
-    [MODEL_TYPES.VLM2]: "green",
-    [MODEL_TYPES.VLM3]: "green",
-  };
 
   /* ------------------ Card-level edit / delete ------------------ */
   const handleCardEdit = useCallback((model: ModelOption) => {
@@ -329,184 +270,6 @@ export const ModelConfigSection = forwardRef<
     },
     [message, modal, modelConfig, selectedModels, t, updateModelConfig]
   );
-
-  const modelTableColumns = useMemo(
-    () => [
-      {
-        title: t("modelConfig.table.col.model", { defaultValue: "模型" }),
-        key: "model",
-        width: 240,
-        render: (_: any, m: ModelOption) => (
-          <div className="flex flex-col">
-            <span className="font-medium text-sm">
-              {m.displayName || m.name}
-            </span>
-            <span className="text-xs text-gray-500">{m.name}</span>
-          </div>
-        ),
-      },
-      {
-        title: t("modelConfig.table.col.type", { defaultValue: "类型" }),
-        dataIndex: "type",
-        key: "type",
-        width: 110,
-        render: (type: ModelType) => {
-          // Map raw type ids to the semantic i18n keys used across the app
-          // (add dialog / getModelData). Without this, vlm2/vlm3/vlm4 fall
-          // through to the raw id ("vlm3") because no model.type.vlmN keys
-          // exist in the locale files.
-          const typeLabelKeyMap: Record<string, string> = {
-            llm: "llm",
-            embedding: "embedding",
-            multi_embedding: "multiEmbedding",
-            vlm: "imageUnderstanding",
-            vlm2: "imageGeneration",
-            vlm3: "videoUnderstanding",
-            vlm4: "audioUnderstanding",
-            rerank: "rerank",
-            stt: "stt",
-            tts: "tts",
-          };
-          return (
-            <Tag color={modelTypeColors[type] || "default"}>
-              {t(`model.type.${typeLabelKeyMap[type] ?? type}`, {
-                defaultValue: type,
-              })}
-            </Tag>
-          );
-        },
-      },
-      {
-        title: t("modelConfig.table.col.source", { defaultValue: "来源" }),
-        dataIndex: "source",
-        key: "source",
-        width: 130,
-        render: (source: ModelSource) => <Tag>{source}</Tag>,
-      },
-      {
-        title: t("modelConfig.table.col.connectStatus", {
-          defaultValue: "连通状态",
-        }),
-        dataIndex: "connect_status",
-        key: "connect_status",
-        width: 110,
-        render: (status: ModelConnectStatus, m: ModelOption) => {
-          if (!status) return <span className="text-gray-400">—</span>;
-          const meta = getConnectivityMeta(status as ConnectivityStatusType);
-          const text = t(`model.connectivity.${status}`, {
-            defaultValue: CONNECT_STATUS_FALLBACK_LABELS[status] ?? status,
-          });
-          return (
-            <Tooltip title={text}>
-              <Tag
-                color={meta.color}
-                style={{ cursor: "pointer" }}
-                onClick={() => verifyOneModel(m.displayName, m.type)}
-              >
-                {text}
-              </Tag>
-            </Tooltip>
-          );
-        },
-      },
-      {
-        title: t("modelConfig.table.col.context", { defaultValue: "上下文" }),
-        key: "context",
-        width: 100,
-        render: (_: any, m: ModelOption) => {
-          const v = m.contextWindowTokens || m.maxTokens;
-          if (!v) return <span className="text-gray-400">—</span>;
-          return <span>{v.toLocaleString()}</span>;
-        },
-      },
-      {
-        title: t("modelConfig.table.col.maxOutput", {
-          defaultValue: "最大输出",
-        }),
-        key: "maxOutput",
-        width: 100,
-        render: (_: any, m: ModelOption) => {
-          if (!m.maxOutputTokens)
-            return <span className="text-gray-400">—</span>;
-          return <span>{m.maxOutputTokens.toLocaleString()}</span>;
-        },
-      },
-      {
-        title: t("modelConfig.table.col.defaultUsage", {
-          defaultValue: "默认用途",
-        }),
-        key: "defaultUsage",
-        width: 160,
-        render: (_: any, m: ModelOption) => {
-          const slots = defaultSlotMap[m.displayName] || [];
-          if (slots.length === 0)
-            return <span className="text-gray-400">—</span>;
-          return (
-            <Space size={4} wrap>
-              {slots.map((s) => (
-                <Tag key={s} color="geekblue">
-                  {t(DEFAULT_USAGE_I18N_KEYS[s] ?? s, {
-                    defaultValue: s,
-                  })}
-                </Tag>
-              ))}
-            </Space>
-          );
-        },
-      },
-      {
-        title: t("modelConfig.table.col.actions", { defaultValue: "操作" }),
-        key: "actions",
-        width: 110,
-        render: (_: any, m: ModelOption) => (
-          <Space size={4}>
-            <Tooltip title={t("common.edit", { defaultValue: "编辑" })}>
-              <Button
-                size="small"
-                type="text"
-                icon={<Edit3 size={14} />}
-                onClick={() => handleCardEdit(m)}
-              />
-            </Tooltip>
-            <Tooltip title={t("common.delete", { defaultValue: "删除" })}>
-              <Button
-                size="small"
-                type="text"
-                danger
-                icon={<Trash2 size={14} />}
-                onClick={() => handleCardDelete(m)}
-              />
-            </Tooltip>
-          </Space>
-        ),
-      },
-    ],
-    [t, defaultSlotMap, modelTypeColors, handleCardEdit, handleCardDelete]
-  );
-
-  /* ------------------ Derived: filter & pagination ------------------ */
-  const filteredModels = useMemo<ModelOption[]>(() => {
-    const kw = searchKeyword.trim().toLowerCase();
-    return models.filter((m) => {
-      if (filterType !== "all" && m.type !== filterType) return false;
-      if (filterSource !== "all" && m.source !== filterSource) return false;
-      if (filterStatus !== "all" && m.connect_status !== filterStatus)
-        return false;
-      if (kw) {
-        const hay = [m.name, m.displayName, m.apiUrl, m.apiKey]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (!hay.includes(kw)) return false;
-      }
-      return true;
-    });
-  }, [models, searchKeyword, filterType, filterSource, filterStatus]);
-
-  // Auto jump to page 1 when filters change
-  useEffect(() => {
-    setPage(1);
-  }, [searchKeyword, filterType, filterSource, filterStatus, pageSize]);
 
   /* ------------------ Connectivity resolution ------------------ */
   const getEmbeddingConnectivity = () => {
@@ -1103,94 +866,6 @@ export const ModelConfigSection = forwardRef<
   };
 
   /* ------------------ Select options ------------------ */
-  const modelTypeOptions = useMemo(() => {
-    const list: { value: ModelType | "all"; label: string }[] = [
-      {
-        value: "all",
-        label: t("model.filter.allTypes", { defaultValue: "全部类型" }),
-      },
-    ];
-    const map: [ModelType, string][] = [
-      [MODEL_TYPES.LLM, t("model.type.llm", { defaultValue: "大语言模型" })],
-      [
-        MODEL_TYPES.EMBEDDING,
-        t("model.type.embedding", { defaultValue: "文本嵌入" }),
-      ],
-      [
-        MODEL_TYPES.MULTI_EMBEDDING,
-        t("model.type.multiEmbedding", { defaultValue: "多模态嵌入" }),
-      ],
-      [MODEL_TYPES.RERANK, t("model.type.rerank", { defaultValue: "重排" })],
-      [
-        MODEL_TYPES.VLM,
-        t("model.type.imageUnderstanding", { defaultValue: "图像理解" }),
-      ],
-      [
-        MODEL_TYPES.VLM2,
-        t("model.type.imageGeneration", { defaultValue: "图像生成" }),
-      ],
-      [
-        MODEL_TYPES.VLM3,
-        t("model.type.videoUnderstanding", { defaultValue: "视频理解" }),
-      ],
-      [MODEL_TYPES.STT, t("model.type.stt", { defaultValue: "语音识别" })],
-      [MODEL_TYPES.TTS, t("model.type.tts", { defaultValue: "语音合成" })],
-    ];
-    map.forEach(([v, l]) => list.push({ value: v, label: l }));
-    return list;
-  }, [t]);
-
-  const modelSourceOptions = useMemo(() => {
-    const list: { value: ModelSource | "all"; label: string }[] = [
-      {
-        value: "all",
-        label: t("model.filter.allSources", { defaultValue: "全部来源" }),
-      },
-    ];
-    const sMap: [ModelSource, string][] = [
-      [MODEL_SOURCES.MODELENGINE, "ModelEngine"],
-      [MODEL_SOURCES.SILICON, "SiliconFlow"],
-      [MODEL_SOURCES.OPENAI, "OpenAI"],
-      [MODEL_SOURCES.OPENAI_API_COMPATIBLE, "OpenAI-API-Compatible"],
-      [
-        MODEL_SOURCES.CUSTOM,
-        t("model.source.custom", { defaultValue: "自定义" }),
-      ],
-      [MODEL_SOURCES.DASHSCOPE, "DashScope"],
-      [MODEL_SOURCES.TOKENPONY, "TokenPony"],
-      [MODEL_SOURCES.VOLCENGINE, "VolcEngine"],
-    ];
-    sMap.forEach(([v, l]) => list.push({ value: v, label: l }));
-    return list;
-  }, [t]);
-
-  const statusOptions = useMemo<
-    { value: ModelConnectStatus | "all"; label: string }[]
-  >(
-    () => [
-      {
-        value: "all",
-        label: t("model.filter.allStatus", { defaultValue: "全部状态" }),
-      },
-      {
-        value: MODEL_STATUS.AVAILABLE,
-        label: t("model.status.available", { defaultValue: "可用" }),
-      },
-      {
-        value: MODEL_STATUS.UNAVAILABLE,
-        label: t("model.status.unavailable", { defaultValue: "不可用" }),
-      },
-      {
-        value: MODEL_STATUS.CHECKING,
-        label: t("model.status.detecting", { defaultValue: "检测中" }),
-      },
-      {
-        value: MODEL_STATUS.UNCHECKED,
-        label: t("model.status.notDetected", { defaultValue: "未检测" }),
-      },
-    ],
-    [t]
-  );
 
   /* ==================== v2.6.1 redesign: derived slot data ==================== */
   const modelSlots = useMemo(() => buildModelSlots(t), [t]);
@@ -1350,119 +1025,14 @@ export const ModelConfigSection = forwardRef<
             />
           )}
 
-          {/* -------------------- Filter bar -------------------- */}
-          <Row gutter={[12, 8]} align="middle">
-            <Col xs={24} md={8} lg={8}>
-              <Input.Search
-                allowClear
-                enterButton
-                placeholder={t("modelConfig.search.placeholder", {
-                  defaultValue: "搜索模型名 / 自定义名称 / API 地址",
-                })}
-                value={searchKeyword}
-                onChange={(e) => setSearchKeyword(e.target.value)}
-                onSearch={(v) => setSearchKeyword(v)}
-              />
-            </Col>
-            <Col xs={12} sm={8} md={5} lg={5}>
-              <Select
-                style={{ width: "100%" }}
-                value={filterType}
-                onChange={(v) => setFilterType(v as ModelType | "all")}
-                options={modelTypeOptions}
-              />
-            </Col>
-            <Col xs={12} sm={8} md={5} lg={5}>
-              <Select
-                style={{ width: "100%" }}
-                value={filterSource}
-                onChange={(v) => setFilterSource(v as ModelSource | "all")}
-                options={modelSourceOptions}
-              />
-            </Col>
-            <Col xs={12} sm={8} md={5} lg={5}>
-              <Select
-                style={{ width: "100%" }}
-                value={filterStatus}
-                onChange={(v) =>
-                  setFilterStatus(v as ModelConnectStatus | "all")
-                }
-                options={statusOptions}
-              />
-            </Col>
-            <Col
-              xs={12}
-              sm={24}
-              md={1}
-              lg={1}
-              style={{ textAlign: "right", color: "#94a3b8", fontSize: 12 }}
-            >
-              <Tooltip
-                title={t("modelConfig.search.totalCount", {
-                  count: filteredModels.length,
-                  defaultValue: `共 ${filteredModels.length} 条匹配`,
-                })}
-              >
-                <Tag color="geekblue" style={{ margin: 0 }}>
-                  {filteredModels.length}/{models.length}
-                </Tag>
-              </Tooltip>
-            </Col>
-          </Row>
-
-          {/* -------------------- Model table -------------------- */}
-          <div
-            style={{
-              width: "100%",
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              minHeight: 240,
-            }}
-          >
-            {filteredModels.length === 0 ? (
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Empty
-                  description={t("modelConfig.list.empty", {
-                    defaultValue: "暂无匹配的模型，请更换筛选条件或新增模型",
-                  })}
-                />
-              </div>
-            ) : (
-              <Table
-                size="small"
-                rowKey={(r) => `${r.id}-${r.displayName}-${r.type}`}
-                columns={modelTableColumns}
-                dataSource={filteredModels}
-                pagination={{
-                  current: page,
-                  pageSize,
-                  total: filteredModels.length,
-                  showSizeChanger: true,
-                  pageSizeOptions: ["8", "12", "24", "48"],
-                  showTotal: (total, range) =>
-                    t("modelConfig.pagination.showTotal", {
-                      range0: range[0],
-                      range1: range[1],
-                      total,
-                      defaultValue: `第 ${range[0]}-${range[1]} / 共 ${total} 条`,
-                    }),
-                  onChange: (p, ps) => {
-                    setPage(p);
-                    setPageSize(ps);
-                  },
-                }}
-                scroll={{ x: 980 }}
-              />
-            )}
-          </div>
+          {/* -------------------- Model library list (v0 redesign) -------------------- */}
+          <ModelLibraryList
+            models={models}
+            defaultSlotMap={defaultSlotMap}
+            onCheck={verifyOneModel}
+            onEdit={handleCardEdit}
+            onDelete={handleCardDelete}
+          />
         </section>
 
         {/* -------------------- Dialogs -------------------- */}
