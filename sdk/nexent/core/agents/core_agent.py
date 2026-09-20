@@ -25,6 +25,7 @@ from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate
 
 from ...monitor import get_monitoring_manager
 
+from ..model_errors import ModelInvocationTerminalError
 from ..utils.observer import MessageObserver, ProcessType
 from jinja2 import Template, StrictUndefined
 
@@ -910,7 +911,11 @@ Additional Args:
 
                 self.logger.log_markdown(
                     content=model_output, title="MODEL OUTPUT", level=LogLevel.INFO)
+            except ModelInvocationTerminalError:
+                raise
             except Exception as e:
+                if self.stop_event.is_set():
+                    raise RunTerminated() from e
                 raise AgentGenerationError(
                     f"Error in generating model output:\n{e}", self.logger) from e
 
@@ -1492,6 +1497,13 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             except StepSteered:
                 interrupted = True
                 continue
+            except ModelInvocationTerminalError:
+                # The model adapter has already exhausted its complete physical
+                # call budget (or classified the failure as non-retryable).
+                # Do not persist this incomplete step or let the ReAct loop
+                # turn it into a subsequent model invocation.
+                interrupted = True
+                raise
             except (AttemptSuspended, RecoveryRequired, RunTerminated):
                 interrupted = True
                 raise
@@ -1703,6 +1715,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 total_input_tokens = chat_message.token_usage.input_tokens
                 total_output_tokens = chat_message.token_usage.output_tokens
 
+        except ModelInvocationTerminalError:
+            raise
         except Exception as e:
             # Fallback to error message if streaming fails
             model_output = f"Error in generating final LLM output: {e}"

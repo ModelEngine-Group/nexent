@@ -2028,6 +2028,32 @@ def test_agent_run_with_observer_with_exception(nexent_agent_instance, mock_core
     )
 
 
+def test_cmsr_004_terminal_model_error_emits_one_safe_error(
+    nexent_agent_instance, mock_core_agent
+):
+    nexent_agent_instance.agent = mock_core_agent
+    terminal_error_type = nexent_agent.ModelInvocationTerminalError
+    model_error_code = terminal_error_type.safe_message.__globals__["ModelErrorCode"]
+    terminal = terminal_error_type(
+        model_error_code.SERVICE_UNAVAILABLE,
+        5,
+        cause=RuntimeError("private provider body"),
+    )
+    mock_core_agent.run.side_effect = terminal
+
+    with pytest.raises(terminal_error_type) as exc_info:
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    assert exc_info.value is terminal
+    mock_core_agent.observer.add_message.assert_called_once_with(
+        agent_name="test_agent",
+        process_type=ProcessType.ERROR,
+        content="The model service is temporarily unavailable. Please try again later.",
+        error_code="model_service_unavailable",
+        retryable=False,
+    )
+
+
 def test_agent_run_with_observer_invalid_agent_type(nexent_agent_instance):
     """Test agent_run_with_observer raises TypeError when agent is not a CoreAgent."""
     nexent_agent_instance.agent = "not_core_agent"
@@ -4805,7 +4831,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         else:
             grant.assert_not_called()
 
-    def test_grant_sandbox_output_access_uses_sandbox_group(self, tmp_path):
+    def test_grant_sandbox_output_access_grants_parent_traversal(self, tmp_path):
         workspace = tmp_path / "tenant" / "user" / "run-1"
         input_dir = workspace / "inputs"
         output_dir = workspace / "outputs"
@@ -4817,12 +4843,16 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             MagicMock(exit_code=0, output=b""),
             MagicMock(exit_code=0, output=b""),
             MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
         ]
 
         NexentAgent._grant_sandbox_output_access(container, workspace)
 
         assert container.exec_run.call_args_list == [
             call(["id", "-g"]),
+            call(["chgrp", "1000", str(workspace.parent)], user="0"),
+            call(["chmod", "g+xs", str(workspace.parent)], user="0"),
             call(["chgrp", "-R", "1000", str(workspace)], user="0"),
             call(["chmod", "-R", "g+rwX", str(workspace)], user="0"),
             call(

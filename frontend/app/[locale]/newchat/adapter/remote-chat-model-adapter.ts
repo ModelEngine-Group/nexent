@@ -65,6 +65,9 @@ interface SseChunk {
   // frontend can route streaming content to the matching card even when
   // sibling sub-agents execute in parallel.
   invocation_id?: string;
+  attempt_id?: string;
+  phase?: "begin" | "rollback" | "commit";
+  attempt?: number;
   path?: string;
   block_id?: string;
   origin_type?: string;
@@ -202,9 +205,7 @@ export interface Nl2aResourceCandidate {
 }
 
 export type Nl2aInstallationFormKind =
-  | "SKILL_CONFIG"
-  | "MCP_REMOTE"
-  | "MCP_CONTAINER";
+  "SKILL_CONFIG" | "MCP_REMOTE" | "MCP_CONTAINER";
 
 export interface Nl2aResourceInstallationOption {
   option_id: string;
@@ -1462,8 +1463,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const history = historyMessages.map((msg) => {
       const customMetadata = isNl2Agent
         ? (msg.metadata?.custom as
-            | { nl2agentCardAction?: Nl2AgentCardAction }
-            | undefined)
+            { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
         : undefined;
       const text = customMetadata?.nl2agentCardAction
         ? JSON.stringify(customMetadata.nl2agentCardAction)
@@ -1563,8 +1563,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (abortHandled) return;
       abortHandled = true;
       const abortReason = abortSignal?.reason as
-        | { detach?: boolean }
-        | undefined;
+        { detach?: boolean } | undefined;
       if (abortReason?.detach) {
         log.log(
           `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
@@ -1592,8 +1591,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
 
     let agentResponse:
-      | ReadableStreamDefaultReader<Uint8Array>
-      | { type: "json"; data: unknown };
+      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(
@@ -1876,6 +1874,70 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       return resolved;
     };
 
+    type SubAgentAttemptCheckpoint = {
+      invocationId: string;
+      reasoningIdx: number | null;
+      textLength: number;
+    };
+    const subAgentAttemptCheckpoints = new Map<
+      string,
+      SubAgentAttemptCheckpoint
+    >();
+    const removeContentPart = (index: number) => {
+      contentParts.splice(index, 1);
+      for (const slot of invocationSlots.values()) {
+        if (slot.reasoningIdx === index) slot.reasoningIdx = null;
+        else if (slot.reasoningIdx !== null && slot.reasoningIdx > index) {
+          slot.reasoningIdx -= 1;
+        }
+      }
+    };
+    const handleModelAttemptControl = (chunk: SseChunk): boolean => {
+      if (
+        chunk.type !== "model_attempt_control" ||
+        !chunk.attempt_id ||
+        !chunk.phase
+      ) {
+        return false;
+      }
+      const top = resolveSubAgent(chunk.invocation_id);
+      if (!top) {
+        if (chunk.phase === "begin") {
+          parentReasoning.beginAttempt(chunk.attempt_id);
+        } else if (chunk.phase === "rollback") {
+          parentReasoning.rollbackAttempt(chunk.attempt_id);
+        } else {
+          parentReasoning.commitAttempt(chunk.attempt_id);
+        }
+        return true;
+      }
+
+      if (chunk.phase === "begin") {
+        const idx = top.slot.reasoningIdx;
+        subAgentAttemptCheckpoints.set(chunk.attempt_id, {
+          invocationId: top.invocationId,
+          reasoningIdx: idx,
+          textLength: idx === null ? 0 : (contentParts[idx]?.text?.length ?? 0),
+        });
+        return true;
+      }
+
+      const checkpoint = subAgentAttemptCheckpoints.get(chunk.attempt_id);
+      subAgentAttemptCheckpoints.delete(chunk.attempt_id);
+      if (chunk.phase !== "rollback" || !checkpoint) return true;
+      const slot = slotForInvocation(checkpoint.invocationId);
+      if (!slot || slot.reasoningIdx === null) return true;
+      if (checkpoint.reasoningIdx === null) {
+        removeContentPart(slot.reasoningIdx);
+      } else {
+        const part = contentParts[slot.reasoningIdx];
+        if (part?.type === "reasoning") {
+          part.text = part.text.slice(0, checkpoint.textLength);
+        }
+      }
+      return true;
+    };
+
     const flushOpenReasoning = (specificInvocationId?: string | null) => {
       if (specificInvocationId) {
         const entry = activeSubAgents.get(specificInvocationId);
@@ -2034,11 +2096,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let firstTokenTime: number | undefined;
     let toolCallCount = 0;
     let storedTiming: ReturnType<typeof buildTimingResult> | null = null;
+    let hitlTerminal: boolean | undefined = undefined;
 
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || hitlTerminal) break;
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -2050,6 +2113,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
 
+          if (handleModelAttemptControl(chunk)) {
+            yield buildStreamResult(contentParts);
+            continue;
+          }
+
           if (chunk.type === "human_run") {
             const value =
               typeof chunk.content === "string"
@@ -2058,6 +2126,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (value && typeof value.run_id === "string")
               humanRunId = value.run_id;
             custom?.onHumanInteractionEvent?.();
+            // Terminal HITL status: stop reading so isRunning flips false
+            // without waiting for the backend to close the stream.
+            if (
+              value &&
+              typeof value.status === "string" &&
+              ["COMPLETED", "FAILED", "STOPPED", "EXPIRED"].includes(value.status)
+            ) {
+              hitlTerminal = true;
+              break;
+            }
             continue;
           }
           if (
@@ -2654,7 +2732,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               flushOpenReasoning();
             }
             const partType =
-              chunk.type === "step_count" ? "reasoning" : mapChunkType(chunk.type);
+              chunk.type === "step_count"
+                ? "reasoning"
+                : mapChunkType(chunk.type);
             if (chunk.type === "parse") {
               flushOpenReasoning(chunk.invocation_id);
               if (chunk.content.trim()) {

@@ -2715,6 +2715,42 @@ class TestRunStreamRealExecution:
         assert len(agent.memory.steps) == 2
         assert agent.memory.steps[0].error is not None
 
+    def test_cmsr_004_terminal_model_error_stops_react_without_memory_append(
+        self, monkeypatch
+    ):
+        """A depleted model budget must not become another recoverable ReAct step."""
+
+        class FakeAgentError(Exception):
+            pass
+
+        monkeypatch.setattr(core_agent_module, "AgentError", FakeAgentError)
+        agent = self._create_canonical_run_agent(monkeypatch)
+        terminal = core_agent_module.ModelInvocationTerminalError(
+            SimpleNamespace(value="model_timeout"),
+            5,
+            cause=TimeoutError("provider detail"),
+        )
+        physical_steps = 0
+
+        def failing_step(_action_step):
+            nonlocal physical_steps
+            physical_steps += 1
+            if False:
+                yield None
+            raise terminal
+
+        agent._step_stream = failing_step
+
+        with pytest.raises(core_agent_module.ModelInvocationTerminalError) as exc_info:
+            list(agent._run_stream("test task", max_steps=10))
+
+        assert exc_info.value is terminal
+        assert physical_steps == 1
+        assert agent.step_number == 1
+        assert agent.memory.steps == []
+        agent._finalize_step.assert_not_called()
+        agent._collect_step_metrics.assert_not_called()
+
     def test_planning_run_retries_empty_direct_answer_then_verifies_valid_answer(self, monkeypatch):
         """Planning runs reset state, retry an empty answer, and verify the next answer."""
         module = core_agent_module
@@ -2880,6 +2916,22 @@ class TestHandleMaxStepsReached:
             if call[1].get("level") and "ERROR" in str(call[1].get("level"))
         ]
         assert len(error_calls) >= 1
+
+    def test_cmsr_004_max_steps_propagates_terminal_model_error(self):
+        agent, module = self._create_agent_for_handle_max_steps_test()
+        terminal = module.ModelInvocationTerminalError(
+            SimpleNamespace(value="model_timeout"),
+            5,
+            cause=TimeoutError("provider detail"),
+        )
+        agent.model = MagicMock(side_effect=terminal)
+        agent._finalize_step = MagicMock()
+
+        with pytest.raises(module.ModelInvocationTerminalError) as exc_info:
+            agent._handle_max_steps_reached("original task")
+
+        assert exc_info.value is terminal
+        agent._finalize_step.assert_not_called()
 
     def test_handle_max_steps_reached_empty_content_uses_fallback(self, caplog, monkeypatch):
         """Empty max-step synthesis returns a visible fallback and records why."""

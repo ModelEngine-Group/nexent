@@ -13,14 +13,17 @@ Design notes (decision record):
   network / connection / timeout failures). Authentication errors, not-found,
   invalid payloads and context-length errors are treated as non-retryable so
   we fail fast instead of burning backoff on hopeless requests.
-* Empty responses (stream completed without user-visible content) are handled
-  by the caller (the agent step loop / summary truncation), **not** here.
+* Empty ``stop`` responses share the same physical-call budget as provider
+  failures. The model adapter detects them and raises the typed terminal error
+  defined here after the budget is exhausted.
 """
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+
+from ..model_errors import ModelErrorCode, ModelInvocationTerminalError
 
 
 @dataclass
@@ -39,7 +42,7 @@ class ModelRetryConfig:
             across many concurrent clients.
     """
 
-    max_attempts: int = 6
+    max_attempts: int = 5
     backoff_base_seconds: float = 2.0
     max_backoff_seconds: float = 30.0
     jitter: bool = True
@@ -63,7 +66,13 @@ class ModelRetryConfig:
 DEFAULT_MODEL_RETRY = ModelRetryConfig()
 
 
-def classify_model_error(exc: BaseException) -> str:
+@dataclass(frozen=True)
+class ModelErrorClassification:
+    retryable: bool
+    error_code: ModelErrorCode
+
+
+def classify_model_error(exc: BaseException) -> ModelErrorClassification:
     """Classify an exception raised by a model invocation.
 
     Returns ``"retryable"`` for transient errors (rate limiting, server-side
@@ -78,9 +87,17 @@ def classify_model_error(exc: BaseException) -> str:
     """
     status = getattr(exc, "status_code", None)
     if isinstance(status, int):
-        if status == 429 or 500 <= status < 600:
-            return "retryable"
-        return "non_retryable"
+        if status == 429:
+            return ModelErrorClassification(True, ModelErrorCode.RATE_LIMIT_EXHAUSTED)
+        if 500 <= status < 600:
+            return ModelErrorClassification(True, ModelErrorCode.SERVICE_UNAVAILABLE)
+        if status in (401, 403):
+            return ModelErrorClassification(False, ModelErrorCode.AUTHENTICATION_ERROR)
+        if status == 404:
+            return ModelErrorClassification(False, ModelErrorCode.NOT_FOUND)
+        if status in (400, 422):
+            return ModelErrorClassification(False, ModelErrorCode.INVALID_REQUEST)
+        return ModelErrorClassification(False, ModelErrorCode.UNKNOWN_ERROR)
 
     msg = str(exc).lower()
     non_retryable_markers = (
@@ -89,9 +106,19 @@ def classify_model_error(exc: BaseException) -> str:
         "invalid", "api key", "authentication", "context_length",
         "context length", "token limit",
     )
-    for marker in non_retryable_markers:
-        if marker in msg:
-            return "non_retryable"
+    if any(marker in msg for marker in ("context_length", "context length", "token limit")):
+        return ModelErrorClassification(False, ModelErrorCode.CONTEXT_OVERFLOW)
+    if any(marker in msg for marker in ("401", "unauthorized", "403", "forbidden", "api key", "authentication")):
+        return ModelErrorClassification(False, ModelErrorCode.AUTHENTICATION_ERROR)
+    if any(marker in msg for marker in ("404", "not found")):
+        return ModelErrorClassification(False, ModelErrorCode.NOT_FOUND)
+    if any(marker in msg for marker in non_retryable_markers):
+        return ModelErrorClassification(False, ModelErrorCode.INVALID_REQUEST)
+
+    if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
+        return ModelErrorClassification(True, ModelErrorCode.TIMEOUT)
+    if isinstance(exc, ConnectionError):
+        return ModelErrorClassification(True, ModelErrorCode.CONNECTION_ERROR)
 
     retryable_markers = (
         "429", "rate limit", "rate_limit",
@@ -105,10 +132,16 @@ def classify_model_error(exc: BaseException) -> str:
     )
     for marker in retryable_markers:
         if marker in msg:
-            return "retryable"
+            if "timeout" in marker or "timed out" in marker or "time out" in marker or marker == "etimedout":
+                return ModelErrorClassification(True, ModelErrorCode.TIMEOUT)
+            if marker in {"429", "rate limit", "rate_limit"}:
+                return ModelErrorClassification(True, ModelErrorCode.RATE_LIMIT_EXHAUSTED)
+            if marker in {"500", "502", "503", "504", "server error", "service unavailable", "temporarily unavailable", "try again", "gateway timeout", "bad gateway"}:
+                return ModelErrorClassification(True, ModelErrorCode.SERVICE_UNAVAILABLE)
+            return ModelErrorClassification(True, ModelErrorCode.CONNECTION_ERROR)
 
     # Unknown error: prefer failing fast over retrying blindly.
-    return "non_retryable"
+    return ModelErrorClassification(False, ModelErrorCode.UNKNOWN_ERROR)
 
 
 def get_retry_after_seconds(exc: BaseException) -> float | None:
