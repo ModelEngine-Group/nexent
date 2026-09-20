@@ -141,3 +141,69 @@ def test_map_error_reraises_unexpected_exception():
     unexpected = RuntimeError("database unavailable")
     with pytest.raises(RuntimeError, match="database unavailable"):
         _map_error(unexpected)
+
+
+class TestApiKeyAuditEntries:
+    @patch("apps.api_key_app.refresh_user_api_key")
+    @patch("apps.api_key_app.get_current_user_context")
+    def test_refresh_success_emits_audit_entry(self, mock_context, mock_refresh, caplog):
+        import logging
+
+        mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
+        mock_refresh.return_value = {"api_key": "nexent-new-key"}
+
+        with caplog.at_level(logging.INFO, logger="audit.auth"):
+            response = client.post(
+                "/api-keys/refresh",
+                headers={"Authorization": "Bearer token"},
+                json={"user_id": "user-1"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        message = caplog.records[-1].getMessage()
+        assert "[AUTH_AUDIT]" in message
+        assert "event=api_key_refresh" in message
+        assert "result=success" in message
+        assert "user_id=admin-1" in message
+        assert 'details={"target_user_id":"user-1","target_email":null}' in message
+
+    @patch("apps.api_key_app.refresh_user_api_key", side_effect=ForbiddenError("not allowed"))
+    @patch("apps.api_key_app.get_current_user_context")
+    def test_refresh_failure_emits_reason(self, mock_context, _, caplog):
+        import logging
+
+        mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
+
+        with caplog.at_level(logging.INFO, logger="audit.auth"):
+            response = client.post(
+                "/api-keys/refresh",
+                headers={"Authorization": "Bearer token"},
+                json={"email": "api.user@example.com"},
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        message = caplog.records[-1].getMessage()
+        assert "event=api_key_refresh" in message
+        assert "result=failure" in message
+        assert "reason=forbidden" in message
+        assert "user_id=admin-1" in message
+
+    @patch("apps.api_key_app.revoke_user_api_keys")
+    @patch("apps.api_key_app.get_current_user_context")
+    def test_revoke_success_emits_audit_entry(self, mock_context, mock_revoke, caplog):
+        import logging
+
+        mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
+        mock_revoke.return_value = {"revoked_count": 2}
+
+        with caplog.at_level(logging.INFO, logger="audit.auth"):
+            response = client.delete(
+                "/api-keys?user_id=user-1",
+                headers={"Authorization": "Bearer token"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        message = caplog.records[-1].getMessage()
+        assert "event=api_key_revoke" in message
+        assert "result=success" in message
+        assert 'details={"target_user_id":"user-1","target_email":null}' in message

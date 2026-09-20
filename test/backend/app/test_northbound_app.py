@@ -1754,3 +1754,49 @@ def test_run_chat_passes_hitl_flag(enable_hitl):
         })
     assert response.status_code == 200
     assert start.call_args.kwargs["enable_hitl"] is enable_hitl
+
+
+def test_batch_create_api_users_emits_audit_entry(caplog):
+    import logging
+
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.create_api_users_batch", return_value={"users": []}):
+        mock_ctx.return_value = ctx
+        with caplog.at_level(logging.INFO, logger="audit.auth"):
+            response = client.post(
+                "/nb/v1/api-users/batch",
+                headers=_build_headers(),
+                json={"role": "USER", "group_id": 3, "count": 2},
+            )
+
+    assert response.status_code == 201
+    message = caplog.records[-1].getMessage()
+    assert "event=northbound_api_users_batch_create" in message
+    assert "result=success" in message
+    assert "user_id=admin-1" in message
+    assert 'details={"request_id":"req-123","role":"USER","group_id":3,"count":2}' in message
+
+
+def test_batch_create_api_users_emits_failure_reason(caplog):
+    import logging
+
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.create_api_users_batch", side_effect=ForbiddenError("not allowed")):
+        mock_ctx.return_value = ctx
+        with caplog.at_level(logging.INFO, logger="audit.auth"):
+            response = client.post(
+                "/nb/v1/api-users/batch",
+                headers=_build_headers(),
+                json={"role": "USER", "count": 1},
+            )
+
+    assert response.status_code == 403
+    message = caplog.records[-1].getMessage()
+    assert "event=northbound_api_users_batch_create" in message
+    assert "result=failure" in message
+    assert "reason=forbidden" in message
+    assert 'details={"request_id":"req-123","role":"USER","group_id":null,"count":1}' in message
