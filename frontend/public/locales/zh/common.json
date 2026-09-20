@@ -108,6 +108,7 @@
   "chatInput.fileCountExceedsLimit": "文件数量超过限制，最多只能上传{{count}}个文件",
   "chatInput.fileSizeExceedsLimit": "文件\"{{name}}\"超过大小限制，单个文件最大{FILE_UPLOAD_SIZE_LIMIT}MB",
   "newchat.fileSizeExceedsLimit": "文件“{{name}}”超过大小限制，单个文件最大 {{maxSizeMB}} MB",
+  "newchat.fileCountExceedsLimit": "文件数量超过限制，最多只能上传 {{count}} 个文件",
   "chatInput.unsupportedFileType": "文件\"{{name}}\"不是支持的文件类型，支持的格式包括：图片、文档（PDF、Word、Excel、PPT、EPUB）、纯文本、CSV/TSV、Markdown、JSON、HTML、XML",
   "chatInput.unsupportedFileTypeSimple": "不支持的文件类型",
   "chatInput.dragAndDropFilesHere": "文件拖动到此处即可上传",

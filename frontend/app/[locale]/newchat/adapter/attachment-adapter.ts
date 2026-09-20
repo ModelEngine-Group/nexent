@@ -13,7 +13,9 @@ import { storageService } from "@/services/storageService";
 import log from "@/lib/logger";
 import { getAttachmentType } from "../utils/attachment-type";
 import {
+  canAddNewChatAttachment,
   isNewChatFileTooLarge,
+  NEW_CHAT_MAX_FILE_COUNT,
   NEW_CHAT_MAX_FILE_SIZE_MB,
 } from "../utils/attachment-size";
 
@@ -128,19 +130,47 @@ export const compositeAttachmentAdapter: AttachmentAdapter = {
   },
 };
 
-export const newChatAttachmentAdapter: AttachmentAdapter = {
-  ...compositeAttachmentAdapter,
+export const createNewChatAttachmentAdapter = (): AttachmentAdapter => {
+  let attachmentCount = 0;
 
-  async add({ file }: { file: File }): Promise<PendingAttachment> {
-    if (isNewChatFileTooLarge(file.size)) {
-      const errorMessage = i18n.t("newchat.fileSizeExceedsLimit", {
-        name: file.name,
-        maxSizeMB: NEW_CHAT_MAX_FILE_SIZE_MB,
-      });
-      message.error(errorMessage);
-      throw new Error(errorMessage);
-    }
+  const releaseAttachmentSlot = () => {
+    attachmentCount = Math.max(attachmentCount - 1, 0);
+  };
 
-    return createPendingAttachment({ file });
-  },
+  return {
+    ...compositeAttachmentAdapter,
+
+    async add({ file }: { file: File }): Promise<PendingAttachment> {
+      if (isNewChatFileTooLarge(file.size)) {
+        const errorMessage = i18n.t("newchat.fileSizeExceedsLimit", {
+          name: file.name,
+          maxSizeMB: NEW_CHAT_MAX_FILE_SIZE_MB,
+        });
+        message.error(errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      if (!canAddNewChatAttachment(attachmentCount)) {
+        const errorMessage = i18n.t("newchat.fileCountExceedsLimit", {
+          count: NEW_CHAT_MAX_FILE_COUNT,
+        });
+        message.error(errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      attachmentCount += 1;
+      return createPendingAttachment({ file });
+    },
+
+    async remove(attachment: Attachment): Promise<void> {
+      releaseAttachmentSlot();
+      await compositeAttachmentAdapter.remove(attachment);
+    },
+
+    async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
+      const completeAttachment = await compositeAttachmentAdapter.send(attachment);
+      releaseAttachmentSlot();
+      return completeAttachment;
+    },
+  };
 };

@@ -37,7 +37,7 @@ import {
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
-import { newChatAttachmentAdapter } from "./adapter/attachment-adapter";
+import { createNewChatAttachmentAdapter } from "./adapter/attachment-adapter";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout, message } from "antd";
@@ -60,9 +60,14 @@ import type {
 function useLocalChatRuntime(
   dictationAdapter: ServerDictationAdapter
 ): AssistantRuntime {
+  const attachmentAdapter = useMemo(
+    () => createNewChatAttachmentAdapter(),
+    []
+  );
+
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
-      attachments: newChatAttachmentAdapter,
+      attachments: attachmentAdapter,
       dictation: dictationAdapter,
     },
   });

@@ -108,6 +108,7 @@
   "chatInput.fileCountExceedsLimit": "File count exceeds limit. Maximum {{count}} files allowed",
   "chatInput.fileSizeExceedsLimit": "File \"{{name}}\" exceeds size limit. Maximum {FILE_UPLOAD_SIZE_LIMIT}MB per file",
   "newchat.fileSizeExceedsLimit": "File \"{{name}}\" exceeds the size limit. Maximum {{maxSizeMB}} MB per file",
+  "newchat.fileCountExceedsLimit": "File count exceeds the limit. Maximum {{count}} files allowed",
   "chatInput.unsupportedFileType": "File \"{{name}}\" is not a supported file type. Supported formats: images, documents (PDF, Word, Excel, PPT), text files, CSV/TSV, Markdown、JSON、HTML、XML",
   "chatInput.unsupportedFileTypeSimple": "Unsupported file type",
   "chatInput.dragAndDropFilesHere": "Drag and drop files here to upload",
