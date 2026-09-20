@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from contextlib import suppress
 from functools import lru_cache
 
 from fastapi.responses import StreamingResponse
@@ -162,25 +163,83 @@ async def execute_attempt(job, lease):
         # Deployments opt into the conservative approval gate independently.
         port.allowed_tools = _allowed_tool_names(config.tools)
         run_info.human_interaction = runtime_type(port)
-        buffered_chunks = []
+
+        _FLUSH_INTERVAL = 0.05
+        _FLUSH_BATCH = 16
+
         last_flush = time.monotonic()
-        async for chunk in _stream_agent_chunks(
+
+        async def _flush_if_due() -> None:
+            """Flush buffered chunks on the interval/batch trigger to keep DB order.
+
+            The async loop flushes on its own; the worker flushes again before
+            each HITL transaction. Peek first and never take-put-back — that
+            would open a transiently empty window the worker's idle poll can
+            mistake for "async is done".
+            """
+            nonlocal last_flush
+            if (time.monotonic() - last_flush >= _FLUSH_INTERVAL
+                    or port.peek_chunks() >= _FLUSH_BATCH):
+                buffered = port.take_chunks()
+                if buffered:
+                    try:
+                        port.begin_emit()
+                        await run_blocking(
+                            "hitl-port-emit_chunks", port.emit_chunks, buffered,
+                            lane="control-io", owner=__name__,
+                        )
+                        last_flush = time.monotonic()
+                    finally:
+                        port.end_emit()
+
+        chunk_iter = _stream_agent_chunks(
             agent_request=request, user_id=identity["user_id"], tenant_id=identity["tenant_id"],
             agent_run_info=run_info, memory_ctx=memory_context,
-        ):
-            buffered_chunks.append(chunk)
-            if len(buffered_chunks) >= 32 or time.monotonic() - last_flush >= 0.25:
-                await run_blocking(
-                    "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks, lane="control-io",
-                    owner=__name__,
+        ).__aiter__()
+
+        anext_task: asyncio.Task | None = None
+        try:
+            anext_task = asyncio.create_task(chunk_iter.__anext__())
+            while True:
+                # On timeout the task stays pending; the worker may resume it later.
+                done, pending = await asyncio.wait(
+                    {anext_task},
+                    timeout=_FLUSH_INTERVAL,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-                buffered_chunks = []
-                last_flush = time.monotonic()
-        if buffered_chunks:
-            await run_blocking(
-                "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks, lane="control-io",
-                owner=__name__,
-            )
+                if pending:
+                    # No new chunk yet; flush what we have to keep DB order.
+                    await _flush_if_due()
+                    continue
+
+                task = done.pop()
+                try:
+                    chunk = task.result()
+                except StopAsyncIteration:
+                    break
+                port.add_chunk(chunk)
+                await _flush_if_due()
+                anext_task = asyncio.create_task(chunk_iter.__anext__())
+        finally:
+            if anext_task is not None:
+                anext_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await anext_task
+            try:
+                await chunk_iter.aclose()
+            except Exception:
+                pass
+            # Final flush so leftover chunks precede finish() in DB order.
+            leftover = port.take_chunks()
+            if leftover:
+                try:
+                    port.begin_emit()
+                    await run_blocking(
+                        "hitl-port-emit_chunks", port.emit_chunks, leftover,
+                        lane="control-io", owner=__name__,
+                    )
+                finally:
+                    port.end_emit()
         await run_blocking(
             "hitl-port-finish", port.finish, run_info.attempt_outcome or "failed", lane="control-io",
             owner=__name__,
@@ -264,7 +323,7 @@ human_run_scheduler = LeaseScheduler(HumanRunLeaseStore(), execute_attempt, Sche
 async def stream_run(run_id, tenant_id, user_id, *, after=0):
     service = require_enabled()
     snapshot = await run_blocking(
-        "hitl-service-snapshot", service.snapshot, run_id, tenant_id, user_id, lane="control-io",
+        "hitl-service-snapshot", service.light_snapshot, run_id, tenant_id, user_id, lane="control-io",
         owner=__name__,
     )
     if after > snapshot["event_seq"]:
@@ -276,7 +335,7 @@ async def stream_run(run_id, tenant_id, user_id, *, after=0):
         while True:
             # Re-check ownership and deadlines for reconnecting subscribers.
             current = await run_blocking(
-                "hitl-service-snapshot", service.snapshot, run_id, tenant_id, user_id, lane="control-io",
+                "hitl-service-snapshot", service.light_snapshot, run_id, tenant_id, user_id, lane="control-io",
                 owner=__name__,
             )
             rows = await run_blocking(

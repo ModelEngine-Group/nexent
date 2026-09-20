@@ -67,4 +67,3 @@ Reference `proposal.md` for motivation, scope and AC definitions. Follow [D1 tes
 ## Open Questions
 
 <Optional. Only unknowns that do not change behavior, the chosen approach or task breakdown may remain. Resolve material questions before finalizing tasks or starting implementation. Fold answers into the formal design.>
-

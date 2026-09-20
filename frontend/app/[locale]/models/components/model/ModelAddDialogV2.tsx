@@ -906,6 +906,10 @@ export const ModelAddDialogV2 = ({
         modelType: resolvedModelType,
         baseUrl: customForm.url,
         apiKey: customForm.apiKey,
+        // Edit mode leaves apiKey empty to "keep existing"; pass the model
+        // id so the backend probes with the stored key instead of the
+        // "sk-no-api-key" placeholder.
+        modelId: model?.id,
         ...capacityPayload,
         ...inferencePayload,
         ...embeddingPayload,
@@ -1062,6 +1066,20 @@ export const ModelAddDialogV2 = ({
         ctx.resolvedModelType === MODEL_TYPES.MULTI_EMBEDDING
           ? "multiEmbedding"
           : ctx.resolvedModelType;
+      // Never steal an occupied default slot: adding or editing a model is
+      // not an intent to change the tenant default. Persist only when the
+      // slot is empty (add: deterministic onboarding default, mirroring the
+      // backend backfill) or when the submitted model already occupies the
+      // slot (edit: keep the slot's apiKey/url in sync with the model's new
+      // values).
+      const currentSlotDisplayName = modelConfig?.[configKey]?.displayName;
+      const slotIsFree = !currentSlotDisplayName;
+      const submitsCurrentSlotModel =
+        !!model &&
+        currentSlotDisplayName === (model.displayName || model.name);
+      if (!slotIsFree && !submitsCurrentSlotModel) {
+        return;
+      }
       const existingApiKey = modelConfig?.[configKey]?.apiConfig?.apiKey || "";
       const nextModelConfig: SingleModelConfig = {
         id: 0,
@@ -1292,7 +1310,7 @@ export const ModelAddDialogV2 = ({
       }
       width={900}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <Tabs
         activeKey={activeTab}
@@ -1581,7 +1599,7 @@ export const ModelAddDialogV2 = ({
                   )}
                 </Space>
                 {customConnectivity.message && (
-                  <Alert type="error" showIcon message={customConnectivity.message} />
+                  <Alert type="error" showIcon title={customConnectivity.message} />
                 )}
 
                 <div className="flex justify-end gap-2 pt-2 border-t">
@@ -1741,7 +1759,7 @@ export const ModelAddDialogV2 = ({
         cancelText={t("common.cancel", { defaultValue: "取消" })}
         width={640}
         centered
-        destroyOnClose={false}
+        destroyOnHidden={false}
         styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
       >
         <div className="space-y-4">

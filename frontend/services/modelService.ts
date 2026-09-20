@@ -832,6 +832,9 @@ export const modelService = {
       temperature?: number;
       topP?: number;
       extraParams?: Record<string, unknown>;
+      // Edit-dialog probes: when set, the backend falls back to the stored
+      // api_key for this model when apiKey is empty/placeholder.
+      modelId?: number;
     },
     signal?: AbortSignal
   ): Promise<ModelValidationResponse> => {
@@ -841,6 +844,9 @@ export const modelService = {
         model_type: config.modelType,
         api_key: config.apiKey || "sk-no-api-key",
         base_url: config.baseUrl || "",
+        ...(config.modelId !== undefined
+          ? { probe_model_id: config.modelId }
+          : {}),
         ...(config.maxTokens !== undefined
           ? { max_tokens: config.maxTokens }
           : {}),

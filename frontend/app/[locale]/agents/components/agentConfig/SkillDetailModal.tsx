@@ -151,7 +151,7 @@ export default function SkillDetailModal({
       footer={null}
       width={820}
       zIndex={zIndex}
-      maskClosable={maskClosable}
+      mask={{ closable: maskClosable }}
       className="skill-detail-modal"
       styles={{
         body: {
@@ -165,7 +165,7 @@ export default function SkillDetailModal({
         <Alert
           type="warning"
           showIcon
-          message={fileTreeMessage}
+          title={fileTreeMessage}
           className="mb-3"
         />
       ) : null}

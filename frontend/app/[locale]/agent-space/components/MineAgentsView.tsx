@@ -4,7 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Popover, Spin } from "antd";
-import { ChevronLeft, ChevronRight, Plus, Search, Tag, Upload } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Search,
+  Tag,
+  Upload,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal, {
@@ -44,7 +51,10 @@ import { MineReviewStatusModal } from "./MineReviewStatusModal";
 import { CreateNewAgentCard } from "./CreateNewAgentCard";
 import { MyAgentCard } from "./MyAgentCard";
 import TagFilterControls from "@/components/tag/TagFilterControls";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
+import type {
+  TagDefinition,
+  TagResourcePredicate,
+} from "@/types/tagManagement";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -210,7 +220,9 @@ export function MineAgentsView({
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/evaluation?agent_id=${agent.agent_id}`);
+    router.push(
+      `/${locale}/evaluation?agent_ids=${encodeURIComponent(JSON.stringify([agent.agent_id]))}`
+    );
   };
 
   const closeReviewModal = () => {
@@ -388,7 +400,9 @@ export function MineAgentsView({
   };
 
   const hasActiveFilter =
-    ownership !== "all" || normalizedQuery.length > 0 || tagPredicates.length > 0;
+    ownership !== "all" ||
+    normalizedQuery.length > 0 ||
+    tagPredicates.length > 0;
   const showFilteredEmpty = !isLoading && !isError && agents.length === 0;
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
   const showPagination = !isLoading && !isError && totalPages > 1;
