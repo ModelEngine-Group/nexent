@@ -1380,7 +1380,7 @@ class NexentAgent:
 
     @staticmethod
     def _grant_sandbox_output_access(container: Any, workspace: Path) -> None:
-        """Allow the sandbox user to read and write the exact run workspace."""
+        """Allow sandbox traversal of the user directory and writes in the run workspace."""
         gid_result = container.exec_run(["id", "-g"])
         gid_exit_code = getattr(gid_result, "exit_code", None)
         gid_output = getattr(gid_result, "output", b"")
@@ -1394,7 +1394,10 @@ class NexentAgent:
             raise RuntimeError("Sandbox user returned an invalid group ID")
 
         workspace_dir = str(workspace)
+        workspace_parent_dir = str(workspace.parent)
         commands = (
+            ["chgrp", sandbox_gid, workspace_parent_dir],
+            ["chmod", "g+xs", workspace_parent_dir],
             ["chgrp", "-R", sandbox_gid, workspace_dir],
             ["chmod", "-R", "g+rwX", workspace_dir],
             ["find", workspace_dir, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"],

@@ -4805,7 +4805,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         else:
             grant.assert_not_called()
 
-    def test_grant_sandbox_output_access_uses_sandbox_group(self, tmp_path):
+    def test_grant_sandbox_output_access_grants_parent_traversal(self, tmp_path):
         workspace = tmp_path / "tenant" / "user" / "run-1"
         input_dir = workspace / "inputs"
         output_dir = workspace / "outputs"
@@ -4817,12 +4817,16 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             MagicMock(exit_code=0, output=b""),
             MagicMock(exit_code=0, output=b""),
             MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
         ]
 
         NexentAgent._grant_sandbox_output_access(container, workspace)
 
         assert container.exec_run.call_args_list == [
             call(["id", "-g"]),
+            call(["chgrp", "1000", str(workspace.parent)], user="0"),
+            call(["chmod", "g+xs", str(workspace.parent)], user="0"),
             call(["chgrp", "-R", "1000", str(workspace)], user="0"),
             call(["chmod", "-R", "g+rwX", str(workspace)], user="0"),
             call(
