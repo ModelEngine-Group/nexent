@@ -17,10 +17,12 @@ from consts.exceptions import (
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
     RuntimeUpstreamError,
+    TenantResourceLimitError,
     UnauthorizedError,
     NotFoundException,
     UnauthorizedError,
     ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from consts.model import (
     ApiKeyTargetRequest,
@@ -218,6 +220,11 @@ async def create_api_users_batch_endpoint(
             content={"message": "success", "requestId": ctx.request_id, "data": data},
         )
     except Exception as exc:
+        if isinstance(exc, TenantResourceLimitError):
+            return JSONResponse(
+                status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                content=tenant_resource_limit_error_payload(exc),
+            )
         _raise_api_key_http_exception(exc)
 
 
