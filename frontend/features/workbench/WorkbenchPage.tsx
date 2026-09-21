@@ -763,11 +763,6 @@ const HomeContent: FC = () => {
     return () => setServerConversationIdState(null);
   }, [serverConversationIdsRef, activeThreadId]);
 
-  const handleThreadBack = useCallback(() => {
-    shouldRestoreAgentRef.current = false;
-    onBack();
-  }, [onBack]);
-
   const handlePrepareNewConversation = useCallback(() => {
     // Do not restore the agent from the thread that is being left.
     shouldRestoreAgentRef.current = false;
@@ -883,14 +878,10 @@ const HomeContent: FC = () => {
           modelSelectionScope={
             workbenchState.config.agent_mounts.length === 1 ? "agent" : "tenant"
           }
-          fallbackAgentName={
-            workbenchBootstrap?.generic_agent?.display_name ||
-            "Nexent Workbench"
-          }
+          fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
           selectedModelId={workbenchState.config.model_id?.toString()}
           onModelChange={(id) => void handleModelChange(id)}
           onAgentSelected={handleAgentSelectedFromLanding}
-          onBack={handleThreadBack}
           chatMode={chatMode}
           onChatModeChange={handleChatModeChange}
           isDictationConfigured={isDictationConfigured}

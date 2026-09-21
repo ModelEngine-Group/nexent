@@ -2604,6 +2604,7 @@ class TestCreateAgentConfig:
                 )
                 mock_recursive_create.assert_called_once()
                 assert mock_recursive_create.call_args.kwargs["version_no"] == 3
+                assert mock_sub_agent_config.invocation_name == "sub_agent"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_memory(self):

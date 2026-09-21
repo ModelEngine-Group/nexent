@@ -1181,6 +1181,12 @@ async def create_agent_config(
             # Workbench overlays replace Skills on the effective root only.
             runtime_skill_snapshot=None,
         )
+        # Persisted Agent relations are rendered into the manager prompt by
+        # their configured business name. Keep the callable registered in the
+        # Python executor under that same name; the generic runtime identity
+        # assigned by the recursive builder is only appropriate for roots and
+        # Workbench-selected dynamic children.
+        sub_agent_config.invocation_name = sub_agent_config.name
         managed_agents.append(sub_agent_config)
 
     # Workbench-selected Agents are request-scoped children. They are built

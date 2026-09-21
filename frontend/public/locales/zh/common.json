@@ -1,4 +1,5 @@
 {
+  "workbench.genericAgentName": "智能体工作台",
   "workbench.creationExamples.skill.invoiceExtraction": "帮我创建一个「发票信息提取」Skill：上传发票图片或 PDF，自动识别发票代码、发票号码、开票日期、购买方、销售方、金额、税额。支持增值税普通发票和专用发票，输出为结构化 JSON，支持批量上传。",
   "workbench.creationExamples.skill.contractReview": "帮我创建一个「合同关键信息审查」Skill：上传合同 PDF 或 Word，提取合同主体、金额、履约期限、付款条件、违约责任和争议解决条款，标记缺失项与高风险条款，并输出结构化审查结果。",
   "workbench.creationExamples.skill.meetingNotes": "帮我创建一个「会议纪要整理」Skill：上传会议录音或文字记录，识别议题、关键结论、待办事项、负责人和截止时间，生成结构化会议纪要，并支持导出 Markdown。",

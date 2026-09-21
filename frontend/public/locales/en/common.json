@@ -1,4 +1,5 @@
 {
+  "workbench.genericAgentName": "Agent Workbench",
   "workbench.creationExamples.skill.invoiceExtraction": "Create an Invoice Information Extraction Skill: upload invoice images or PDFs and identify the invoice code, number, date, buyer, seller, amount, and tax. Support standard and special VAT invoices, structured JSON output, and batch uploads.",
   "workbench.creationExamples.skill.contractReview": "Create a Contract Review Skill: upload PDF or Word contracts, extract parties, amounts, fulfillment dates, payment terms, liability, and dispute resolution clauses. Flag missing information and high-risk clauses, and produce structured review results.",
   "workbench.creationExamples.skill.meetingNotes": "Create a Meeting Notes Skill: upload audio or transcripts, identify topics, conclusions, action items, owners, and deadlines, and generate structured minutes with Markdown export.",
