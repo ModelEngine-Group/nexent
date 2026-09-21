@@ -26,7 +26,7 @@ enum SkillRepositoryTab {
 }
 
 const skillRepositoryTheme = {
-  token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6", borderRadius: 12 },
+  token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6" },
 };
 
 export default function SkillRepositoryPage() {

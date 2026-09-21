@@ -49,6 +49,12 @@ test("skill space uses the same page inset and tab treatment as MCP space", asyn
   assert.doesNotMatch(page, /max-w-6xl/);
 });
 
+test("skill space uses Agent repository default component radius", async () => {
+  const page = await readFile(new URL("page.tsx", route), "utf8");
+
+  assert.doesNotMatch(page, /borderRadius\s*:/);
+});
+
 test("skill repository delegates visible pagination to ResourceCardGrid", async () => {
   const view = await readFile(repositoryView, "utf8");
 
