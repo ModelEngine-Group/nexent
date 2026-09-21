@@ -24,15 +24,14 @@ from services.agent_repository_service import (
     delete_official_agent_impl,
     list_official_agent_management_impl,
 )
-from database.user_tenant_db import get_user_role_by_tenant
-from utils.auth_utils import get_current_user_id
+from utils.auth_utils import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
 
 
-def _require_super_admin(user_id: str, current_tenant_id: str) -> None:
-    if get_user_role_by_tenant(user_id, current_tenant_id).upper() != "SU":
+def _require_super_admin(user_role: str) -> None:
+    if user_role.upper() != "SU":
         raise UnauthorizedError("Super admin role is required")
 
 
@@ -41,8 +40,8 @@ async def list_official_agent_management_api(
     authorization: str = Header(None)
 ):
     try:
-        user_id, current_tenant_id = get_current_user_id(authorization)
-        _require_super_admin(user_id, current_tenant_id)
+        _, _, user_role = get_current_user_context(authorization)
+        _require_super_admin(user_role)
         return JSONResponse(content={"items": list_official_agent_management_impl()})
     except UnauthorizedError as error:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
@@ -53,8 +52,8 @@ async def delete_official_agent_api(
     agent_repository_id: int, authorization: str = Header(None)
 ):
     try:
-        user_id, current_tenant_id = get_current_user_id(authorization)
-        _require_super_admin(user_id, current_tenant_id)
+        user_id, _, user_role = get_current_user_context(authorization)
+        _require_super_admin(user_role)
         return JSONResponse(content=delete_official_agent_impl(agent_repository_id, user_id))
     except UnauthorizedError as error:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))

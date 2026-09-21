@@ -35,6 +35,8 @@ import ExpandEditModal from "@/components/common/ExpandEditModal";
 import type { AgentVersion } from "@/services/agentVersionService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import ManageOfficialAgentsModal from "@/components/agent/ManageOfficialAgentsModal";
+import { USER_ROLES } from "@/const/auth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -67,6 +69,8 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
+  const canManageOfficialAgents = user?.role === USER_ROLES.SU;
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
 
@@ -575,9 +579,11 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           placeholder={t("tenantResources.agents.filterGroup")}
           className="w-48"
         />
-        <Button className="ml-auto" onClick={() => setOfficialModalOpen(true)}>
-          管理官方智能体
-        </Button>
+        {canManageOfficialAgents && (
+          <Button className="ml-auto" onClick={() => setOfficialModalOpen(true)}>
+            管理官方智能体
+          </Button>
+        )}
       </div>
       <div className="flex-1 overflow-hidden">
         <Table
