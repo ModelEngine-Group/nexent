@@ -7,7 +7,7 @@ const pagePath = new URL(
   import.meta.url
 );
 const agentSpacePath = new URL(
-  "../app/[locale]/agent-space/space.tsx",
+  "../app/[locale]/agent-space/agent-space.tsx",
   import.meta.url
 );
 const resourceCardPath = new URL(
@@ -55,17 +55,13 @@ test("agent repository displays up to twelve unified cards in four desktop colum
   assert.doesNotMatch(agentSpace, /key: "copy"/);
   assert.match(
     agentSpace,
-    /title=\{[\s\S]*t\("agentRepository\.detail\.downloads"/
+    /headerActions=\{\s*<div className="flex items-center gap-1">[\s\S]*agentRepository\.detail\.downloads[\s\S]*MoreHorizontal/
   );
   assert.match(
     agentSpace,
     /footer=\{[\s\S]*onClick=\{\(\) => setCopyListing\(listing\)\}/
   );
-  assert.match(agentSpace, /footer=\{[\s\S]*type="primary"/);
-  assert.match(
-    agentSpace,
-    /footer=\{[\s\S]*className="h-8 px-3 text-xs font-medium shadow-sm"/
-  );
+  assert.match(agentSpace, /footer=\{[\s\S]*type="text"/);
   assert.match(agentSpace, /footerLayout="inline"/);
   assert.match(agentSpace, /badge=\{[\s\S]*listing\.version_label/);
   assert.match(agentSpace, /Grid\.useBreakpoint\(\)/);
@@ -84,7 +80,7 @@ test("agent repository displays up to twelve unified cards in four desktop colum
   assert.match(resourceCardGrid, /min-\[576px\]:grid-cols-2/);
   assert.doesNotMatch(resourceCardGrid, /sm:grid-cols-2/);
   assert.match(mineAgent, /export function MyAgent/);
-  assert.match(mineAgent, /<ResourceCardGrid[\s\S]*columns=\{4\}/);
+  assert.match(mineAgent, /<ResourceCardGrid[\s\S]*columns=\{columns\}/);
 });
 
 test("agent-space tabs load same-level content components", async () => {
@@ -92,7 +88,7 @@ test("agent-space tabs load same-level content components", async () => {
     readFile(pagePath, "utf8"),
     readFile(reviewCenterPath, "utf8"),
   ]);
-  assert.match(page, /import \{ AgentSpace \} from "\.\/space";/);
+  assert.match(page, /import \{ AgentSpace \} from "\.\/agent-space";/);
   assert.match(page, /import \{ MyAgent \} from "\.\/my-agent";/);
   assert.match(page, /import \{ ReviewCenter \} from "\.\/review-center";/);
   assert.match(page, /<AgentSpace/);

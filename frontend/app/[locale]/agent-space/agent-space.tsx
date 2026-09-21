@@ -280,7 +280,7 @@ export function AgentSpace({ active }: { active: boolean }) {
         footerLayout="inline"
         meta={author ? <span className="truncate">{author}</span> : undefined}
         headerActions={
-          <>
+          <div className="flex items-center gap-1">
             <span
               className="inline-flex shrink-0 items-center gap-1 text-xs font-normal text-slate-500 dark:text-slate-400"
               aria-label={t("agentRepository.detail.downloads", {
@@ -302,7 +302,7 @@ export function AgentSpace({ active }: { active: boolean }) {
                 />
               </Dropdown>
             ) : null}
-          </>
+          </div>
         }
         footer={
           <Button
