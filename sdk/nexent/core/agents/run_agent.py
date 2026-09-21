@@ -51,6 +51,11 @@ def _mcp_timeout_message(agent_run_info: AgentRunInfo) -> str:
     )
 
 
+def _is_mcp_timeout_error(error: BaseException) -> bool:
+    """Identify an MCP timeout, including errors wrapped by the Agent runtime."""
+    return is_mcp_timeout_error(error)
+
+
 class DeferredAgentRun:
     """Managed worker target that waits for request preparation to bind run data."""
 
