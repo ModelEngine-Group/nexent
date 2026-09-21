@@ -220,19 +220,19 @@ export function ModelLibraryList({
       <div className="min-h-[240px] flex-1 overflow-y-auto rounded-xl border">
         {/* Header (desktop only) */}
         <div className="hidden items-center gap-3 border-b bg-secondary/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:flex">
-          <span className="w-52 shrink-0">
+          <span className="w-64 shrink-0">
             {t("modelConfig.table.col.model", { defaultValue: "模型" })}
           </span>
-          <span className="w-32 shrink-0">
+          <span className="w-40 shrink-0">
             {t("modelConfig.table.col.type", { defaultValue: "类型" })}
           </span>
-          <span className="w-28 shrink-0">
+          <span className="w-32 shrink-0">
             {t("modelConfig.table.col.source", { defaultValue: "服务商" })}
           </span>
           <span className="flex-1">
             {t("modelConfig.table.col.connectStatus", { defaultValue: "状态" })}
           </span>
-          <span className="w-28 shrink-0 text-right">
+          <span className="w-32 shrink-0 text-right">
             {t("modelConfig.table.col.actions", { defaultValue: "操作" })}
           </span>
         </div>
@@ -340,7 +340,7 @@ function ModelRow({
   return (
     <div className="flex flex-col gap-3 px-4 py-3 transition-colors hover:bg-secondary/40 md:flex-row md:items-center md:gap-3">
       {/* Model name */}
-      <div className="flex min-w-0 items-center gap-2 md:w-52 md:shrink-0">
+      <div className="flex min-w-0 items-center gap-2 md:w-64 md:shrink-0">
         <div className="flex min-w-0 flex-col">
           <span className="truncate font-medium text-foreground">
             {model.displayName || model.name}
@@ -360,7 +360,7 @@ function ModelRow({
       </div>
 
       {/* Type */}
-      <div className="md:w-32 md:shrink-0">
+      <div className="md:w-40 md:shrink-0">
         <Badge
           variant="secondary"
           className={cn(
@@ -375,7 +375,7 @@ function ModelRow({
       </div>
 
       {/* Source */}
-      <div className="md:w-28 md:shrink-0">
+      <div className="md:w-32 md:shrink-0">
         <span className="text-sm text-muted-foreground">{model.source}</span>
       </div>
 
@@ -395,7 +395,7 @@ function ModelRow({
       </div>
 
       {/* Actions */}
-      <div className="flex shrink-0 items-center gap-0.5 md:w-28 md:justify-end">
+      <div className="flex shrink-0 items-center gap-0.5 md:w-32 md:justify-end">
         <RowAction
           label={t("modelConfig.list.checkConnectivity", {
             defaultValue: "检测连通性",
