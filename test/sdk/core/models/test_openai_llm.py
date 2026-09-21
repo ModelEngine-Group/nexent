@@ -2961,6 +2961,20 @@ def test_missing_reasoning_budget_is_a_configuration_error(openai_model_instance
         openai_model_instance._apply_reasoning_control({})
 
 
+def test_reasoning_toggle_enabled_does_not_add_budget(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {"wire_format": "thinking_toggle"}
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {
+        "extra_body": {
+            "thinking": {"type": "enabled"},
+        },
+    }
+
+
 def test_reasoning_error_detection_requires_bad_request_and_reasoning_marker():
     detector = openai_llm_module._is_reasoning_parameter_error
 
