@@ -3816,6 +3816,7 @@
   "quota.tenantUsage": "Tenant Usage",
   "quota.fairShare": "Fair Share Reference",
   "quota.perKbBreakdown": "Per-KB Breakdown",
+  "quota.breakdownTotal": "{{total}} knowledge bases in total",
   "quota.editHint": "Set per-KB quotas in the KB list → action column → edit icon",
   "quota.summary": "Summary",
   "quota.totalAllocated": "allocated",

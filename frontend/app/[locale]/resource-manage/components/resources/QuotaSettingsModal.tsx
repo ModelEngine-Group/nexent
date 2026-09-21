@@ -598,7 +598,12 @@ export function QuotaSettingsModal({
             columns={breakdownColumns}
             rowKey="knowledge_id"
             size="small"
-            pagination={false}
+            pagination={{
+              pageSize: 10,
+              size: "small",
+              showSizeChanger: false,
+              showTotal: (total) => t("quota.breakdownTotal", { total }),
+            }}
             style={{ marginBottom: 16 }}
           />
           <Text type="secondary">
