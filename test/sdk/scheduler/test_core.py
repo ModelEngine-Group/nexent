@@ -141,13 +141,18 @@ async def test_waiting_jobs_do_not_consume_concurrency():
     store = MemoryLeaseStore([ClaimedJob(1, {"id": 1}), ClaimedJob(2, {"id": 2})])
     started = []
     first_running = asyncio.Event()
+    second_running = asyncio.Event()
     gate = asyncio.Event()
 
     async def execute(job, lease):
         started.append(job.job_id)
+        # Both executors must stay alive: an instantly-completing job 2 would
+        # race its done-callback against the active_count assertion below.
         if job.job_id == 1:
             first_running.set()
-            await gate.wait()
+        else:
+            second_running.set()
+        await gate.wait()
 
     scheduler = LeaseScheduler(store, execute, _config(max_concurrency=1), owner_id="scheduler-a")
     await scheduler.start()
@@ -159,7 +164,7 @@ async def test_waiting_jobs_do_not_consume_concurrency():
 
     # Job 1 parks on human input: its slot frees for job 2 without finishing.
     scheduler.mark_waiting(1, waiting=True)
-    await _wait_until(lambda: 2 in started)
+    await _wait_until(second_running.is_set)
     assert scheduler.active_count == 2
     assert scheduler.waiting_count == 1
 
