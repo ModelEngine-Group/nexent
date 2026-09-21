@@ -292,7 +292,7 @@ export function MineSkillsView({
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={t("skillRepository.searchPlaceholder")}
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-            style={{ borderRadius: 0 }}
+            className="rounded-xl"
             allowClear
           />
         </div>
@@ -320,7 +320,6 @@ export function MineSkillsView({
         >
           <Button
             type={tagPredicates.length > 0 ? "primary" : "default"}
-            style={{ borderRadius: 0 }}
             icon={<Tag className="size-3.5" aria-hidden />}
           >
             {t("repository.tagFilter.button")}

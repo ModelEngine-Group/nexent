@@ -116,7 +116,7 @@ test("skill grids share Agent-style adaptive dimensions and default-height contr
   assert.doesNotMatch(tagFilter, /className="h-11"/);
 });
 
-test("skill feedback keeps square search controls, exposes tags, and shows repository authors", async () => {
+test("skill feedback matches Agent search controls, exposes tags, and shows repository authors", async () => {
   const [repository, mine, card] = await Promise.all([
     readFile(repositoryView, "utf8"),
     readFile(mineView, "utf8"),
@@ -125,12 +125,15 @@ test("skill feedback keeps square search controls, exposes tags, and shows repos
 
   assert.match(
     repository,
-    /<TagFilterPopover[\s\S]*buttonStyle=\{\{ borderRadius: 0 \}\}/
+    /<TagFilterPopover[\s\S]*onChange=\{onTagPredicatesChange\}\s*\/>/
   );
-  assert.match(repository, /style=\{\{ borderRadius: 0 \}\}/);
+  assert.match(repository, /className="rounded-xl"/);
   assert.doesNotMatch(mine, /skillRepository\.mine\.createSkill/);
   assert.match(mine, /<Popover[\s\S]*repository\.tagFilter\.button/);
-  assert.match(mine, /style=\{\{ borderRadius: 0 \}\}/);
+  assert.match(mine, /className="rounded-xl"/);
   assert.match(card, /min-h-7/);
-  assert.match(card, /listing\.author\?\.trim\(\) \|\| listing\.submitted_by\?\.trim\(\)/);
+  assert.match(
+    card,
+    /listing\.author\?\.trim\(\) \|\| listing\.submitted_by\?\.trim\(\)/
+  );
 });

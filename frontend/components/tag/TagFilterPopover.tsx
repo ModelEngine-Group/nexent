@@ -1,7 +1,6 @@
 "use client";
 
 import { Button, Popover } from "antd";
-import type { CSSProperties } from "react";
 import { Tag } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -16,7 +15,6 @@ interface TagFilterPopoverProps {
   value: TagResourcePredicate[];
   onChange: (predicates: TagResourcePredicate[]) => void;
   buttonClassName?: string;
-  buttonStyle?: CSSProperties;
 }
 
 export default function TagFilterPopover({
@@ -24,7 +22,6 @@ export default function TagFilterPopover({
   value,
   onChange,
   buttonClassName,
-  buttonStyle,
 }: TagFilterPopoverProps) {
   const { t } = useTranslation("common");
 
@@ -54,7 +51,6 @@ export default function TagFilterPopover({
       <Button
         type={value.length > 0 ? "primary" : "default"}
         className={buttonClassName}
-        style={buttonStyle}
         icon={<Tag className="size-3.5" aria-hidden />}
       >
         {t("repository.tagFilter.button")}
