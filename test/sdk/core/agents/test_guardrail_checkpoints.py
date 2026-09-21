@@ -444,6 +444,45 @@ def test_valid_action_resets_consecutive_protocol_errors():
     assert agent._consecutive_protocol_errors == 0
 
 
+def test_ac_018_ac_019_reasoning_and_multiple_code_blocks_execute_as_one_action():
+    """A mainstream reasoning prefix and adjacent blocks form one logical Action."""
+    rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
+    agent = _make_step_agent(
+        rule,
+        messages=[_msg("user", "hello")],
+        model_output=(
+            "<think>Use two dependent tools.</think>\n"
+            "<code>a = tool_a()</code>\n"
+            "<code>b = tool_b(a)\nprint(b)</code>"
+        ),
+    )
+    agent._consecutive_protocol_errors = 2
+    agent._protocol_repair_messages = []
+    agent.model.supports_deferred_attempt_commit = True
+    agent.model.return_value.model_attempt_id = "accepted-mainstream-output"
+    agent.model.return_value.model_attempt_number = 1
+    agent.model.return_value.model_attempt_commit_deferred = True
+    code_output = MagicMock(output="ok", logs="", is_final_answer=False)
+    agent.python_executor.return_value = code_output
+    agent.verification_controller.config.step_verification_enabled = False
+    action_step = MagicMock()
+
+    results = list(agent._step_stream(action_step))
+
+    expected_code = "a = tool_a()\n\nb = tool_b(a)\nprint(b)"
+    agent.python_executor.assert_called_once_with(expected_code)
+    assert action_step.code_action == expected_code
+    assert len(action_step.tool_calls) == 1
+    assert action_step.tool_calls[0].arguments == expected_code
+    assert agent._consecutive_protocol_errors == 0
+    assert agent._protocol_repair_messages == []
+    agent.observer.commit_model_attempt.assert_called_once_with(
+        "accepted-mainstream-output", 1
+    )
+    agent.observer.rollback_model_attempt.assert_not_called()
+    assert len(results) == 1
+
+
 def test_step_stream_checkpoint3_except_block():
     """Checkpoint ③: a stashed refusal raises a trusted runtime final."""
     rule = GuardrailRule(

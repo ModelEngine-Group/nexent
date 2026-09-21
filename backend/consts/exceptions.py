@@ -259,7 +259,44 @@ class WorkbenchConfigVersionConflict(ValueError):
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
-    pass
+    code = ErrorCode.TENANT_RESOURCE_EXCEEDED.value
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        resource: str | None = None,
+        scope: str | None = None,
+        limit: int | None = None,
+        current_count: int | None = None,
+    ):
+        self.resource = resource
+        self.scope = scope
+        self.limit = limit
+        self.current_count = current_count
+        super().__init__(message)
+
+    def to_detail(self) -> dict:
+        """Return structured quota details for the standard API error contract."""
+        return {
+            key: value
+            for key, value in {
+                "resource": self.resource,
+                "scope": self.scope,
+                "limit": self.limit,
+                "current_count": self.current_count,
+            }.items()
+            if value is not None
+        }
+
+
+def tenant_resource_limit_error_payload(error: TenantResourceLimitError) -> dict:
+    """Build the standard API error payload for a tenant resource limit."""
+    return {
+        "code": ErrorCode.TENANT_RESOURCE_EXCEEDED.value,
+        "message": str(error),
+        "details": error.to_detail(),
+    }
 
 
 class NotFoundException(Exception):

@@ -52,6 +52,8 @@ test = [
     "pytest",
     "pytest-cov",
     "coverage",
+    "jsonschema>=4.25.0",
+    "openpyxl>=3.1.5",
     "langfuse==2.60.10",
     "unittest2",
     "mock",
