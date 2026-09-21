@@ -11,6 +11,7 @@ import {
   Check,
   PackageOpen,
   Search,
+  Settings2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +20,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -37,6 +39,12 @@ import { MODEL_TYPES } from "@/const/modelConfig";
 import { modelService, ModelError } from "@/services/modelService";
 import { ModelType } from "@/types/modelConfig";
 import log from "@/lib/logger";
+
+import {
+  ModelAdvancedSettings,
+  ModelAdvancedSettingsValue,
+  buildInferenceParamsPayload,
+} from "./ModelAdvancedSettings";
 
 /**
  * v2.6.1 redesign (v0 design): the add-model dialog.
@@ -507,6 +515,15 @@ interface FetchedRow {
   model_type: ModelType;
 }
 
+/** Per-row capacity + inference-param overrides for batch add. */
+interface RowOverride {
+  contextWindowTokens?: string;
+  maxInputTokens?: string;
+  maxOutputTokens?: string;
+  defaultOutputReserveTokens?: string;
+  inference?: ModelAdvancedSettingsValue;
+}
+
 function BatchAddForm({
   onDone,
   onSuccess,
@@ -528,6 +545,12 @@ function BatchAddForm({
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Per-row advanced overrides (capacity + inference params), keyed by model id.
+  const [rowOverrides, setRowOverrides] = useState<Record<string, RowOverride>>(
+    {}
+  );
+  const [settingsRowId, setSettingsRowId] = useState<string | null>(null);
 
   // Default to the first preset once loaded.
   useEffect(() => {
@@ -626,8 +649,9 @@ function BatchAddForm({
     let created = 0;
     const failed: string[] = [];
     for (const row of rows) {
+      const override = rowOverrides[row.id];
       try {
-        await createModel(tenantId, {
+        const params: Record<string, any> = {
           name: row.model_name,
           type: row.model_type,
           url: baseUrl.trim(),
@@ -635,7 +659,26 @@ function BatchAddForm({
           displayName: defaultDisplayName(row.model_name),
           maxTokens: row.model_type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
           modelFactory: provider,
-        });
+        };
+        if (override) {
+          if (override.contextWindowTokens)
+            params.contextWindowTokens = Number(override.contextWindowTokens);
+          if (override.maxInputTokens)
+            params.maxInputTokens = Number(override.maxInputTokens);
+          if (override.maxOutputTokens)
+            params.maxOutputTokens = Number(override.maxOutputTokens);
+          if (override.defaultOutputReserveTokens)
+            params.defaultOutputReserveTokens = Number(
+              override.defaultOutputReserveTokens
+            );
+          if (override.inference) {
+            Object.assign(
+              params,
+              buildInferenceParamsPayload(override.inference)
+            );
+          }
+        }
+        await createModel(tenantId, params);
         created++;
       } catch (error: any) {
         failed.push(row.model_name);
@@ -814,15 +857,31 @@ function BatchAddForm({
                           {row.model_name}
                         </span>
                       </span>
-                      <Badge
-                        variant="secondary"
-                        className={cn(
-                          "shrink-0 border-0 text-xs font-normal",
-                          TYPE_BADGE_CLASS[row.model_type]
+                      <span className="flex shrink-0 items-center gap-2">
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            "border-0 text-xs font-normal",
+                            TYPE_BADGE_CLASS[row.model_type]
+                          )}
+                        >
+                          {typeLabel(row.model_type, t)}
+                        </Badge>
+                        {rowOverrides[row.id] && (
+                          <span className="size-1.5 rounded-full bg-primary" />
                         )}
-                      >
-                        {typeLabel(row.model_type, t)}
-                      </Badge>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSettingsRowId(row.id);
+                          }}
+                        >
+                          <Settings2 className="size-3.5" />
+                        </Button>
+                      </span>
                     </button>
                   </li>
                 );
@@ -868,6 +927,134 @@ function BatchAddForm({
           </Button>
         </div>
       </div>
+
+      {/* Per-row advanced settings */}
+      <RowSettingsDialog
+        row={fetched.find((r) => r.id === settingsRowId) ?? null}
+        override={settingsRowId ? rowOverrides[settingsRowId] : undefined}
+        onSave={(next) => {
+          if (settingsRowId) {
+            setRowOverrides((prev) => ({
+              ...prev,
+              [settingsRowId]: next,
+            }));
+          }
+          setSettingsRowId(null);
+        }}
+        onClose={() => setSettingsRowId(null)}
+      />
     </div>
+  );
+}
+
+/* ------------------------ per-row advanced settings ------------------------ */
+
+function RowSettingsDialog({
+  row,
+  override,
+  onSave,
+  onClose,
+}: {
+  row: FetchedRow | null;
+  override?: RowOverride;
+  onSave: (next: RowOverride) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [capacity, setCapacity] = useState({
+    contextWindowTokens: override?.contextWindowTokens ?? "",
+    maxInputTokens: override?.maxInputTokens ?? "",
+    maxOutputTokens: override?.maxOutputTokens ?? "",
+    defaultOutputReserveTokens: override?.defaultOutputReserveTokens ?? "",
+  });
+  const [inference, setInference] = useState<ModelAdvancedSettingsValue>(
+    override?.inference ?? {}
+  );
+
+  if (!row) return null;
+
+  const capacityFields: { key: keyof typeof capacity; label: string }[] = [
+    { key: "contextWindowTokens", label: "上下文窗口" },
+    { key: "maxInputTokens", label: "最大输入Token数" },
+    { key: "maxOutputTokens", label: "最大输出Token数" },
+    { key: "defaultOutputReserveTokens", label: "输出预留Token数" },
+  ];
+
+  function handleSave() {
+    onSave({
+      ...capacity,
+      inference: Object.keys(inference).length > 0 ? inference : undefined,
+    });
+  }
+
+  return (
+    <Dialog open={!!row} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="flex max-h-[80vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="border-b px-6 py-4">
+          <DialogTitle className="text-sm font-mono">
+            {row.model_name}
+          </DialogTitle>
+          <DialogDescription>
+            {t("modelConfig.addDialog.rowSettingsDesc", {
+              defaultValue: "容量与推理参数（留空使用默认值）",
+            })}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {/* Capacity */}
+          <div className="space-y-3">
+            <Label className="text-sm font-medium">
+              {t("modelConfig.addDialog.capacitySection", {
+                defaultValue: "容量配置",
+              })}
+            </Label>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              {capacityFields.map((f) => (
+                <div key={f.key} className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    {t(`modelConfig.addDialog.${f.key}`, {
+                      defaultValue: f.label,
+                    })}
+                  </Label>
+                  <Input
+                    type="number"
+                    value={capacity[f.key]}
+                    onChange={(e) =>
+                      setCapacity((c) => ({ ...c, [f.key]: e.target.value }))
+                    }
+                    placeholder="留空使用默认"
+                    className="h-8"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Inference params */}
+          <div className="space-y-3">
+            <Label className="text-sm font-medium">
+              {t("modelConfig.addDialog.inferenceSection", {
+                defaultValue: "推理参数",
+              })}
+            </Label>
+            <ModelAdvancedSettings
+              modelType={row.model_type}
+              specs={{ [row.model_type]: [] }}
+              value={inference}
+              onChange={(next) => setInference(next)}
+              mode="override"
+            />
+          </div>
+        </div>
+        <DialogFooter className="border-t px-6 py-4">
+          <Button variant="outline" onClick={onClose}>
+            {t("common.cancel", { defaultValue: "取消" })}
+          </Button>
+          <Button onClick={handleSave}>
+            {t("common.save", { defaultValue: "保存" })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
