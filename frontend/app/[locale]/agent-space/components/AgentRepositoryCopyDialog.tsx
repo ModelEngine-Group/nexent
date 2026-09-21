@@ -498,7 +498,7 @@ export function AgentRepositoryCopyDialog({
                         <Radio value="create_new">
                           创建新的知识库
                           <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
-                            （新名称：{item.name} 副本）
+                            新名称：{item.name} 副本
                           </span>
                         </Radio>
                       </Space>
