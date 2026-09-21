@@ -9,8 +9,6 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - DELETE /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}     (delete)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Upload  (upload docs)
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles         (list docs)
-  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Remove  (remove docs)
-  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Download (download doc)
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Channels               (ingestion channels)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/History (all-status file history)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
@@ -36,18 +34,16 @@ rebuilds the seed data. Run with:
 import argparse
 import json
 import logging
-import mimetypes
 import os
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
-from urllib.parse import quote
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse
 
 logger = logging.getLogger("aidp_mgmt_mock")
 logging.basicConfig(
@@ -151,16 +147,14 @@ def _seed_initial_data() -> None:
     # Seed some documents for the FAQ KB so list_docs is non-empty by default.
     _DOCUMENTS_BY_KB["aidp-kb-faq"] = [
         {
-            "file_uuid": "00000000-0000-4000-8000-000000000001",
-            "file_ino_no": 1001,
+            "file_ino_no": "file-faq-001",
             "file_name": "常见问题汇总.txt",
             "file_size": 2048,
             "file_type": "txt",
             "create_time": 1718000400,
         },
         {
-            "file_uuid": "00000000-0000-4000-8000-000000000002",
-            "file_ino_no": 1002,
+            "file_ino_no": "file-faq-002",
             "file_name": "troubleshooting.md",
             "file_size": 4096,
             "file_type": "md",
@@ -227,55 +221,7 @@ def _load_state() -> None:
     )
 
 
-def _ensure_document_uuids() -> None:
-    """Backfill stable UUIDs for state created before UUID support existed."""
-    for kds_id, documents in _DOCUMENTS_BY_KB.items():
-        if not isinstance(documents, list):
-            continue
-        for document in documents:
-            if not isinstance(document, dict) or document.get("file_uuid"):
-                continue
-            file_ino_no = str(document.get("file_ino_no") or uuid.uuid4())
-            document["file_uuid"] = str(
-                uuid.uuid5(uuid.NAMESPACE_URL, f"mock-aidp:{kds_id}:{file_ino_no}")
-            )
-
-
 _load_state()
-_ensure_document_uuids()
-_save_state()
-
-
-def _public_document(document: Dict[str, Any]) -> Dict[str, Any]:
-    """Return document metadata without any mock-only private fields."""
-    return {key: value for key, value in document.items() if not key.startswith("_")}
-
-
-def _find_document(kds_id: str, file_uuid: str) -> Optional[Dict[str, Any]]:
-    return next(
-        (
-            document
-            for document in _DOCUMENTS_BY_KB.get(kds_id, [])
-            if document.get("file_uuid") == file_uuid
-        ),
-        None,
-    )
-
-
-def _document_content(document: Dict[str, Any]) -> bytes:
-    """Build deterministic mock content for a document download."""
-    return (
-        f"Mock AIDP content for {document.get('file_name', 'download')}\n"
-    ).encode("utf-8")
-
-
-def _content_disposition(filename: str) -> str:
-    """Build a standard ASCII fallback plus RFC 5987 UTF-8 filename header."""
-    ascii_name = "".join(
-        char if 32 <= ord(char) < 127 and char not in {'"', "\\"} else "_"
-        for char in filename
-    )
-    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
 
 
 # =============================================================================
@@ -372,14 +318,6 @@ class FusionSearchRequest(BaseModel):
     top_k: int = Field(10, ge=1, le=100)
     multi_modal: bool = False
     metadata_condition: Optional[MetadataCondition] = None
-
-
-class RemoveFilesBody(BaseModel):
-    file_uuids: List[uuid.UUID] = Field(..., min_length=1)
-
-
-class DownloadFileBody(BaseModel):
-    file_uuid: uuid.UUID = Field(...)
 
 
 # =============================================================================
@@ -711,16 +649,8 @@ async def upload_documents(
     for f in files:
         try:
             content = await f.read()
-            file_ino_no = max(
-                (
-                    document["file_ino_no"]
-                    for document in _DOCUMENTS_BY_KB.get(kds_id, [])
-                    if isinstance(document.get("file_ino_no"), int)
-                ),
-                default=0,
-            ) + 1
+            file_ino_no = f"file-{uuid.uuid4().hex[:12]}"
             doc = {
-                "file_uuid": str(uuid.uuid4()),
                 "file_ino_no": file_ino_no,
                 "file_name": f.filename or "unknown",
                 "file_size": len(content),
@@ -756,7 +686,6 @@ async def upload_documents(
                 "file_type": doc["file_type"],
                 "file_size": doc["file_size"],
                 "file_ino_no": doc["file_ino_no"],
-                "file_uuid": doc["file_uuid"],
                 "first_upload_time": doc["create_time"],
             }
             for doc in success_docs
@@ -789,7 +718,7 @@ def list_documents(
     ]
     start = (page - 1) * page_size
     end = start + page_size
-    items = [_public_document(doc) for doc in all_docs[start:end]]
+    items = all_docs[start:end]
 
     # Real AIDP returns `next_link` as the authoritative "more pages exist"
     # signal. When there are no more docs, next_link is simply absent.
@@ -804,89 +733,6 @@ def list_documents(
         "total_count": len(items),
         "next_link": next_link,
     })
-
-
-@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Remove")
-def remove_documents(
-    kds_id: str,
-    body: RemoveFilesBody,
-    authorization: Optional[str] = Header(default=None),
-) -> JSONResponse:
-    """Remove documents by file UUID and return per-file success/failure lists."""
-    _check_auth(authorization)
-
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-
-    documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
-    remaining = list(documents)
-    success_list: List[Dict[str, str]] = []
-    failed_list: List[Dict[str, str]] = []
-    for raw_file_uuid in body.file_uuids:
-        file_uuid = str(raw_file_uuid)
-        matched = next(
-            (document for document in remaining if document.get("file_uuid") == file_uuid),
-            None,
-        )
-        if matched is None:
-            failed_list.append({"file_uuid": file_uuid})
-            continue
-        remaining.remove(matched)
-        success_list.append({"file_uuid": file_uuid})
-
-    _DOCUMENTS_BY_KB[kds_id] = remaining
-    _save_state()
-    logger.info(
-        "REMOVE DOCS  kds_id=%s total=%d success=%d failed=%d",
-        kds_id,
-        len(body.file_uuids),
-        len(success_list),
-        len(failed_list),
-    )
-    return JSONResponse(content={
-        "summary": {
-            "total": len(body.file_uuids),
-            "success": len(success_list),
-            "failed": len(failed_list),
-        },
-        "success_list": success_list,
-        "failed_list": failed_list,
-    })
-
-
-@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Download")
-def download_document(
-    kds_id: str,
-    body: DownloadFileBody,
-    authorization: Optional[str] = Header(default=None),
-) -> StreamingResponse:
-    """Return deterministic binary content for a document download."""
-    _check_auth(authorization)
-
-    if kds_id not in _KNOWLEDGE_BASES:
-        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-
-    file_uuid = str(body.file_uuid)
-    document = _find_document(kds_id, file_uuid)
-    if document is None:
-        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
-
-    filename = str(document.get("file_name") or "download")
-    content = _document_content(document)
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    response_headers = {
-        "Content-Disposition": _content_disposition(filename),
-        "X-File-Size": str(len(content)),
-    }
-    async def content_stream():
-        for offset in range(0, len(content), 8 * 1024):
-            yield content[offset : offset + 8 * 1024]
-
-    return StreamingResponse(
-        content_stream(),
-        media_type=content_type,
-        headers=response_headers,
-    )
 
 
 # =============================================================================

@@ -9,6 +9,7 @@ import { InfoCircleFilled } from "@ant-design/icons";
 import {
   SETUP_PAGE_CONTAINER,
   TWO_COLUMN_LAYOUT,
+  STANDARD_CARD,
 } from "@/const/layoutConstants";
 import { KB_SEARCH_DEBOUNCE_MS } from "@/const/knowledgeBase";
 import {
@@ -45,10 +46,8 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   // which may not contain the currently active KB. `selectedKb` is the item
   // itself — set on selection, kept stable across list refetches.
   const [activeKbId, setActiveKbId] = useState<string | null>(null);
-  const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(
-    null
-  );
-  const [, setActiveKbDetail] = useState<AidpKbDetail | null>(null);
+  const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(null);
+  const [activeKbDetail, setActiveKbDetail] = useState<AidpKbDetail | null>(null);
   const [documents, setDocuments] = useState<AidpDocumentItem[]>([]);
   const [totalDocs, setTotalDocs] = useState(0);
   const [docHasMore, setDocHasMore] = useState(false);
@@ -67,9 +66,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   // ---- Modal state ----
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
-  const [editingKb, setEditingKb] = useState<AidpKnowledgeBaseItem | null>(
-    null
-  );
+  const [editingKb, setEditingKb] = useState<AidpKnowledgeBaseItem | null>(null);
 
   // ---- Keyword search state ----
   // `kbKeyword` is the raw input value and keeps the text field responsive;
@@ -93,7 +90,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         const result = await aidpKnowledgeService.listKbs(
           page,
           KB_PAGE_SIZE,
-          keyword
+          keyword,
         );
         setKbs(result.value);
         setKbTotal(result.total_count ?? result.value.length);
@@ -151,7 +148,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         const result = await aidpKnowledgeService.listDocs(
           kbId,
           page,
-          DOC_PAGE_SIZE
+          DOC_PAGE_SIZE,
         );
         const count = result.total_count ?? result.value.length;
         setDocuments(result.value);
@@ -296,7 +293,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
 
             // Refresh list, keeping the active search filter applied
             fetchKbs(kbPage, debouncedKbKeyword);
-          } catch {
+          } catch (error) {
             appMessage.error(t("aidpKnowledge.deleteKbFailed"));
           }
         },
@@ -424,17 +421,18 @@ const AidpKnowledgeConfiguration: React.FC = () => {
 
   return (
     <div
-      className="relative mx-auto flex h-full w-full flex-col bg-white"
+      className="w-full h-full mx-auto relative flex flex-col"
       style={{
         maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
         padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
       }}
     >
-      <div className="min-h-0 w-full flex-1 overflow-hidden pt-4">
-        <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
+      {/* Two-column layout — content-sized cards with a single
+          scroll container; no card stretches to viewport height. */}
+      <div className="flex-1 min-h-0 w-full mt-4 overflow-y-auto">
+        <Row className="w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
           {/* Left column: KB list */}
           <Col
-            className="h-full min-h-0"
             xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
             md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
             lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
@@ -463,7 +461,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
 
           {/* Right column: Document list or empty state */}
           <Col
-            className="h-full min-h-0"
             xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
             md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
             lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
@@ -490,17 +487,24 @@ const AidpKnowledgeConfiguration: React.FC = () => {
                 onRefresh={handleRefreshDocs}
               />
             ) : (
-              <div className="flex h-full min-h-[280px] w-full items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm">
-                <div className="px-6 text-center">
-                  <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
-                    <InfoCircleFilled style={{ fontSize: 24 }} />
+              <div
+                className={`${STANDARD_CARD.BASE_CLASSES} w-full`}
+                style={{ padding: STANDARD_CARD.PADDING }}
+              >
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="text-gray-400 mb-2">
+                      <InfoCircleFilled
+                        style={{ fontSize: 36, color: "#1677ff" }}
+                      />
+                    </div>
+                    <h3 className="text-base font-medium text-gray-700 mb-1">
+                      {t("aidpKnowledge.selectKbTitle")}
+                    </h3>
+                    <p className="text-gray-500 max-w-md text-xs">
+                      {t("aidpKnowledge.selectKbHint")}
+                    </p>
                   </div>
-                  <h3 className="mb-1 text-base font-semibold text-gray-800">
-                    {t("aidpKnowledge.selectKbTitle")}
-                  </h3>
-                  <p className="mx-auto max-w-md text-sm text-gray-500">
-                    {t("aidpKnowledge.selectKbHint")}
-                  </p>
                 </div>
               </div>
             )}
