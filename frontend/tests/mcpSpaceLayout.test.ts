@@ -7,6 +7,18 @@ const agentPage = new URL(
   "../app/[locale]/agent-space/page.tsx",
   import.meta.url
 );
+const mcpSpacePath = new URL(
+  "../app/[locale]/mcp-space/agent-space.tsx",
+  import.meta.url
+);
+const myMcpPath = new URL(
+  "../app/[locale]/mcp-space/my-mcp.tsx",
+  import.meta.url
+);
+const mineMcpCardPath = new URL(
+  "../app/[locale]/mcp-space/components/MineMcpServiceCard.tsx",
+  import.meta.url
+);
 
 test("MCP space delegates each tab to a separate component", async () => {
   const page = await readFile(new URL("page.tsx", route), "utf8");
@@ -15,7 +27,7 @@ test("MCP space delegates each tab to a separate component", async () => {
     assert.doesNotMatch(page, new RegExp(`function ${component}\\b`));
   }
   const files = await readdir(route);
-  for (const name of ["space.tsx", "my-mcp.tsx", "review-center.tsx"]) {
+  for (const name of ["agent-space.tsx", "my-mcp.tsx", "review-center.tsx"]) {
     assert.ok(files.includes(name), `${name} is a separate tab component`);
   }
   for (const name of [
@@ -45,4 +57,52 @@ test("MCP space matches agent space horizontal spacing and tabs", async () => {
   assert.match(page, tabs);
   assert.doesNotMatch(page, /max-w-6xl/);
   assert.match(page, /data-\[state=active\]:border-primary/);
+});
+
+test("MCP repository grid uses the agent repository responsive capacity", async () => {
+  const page = await readFile(mcpSpacePath, "utf8");
+
+  assert.match(page, /Grid\.useBreakpoint\(\)/);
+  assert.match(page, /const pageSize = columns \* rows;/);
+  assert.match(page, /onPageSizeChange\(pageSize\)/);
+  assert.match(page, /const gridHeight =/);
+  assert.match(
+    page,
+    /<ResourceCardGrid[\s\S]*columns=\{columns\}[\s\S]*rows=\{rows\}[\s\S]*gridHeight=\{gridHeight\}/
+  );
+  assert.match(page, /useMcpCommunityBrowser\([\s\S]*repositoryPageSize/);
+  assert.match(page, /onPageSizeChange: setRepositoryPageSize/);
+});
+
+test("my MCP grid uses the agent repository responsive capacity", async () => {
+  const page = await readFile(myMcpPath, "utf8");
+
+  assert.match(page, /Grid\.useBreakpoint\(\)/);
+  assert.match(page, /const pageSize = columns \* rows;/);
+  assert.match(page, /const firstPageSize = pageSize - 1;/);
+  assert.match(page, /const gridHeight =/);
+  assert.match(
+    page,
+    /<ResponsiveCardGrid[\s\S]*columns=\{columns\}[\s\S]*rows=\{rows\}[\s\S]*gridHeight=\{gridHeight\}/
+  );
+});
+
+test("my MCP cards open on click and retain only the enabled action", async () => {
+  const [page, card] = await Promise.all([
+    readFile(myMcpPath, "utf8"),
+    readFile(mineMcpCardPath, "utf8"),
+  ]);
+
+  assert.match(card, /<ResourceCard[\s\S]*onClick=\{handleEdit\}/);
+  assert.match(card, /footerLayout="inline"/);
+  assert.match(card, /meta=\{[\s\S]*createDate/);
+  assert.match(card, /headerActions=\{/);
+  assert.match(card, /flex items-start gap-1/);
+  assert.match(
+    card,
+    /className="h-8 px-3 text-xs font-medium text-primary !shadow-none hover:!bg-transparent hover:!text-primary\/80"/
+  );
+  assert.doesNotMatch(card, /Edit3|Share2|mcpTools\.mine\.onHub/);
+  assert.match(page, /searchActions=\{/);
+  assert.doesNotMatch(page, /filterActions=\{/);
 });

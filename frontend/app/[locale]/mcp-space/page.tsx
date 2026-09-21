@@ -7,7 +7,7 @@ import { Inbox, Puzzle, ShieldCheck, User } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { McpToolsServicesTab } from "@/const/mcpTools";
-import { McpSpace, useMcpSpaceController } from "./space";
+import { McpSpace, useMcpSpaceController } from "./agent-space";
 import { MyMcp } from "./my-mcp";
 import { ReviewCenter } from "./review-center";
 

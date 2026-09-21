@@ -495,7 +495,7 @@ export function MyAgent({ active }: { active: boolean }) {
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t("agentRepository.mine.searchPlaceholder")}
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-            className="h-10 rounded-xl"
+            className="rounded-xl"
             allowClear
           />
         </div>

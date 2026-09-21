@@ -1,8 +1,8 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { App, Button, Popover, Spin } from "antd";
+import { App, Button, Grid, Popover, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Tag } from "lucide-react";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
@@ -43,8 +43,11 @@ import MineMcpServiceCard, {
 import MineApplyListingModal from "./components/MineApplyListingModal";
 import MineMcpReviewStatusModal from "./components/MineMcpReviewStatusModal";
 import { getDeploymentTypeLabelKey } from "@/lib/mcpTools";
+import type { CSSProperties } from "react";
 
-const MINE_PAGE_SIZE = 6;
+const CARD_GAP = 20;
+const MIN_CARD_HEIGHT = 240;
+const PAGINATION_HEIGHT = 60;
 
 export function MyMcp({
   localList,
@@ -103,6 +106,50 @@ export function MyMcp({
     onlineService?: CommunityMcpCard;
   } | null>(null);
   const deepLinkHandledRef = useRef<string | null>(null);
+  const screens = Grid.useBreakpoint();
+  const gridRegionRef = useRef<HTMLDivElement>(null);
+  const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
+    null
+  );
+  const columns = screens.xxl
+    ? 4
+    : screens.xl
+      ? 3
+      : screens.lg || screens.md || screens.sm
+        ? 2
+        : screens.xs
+          ? 1
+          : 4;
+  const pageBottomPadding = screens.sm ? 40 : 32;
+  const rows = getRowCount(
+    Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
+  );
+  const pageSize = columns * rows;
+  const measureGridHeight = useCallback(() => {
+    if (!gridRegionRef.current) return;
+
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const { top } = gridRegionRef.current.getBoundingClientRect();
+    setAvailableGridHeight(
+      Math.max(0, Math.floor(viewportHeight - top - pageBottomPadding - 8))
+    );
+  }, [pageBottomPadding]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(measureGridHeight);
+    const observer = new ResizeObserver(measureGridHeight);
+    const visualViewport = window.visualViewport;
+    if (gridRegionRef.current) observer.observe(gridRegionRef.current);
+    window.addEventListener("resize", measureGridHeight);
+    visualViewport?.addEventListener("resize", measureGridHeight);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", measureGridHeight);
+      visualViewport?.removeEventListener("resize", measureGridHeight);
+    };
+  }, [measureGridHeight]);
 
   const items = useMemo<MineMcpCardItem[]>(() => {
     return getDeduplicatedMineItems(localList.services, myPublished.items);
@@ -300,16 +347,31 @@ export function MyMcp({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [search, tag, deploymentType, tagPredicates]);
 
-  const firstPageSize = MINE_PAGE_SIZE - 1;
+  const firstPageSize = pageSize - 1;
+  const remainingItems = Math.max(0, filteredItems.length - firstPageSize);
+  const totalPages = 1 + Math.ceil(remainingItems / pageSize);
+  const gridHeight =
+    availableGridHeight === null
+      ? undefined
+      : Math.max(
+          0,
+          availableGridHeight - (totalPages > 1 ? PAGINATION_HEIGHT : 0)
+        );
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- Resize can reduce the number of available cards per page. */
+    if (page > totalPages) setPage(totalPages);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [page, totalPages]);
 
   const pagedItems = useMemo(() => {
     if (filteredItems.length === 0) return [];
     if (page === 1) {
       return filteredItems.slice(0, firstPageSize);
     }
-    const start = firstPageSize + (page - 2) * MINE_PAGE_SIZE;
-    return filteredItems.slice(start, start + MINE_PAGE_SIZE);
-  }, [filteredItems, page, firstPageSize]);
+    const start = firstPageSize + (page - 2) * pageSize;
+    return filteredItems.slice(start, start + pageSize);
+  }, [filteredItems, page, firstPageSize, pageSize]);
 
   const loading = localList.loading || myPublished.loading;
 
@@ -572,7 +634,7 @@ export function MyMcp({
         deploymentType={deploymentType}
         categoryStats={categoryStats}
         actions={actions}
-        filterActions={
+        searchActions={
           <Popover
             trigger="click"
             placement="bottomRight"
@@ -608,101 +670,101 @@ export function MyMcp({
         onDeploymentTypeChange={setDeploymentType}
       />
 
-      <p className="text-sm text-slate-500">{t("mcpTools.mine.publishHint")}</p>
+      <div ref={gridRegionRef} className="min-h-0">
+        {loading ? (
+          <PlaceholderBox>
+            <Spin />
+          </PlaceholderBox>
+        ) : filteredItems.length === 0 ? (
+          <ResponsiveCardGrid
+            columns={columns}
+            rows={rows}
+            gridHeight={gridHeight}
+          >
+            <AddMcpServiceCard onClick={onAdd} />
+          </ResponsiveCardGrid>
+        ) : (
+          <ResponsiveCardGrid
+            columns={columns}
+            rows={rows}
+            gridHeight={gridHeight}
+          >
+            {page === 1 ? <AddMcpServiceCard onClick={onAdd} /> : null}
+            {pagedItems.map((item) => {
+              const key = getMineItemKey(item);
+              const onlineService =
+                item.kind === "local"
+                  ? resolveOnlineService(
+                      item.service,
+                      onlineServiceByCommunityId,
+                      onlineServiceBySourceMcpId
+                    )
+                  : item.service;
+              return (
+                <MineMcpServiceCard
+                  key={key}
+                  item={item}
+                  onlineService={onlineService}
+                  toggling={
+                    item.kind === "local"
+                      ? toggle.isToggling(item.service.mcpId)
+                      : false
+                  }
+                  publishing={publishingKey === key}
+                  unpublishing={unpublishingKey === key}
+                  onEditLocal={onEditLocal}
+                  onEditCommunity={onEditCommunity}
+                  onToggle={handleToggle}
+                  onSubmitVersionUpdate={handleSubmitVersionUpdate}
+                  onUnpublishOnline={handleUnpublishOnline}
+                  onDelete={handleDelete}
+                  onViewReviewProgress={(item, os) =>
+                    setReviewProgressItem({ item, onlineService: os })
+                  }
+                  onHealthCheck={handleHealthCheck}
+                  healthChecking={refreshingMineKey === getMineItemKey(item)}
+                />
+              );
+            })}
+          </ResponsiveCardGrid>
+        )}
+      </div>
 
-      {loading ? (
-        <PlaceholderBox>
-          <Spin />
-        </PlaceholderBox>
-      ) : filteredItems.length === 0 ? (
-        <ResponsiveCardGrid>
-          <AddMcpServiceCard onClick={onAdd} />
-        </ResponsiveCardGrid>
-      ) : (
-        <ResponsiveCardGrid>
-          {page === 1 ? <AddMcpServiceCard onClick={onAdd} /> : null}
-          {pagedItems.map((item) => {
-            const key = getMineItemKey(item);
-            const onlineService =
-              item.kind === "local"
-                ? resolveOnlineService(
-                    item.service,
-                    onlineServiceByCommunityId,
-                    onlineServiceBySourceMcpId
-                  )
-                : item.service;
-            return (
-              <MineMcpServiceCard
-                key={key}
-                item={item}
-                onlineService={onlineService}
-                toggling={
-                  item.kind === "local"
-                    ? toggle.isToggling(item.service.mcpId)
-                    : false
-                }
-                publishing={publishingKey === key}
-                unpublishing={unpublishingKey === key}
-                onEditLocal={onEditLocal}
-                onEditCommunity={onEditCommunity}
-                onToggle={handleToggle}
-                onSubmitVersionUpdate={handleSubmitVersionUpdate}
-                onUnpublishOnline={handleUnpublishOnline}
-                onDelete={handleDelete}
-                onViewReviewProgress={(item, os) =>
-                  setReviewProgressItem({ item, onlineService: os })
-                }
-                onHealthCheck={handleHealthCheck}
-                healthChecking={refreshingMineKey === getMineItemKey(item)}
-              />
-            );
-          })}
-        </ResponsiveCardGrid>
-      )}
-
-      {(() => {
-        const remainingItems = Math.max(
-          0,
-          filteredItems.length - firstPageSize
-        );
-        const totalPages = 1 + Math.ceil(remainingItems / MINE_PAGE_SIZE);
-        if (totalPages <= 1) return null;
-        return (
-          <div className="flex items-center justify-center gap-1.5 pt-4">
-            <Button
-              type="default"
-              className="flex size-9 items-center justify-center rounded-lg p-0"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-              aria-label="Previous page"
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-              (pageNumber) => (
-                <Button
-                  key={pageNumber}
-                  type={pageNumber === page ? "primary" : "default"}
-                  className="flex size-9 items-center justify-center rounded-lg p-0"
-                  onClick={() => setPage(pageNumber)}
-                  aria-current={pageNumber === page ? "page" : undefined}
-                >
-                  {pageNumber}
-                </Button>
-              )
-            )}
-            <Button
-              type="default"
-              className="flex size-9 items-center justify-center rounded-lg p-0"
-              disabled={page >= totalPages}
-              onClick={() => setPage(page + 1)}
-              aria-label="Next page"
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-        );
-      })()}
+      {totalPages > 1 ? (
+        <div className="flex items-center justify-center gap-1.5 pt-4">
+          <Button
+            type="default"
+            className="flex size-9 items-center justify-center rounded-lg p-0"
+            disabled={page <= 1}
+            onClick={() => setPage(page - 1)}
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+            (pageNumber) => (
+              <Button
+                key={pageNumber}
+                type={pageNumber === page ? "primary" : "default"}
+                className="flex size-9 items-center justify-center rounded-lg p-0"
+                onClick={() => setPage(pageNumber)}
+                aria-current={pageNumber === page ? "page" : undefined}
+              >
+                {pageNumber}
+              </Button>
+            )
+          )}
+          <Button
+            type="default"
+            className="flex size-9 items-center justify-center rounded-lg p-0"
+            disabled={page >= totalPages}
+            onClick={() => setPage(page + 1)}
+            aria-label="Next page"
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
+      ) : null}
 
       <MineMcpReviewStatusModal
         open={Boolean(reviewProgressItem)}
@@ -856,13 +918,43 @@ export function resolveOnlineService(
 
 export function ResponsiveCardGrid({
   children,
+  columns,
+  rows,
+  gridHeight,
 }: {
   children: React.ReactNode;
+  columns: number;
+  rows: number;
+  gridHeight?: number;
 }) {
   return (
-    <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div
+      className={`grid grid-cols-1 items-stretch gap-5 min-[576px]:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))] ${
+        gridHeight !== undefined
+          ? "grid-rows-[repeat(var(--resource-card-rows),minmax(0,1fr))]"
+          : ""
+      }`}
+      style={
+        {
+          "--resource-card-columns": columns,
+          "--resource-card-rows": rows,
+          ...(gridHeight !== undefined ? { height: `${gridHeight}px` } : {}),
+        } as CSSProperties
+      }
+    >
       {children}
     </div>
+  );
+}
+
+function getRowCount(availableHeight: number) {
+  if (availableHeight <= 0) return 3;
+  return Math.min(
+    3,
+    Math.max(
+      1,
+      Math.floor((availableHeight + CARD_GAP) / (MIN_CARD_HEIGHT + CARD_GAP))
+    )
   );
 }
 

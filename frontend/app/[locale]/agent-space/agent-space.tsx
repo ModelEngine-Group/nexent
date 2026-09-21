@@ -338,9 +338,6 @@ export function AgentSpace({ active }: { active: boolean }) {
           onChange={onTagPredicatesChange}
         />
       </div>
-      <p className="text-sm text-slate-500 dark:text-slate-400">
-        {t("agentRepository.page.repositoryHint")}
-      </p>
       <div ref={gridRegionRef} className="min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
