@@ -327,6 +327,7 @@ function SingleAddForm({
   const { message } = App.useApp();
   const presets = useProviderPresets(true);
   const typeOptions = useTypeOptions();
+  const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
 
   const [provider, setProvider] = useState<string>(CUSTOM_PROVIDER_KEY);
   const [type, setType] = useState<ModelType>(MODEL_TYPES.LLM as ModelType);
@@ -335,6 +336,8 @@ function SingleAddForm({
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [override, setOverride] = useState<RowOverride | undefined>(undefined);
+  const [showSettings, setShowSettings] = useState(false);
 
   function changeProvider(next: string) {
     setProvider(next);
@@ -352,7 +355,7 @@ function SingleAddForm({
     if (!canSubmit || submitting) return;
     setSubmitting(true);
     try {
-      await createModel(tenantId, {
+      const params: Record<string, any> = {
         name: name.trim(),
         type,
         url: baseUrl.trim(),
@@ -360,7 +363,11 @@ function SingleAddForm({
         displayName: displayName.trim() || name.trim(),
         maxTokens: type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
         modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
-      });
+      };
+      if (override?.settings) {
+        Object.assign(params, buildInferenceParamsPayload(override.settings));
+      }
+      await createModel(tenantId, params);
       onSuccess({ name: name.trim(), type });
       onDone();
     } catch (error: any) {
@@ -497,15 +504,49 @@ function SingleAddForm({
           </div>
         </div>
       </div>
-      <div className="flex justify-end gap-2 border-t px-6 py-4">
-        <Button variant="outline" onClick={onDone}>
-          {t("common.cancel", { defaultValue: "取消" })}
+      <div className="flex items-center justify-between border-t px-6 py-4">
+        <Button
+          variant="outline"
+          onClick={() => setShowSettings(true)}
+          className="gap-2"
+        >
+          <Settings2 className="size-4" />
+          {t("modelConfig.addDialog.advancedSettings", {
+            defaultValue: "高级设置",
+          })}
+          {override?.settings && (
+            <span className="size-1.5 rounded-full bg-primary" />
+          )}
         </Button>
-        <Button disabled={!canSubmit || submitting} onClick={submit}>
-          {submitting && <Loader2 className="size-4 animate-spin" />}
-          {t("modelConfig.addDialog.submit", { defaultValue: "添加模型" })}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onDone}>
+            {t("common.cancel", { defaultValue: "取消" })}
+          </Button>
+          <Button disabled={!canSubmit || submitting} onClick={submit}>
+            {submitting && <Loader2 className="size-4 animate-spin" />}
+            {t("modelConfig.addDialog.submit", { defaultValue: "添加模型" })}
+          </Button>
+        </div>
       </div>
+
+      {/* Advanced settings (capacity + inference params) */}
+      {showSettings && (
+        <RowSettingsDialog
+          key="single"
+          row={{
+            id: "single",
+            model_name: name.trim() || "model",
+            model_type: type,
+          }}
+          override={override}
+          specs={inferenceSpecs}
+          onSave={(next) => {
+            setOverride(next);
+            setShowSettings(false);
+          }}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   );
 }
