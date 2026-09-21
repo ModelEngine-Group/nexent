@@ -4576,6 +4576,7 @@ async def test_prepare_agent_run(
         is_debug=False,
         override_version_no=None,
         override_model_id=None,
+        reasoning_effort=None,
         requested_output_tokens=4096,
         tool_params=None,
         conversation_id=123,
@@ -6470,6 +6471,61 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
 
     assert not any("memory_search" in chunk for chunk in out)
     assert "data: fb1\n\n" in out
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_reports_recursive_fallback_failure(monkeypatch):
+    agent_request = AgentRequest(
+        agent_id=8,
+        conversation_id=888,
+        query="q3",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    fake_channel = MagicMock()
+    fake_channel.publish = AsyncMock()
+    original_generate_stream = agent_run_service.generate_stream
+
+    monkeypatch.setattr(
+        "management.services.agent.run.build_memory_context",
+        MagicMock(return_value=MagicMock(user_config=MagicMock(memory_switch=True))),
+        raising=False,
+    )
+
+    async def raise_prepare(*_, **__):
+        raise Exception("prep failed")
+
+    async def fail_recursive_fallback(*_, **kwargs):
+        if kwargs.get("enable_memory") is False:
+            raise RuntimeError("fallback failed")
+        async for chunk in original_generate_stream(*_, **kwargs):
+            yield chunk
+
+    monkeypatch.setattr(
+        "management.services.agent.run.prepare_agent_run",
+        raise_prepare,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.generate_stream",
+        fail_recursive_fallback,
+        raising=False,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in original_generate_stream(
+            agent_request,
+            user_id="u",
+            tenant_id="t",
+            enable_memory=True,
+            channel=fake_channel,
+        )
+    ]
+
+    assert chunks
+    assert fake_channel.publish.await_count == 1
 
 
 @pytest.mark.asyncio

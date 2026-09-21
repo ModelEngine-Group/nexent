@@ -131,7 +131,6 @@ _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
 _fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
-
 def _unregister_agent_run_after_execution(
     conversation_id: int | str,
     user_id: str,

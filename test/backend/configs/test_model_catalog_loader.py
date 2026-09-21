@@ -139,6 +139,12 @@ class TestModelCatalogLoaderSmoke:
         assert historical is not None
         assert historical["levels"] == ["low", "high", "max"]
 
+        exact = resolve_reasoning_capability(
+            "deepseek-v4-pro", provider_hint="deepseek"
+        )
+        assert exact is not None
+        assert exact["default"] == "high"
+
         silicon_historical = resolve_reasoning_capability(
             "deepseek-reasoner", provider_hint="silicon"
         )
@@ -157,6 +163,55 @@ class TestModelCatalogLoaderSmoke:
             "deepseek-ai/DeepSeek-R1", provider_hint="silicon"
         )
         assert known_non_reasoning is None
+
+    @pytest.mark.parametrize(
+        ("model_name", "provider_hint", "expected_wire_format"),
+        [
+            ("glm-4.99", "zhipu", "thinking_toggle"),
+            ("claude-4.99-preview", "anthropic", "thinking_budget"),
+            ("gemini-4-pro", "google", "reasoning_effort"),
+            ("grok-4.99", "xai", "reasoning_effort"),
+            ("qwen3.99-max", "dashscope", "reasoning_effort"),
+            ("magistral-next", "mistral", "reasoning_effort"),
+        ],
+    )
+    def test_unknown_vendor_model_ids_use_family_fallbacks(
+        self, model_name, provider_hint, expected_wire_format
+    ):
+        from configs.model_catalog_loader import resolve_reasoning_capability
+
+        capability = resolve_reasoning_capability(model_name, provider_hint=provider_hint)
+
+        assert capability is not None
+        assert capability["wire_format"] == expected_wire_format
+        assert capability["status"] == "supported"
+
+    @pytest.mark.parametrize(
+        ("model_name", "expected_provider"),
+        [
+            ("claude-4.99-preview", "anthropic"),
+            ("gemini-4-pro", "google"),
+            ("grok-4.99", "xai"),
+            ("glm-4.99", "zhipu"),
+            ("qwen3.99-max", "dashscope"),
+            ("mistral-large-next", "mistral"),
+        ],
+    )
+    def test_model_id_inference_recognizes_known_vendors(self, model_name, expected_provider):
+        from configs.model_catalog_loader import resolve_reasoning_capability
+
+        capability = resolve_reasoning_capability(model_name)
+
+        if expected_provider == "zhipu":
+            assert capability is not None and capability["control"] == "toggle"
+        else:
+            assert capability is not None
+
+    def test_empty_and_unknown_model_ids_have_no_capability(self):
+        from configs.model_catalog_loader import resolve_reasoning_capability
+
+        assert resolve_reasoning_capability("") is None
+        assert resolve_reasoning_capability("unknown-model", provider_hint="custom") is None
 
     def test_pydantic_models_match_catalog(self):
         from consts.model import ModelCatalogProfile, ModelCatalogProviderInfo

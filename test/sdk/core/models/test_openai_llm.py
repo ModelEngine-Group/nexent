@@ -2959,3 +2959,57 @@ def test_missing_reasoning_budget_is_a_configuration_error(openai_model_instance
 
     with pytest.raises(openai_llm_module.ReasoningConfigurationError):
         openai_model_instance._apply_reasoning_control({})
+
+
+def test_reasoning_error_detection_requires_bad_request_and_reasoning_marker():
+    detector = openai_llm_module._is_reasoning_parameter_error
+
+    assert detector(_StatusErr(400, "invalid reasoning_effort"), {"reasoning_effort": "high"})
+    assert detector(
+        _StatusErr(400, "invalid thinking budget"),
+        {"extra_body": {"thinking": {"type": "enabled"}}},
+    )
+    assert not detector(_StatusErr(500, "invalid reasoning_effort"), {"reasoning_effort": "high"})
+    assert not detector(_StatusErr(400, "invalid parameter"), {"reasoning_effort": "high"})
+    assert not detector(_StatusErr(400, "invalid reasoning_effort"), {})
+
+
+def test_dispatch_raises_safe_reasoning_configuration_error(openai_model_instance):
+    openai_model_instance.client.chat.completions.create.side_effect = _StatusErr(
+        400, "unsupported reasoning_effort"
+    )
+
+    with pytest.raises(openai_llm_module.ReasoningConfigurationError):
+        openai_model_instance._dispatch_chat_completion(reasoning_effort="high")
+
+
+def test_unknown_reasoning_wire_format_falls_back_to_top_level(openai_model_instance):
+    openai_model_instance.reasoning_effort = "medium"
+    openai_model_instance.reasoning_capability = {"wire_format": "provider-specific"}
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {"reasoning_effort": "medium"}
+
+
+def test_check_connectivity_translates_extra_body_before_reasoning_control(openai_model_instance):
+    openai_model_instance.model_id = "qwen3-max"
+    openai_model_instance.extra_body = {"enable_thinking": False}
+    openai_model_instance.reasoning_effort = "none"
+    openai_model_instance.reasoning_capability = {"wire_format": "thinking_toggle"}
+
+    captured = {}
+
+    async def run_blocking(_name, callback, **kwargs):
+        captured.update(kwargs)
+        callback(**kwargs)
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(openai_llm_module, "run_blocking", new=run_blocking):
+        assert __import__("asyncio").run(openai_model_instance.check_connectivity()) is True
+
+    assert captured["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False},
+        "thinking": {"type": "disabled"},
+    }

@@ -1459,3 +1459,46 @@ def test_delete_mcp_service_request():
         mcp_id=42
     )
     assert req.mcp_id == 42
+
+
+def test_reasoning_capability_normalizes_unsupported_profiles():
+    capability = model_consts.ReasoningCapability(
+        status="unsupported",
+        levels=["low"],
+        default="low",
+        effort_budgets={"low": 2048},
+    )
+
+    assert capability.levels == []
+    assert capability.default is None
+    assert capability.effort_budgets == {}
+
+
+def test_reasoning_capability_accepts_toggle_without_effort_levels():
+    capability = model_consts.ReasoningCapability(
+        status="supported",
+        control="toggle",
+        wire_format="thinking_toggle",
+    )
+
+    assert capability.levels == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"status": "supported", "control": "effort"},
+        {"status": "supported", "levels": ["low"], "default": "high"},
+        {"status": "supported", "levels": ["low"], "effort_budgets": {"high": 2048}},
+        {"status": "supported", "levels": ["low"], "effort_budgets": {"low": 512}},
+        {
+            "status": "supported",
+            "levels": ["none", "high"],
+            "wire_format": "thinking_budget",
+            "effort_budgets": {},
+        },
+    ],
+)
+def test_reasoning_capability_rejects_invalid_profiles(payload):
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningCapability(**payload)
