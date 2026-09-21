@@ -22,7 +22,6 @@ import RepositoryTagFilter from "@/components/tag/RepositoryTagFilter";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
-import McpToolsPagination from "./components/McpToolsPagination";
 import RepositoryMcpCard from "./components/RepositoryMcpCard";
 import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
 import CommunityQuickAddModal from "./components/add/community/CommunityQuickAddModal";
@@ -169,6 +168,9 @@ export function McpSpace({
         ) : (
           <ResourceCardGrid
             items={filteredServices}
+            page={browser.page}
+            total={browser.total}
+            onPageChange={browser.setPage}
             columns={columns}
             rows={rows}
             gridHeight={gridHeight}
@@ -188,16 +190,6 @@ export function McpSpace({
           />
         )}
       </div>
-
-      {filteredServices.length > 0 ? (
-        <McpToolsPagination
-          mode="offset"
-          current={browser.page}
-          pageSize={browser.pageSize}
-          total={browser.total}
-          onChange={browser.setPage}
-        />
-      ) : null}
     </div>
   );
 }

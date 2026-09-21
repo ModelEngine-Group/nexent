@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { App, Button, Grid, Popover, Spin } from "antd";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, ChevronRight, Tag } from "lucide-react";
+import { Tag } from "lucide-react";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
 import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
@@ -35,6 +35,7 @@ import {
   McpTransportType,
 } from "@/const/mcpTools";
 import TagFilterControls from "@/components/tag/TagFilterControls";
+import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import AddMcpServiceCard from "./components/AddMcpServiceCard";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
 import MineMcpServiceCard, {
@@ -43,7 +44,6 @@ import MineMcpServiceCard, {
 import MineApplyListingModal from "./components/MineApplyListingModal";
 import MineMcpReviewStatusModal from "./components/MineMcpReviewStatusModal";
 import { getDeploymentTypeLabelKey } from "@/lib/mcpTools";
-import type { CSSProperties } from "react";
 
 const CARD_GAP = 20;
 const MIN_CARD_HEIGHT = 240;
@@ -347,9 +347,11 @@ export function MyMcp({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [search, tag, deploymentType, tagPredicates]);
 
-  const firstPageSize = pageSize - 1;
-  const remainingItems = Math.max(0, filteredItems.length - firstPageSize);
-  const totalPages = 1 + Math.ceil(remainingItems / pageSize);
+  const itemsPerPage = Math.max(1, pageSize - 1);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredItems.length / itemsPerPage)
+  );
   const gridHeight =
     availableGridHeight === null
       ? undefined
@@ -363,15 +365,6 @@ export function MyMcp({
     if (page > totalPages) setPage(totalPages);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [page, totalPages]);
-
-  const pagedItems = useMemo(() => {
-    if (filteredItems.length === 0) return [];
-    if (page === 1) {
-      return filteredItems.slice(0, firstPageSize);
-    }
-    const start = firstPageSize + (page - 2) * pageSize;
-    return filteredItems.slice(start, start + pageSize);
-  }, [filteredItems, page, firstPageSize, pageSize]);
 
   const loading = localList.loading || myPublished.loading;
 
@@ -675,22 +668,20 @@ export function MyMcp({
           <PlaceholderBox>
             <Spin />
           </PlaceholderBox>
-        ) : filteredItems.length === 0 ? (
-          <ResponsiveCardGrid
-            columns={columns}
-            rows={rows}
-            gridHeight={gridHeight}
-          >
-            <AddMcpServiceCard onClick={onAdd} />
-          </ResponsiveCardGrid>
         ) : (
-          <ResponsiveCardGrid
+          <ResourceCardGrid
+            items={filteredItems}
+            page={page}
+            total={filteredItems.length}
+            onPageChange={setPage}
             columns={columns}
             rows={rows}
             gridHeight={gridHeight}
-          >
-            {page === 1 ? <AddMcpServiceCard onClick={onAdd} /> : null}
-            {pagedItems.map((item) => {
+            createCard={<AddMcpServiceCard onClick={onAdd} />}
+            paginateItems
+            showToolbar={false}
+            emptyState={null}
+            renderItem={(item) => {
               const key = getMineItemKey(item);
               const onlineService =
                 item.kind === "local"
@@ -725,46 +716,10 @@ export function MyMcp({
                   healthChecking={refreshingMineKey === getMineItemKey(item)}
                 />
               );
-            })}
-          </ResponsiveCardGrid>
+            }}
+          />
         )}
       </div>
-
-      {totalPages > 1 ? (
-        <div className="flex items-center justify-center gap-1.5 pt-4">
-          <Button
-            type="default"
-            className="flex size-9 items-center justify-center rounded-lg p-0"
-            disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
-            aria-label="Previous page"
-          >
-            <ChevronLeft className="size-4" />
-          </Button>
-          {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-            (pageNumber) => (
-              <Button
-                key={pageNumber}
-                type={pageNumber === page ? "primary" : "default"}
-                className="flex size-9 items-center justify-center rounded-lg p-0"
-                onClick={() => setPage(pageNumber)}
-                aria-current={pageNumber === page ? "page" : undefined}
-              >
-                {pageNumber}
-              </Button>
-            )
-          )}
-          <Button
-            type="default"
-            className="flex size-9 items-center justify-center rounded-lg p-0"
-            disabled={page >= totalPages}
-            onClick={() => setPage(page + 1)}
-            aria-label="Next page"
-          >
-            <ChevronRight className="size-4" />
-          </Button>
-        </div>
-      ) : null}
 
       <MineMcpReviewStatusModal
         open={Boolean(reviewProgressItem)}
@@ -914,37 +869,6 @@ export function resolveOnlineService(
     }
   }
   return undefined;
-}
-
-export function ResponsiveCardGrid({
-  children,
-  columns,
-  rows,
-  gridHeight,
-}: {
-  children: React.ReactNode;
-  columns: number;
-  rows: number;
-  gridHeight?: number;
-}) {
-  return (
-    <div
-      className={`grid grid-cols-1 items-stretch gap-5 min-[576px]:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))] ${
-        gridHeight !== undefined
-          ? "grid-rows-[repeat(var(--resource-card-rows),minmax(0,1fr))]"
-          : ""
-      }`}
-      style={
-        {
-          "--resource-card-columns": columns,
-          "--resource-card-rows": rows,
-          ...(gridHeight !== undefined ? { height: `${gridHeight}px` } : {}),
-        } as CSSProperties
-      }
-    >
-      {children}
-    </div>
-  );
 }
 
 function getRowCount(availableHeight: number) {

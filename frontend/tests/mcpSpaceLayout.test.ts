@@ -68,10 +68,11 @@ test("MCP repository grid uses the agent repository responsive capacity", async 
   assert.match(page, /const gridHeight =/);
   assert.match(
     page,
-    /<ResourceCardGrid[\s\S]*columns=\{columns\}[\s\S]*rows=\{rows\}[\s\S]*gridHeight=\{gridHeight\}/
+    /<ResourceCardGrid[\s\S]*page=\{browser\.page\}[\s\S]*total=\{browser\.total\}[\s\S]*onPageChange=\{browser\.setPage\}[\s\S]*columns=\{columns\}[\s\S]*rows=\{rows\}[\s\S]*gridHeight=\{gridHeight\}/
   );
   assert.match(page, /useMcpCommunityBrowser\([\s\S]*repositoryPageSize/);
   assert.match(page, /onPageSizeChange: setRepositoryPageSize/);
+  assert.doesNotMatch(page, /<McpToolsPagination/);
 });
 
 test("my MCP grid uses the agent repository responsive capacity", async () => {
@@ -79,12 +80,13 @@ test("my MCP grid uses the agent repository responsive capacity", async () => {
 
   assert.match(page, /Grid\.useBreakpoint\(\)/);
   assert.match(page, /const pageSize = columns \* rows;/);
-  assert.match(page, /const firstPageSize = pageSize - 1;/);
+  assert.match(page, /const itemsPerPage = Math\.max\(1, pageSize - 1\);/);
   assert.match(page, /const gridHeight =/);
   assert.match(
     page,
-    /<ResponsiveCardGrid[\s\S]*columns=\{columns\}[\s\S]*rows=\{rows\}[\s\S]*gridHeight=\{gridHeight\}/
+    /<ResourceCardGrid[\s\S]*page=\{page\}[\s\S]*total=\{filteredItems\.length\}[\s\S]*onPageChange=\{setPage\}[\s\S]*columns=\{columns\}[\s\S]*rows=\{rows\}[\s\S]*gridHeight=\{gridHeight\}/
   );
+  assert.doesNotMatch(page, /<ResponsiveCardGrid/);
 });
 
 test("my MCP cards open on click and retain only the enabled action", async () => {
