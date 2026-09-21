@@ -1032,21 +1032,11 @@ export const ModelConfigSection = forwardRef<
                     defaultValue: "标注（推荐）的模型按需推荐配置",
                   })}
                 </span>
-                <span className="flex items-center gap-3">
-                  <span className="flex items-center gap-1.5">
-                    <span className="size-2 rounded-full bg-emerald-500" />
-                    {t("model.status.available", { defaultValue: "可用" })}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="size-2 rounded-full bg-red-500" />
-                    {t("model.status.unavailable", { defaultValue: "不可用" })}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="size-2 rounded-full bg-slate-300" />
-                    {t("model.status.notDetected", {
-                      defaultValue: "未检测",
-                    })}
-                  </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  {t("modelConfig.section.legendDot", {
+                    defaultValue: "绿色代表已连通",
+                  })}
                 </span>
               </div>
 
