@@ -45,6 +45,8 @@ import {
   ModelAdvancedSettingsValue,
   buildInferenceParamsPayload,
 } from "./ModelAdvancedSettings";
+import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import { InferenceFieldSpecsByType } from "@/types/modelConfig";
 
 /**
  * v2.6.1 redesign (v0 design): the add-model dialog.
@@ -536,6 +538,7 @@ function BatchAddForm({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const presets = useProviderPresets(true);
+  const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
 
   const [provider, setProvider] = useState<string>("");
   const [apiKey, setApiKey] = useState("");
@@ -927,11 +930,11 @@ function BatchAddForm({
           </Button>
         </div>
       </div>
-
       {/* Per-row advanced settings */}
       <RowSettingsDialog
         row={fetched.find((r) => r.id === settingsRowId) ?? null}
         override={settingsRowId ? rowOverrides[settingsRowId] : undefined}
+        specs={inferenceSpecs}
         onSave={(next) => {
           if (settingsRowId) {
             setRowOverrides((prev) => ({
@@ -952,11 +955,13 @@ function BatchAddForm({
 function RowSettingsDialog({
   row,
   override,
+  specs,
   onSave,
   onClose,
 }: {
   row: FetchedRow | null;
   override?: RowOverride;
+  specs: InferenceFieldSpecsByType;
   onSave: (next: RowOverride) => void;
   onClose: () => void;
 }) {
@@ -1000,60 +1005,47 @@ function RowSettingsDialog({
             })}
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-          {/* Capacity */}
-          <div className="space-y-3">
-            <Label className="text-sm font-medium">
-              {t("modelConfig.addDialog.capacitySection", {
-                defaultValue: "容量配置",
-              })}
-            </Label>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              {capacityFields.map((f) => (
-                <div key={f.key} className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">
-                    {t(`modelConfig.addDialog.${f.key}`, {
-                      defaultValue: f.label,
-                    })}
-                  </Label>
-                  <Input
-                    type="number"
-                    value={capacity[f.key]}
-                    onChange={(e) =>
-                      setCapacity((c) => ({ ...c, [f.key]: e.target.value }))
-                    }
-                    placeholder="留空使用默认"
-                    className="h-8"
-                  />
-                </div>
-              ))}
-            </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          {/* Capacity (same field set as the old per-row gear panel) */}
+          <div className="grid grid-cols-1 gap-x-4 gap-y-4 md:grid-cols-2">
+            {capacityFields.map((f) => (
+              <div key={f.key} className="space-y-1.5">
+                <Label className="text-sm">
+                  {t(`modelConfig.addDialog.${f.key}`, {
+                    defaultValue: f.label,
+                  })}
+                </Label>
+                <Input
+                  type="number"
+                  value={capacity[f.key]}
+                  onChange={(e) =>
+                    setCapacity((c) => ({ ...c, [f.key]: e.target.value }))
+                  }
+                  placeholder="留空使用默认"
+                />
+              </div>
+            ))}
           </div>
 
-          {/* Inference params */}
-          <div className="space-y-3">
-            <Label className="text-sm font-medium">
-              {t("modelConfig.addDialog.inferenceSection", {
-                defaultValue: "推理参数",
-              })}
-            </Label>
+          {/* Inference params (temperature / top_p / thinking / custom) */}
+          <div className="mt-5 border-t pt-5">
             <ModelAdvancedSettings
               modelType={row.model_type}
-              specs={{ [row.model_type]: [] }}
+              specs={specs}
               value={inference}
               onChange={(next) => setInference(next)}
               mode="override"
             />
           </div>
         </div>
-        <DialogFooter className="border-t px-6 py-4">
+        <div className="flex justify-end gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose}>
             {t("common.cancel", { defaultValue: "取消" })}
           </Button>
           <Button onClick={handleSave}>
             {t("common.save", { defaultValue: "保存" })}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
