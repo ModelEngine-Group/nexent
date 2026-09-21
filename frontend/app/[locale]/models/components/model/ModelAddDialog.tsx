@@ -12,6 +12,7 @@ import {
   PackageOpen,
   Search,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -550,10 +551,21 @@ function BatchAddForm({
   const [submitting, setSubmitting] = useState(false);
 
   // Per-row advanced overrides (capacity + inference params), keyed by model id.
+  // rowSuggestions: auto-filled from suggestCapacity on fetch; used when the
+  // user hasn't manually modified the row's settings.
   const [rowOverrides, setRowOverrides] = useState<Record<string, RowOverride>>(
     {}
   );
+  const [rowSuggestions, setRowSuggestions] = useState<
+    Record<string, RowOverride>
+  >({});
   const [settingsRowId, setSettingsRowId] = useState<string | null>(null);
+
+  // Per-row connectivity check (optional, does not gate submit).
+  const [rowCheck, setRowCheck] = useState<
+    Record<string, "checking" | "available" | "unavailable">
+  >({});
+  const [batchChecking, setBatchChecking] = useState(false);
 
   // Default to the first preset once loaded.
   useEffect(() => {
@@ -632,6 +644,44 @@ function BatchAddForm({
       setFetched(rows);
       // Nothing selected by default — the user picks what to import.
       setSelected({});
+      setRowOverrides({});
+      setRowSuggestions({});
+      setRowCheck({});
+      // Auto-fill capacity from the catalog (same as the old dialog):
+      // suggestCapacity is a local lookup, fast enough to batch.
+      const suggestions: Record<string, RowOverride> = {};
+      await Promise.all(
+        rows.map(async (row) => {
+          try {
+            const s = await modelService.suggestCapacity({
+              modelName: row.model_name,
+              baseUrl,
+              providerHint: provider,
+              modelType: row.model_type,
+            });
+            const sug = s?.suggestions;
+            if (sug) {
+              suggestions[row.id] = {
+                contextWindowTokens: sug.contextWindowTokens
+                  ? String(sug.contextWindowTokens)
+                  : "",
+                maxInputTokens: sug.maxInputTokens
+                  ? String(sug.maxInputTokens)
+                  : "",
+                maxOutputTokens: sug.maxOutputTokens
+                  ? String(sug.maxOutputTokens)
+                  : "",
+                defaultOutputReserveTokens: sug.defaultOutputReserveTokens
+                  ? String(sug.defaultOutputReserveTokens)
+                  : "",
+              };
+            }
+          } catch {
+            // catalog miss — leave empty, user can fill manually
+          }
+        })
+      );
+      setRowSuggestions(suggestions);
     } catch (error: any) {
       log.error("fetch provider models failed", error);
       message.error(
@@ -645,6 +695,32 @@ function BatchAddForm({
     }
   }
 
+  async function checkRow(row: FetchedRow) {
+    setRowCheck((s) => ({ ...s, [row.id]: "checking" }));
+    try {
+      const result = await modelService.verifyModelConfigConnectivity({
+        modelName: row.model_name,
+        modelType: row.model_type,
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim(),
+      });
+      setRowCheck((s) => ({
+        ...s,
+        [row.id]: result.connectivity ? "available" : "unavailable",
+      }));
+    } catch {
+      setRowCheck((s) => ({ ...s, [row.id]: "unavailable" }));
+    }
+  }
+
+  async function checkAllSelected() {
+    const rows = fetched.filter((row) => selected[row.id]);
+    if (rows.length === 0 || batchChecking) return;
+    setBatchChecking(true);
+    await Promise.all(rows.map((row) => checkRow(row)));
+    setBatchChecking(false);
+  }
+
   async function submit() {
     const rows = fetched.filter((row) => selected[row.id]);
     if (rows.length === 0 || submitting) return;
@@ -652,7 +728,8 @@ function BatchAddForm({
     let created = 0;
     const failed: string[] = [];
     for (const row of rows) {
-      const override = rowOverrides[row.id];
+      // User-modified overrides win; otherwise use catalog suggestions.
+      const override = rowOverrides[row.id] ?? rowSuggestions[row.id];
       try {
         const params: Record<string, any> = {
           name: row.model_name,
@@ -861,6 +938,15 @@ function BatchAddForm({
                         </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
+                        {rowCheck[row.id] === "checking" && (
+                          <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                        )}
+                        {rowCheck[row.id] === "available" && (
+                          <span className="size-2 rounded-full bg-emerald-500" />
+                        )}
+                        {rowCheck[row.id] === "unavailable" && (
+                          <span className="size-2 rounded-full bg-red-500" />
+                        )}
                         <Badge
                           variant="secondary"
                           className={cn(
@@ -873,6 +959,18 @@ function BatchAddForm({
                         {rowOverrides[row.id] && (
                           <span className="size-1.5 rounded-full bg-primary" />
                         )}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            checkRow(row);
+                          }}
+                          disabled={rowCheck[row.id] === "checking"}
+                        >
+                          <ShieldCheck className="size-3.5" />
+                        </Button>
                         <Button
                           size="icon"
                           variant="ghost"
@@ -906,14 +1004,33 @@ function BatchAddForm({
       </div>
 
       <div className="flex items-center justify-between border-t px-6 py-4">
-        <span className="text-sm text-muted-foreground">
-          {selectedCount > 0
-            ? t("modelConfig.addDialog.selectedCount", {
-                defaultValue: `已选 ${selectedCount} 个模型`,
-                count: selectedCount,
-              })
-            : ""}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            {selectedCount > 0
+              ? t("modelConfig.addDialog.selectedCount", {
+                  defaultValue: `已选 ${selectedCount} 个模型`,
+                  count: selectedCount,
+                })
+              : ""}
+          </span>
+          {selectedCount > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={batchChecking}
+              onClick={checkAllSelected}
+            >
+              {batchChecking ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="size-4" />
+              )}
+              {t("modelConfig.addDialog.batchCheck", {
+                defaultValue: "批量检测",
+              })}
+            </Button>
+          )}
+        </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={onDone}>
             {t("common.cancel", { defaultValue: "取消" })}
@@ -930,10 +1047,14 @@ function BatchAddForm({
           </Button>
         </div>
       </div>
-      {/* Per-row advanced settings */}
+      {/* Per-row advanced settings: user overrides win, else show catalog suggestions */}
       <RowSettingsDialog
         row={fetched.find((r) => r.id === settingsRowId) ?? null}
-        override={settingsRowId ? rowOverrides[settingsRowId] : undefined}
+        override={
+          settingsRowId
+            ? (rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId])
+            : undefined
+        }
         specs={inferenceSpecs}
         onSave={(next) => {
           if (settingsRowId) {
