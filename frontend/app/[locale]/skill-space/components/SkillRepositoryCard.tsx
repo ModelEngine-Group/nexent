@@ -75,16 +75,20 @@ export function SkillRepositoryCard({
         listing.description || t("skillRepository.common.noDescription")
       }
       tags={
-        <div className="flex min-h-7 flex-wrap gap-2">
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
+        tags.length > 0 ? (
+          <>
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                {tag}
+              </span>
+            ))}
+          </>
+        ) : (
+          <span aria-hidden className="block min-h-7" />
+        )
       }
       headerActions={
         <span
@@ -111,11 +115,7 @@ export function SkillRepositoryCard({
           </Dropdown>
         ) : undefined
       }
-      meta={
-        author ? (
-          <span className="truncate">{author}</span>
-        ) : undefined
-      }
+      meta={author ? <span className="truncate">{author}</span> : undefined}
       footer={action}
       onClick={onDetailClick}
     />

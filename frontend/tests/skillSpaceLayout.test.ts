@@ -77,6 +77,7 @@ test("skill repository cards open on click and keep Copy as the compact footer a
   assert.match(card, /onClick=\{onDetailClick\}/);
   assert.match(card, /headerActions=\{[\s\S]*Download/);
   assert.match(card, /actions=\{[\s\S]*MoreHorizontal/);
+  assert.match(card, /tags\.length > 0 \? \(/);
   assert.match(card, /min-h-7/);
 });
 
