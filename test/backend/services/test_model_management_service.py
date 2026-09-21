@@ -1784,6 +1784,64 @@ async def test_update_single_model_for_tenant_empty_api_key_sets_ssl_verify_fals
         assert update_call[0][1]["ssl_verify"] is False
 
 
+async def test_update_single_model_for_tenant_open_router_url_keeps_ssl_verify_false():
+    """Editing a ModelEngine model must not flip ssl_verify to True.
+
+    ModelEngine endpoints serve self-signed certificates, so their records
+    are created with ssl_verify=False. The edit dialog prefills the real
+    api_key and always submits it; without the open/router exemption the
+    update path would silently flip ssl_verify to True and break
+    connectivity. Mirrors the create-path exemption in
+    create_model_for_tenant.
+    """
+    svc = import_svc()
+
+    existing_models = [
+        {
+            "model_id": 1,
+            "model_type": "llm",
+            "display_name": "name",
+            "base_url": "https://141.111.135.222:30012/open/router/v1",
+        },
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "api_key": "my-secret-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_call = mock_update.call_args
+        assert update_call[0][1]["ssl_verify"] is False
+
+
+async def test_update_single_model_for_tenant_open_router_url_in_payload_keeps_ssl_verify_false():
+    """The open/router exemption also applies when the update payload carries the URL itself."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "api_key": "my-secret-key",
+        "base_url": "https://example.com/open/router/v1",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_call = mock_update.call_args
+        assert update_call[0][1]["ssl_verify"] is False
+
+
 async def test_update_single_model_for_tenant_generic_exception():
     """Test that generic exceptions are caught and re-raised (covers lines 329-331)."""
     svc = import_svc()

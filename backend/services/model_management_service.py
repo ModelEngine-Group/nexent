@@ -784,9 +784,21 @@ async def update_single_model_for_tenant(
 
         # Auto-set ssl_verify based on api_key if provided:
         # - Empty api_key -> ssl_verify=False
+        # - "open/router" URL (ModelEngine, self-signed certs) -> ssl_verify=False
         # - Otherwise -> ssl_verify=True
+        # The open/router exemption mirrors the create path
+        # (create_model_for_tenant): without it, editing a ModelEngine model
+        # submits the prefilled non-empty api_key and silently flips
+        # ssl_verify to True, breaking connectivity against its self-signed
+        # certificate. The URL is taken from the update payload when present
+        # and falls back to the stored record otherwise.
         if "api_key" in model_data:
-            if not model_data["api_key"]:
+            effective_base_url = (
+                model_data.get("base_url")
+                or (existing_models[0].get("base_url") if existing_models else "")
+                or ""
+            )
+            if not model_data["api_key"] or "open/router" in effective_base_url:
                 model_data["ssl_verify"] = False
             else:
                 model_data["ssl_verify"] = True

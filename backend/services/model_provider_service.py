@@ -29,8 +29,14 @@ async def get_provider_models(model_data: dict) -> List[dict]:
     """
     Get model list based on provider.
 
-    All providers are queried via the standard OpenAI-compatible
-    GET {base_url}/models endpoint.
+    ModelEngine is dispatched to its dedicated provider class: its models
+    endpoint lives at {host}/open/router/v1/models (not the OpenAI
+    /models path), the response uses ModelEngine's own type taxonomy
+    ("chat"/"embed"/"multimodal"/...) that must be mapped to internal
+    types, each model must carry its host so prepare_model_dict can build
+    the full base_url later, and its endpoints serve self-signed
+    certificates (ssl=False). All other providers are queried via the
+    standard OpenAI-compatible GET {base_url}/models endpoint.
 
     Args:
         model_data: Model data containing provider information
@@ -38,10 +44,12 @@ async def get_provider_models(model_data: dict) -> List[dict]:
     Returns:
         List of models from the specified provider
     """
-    provider = OpenAICompatibleProvider()
-    model_list = await provider.get_models(model_data)
-
-    return model_list
+    provider_key = (model_data.get("provider") or "").lower()
+    if provider_key == ProviderEnum.MODELENGINE.value:
+        client: AbstractModelProvider = ModelEngineProvider()
+    else:
+        client = OpenAICompatibleProvider()
+    return await client.get_models(model_data)
 
 
 # =============================================================================
