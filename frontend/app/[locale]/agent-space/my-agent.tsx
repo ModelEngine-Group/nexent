@@ -298,7 +298,9 @@ export function MyAgent({ active }: { active: boolean }) {
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/evaluation?agent_id=${agent.agent_id}`);
+    router.push(
+      `/${locale}/evaluation?agent_ids=${encodeURIComponent(JSON.stringify([agent.agent_id]))}`
+    );
   };
 
   const closeReviewModal = () => {

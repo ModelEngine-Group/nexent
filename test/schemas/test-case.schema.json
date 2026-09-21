@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexent.dev/schemas/test-case.schema.json",
+  "title": "Nexent formal D1-D5 test cases",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stage", "module", "cases"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "stage": {"enum": ["D1", "D2", "D3", "D4", "D5"]},
+    "module": {"$ref": "#/$defs/identifier"},
+    "cases": {"type": "array", "items": {"$ref": "#/$defs/case"}}
+  },
+  "allOf": [
+    {"if": {"properties": {"stage": {"const": "D1"}}}, "then": {"properties": {"cases": {"items": {"$ref": "#/$defs/d1Case"}}}}},
+    {"if": {"properties": {"stage": {"const": "D2"}}}, "then": {"properties": {"cases": {"items": {"$ref": "#/$defs/d2Case"}}}}},
+    {"if": {"properties": {"stage": {"const": "D3"}}}, "then": {"properties": {"cases": {"items": {"$ref": "#/$defs/d3Case"}}}}},
+    {"if": {"properties": {"stage": {"const": "D4"}}}, "then": {"properties": {"cases": {"items": {"$ref": "#/$defs/d4Case"}}}}},
+    {"if": {"properties": {"stage": {"const": "D5"}}}, "then": {"properties": {"cases": {"items": {"$ref": "#/$defs/d5Case"}}}}}
+  ],
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$"},
+    "nonEmpty": {"type": "string", "minLength": 1},
+    "stringList": {"type": "array", "items": {"$ref": "#/$defs/nonEmpty"}},
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "action", "expected"],
+      "properties": {
+        "order": {"type": "integer", "minimum": 1},
+        "action": {"$ref": "#/$defs/nonEmpty"},
+        "expected": {"$ref": "#/$defs/nonEmpty"}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "required_services"],
+      "properties": {
+        "name": {"enum": ["mock", "real_smoke"]},
+        "required_services": {
+          "type": "array",
+          "items": {"enum": ["model-provider", "mcp-server", "knowledge-provider", "memory-provider", "a2a-agent", "http-fixture"]},
+          "uniqueItems": true
+        },
+        "scenarios": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profiles"],
+      "properties": {
+        "profiles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/profile"}},
+        "timeout_seconds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "feature_id", "title", "type", "priority", "status", "automation", "objective", "preconditions", "test_data", "steps", "expected_results", "forbidden_side_effects"],
+      "properties": {
+        "case_id": {"$ref": "#/$defs/identifier"},
+        "feature_id": {"$ref": "#/$defs/identifier"},
+        "requirement_ids": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true},
+        "business_rule_ids": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true},
+        "title": {"$ref": "#/$defs/nonEmpty"},
+        "type": {"type": "string", "minLength": 1},
+        "priority": {"enum": ["P0", "P1", "P2", "P3"]},
+        "status": {"enum": ["active", "retired", "blocked", "manual", "skipped_by_policy"]},
+        "automation": {"enum": ["automated", "manual", "not_applicable"]},
+        "objective": {"$ref": "#/$defs/nonEmpty"},
+        "preconditions": {"$ref": "#/$defs/stringList"},
+        "test_data": {"type": "object", "additionalProperties": true},
+        "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}},
+        "expected_results": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}},
+        "forbidden_side_effects": {"$ref": "#/$defs/stringList"},
+        "tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "source": {"type": "object", "additionalProperties": true},
+        "execution": {"$ref": "#/$defs/execution"},
+        "unit_boundary": {"type": "string"},
+        "inputs": {"type": "array", "items": {}},
+        "assertions": {"$ref": "#/$defs/stringList"},
+        "contract": {"type": "object"},
+        "integration_boundary": {"$ref": "#/$defs/stringList"},
+        "observations": {"$ref": "#/$defs/stringList"},
+        "cleanup": {"$ref": "#/$defs/stringList"},
+        "actor": {"type": "string"},
+        "journey": {"$ref": "#/$defs/stringList"},
+        "final_business_result": {"$ref": "#/$defs/stringList"},
+        "failure_evidence": {"$ref": "#/$defs/stringList"},
+        "risk_type": {"type": "string"},
+        "risk": {"type": "string"},
+        "condition": {"$ref": "#/$defs/stringList"},
+        "metrics": {"$ref": "#/$defs/stringList"},
+        "thresholds": {"$ref": "#/$defs/stringList"},
+        "recovery_expectations": {"$ref": "#/$defs/stringList"}
+      }
+    },
+    "d1Case": {
+      "allOf": [
+        {"$ref": "#/$defs/case"},
+        {"required": ["unit_boundary", "inputs", "assertions"], "properties": {"type": {"enum": ["BE-UT", "SDK-UT", "FE-COMP"]}, "unit_boundary": {"$ref": "#/$defs/nonEmpty"}, "assertions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}}}
+      ]
+    },
+    "d2Case": {
+      "allOf": [
+        {"$ref": "#/$defs/case"},
+        {"required": ["contract"], "properties": {"type": {"enum": ["API-IT", "CONTRACT"]}, "contract": {"$ref": "#/$defs/contract"}}}
+      ]
+    },
+    "d3Case": {
+      "allOf": [
+        {"$ref": "#/$defs/case"},
+        {"required": ["integration_boundary", "observations", "cleanup"], "properties": {"type": {"enum": ["AGENT-IT", "INTEGRATION"]}, "integration_boundary": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}, "observations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}}}
+      ]
+    },
+    "d4Case": {
+      "allOf": [
+        {"$ref": "#/$defs/case"},
+        {"required": ["actor", "journey", "final_business_result", "failure_evidence"], "properties": {"type": {"const": "E2E"}, "actor": {"$ref": "#/$defs/nonEmpty"}, "journey": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}, "final_business_result": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}, "failure_evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}}}
+      ]
+    },
+    "d5Case": {
+      "allOf": [
+        {"$ref": "#/$defs/case"},
+        {"required": ["risk_type", "risk", "condition", "metrics", "thresholds", "recovery_expectations"], "properties": {"type": {"enum": ["SECURITY", "RELIABILITY", "PERFORMANCE", "DEPLOYMENT"]}, "risk_type": {"enum": ["SECURITY", "RELIABILITY", "PERFORMANCE", "DEPLOYMENT"]}, "risk": {"$ref": "#/$defs/nonEmpty"}, "condition": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}, "metrics": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}, "thresholds": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}}}
+      ]
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_expectations", "response_expectations"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/nonEmpty"},
+        "method": {"type": "string"},
+        "endpoint": {"type": "string"},
+        "request_expectations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}},
+        "response_expectations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}}
+      }
+    }
+  }
+}
