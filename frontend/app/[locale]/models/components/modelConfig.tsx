@@ -39,6 +39,7 @@ import {
 } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
+import { ModelAddDialog } from "./model/ModelAddDialog";
 import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
 import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
 import { ModelLibraryList } from "./model/ModelLibraryList";
@@ -89,6 +90,11 @@ export const ModelConfigSection = forwardRef<
   const [isVerifying, setIsVerifying] = useState(false);
   const [capacityCoverage, setCapacityCoverage] =
     useState<CapacityCoverage | null>(null);
+
+  // v2.6.1 redesign: add-model dialog (single/batch tab)
+  const [addDialogTab, setAddDialogTab] = useState<"single" | "batch">(
+    "single"
+  );
 
   // Single model edit dialog
   const [editingCardModel, setEditingCardModel] = useState<ModelOption | null>(
@@ -751,11 +757,6 @@ export const ModelConfigSection = forwardRef<
     await verifyModelsInternal(models);
   };
 
-  /* ------------------ Sync ModelEngine ------------------ */
-  const handleSyncModels = () => {
-    setIsAddModalV2Open(true);
-  };
-
   /* ------------------ Verify single ------------------ */
   const verifyOneModel = async (displayName: string, modelType: ModelType) => {
     if (!displayName) return;
@@ -1080,11 +1081,29 @@ export const ModelConfigSection = forwardRef<
                 </Badge>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                {/* v2.6.1: add first, then the rest */}
+                <Can permission="model:create">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setAddDialogTab("single");
+                      setIsAddModalV2Open(true);
+                    }}
+                  >
+                    <Plus className="size-4" />
+                    {t("modelConfig.button.addModel", {
+                      defaultValue: "添加模型",
+                    })}
+                  </Button>
+                </Can>
                 {modelEngineEnable && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={handleSyncModels}
+                    onClick={() => {
+                      setAddDialogTab("batch");
+                      setIsAddModalV2Open(true);
+                    }}
                   >
                     <RefreshCw className="size-4" />
                     {t("modelConfig.button.syncModelEngine")}
@@ -1117,15 +1136,6 @@ export const ModelConfigSection = forwardRef<
                     defaultValue: "批量删除",
                   })}
                 </Button>
-                {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
-                <Can permission="model:create">
-                  <Button size="sm" onClick={() => setIsAddModalV2Open(true)}>
-                    <Plus className="size-4" />
-                    {t("modelConfig.button.addModel", {
-                      defaultValue: "添加模型",
-                    })}
-                  </Button>
-                </Can>
               </div>
             </div>
 
@@ -1157,10 +1167,11 @@ export const ModelConfigSection = forwardRef<
           </section>
 
           {/* -------------------- Dialogs -------------------- */}
-          {/* v2.6.0: new Add Model dialog (Tabs: batch import / custom access) */}
-          <ModelAddDialogV2
+          {/* v2.6.1: add-model dialog (v0 design: single / batch tabs) */}
+          <ModelAddDialog
             isOpen={isAddModalV2Open}
             onClose={() => setIsAddModalV2Open(false)}
+            initialTab={addDialogTab}
             onSuccess={async (newModel) => {
               // Invalidate FIRST so the refetch completes before loadModelLists
               // reads the cache (a model create may have auto-configured
@@ -1169,7 +1180,6 @@ export const ModelConfigSection = forwardRef<
                 queryKey: CONFIG_QUERY_KEY,
               });
               await loadModelLists(true);
-              message.success(t("modelConfig.message.addSuccess"));
               if (newModel && newModel.name && newModel.type) {
                 setTimeout(() => {
                   verifyOneModel(newModel.name, newModel.type);
