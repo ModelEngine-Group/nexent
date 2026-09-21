@@ -75,6 +75,8 @@ export function workbenchReducer(
         config: {
           ...state.config,
           mode: action.mode,
+          model_id:
+            action.mode === "generic_chat" ? state.config.model_id : undefined,
           agent_mounts: [],
           skill_mounts: [],
           knowledge_scope: undefined,
@@ -189,7 +191,7 @@ export function getWorkbenchSendability(
     state.config.mode === "agent_create" ||
     state.config.mode === "skill_create"
   ) {
-    return { canSend: false, reason: "创建运行适配器尚未接入，当前可编辑草稿" };
+    return { canSend: true };
   }
   return { canSend: true };
 }

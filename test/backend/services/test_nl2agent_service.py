@@ -236,6 +236,66 @@ def test_update_agent_draft_initializes_generated_name_once(mocker):
     )
 
 
+def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[{
+            "agent_id": 22, "tenant_id": "tenant-a", "version_no": 0,
+            "delete_flag": "N", "created_by": "user-a", "name": None,
+            "display_name": "Workbench Draft abc123-abcdef", "description": "",
+        }],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=[{"agent_id": 22, "name": None}],
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields", return_value=1,
+    )
+
+    result = save_agent_draft_fields_impl(
+        22,
+        AgentDraftFields(name="customer_service_assistant", display_name="智能客服"),
+        "tenant-a", "user-a",
+    )
+
+    assert result["updated_fields"] == ["name", "display_name"]
+    update_fields.assert_called_once_with(
+        agent_id=22, tenant_id="tenant-a",
+        fields={"name": "customer_service_assistant", "display_name": "智能客服"},
+    )
+
+
+def test_nl2agent_cannot_rename_existing_display_name(mocker):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[{
+            "agent_id": 22, "tenant_id": "tenant-a", "version_no": 0,
+            "delete_flag": "N", "created_by": "user-a", "name": None,
+            "display_name": "Research Helper", "description": "",
+        }],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    update_fields = mocker.patch("services.nl2agent_service.update_agent_draft_fields")
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            22,
+            AgentDraftFields(name="research_assistant", display_name="New Name"),
+            "tenant-a", "user-a",
+        )
+
+    assert exc_info.value.code == "agent_display_name_immutable"
+    update_fields.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("draft_name", "existing_agents", "expected_code", "retryable"),
     [

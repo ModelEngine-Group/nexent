@@ -129,6 +129,8 @@ export const Chat: FC<ChatProps> = ({
             provide_run_summary: false,
             tools: [],
           }}
+          generatedTitle={generatedTitle}
+          conversationId={conversationId}
           welcomeContent={landingContent}
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
@@ -139,11 +141,13 @@ export const Chat: FC<ChatProps> = ({
           isDictationConfigured={isDictationConfigured}
           readOnly={readOnly}
           readOnlyReason={readOnlyReason}
+          interactionContent={interactionContent}
           showConversationTitle={showConversationTitle}
           workbenchPresentation={workbenchPresentation}
           workbenchResources={workbenchResources}
           onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
           onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+          skillFiles={skillFiles}
           knowledgeScope={knowledgeScope}
           knowledgePreview={knowledgePreview}
           knowledgeCapabilities={knowledgeCapabilities}

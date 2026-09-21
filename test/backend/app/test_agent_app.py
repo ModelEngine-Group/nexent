@@ -355,9 +355,57 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
     )
-    assert not hasattr(request, "conversation_id")
+    assert request.conversation_id is None
+    assert request.persist_history is False
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
+    mocker, mock_auth_header
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-a", "tenant-a", "en"),
+    )
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+
+    async def mock_stream():
+        yield 'data: {"type":"final_answer","content":"done"}\n\n'
+
+    mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+        return_value=mock_stream(),
+    )
+    prepare = mocker.patch(
+        "apps.agent_app.prepare_creation_history", return_value=(42, 1)
+    )
+    persist = mocker.patch(
+        "apps.agent_app.persist_creation_stream",
+        side_effect=lambda stream, **kwargs: stream,
+    )
+    response = await nl2agent_run_api(
+        nl2agent_request=NL2AgentRunRequest(
+            query="Build a weather agent",
+            agent_id=17,
+            persist_history=True,
+            workbench_config={
+                "schema_version": 3, "mode": "agent_create",
+                "generation_config": {"deep_thinking": False},
+                "agent_mounts": [], "skill_mounts": [],
+            },
+        ),
+        http_request=MagicMock(),
+        authorization=mock_auth_header["Authorization"],
+    )
+    assert response.headers["conversation_id"] == "42"
+    assert prepare.call_args.kwargs["agent_id"] == 17
+    assert persist.call_args.kwargs["assistant_index"] == 1
 
 
 @pytest.mark.asyncio
@@ -537,7 +585,8 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
     )
-    assert not hasattr(request, "conversation_id")
+    assert request.conversation_id is None
+    assert request.persist_history is False
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
 

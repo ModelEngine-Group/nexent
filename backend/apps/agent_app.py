@@ -73,6 +73,10 @@ from services.workbench_service import (
 )
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
+from services.workbench_creation_history_service import (
+    prepare_creation_history,
+    persist_creation_stream,
+)
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
@@ -310,7 +314,7 @@ async def nl2agent_run_api(
     authorization: Optional[str] = Header(None),
     _current_user: CurrentUser = Depends(require_agent_create_permission),
 ):
-    """Run one non-persistent NL2Agent turn."""
+    """Run NL2Agent; Workbench turns opt into conversation persistence."""
 
     try:
         _, tenant_id, language = get_current_user_info(
@@ -322,6 +326,32 @@ async def nl2agent_run_api(
             language=language,
             authorization=authorization,
         )
+        if nl2agent_request.persist_history:
+            user_id, _ = get_current_user_id(authorization)
+            conversation_id, assistant_index = prepare_creation_history(
+                conversation_id=nl2agent_request.conversation_id,
+                mode="agent_create",
+                query=nl2agent_request.query,
+                minio_files=nl2agent_request.minio_files,
+                workbench_config=nl2agent_request.workbench_config,
+                agent_id=nl2agent_request.agent_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                retry_user_message_id=nl2agent_request.retry_user_message_id,
+                retry_message_index=nl2agent_request.retry_message_index,
+            )
+            stream = persist_creation_stream(
+                stream,
+                conversation_id=conversation_id,
+                assistant_index=assistant_index,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+            return StreamingResponse(
+                stream,
+                media_type="text/event-stream",
+                headers={"conversation_id": str(conversation_id)},
+            )
         return StreamingResponse(stream, media_type="text/event-stream")
     except UnauthorizedError as exc:
         raise HTTPException(
@@ -344,6 +374,11 @@ async def nl2agent_run_api(
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail={"code": exc.code, "message": "Agent context is invalid."},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Invalid Workbench creation session.",
         ) from exc
     except PermissionError as exc:
         raise HTTPException(

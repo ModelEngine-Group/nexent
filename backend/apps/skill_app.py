@@ -24,6 +24,10 @@ from services.agent_draft_permission_service import (
     require_agent_draft_edit,
 )
 from services.nl2skill_service import create_nl2skill_stream
+from services.workbench_creation_history_service import (
+    prepare_creation_history,
+    persist_creation_stream,
+)
 from management.services.skill.service import (
     SkillService,
     UnsupportedSkillFilePreview,
@@ -747,7 +751,7 @@ async def nl2skill_run_api(
     authorization: Optional[str] = Header(None),
     _current_user: CurrentUser = Depends(require_skill_create_permission),
 ):
-    """Run one non-persistent, multi-turn NL2Skill conversation turn."""
+    """Run NL2Skill; Workbench turns opt into conversation persistence."""
     try:
         _, tenant_id, user_language = get_current_user_info(authorization)
     except Exception as e:
@@ -760,7 +764,35 @@ async def nl2skill_run_api(
             tenant_id=tenant_id,
             language=request.language or user_language or "zh",
         )
+        if request.persist_history:
+            user_id, _ = get_current_user_id(authorization)
+            conversation_id, assistant_index = prepare_creation_history(
+                conversation_id=request.conversation_id,
+                mode="skill_create",
+                query=request.query,
+                minio_files=request.minio_files,
+                workbench_config=request.workbench_config,
+                agent_id=None,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                retry_user_message_id=request.retry_user_message_id,
+                retry_message_index=request.retry_message_index,
+            )
+            stream = persist_creation_stream(
+                stream,
+                conversation_id=conversation_id,
+                assistant_index=assistant_index,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+            return StreamingResponse(
+                stream,
+                media_type="text/event-stream",
+                headers={"conversation_id": str(conversation_id)},
+            )
         return StreamingResponse(stream, media_type="text/event-stream")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Workbench creation session.") from exc
     except HTTPException:
         raise
     except Exception:

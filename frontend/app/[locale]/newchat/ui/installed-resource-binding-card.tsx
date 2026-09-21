@@ -55,6 +55,7 @@ import {
   type Nl2AgentResourceParam,
 } from "./nl2agent-resource-config";
 import { Nl2AgentResourceSourceBadge } from "./nl2agent-resource-source-badge";
+import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
 
 type ConfigStatus = "unconfigured" | "valid" | "invalid";
 type BindingStatus = "idle" | "binding" | "bound" | "failed";
@@ -622,6 +623,10 @@ export const InstalledResourceBindingCard: FC<{
     submitCard(cardKey);
     markResourcesBound(payload.agent_id);
     aui.thread().append({
+      runConfig: nl2AgentCardRunConfig(
+        aui.thread().composer().getState().runConfig,
+        payload.agent_id
+      ),
       role: "user",
       content: [
         {
@@ -648,6 +653,10 @@ export const InstalledResourceBindingCard: FC<{
       result: { failed_fields: failedPromptFields },
     };
     aui.thread().append({
+      runConfig: nl2AgentCardRunConfig(
+        aui.thread().composer().getState().runConfig,
+        payload.agent_id
+      ),
       role: "user",
       content: [
         {

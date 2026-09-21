@@ -100,6 +100,7 @@ AGENT_DRAFT_FIELD_ORDER = (
     "greeting_message",
     "example_questions",
 )
+_WORKBENCH_DRAFT_NAME = re.compile(r"Workbench Draft [a-z0-9]+-[a-z0-9]{6}\Z")
 
 
 class _Nl2AgentBoundaryObserver(MessageObserver):
@@ -179,6 +180,13 @@ def _update_agent_draft_from_fields(
 
     patch = fields.model_dump(mode="python", exclude_unset=True)
     generated_name = patch.get("name")
+    if "display_name" in patch and not (
+        generated_name is not None
+        and not str(draft.get("name") or "").strip()
+        and not str(draft.get("description") or "").strip()
+        and _WORKBENCH_DRAFT_NAME.fullmatch(str(draft.get("display_name") or ""))
+    ):
+        raise Nl2AgentDraftSaveError("agent_display_name_immutable")
     if generated_name is not None:
         if str(draft.get("name") or "").strip():
             raise Nl2AgentDraftSaveError("agent_name_already_set")

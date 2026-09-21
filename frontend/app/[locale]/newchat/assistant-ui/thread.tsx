@@ -83,12 +83,14 @@ import {
 import { DirectiveText, SkillDirectiveText } from "../ui/directive-text";
 import { QuoteBlock } from "../ui/quote";
 import { BranchPicker } from "../ui/branch-picker";
+import { getCreationRetryTarget } from "@/features/workbench/creationRetry";
 import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
+import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -1308,11 +1310,19 @@ const AssistantMessage: FC<{
     (s) =>
       (s.message.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
   );
+  const isLatestMessage = useAuiState(
+    (s) => s.thread.messages.at(-1)?.id === s.message.id
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
+    name?: string;
+    data?: { agentId?: number; completed?: boolean };
     skillFileAttachments?: CompleteAttachment[];
   }>;
+  const createdAgent = content.find(
+    (part) => part.type === "data" && part.name === "nl2agent-created"
+  )?.data;
   const streamedSkillFileAttachments = useMemo(() => {
     for (let index = content.length - 1; index >= 0; index -= 1) {
       const part = content[index];
@@ -1631,7 +1641,7 @@ const AssistantMessage: FC<{
         {nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : nl2a?.content.subtype === "local_mcp_recommendation" ? (
           <ToolRecommendations payload={nl2a.content} disabled={readOnly} />
@@ -1640,16 +1650,23 @@ const AssistantMessage: FC<{
         ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
           <SuggestedResourceInstallationCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
           <InstalledResourceBindingCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
+        ) : null}
+        {typeof createdAgent?.agentId === "number" &&
+        createdAgent.agentId > 0 ? (
+          <AgentCreationResultCard
+            agentId={createdAgent.agentId}
+            completed={createdAgent.completed === true}
+          />
         ) : null}
         <MessageError />
       </div>
@@ -1667,6 +1684,38 @@ const AssistantMessage: FC<{
 
 const AssistantActionBar: FC = () => {
   const { t } = useTranslation();
+  const aui = useAui();
+  const creationMode = useAuiState((s) => {
+    const custom = s.thread.composer.runConfig.custom as
+      | { runtimeMode?: string }
+      | undefined;
+    return custom?.runtimeMode === "nl2skill" || custom?.runtimeMode === "nl2agent";
+  });
+  const creationRetryDisabled = useAuiState(
+    (s) => s.thread.isRunning || s.thread.isDisabled || !s.thread.capabilities.reload
+  );
+
+  const reloadMessage = () => {
+    const runConfig = aui.thread.composer().getState().runConfig;
+    const custom = runConfig.custom as
+      | { runtimeMode?: string; [key: string]: unknown }
+      | undefined;
+    if (custom?.runtimeMode !== "nl2skill" && custom?.runtimeMode !== "nl2agent") {
+      aui.message.reload();
+      return;
+    }
+    const target = getCreationRetryTarget(
+      aui.thread.getState().messages,
+      aui.message.getState().parentId
+    );
+    if (!target) {
+      message.error(t("chat.thread.refresh"));
+      return;
+    }
+    aui.message.reload({
+      runConfig: { ...runConfig, custom: { ...custom, ...target } },
+    });
+  };
 
   return (
     <ActionBarPrimitive.Root
@@ -1685,11 +1734,17 @@ const AssistantActionBar: FC = () => {
             </AuiIf>
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
-        <ActionBarPrimitive.Reload asChild>
-          <TooltipIconButton tooltip={t("chat.thread.refresh")}>
+        {creationMode ? (
+          <TooltipIconButton tooltip={t("chat.thread.refresh")} onClick={reloadMessage} disabled={creationRetryDisabled}>
             <RefreshCwIcon />
           </TooltipIconButton>
-        </ActionBarPrimitive.Reload>
+        ) : (
+          <ActionBarPrimitive.Reload asChild>
+            <TooltipIconButton tooltip={t("chat.thread.refresh")}>
+              <RefreshCwIcon />
+            </TooltipIconButton>
+          </ActionBarPrimitive.Reload>
+        )}
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
             <TooltipIconButton

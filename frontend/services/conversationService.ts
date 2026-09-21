@@ -1057,6 +1057,10 @@ export const conversationService = {
       workbench?: import("@/features/workbench").WorkbenchSessionConfig;
       expected_workbench_config_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
+      persist_history?: boolean;
+      retry_message_index?: number;
+      retry_user_message_id?: number;
+      workbench_config?: import("@/features/workbench").WorkbenchSessionConfig;
       draft_snapshot?: Record<string, unknown>;
       complexity?: "simple" | "complicated";
       language?: "zh" | "en";
@@ -1086,6 +1090,16 @@ export const conversationService = {
         requestParams.draft_snapshot = params.draft_snapshot;
         requestParams.complexity = params.complexity || "complicated";
         requestParams.language = params.language;
+      }
+      if (params.persist_history && params.runtime_mode) {
+        requestParams.persist_history = true;
+        requestParams.workbench_config = params.workbench_config;
+        if (params.retry_message_index !== undefined) {
+          requestParams.retry_message_index = params.retry_message_index;
+        }
+        if (params.retry_user_message_id !== undefined) {
+          requestParams.retry_user_message_id = params.retry_user_message_id;
+        }
       }
 
       // Only include conversation_id if it has a value
@@ -1184,11 +1198,23 @@ export const conversationService = {
           const errorData = await response.json();
           const detail = errorData.detail;
           if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-            code = typeof detail.code === "string" ? detail.code : response.status;
-            errorMessage = typeof detail.message === "string" ? detail.message : errorMessage;
-            details = typeof detail.current_version === "number" ? { current_version: detail.current_version } : undefined;
+            code =
+              typeof detail.code === "string" ? detail.code : response.status;
+            errorMessage =
+              typeof detail.message === "string"
+                ? detail.message
+                : errorMessage;
+            details =
+              typeof detail.current_version === "number"
+                ? { current_version: detail.current_version }
+                : undefined;
           } else {
-            errorMessage = typeof detail === "string" ? detail : typeof errorData.message === "string" ? errorData.message : errorMessage;
+            errorMessage =
+              typeof detail === "string"
+                ? detail
+                : typeof errorData.message === "string"
+                  ? errorData.message
+                  : errorMessage;
           }
         } catch {
           // Preserve the HTTP status when the error response is not JSON.

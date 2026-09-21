@@ -9,6 +9,7 @@ import type {
 } from "@assistant-ui/react";
 
 import { conversationService } from "@/services/conversationService";
+import { createWorkbenchAgentDraft } from "@/features/workbench/agentCreationDraft";
 import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
@@ -113,7 +114,8 @@ export interface Nl2AgentCardAction {
   result: Record<string, unknown>;
 }
 
-export type Nl2AgentDraftField = "name" | "description" | Nl2aPromptField;
+export type Nl2AgentDraftField =
+  "name" | "display_name" | "description" | Nl2aPromptField;
 
 export type Nl2AgentStateEvent =
   | {
@@ -286,6 +288,16 @@ interface NexentRunConfig {
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
+  persistCreationHistory?: boolean;
+  retry_message_index?: number;
+  retry_user_message_id?: number;
+  creationWorkbenchConfig?: import("@/features/workbench").WorkbenchSessionConfig;
+  autoCreateAgentDraft?: boolean;
+  agentAuthor?: string;
+  onNl2AgentDraftCreated?: (draft: {
+    agentId: number;
+    displayName: string;
+  }) => void | Promise<void>;
   onNl2AgentStopped?: (agentId: number) => void;
   modelId?: number;
   runtimeMetadata?: Record<string, unknown>;
@@ -830,7 +842,7 @@ function appendToolCallPart(contentParts: any[], toolCallPart: any): any {
 /**
  * Parses an NL2Agent SSE chunk into frontend message metadata.
  */
-function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
+export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
   try {
     const content = JSON.parse(chunk.content) as Nl2aPayload;
     if (content.subtype === "requirement_clarification") {
@@ -939,6 +951,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
 
     const draftFields = new Set<Nl2AgentDraftField>([
       "name",
+      "display_name",
       "description",
       ...promptFields,
     ]);
@@ -1414,17 +1427,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const onRunId = custom?.onRunId;
     const isResume =
       !isEphemeralRuntime && (custom?.resume === true || !!custom?.hitlRunId);
-    const nl2AgentId =
+    let nl2AgentId =
       typeof custom?.agentId === "string"
         ? Number(custom.agentId)
         : custom?.agentId;
-    if (
-      isNl2Agent &&
-      (!Number.isInteger(nl2AgentId) || Number(nl2AgentId) <= 0)
-    ) {
-      log.warn("[ChatModelAdapter] NL2Agent requires an editable Agent ID");
-      return;
-    }
 
     // Extract user query: last user message text
     let lastUserIndex = -1;
@@ -1446,13 +1452,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             | undefined)
         : undefined;
     const structuredNl2AgentInput = lastUserCustom?.nl2agentCardAction;
-    if (
-      structuredNl2AgentInput &&
-      structuredNl2AgentInput.agent_id !== nl2AgentId
-    ) {
-      log.warn("[ChatModelAdapter] Ignored mismatched NL2Agent action ID");
-      return;
-    }
     const query = structuredNl2AgentInput
       ? JSON.stringify(structuredNl2AgentInput)
       : visibleQuery;
@@ -1463,6 +1462,29 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
     if (isResume && !serverThreadId) {
       log.warn("[ChatModelAdapter] Cannot resume without a conversation ID");
+      return;
+    }
+    if (
+      isNl2Agent &&
+      (!Number.isInteger(nl2AgentId) || Number(nl2AgentId) <= 0) &&
+      custom?.autoCreateAgentDraft
+    ) {
+      const draft = await createWorkbenchAgentDraft(custom.agentAuthor || "");
+      nl2AgentId = draft.agentId;
+      await custom.onNl2AgentDraftCreated?.(draft);
+    }
+    if (
+      isNl2Agent &&
+      (!Number.isInteger(nl2AgentId) || Number(nl2AgentId) <= 0)
+    ) {
+      log.warn("[ChatModelAdapter] NL2Agent requires an editable Agent ID");
+      return;
+    }
+    if (
+      structuredNl2AgentInput &&
+      structuredNl2AgentInput.agent_id !== nl2AgentId
+    ) {
+      log.warn("[ChatModelAdapter] Ignored mismatched NL2Agent action ID");
       return;
     }
 
@@ -1501,20 +1523,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
-    if (!isEphemeralRuntime && hasServerConversationId) {
+    if (
+      (!isEphemeralRuntime || custom?.persistCreationHistory) &&
+      hasServerConversationId
+    ) {
       requestBody.conversation_id = numericServerThreadId;
     }
 
     // Pass selected agent if provided via custom (set by the page wrapper)
     if (
       (isAgentDebug || isNl2Agent || !isEphemeralRuntime) &&
-      custom?.agentId !== undefined &&
-      custom.agentId !== null
+      (isNl2Agent ? nl2AgentId != null : custom?.agentId != null)
     ) {
-      const numericAgentId =
-        typeof custom.agentId === "string"
-          ? Number(custom.agentId)
-          : custom.agentId;
+      const numericAgentId = isNl2Agent
+        ? Number(nl2AgentId)
+        : Number(custom?.agentId);
       if (!Number.isNaN(numericAgentId)) {
         requestBody.agent_id = numericAgentId;
       }
@@ -1588,9 +1611,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (backendConversationId !== null) {
         custom?.onGenerationStopped?.(backendConversationId);
       }
-      const nl2AgentId = Number(custom?.agentId);
-      if (isNl2Agent && Number.isInteger(nl2AgentId) && nl2AgentId > 0) {
-        custom?.onNl2AgentStopped?.(nl2AgentId);
+      if (
+        isNl2Agent &&
+        Number.isInteger(nl2AgentId) &&
+        Number(nl2AgentId) > 0
+      ) {
+        custom?.onNl2AgentStopped?.(Number(nl2AgentId));
       }
       if (backendConversationId !== null) {
         void stopBackendRun(backendConversationId);
@@ -1634,6 +1660,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : isNl2Skill
               ? "nl2skill"
               : undefined,
+          persist_history:
+            isEphemeralRuntime && custom?.persistCreationHistory === true,
+          retry_message_index: isEphemeralRuntime
+            ? custom?.retry_message_index
+            : undefined,
+          retry_user_message_id: isEphemeralRuntime
+            ? custom?.retry_user_message_id
+            : undefined,
+          workbench_config: isEphemeralRuntime
+            ? custom?.creationWorkbenchConfig
+            : undefined,
           draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
           complexity: isNl2Skill ? custom?.complexity : undefined,
           language: isNl2Skill ? custom?.language : undefined,
@@ -1951,17 +1988,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             };
       nl2SkillAttemptCheckpoints.set(attemptId, { files, summary });
     };
-    const rollbackNl2SkillAttempt = (
-      checkpoint: Nl2SkillAttemptCheckpoint
-    ) => {
+    const rollbackNl2SkillAttempt = (checkpoint: Nl2SkillAttemptCheckpoint) => {
       const createdIndices = new Set<number>();
       for (const [path, index] of nl2SkillFilePartIndices) {
         if (!checkpoint.files.has(path)) createdIndices.add(index);
       }
-      if (
-        checkpoint.summary === null &&
-        nl2SkillSummaryPartIndex !== null
-      ) {
+      if (checkpoint.summary === null && nl2SkillSummaryPartIndex !== null) {
         createdIndices.add(nl2SkillSummaryPartIndex);
       }
       for (const index of [...createdIndices].sort((a, b) => b - a)) {
@@ -2102,6 +2134,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       return true;
     };
     const deliveredNl2AgentStates = new Set<string>();
+    const upsertCreatedAgentPart = (completed: boolean) => {
+      if (!isNl2Agent || !custom?.persistCreationHistory) return;
+      const agentId = Number(nl2AgentId);
+      if (!Number.isInteger(agentId) || agentId <= 0) return;
+      const existing = contentParts.find(
+        (part) => part.type === "data" && part.name === "nl2agent-created"
+      );
+      if (existing) {
+        existing.data.completed ||= completed;
+      } else {
+        contentParts.push({
+          type: "data",
+          name: "nl2agent-created",
+          data: { agentId, completed },
+        });
+      }
+    };
     const deliverNl2AgentState = (chunk: SseChunk) => {
       if (!isNl2Agent || userAborted) return;
       const event = parseNl2AgentState(chunk.content);
@@ -2114,6 +2163,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         if (deliveredNl2AgentStates.has(eventKey)) return;
         deliveredNl2AgentStates.add(eventKey);
       }
+      if (event.event === "agent_generation_completed")
+        upsertCreatedAgentPart(true);
       custom?.onNl2AgentState?.(event);
     };
     let verificationPanel: VerificationPanelPart | null = null;
@@ -2227,9 +2278,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // let the HITL controller snapshot/polling recover the state.
             let value: Record<string, unknown>;
             try {
-              value = (typeof chunk.content === "string"
-                ? JSON.parse(chunk.content)
-                : chunk.content) as Record<string, unknown>;
+              value = (
+                typeof chunk.content === "string"
+                  ? JSON.parse(chunk.content)
+                  : chunk.content
+              ) as Record<string, unknown>;
             } catch (error) {
               log.warn(
                 "[ChatModelAdapter] Failed to parse human_run chunk:",
@@ -2245,7 +2298,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (
               value &&
               typeof value.status === "string" &&
-              ["COMPLETED", "FAILED", "STOPPED", "EXPIRED"].includes(value.status)
+              ["COMPLETED", "FAILED", "STOPPED", "EXPIRED"].includes(
+                value.status
+              )
             ) {
               hitlTerminal = true;
               break;
@@ -2339,6 +2394,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "step_count") {
+            // NL2Skill can emit a step marker with no thinking text. It is
+            // metadata, not a standalone reasoning card in creation mode.
+            if (isNl2Skill) continue;
             // A new model step is a boundary; user guidance by itself is not.
             flushOpenReasoning(chunk.invocation_id);
             // Fold `step_count` into the invocation's reasoning part text
@@ -2413,6 +2471,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
+            if (isNl2Agent && custom?.persistCreationHistory) {
+              yield buildStreamResult(contentParts);
+            }
             continue;
           }
 
@@ -2479,6 +2540,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "final_answer") {
+            upsertCreatedAgentPart(false);
             // Backward compatibility for streams produced before the warning
             // event existed. A later final answer proves those earlier step
             // errors were recovered, so update their presentation in place.
@@ -2800,6 +2862,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             }
           } else if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
+            if (isNl2Agent && custom?.persistCreationHistory) {
+              yield buildStreamResult(contentParts);
+            }
           } else if (chunk.type === "automation_proposal") {
             const proposal = parseAutomationProposal(chunk.content);
             if (proposal) {
@@ -2842,8 +2907,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 yield buildStreamResult(contentParts);
               }
             }
+          } else if (chunk.type === "step_count" && isNl2Skill) {
+            // The buffered SSE tail follows the live NL2Skill rule too.
           } else {
             if (chunk.type === "final_answer") {
+              upsertCreatedAgentPart(false);
               // Commit any pending parent reasoning so the answer is emitted
               // after the most recent step thought instead of being reordered
               // in front of it.

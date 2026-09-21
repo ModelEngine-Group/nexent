@@ -987,20 +987,30 @@ class AgentRequest(BaseModel):
 
 
 class NL2AgentRunRequest(BaseModel):
-    """Request payload for one ephemeral NL2Agent turn."""
+    """Request payload for an NL2Agent turn, optionally persisted by Workbench."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: int = Field(gt=0)
+    conversation_id: Optional[int] = Field(default=None, gt=0)
+    retry_user_message_id: Optional[int] = Field(default=None, gt=0)
+    retry_message_index: Optional[int] = Field(default=None, ge=0)
+    persist_history: bool = False
+    workbench_config: Optional[Dict[str, Any]] = None
 
 
 class NL2SkillRunRequest(BaseModel):
-    """Request payload for one ephemeral NL2Skill conversation turn."""
+    """Request payload for an NL2Skill turn, optionally persisted by Workbench."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
+    conversation_id: Optional[int] = Field(default=None, gt=0)
+    retry_user_message_id: Optional[int] = Field(default=None, gt=0)
+    retry_message_index: Optional[int] = Field(default=None, ge=0)
+    persist_history: bool = False
+    workbench_config: Optional[Dict[str, Any]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     complexity: Literal["simple", "complicated"] = "complicated"
     language: Optional[Literal["zh", "en"]] = None

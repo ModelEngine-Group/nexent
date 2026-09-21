@@ -42,6 +42,7 @@ test("UT-FE-WB-009 creation actions clear incompatible resources", () => {
   assert.equal(creation.config.mode, "agent_create");
   assert.deepEqual(creation.config.agent_mounts, []);
   assert.deepEqual(creation.config.skill_mounts, []);
+  assert.equal(creation.config.model_id, undefined);
 });
 
 test("UT-FE-WB-006 locks version and initializes published Skill defaults", () => {
@@ -137,6 +138,16 @@ test("Resource resolution and unavailable execution disable send", () => {
     mounts: [{ agent_id: 8 }, { agent_id: 9 }],
   });
   assert.equal(getWorkbenchSendability(multi).canSend, false);
+});
+
+test("Creation modes send through their dedicated NL2 runtimes", () => {
+  for (const mode of ["skill_create", "agent_create"] as const) {
+    const state = workbenchReducer(initialWorkbenchState, {
+      type: "select-mode",
+      mode,
+    });
+    assert.deepEqual(getWorkbenchSendability(state), { canSend: true });
+  }
 });
 
 test("UT-FE-WB-032 restores canonical config and its independent version", () => {
