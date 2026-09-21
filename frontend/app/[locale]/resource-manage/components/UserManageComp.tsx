@@ -1223,6 +1223,7 @@ export default function UserManageComp() {
               onCancel={hideModal}
               footer={null}
               width={800}
+              destroyOnHidden
             >
               <ProjectConfigTab showPlatformQuota />
             </Modal>
