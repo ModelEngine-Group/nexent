@@ -157,7 +157,7 @@ export default function ResourceCardGrid<T>({
           visibleItems.map((item, index) => renderItem(item, index))
         )}
       </div>
-      {itemCount > 0 && totalPages > 1 && onPageChange ? (
+      {itemCount > 0 && onPageChange ? (
         <div className="mt-7 flex justify-end">
           <Pagination
             current={currentPage}
