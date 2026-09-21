@@ -11,7 +11,6 @@ import {
   Eye,
   MoreHorizontal,
   Pencil,
-  Plus,
   Power,
   Search,
   Tag,
@@ -293,18 +292,40 @@ export function MineSkillsView({
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={t("skillRepository.searchPlaceholder")}
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-            className="rounded-xl"
+            className="rounded-none"
             allowClear
           />
         </div>
-        <Button
-          type="primary"
-          className="flex shrink-0 items-center gap-1.5"
-          icon={<Plus className="size-4" />}
-          onClick={onCreateSkill}
+        <Popover
+          trigger="click"
+          placement="bottomRight"
+          content={
+            <div className="w-72">
+              <TagFilterControls
+                definitions={tagDefinitions}
+                value={tagPredicates}
+                onChange={onTagPredicatesChange}
+              />
+              {tagPredicates.length > 0 ? (
+                <button
+                  type="button"
+                  className="mt-2 text-xs text-blue-600 hover:underline"
+                  onClick={() => onTagPredicatesChange([])}
+                >
+                  {t("repository.tagFilter.clear")}
+                </button>
+              ) : null}
+            </div>
+          }
         >
-          {t("skillRepository.mine.createSkill")}
-        </Button>
+          <Button
+            type={tagPredicates.length > 0 ? "primary" : "default"}
+            className="rounded-none"
+            icon={<Tag className="size-3.5" aria-hidden />}
+          >
+            {t("repository.tagFilter.button")}
+          </Button>
+        </Popover>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -319,38 +340,6 @@ export function MineSkillsView({
               <span className="ml-1 text-xs opacity-80">{counts[filter]}</span>
             </FilterButton>
           ))}
-        </div>
-        <div className="ml-auto shrink-0">
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            content={
-              <div className="w-72">
-                <TagFilterControls
-                  definitions={tagDefinitions}
-                  value={tagPredicates}
-                  onChange={onTagPredicatesChange}
-                />
-                {tagPredicates.length > 0 ? (
-                  <button
-                    type="button"
-                    className="mt-2 text-xs text-blue-600 hover:underline"
-                    onClick={() => onTagPredicatesChange([])}
-                  >
-                    {t("repository.tagFilter.clear")}
-                  </button>
-                ) : null}
-              </div>
-            }
-          >
-            <Button
-              type={tagPredicates.length > 0 ? "primary" : "default"}
-              className="h-11"
-              icon={<Tag className="size-3.5" aria-hidden />}
-            >
-              {t("repository.tagFilter.button")}
-            </Button>
-          </Popover>
         </div>
       </div>
 

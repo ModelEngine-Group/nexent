@@ -71,7 +71,7 @@ test("skill repository cards open on click and keep Copy as the compact footer a
   assert.match(card, /onClick=\{onDetailClick\}/);
   assert.match(card, /headerActions=\{[\s\S]*Download/);
   assert.match(card, /actions=\{[\s\S]*MoreHorizontal/);
-  assert.match(card, /min-h-6/);
+  assert.match(card, /min-h-7/);
 });
 
 test("my skill cards move shared status beside More and keep only the lower-right edit or view action", async () => {
@@ -114,4 +114,23 @@ test("skill grids share Agent-style adaptive dimensions and default-height contr
     assert.doesNotMatch(source, /<PaginationBar/);
   }
   assert.doesNotMatch(tagFilter, /className="h-11"/);
+});
+
+test("skill feedback keeps square search controls, exposes tags, and shows repository authors", async () => {
+  const [repository, mine, card] = await Promise.all([
+    readFile(repositoryView, "utf8"),
+    readFile(mineView, "utf8"),
+    readFile(repositoryCard, "utf8"),
+  ]);
+
+  assert.match(
+    repository,
+    /<TagFilterPopover[\s\S]*buttonClassName="rounded-none"/
+  );
+  assert.doesNotMatch(repository, /className="rounded-xl"/);
+  assert.doesNotMatch(mine, /skillRepository\.mine\.createSkill/);
+  assert.match(mine, /<Popover[\s\S]*repository\.tagFilter\.button/);
+  assert.doesNotMatch(mine, /className="rounded-xl"/);
+  assert.match(card, /min-h-7/);
+  assert.match(card, /meta=\{[\s\S]*listing\.author/);
 });

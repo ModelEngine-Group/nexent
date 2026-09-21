@@ -74,7 +74,7 @@ export function SkillRepositoryCard({
         listing.description || t("skillRepository.common.noDescription")
       }
       tags={
-        <div className="flex min-h-6 flex-wrap gap-2">
+        <div className="flex min-h-7 flex-wrap gap-2">
           {tags.map((tag) => (
             <span
               key={tag}
@@ -108,6 +108,11 @@ export function SkillRepositoryCard({
               aria-label={t("skillRepository.common.moreActions")}
             />
           </Dropdown>
+        ) : undefined
+      }
+      meta={
+        listing.author?.trim() ? (
+          <span className="truncate">{listing.author.trim()}</span>
         ) : undefined
       }
       footer={action}
