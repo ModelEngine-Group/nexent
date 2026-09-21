@@ -575,11 +575,9 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           placeholder={t("tenantResources.agents.filterGroup")}
           className="w-48"
         />
-        {tenantId && (
-          <Button className="ml-auto" onClick={() => setOfficialModalOpen(true)}>
-            管理官方智能体
-          </Button>
-        )}
+        <Button className="ml-auto" onClick={() => setOfficialModalOpen(true)}>
+          管理官方智能体
+        </Button>
       </div>
       <div className="flex-1 overflow-hidden">
         <Table
@@ -788,13 +786,10 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           </Form>
         </Spin>
       </Modal>
-      {tenantId && (
-        <ManageOfficialAgentsModal
-          open={officialModalOpen}
-          tenantId={tenantId}
-          onClose={() => setOfficialModalOpen(false)}
-        />
-      )}
+      <ManageOfficialAgentsModal
+        open={officialModalOpen}
+        onClose={() => setOfficialModalOpen(false)}
+      />
 
       {/* Fullscreen View Modal */}
       <ExpandEditModal

@@ -324,32 +324,14 @@ export async function installOfficialAgents(
   }
 }
 
-export async function fetchOfficialAgentManagement(
-  tenantId: string
-): Promise<OfficialAgentManagementItem[]> {
+export async function fetchOfficialAgentManagement(): Promise<OfficialAgentManagementItem[]> {
   const response = await fetchWithErrorHandling(
-    `${API_ENDPOINTS.agentRepository.officialManagement}?tenant_id=${encodeURIComponent(tenantId)}`,
+    API_ENDPOINTS.agentRepository.officialManagement,
     { method: "GET", headers: getAuthHeaders() }
   );
   if (!response.ok) throw new Error(`Failed to fetch official agents: ${response.statusText}`);
   const data = await response.json();
   return data.items ?? [];
-}
-
-export async function setOfficialAgentVisibility(
-  agentRepositoryId: number,
-  tenantId: string,
-  visible: boolean
-): Promise<void> {
-  const response = await fetchWithErrorHandling(
-    `${API_ENDPOINTS.agentRepository.officialManagementItem(agentRepositoryId)}?tenant_id=${encodeURIComponent(tenantId)}`,
-    {
-      method: "PATCH",
-      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ visible }),
-    }
-  );
-  if (!response.ok) throw new Error(`Failed to update official agent visibility: ${response.statusText}`);
 }
 
 export async function deleteOfficialAgent(agentRepositoryId: number): Promise<void> {
@@ -372,7 +354,6 @@ const agentRepositoryService = {
   fetchOfficialAgentsWithStatus,
   installOfficialAgents,
   fetchOfficialAgentManagement,
-  setOfficialAgentVisibility,
   deleteOfficialAgent,
 };
 

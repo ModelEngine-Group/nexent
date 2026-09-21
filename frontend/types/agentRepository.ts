@@ -30,9 +30,7 @@ export interface AgentRepositoryListingItem {
   is_official?: boolean;
 }
 
-export interface OfficialAgentManagementItem extends AgentRepositoryListingItem {
-  visible: boolean;
-}
+export type OfficialAgentManagementItem = AgentRepositoryListingItem;
 
 export interface AgentRepositoryListingPagination {
   page: number;

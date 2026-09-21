@@ -1917,34 +1917,6 @@ class AgentRepository(TableBase):
     content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
 
 
-class OfficialAgentTenantVisibility(TableBase):
-    """Per-tenant visibility override for an official agent repository listing.
-
-    Visibility is opt-out: an absent row means the official listing is visible.
-    The table deliberately stores only the tenant override, not a second copy
-    of the official agent or any of the tenant's installed resources.
-    """
-    __tablename__ = "ag_official_agent_tenant_visibility_t"
-    __table_args__ = (
-        UniqueConstraint(
-            "agent_repository_id",
-            "tenant_id",
-            name="ux_official_agent_tenant_visibility",
-        ),
-        Index("ix_official_agent_tenant_visibility_tenant", "tenant_id"),
-        {"schema": SCHEMA},
-    )
-
-    visibility_id = Column(
-        BigInteger,
-        Sequence("ag_official_agent_tenant_visibility_t_visibility_id_seq", schema=SCHEMA),
-        primary_key=True,
-        nullable=False,
-    )
-    agent_repository_id = Column(BigInteger, nullable=False)
-    tenant_id = Column(String(100), nullable=False)
-
-
 class SkillRepository(TableBase):
     """
     Skill repository (marketplace) table. Frozen snapshot of a shared skill for installation.

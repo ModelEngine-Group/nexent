@@ -34,12 +34,6 @@ from database.agent_repository_db import (
     update_agent_repository_status_by_id,
     soft_delete_agent_repository_record,
 )
-from database.official_agent_visibility_db import (
-    delete_visibility_overrides,
-    is_official_agent_hidden,
-    list_hidden_official_agent_repository_ids,
-    set_official_agent_visibility,
-)
 from database.agent_version_db import search_version_by_version_no
 from database.tag_management_db import TagManagementDB
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -230,11 +224,6 @@ def list_agent_repository_listings_impl(
         )
         for record in official_records:
             record["publisher_tenant_id"] = OFFICIAL_AGENT_TENANT_ID
-        hidden_ids = list_hidden_official_agent_repository_ids(tenant_id)
-        official_records = [
-            record for record in official_records
-            if int(record["agent_repository_id"]) not in hidden_ids
-        ]
         records.extend(official_records)
         # Keep the response stable if a repository record is visible through
         # both tenant queries (for example during a migration or in tests).
@@ -789,12 +778,6 @@ def get_agent_repository_listing_detail_impl(
         )
     if not record:
         raise ValueError("Repository listing not found")
-    if (
-        record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID
-        and is_official_agent_hidden(agent_repository_id, tenant_id)
-    ):
-        raise ValueError("Repository listing not found")
-
     root_agent = _extract_root_agent_from_snapshot(record.get("agent_info_json"))
     agent_id = record.get("agent_id")
     download_total = 0
@@ -1280,12 +1263,6 @@ def check_repository_import_precheck_impl(
         )
     if not record:
         raise ValueError("Repository listing not found")
-    if (
-        record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID
-        and is_official_agent_hidden(agent_repository_id, tenant_id)
-    ):
-        raise ValueError("Repository listing not found")
-
     if record.get("status") != STATUS_SHARED:
         raise ValueError("Repository listing is not available for import")
 
@@ -1353,12 +1330,6 @@ async def import_agent_from_repository_impl(
             OFFICIAL_AGENT_TENANT_ID,
         )
     if not record:
-        raise ValueError("Repository listing not found")
-
-    if (
-        record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID
-        and is_official_agent_hidden(agent_repository_id, tenant_id)
-    ):
         raise ValueError("Repository listing not found")
 
     # Official listings are templates backed by a mounted bundle. Their
@@ -1437,35 +1408,19 @@ async def import_agent_from_repository_impl(
     return result
 
 
-def list_official_agent_management_impl(tenant_id: str) -> List[Dict[str, Any]]:
-    """Return official listings plus visibility for the selected tenant."""
+def list_official_agent_management_impl() -> List[Dict[str, Any]]:
+    """Return active official listings for super-admin management."""
     records = list_agent_repository_summaries(
         publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
         status=STATUS_SHARED,
     )
-    hidden_ids = list_hidden_official_agent_repository_ids(tenant_id)
     return [
         {
             **record,
             "publisher_tenant_id": OFFICIAL_AGENT_TENANT_ID,
-            "visible": int(record["agent_repository_id"]) not in hidden_ids,
         }
         for record in records
     ]
-
-
-def set_official_agent_visibility_impl(
-    agent_repository_id: int,
-    tenant_id: str,
-    visible: bool,
-    user_id: str,
-) -> Dict[str, Any]:
-    """Set visibility for one official listing in one selected tenant."""
-    record = get_agent_repository_by_id(agent_repository_id, OFFICIAL_AGENT_TENANT_ID)
-    if not record or record.get("status") != STATUS_SHARED:
-        raise ValueError("Official agent repository listing not found")
-    set_official_agent_visibility(agent_repository_id, tenant_id, visible, user_id)
-    return {"agent_repository_id": agent_repository_id, "tenant_id": tenant_id, "visible": visible}
 
 
 def delete_official_agent_impl(agent_repository_id: int, user_id: str) -> Dict[str, Any]:
@@ -1511,7 +1466,6 @@ def delete_official_agent_impl(agent_repository_id: int, user_id: str) -> Dict[s
         publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
         user_id=user_id,
     )
-    delete_visibility_overrides(agent_repository_id)
     if affected == 0:
         raise ValueError("Official agent repository listing was already deleted")
     return {
