@@ -51,6 +51,116 @@ def test_action_approval_mode_only_trusts_control_tools():
     assert _allowed_tool_names(tools, approval_enabled=True) == {"final_answer", "create_plan"}
 
 
+@pytest.mark.asyncio
+async def test_authorize_run_accepts_hidden_workbench_system_root(monkeypatch):
+    """Workbench roots are hidden from normal Agent lists but remain runnable."""
+    from database import user_tenant_db
+    from management.services.agent import management
+    from services import conversation_management_service, workbench_service
+    from services.human_interaction import application
+
+    async def run_inline(_name, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
+
+    async def no_visible_agents(_tenant_id, _user_id):
+        return []
+
+    config = {"schema_version": 3, "mode": "generic_chat"}
+    resolved_plan = types.SimpleNamespace(
+        root=types.SimpleNamespace(
+            identity=types.SimpleNamespace(agent_id=99)
+        )
+    )
+    monkeypatch.setattr(application, "run_blocking", run_inline)
+    monkeypatch.setattr(
+        user_tenant_db,
+        "get_user_tenant_by_user_id",
+        lambda _user_id: {"tenant_id": "tenant-a"},
+    )
+    monkeypatch.setattr(
+        conversation_management_service,
+        "get_conversation_service",
+        lambda *_args, **_kwargs: {"workbench_config": config},
+    )
+    monkeypatch.setattr(
+        management, "list_all_agent_info_impl", no_visible_agents
+    )
+    monkeypatch.setattr(
+        workbench_service,
+        "resolve_workbench_config",
+        lambda resolved_config, **_kwargs: (resolved_config, resolved_plan),
+    )
+
+    await application.authorize_run(
+        {
+            "agent_id": 99,
+            "conversation_id": 7,
+            "entrypoint": "workbench",
+            "workbench": config,
+        },
+        "tenant-a",
+        "owner",
+    )
+
+
+@pytest.mark.asyncio
+async def test_authorize_run_rejects_mismatched_workbench_root(monkeypatch):
+    """A workbench marker must not authorize an arbitrary hidden Agent ID."""
+    from database import user_tenant_db
+    from management.services.agent import management
+    from services import conversation_management_service, workbench_service
+    from services.human_interaction import application
+    from services.human_interaction.models import InteractionError
+
+    async def run_inline(_name, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
+
+    async def visible_spoofed_agent(_tenant_id, _user_id):
+        return [{"agent_id": 1234}]
+
+    config = {"schema_version": 3, "mode": "generic_chat"}
+    resolved_plan = types.SimpleNamespace(
+        root=types.SimpleNamespace(
+            identity=types.SimpleNamespace(agent_id=99)
+        )
+    )
+    monkeypatch.setattr(application, "run_blocking", run_inline)
+    monkeypatch.setattr(
+        user_tenant_db,
+        "get_user_tenant_by_user_id",
+        lambda _user_id: {"tenant_id": "tenant-a"},
+    )
+    monkeypatch.setattr(
+        conversation_management_service,
+        "get_conversation_service",
+        lambda *_args, **_kwargs: {"workbench_config": config},
+    )
+    monkeypatch.setattr(
+        management, "list_all_agent_info_impl", visible_spoofed_agent
+    )
+    monkeypatch.setattr(
+        workbench_service,
+        "resolve_workbench_config",
+        lambda resolved_config, **_kwargs: (resolved_config, resolved_plan),
+    )
+
+    with pytest.raises(InteractionError, match="Agent is no longer accessible"):
+        await application.authorize_run(
+            {
+                "agent_id": 1234,
+                "conversation_id": 7,
+                "entrypoint": "workbench",
+                "workbench": config,
+            },
+            "tenant-a",
+            "owner",
+        )
+
+
 def test_interaction_answer_accepts_explicit_other_value():
     from services.human_interaction.service import validate_interaction_answer
 

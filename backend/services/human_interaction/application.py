@@ -67,6 +67,26 @@ def _allowed_tool_names(tools, *, approval_enabled=HITL_TOOL_APPROVAL_ENABLED):
     return frozenset(allowed)
 
 
+def _resolve_authorized_workbench_root(payload, conversation, tenant_id, user_id):
+    """Re-resolve a Workbench run without exposing its hidden system Agent."""
+    from consts.model import WorkbenchSessionConfig
+    from services.workbench_service import resolve_workbench_config
+
+    raw_config = payload.get("workbench")
+    if raw_config is None and isinstance(conversation, dict):
+        raw_config = conversation.get("workbench_config")
+    if raw_config is None:
+        raise ValueError("Workbench configuration is unavailable")
+
+    config = WorkbenchSessionConfig.model_validate(raw_config)
+    _, plan = resolve_workbench_config(
+        config,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return int(plan.root.identity.agent_id)
+
+
 async def authorize_run(payload, tenant_id, user_id):
     from database.user_tenant_db import get_user_tenant_by_user_id
     from management.services.agent.management import list_all_agent_info_impl
@@ -84,6 +104,26 @@ async def authorize_run(payload, tenant_id, user_id):
     )
     if conversation is None:
         raise InteractionError("Conversation is no longer accessible", 403)
+
+    if payload.get("entrypoint") == "workbench":
+        try:
+            resolved_root_id = await run_blocking(
+                "hitl-resolve-workbench-authorization",
+                _resolve_authorized_workbench_root,
+                payload,
+                conversation,
+                tenant_id,
+                user_id,
+                lane="control-io",
+                owner=__name__,
+            )
+            requested_root_id = int(payload["agent_id"])
+        except Exception as exc:
+            raise InteractionError("Agent is no longer accessible", 403) from exc
+        if requested_root_id != resolved_root_id:
+            raise InteractionError("Agent is no longer accessible", 403)
+        return
+
     agents = await list_all_agent_info_impl(tenant_id, user_id)
     if not any(item.get("agent_id") == payload["agent_id"] for item in agents):
         raise InteractionError("Agent is no longer accessible", 403)
