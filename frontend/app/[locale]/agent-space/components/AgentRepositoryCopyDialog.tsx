@@ -467,6 +467,38 @@ export function AgentRepositoryCopyDialog({
             </section>
           ) : null}
 
+          {isOfficialListing && officialKnowledgeConflictItems.length > 0 ? (
+            <section className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-500/10">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                检测到同名知识库，请选择处理方式
+              </p>
+              {officialKnowledgeConflictItems.map((item) => (
+                <div key={item.key} className="space-y-2">
+                  <Tag color="orange">{item.name}</Tag>
+                  <Radio.Group
+                    value={knowledgeResolutionActions[item.name] ?? "reuse"}
+                    onChange={(event) => {
+                      setKnowledgeResolutionActions((prev) => ({
+                        ...prev,
+                        [item.name]: event.target.value,
+                      }));
+                    }}
+                  >
+                    <Space direction="vertical" size={8}>
+                      <Radio value="reuse">复用已有知识库</Radio>
+                      <Radio value="create_new">
+                        创建新的知识库
+                        <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
+                          将自动使用不冲突的名称
+                        </span>
+                      </Radio>
+                    </Space>
+                  </Radio.Group>
+                </div>
+              ))}
+            </section>
+          ) : null}
+
           {isOfficialListing ? (
             <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
               <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
@@ -487,37 +519,6 @@ export function AgentRepositoryCopyDialog({
                   }))}
                 />
               </div>
-              {officialKnowledgeConflictItems.length > 0 ? (
-                <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-500/10">
-                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                    检测到同名知识库，请选择处理方式
-                  </p>
-                  {officialKnowledgeConflictItems.map((item) => (
-                    <div key={item.key} className="space-y-2">
-                      <Tag color="orange">{item.name}</Tag>
-                      <Radio.Group
-                        value={knowledgeResolutionActions[item.name] ?? "reuse"}
-                        onChange={(event) => {
-                          setKnowledgeResolutionActions((prev) => ({
-                            ...prev,
-                            [item.name]: event.target.value,
-                          }));
-                        }}
-                      >
-                        <Space direction="vertical" size={8}>
-                          <Radio value="reuse">复用已有知识库</Radio>
-                          <Radio value="create_new">
-                            创建新的知识库
-                            <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
-                              将自动使用不冲突的名称
-                            </span>
-                          </Radio>
-                        </Space>
-                      </Radio.Group>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
               {hasOfficialKnowledge && hasOfficialKnowledgeToCreate ? (
                 <div className="space-y-2">
                   <label className="block text-xs text-slate-600 dark:text-slate-300">
