@@ -137,6 +137,40 @@ async def test_lease_loss_cancels_stale_executor():
 
 
 @pytest.mark.asyncio
+async def test_waiting_jobs_do_not_consume_concurrency():
+    store = MemoryLeaseStore([ClaimedJob(1, {"id": 1}), ClaimedJob(2, {"id": 2})])
+    started = []
+    first_running = asyncio.Event()
+    gate = asyncio.Event()
+
+    async def execute(job, lease):
+        started.append(job.job_id)
+        if job.job_id == 1:
+            first_running.set()
+            await gate.wait()
+
+    scheduler = LeaseScheduler(store, execute, _config(max_concurrency=1), owner_id="scheduler-a")
+    await scheduler.start()
+    await _wait_until(first_running.is_set)
+
+    # With job 1 executing, the single concurrency slot is fully consumed.
+    assert scheduler.active_count == 1
+    assert 2 not in started
+
+    # Job 1 parks on human input: its slot frees for job 2 without finishing.
+    scheduler.mark_waiting(1, waiting=True)
+    await _wait_until(lambda: 2 in started)
+    assert scheduler.active_count == 2
+    assert scheduler.waiting_count == 1
+
+    gate.set()
+    await scheduler.stop()
+
+    # Completion clears the waiting flag even without an explicit reset.
+    assert scheduler.waiting_count == 0
+
+
+@pytest.mark.asyncio
 async def test_scheduler_recovers_after_transient_claim_failure():
     store = MemoryLeaseStore([ClaimedJob(1, {"id": 1})])
     store.claim_failures = 1

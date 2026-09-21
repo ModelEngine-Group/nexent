@@ -112,7 +112,24 @@ async def execute_attempt(job, lease):
             except Exception as exc:
                 raise RunTerminated("Run authorization could not be revalidated") from exc
 
-        port = RuntimeInteractionPort(service, identity, lease.owner_id, authorize, live_resume=True)
+        def report_waiting(waiting: bool) -> None:
+            # Worker threads park inside _wait_until_ready; relay the state to
+            # the scheduler loop so human waits do not consume execution slots.
+            # The reporter is a pure concurrency-budget optimization: a dead
+            # loop (service shutdown) or a stale SDK copy without mark_waiting
+            # must degrade to slot-consuming waits, never break execution.
+            mark_waiting = getattr(human_run_scheduler, "mark_waiting", None)
+            if mark_waiting is None:
+                return
+            # call_soon_threadsafe takes no kwargs: wrap the keyword-only flag.
+            try:
+                loop.call_soon_threadsafe(lambda: mark_waiting(lease.job_id, waiting=waiting))
+            except RuntimeError:
+                pass
+
+        port = RuntimeInteractionPort(
+            service, identity, lease.owner_id, authorize, live_resume=True, wait_reporter=report_waiting,
+        )
         saved = port.request_payload
         if saved.get("runtime_mode") == "native-live-v1" and port.checkpoint:
             raise RecoveryRequired("The original native execution is no longer available")
