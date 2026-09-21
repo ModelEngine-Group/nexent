@@ -61,7 +61,7 @@ export default function AppModelConfig({
         // shared 1920px setup-container width — the redesigned layout was
         // authored for a ~1150px column and stretched to 1920px it leaves
         // wide empty gaps in the library rows.
-        maxWidth: "1600px",
+        maxWidth: "1760px",
         padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
       }}
     >
