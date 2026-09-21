@@ -5,6 +5,7 @@ import type {
   ConversationListResponse,
   ConversationListPage,
   ConversationListParams,
+  ConversationListFilterParams,
   ApiConversationDetail,
   ApiConversationResponse,
 } from "@/types/conversation";
@@ -34,7 +35,7 @@ const getWebSocketUrl = (endpoint: string): string => {
 export const conversationService = {
   // Get conversation list
   async getList(
-    params: ConversationListParams & {
+    params: ConversationListParams & ConversationListFilterParams & {
       todayStartMs: number;
       weekStartMs: number;
     }
@@ -45,6 +46,18 @@ export const conversationService = {
       today_start_ms: String(params.todayStartMs),
       week_start_ms: String(params.weekStartMs),
     });
+    if (params.startDateMs !== undefined && params.startDateMs !== null) {
+      query.set("start_date_ms", String(params.startDateMs));
+    }
+    if (params.endDateMs !== undefined && params.endDateMs !== null) {
+      query.set("end_date_ms", String(params.endDateMs));
+    }
+    if (params.agentId !== undefined && params.agentId !== null) {
+      query.set("agent_id", String(params.agentId));
+    }
+    if (params.keyword !== undefined && params.keyword !== null && params.keyword.trim() !== "") {
+      query.set("keyword", params.keyword.trim());
+    }
     const response = await fetch(
       `${API_ENDPOINTS.conversation.list}?${query.toString()}`
     );
