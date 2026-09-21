@@ -472,30 +472,40 @@ export function AgentRepositoryCopyDialog({
               <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
                 检测到同名知识库，请选择处理方式
               </p>
-              {officialKnowledgeConflictItems.map((item) => (
-                <div key={item.key} className="space-y-2">
-                  <Tag color="orange">{item.name}</Tag>
-                  <Radio.Group
-                    value={knowledgeResolutionActions[item.name] ?? "reuse"}
-                    onChange={(event) => {
-                      setKnowledgeResolutionActions((prev) => ({
-                        ...prev,
-                        [item.name]: event.target.value,
-                      }));
-                    }}
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                请选择每个同名知识库的处理方式：
+              </p>
+              <div className="space-y-3">
+                {officialKnowledgeConflictItems.map((item) => (
+                  <div
+                    key={item.key}
+                    className="rounded-lg border border-amber-200 bg-white p-3 dark:border-amber-700 dark:bg-slate-800"
                   >
-                    <Space direction="vertical" size={8}>
-                      <Radio value="reuse">复用已有知识库</Radio>
-                      <Radio value="create_new">
-                        创建新的知识库
-                        <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
-                          将自动使用不冲突的名称
-                        </span>
-                      </Radio>
-                    </Space>
-                  </Radio.Group>
-                </div>
-              ))}
+                    <div className="mb-2">
+                      <Tag color="orange">{item.name}</Tag>
+                    </div>
+                    <Radio.Group
+                      value={knowledgeResolutionActions[item.name] ?? "reuse"}
+                      onChange={(event) => {
+                        setKnowledgeResolutionActions((prev) => ({
+                          ...prev,
+                          [item.name]: event.target.value,
+                        }));
+                      }}
+                    >
+                      <Space direction="vertical" size={8}>
+                        <Radio value="reuse">复用已有知识库</Radio>
+                        <Radio value="create_new">
+                          创建新的知识库
+                          <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
+                            将自动使用不冲突的名称
+                          </span>
+                        </Radio>
+                      </Space>
+                    </Radio.Group>
+                  </div>
+                ))}
+              </div>
             </section>
           ) : null}
 
