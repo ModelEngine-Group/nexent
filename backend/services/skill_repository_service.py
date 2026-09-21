@@ -925,11 +925,17 @@ def _to_mine_skill_item(
     user_id: str,
     user_role: str,
     repository_by_skill_id: Dict[int, List[Dict[str, Any]]],
+    managed_tags_by_skill_id: Dict[str, List[str]],
 ) -> Dict[str, Any]:
     if skill.get("new_skill_padding"):
         return {"new_skill_padding": True}
 
     skill_id = skill.get("skill_id")
+    managed_tags = (
+        managed_tags_by_skill_id.get(str(skill_id), [])
+        if skill_id is not None
+        else []
+    )
     repository_info = (
         repository_by_skill_id.get(int(skill_id), [])
         if skill_id is not None
@@ -940,7 +946,7 @@ def _to_mine_skill_item(
         "name": skill.get("name"),
         "description": skill.get("description"),
         "source": skill.get("source"),
-        "tags": _normalize_mine_skill_tags(skill.get("tags")),
+        "tags": managed_tags or _normalize_mine_skill_tags(skill.get("tags")),
         "group_ids": skill.get("group_ids") or [],
         "ingroup_permission": skill.get("ingroup_permission"),
         "created_by": skill.get("created_by"),
@@ -1028,12 +1034,24 @@ def list_my_editable_skills_impl(
         paged_skills,
         tenant_id,
     )
+    from database.tag_management_db import TagManagementDB
+
+    managed_tags_by_skill_id = TagManagementDB.list_resource_assignment_display_values_by_ids(
+        tenant_id=tenant_id,
+        resource_type="skill",
+        resource_ids=[
+            str(skill["skill_id"])
+            for skill in paged_skills
+            if skill.get("skill_id") is not None
+        ],
+    )
     items = [
         _to_mine_skill_item(
             skill,
             user_id=user_id,
             user_role=user_role,
             repository_by_skill_id=repository_by_skill_id,
+            managed_tags_by_skill_id=managed_tags_by_skill_id,
         )
         for skill in paged_skills
     ]

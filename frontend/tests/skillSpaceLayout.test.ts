@@ -13,6 +13,10 @@ const tagFilterPopover = new URL(
   "../components/tag/TagFilterPopover.tsx",
   import.meta.url
 );
+const skillRepositoryBackend = new URL(
+  "../../backend/services/skill_repository_service.py",
+  import.meta.url
+);
 
 test("skill space keeps tab content and actions in three sibling components", async () => {
   const page = await readFile(new URL("page.tsx", route), "utf8");
@@ -143,4 +147,14 @@ test("skill feedback matches Agent search controls, exposes tags, and shows repo
     card,
     /listing\.author\?\.trim\(\) \|\| listing\.submitted_by\?\.trim\(\)/
   );
+});
+
+test("my skill cards receive managed Skill tag display values", async () => {
+  const backend = await readFile(skillRepositoryBackend, "utf8");
+
+  assert.match(
+    backend,
+    /TagManagementDB\.list_resource_assignment_display_values_by_ids\(/
+  );
+  assert.match(backend, /"tags": managed_tags or _normalize_mine_skill_tags/);
 });
