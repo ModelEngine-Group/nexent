@@ -121,7 +121,12 @@ export function AgentRepositoryCopyDialog({
     [precheck]
   );
   const availableItems = useMemo(
-    () => precheck?.items.filter((item) => item.available) ?? [],
+    () =>
+      precheck?.items.filter(
+        (item) =>
+          item.available &&
+          !(item.type === "knowledge_base" && item.resolution_required)
+      ) ?? [],
     [precheck]
   );
 
