@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Select, Tag, Tooltip } from "antd";
 import {
   Pencil,
   Trash2,
@@ -14,20 +13,31 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
-  ModelOption,
-  ModelType,
-  ModelSource,
-  ModelConnectStatus,
-} from "@/types/modelConfig";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+
+import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
+import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
 
 /**
- * v2.6.1 redesign (v0 design): the model library as a custom list.
- *
- * Replaces the previous antd Table with the v0 layout: toolbar (search +
- * type + provider filters), lightweight rows (name + default badge, type
- * badge, provider, connectivity dot, icon actions) and custom pagination.
+ * v2.6.1 redesign (v0 design): the model library as a custom list built on
+ * the project's shadcn/ui primitives — quiet table header, lightweight rows
+ * (name + default badge, type badge, provider, connectivity dot, icon
+ * actions with tooltips) and custom pagination.
  */
 
 const PAGE_SIZE = 8;
@@ -69,17 +79,17 @@ const TYPE_LABEL_KEY_MAP: Record<string, string> = {
   tts: "tts",
 };
 
-const TYPE_BADGE_COLORS: Record<string, string> = {
-  [MODEL_TYPES.LLM]: "blue",
-  [MODEL_TYPES.EMBEDDING]: "geekblue",
-  [MODEL_TYPES.MULTI_EMBEDDING]: "cyan",
-  [MODEL_TYPES.RERANK]: "purple",
-  [MODEL_TYPES.STT]: "orange",
-  [MODEL_TYPES.TTS]: "magenta",
-  [MODEL_TYPES.VLM]: "green",
-  [MODEL_TYPES.VLM2]: "green",
-  [MODEL_TYPES.VLM3]: "green",
-  [MODEL_TYPES.VLM4]: "green",
+const TYPE_BADGE_CLASS: Record<string, string> = {
+  [MODEL_TYPES.LLM]: "bg-blue-100 text-blue-700",
+  [MODEL_TYPES.EMBEDDING]: "bg-indigo-100 text-indigo-700",
+  [MODEL_TYPES.MULTI_EMBEDDING]: "bg-cyan-100 text-cyan-700",
+  [MODEL_TYPES.RERANK]: "bg-purple-100 text-purple-700",
+  [MODEL_TYPES.STT]: "bg-orange-100 text-orange-700",
+  [MODEL_TYPES.TTS]: "bg-pink-100 text-pink-700",
+  [MODEL_TYPES.VLM]: "bg-emerald-100 text-emerald-700",
+  [MODEL_TYPES.VLM2]: "bg-emerald-100 text-emerald-700",
+  [MODEL_TYPES.VLM3]: "bg-emerald-100 text-emerald-700",
+  [MODEL_TYPES.VLM4]: "bg-emerald-100 text-emerald-700",
 };
 
 export function ModelLibraryList({
@@ -102,68 +112,15 @@ export function ModelLibraryList({
   const [sourceFilter, setSourceFilter] = useState<ModelSource | "all">("all");
   const [page, setPage] = useState(1);
 
-  const typeOptions = useMemo(() => {
-    const list: { value: ModelType | "all"; label: string }[] = [
-      {
-        value: "all",
-        label: t("model.filter.allTypes", { defaultValue: "全部类型" }),
-      },
-    ];
-    const map: [ModelType, string][] = [
-      [MODEL_TYPES.LLM, t("model.type.llm", { defaultValue: "大语言模型" })],
-      [
-        MODEL_TYPES.EMBEDDING,
-        t("model.type.embedding", { defaultValue: "文本嵌入" }),
-      ],
-      [
-        MODEL_TYPES.MULTI_EMBEDDING,
-        t("model.type.multiEmbedding", { defaultValue: "多模态嵌入" }),
-      ],
-      [MODEL_TYPES.RERANK, t("model.type.rerank", { defaultValue: "重排" })],
-      [
-        MODEL_TYPES.VLM,
-        t("model.type.imageUnderstanding", { defaultValue: "图像理解" }),
-      ],
-      [
-        MODEL_TYPES.VLM2,
-        t("model.type.imageGeneration", { defaultValue: "图像生成" }),
-      ],
-      [
-        MODEL_TYPES.VLM3,
-        t("model.type.videoUnderstanding", { defaultValue: "视频理解" }),
-      ],
-      [MODEL_TYPES.STT, t("model.type.stt", { defaultValue: "语音识别" })],
-      [MODEL_TYPES.TTS, t("model.type.tts", { defaultValue: "语音合成" })],
-    ];
-    map.forEach(([v, l]) => list.push({ value: v, label: l }));
-    return list;
-  }, [t]);
+  const typeOptions: ModelType[] = useMemo(
+    () => Object.keys(TYPE_LABEL_KEY_MAP) as ModelType[],
+    []
+  );
 
-  const sourceOptions = useMemo(() => {
-    const list: { value: ModelSource | "all"; label: string }[] = [
-      {
-        value: "all",
-        label: t("model.filter.allSources", {
-          defaultValue: "全部服务商",
-        }),
-      },
-    ];
-    const map: [ModelSource, string][] = [
-      [MODEL_SOURCES.MODELENGINE, "ModelEngine"],
-      [MODEL_SOURCES.SILICON, "SiliconFlow"],
-      [MODEL_SOURCES.OPENAI, "OpenAI"],
-      [MODEL_SOURCES.OPENAI_API_COMPATIBLE, "OpenAI-API-Compatible"],
-      [
-        MODEL_SOURCES.CUSTOM,
-        t("model.source.custom", { defaultValue: "自定义" }),
-      ],
-      [MODEL_SOURCES.DASHSCOPE, "DashScope"],
-      [MODEL_SOURCES.TOKENPONY, "TokenPony"],
-      [MODEL_SOURCES.VOLCENGINE, "VolcEngine"],
-    ];
-    map.forEach(([v, l]) => list.push({ value: v, label: l }));
-    return list;
-  }, [t]);
+  const sourceOptions: ModelSource[] = useMemo(
+    () => Object.values(MODEL_SOURCES),
+    []
+  );
 
   const filtered = useMemo(() => {
     const kw = query.trim().toLowerCase();
@@ -203,7 +160,6 @@ export function ModelLibraryList({
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            allowClear
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("modelConfig.search.placeholder", {
@@ -213,17 +169,51 @@ export function ModelLibraryList({
           />
         </div>
         <Select
-          className="w-full sm:w-44"
           value={typeFilter}
-          onChange={(v) => setTypeFilter(v as ModelType | "all")}
-          options={typeOptions}
-        />
+          onValueChange={(v) => setTypeFilter(v as ModelType | "all")}
+        >
+          <SelectTrigger className="w-full sm:w-44">
+            <SelectValue
+              placeholder={t("model.filter.allTypes", {
+                defaultValue: "全部类型",
+              })}
+            />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">
+              {t("model.filter.allTypes", { defaultValue: "全部类型" })}
+            </SelectItem>
+            {typeOptions.map((v) => (
+              <SelectItem key={v} value={v}>
+                {t(`model.type.${TYPE_LABEL_KEY_MAP[v] ?? v}`, {
+                  defaultValue: v,
+                })}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select
-          className="w-full sm:w-44"
           value={sourceFilter}
-          onChange={(v) => setSourceFilter(v as ModelSource | "all")}
-          options={sourceOptions}
-        />
+          onValueChange={(v) => setSourceFilter(v as ModelSource | "all")}
+        >
+          <SelectTrigger className="w-full sm:w-44">
+            <SelectValue
+              placeholder={t("model.filter.allSources", {
+                defaultValue: "全部服务商",
+              })}
+            />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">
+              {t("model.filter.allSources", { defaultValue: "全部服务商" })}
+            </SelectItem>
+            {sourceOptions.map((v) => (
+              <SelectItem key={v} value={v}>
+                {v}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* ---------- List ---------- */}
@@ -240,9 +230,7 @@ export function ModelLibraryList({
             {t("modelConfig.table.col.source", { defaultValue: "服务商" })}
           </span>
           <span className="flex-1">
-            {t("modelConfig.table.col.connectStatus", {
-              defaultValue: "状态",
-            })}
+            {t("modelConfig.table.col.connectStatus", { defaultValue: "状态" })}
           </span>
           <span className="w-28 shrink-0 text-right">
             {t("modelConfig.table.col.actions", { defaultValue: "操作" })}
@@ -291,20 +279,21 @@ export function ModelLibraryList({
           </p>
           <div className="flex items-center gap-1">
             <Button
-              size="small"
+              size="sm"
+              variant="outline"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              icon={<ChevronLeft className="size-4" />}
             >
+              <ChevronLeft className="size-4" />
               {t("modelConfig.pagination.prev", { defaultValue: "上一页" })}
             </Button>
             <div className="flex items-center gap-1">
               {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
                 <Button
                   key={p}
-                  size="small"
-                  type={p === page ? "primary" : "text"}
-                  className="min-w-8 px-0"
+                  size="icon"
+                  variant={p === page ? "default" : "ghost"}
+                  className="size-8 text-xs"
                   onClick={() => setPage(p)}
                 >
                   {p}
@@ -312,7 +301,8 @@ export function ModelLibraryList({
               ))}
             </div>
             <Button
-              size="small"
+              size="sm"
+              variant="outline"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             >
@@ -360,19 +350,28 @@ function ModelRow({
           </span>
         </div>
         {isDefault && (
-          <Tag color="blue" className="m-0 shrink-0 text-[10px]">
+          <Badge
+            variant="secondary"
+            className="shrink-0 bg-primary/10 px-1.5 text-[10px] font-normal text-primary hover:bg-primary/10"
+          >
             {t("modelConfig.list.defaultBadge", { defaultValue: "默认" })}
-          </Tag>
+          </Badge>
         )}
       </div>
 
       {/* Type */}
       <div className="md:w-32 md:shrink-0">
-        <Tag color={TYPE_BADGE_COLORS[model.type] || "default"} className="m-0">
+        <Badge
+          variant="secondary"
+          className={cn(
+            "border-0 text-xs font-normal",
+            TYPE_BADGE_CLASS[model.type]
+          )}
+        >
           {t(`model.type.${TYPE_LABEL_KEY_MAP[model.type] ?? model.type}`, {
             defaultValue: model.type,
           })}
-        </Tag>
+        </Badge>
       </div>
 
       {/* Source */}
@@ -396,38 +395,65 @@ function ModelRow({
       </div>
 
       {/* Actions */}
-      <div className="flex shrink-0 items-center gap-1 md:w-28 md:justify-end">
-        <Tooltip
-          title={t("modelConfig.list.checkConnectivity", {
+      <div className="flex shrink-0 items-center gap-0.5 md:w-28 md:justify-end">
+        <RowAction
+          label={t("modelConfig.list.checkConnectivity", {
             defaultValue: "检测连通性",
           })}
+          onClick={onCheck}
+          disabled={checking}
         >
-          <Button
-            size="small"
-            type="text"
-            icon={<ShieldCheck className="size-4" />}
-            disabled={checking}
-            onClick={onCheck}
-          />
-        </Tooltip>
-        <Tooltip title={t("common.edit", { defaultValue: "编辑" })}>
-          <Button
-            size="small"
-            type="text"
-            icon={<Pencil className="size-4" />}
-            onClick={onEdit}
-          />
-        </Tooltip>
-        <Tooltip title={t("common.delete", { defaultValue: "删除" })}>
-          <Button
-            size="small"
-            type="text"
-            danger
-            icon={<Trash2 className="size-4" />}
-            onClick={onDelete}
-          />
-        </Tooltip>
+          <ShieldCheck className="size-4" />
+        </RowAction>
+        <RowAction
+          label={t("common.edit", { defaultValue: "编辑" })}
+          onClick={onEdit}
+        >
+          <Pencil className="size-4" />
+        </RowAction>
+        <RowAction
+          label={t("common.delete", { defaultValue: "删除" })}
+          onClick={onDelete}
+          destructive
+        >
+          <Trash2 className="size-4" />
+        </RowAction>
       </div>
     </div>
+  );
+}
+
+function RowAction({
+  label,
+  onClick,
+  disabled,
+  destructive,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="icon"
+          variant="ghost"
+          disabled={disabled}
+          onClick={onClick}
+          className={cn(
+            "size-8",
+            destructive && "text-destructive hover:text-destructive"
+          )}
+        >
+          {children}
+          <span className="sr-only">{label}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

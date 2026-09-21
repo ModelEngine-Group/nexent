@@ -2,18 +2,32 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Select, Tag, Tooltip } from "antd";
 import { Info } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 import { ModelOption, ModelType } from "@/types/modelConfig";
 
 /**
- * v2.6.1 redesign: one default-model slot in the flat "默认配置" grid.
+ * v2.6.1 redesign (v0 design): one default-model slot in the flat "默认配置"
+ * grid.
  *
- * Replaces the DefaultModelDialog approach (open a modal to configure slots)
- * with inline selects, following the v0 design: every slot is visible at a
- * glance, carries a priority badge, an explanatory tooltip, the selected
- * model's connectivity dot, and a provider badge.
+ * Built on the project's shadcn/ui primitives to match the v0 aesthetic:
+ * quiet borders, status dot inside the select, priority hint next to the
+ * label, provider badge on the selected model.
  */
 
 export type ModelSlotPriority = "required" | "recommended" | "optional";
@@ -50,10 +64,9 @@ function StatusDot({ status }: { status?: string }) {
 }
 
 /**
- * All default-model slots, flattened. Mirrors the previous DefaultModelDialog
- * grouping (llm / embedding / reranker / multimodal / voice) but rendered as
- * one grid. Priorities follow the v0 design: LLM is required, embedding and
- * image understanding are recommended, everything else is optional.
+ * All default-model slots, flattened. Priorities follow the v0 design: LLM
+ * is required, embedding and image understanding are recommended, the rest
+ * are optional.
  */
 export function buildModelSlots(
   t: (key: string, opts?: any) => string
@@ -206,6 +219,10 @@ export function ModelSlotSelect({
     [models, slot.modelType]
   );
   const selected = options.find((m) => m.displayName === value) ?? null;
+  const statusKey = selected?.connect_status ?? "not_detected";
+  const statusLabel = t(`model.connectivity.${statusKey}`, {
+    defaultValue: statusKey,
+  });
 
   return (
     <div
@@ -213,7 +230,7 @@ export function ModelSlotSelect({
       data-error-field={error ? slot.fieldKey : undefined}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1">
+        <span className="flex min-w-0 items-center gap-1.5">
           <label className="truncate text-sm font-medium text-foreground">
             {slot.label}
           </label>
@@ -222,65 +239,77 @@ export function ModelSlotSelect({
               {PRIORITY_LABELS[slot.priority]}
             </span>
           )}
-          <Tooltip title={slot.hint}>
-            <button
-              type="button"
-              aria-label={`${slot.label}说明`}
-              className="text-muted-foreground/60 transition-colors hover:text-foreground"
-            >
-              <Info className="size-3.5" />
-            </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`${slot.label}说明`}
+                className="text-muted-foreground/60 transition-colors hover:text-foreground"
+              >
+                <Info className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-56 leading-relaxed">
+              {slot.hint}
+            </TooltipContent>
           </Tooltip>
         </span>
         {selected && (
-          <Tag className="m-0 shrink-0 text-[10px]">{selected.source}</Tag>
+          <Badge
+            variant="secondary"
+            className="h-5 shrink-0 px-1.5 text-[10px] font-medium"
+          >
+            {selected.source}
+          </Badge>
         )}
       </div>
 
       <Select
-        className="w-full"
-        size="middle"
-        status={error ? "error" : undefined}
-        disabled={disabled}
         value={value || "__none__"}
-        onChange={(v) => onChange(v === "__none__" ? "" : v)}
-        popupMatchSelectWidth={false}
+        onValueChange={(v) => onChange(v === "__none__" ? "" : v)}
+        disabled={disabled}
       >
-        <Select.Option value="__none__" className="text-muted-foreground">
-          <span className="text-muted-foreground">
+        <SelectTrigger
+          className={cn(
+            "w-full bg-card",
+            error && "border-destructive ring-destructive/20",
+            !selected && "text-muted-foreground"
+          )}
+        >
+          <SelectValue
+            placeholder={t("modelConfig.slot.placeholder", {
+              defaultValue: "选择模型",
+            })}
+          />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__" className="text-muted-foreground">
             {t("modelConfig.slot.notUsed", { defaultValue: "不使用" })}
-          </span>
-        </Select.Option>
-        {options.length === 0 ? (
-          <Select.Option value="__empty__" disabled>
-            <span className="text-muted-foreground">
+          </SelectItem>
+          {options.length === 0 ? (
+            <div className="px-2 py-3 text-center text-xs text-muted-foreground">
               {t("modelConfig.slot.noModels", {
                 defaultValue: "暂无该类型模型，请先添加",
               })}
-            </span>
-          </Select.Option>
-        ) : (
-          options.map((m) => (
-            <Select.Option
-              key={`${m.id}-${m.displayName}`}
-              value={m.displayName}
-            >
-              <span className="flex items-center gap-2">
+            </div>
+          ) : (
+            options.map((m) => (
+              <SelectItem
+                key={`${m.id}-${m.displayName}`}
+                value={m.displayName}
+              >
                 <StatusDot status={m.connect_status} />
-                <span className="max-w-52 truncate">{m.displayName}</span>
-              </span>
-            </Select.Option>
-          ))
-        )}
+                <span className="truncate">{m.displayName}</span>
+              </SelectItem>
+            ))
+          )}
+        </SelectContent>
       </Select>
 
-      {/* status hint below the select */}
       {selected && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <StatusDot status={selected.connect_status} />
-          {t(`model.connectivity.${selected.connect_status}`, {
-            defaultValue: selected.connect_status ?? "",
-          })}
+          {statusLabel}
         </p>
       )}
     </div>

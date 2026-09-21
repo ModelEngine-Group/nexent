@@ -11,9 +11,21 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { Alert, App, Button, Card, Tag } from "antd";
-import { Plus, ShieldCheck, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Alert, App } from "antd";
+import {
+  Plus,
+  ShieldCheck,
+  RefreshCw,
+  Pencil,
+  Trash2,
+  Loader2,
+} from "lucide-react";
 import { ExclamationCircleFilled } from "@ant-design/icons";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
@@ -956,237 +968,247 @@ export const ModelConfigSection = forwardRef<
   /* ==================== Render ==================== */
   return (
     <>
-      <div className="flex w-full flex-col gap-8">
-        {/* ========== Section 1: 默认配置 (inline slots, v0 redesign) ========== */}
-        <section>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-baseline gap-2">
-              <h3 className="text-base font-semibold text-foreground">
-                {t("modelConfig.section.defaultConfig", {
-                  defaultValue: "默认配置",
-                })}
-              </h3>
-              <span className="text-xs text-muted-foreground">
-                {t("modelConfig.section.defaultConfigHint", {
-                  defaultValue: "未配置模型时默认选用以下模型",
-                })}
-              </span>
-              <Tag color="blue" className="m-0 tabular-nums">
-                {t("modelConfig.section.configuredCount", {
-                  configured: configuredSlotCount,
-                  total: modelSlots.length,
-                  defaultValue: `已配置 ${configuredSlotCount}/${modelSlots.length}`,
-                })}
-              </Tag>
-            </div>
-            <Button
-              size="middle"
-              icon={<ShieldCheck size={16} />}
-              onClick={verifyModels}
-              loading={isVerifying}
-            >
-              <span className="button-text-full">
+      <TooltipProvider>
+        <div className="flex w-full flex-col gap-8">
+          {/* ========== Section 1: 默认配置 (inline slots, v0 redesign) ========== */}
+          <section>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h3 className="text-base font-semibold text-foreground">
+                  {t("modelConfig.section.defaultConfig", {
+                    defaultValue: "默认配置",
+                  })}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {t("modelConfig.section.defaultConfigHint", {
+                    defaultValue: "未配置模型时默认选用以下模型",
+                  })}
+                </span>
+                <Badge
+                  variant="secondary"
+                  className="tabular-nums text-[10px] font-normal"
+                >
+                  {t("modelConfig.section.configuredCount", {
+                    configured: configuredSlotCount,
+                    total: modelSlots.length,
+                    defaultValue: `已配置 ${configuredSlotCount}/${modelSlots.length}`,
+                  })}
+                </Badge>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={verifyModels}
+                disabled={isVerifying}
+              >
+                {isVerifying ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="size-4" />
+                )}
                 {t("modelConfig.button.checkConnectivity")}
-              </span>
-            </Button>
-          </div>
-
-          <Card styles={{ body: { padding: 20 } }}>
-            {/* Legend */}
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b pb-4 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">
-                {t("modelConfig.section.legendTitle", {
-                  defaultValue: "配置说明",
-                })}
-              </span>
-              <span>
-                {t("modelConfig.section.legendRequired", {
-                  defaultValue: "标注（必填）的模型系统运行必须配置",
-                })}
-              </span>
-              <span>
-                {t("modelConfig.section.legendRecommended", {
-                  defaultValue: "标注（推荐）的模型按需推荐配置",
-                })}
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-emerald-500" />
-                {t("modelConfig.section.legendDot", {
-                  defaultValue: "圆点代表已连通",
-                })}
-              </span>
+              </Button>
             </div>
 
-            {/* Flat slot grid (replaces the DefaultModelDialog) */}
-            <div className="grid grid-cols-1 gap-x-8 gap-y-5 pt-5 md:grid-cols-2 xl:grid-cols-3">
-              {modelSlots.map((slot) => (
-                <ModelSlotSelect
-                  key={slot.fieldKey}
-                  slot={slot}
-                  models={models}
-                  value={selectedModels[slot.category]?.[slot.option] ?? ""}
-                  error={!!errorFields[slot.fieldKey]}
-                  onChange={(displayName) =>
-                    handleModelChange(slot.category, slot.option, displayName)
-                  }
-                />
-              ))}
-            </div>
-          </Card>
-        </section>
+            <Card className="gap-0 p-5 sm:p-6">
+              {/* Legend */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b pb-4 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {t("modelConfig.section.legendTitle", {
+                    defaultValue: "配置说明",
+                  })}
+                </span>
+                <span>
+                  {t("modelConfig.section.legendRequired", {
+                    defaultValue: "标注（必填）的模型系统运行必须配置",
+                  })}
+                </span>
+                <span>
+                  {t("modelConfig.section.legendRecommended", {
+                    defaultValue: "标注（推荐）的模型按需推荐配置",
+                  })}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  {t("modelConfig.section.legendDot", {
+                    defaultValue: "圆点代表已连通",
+                  })}
+                </span>
+              </div>
 
-        {/* ========== Section 2: 模型库 ========== */}
-        <section className="flex w-full flex-col gap-3">
-          <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-baseline gap-2">
-              <h3 className="text-base font-semibold text-foreground">
-                {t("modelConfig.section.modelLibrary", {
-                  defaultValue: "模型库",
-                })}
-              </h3>
-              <span className="text-xs text-muted-foreground">
-                {t("modelConfig.section.modelLibraryHint", {
-                  defaultValue: "管理已添加的全部模型",
-                })}
-              </span>
-              <Tag color="geekblue" className="m-0 tabular-nums">
-                {models.length}
-              </Tag>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {modelEngineEnable && (
-                <Button
-                  size="middle"
-                  onClick={handleSyncModels}
-                  icon={<RefreshCw size={16} />}
+              {/* Flat slot grid (replaces the DefaultModelDialog) */}
+              <div className="grid grid-cols-1 gap-x-8 gap-y-5 pt-5 md:grid-cols-2 xl:grid-cols-3">
+                {modelSlots.map((slot) => (
+                  <ModelSlotSelect
+                    key={slot.fieldKey}
+                    slot={slot}
+                    models={models}
+                    value={selectedModels[slot.category]?.[slot.option] ?? ""}
+                    error={!!errorFields[slot.fieldKey]}
+                    onChange={(displayName) =>
+                      handleModelChange(slot.category, slot.option, displayName)
+                    }
+                  />
+                ))}
+              </div>
+            </Card>
+          </section>
+
+          {/* ========== Section 2: 模型库 ========== */}
+          <section className="flex w-full flex-col gap-3">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h3 className="text-base font-semibold text-foreground">
+                  {t("modelConfig.section.modelLibrary", {
+                    defaultValue: "模型库",
+                  })}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {t("modelConfig.section.modelLibraryHint", {
+                    defaultValue: "管理已添加的全部模型",
+                  })}
+                </span>
+                <Badge
+                  variant="secondary"
+                  className="tabular-nums text-[10px] font-normal"
                 >
-                  <span className="button-text-full">
+                  {models.length}
+                </Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {modelEngineEnable && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSyncModels}
+                  >
+                    <RefreshCw className="size-4" />
                     {t("modelConfig.button.syncModelEngine")}
-                  </span>
-                </Button>
-              )}
-              <Button
-                size="middle"
-                icon={<Pencil size={14} />}
-                onClick={() => {
-                  setManagerMode("editGroup");
-                  setIsManagerOpen(true);
-                }}
-              >
-                {t("modelConfig.batchEdit.title", { defaultValue: "批量修改" })}
-              </Button>
-              <Button
-                size="middle"
-                danger
-                icon={<Trash2 size={14} />}
-                onClick={() => {
-                  setManagerMode("deleteGroup");
-                  setIsManagerOpen(true);
-                }}
-              >
-                {t("modelConfig.batchDelete.title", {
-                  defaultValue: "批量删除",
-                })}
-              </Button>
-              {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
-              <Can permission="model:create">
+                  </Button>
+                )}
                 <Button
-                  type="primary"
-                  size="middle"
-                  icon={<Plus size={16} />}
-                  onClick={() => setIsAddModalV2Open(true)}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setManagerMode("editGroup");
+                    setIsManagerOpen(true);
+                  }}
                 >
-                  <span className="button-text-full">
+                  <Pencil className="size-4" />
+                  {t("modelConfig.batchEdit.title", {
+                    defaultValue: "批量修改",
+                  })}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => {
+                    setManagerMode("deleteGroup");
+                    setIsManagerOpen(true);
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                  {t("modelConfig.batchDelete.title", {
+                    defaultValue: "批量删除",
+                  })}
+                </Button>
+                {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
+                <Can permission="model:create">
+                  <Button size="sm" onClick={() => setIsAddModalV2Open(true)}>
+                    <Plus className="size-4" />
                     {t("modelConfig.button.addModel", {
                       defaultValue: "添加模型",
                     })}
-                  </span>
-                </Button>
-              </Can>
+                  </Button>
+                </Can>
+              </div>
             </div>
-          </div>
 
-          {/* -------------------- Capacity coverage warning -------------------- */}
-          {capacityCoverage && capacityCoverage.bareCount > 0 && (
-            <Alert
-              type="warning"
-              showIcon
-              title={t("modelConfig.capacityCoverage.warning", {
-                bareCount: capacityCoverage.bareCount,
-                total: capacityCoverage.totalLlmVlm,
-              })}
-              description={t("modelConfig.capacityCoverage.description", {
-                suggestionCount: capacityCoverage.bareModels.filter(
-                  (m) => m.suggestionAvailable
-                ).length,
-              })}
+            {/* -------------------- Capacity coverage warning -------------------- */}
+            {capacityCoverage && capacityCoverage.bareCount > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                title={t("modelConfig.capacityCoverage.warning", {
+                  bareCount: capacityCoverage.bareCount,
+                  total: capacityCoverage.totalLlmVlm,
+                })}
+                description={t("modelConfig.capacityCoverage.description", {
+                  suggestionCount: capacityCoverage.bareModels.filter(
+                    (m) => m.suggestionAvailable
+                  ).length,
+                })}
+              />
+            )}
+
+            {/* -------------------- Model library list (v0 redesign) -------------------- */}
+            <ModelLibraryList
+              models={models}
+              defaultSlotMap={defaultSlotMap}
+              onCheck={verifyOneModel}
+              onEdit={handleCardEdit}
+              onDelete={handleCardDelete}
             />
-          )}
+          </section>
 
-          {/* -------------------- Model library list (v0 redesign) -------------------- */}
-          <ModelLibraryList
-            models={models}
-            defaultSlotMap={defaultSlotMap}
-            onCheck={verifyOneModel}
-            onEdit={handleCardEdit}
-            onDelete={handleCardDelete}
+          {/* -------------------- Dialogs -------------------- */}
+          {/* v2.6.0: new Add Model dialog (Tabs: batch import / custom access) */}
+          <ModelAddDialogV2
+            isOpen={isAddModalV2Open}
+            onClose={() => setIsAddModalV2Open(false)}
+            onSuccess={async (newModel) => {
+              // Invalidate FIRST so the refetch completes before loadModelLists
+              // reads the cache (a model create may have auto-configured
+              // default-model slots that must be reflected immediately).
+              await queryClient.invalidateQueries({
+                queryKey: CONFIG_QUERY_KEY,
+              });
+              await loadModelLists(true);
+              message.success(t("modelConfig.message.addSuccess"));
+              if (newModel && newModel.name && newModel.type) {
+                setTimeout(() => {
+                  verifyOneModel(newModel.name, newModel.type);
+                }, 100);
+              }
+            }}
           />
-        </section>
 
-        {/* -------------------- Dialogs -------------------- */}
-        {/* v2.6.0: new Add Model dialog (Tabs: batch import / custom access) */}
-        <ModelAddDialogV2
-          isOpen={isAddModalV2Open}
-          onClose={() => setIsAddModalV2Open(false)}
-          onSuccess={async (newModel) => {
-            // Invalidate FIRST so the refetch completes before loadModelLists
-            // reads the cache (a model create may have auto-configured
-            // default-model slots that must be reflected immediately).
-            await queryClient.invalidateQueries({ queryKey: CONFIG_QUERY_KEY });
-            await loadModelLists(true);
-            message.success(t("modelConfig.message.addSuccess"));
-            if (newModel && newModel.name && newModel.type) {
-              setTimeout(() => {
-                verifyOneModel(newModel.name, newModel.type);
-              }, 100);
-            }
-          }}
-        />
+          {/* v2.6.1 redesign: batch edit / delete by connection group */}
+          <ModelManagerDialog
+            open={isManagerOpen}
+            mode={managerMode}
+            models={models}
+            onClose={() => setIsManagerOpen(false)}
+            onUpdateGroup={handleBatchUpdateGroup}
+            onDeleteModels={handleBatchDeleteModels}
+            updating={batchUpdating}
+            deleting={batchDeleting}
+          />
 
-        {/* v2.6.1 redesign: batch edit / delete by connection group */}
-        <ModelManagerDialog
-          open={isManagerOpen}
-          mode={managerMode}
-          models={models}
-          onClose={() => setIsManagerOpen(false)}
-          onUpdateGroup={handleBatchUpdateGroup}
-          onDeleteModels={handleBatchDeleteModels}
-          updating={batchUpdating}
-          deleting={batchDeleting}
-        />
-
-        <ModelAddDialogV2
-          isOpen={!!editingCardModel}
-          model={editingCardModel}
-          onClose={() => setEditingCardModel(null)}
-          onConnectivityChange={(displayName, modelType, status) => {
-            // Refresh the list row's connect_status in place when the edit
-            // dialog's connectivity probe finishes, so the list doesn't show
-            // a stale status from the last loadModelLists.
-            setModels((prev) =>
-              prev.map((m) =>
-                m.displayName === displayName && m.type === modelType
-                  ? { ...m, connect_status: status }
-                  : m
-              )
-            );
-          }}
-          onSuccess={async () => {
-            setEditingCardModel(null);
-            await loadModelLists(true);
-          }}
-        />
-      </div>
+          <ModelAddDialogV2
+            isOpen={!!editingCardModel}
+            model={editingCardModel}
+            onClose={() => setEditingCardModel(null)}
+            onConnectivityChange={(displayName, modelType, status) => {
+              // Refresh the list row's connect_status in place when the edit
+              // dialog's connectivity probe finishes, so the list doesn't show
+              // a stale status from the last loadModelLists.
+              setModels((prev) =>
+                prev.map((m) =>
+                  m.displayName === displayName && m.type === modelType
+                    ? { ...m, connect_status: status }
+                    : m
+                )
+              );
+            }}
+            onSuccess={async () => {
+              setEditingCardModel(null);
+              await loadModelLists(true);
+            }}
+          />
+        </div>
+      </TooltipProvider>
     </>
   );
 });
