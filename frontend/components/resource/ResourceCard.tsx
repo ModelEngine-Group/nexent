@@ -112,7 +112,7 @@ export default function ResourceCard({
                 <div
                   data-resource-card-action
                   className={cn(
-                    "flex shrink-0 items-center gap-1",
+                    "flex shrink-0 items-start gap-1",
                     actionClassName
                   )}
                   onDoubleClick={(event) => event.stopPropagation()}
