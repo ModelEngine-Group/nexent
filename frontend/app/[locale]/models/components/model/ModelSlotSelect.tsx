@@ -219,10 +219,6 @@ export function ModelSlotSelect({
     [models, slot.modelType]
   );
   const selected = options.find((m) => m.displayName === value) ?? null;
-  const statusKey = selected?.connect_status ?? "not_detected";
-  const statusLabel = t(`model.connectivity.${statusKey}`, {
-    defaultValue: statusKey,
-  });
 
   return (
     <div
@@ -305,13 +301,6 @@ export function ModelSlotSelect({
           )}
         </SelectContent>
       </Select>
-
-      {selected && (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <StatusDot status={selected.connect_status} />
-          {statusLabel}
-        </p>
-      )}
     </div>
   );
 }
