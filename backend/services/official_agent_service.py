@@ -956,8 +956,6 @@ async def _install_bundle(
             import_agent_impl(
                 bundle,
                 authorization,
-                tenant_id=tenant_id,
-                user_id=user_id,
             ),
         )
 

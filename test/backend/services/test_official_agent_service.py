@@ -826,7 +826,7 @@ async def test_install_bundle_without_skills():
 
     assert result == 100
     fake_agent.import_agent_impl.assert_awaited_once_with(
-        bundle, "auth", tenant_id="tenant-1", user_id="u"
+        bundle, "auth"
     )
     fake_agent._create_skills_for_install.assert_not_awaited()
     fake_agent._import_agent_with_skill_links.assert_not_awaited()
@@ -1149,7 +1149,7 @@ async def test_install_bundle_creates_kb_and_remaps_refs():
     # tool references were remapped to the tenant-generated index name
     assert bundle.agent_info["1"].tools[0].params["index_names"] == ["42-abc"]
     fake_agent.import_agent_impl.assert_awaited_once_with(
-        bundle, "auth", tenant_id="tenant-1", user_id="u"
+        bundle, "auth"
     )
 
 
