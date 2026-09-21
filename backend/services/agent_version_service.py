@@ -243,7 +243,10 @@ def get_version_impl(
     """
     Get version
     """
-    return search_version_by_version_no(agent_id, tenant_id, version_no)
+    version = search_version_by_version_no(agent_id, tenant_id, version_no)
+    if not version:
+        raise ValueError(f"Version {version_no} not found")
+    return version
 
 
 def get_version_detail_impl(

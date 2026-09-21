@@ -268,6 +268,10 @@ class AgentConfig(BaseModel):
         ge=1,
     )
     model_name: str = Field(description="Model alias from ModelConfig")
+    output_protocol: Literal["code_action", "final_answer_envelope"] = Field(
+        description="Closed model-output protocol used by the Agent runtime",
+        default="code_action",
+    )
     provide_run_summary: Optional[bool] = Field(
         description="Whether to provide run summary to upper-level Agent", default=False
     )

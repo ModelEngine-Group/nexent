@@ -90,6 +90,49 @@ test("empty reasoning cannot move guidance received before the model starts", ()
   );
 });
 
+test("CMSR-003 rollback removes only the failed model attempt", () => {
+  const parts: unknown[] = [];
+  const reasoning = createReasoningAccumulator(parts);
+  reasoning.append("stable prefix");
+  reasoning.beginAttempt("attempt-one");
+  reasoning.append(" leaked partial");
+  reasoning.rollbackAttempt("attempt-one");
+
+  assert.deepEqual(parts, [
+    {
+      type: "reasoning",
+      text: "stable prefix",
+      status: { type: "running" },
+    },
+  ]);
+
+  reasoning.beginAttempt("attempt-two");
+  reasoning.append(" recovered");
+  reasoning.commitAttempt("attempt-two");
+  assert.equal((parts[0] as { text: string }).text, "stable prefix recovered");
+});
+
+test("CMSR-003 rollback preserves interleaved sibling output", () => {
+  const parts: unknown[] = [];
+  const reasoning = createReasoningAccumulator(parts);
+  reasoning.append("parent prefix");
+  reasoning.beginAttempt("parent-attempt");
+  reasoning.append(" leaked parent token");
+
+  const sibling = { type: "reasoning", text: "sibling output" };
+  parts.unshift(sibling);
+  reasoning.rollbackAttempt("parent-attempt");
+
+  assert.deepEqual(parts, [
+    sibling,
+    {
+      type: "reasoning",
+      text: "parent prefix",
+      status: { type: "running" },
+    },
+  ]);
+});
+
 test("a new model step starts below guidance even when no tool ran", () => {
   const parts: unknown[] = [];
   const reasoning = createReasoningAccumulator(parts);

@@ -782,12 +782,12 @@ def test_get_agent_evaluation_run_impl_returns_db_payload(service_module):
     )
 
 
-def test_list_agent_evaluations_by_agent_impl_forwards_pagination(service_module):
+def test_list_agent_evaluations_by_agent_impl_forwards_agent_ids_and_pagination(service_module):
     _wire_full_db_module(service_module)
     service_module.list_agent_evaluations_by_agent.return_value = [{"id": 1}, {"id": 2}]
 
     result = service_module.list_agent_evaluations_by_agent_impl(
-        agent_id=11,
+        agent_ids=[11, 12],
         tenant_id="t1",
         limit=10,
         offset=20,
@@ -795,7 +795,7 @@ def test_list_agent_evaluations_by_agent_impl_forwards_pagination(service_module
 
     assert result == [{"id": 1}, {"id": 2}]
     service_module.list_agent_evaluations_by_agent.assert_called_once_with(
-        agent_id=11,
+        agent_ids=[11, 12],
         tenant_id="t1",
         limit=10,
         offset=20,
