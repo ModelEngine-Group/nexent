@@ -63,7 +63,13 @@ def events(observer):
     return [json.loads(message) for message in observer.get_cached_message()]
 
 
-@pytest.mark.parametrize("prefix", ["", "思考：缺少地区信息，需要询问用户。\n\n代码：\n", "Think: Ask for the region.\nCode:\n"])
+@pytest.mark.parametrize("prefix", [
+    "",
+    "思考：缺少地区信息，需要询问用户。\n\n代码：\n",
+    "Think: Ask for the region.\nCode:\n",
+    "I need to ask for the region.\n",
+    "<think>Ask for the region.</think>\n",
+])
 def test_clarification_ends_run_without_executor_verifier_or_next_model_call(build_agent, prefix):
     agent, model, observer = build_agent([f"{prefix}<code>{CODE}</code>"])
     executor = MagicMock(wraps=agent.python_executor)
@@ -84,10 +90,16 @@ def test_clarification_ends_run_without_executor_verifier_or_next_model_call(bui
     assert agent.memory.steps[-1].is_final_answer
 
 
-@pytest.mark.parametrize("output", [f"record(); {CODE}", f"x = {CODE}", f"{CODE}; record()"])
+@pytest.mark.parametrize("output", [
+    f"<code>record(); {CODE}</code>",
+    f"<code>x = {CODE}</code>",
+    f"<code>{CODE}; record()</code>",
+    f"<code>record()</code>\n<code>{CODE}</code>",
+    f"<code>{CODE}</code>\n<code>record()</code>",
+])
 def test_mixed_actions_are_not_partially_executed(build_agent, output):
     tool = RecordTool()
-    agent, model, observer = build_agent([f"<code>{output}</code>", f"<code>{CODE}</code>"], [tool])
+    agent, model, observer = build_agent([output, f"<code>{CODE}</code>"], [tool])
     assert str(agent.run("Help")) == "1. Which region?"
     assert tool.calls == 0
     assert len(model.calls) == 2

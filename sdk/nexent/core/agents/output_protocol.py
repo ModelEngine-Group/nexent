@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ast
+import io
 import re
+import tokenize
 import unicodedata
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from pydantic import ValidationError
 
@@ -77,7 +79,6 @@ class ModelOutputProtocolExhaustedError(Exception):
     """Terminal failure after the runtime exhausts protocol repair attempts."""
 
 
-_CODE_RE = re.compile(r"\A<code>(?P<body>[\s\S]*)</code>\Z")
 _RUN_RE = re.compile(r"\A```<RUN>(?P<body>[\s\S]*?)```\Z")
 _ACTION_PREAMBLE_RE = re.compile(
     r"\A(?P<preamble>(?:(?:Think|Thought|思考)[ \t]*[:：][\s\S]*?\n)?"
@@ -86,6 +87,16 @@ _ACTION_PREAMBLE_RE = re.compile(
 )
 _FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z")
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]{0,255}>")
+_MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
+_CODE_MARKER_RE = re.compile(r"</?code>")
+_THINK_RE = re.compile(r"\A<think>[\s\S]*</think>\Z")
+_CODE_OPEN = "<code>"
+_CODE_CLOSE = "</code>"
+_PYTHON_DATA_TOKEN_TYPES = {
+    tokenize.STRING,
+    tokenize.COMMENT,
+    *([tokenize.FSTRING_MIDDLE] if hasattr(tokenize, "FSTRING_MIDDLE") else []),
+}
 
 
 def _is_protocol_padding(character: str) -> bool:
@@ -142,8 +153,9 @@ def protocol_repair_instruction(
             + CLARIFICATION_SCHEMA_GUIDANCE
         )
     return (
-        prefix + "Return exactly one executable Python action inside <code>...</code>. "
-        "To finish, call final_answer(...) inside that code block; never return a bare-text final answer."
+        prefix + "Return optional reasoning followed by one or more complete <code>...</code> blocks. "
+        "Prefer one block; if multiple blocks are needed, put only whitespace between them because they execute together as one Python action. "
+        "Put no text after the final block. To finish, call final_answer(...) in the final block as the last top-level statement; never return a bare-text final answer."
     )
 
 
@@ -151,8 +163,257 @@ def _raise_protocol_error(
     reason: ProtocolErrorReason,
     protocol: OutputProtocol,
     logger: Any,
-) -> None:
+) -> NoReturn:
     raise ModelOutputProtocolError(reason, protocol, logger)
+
+
+def _parse_executable_action(
+    code: str,
+    *,
+    protocol: OutputProtocol,
+    logger: Any,
+    legacy_format: bool = False,
+) -> ExecutableAction:
+    code = code.strip()
+    if not has_meaningful_visible_content(code):
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+    try:
+        ast.parse(code)
+    except (SyntaxError, ValueError, TypeError):
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+    return ExecutableAction(code=code, legacy_format=legacy_format)
+
+
+def _line_offsets(value: str) -> list[int]:
+    offsets = [0]
+    for match in re.finditer("\n", value):
+        offsets.append(match.end())
+    return offsets
+
+
+def _absolute_offset(offsets: list[int], position: tuple[int, int]) -> int:
+    line, column = position
+    return offsets[line - 1] + column
+
+
+def _python_literal_and_comment_spans(value: str) -> list[tuple[int, int]]:
+    """Return source spans whose protocol-like text is Python data, not markup."""
+
+    offsets = _line_offsets(value)
+    spans: list[tuple[int, int]] = []
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(value).readline)
+        for token in tokens:
+            if token.type not in _PYTHON_DATA_TOKEN_TYPES:
+                continue
+            spans.append(
+                (
+                    _absolute_offset(offsets, token.start),
+                    _absolute_offset(offsets, token.end),
+                )
+            )
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # Lexically incomplete Python cannot form a complete executable Action.
+        return []
+    return spans
+
+
+def _position_in_spans(position: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start <= position < end for start, end in spans)
+
+
+def _outer_code_markers(action_region: str) -> list[re.Match[str]]:
+    """Find code protocol markers while ignoring markers in strings/comments."""
+
+    matches = list(_CODE_MARKER_RE.finditer(action_region))
+    sanitized = list(action_region)
+    for match in matches:
+        sanitized[match.start() : match.end()] = " " * (match.end() - match.start())
+    spans = _python_literal_and_comment_spans("".join(sanitized))
+    return [match for match in matches if not _position_in_spans(match.start(), spans)]
+
+
+def _validate_reasoning_prefix(
+    prefix: str,
+    *,
+    protocol: OutputProtocol,
+    logger: Any,
+) -> None:
+    prefix = strip_protocol_padding(prefix)
+    if not has_meaningful_visible_content(prefix):
+        return
+
+    if "<think>" in prefix or "</think>" in prefix:
+        if not _THINK_RE.fullmatch(prefix) or prefix.count("<think>") != 1 or prefix.count("</think>") != 1:
+            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+        return
+
+    if _TAG_RE.search(prefix) or _MODEL_CONTROL_TOKEN_RE.search(prefix):
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+
+
+class _RuntimeFinalAnswerVisitor(ast.NodeVisitor):
+    """Find executed final_answer calls without descending into definitions."""
+
+    def __init__(self) -> None:
+        self.calls: list[ast.Call] = []
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802 - ast visitor API
+        if isinstance(node.func, ast.Name) and node.func.id == "final_answer":
+            self.calls.append(node)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        return
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        return
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+        return
+
+
+def _validate_terminal_final_answer(
+    tree: ast.Module,
+    *,
+    last_block_start_line: int,
+    protocol: OutputProtocol,
+    logger: Any,
+) -> None:
+    final_statement_indexes: list[int] = []
+    final_call_lines: list[int] = []
+    for index, statement in enumerate(tree.body):
+        visitor = _RuntimeFinalAnswerVisitor()
+        visitor.visit(statement)
+        if not visitor.calls:
+            continue
+        final_statement_indexes.append(index)
+        final_call_lines.extend(call.lineno for call in visitor.calls)
+
+    if not final_statement_indexes:
+        return
+    if any(index != len(tree.body) - 1 for index in final_statement_indexes) or any(
+        line < last_block_start_line for line in final_call_lines
+    ):
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+
+
+def _parse_code_action(
+    text: str,
+    *,
+    protocol: OutputProtocol,
+    logger: Any,
+) -> ExecutableAction | None:
+    first_open = text.find(_CODE_OPEN)
+    if first_open < 0:
+        return None
+
+    prefix = text[:first_open]
+    _validate_reasoning_prefix(prefix, protocol=protocol, logger=logger)
+    action_region = text[first_open:]
+    markers = _outer_code_markers(action_region)
+    if not markers or markers[0].start() != 0:
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+
+    bodies: list[str] = []
+    expected_open = True
+    previous_end = 0
+    body_start = 0
+    for marker in markers:
+        marker_text = marker.group(0)
+        if expected_open:
+            if marker_text != _CODE_OPEN:
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            if bodies and has_meaningful_visible_content(action_region[previous_end : marker.start()]):
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            body_start = marker.end()
+        else:
+            if marker_text != _CODE_CLOSE:
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            body = strip_protocol_padding(action_region[body_start : marker.start()])
+            if not has_meaningful_visible_content(body):
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            bodies.append(body)
+            previous_end = marker.end()
+        expected_open = not expected_open
+
+    if not expected_open or not bodies:
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+    if has_meaningful_visible_content(action_region[previous_end:]):
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+
+    block_start_lines: list[int] = []
+    current_line = 1
+    for body in bodies:
+        block_start_lines.append(current_line)
+        current_line += body.count("\n") + 2
+    code = "\n\n".join(bodies)
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, TypeError):
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+    _validate_terminal_final_answer(
+        tree,
+        last_block_start_line=block_start_lines[-1],
+        protocol=protocol,
+        logger=logger,
+    )
+    return ExecutableAction(code=code)
+
+
+def _classify_code_action(
+    text: str,
+    *,
+    protocol: OutputProtocol,
+    logger: Any,
+) -> ExecutableAction:
+    code_action = _parse_code_action(text, protocol=protocol, logger=logger)
+    if code_action is not None:
+        return code_action
+
+    run_match = _RUN_RE.fullmatch(text)
+    if run_match and text.count("```<RUN>") == 1:
+        return _parse_executable_action(
+            run_match.group("body"),
+            protocol=protocol,
+            logger=logger,
+            legacy_format=True,
+        )
+
+    if any(marker in text for marker in ("<code>", "</code>", "```<RUN>")):
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+    if _TAG_RE.search(text) or _MODEL_CONTROL_TOKEN_RE.search(text):
+        _raise_protocol_error(
+            ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
+            protocol,
+            logger,
+        )
+    _raise_protocol_error(
+        ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION,
+        protocol,
+        logger,
+    )
+
+
+def _classify_final_envelope(
+    text: str,
+    *,
+    protocol: OutputProtocol,
+    logger: Any,
+) -> ExplicitFinalAnswer:
+    envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
+    if envelope_match and text.count("<FINAL_ANSWER>") == 1 and text.count("</FINAL_ANSWER>") == 1:
+        answer = envelope_match.group("body")
+        if has_meaningful_visible_content(answer):
+            return ExplicitFinalAnswer(answer=answer)
+    _raise_protocol_error(
+        ProtocolErrorReason.INVALID_FINAL_ENVELOPE,
+        protocol,
+        logger,
+    )
 
 
 def classify_model_output(
@@ -175,66 +436,16 @@ def classify_model_output(
 
     if protocol == "code_action":
         # The platform prompt explicitly requests Think:/Code: (or 思考：/代码：).
-        # Only strip that labeled preamble; the complete remaining action still
-        # has to match one envelope and pass Python syntax validation.
+        # Preserve labeled legacy RUN actions and reject embedded examples
+        # before validating the remaining action with the shared parser.
         preamble_match = _ACTION_PREAMBLE_RE.fullmatch(text)
         if preamble_match:
             preamble = preamble_match.group("preamble")
             if any(marker in preamble for marker in ("<code>", "</code>", "```")):
                 _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
             text = preamble_match.group("action")
-        code_match = _CODE_RE.fullmatch(text)
-        if code_match:
-            code = code_match.group("body").strip()
-            if not has_meaningful_visible_content(code):
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            try:
-                ast.parse(code)
-            except (SyntaxError, ValueError, TypeError):
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            return ExecutableAction(code=code)
-
-        run_match = _RUN_RE.fullmatch(text)
-        if run_match and text.count("```<RUN>") == 1:
-            code = run_match.group("body").strip()
-            if not has_meaningful_visible_content(code):
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            try:
-                ast.parse(code)
-            except (SyntaxError, ValueError, TypeError):
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            return ExecutableAction(code=code, legacy_format=True)
-
-        if any(marker in text for marker in ("<code>", "</code>", "```<RUN>")):
-            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-        if _TAG_RE.search(text):
-            _raise_protocol_error(
-                ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
-                protocol,
-                logger,
-            )
-        _raise_protocol_error(
-            ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION,
-            protocol,
-            logger,
-        )
-
-    envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
-    if envelope_match and text.count("<FINAL_ANSWER>") == 1 and text.count("</FINAL_ANSWER>") == 1:
-        answer = envelope_match.group("body")
-        if not has_meaningful_visible_content(answer):
-            _raise_protocol_error(
-                ProtocolErrorReason.INVALID_FINAL_ENVELOPE,
-                protocol,
-                logger,
-            )
-        return ExplicitFinalAnswer(answer=answer)
-
-    _raise_protocol_error(
-        ProtocolErrorReason.INVALID_FINAL_ENVELOPE,
-        protocol,
-        logger,
-    )
+        return _classify_code_action(text, protocol=protocol, logger=logger)
+    return _classify_final_envelope(text, protocol=protocol, logger=logger)
 
 
 def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm | None:

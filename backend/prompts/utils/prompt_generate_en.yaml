@@ -62,7 +62,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
      - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code
      - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.
 
-  After thinking, when you can answer the user, call `final_answer(...)` inside the single `<code>...</code>` action block. Never return a bare-text final answer.
+  Prefer one complete `<code>...</code>` block per action. If multiple blocks are necessary, emit them consecutively with whitespace only between them; they execute together as one action, and no prose may follow the first or final block. After thinking, when you can answer the user, call `final_answer(...)` as the last top-level statement in the final block. Never return a bare-text final answer or execute another action afterward.
 
   ### Python Code Specifications
   1. If it is considered to be code that needs to be executed, use '<code>code</code>'. If the code does not need to be executed for display only, use '<DISPLAY:language_type>code</DISPLAY>', where language_type can be python, java, javascript, etc.;
