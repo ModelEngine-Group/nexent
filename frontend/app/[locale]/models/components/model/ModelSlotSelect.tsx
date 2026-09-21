@@ -294,8 +294,10 @@ export function ModelSlotSelect({
                 key={`${m.id}-${m.displayName}`}
                 value={m.displayName}
               >
-                <StatusDot status={m.connect_status} />
-                <span className="truncate">{m.displayName}</span>
+                <span className="flex items-center gap-2.5">
+                  <StatusDot status={m.connect_status} />
+                  <span className="truncate">{m.displayName}</span>
+                </span>
               </SelectItem>
             ))
           )}
