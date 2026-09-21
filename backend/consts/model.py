@@ -2537,6 +2537,37 @@ def _clean_custom_params(value: Any, logger) -> Optional[Dict[str, Any]]:
     return clean_custom or None
 
 
+def _validate_reasoning_extra_param(key: str, value: Any, logger) -> bool:
+    if key == "reasoning_enabled":
+        if isinstance(value, bool):
+            return True
+        logger.warning(
+            "Dropped invalid reasoning_enabled value %r; expected a boolean",
+            value,
+        )
+        return False
+    if key == "reasoning_effort" and value not in REASONING_EFFORT_VALUES:
+        logger.warning(
+            "Dropped invalid reasoning_effort value %r; expected one of %s",
+            value,
+            sorted(REASONING_EFFORT_VALUES),
+        )
+        return False
+    return True
+
+
+def _prepare_custom_extra_param(
+    value: Any, logger
+) -> tuple[Optional[Dict[str, Any]], bool]:
+    if not isinstance(value, dict):
+        logger.warning(
+            "__custom__ must be a dict, got %s; dropping",
+            type(value).__name__,
+        )
+        return None, False
+    return _clean_custom_params(value, logger), True
+
+
 def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Filter extra_params to only keep keys allowed for the given model type.
 
@@ -2558,36 +2589,17 @@ def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]])
     dropped = []
     for key, value in extra_params.items():
         if key == "__custom__":
-            if not isinstance(value, dict):
-                logger.warning(
-                    "__custom__ must be a dict, got %s; dropping",
-                    type(value).__name__,
-                )
+            clean_custom, accepted = _prepare_custom_extra_param(value, logger)
+            if not accepted:
                 dropped.append(key)
                 continue
-            clean_custom = _clean_custom_params(value, logger)
             if clean_custom is not None:
                 filtered["__custom__"] = clean_custom
             continue
-        if key in allowed:
-            if key == "reasoning_enabled" and not isinstance(value, bool):
-                logger.warning(
-                    "Dropped invalid reasoning_enabled value %r; expected a boolean",
-                    value,
-                )
-                dropped.append(key)
-                continue
-            if key == "reasoning_effort" and value not in REASONING_EFFORT_VALUES:
-                logger.warning(
-                    "Dropped invalid reasoning_effort value %r; expected one of %s",
-                    value,
-                    sorted(REASONING_EFFORT_VALUES),
-                )
-                dropped.append(key)
-                continue
-            filtered[key] = value
-        else:
+        if key not in allowed or not _validate_reasoning_extra_param(key, value, logger):
             dropped.append(key)
+            continue
+        filtered[key] = value
     if dropped:
         logger.warning(
             "Dropped extra_params keys not in fixed field set for model_type=%s: %s",

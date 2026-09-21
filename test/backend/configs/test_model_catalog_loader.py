@@ -123,7 +123,8 @@ class TestModelCatalogLoaderSmoke:
             assert profile.reasoning_capability.wire_format == wire_format
 
         claude = get_model_profile("anthropic", "claude-sonnet-4-5-20250929")
-        assert claude is not None and claude.reasoning_capability is not None
+        assert claude is not None
+        assert claude.reasoning_capability is not None
         assert claude.reasoning_capability.effort_budgets == {
             "low": 2048,
             "medium": 8192,
@@ -202,10 +203,9 @@ class TestModelCatalogLoaderSmoke:
 
         capability = resolve_reasoning_capability(model_name)
 
+        assert capability is not None
         if expected_provider == "zhipu":
-            assert capability is not None and capability["control"] == "toggle"
-        else:
-            assert capability is not None
+            assert capability["control"] == "toggle"
 
     def test_empty_and_unknown_model_ids_have_no_capability(self):
         from configs.model_catalog_loader import resolve_reasoning_capability

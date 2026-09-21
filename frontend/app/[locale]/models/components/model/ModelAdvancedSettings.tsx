@@ -156,6 +156,103 @@ const REMOVED_ADVANCED_PARAM_KEYS = new Set<string>([
   "speed",
 ]);
 
+const REASONING_LABELS: Record<
+  ReasoningEffort,
+  { key: string; defaultValue: string }
+> = {
+  none: { key: "model.advanced.reasoningOff", defaultValue: "关闭" },
+  minimal: { key: "model.advanced.reasoningMinimal", defaultValue: "最低" },
+  low: { key: "model.advanced.reasoningLow", defaultValue: "低" },
+  medium: { key: "model.advanced.reasoningMedium", defaultValue: "中" },
+  high: { key: "model.advanced.reasoningHigh", defaultValue: "高" },
+  xhigh: { key: "model.advanced.reasoningXHigh", defaultValue: "超高" },
+  max: { key: "model.advanced.reasoningMax", defaultValue: "最大" },
+};
+
+const resolveReasoningDefault = (
+  currentEffort: ReasoningEffort | undefined,
+  capability: ReasoningCapability | undefined,
+  levels: readonly ReasoningEffort[]
+): ReasoningEffort | undefined => {
+  if (currentEffort && levels.includes(currentEffort)) return currentEffort;
+  if (capability?.default && levels.includes(capability.default)) {
+    return capability.default;
+  }
+  if (levels.includes(DEFAULT_REASONING_EFFORT)) {
+    return DEFAULT_REASONING_EFFORT;
+  }
+  return levels[0];
+};
+
+const shouldSkipInferenceParam = (
+  key: string,
+  raw: unknown,
+  reasoningEnabled: boolean
+): boolean => {
+  if (raw === undefined || raw === null || raw === "") return true;
+  if (REMOVED_ADVANCED_PARAM_KEYS.has(key)) return true;
+  return key === "reasoning_effort" && !reasoningEnabled;
+};
+
+const assignInferenceParam = (
+  key: string,
+  raw: unknown,
+  result: Record<string, unknown>,
+  extraParams: Record<string, unknown>
+): void => {
+  if (key === "__custom__") {
+    const dict = buildCustomDict(raw);
+    if (Object.keys(dict).length > 0) {
+      extraParams["__custom__"] = dict;
+    }
+    return;
+  }
+  if (DEDICATED_KEYS.has(key)) {
+    result[key] = raw;
+    return;
+  }
+  extraParams[key] = raw;
+};
+
+const applyReasoningValues = (
+  value: ModelAdvancedSettingsValue,
+  extra: Record<string, unknown>
+): void => {
+  const hasReasoningFlag = typeof extra.reasoning_enabled === "boolean";
+  if (hasReasoningFlag) {
+    value.reasoning_enabled = extra.reasoning_enabled;
+  }
+  if (typeof extra.reasoning_effort === "string") {
+    if (!hasReasoningFlag || extra.reasoning_enabled === true) {
+      value.reasoning_effort = extra.reasoning_effort;
+    }
+    if (!hasReasoningFlag) {
+      value.reasoning_enabled = true;
+    }
+  }
+};
+
+const getVisibleAdvancedSpecs = (
+  specs: InferenceFieldSpecsByType,
+  modelType: string,
+  mode: ModelAdvancedSettingsMode,
+  isVoiceType: boolean,
+  isVolcengineVoice: boolean
+): InferenceFieldSpec[] => {
+  const specList = specs[modelType] || [];
+  return specList.filter((spec) => {
+    if (REMOVED_ADVANCED_PARAM_KEYS.has(spec.key)) return false;
+    if (mode === "default" && CAPACITY_FIELD_KEYS.has(spec.key)) return false;
+    if (mode === "default" && EMBEDDING_FIELD_KEYS.has(spec.key)) return false;
+    if (mode === "override" && spec.key === "display_name") return false;
+    const isVolcengineCredential =
+      isVoiceType &&
+      mode === "default" &&
+      (spec.key === "model_appid" || spec.key === "access_token");
+    return !isVolcengineCredential || isVolcengineVoice;
+  });
+};
+
 /**
  * Split a form-state object into the wire payload shape consumed by the
  * backend create/update endpoints:
@@ -306,21 +403,8 @@ export const buildInferenceParamsPayload = (
   const reasoningEnabled = value.reasoning_enabled === true;
 
   for (const [key, raw] of Object.entries(value)) {
-    if (raw === undefined || raw === null || raw === "") continue;
-    if (REMOVED_ADVANCED_PARAM_KEYS.has(key)) continue;
-    if (key === "reasoning_effort" && !reasoningEnabled) continue;
-    if (key === "__custom__") {
-      const dict = buildCustomDict(raw);
-      if (Object.keys(dict).length > 0) {
-        extraParams["__custom__"] = dict;
-      }
-      continue;
-    }
-    if (DEDICATED_KEYS.has(key)) {
-      result[key] = raw;
-    } else {
-      extraParams[key] = raw;
-    }
+    if (shouldSkipInferenceParam(key, raw, reasoningEnabled)) continue;
+    assignInferenceParam(key, raw, result, extraParams);
   }
 
   if (!reasoningEnabled) {
@@ -391,18 +475,7 @@ export const advancedSettingsValueFromRecord = (
 
   // The model-level reasoning default is catalog-driven rather than part of
   // the generic field-spec payload, but it still lives in extra_params.
-  const hasReasoningFlag = typeof extra.reasoning_enabled === "boolean";
-  if (hasReasoningFlag) {
-    value.reasoning_enabled = extra.reasoning_enabled;
-  }
-  if (typeof extra.reasoning_effort === "string") {
-    if (!hasReasoningFlag || extra.reasoning_enabled === true) {
-      value.reasoning_effort = extra.reasoning_effort;
-    }
-    if (!hasReasoningFlag) {
-      value.reasoning_enabled = true;
-    }
-  }
+  applyReasoningValues(value, extra);
 
   // Pass through user-defined custom params (extra_params.__custom__).
   // Backend stores a dict of JSON-compatible values; the editor works on a
@@ -749,21 +822,13 @@ export const ModelAdvancedSettings = ({
   //    capacity panel, so capacity fields ARE shown here.
   //  - display_name in override mode: it's a model-level property, not an
   //    inference parameter that can be overridden per-agent/per-KB.
-  const specList: InferenceFieldSpec[] = (specs[modelType] || []).filter((spec) => {
-    if (REMOVED_ADVANCED_PARAM_KEYS.has(spec.key)) return false;
-    if (mode === "default" && CAPACITY_FIELD_KEYS.has(spec.key)) return false;
-    if (mode === "default" && EMBEDDING_FIELD_KEYS.has(spec.key)) return false;
-    if (mode === "override" && spec.key === "display_name") return false;
-    if (
-      isVoiceType &&
-      mode === "default" &&
-      (spec.key === "model_appid" || spec.key === "access_token") &&
-      !isVolcengineVoice
-    ) {
-      return false;
-    }
-    return true;
-  });
+  const specList = getVisibleAdvancedSpecs(
+    specs,
+    modelType,
+    mode,
+    isVoiceType,
+    isVolcengineVoice
+  );
 
   const handleFieldChange = (key: string, next: unknown) => {
     onChange({ ...value, [key]: next });
@@ -790,29 +855,15 @@ export const ModelAdvancedSettings = ({
       ? reasoningCapability.levels
       : [...DEFAULT_REASONING_EFFORTS];
   const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
-  const reasoningDefault =
-    reasoningEffort && reasoningLevels.includes(reasoningEffort)
-      ? reasoningEffort
-      : reasoningCapability?.default &&
-          reasoningLevels.includes(reasoningCapability.default)
-        ? reasoningCapability.default
-        : reasoningLevels.includes(DEFAULT_REASONING_EFFORT)
-          ? DEFAULT_REASONING_EFFORT
-          : reasoningLevels[0];
-  const reasoningLabel = (level: ReasoningEffort) =>
-    level === "none"
-      ? t("model.advanced.reasoningOff", { defaultValue: "关闭" })
-      : level === "minimal"
-        ? t("model.advanced.reasoningMinimal", { defaultValue: "最低" })
-        : level === "low"
-          ? t("model.advanced.reasoningLow", { defaultValue: "低" })
-          : level === "medium"
-            ? t("model.advanced.reasoningMedium", { defaultValue: "中" })
-            : level === "high"
-              ? t("model.advanced.reasoningHigh", { defaultValue: "高" })
-              : level === "xhigh"
-                ? t("model.advanced.reasoningXHigh", { defaultValue: "超高" })
-                : t("model.advanced.reasoningMax", { defaultValue: "最大" });
+  const reasoningDefault = resolveReasoningDefault(
+    reasoningEffort,
+    reasoningCapability,
+    reasoningLevels
+  );
+  const reasoningLabel = (level: ReasoningEffort) => {
+    const label = REASONING_LABELS[level];
+    return t(label.key, { defaultValue: label.defaultValue });
+  };
 
   const renderReasoningEffort = reasoningControlVisible && (
     <div>

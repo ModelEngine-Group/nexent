@@ -247,29 +247,40 @@ async def process_skill_file_uploads(
     return upload_results
 
 
-def safe_agent_stream_error_chunk(exception: Optional[BaseException] = None) -> str:
-    """Return a sanitized SSE error chunk without internal exception details."""
-    is_reasoning_error = False
+def _is_reasoning_configuration_error(exception: Optional[BaseException]) -> bool:
+    """Return whether an exception chain contains a reasoning configuration error."""
     current = exception
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         if getattr(current, "is_reasoning_configuration_error", False):
-            is_reasoning_error = True
-            break
+            return True
         current = current.__cause__ or current.__context__
-    if is_reasoning_error:
-        error_payload = json.dumps(
-            {
-                "type": "error",
-                "code": REASONING_CONFIGURATION_ERROR_CODE,
-                "content": SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE,
-            },
-            ensure_ascii=False,
-        )
-        return f"data: {error_payload}\n\n"
+    return False
+
+
+def _reasoning_configuration_error_chunk() -> str:
+    error_payload = json.dumps(
+        {
+            "type": "error",
+            "code": REASONING_CONFIGURATION_ERROR_CODE,
+            "content": SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE,
+        },
+        ensure_ascii=False,
+    )
+    return f"data: {error_payload}\n\n"
+
+
+def _generic_agent_stream_error_chunk() -> str:
     error_payload = json.dumps(
         {"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE},
         ensure_ascii=False,
     )
     return f"data: {error_payload}\n\n"
+
+
+def safe_agent_stream_error_chunk(exception: Optional[BaseException] = None) -> str:
+    """Return a sanitized SSE error chunk without internal exception details."""
+    if _is_reasoning_configuration_error(exception):
+        return _reasoning_configuration_error_chunk()
+    return _generic_agent_stream_error_chunk()

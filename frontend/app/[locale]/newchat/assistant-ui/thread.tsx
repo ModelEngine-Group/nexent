@@ -67,6 +67,7 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
+import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
@@ -110,6 +111,26 @@ type HistorySummaryData = {
   status?: "compacting" | "accepted";
   summary?: { markdown?: string } | string;
   covered_through_message_id?: number;
+};
+
+const resolveDefaultReasoningEffort = (
+  modelDefault: ReasoningEffort | undefined,
+  capability: ReasoningCapability | undefined,
+  levels: readonly ReasoningEffort[]
+): ReasoningEffort | undefined => {
+  if (modelDefault && levels.includes(modelDefault)) return modelDefault;
+  if (capability?.default && levels.includes(capability.default)) {
+    return capability.default;
+  }
+  if (levels.includes(DEFAULT_REASONING_EFFORT)) {
+    return DEFAULT_REASONING_EFFORT;
+  }
+  return levels[0];
+};
+
+const formatReasoningEffortName = (level: ReasoningEffort): string => {
+  if (level === "none") return "Off";
+  return level[0].toUpperCase() + level.slice(1);
 };
 
 const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {
@@ -233,15 +254,11 @@ const useAgentModels = (
         capability?.status === "supported" && capability.levels.length > 0
           ? capability.levels
           : [...DEFAULT_REASONING_EFFORTS];
-      const defaultEffort =
-        model?.defaultReasoningEffort &&
-        effortLevels.includes(model.defaultReasoningEffort)
-          ? model.defaultReasoningEffort
-          : capability?.default && effortLevels.includes(capability.default)
-            ? capability.default
-            : effortLevels.includes(DEFAULT_REASONING_EFFORT)
-              ? DEFAULT_REASONING_EFFORT
-              : effortLevels[0];
+      const defaultEffort = resolveDefaultReasoningEffort(
+        model?.defaultReasoningEffort,
+        capability,
+        effortLevels
+      );
       return {
         id,
         name: fallbackName,
@@ -249,10 +266,7 @@ const useAgentModels = (
           ? {
               efforts: effortLevels.map((level) => ({
                 id: level,
-                name:
-                  level === "none"
-                    ? "Off"
-                    : level[0].toUpperCase() + level.slice(1),
+                name: formatReasoningEffortName(level),
               })),
               defaultEffort: defaultEffort ?? undefined,
             }

@@ -731,14 +731,16 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
     assert result.stop_event == nexent_agent_with_models.stop_event
 
 
-def test_create_model_passes_enabled_reasoning_configuration(nexent_agent_with_models, mock_model_config):
+def test_create_model_passes_enabled_reasoning_configuration(
+    nexent_agent_with_models, mock_model_config, monkeypatch
+):
     mock_model_config.reasoning_enabled = True
     mock_model_config.reasoning_effort = "high"
     mock_model_config.reasoning_capability = {
         "status": "supported",
         "levels": ["low", "high"],
     }
-    mock_openai_model_class.return_value = MagicMock()
+    monkeypatch.setattr(mock_openai_model_class, "return_value", MagicMock())
 
     nexent_agent_with_models.create_model("test_model")
 

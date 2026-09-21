@@ -573,6 +573,95 @@ def _infer_provider_from_model_id(model_id: str) -> Optional[str]:
     return None
 
 
+def _reasoning_effort_capability(
+    levels: List[str], default: str, wire_format: str = "reasoning_effort"
+) -> Dict[str, Any]:
+    return {
+        "status": "supported",
+        "control": "effort",
+        "levels": levels,
+        "default": default,
+        "wire_format": wire_format,
+        "source": "operator",
+    }
+
+
+def _resolve_deepseek_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"deepseek[-_]?v4", value) or "deepseek-reasoner" in value:
+        return _reasoning_effort_capability(["low", "high", "max"], "high")
+    return None
+
+
+def _resolve_zhipu_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.match(r"(?:glm|chatglm)[-_]?(?:4\.[5-9]|5)", value):
+        return {
+            "status": "supported",
+            "control": "toggle",
+            "levels": ["none", "high"],
+            "default": "high",
+            "wire_format": "thinking_toggle",
+            "source": "operator",
+        }
+    return None
+
+
+def _resolve_anthropic_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"claude[-_].*4", value):
+        return _reasoning_effort_capability(
+            ["none", "low", "medium", "high"], "medium", "thinking_budget"
+        ) | {"effort_budgets": {"low": 2048, "medium": 8192, "high": 16384}}
+    return None
+
+
+def _resolve_google_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"gemini[-_](?:2\.5|3|4)", value):
+        return _reasoning_effort_capability(["low", "medium", "high"], "high")
+    return None
+
+
+def _resolve_openai_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.match(r"(?:o[1-4]|gpt-5)(?:[-.]|$)", value):
+        levels = (
+            ["low", "medium", "high"]
+            if value.startswith("o")
+            else ["minimal", "low", "medium", "high"]
+        )
+        return _reasoning_effort_capability(levels, "medium")
+    return None
+
+
+def _resolve_xai_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.match(r"grok[-_]4", value):
+        return _reasoning_effort_capability(["low", "medium", "high", "xhigh"], "high")
+    return None
+
+
+def _resolve_qwen_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"qwen[-_]?3", value) or "qwq" in value:
+        return _reasoning_effort_capability(["low", "medium", "xhigh"], "medium")
+    return None
+
+
+def _resolve_mistral_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"(?:magistral|mistral[-_]medium|mistral[-_]large)", value):
+        return _reasoning_effort_capability(["none", "high"], "high")
+    return None
+
+
+_REASONING_CAPABILITY_RESOLVERS = {
+    "deepseek": _resolve_deepseek_reasoning,
+    "zhipu": _resolve_zhipu_reasoning,
+    "anthropic": _resolve_anthropic_reasoning,
+    "google": _resolve_google_reasoning,
+    "openai": _resolve_openai_reasoning,
+    "xai": _resolve_xai_reasoning,
+    "dashscope": _resolve_qwen_reasoning,
+    "silicon": _resolve_qwen_reasoning,
+    "modelengine": _resolve_qwen_reasoning,
+    "mistral": _resolve_mistral_reasoning,
+}
+
+
 def _infer_reasoning_capability_from_model_id(
     model_id: str,
     provider_id: str,
@@ -584,51 +673,8 @@ def _infer_reasoning_capability_from_model_id(
     rows whose provider/model name was not an exact catalog key.
     """
     value = str(model_id or "").lower()
-    provider = str(provider_id or "").lower()
-
-    def effort(levels: List[str], default: str, wire_format: str = "reasoning_effort"):
-        return {
-            "status": "supported",
-            "control": "effort",
-            "levels": levels,
-            "default": default,
-            "wire_format": wire_format,
-            "source": "operator",
-        }
-
-    if provider == "deepseek" and (
-        re.search(r"deepseek[-_]?v4", value) or "deepseek-reasoner" in value
-    ):
-        return effort(["low", "high", "max"], "high")
-    if provider == "zhipu" and re.match(r"(?:glm|chatglm)[-_]?(?:4\.[5-9]|5)", value):
-        return {
-            "status": "supported",
-            "control": "toggle",
-            "levels": ["none", "high"],
-            "default": "high",
-            "wire_format": "thinking_toggle",
-            "source": "operator",
-        }
-    if provider == "anthropic" and re.search(r"claude[-_].*4", value):
-        return effort(
-            ["none", "low", "medium", "high"],
-            "medium",
-            "thinking_budget",
-        ) | {"effort_budgets": {"low": 2048, "medium": 8192, "high": 16384}}
-    if provider == "google" and re.search(r"gemini[-_](?:2\.5|3|4)", value):
-        return effort(["low", "medium", "high"], "high")
-    if provider == "openai" and re.match(r"(?:o[1-4]|gpt-5)(?:[-.]|$)", value):
-        levels = ["low", "medium", "high"] if value.startswith("o") else ["minimal", "low", "medium", "high"]
-        return effort(levels, "medium")
-    if provider == "xai" and re.match(r"grok[-_]4", value):
-        return effort(["low", "medium", "high", "xhigh"], "high")
-    if provider in {"dashscope", "silicon", "modelengine"} and (
-        re.search(r"qwen[-_]?3", value) or "qwq" in value
-    ):
-        return effort(["low", "medium", "xhigh"], "medium")
-    if provider == "mistral" and re.search(r"(?:magistral|mistral[-_]medium|mistral[-_]large)", value):
-        return effort(["none", "high"], "high")
-    return None
+    resolver = _REASONING_CAPABILITY_RESOLVERS.get(str(provider_id or "").lower())
+    return resolver(value) if resolver else None
 
 
 # ---------------------------------------------------------------------------
