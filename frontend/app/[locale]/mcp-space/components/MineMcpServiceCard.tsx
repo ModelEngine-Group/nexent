@@ -242,7 +242,7 @@ export default function MineMcpServiceCard({
               />
             </Tooltip>
           ) : null}
-          <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-col items-start gap-1">
             <Dropdown
               menu={{ items: actionItems }}
               trigger={["click"]}

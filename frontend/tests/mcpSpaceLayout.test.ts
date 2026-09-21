@@ -106,3 +106,9 @@ test("my MCP cards open on click and retain only the enabled action", async () =
   assert.match(page, /searchActions=\{/);
   assert.doesNotMatch(page, /filterActions=\{/);
 });
+
+test("my MCP header actions keep the more menu beside refresh", async () => {
+  const card = await readFile(mineMcpCardPath, "utf8");
+
+  assert.match(card, /flex flex-col items-start gap-1/);
+});
