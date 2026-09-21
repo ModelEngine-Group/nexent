@@ -125,12 +125,12 @@ test("skill feedback keeps square search controls, exposes tags, and shows repos
 
   assert.match(
     repository,
-    /<TagFilterPopover[\s\S]*buttonClassName="rounded-none"/
+    /<TagFilterPopover[\s\S]*buttonStyle=\{\{ borderRadius: 0 \}\}/
   );
-  assert.doesNotMatch(repository, /className="rounded-xl"/);
+  assert.match(repository, /style=\{\{ borderRadius: 0 \}\}/);
   assert.doesNotMatch(mine, /skillRepository\.mine\.createSkill/);
   assert.match(mine, /<Popover[\s\S]*repository\.tagFilter\.button/);
-  assert.doesNotMatch(mine, /className="rounded-xl"/);
+  assert.match(mine, /style=\{\{ borderRadius: 0 \}\}/);
   assert.match(card, /min-h-7/);
-  assert.match(card, /meta=\{[\s\S]*listing\.author/);
+  assert.match(card, /listing\.author\?\.trim\(\) \|\| listing\.submitted_by\?\.trim\(\)/);
 });

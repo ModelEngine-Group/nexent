@@ -46,6 +46,7 @@ export function SkillRepositoryCard({
 }) {
   const { t } = useTranslation("common");
   const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
+  const author = listing.author?.trim() || listing.submitted_by?.trim();
   const menuItems: MenuProps["items"] =
     showAdminMenu && onTakeDown != null
       ? [
@@ -111,8 +112,8 @@ export function SkillRepositoryCard({
         ) : undefined
       }
       meta={
-        listing.author?.trim() ? (
-          <span className="truncate">{listing.author.trim()}</span>
+        author ? (
+          <span className="truncate">{author}</span>
         ) : undefined
       }
       footer={action}

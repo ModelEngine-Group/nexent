@@ -75,14 +75,14 @@ export function RepositoryView({
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={t("skillRepository.searchPlaceholder")}
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-            className="rounded-none"
+            style={{ borderRadius: 0 }}
           />
         </div>
         <TagFilterPopover
           definitions={tagDefinitions}
           value={tagPredicates}
           onChange={onTagPredicatesChange}
-          buttonClassName="rounded-none"
+          buttonStyle={{ borderRadius: 0 }}
         />
       </div>
 
