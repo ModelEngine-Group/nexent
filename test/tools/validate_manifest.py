@@ -42,12 +42,31 @@ def validate(root: Path, allow_empty: bool = False):
             issues.append(ValidationIssue(root / "test/manifests", case_id, f"Contract hash must be {expected_contract_hash}"))
 
         implementations = entry.get("implementation", [])
+        case_status = case.get("status")
+        if case_status in {"manual", "skipped_by_policy", "retired"}:
+            allowed_statuses = {case_status}
+        elif case.get("automation") == "manual":
+            allowed_statuses = {"manual", "blocked"} if case_status == "blocked" else {"manual"}
+        elif case_status == "blocked":
+            allowed_statuses = {"blocked", "implemented"}
+        elif case.get("automation") == "automated":
+            allowed_statuses = {"implemented"}
+        else:
+            allowed_statuses = {"blocked"}
+        if entry.get("status") not in allowed_statuses:
+            issues.append(ValidationIssue(root / "test/manifests", case_id, "Manifest status is incompatible with case status/automation"))
         all_files_exist = True
         for implementation in implementations:
             relative_file = implementation.get("file", "")
             if relative_file.startswith(LEGACY_PREFIXES):
                 issues.append(ValidationIssue(root / "test/manifests", case_id, f"Legacy test path is not a formal implementation: {relative_file}"))
             file_path = root / relative_file
+            stage_root = root / "test/automation" / stage.lower()
+            resolved = file_path.resolve()
+            if not resolved.is_relative_to(stage_root.resolve()) or not resolved.is_relative_to(root.resolve()) or stage_root.resolve() != stage_root.absolute():
+                all_files_exist = False
+                issues.append(ValidationIssue(root / "test/manifests", case_id, "Implementation must remain inside its stage-specific automation directory"))
+                continue
             if not file_path.is_file():
                 all_files_exist = False
                 issues.append(ValidationIssue(root / "test/manifests", case_id, f"Implementation file does not exist: {relative_file}"))

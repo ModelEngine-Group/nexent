@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import yaml
+import pytest
 from openpyxl import load_workbook
 
 
@@ -18,6 +19,8 @@ if str(TOOLS_DIR) not in sys.path:
 import generate_excel  # noqa: E402
 import validate_test_assets  # noqa: E402
 from test_asset_lib import case_contract_hash, implementation_hash  # noqa: E402
+from test_asset_lib import _validate_portable_case  # noqa: E402
+import validate_manifest  # noqa: E402
 
 
 def _write_yaml(path: Path, value) -> None:
@@ -167,3 +170,51 @@ def test_schemas_are_valid_json(tmp_path: Path) -> None:
     source_root = Path(__file__).resolve().parents[3]
     for schema_path in sorted((source_root / "test/schemas").glob("*.json")):
         assert isinstance(json.loads(schema_path.read_text(encoding="utf-8")), dict)
+
+
+@pytest.mark.parametrize("field", ["inputs", "contract", "execution", "journey", "condition"])
+def test_portability_checks_entire_case(field):
+    issues = _validate_portable_case(Path("case.yaml"), 0, {field: [{"file": "/home/dev/data"}]})
+    assert any("absolute paths" in issue.message for issue in issues)
+
+
+@pytest.mark.parametrize("field", ["token", "access_token", "refresh_token", "id_token", "Authorization", "apiKey"])
+def test_credential_fields_require_asset_reference(field):
+    assert _validate_portable_case(Path("case.yaml"), 0, {"inputs": {field: "literal"}})
+    assert not _validate_portable_case(Path("case.yaml"), 0, {"inputs": {field: {"asset_ref": "tenant-a"}}})
+
+
+def test_http_endpoint_is_not_a_filesystem_path():
+    assert not _validate_portable_case(Path("case.yaml"), 0, {"contract": {"endpoint": "/api/agents"}})
+
+
+@pytest.mark.parametrize("relative", ["test/automation/d5/test_feature.py", "test/automation/d1/../../../backend/test_feature.py"])
+def test_manifest_rejects_cross_stage_and_traversal(tmp_path, relative):
+    root = _build_repository(tmp_path, Path(__file__).resolve().parents[3])
+    target = root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("def test_feature_d1_001(): pass", encoding="utf-8")
+    manifest_path = root / "test/manifests/d1-d5.yaml"
+    document = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    document["cases"][0]["implementation"][0]["file"] = relative
+    _write_yaml(manifest_path, document)
+    assert any("stage-specific" in issue.message for issue in validate_manifest.validate(root))
+
+
+@pytest.mark.parametrize("status,automation", [("manual", "manual"), ("skipped_by_policy", "not_applicable"), ("retired", "automated")])
+def test_manifest_rejects_implemented_nonexecuting_case(tmp_path, status, automation):
+    root = _build_repository(tmp_path, Path(__file__).resolve().parents[3])
+    path = root / "test/cases/d1/core.yaml"
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document["cases"][0].update(status=status, automation=automation)
+    _write_yaml(path, document)
+    assert any("incompatible" in issue.message for issue in validate_manifest.validate(root))
+
+
+def test_blocked_case_can_retain_implemented_script(tmp_path):
+    root = _build_repository(tmp_path, Path(__file__).resolve().parents[3])
+    path = root / "test/cases/d1/core.yaml"
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document["cases"][0]["status"] = "blocked"
+    _write_yaml(path, document)
+    assert not any("incompatible" in issue.message for issue in validate_manifest.validate(root))

@@ -234,19 +234,22 @@ def manifest_index(documents: Iterable[AssetDocument]) -> tuple[dict[str, dict[s
 
 def _validate_portable_case(path: Path, index: int, case: dict[str, Any]) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    stack: list[tuple[str, Any]] = [("test_data", case.get("test_data", {}))]
+    stack: list[tuple[str, Any]] = [("", case)]
     while stack:
         location, value = stack.pop()
         if isinstance(value, dict):
             for key, child in value.items():
-                if any(token in key.lower() for token in ("password", "secret", "api_key", "token_value")):
+                normalized_key = re.sub(r"([a-z])([A-Z])", r"\1_\2", key).lower().replace("-", "_")
+                secret_field = any(token in normalized_key for token in ("password", "secret", "api_key", "token_value")) or normalized_key in {"token", "access_token", "refresh_token", "id_token", "authorization"}
+                reference = isinstance(child, dict) and set(child) == {"asset_ref"} and isinstance(child["asset_ref"], str) and bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]*", child["asset_ref"]))
+                if secret_field and not reference:
                     issues.append(ValidationIssue(path, f"cases/{index}/{location}/{key}", "Secret-shaped fields are not allowed in formal test data"))
                 stack.append((f"{location}/{key}", child))
         elif isinstance(value, list):
             stack.extend((f"{location}/{child_index}", child) for child_index, child in enumerate(value))
         elif isinstance(value, str):
             normalized = value.replace("\\", "/")
-            if WINDOWS_ABSOLUTE.match(value) or normalized.startswith(("/home/", "/root/", "/tmp/")):
+            if WINDOWS_ABSOLUTE.match(value) or normalized.startswith(("/home/", "/root/", "/tmp/", "/Users/", "//")):
                 issues.append(ValidationIssue(path, f"cases/{index}/{location}", "Developer- or runner-local absolute paths are not allowed"))
             if SQL_PATH.search(value):
                 issues.append(ValidationIssue(path, f"cases/{index}/{location}", "Business tests must not depend on SQL file paths"))

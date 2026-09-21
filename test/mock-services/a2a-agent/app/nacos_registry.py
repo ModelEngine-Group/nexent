@@ -54,6 +54,8 @@ class NacosRegistry:
 
     async def register_once(self) -> None:
         async with httpx.AsyncClient(base_url=self.settings.nacos_server_url, timeout=10) as client:
+            # Nacos 3.x Admin A2A APIs require login even when client API auth
+            # (NACOS_AUTH_ENABLED) is disabled. Do not gate this on that flag.
             self._token = await self._login(client)
             headers = {"accessToken": self._token} if self._token else {}
             card = card_dict(
