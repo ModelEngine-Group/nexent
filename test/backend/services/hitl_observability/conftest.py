@@ -91,9 +91,15 @@ def runtime(monkeypatch, mocker, spans):
             chunks.clear()
             return buffered
 
+        def drain_and_emit():
+            buffered = take_chunks()
+            if buffered:
+                port.emit_chunks(buffered)
+
         port.add_chunk.side_effect = chunks.append
         port.peek_chunks.side_effect = lambda: len(chunks)
         port.take_chunks.side_effect = take_chunks
+        port.drain_and_emit.side_effect = drain_and_emit
         port.request_payload = cipher.open(stored[identity["run_id"]])
         port.checkpoint = None
         port.context_snapshot.side_effect = lambda items: items

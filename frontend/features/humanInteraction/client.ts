@@ -37,6 +37,11 @@ export type HumanDecision = "answer" | "approve" | "reject" | "steer";
 
 const base = `${API_BASE_URL}/agent/human-interactions`;
 
+// A hung request (half-open proxy/socket) would otherwise keep the
+// controller's in-flight guard stuck forever and silently drop every
+// subsequent snapshot, including forced ones. Abort and surface an error.
+const REQUEST_TIMEOUT_MS = 15000;
+
 export class HumanInteractionHttpError extends Error {
   constructor(
     message: string,
@@ -50,6 +55,7 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetchWithAuth(`${base}${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!response.ok) {

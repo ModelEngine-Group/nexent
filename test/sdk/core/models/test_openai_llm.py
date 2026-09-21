@@ -2,6 +2,7 @@ import sys
 import types
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 # Ensure SDK package is importable by adding sdk/ to sys.path (do not fallback to stubs)
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "sdk"))
 
@@ -391,8 +392,9 @@ def test_ut_sdk_tlm_031_model_timeout_emits_sanitized_warning(caplog):
         stream = TimeoutStream(chunks_before_timeout)
         model.client.chat.completions.create = lambda **kwargs: stream
 
-        with pytest.raises(openai_llm_module.httpx.ReadTimeout):
+        with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
             model([{"role": "user", "content": "secret-prompt"}])
+        assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.TIMEOUT
 
         timeout_records = [
             record for record in caplog.records
@@ -1011,15 +1013,13 @@ def test_provider_context_overflow_stops_after_two_recovery_dispatches(openai_mo
     )
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
-        with pytest.raises(
-            openai_llm_module.ProviderContextOverflowRetryExhausted,
-            match="persisted after two recovery dispatches",
-        ):
+        with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
             openai_model_instance.__call__(
                 messages,
                 context_rebuild=lambda: messages,
                 _overflow_recovery_ordinal=2,
             )
+        assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.CONTEXT_OVERFLOW
 
 
 def test_provider_context_overflow_without_rebuild_is_retry_unsafe(openai_model_instance):
@@ -1029,11 +1029,9 @@ def test_provider_context_overflow_without_rebuild_is_retry_unsafe(openai_model_
     )
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
-        with pytest.raises(
-            openai_llm_module.ProviderContextOverflowRetryUnsafe,
-            match="cannot be safely rebuilt",
-        ):
+        with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
             openai_model_instance.__call__(messages, context_rebuild=None)
+        assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.CONTEXT_OVERFLOW
 
 
 def test_provider_context_overflow_does_not_recover_unrelated_error(openai_model_instance):
@@ -1353,10 +1351,11 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
         ]
 
         with pytest.raises(
-            openai_llm_module.EmptyModelResponseError,
+            openai_llm_module.ModelInvocationTerminalError,
             match="finish_reason=length",
-        ):
+        ) as exc_info:
             openai_model_instance.__call__(messages)
+        assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
 
     diagnostics = openai_model_instance.last_response_diagnostics
     assert diagnostics["finish_reason"] == "length"
@@ -1447,8 +1446,25 @@ def test_init_with_ssl_verify_true():
         assert kwargs["timeout"].read == 60.0
 
 
-def test_ut_sdk_tlm_035_uses_openai_http_implementation_timeout():
-    """Use the Timeout class owned by the HTTP implementation behind OpenAI."""
+def test_cmsr_001_init_disables_hidden_openai_transport_retries():
+    captured = {}
+
+    def fake_base_init(self, *args, **kwargs):
+        captured.update(kwargs)
+        self.client = SimpleNamespace()
+
+    with patch.object(
+        openai_llm_module.OpenAIServerModel,
+        "__init__",
+        fake_base_init,
+    ):
+        ImportedOpenAIModel(observer=MagicMock())
+
+    assert captured["client_kwargs"]["max_retries"] == 0
+
+
+def test_ut_sdk_tlm_035_falls_back_to_public_httpx_timeout_for_test_double():
+    """Use public httpx when the injected OpenAI client has no HTTP base."""
 
     class SDKTimeout:
         def __init__(self, *, connect, read, write, pool):
@@ -1457,11 +1473,7 @@ def test_ut_sdk_tlm_035_uses_openai_http_implementation_timeout():
             self.write = write
             self.pool = pool
 
-    sdk_httpx = types.SimpleNamespace(Timeout=SDKTimeout)
-    openai_base_client = types.ModuleType("openai._base_client")
-    openai_base_client.httpx2 = sdk_httpx
-
-    with patch.dict(sys.modules, {"openai._base_client": openai_base_client}), \
+    with patch.object(openai_llm_module.httpx, "Timeout", SDKTimeout), \
             patch("openai.DefaultHttpxClient") as mock_httpx_client:
         ImportedOpenAIModel(observer=MagicMock(), ssl_verify=True)
 
@@ -1470,6 +1482,29 @@ def test_ut_sdk_tlm_035_uses_openai_http_implementation_timeout():
     assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (
         10.0, 60.0, 30.0, 10.0,
     )
+
+
+def test_cmsr_compatible_timeout_uses_default_clients_http_implementation():
+    """OpenAI's httpx2 client must receive an httpx2 timeout, not httpx.Timeout."""
+
+    compatible_timeout = MagicMock()
+    timeout_type = MagicMock(return_value=compatible_timeout)
+    http_module = SimpleNamespace(Timeout=timeout_type)
+    compatible_client_base = type("Client", (), {})
+    compatible_client_base.__module__ = "httpx2._client"
+    default_client = type("DefaultClient", (compatible_client_base,), {})
+
+    with patch.object(openai_llm_module.importlib, "import_module", return_value=http_module):
+        result = openai_llm_module._build_compatible_http_timeout(
+            default_client,
+            connect=10.0,
+            read=60.0,
+            write=30.0,
+            pool=10.0,
+        )
+
+    assert result is compatible_timeout
+    timeout_type.assert_called_once_with(connect=10.0, read=60.0, write=30.0, pool=10.0)
 
 
 # ---------------------------------------------------------------------------
@@ -1718,10 +1753,11 @@ def test_call_api_returns_string_raises_value_error(openai_model_instance):
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.retry_config = _retry_model_config()
         # Mock the client to return a string instead of a stream
         openai_model_instance.client.chat.completions.create.return_value = "error: rate limit exceeded"
 
-        with pytest.raises(ValueError, match="LLM API returned error string: error: rate limit exceeded"):
+        with pytest.raises(openai_llm_module.ModelInvocationTerminalError, match="LLM API returned error string: error: rate limit exceeded"):
             openai_model_instance.__call__(messages)
 
 
@@ -1730,10 +1766,11 @@ def test_call_api_returns_dict_with_error_raises_value_error(openai_model_instan
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.retry_config = _retry_model_config()
         # Mock the client to return a dict error response
         openai_model_instance.client.chat.completions.create.return_value = {"error": "rate limit exceeded"}
 
-        with pytest.raises(ValueError, match="LLM API returned error: rate limit exceeded"):
+        with pytest.raises(openai_llm_module.ModelInvocationTerminalError, match="LLM API returned error: rate limit exceeded"):
             openai_model_instance.__call__(messages)
 
 
@@ -1742,10 +1779,11 @@ def test_call_api_returns_dict_with_message_raises_value_error(openai_model_inst
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.retry_config = _retry_model_config()
         # Mock the client to return a dict with 'message' field
         openai_model_instance.client.chat.completions.create.return_value = {"message": "invalid api key"}
 
-        with pytest.raises(ValueError, match="LLM API returned error: invalid api key"):
+        with pytest.raises(openai_llm_module.ModelInvocationTerminalError, match="LLM API returned error: invalid api key"):
             openai_model_instance.__call__(messages)
 
 
@@ -1754,10 +1792,11 @@ def test_call_api_returns_plain_dict_raises_value_error(openai_model_instance):
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.retry_config = _retry_model_config()
         # Mock the client to return a plain dict
         openai_model_instance.client.chat.completions.create.return_value = {"status": "fail"}
 
-        with pytest.raises(ValueError, match="LLM API returned error:"):
+        with pytest.raises(openai_llm_module.ModelInvocationTerminalError, match="LLM API returned error:"):
             openai_model_instance.__call__(messages)
 
 
@@ -2199,6 +2238,64 @@ def test_call_without_tracker_creates_tracker(openai_model_instance):
     mock_tracker.record_token.assert_called()
 
 
+def test_call_can_defer_successful_attempt_commit_for_core_agent(openai_model_instance):
+    """CoreAgent may validate a successful stream before committing it to clients."""
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = '<code>final_answer("ok")</code>'
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.choices[0].finish_reason = "stop"
+    mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    openai_model_instance.observer.reset_mock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        result = openai_model_instance(
+            messages=[{"role": "user", "content": "hello"}],
+            _token_tracker=MagicMock(),
+            _defer_attempt_commit=True,
+        )
+
+    openai_model_instance.observer.begin_model_attempt.assert_called_once()
+    openai_model_instance.observer.commit_model_attempt.assert_not_called()
+    openai_model_instance.observer.rollback_model_attempt.assert_not_called()
+    assert result.model_attempt_commit_deferred is True
+    assert isinstance(result.model_attempt_id, str)
+    assert result.model_attempt_number == 1
+
+
+def test_call_can_suppress_semantic_repair_stream(openai_model_instance):
+    """A semantic repair is observed internally without publishing raw tokens."""
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = '<code>final_answer("ok")</code>'
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = "internal repair reasoning"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.choices[0].finish_reason = "stop"
+    mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    openai_model_instance.observer.reset_mock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        result = openai_model_instance(
+            messages=[{"role": "user", "content": "repair"}],
+            _token_tracker=MagicMock(),
+            _defer_attempt_commit=True,
+            _suppress_attempt_stream=True,
+        )
+
+    openai_model_instance.observer.begin_model_attempt.assert_not_called()
+    openai_model_instance.observer.add_model_reasoning_content.assert_not_called()
+    openai_model_instance.observer.add_model_new_token.assert_not_called()
+    openai_model_instance.observer.flush_remaining_tokens.assert_not_called()
+    openai_model_instance.observer.commit_model_attempt.assert_not_called()
+    openai_model_instance.observer.rollback_model_attempt.assert_not_called()
+    assert result.model_attempt_commit_deferred is False
+
+
 def test_call_token_estimation_with_list_content(openai_model_instance):
     """Test __call__ method extracts text from list-formatted content when usage info is None (line 220)."""
 
@@ -2405,34 +2502,89 @@ def test_retry_exhausts_after_max_attempts(openai_model_instance):
     openai_model_instance.retry_config = _retry_model_config(max_attempts=max_attempts)
     openai_model_instance.client.chat.completions.create.side_effect = fake_create
 
-    with pytest.raises(_StatusErr) as exc_info:
+    with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
         openai_model_instance.__call__([{"role": "user", "content": "hello"}])
 
-    assert exc_info.value.status_code == 503
+    assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.SERVICE_UNAVAILABLE
+    assert exc_info.value.attempts == max_attempts
     assert calls["n"] == max_attempts
     assert openai_model_instance.last_retry_count == max_attempts - 1
 
 
-def test_non_retryable_fails_immediately(openai_model_instance):
-    """A 401 must NOT be retried; the call fails on the first attempt."""
+def test_cmsr_001_default_retry_budget_makes_exactly_five_physical_calls(
+    openai_model_instance,
+):
     calls = {"n": 0}
 
     def fake_create(stream=True, **kwargs):
         calls["n"] += 1
-        raise _StatusErr(401, "Unauthorized")
+        raise _StatusErr(503, "Service Unavailable")
+
+    openai_model_instance.retry_config = openai_llm_module.ModelRetryConfig(
+        backoff_base_seconds=0,
+        max_backoff_seconds=0,
+        jitter=False,
+    )
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
+        openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert calls["n"] == 5
+    assert exc_info.value.attempts == 5
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        (_StatusErr(401, "Unauthorized"), openai_llm_module.ModelErrorCode.AUTHENTICATION_ERROR),
+        (_StatusErr(400, "Bad request"), openai_llm_module.ModelErrorCode.INVALID_REQUEST),
+        (RuntimeError("unclassified provider bug"), openai_llm_module.ModelErrorCode.UNKNOWN_ERROR),
+    ],
+)
+def test_non_retryable_fails_immediately(openai_model_instance, failure, expected_code):
+    """Authentication, request and unknown failures must fail on the first call."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        raise failure
 
     openai_model_instance.retry_config = _retry_model_config()
     openai_model_instance.client.chat.completions.create.side_effect = fake_create
 
-    with pytest.raises(_StatusErr) as exc_info:
+    with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
         openai_model_instance.__call__([{"role": "user", "content": "hello"}])
 
-    assert exc_info.value.status_code == 401
+    assert exc_info.value.error_code is expected_code
     assert calls["n"] == 1
 
 
-def test_reasoning_only_stop_response_retries_once_then_propagates(openai_model_instance):
-    """A reasoning-only stop response gets one transparent retry."""
+def test_cmsr_002_retry_after_controls_retry_wait(openai_model_instance):
+    calls = {"n": 0}
+    rate_limit = _StatusErr(429, "Rate limit")
+    rate_limit.response = SimpleNamespace(headers={"Retry-After": "3.5"})
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise rate_limit
+        return [_make_content_chunk("ok")]
+
+    wait_event = MagicMock()
+    wait_event.is_set.return_value = False
+    openai_model_instance.stop_event = wait_event
+    openai_model_instance.retry_config = _retry_model_config(backoff_base=1.0)
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    result = openai_model_instance.__call__([{"role": "user", "content": "hello"}])
+
+    assert result is not None
+    wait_event.wait.assert_called_once_with(3.5)
+
+
+def test_reasoning_only_stop_response_exhausts_shared_attempt_budget(openai_model_instance):
+    """A reasoning-only stop response uses the configured shared attempt budget."""
     calls = {"n": 0}
 
     def fake_create(stream=True, **kwargs):
@@ -2446,10 +2598,11 @@ def test_reasoning_only_stop_response_retries_once_then_propagates(openai_model_
     openai_model_instance.retry_config = _retry_model_config()
     openai_model_instance.client.chat.completions.create.side_effect = fake_create
 
-    with pytest.raises(openai_llm_module.EmptyModelResponseError):
+    with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
         openai_model_instance.__call__([{"role": "user", "content": "hello"}])
 
-    assert calls["n"] == 2
+    assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
+    assert calls["n"] == openai_model_instance.retry_config.max_attempts
 
 
 def test_reasoning_only_stop_response_recovers_on_retry(openai_model_instance):
