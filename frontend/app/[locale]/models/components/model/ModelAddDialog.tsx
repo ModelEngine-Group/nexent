@@ -518,13 +518,11 @@ interface FetchedRow {
   model_type: ModelType;
 }
 
-/** Per-row capacity + inference-param overrides for batch add. */
+/** Per-row settings override — a single ModelAdvancedSettingsValue that
+ *  includes both capacity and inference params (the component renders them
+ *  all in override mode; no manual capacity grid needed). */
 interface RowOverride {
-  contextWindowTokens?: string;
-  maxInputTokens?: string;
-  maxOutputTokens?: string;
-  defaultOutputReserveTokens?: string;
-  inference?: ModelAdvancedSettingsValue;
+  settings?: ModelAdvancedSettingsValue;
 }
 
 function BatchAddForm({
@@ -661,20 +659,23 @@ function BatchAddForm({
             });
             const sug = s?.suggestions;
             if (sug) {
-              suggestions[row.id] = {
-                contextWindowTokens: sug.contextWindowTokens
-                  ? String(sug.contextWindowTokens)
-                  : "",
-                maxInputTokens: sug.maxInputTokens
-                  ? String(sug.maxInputTokens)
-                  : "",
-                maxOutputTokens: sug.maxOutputTokens
-                  ? String(sug.maxOutputTokens)
-                  : "",
-                defaultOutputReserveTokens: sug.defaultOutputReserveTokens
-                  ? String(sug.defaultOutputReserveTokens)
-                  : "",
-              };
+              // snake_case keys matching spec.key so ModelAdvancedSettings
+              // picks them up directly.
+              const val: ModelAdvancedSettingsValue = {};
+              if (sug.contextWindowTokens != null)
+                val.context_window_tokens = sug.contextWindowTokens;
+              if (sug.maxInputTokens != null)
+                val.max_input_tokens = sug.maxInputTokens;
+              if (sug.maxOutputTokens != null)
+                val.max_output_tokens = sug.maxOutputTokens;
+              if (sug.defaultOutputReserveTokens != null)
+                val.default_output_reserve_tokens =
+                  sug.defaultOutputReserveTokens;
+              if (sug.tokenizerFamily)
+                val.tokenizer_family = sug.tokenizerFamily;
+              if (Object.keys(val).length > 0) {
+                suggestions[row.id] = { settings: val };
+              }
             }
           } catch {
             // catalog miss — leave empty, user can fill manually
@@ -740,23 +741,8 @@ function BatchAddForm({
           maxTokens: row.model_type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
           modelFactory: provider,
         };
-        if (override) {
-          if (override.contextWindowTokens)
-            params.contextWindowTokens = Number(override.contextWindowTokens);
-          if (override.maxInputTokens)
-            params.maxInputTokens = Number(override.maxInputTokens);
-          if (override.maxOutputTokens)
-            params.maxOutputTokens = Number(override.maxOutputTokens);
-          if (override.defaultOutputReserveTokens)
-            params.defaultOutputReserveTokens = Number(
-              override.defaultOutputReserveTokens
-            );
-          if (override.inference) {
-            Object.assign(
-              params,
-              buildInferenceParamsPayload(override.inference)
-            );
-          }
+        if (override?.settings) {
+          Object.assign(params, buildInferenceParamsPayload(override.settings));
         }
         await createModel(tenantId, params);
         created++;
@@ -1089,34 +1075,22 @@ function RowSettingsDialog({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [capacity, setCapacity] = useState({
-    contextWindowTokens: override?.contextWindowTokens ?? "",
-    maxInputTokens: override?.maxInputTokens ?? "",
-    maxOutputTokens: override?.maxOutputTokens ?? "",
-    defaultOutputReserveTokens: override?.defaultOutputReserveTokens ?? "",
-  });
-  const [inference, setInference] = useState<ModelAdvancedSettingsValue>(
-    override?.inference ?? {}
+  // One flat value drives the whole form — ModelAdvancedSettings in override
+  // mode renders both capacity and inference fields, no manual grid needed.
+  const [settings, setSettings] = useState<ModelAdvancedSettingsValue>(
+    override?.settings ?? {}
   );
 
   if (!row) return null;
 
-  const capacityFields: { key: keyof typeof capacity; label: string }[] = [
-    { key: "contextWindowTokens", label: "上下文窗口" },
-    { key: "maxInputTokens", label: "最大输入Token数" },
-    { key: "maxOutputTokens", label: "最大输出Token数" },
-    { key: "defaultOutputReserveTokens", label: "输出预留Token数" },
-  ];
-
   function handleSave() {
     onSave({
-      ...capacity,
-      inference: Object.keys(inference).length > 0 ? inference : undefined,
+      settings: Object.keys(settings).length > 0 ? settings : undefined,
     });
   }
 
   return (
-    <Dialog open={!!row} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="flex max-h-[80vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader className="border-b px-6 py-4">
           <DialogTitle className="text-sm font-mono">
@@ -1129,37 +1103,13 @@ function RowSettingsDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-          {/* Capacity (same field set as the old per-row gear panel) */}
-          <div className="grid grid-cols-1 gap-x-4 gap-y-4 md:grid-cols-2">
-            {capacityFields.map((f) => (
-              <div key={f.key} className="space-y-1.5">
-                <Label className="text-sm">
-                  {t(`modelConfig.addDialog.${f.key}`, {
-                    defaultValue: f.label,
-                  })}
-                </Label>
-                <Input
-                  type="number"
-                  value={capacity[f.key]}
-                  onChange={(e) =>
-                    setCapacity((c) => ({ ...c, [f.key]: e.target.value }))
-                  }
-                  placeholder="留空使用默认"
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* Inference params (temperature / top_p / thinking / custom) */}
-          <div className="mt-5 border-t pt-5">
-            <ModelAdvancedSettings
-              modelType={row.model_type}
-              specs={specs}
-              value={inference}
-              onChange={(next) => setInference(next)}
-              mode="override"
-            />
-          </div>
+          <ModelAdvancedSettings
+            modelType={row.model_type}
+            specs={specs}
+            value={settings}
+            onChange={setSettings}
+            mode="override"
+          />
         </div>
         <div className="flex justify-end gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose}>
