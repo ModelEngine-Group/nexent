@@ -2141,6 +2141,7 @@
   "agentRepository.copy.type.tool": "Tool",
   "agentRepository.copy.reason.model_unavailable": "Model not activated or unavailable",
   "agentRepository.copy.reason.kb_not_found": "Knowledge base not activated",
+  "agentRepository.copy.reason.kb_duplicate": "Knowledge base name conflict",
   "agentRepository.copy.reason.mcp_not_found": "MCP service not activated",
   "agentRepository.copy.reason.skill_duplicate": "Skill name conflict",
   "agentRepository.copy.reason.tool_unavailable": "Tool unavailable",

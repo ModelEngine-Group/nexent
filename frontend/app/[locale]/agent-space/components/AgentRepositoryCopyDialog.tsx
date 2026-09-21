@@ -115,8 +115,8 @@ export function AgentRepositoryCopyDialog({
     () =>
       precheck?.items.filter(
         (item) =>
-          !item.available &&
-          !(item.type === "skill" && item.reason_code === "skill_duplicate")
+          !item.available ||
+          (item.type === "knowledge_base" && item.resolution_required)
       ) ?? [],
     [precheck]
   );
@@ -650,6 +650,17 @@ function RequirementTypeGroup({
   const abnormal = status === "abnormal";
   const typeLabel = getRepositoryRequirementTypeLabel(type, t);
   const activatePath = getRepositoryRequirementActivatePath(type);
+  const hasKnowledgeConflict =
+    type === "knowledge_base" &&
+    items.some((item) => item.resolution_required === true);
+  const reasonLabel =
+    getRepositoryRequirementReasonLabel(items[0]?.reason_code, t) ||
+    (hasKnowledgeConflict
+      ? t(
+          "agentRepository.copy.reason.kb_duplicate",
+          "Knowledge base name conflict"
+        )
+      : "");
 
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
@@ -667,7 +678,7 @@ function RequirementTypeGroup({
             >
               <span className="flex items-center gap-1 text-amber-600">
                 <AlertCircle className="size-3.5" />
-                {getRepositoryRequirementReasonLabel(items[0]?.reason_code, t) ||
+                {reasonLabel ||
                   t("agentRepository.copy.notActivated", { type: typeLabel })}
               </span>
               <span className="flex items-center gap-0.5 text-primary hover:underline">
