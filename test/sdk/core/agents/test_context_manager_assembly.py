@@ -7,7 +7,7 @@ from nexent.core.agents.context import (
     ContextManager,
     ContextManagerConfig,
 )
-from smolagents.memory import ActionStep, TaskStep
+from smolagents.memory import ActionStep, TaskStep, ToolCall
 from smolagents.monitoring import Timing
 
 
@@ -215,6 +215,50 @@ def test_current_run_keeps_only_task_as_user_message():
         "assistant",
     ]
     assert sum(message["role"] == "user" for message in final.messages) == 1
+
+
+def test_completed_skill_read_is_available_to_the_next_model_step():
+    """A successful skill read remains evidence; the model need not read it again."""
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(
+        memory=memory, fallback_system_prompt="policy"
+    )
+    memory.steps.extend(
+        [
+            TaskStep(task="use the matching skill"),
+            ActionStep(
+                step_number=1,
+                timing=Timing(start_time=0),
+                tool_calls=[
+                    ToolCall(
+                        name="python_interpreter",
+                        arguments='skill_content = read_skill_md("demo-skill")',
+                        id="call_1",
+                    )
+                ],
+                observations="Execution logs:\nSKILL_CONTENT_SENTINEL: follow the guide",
+                action_output="SKILL_CONTENT_SENTINEL: follow the guide",
+            ),
+        ]
+    )
+
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    action_history = next(
+        _message_text(message)
+        for message in final.messages
+        if '<completed_action_history read_only="true">' in _message_text(message)
+    )
+    assert "read_skill_md" in action_history
+    assert 'read_skill_md("demo-skill")' in action_history
+    assert "SKILL_CONTENT_SENTINEL: follow the guide" in action_history
+    assert "Do not copy this record's format as your next response." in action_history
 
 
 def test_context_manager_attributes_tool_schema_change():
