@@ -5174,5 +5174,14 @@
   "repository.tagFilter.clear": "清除标签筛选",
   "mcpTools.tagFilter.button": "标签筛选",
   "mcpTools.tagFilter.clear": "清除标签筛选",
-  "mcpTools.tagManagement": "标签管理"
+  "mcpTools.tagManagement": "标签管理",
+  "chat.clarification.title": "澄清需求",
+  "chat.clarification.description": "请补充当前智能体继续执行所需的信息。",
+  "chat.clarification.other": "其他",
+  "chat.clarification.submit": "提交并继续",
+  "chat.clarification.submitted": "已提交",
+  "chat.clarification.hint": "填写后提交，将作为同一会话的新消息继续。",
+  "chat.clarification.saving": "正在保存本轮问题，完成后即可提交。",
+  "chat.clarification.history": "历史问题只读，回答可在后续用户消息中查看。",
+  "chat.clarification.unavailable": "当前卡片暂不可提交，请等待本轮完成。"
 }
