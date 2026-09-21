@@ -392,6 +392,12 @@ async def run_chat(
             }
         }],
     ),
+    enable_hitl: bool = Body(
+        False,
+        embed=True,
+        description="Enable human interaction when supported by the runtime. Cards use type=human_interaction; "
+                    "submit answers through /nb/v1/chat/human-interactions/{run_id}/requests/{request_id}/decisions.",
+    ),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     try:
@@ -407,6 +413,7 @@ async def run_chat(
             tool_params=tool_params,
             model_id=model_id,
             idempotency_key=idempotency_key,
+            enable_hitl=enable_hitl,
         )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
@@ -611,9 +618,15 @@ async def generate_title(payload: GenerateTitleRequest, request: Request):
             conversation_id=payload.conversation_id,
             question=payload.question,
             language=get_user_language(request),
+            model_id=payload.model_id,
         )
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:

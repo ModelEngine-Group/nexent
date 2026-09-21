@@ -93,6 +93,7 @@ class TestConfigAppRouterConfiguration:
         class RecordingApp:
             def __init__(self, lifespan=None):
                 self.included_routers = []
+                self.get_routes = []
                 self.lifespan = lifespan
 
             def on_event(self, _event):
@@ -100,6 +101,13 @@ class TestConfigAppRouterConfiguration:
 
             def include_router(self, router):
                 self.included_routers.append(router)
+
+            def get(self, path, **kwargs):
+                def register(handler):
+                    self.get_routes.append((path, kwargs, handler))
+                    return handler
+
+                return register
 
         app_factory_module = types.ModuleType("apps.app_factory")
         app_factory_module.create_app = (
@@ -181,7 +189,47 @@ class TestConfigAppRouterConfiguration:
         const_module.AIDP_SERVER_URL = ""
         const_module.ENABLE_AIDP_KNOWLEDGE = False
         const_module.IS_SPEED_MODE = False
+        const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
         monkeypatch.setitem(sys.modules, "consts.const", const_module)
+        manager_state = types.SimpleNamespace(CREATED="created")
+
+        class ManagedTaskSpec:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        class ConfigThreadManager:
+            def __init__(self):
+                self.state = manager_state.CREATED
+
+            def start(self):
+                self.state = "running"
+
+            async def run(self, _lane, _spec, fn, *args, **kwargs):
+                return fn(*args, **kwargs)
+
+            async def shutdown(self, timeout):
+                self.state = "closed"
+
+            def snapshot(self):
+                return {"service_name": "config", "active_count": 0}
+
+        concurrency_module = types.ModuleType("nexent.core.concurrency")
+        concurrency_module.ManagedTaskSpec = ManagedTaskSpec
+        concurrency_module.ManagerState = manager_state
+        concurrency_module.set_default_thread_manager = MagicMock()
+        concurrency_module.clear_default_thread_manager = MagicMock()
+        monkeypatch.setitem(
+            sys.modules, "nexent.core.concurrency", concurrency_module
+        )
+        thread_lifecycle_module = types.ModuleType(
+            "services.thread_lifecycle_service"
+        )
+        thread_lifecycle_module.config_thread_manager = ConfigThreadManager()
+        monkeypatch.setitem(
+            sys.modules,
+            "services.thread_lifecycle_service",
+            thread_lifecycle_module,
+        )
         prompt_service_module = types.ModuleType("services.prompt_template_service")
         prompt_service_module.sync_system_default_prompt_template = MagicMock()
         monkeypatch.setitem(sys.modules, "services.prompt_template_service", prompt_service_module)
@@ -195,6 +243,13 @@ class TestConfigAppRouterConfiguration:
         assert {route.path for route in api_key_router.routes} == {
             "/api-keys",
             "/api-keys/refresh",
+        }
+        assert [route[0] for route in config_app.app.get_routes] == [
+            "/internal/thread-capacity"
+        ]
+        assert asyncio.run(config_app.thread_capacity()) == {
+            "service_name": "config",
+            "active_count": 0,
         }
 
         recover_config_tasks = MagicMock()
@@ -217,6 +272,7 @@ class TestConfigAppRouterConfiguration:
             "services.evaluation_maintenance"
         )
         evaluation_maintenance_module.start = start_evaluation_maintenance
+        evaluation_maintenance_module.stop = MagicMock()
         monkeypatch.setitem(
             sys.modules,
             "services.evaluation_maintenance",
@@ -251,7 +307,9 @@ class TestConfigAppRouterConfiguration:
 
         assert config_app.app.lifespan is config_app.config_lifespan
         recover_config_tasks.assert_called_once_with()
-        start_evaluation_maintenance.assert_called_once_with()
+        start_evaluation_maintenance.assert_called_once_with(
+            config_app.config_thread_manager
+        )
         schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
         sync_defaults.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()

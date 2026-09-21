@@ -170,6 +170,30 @@ async def test_perform_connectivity_check_embedding():
 
 
 @pytest.mark.asyncio
+async def test_perform_connectivity_check_embedding_ignores_custom_json():
+    custom = {
+        "dimensions": 512,
+        "metadata": {"tenant": "demo"},
+        "flags": [True, False],
+    }
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(return_value=[[1]])
+        mock_build.return_value = mock_adapter
+
+        result = await _perform_connectivity_check(
+            "text-embedding-ada-002",
+            "embedding",
+            "https://api.openai.com",
+            "test-key",
+            extra_params={"__custom__": custom},
+        )
+
+    assert result is True
+    assert "extra_params" not in mock_build.call_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding():
     # Setup
     with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
@@ -219,7 +243,8 @@ async def test_perform_connectivity_check_llm():
         assert result is True
         mock_build.assert_called_once_with(
             {"base_url": "https://api.openai.com", "api_key": "test-key",
-             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None,
+             "temperature": None, "top_p": None, "extra_params": None},
             "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
@@ -411,7 +436,7 @@ async def test_perform_connectivity_check_rerank():
         # Assert
         assert result is True
         mock_build.assert_called_once_with(
-            {"base_url": "https://api.example.com", "api_key": "test-key",
+            {"base_url": "https://api.example.com/rerank", "api_key": "test-key",
              "ssl_verify": True},
             "rerank", "rerank", None, model_name="rerank-model",
         )
@@ -443,7 +468,8 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
         # Ensure api_base has been normalized when calling the adapter builder
         mock_build.assert_called_once_with(
             {"base_url": "http://host.docker.internal:8080", "api_key": "test-key",
-             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None,
+             "temperature": None, "top_p": None, "extra_params": None},
             "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
@@ -477,7 +503,8 @@ async def test_perform_connectivity_check_base_url_normalization_127001():
         # Ensure api_base has been normalized when calling the adapter builder
         mock_build.assert_called_once_with(
             {"base_url": "http://host.docker.internal:8000", "api_key": "test-key",
-             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None,
+             "temperature": None, "top_p": None, "extra_params": None},
             "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
@@ -693,6 +720,7 @@ async def test_verify_model_config_connectivity_success():
         mock_connectivity_check.assert_called_once_with(
             "gpt-4", "llm", "https://api.openai.com", "test-key", True,
             "openai", None, None, None, None,
+            temperature=None, top_p=None, extra_params=None,
         )
 
 
@@ -1336,10 +1364,12 @@ async def test_verify_model_config_connectivity_ssl_verify_fallback():
         mock_connectivity.assert_any_call(
             "gpt-4", "llm", "https://api.openai.com", "test-key", True,
             "openai", None, None, None, None,
+            temperature=None, top_p=None, extra_params=None,
         )
         mock_connectivity.assert_any_call(
             "gpt-4", "llm", "https://api.openai.com", "test-key", False,
             "openai", None, None, None, None,
+            temperature=None, top_p=None, extra_params=None,
         )
 
 

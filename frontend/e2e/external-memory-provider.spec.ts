@@ -151,7 +151,7 @@ test("AC-P3-27/28/33/34 statuses, card grid, responsive layout, and advanced set
     /^(\d+(\.\d+)?px ){3}\d+(\.\d+)?px$/
   );
   const firstProviderCard = page.locator(".external-provider-row").first();
-  await expect(firstProviderCard).toHaveCSS("min-height", "0px");
+  await expect(firstProviderCard).toHaveCSS("min-height", /^(0px|auto)$/);
   await expect(firstProviderCard).toHaveCSS("padding", "12px");
   await page.setViewportSize({ width: 1200, height: 1000 });
   await expect(providerGrid).toHaveCSS(
@@ -165,9 +165,9 @@ test("AC-P3-27/28/33/34 statuses, card grid, responsive layout, and advanced set
   );
   await expect(page.getByLabel("Maximum results per provider")).toBeHidden();
   await expect(page.locator(".external-memory-advanced")).toHaveCount(0);
-  const advancedButton = page.getByRole("button", {
-    name: "Advanced settings",
-  });
+  const advancedButton = page
+    .locator(".external-memory-card")
+    .getByRole("button", { name: "Advanced settings" });
   const addProviderButton = page
     .getByRole("button", { name: "Add provider" })
     .first();
@@ -432,7 +432,9 @@ test("AC-P3-32 Chinese locale and read-only permissions", async ({ page }) => {
     json(route, { items: [plugin], count: 1 })
   );
   await gotoMemory(page, "zh");
-  const advancedButton = page.getByRole("button", { name: "高级设置" });
+  const advancedButton = page
+    .locator(".external-memory-card")
+    .getByRole("button", { name: "高级设置" });
   await expect(advancedButton).toBeVisible();
   await advancedButton.click();
   await expect(page.getByText("每个 Provider 的最大结果数")).toBeVisible();

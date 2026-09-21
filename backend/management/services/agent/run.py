@@ -8,11 +8,23 @@ from typing import Any, Optional, Dict
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.run_agent import DeferredAgentRun, agent_run
+from nexent.core.concurrency import (
+    ManagedExecution,
+    ManagedTaskSpec,
+    RunCancellationScope,
+    ThreadCapacityExceeded,
+    ThreadQueueTimedOut,
+    run_blocking,
+)
 from nexent.memory.models import MemoryIngestUnit
 from nexent.core.models import OpenAIModel
 
-from agents.agent_run_manager import AgentRunAlreadyActiveError, agent_run_manager
+from agents.agent_run_manager import (
+    AgentRunAlreadyActiveError,
+    AgentRunConcurrencyExceededError,
+    agent_run_manager,
+)
 from agents.create_agent_info import create_agent_run_info
 from agents.preprocess_manager import preprocess_manager
 from consts.const import (
@@ -21,6 +33,7 @@ from consts.const import (
     LANGUAGE,
     MESSAGE_ROLE,
     MODEL_CONFIG_MAPPING,
+    RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
     RUNTIME_CANCEL_POLL_INTERVAL_SECONDS,
     STREAM_STATUS_EVENT,
 )
@@ -31,6 +44,8 @@ from consts.exceptions import (
     MemoryPreparationException,
     RuntimeMetadataValidationError,
     RuntimeMetadataVersionConflict,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from nexent.core.utils.observer import ProcessType
@@ -39,9 +54,7 @@ from consts.model import (
     MessageRequest,
     ConversationKnowledgeScopeRequest,
 )
-from database.agent_db import (
-    search_agent_info_by_agent_id
-)
+from database.agent_db import search_agent_info_by_agent_id
 from database.conversation_db import (
     get_units_by_message,
     resolve_conversation_runtime_metadata,
@@ -74,6 +87,7 @@ from services.conversation_management_service import (
 )
 from services.memory_config_service import build_memory_context
 from services.memory_backend_adapter import _build_ingestion_event_service
+from services.thread_lifecycle_service import runtime_thread_manager
 from services.knowledge_scope_service import (
     build_runtime_knowledge_policy,
     build_runtime_knowledge_resources,
@@ -87,7 +101,10 @@ from utils.auth_utils import get_current_user_info, get_user_language
 from utils.agent_stream_utils import (
     enrich_file_uploads_with_presigned_urls as _enrich_file_uploads_with_presigned_urls,
     extract_json_objects_from_text as _extract_json_objects_from_text,
+    finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments,
+    is_stream_unit_continuation as _is_continuation,
     process_skill_file_uploads as _process_skill_file_uploads,
+    rollback_model_attempt_units as _rollback_model_attempt_units,
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
     serialize_stream_unit_content as _serialize_stream_unit_content,
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
@@ -115,17 +132,65 @@ _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
 _fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
 
-def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int:
-    """Join mergeable unit fragments once and return finalized UTF-8 bytes."""
-    finalized_bytes = 0
-    for unit in message_units:
-        fragments = unit.pop("_content_fragments", None)
-        if fragments is not None:
-            content = "".join(fragments)
-            unit["content"] = content
-            unit["unit_content"] = content
-        finalized_bytes += len(str(unit.get("unit_content", "")).encode("utf-8"))
-    return finalized_bytes
+def _unregister_agent_run_after_execution(
+    conversation_id: int | str,
+    user_id: str,
+    status: str,
+    agent_run_info=None,
+) -> bool:
+    """Keep the conversation reserved until its worker Future really finishes."""
+    future = getattr(agent_run_info, "thread_future", None)
+    if future is not None and not future.done():
+        future.add_done_callback(
+            lambda _future: agent_run_manager.unregister_agent_run(
+                conversation_id,
+                user_id,
+                status=status,
+                agent_run_info=agent_run_info,
+            )
+        )
+        logger.info(
+            "Deferred agent run unregister until worker exit conversation=%s "
+            "execution_id=%s",
+            conversation_id,
+            getattr(agent_run_info, "thread_execution_id", ""),
+        )
+        return False
+    return agent_run_manager.unregister_agent_run(
+        conversation_id,
+        user_id,
+        status=status,
+        agent_run_info=agent_run_info,
+    )
+
+
+async def shutdown_agent_stream_tasks(timeout: float) -> tuple[str, ...]:
+    """Cancel request-owned async tasks before the Runtime thread manager drains."""
+    task_groups = (
+        _agent_stream_producer_tasks,
+        _external_memory_ingest_tasks,
+        _fa_extraction_tasks,
+        _channel_cleanup_tasks,
+    )
+    tasks = tuple(
+        task
+        for task_group in task_groups
+        for task in tuple(task_group)
+        if not task.done()
+    )
+    if not tasks:
+        return ()
+
+    for task in tasks:
+        task.cancel()
+    done, pending = await asyncio.wait(tasks, timeout=max(0, timeout))
+    logger.info(
+        "Agent stream task shutdown requested=%s completed=%s pending=%s",
+        len(tasks),
+        len(done),
+        len(pending),
+    )
+    return tuple(task.get_name() for task in pending)
 
 
 async def _cleanup_channel_later(
@@ -163,6 +228,13 @@ async def _consume_agent_stream_producer(
             async for _ in stream_gen:
                 pass
     except asyncio.CancelledError:
+        try:
+            await stream_gen.aclose()
+        except (AttributeError, RuntimeError):
+            logger.debug(
+                "Agent stream generator was already closing conversation=%s",
+                conversation_id,
+            )
         raise
     except Exception as stream_exc:
         producer_error = True
@@ -189,10 +261,14 @@ async def _consume_agent_stream_producer(
                     conversation_id,
                 )
             try:
-                agent_run_manager.unregister_agent_run(
+                run_info = agent_run_manager.get_agent_run_info(
+                    conversation_id, user_id
+                )
+                _unregister_agent_run_after_execution(
                     conversation_id,
                     user_id,
                     status="failed",
+                    agent_run_info=run_info,
                 )
             except Exception:
                 logger.exception(
@@ -231,11 +307,17 @@ async def _consume_agent_stream_producer(
         )
 
 
-async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_event) -> None:
+async def _poll_runtime_cancel_signal(
+    conversation_id: int, user_id: str, stop_event, cancellation_scope=None
+) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
-        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
+        if await runtime_state_service.is_cancelled_async(
+            user_id=user_id, conversation_id=conversation_id
+        ):
             stop_event.set()
+            if cancellation_scope is not None:
+                cancellation_scope.cancel()
             logger.info(
                 "Runtime cancel signal received, user_id=%s, conversation_id=%s",
                 user_id,
@@ -245,10 +327,14 @@ async def _poll_runtime_cancel_signal(conversation_id: int, user_id: str, stop_e
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
-async def _cancel_task_on_runtime_signal(conversation_id: int, user_id: str, task: asyncio.Task) -> None:
+async def _cancel_task_on_runtime_signal(
+    conversation_id: int, user_id: str, task: asyncio.Task
+) -> None:
     """Cancel a local asyncio task when another Pod writes the runtime cancel signal."""
     while not task.done():
-        if await runtime_state_service.is_cancelled_async(user_id=user_id, conversation_id=conversation_id):
+        if await runtime_state_service.is_cancelled_async(
+            user_id=user_id, conversation_id=conversation_id
+        ):
             task.cancel()
             logger.info(
                 "Runtime cancel signal cancelled task, user_id=%s, conversation_id=%s",
@@ -284,6 +370,8 @@ async def _stream_agent_chunks(
     resume_from_unit_index: int = 0,
     resume_message_id: Optional[int] = None,
     channel: Optional[Any] = None,
+    execution: Optional[ManagedExecution] = None,
+    deferred_run: Optional[DeferredAgentRun] = None,
 ):
     """
     Yield SSE chunks from agent_run while buffering assistant persistence.
@@ -323,7 +411,8 @@ async def _stream_agent_chunks(
     streaming_message_id: Optional[int] = resume_message_id
     if not is_resume_mode and not agent_request.is_debug:
         user_role_count = sum(
-            1 for item in (getattr(agent_request, "history", None) or ())
+            1
+            for item in (getattr(agent_request, "history", None) or ())
             if item.role == MESSAGE_ROLE["USER"]
         )
         assistant_message_req = MessageRequest(
@@ -342,7 +431,8 @@ async def _stream_agent_chunks(
             )
         except Exception as msg_exc:
             logger.error(
-                "Failed to create streaming message row: %r", msg_exc, exc_info=True)
+                "Failed to create streaming message row: %r", msg_exc, exc_info=True
+            )
 
     # Tracks the unit currently being accumulated in memory. Assistant output
     # is written to PostgreSQL only once, after the stream reaches a terminal
@@ -357,22 +447,26 @@ async def _stream_agent_chunks(
     # Get or create streaming channel for multi-subscriber support
     if channel is None:
         channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id,
-            user_id=user_id
+            conversation_id=agent_request.conversation_id, user_id=user_id
         )
 
+    if agent_run_info.cancellation_scope is None:
+        agent_run_info.cancellation_scope = RunCancellationScope(agent_run_info.stop_event)
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
             conversation_id=agent_request.conversation_id,
             user_id=user_id,
             stop_event=agent_run_info.stop_event,
+            cancellation_scope=agent_run_info.cancellation_scope,
         )
     )
 
     # In resume mode, emit a status event first
     if is_resume_mode:
         await channel.publish(STREAM_STATUS_EVENT)
-        await channel.publish(f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n')
+        await channel.publish(
+            f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
+        )
         yield STREAM_STATUS_EVENT
         yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
@@ -383,7 +477,19 @@ async def _stream_agent_chunks(
             (),
         ):
             yield json.dumps(event, ensure_ascii=False)
-        async for agent_chunk in agent_run(agent_run_info):
+        source = agent_run(
+            agent_run_info,
+            thread_manager=runtime_thread_manager,
+            execution=execution,
+            deferred_run=deferred_run,
+        )
+        interaction = getattr(agent_run_info, "human_interaction", None)
+        port = getattr(interaction, "port", None)
+        if callable(getattr(port, "visible_guidance", None)):
+            from services.human_interaction.stream import stream_with_guidance
+
+            source = stream_with_guidance(source, port)
+        async for agent_chunk in source:
             yield agent_chunk
 
     try:
@@ -395,13 +501,11 @@ async def _stream_agent_chunks(
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
 
-                # Add unit_index to the chunk data for frontend resume skip logic.
-                # This allows frontend to accurately skip chunks that were already persisted.
-                # For mergeable types (continuing chunks), use the current unit's index.
-                # For new units, use the next_unit_index that will be assigned.
+                # Use the current unit index for continuations and the next index
+                # for new units so the frontend can skip persisted resume chunks.
                 if streaming_message_id is not None and chunk_type:
                     mergeable = chunk_type in _MERGEABLE_TYPES
-                    if current_unit is not None and mergeable and current_unit.get("type") == chunk_type:
+                    if _is_continuation(current_unit, mergeable, chunk_type, data):
                         # Continuing chunk - use current unit's index
                         data["unit_index"] = current_unit["unit_index"]
                     elif chunk_type not in ("search_content_placeholder",):
@@ -411,9 +515,21 @@ async def _stream_agent_chunks(
                     # from the observer's actual invocation context.
                     # Re-serialize the chunk with unit_index for accurate frontend skip
                     chunk = json.dumps(data)
-                    logger.debug(f"[resume-debug] Added unit_index to chunk: type={chunk_type}, unit_index={data.get('unit_index')}")
+                    logger.debug(
+                        f"[resume-debug] Added unit_index to chunk: type={chunk_type}, unit_index={data.get('unit_index')}"
+                    )
             except Exception:
                 # Malformed chunk: emit as-is and skip persistence bookkeeping.
+                await channel.publish(f"data: {chunk}\n\n")
+                yield f"data: {chunk}\n\n"
+                continue
+
+            if chunk_type == "model_attempt_control":
+                phase = data.get("phase")
+                attempt_id = data.get("attempt_id")
+                current_unit = None
+                if phase == "rollback" and isinstance(attempt_id, str):
+                    _rollback_model_attempt_units(buffered_units, attempt_id)
                 await channel.publish(f"data: {chunk}\n\n")
                 yield f"data: {chunk}\n\n"
                 continue
@@ -484,9 +600,13 @@ async def _stream_agent_chunks(
                     if isinstance(item, dict) and item.get("type") == "text":
                         text_value = item.get("text")
                         if text_value:
-                            extracted_payloads = _extract_json_objects_from_text(text_value)
+                            extracted_payloads = _extract_json_objects_from_text(
+                                text_value
+                            )
                             for payload in extracted_payloads:
-                                absolute_path = str(payload.get("absolute_path") or "").strip()
+                                absolute_path = str(
+                                    payload.get("absolute_path") or ""
+                                ).strip()
                                 if not absolute_path:
                                     continue
                                 if absolute_path in captured_skill_files:
@@ -507,10 +627,8 @@ async def _stream_agent_chunks(
             # stream reaches a terminal state.
             if streaming_message_id is not None and chunk_type:
                 mergeable = chunk_type in _MERGEABLE_TYPES
-                is_continuation = (
-                    current_unit is not None
-                    and mergeable
-                    and current_unit.get("type") == chunk_type
+                is_continuation = _is_continuation(
+                    current_unit, mergeable, chunk_type, data
                 )
 
                 if is_continuation:
@@ -522,65 +640,94 @@ async def _stream_agent_chunks(
                     if chunk_type == "picture_web":
                         try:
                             content_json = json.loads(chunk_content)
-                            if isinstance(content_json, dict) and "images_url" in content_json:
+                            if (
+                                isinstance(content_json, dict)
+                                and "images_url" in content_json
+                            ):
                                 for image_url in content_json["images_url"]:
-                                    if image_url and image_url not in buffered_image_url_set:
+                                    if (
+                                        image_url
+                                        and image_url not in buffered_image_url_set
+                                    ):
                                         buffered_image_url_set.add(image_url)
                                         buffered_image_urls.append(image_url)
                         except Exception as img_exc:
                             logger.error(
-                                "Failed to buffer picture_web sources: %r", img_exc, exc_info=True
+                                "Failed to buffer picture_web sources: %r",
+                                img_exc,
+                                exc_info=True,
                             )
 
                     if chunk_type == "search_content":
                         placeholder_index = next_unit_index
-                        buffered_units.append({
-                            "type": "search_content_placeholder",
-                            "content": '{"placeholder": true}',
-                            "unit_index": placeholder_index,
-                            "unit_type": "search_content_placeholder",
-                            "unit_content": '{"placeholder": true}',
-                            "tool_call_id": data.get("tool_call_id"),
-                            "invocation_id": data.get("invocation_id"),
-                            "mergeable": False,
-                        })
+                        buffered_units.append(
+                            {
+                                "type": "search_content_placeholder",
+                                "content": '{"placeholder": true}',
+                                "unit_index": placeholder_index,
+                                "unit_type": "search_content_placeholder",
+                                "unit_content": '{"placeholder": true}',
+                                "tool_call_id": data.get("tool_call_id"),
+                                "invocation_id": data.get("invocation_id"),
+                                "mergeable": False,
+                            }
+                        )
                         try:
                             search_results = json.loads(chunk_content)
                             if not isinstance(search_results, list):
                                 search_results = [search_results]
                             for result in search_results:
-                                buffered_search_records.append({
-                                    "unit_index": placeholder_index,
-                                    "source_type": result.get("source_type", ""),
-                                    "source_title": result.get("title", ""),
-                                    "source_location": result.get("url", ""),
-                                    "source_content": result.get("text", ""),
-                                    "score_overall": float(result.get("score"))
-                                    if result.get("score") not in (None, "")
-                                    else None,
-                                    "score_accuracy": float(result.get("score_details", {}).get("accuracy"))
-                                    if result.get("score_details", {}).get("accuracy") not in (None, "")
-                                    else None,
-                                    "score_semantic": float(result.get("score_details", {}).get("semantic"))
-                                    if result.get("score_details", {}).get("semantic") not in (None, "")
-                                    else None,
-                                    "retrieval_highlight_terms": result.get(
-                                        "score_details", {}
-                                    ).get("retrieval_highlight_terms", []),
-                                    "published_date": result.get("published_date")
-                                    if result.get("published_date") not in (None, "")
-                                    else None,
-                                    "cite_index": result.get("cite_index")
-                                    if result.get("cite_index") != ""
-                                    else None,
-                                    "search_type": result.get("search_type")
-                                    if result.get("search_type")
-                                    else None,
-                                    "tool_sign": result.get("tool_sign", ""),
-                                })
+                                buffered_search_records.append(
+                                    {
+                                        "unit_index": placeholder_index,
+                                        "source_type": result.get("source_type", ""),
+                                        "source_title": result.get("title", ""),
+                                        "source_location": result.get("url", ""),
+                                        "source_content": result.get("text", ""),
+                                        "score_overall": float(result.get("score"))
+                                        if result.get("score") not in (None, "")
+                                        else None,
+                                        "score_accuracy": float(
+                                            result.get("score_details", {}).get(
+                                                "accuracy"
+                                            )
+                                        )
+                                        if result.get("score_details", {}).get(
+                                            "accuracy"
+                                        )
+                                        not in (None, "")
+                                        else None,
+                                        "score_semantic": float(
+                                            result.get("score_details", {}).get(
+                                                "semantic"
+                                            )
+                                        )
+                                        if result.get("score_details", {}).get(
+                                            "semantic"
+                                        )
+                                        not in (None, "")
+                                        else None,
+                                        "retrieval_highlight_terms": result.get(
+                                            "score_details", {}
+                                        ).get("retrieval_highlight_terms", []),
+                                        "published_date": result.get("published_date")
+                                        if result.get("published_date")
+                                        not in (None, "")
+                                        else None,
+                                        "cite_index": result.get("cite_index")
+                                        if result.get("cite_index") != ""
+                                        else None,
+                                        "search_type": result.get("search_type")
+                                        if result.get("search_type")
+                                        else None,
+                                        "tool_sign": result.get("tool_sign", ""),
+                                    }
+                                )
                         except Exception as src_exc:
                             logger.error(
-                                "Failed to buffer search_content sources: %r", src_exc, exc_info=True
+                                "Failed to buffer search_content sources: %r",
+                                src_exc,
+                                exc_info=True,
                             )
                         current_unit = None
                         next_unit_index += 1
@@ -608,6 +755,7 @@ async def _stream_agent_chunks(
                             "unit_content": persisted_content,
                             "tool_call_id": data.get("tool_call_id"),
                             "invocation_id": data.get("invocation_id"),
+                            "_attempt_id": data.get("attempt_id"),
                             "mergeable": mergeable,
                         }
                         if mergeable:
@@ -618,11 +766,20 @@ async def _stream_agent_chunks(
                         if chunk_type == "automation_proposal":
                             try:
                                 proposal_payload = json.loads(persisted_content)
-                                buffered_automation_proposals.append({
-                                    "unit_index": next_unit_index,
-                                    "proposal_id": int(proposal_payload["proposal_id"]),
-                                })
-                            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                                buffered_automation_proposals.append(
+                                    {
+                                        "unit_index": next_unit_index,
+                                        "proposal_id": int(
+                                            proposal_payload["proposal_id"]
+                                        ),
+                                    }
+                                )
+                            except (
+                                KeyError,
+                                TypeError,
+                                ValueError,
+                                json.JSONDecodeError,
+                            ):
                                 logger.warning(
                                     "Invalid persisted automation proposal event payload"
                                 )
@@ -639,8 +796,29 @@ async def _stream_agent_chunks(
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
 
-        was_stopped = getattr(agent_run_info, "stop_event", None) and agent_run_info.stop_event.is_set()
-        terminal_status = 'stopped' if was_stopped else 'completed' if stream_completed_normally else 'failed'
+        was_stopped = (
+            getattr(agent_run_info, "stop_event", None)
+            and agent_run_info.stop_event.is_set()
+        )
+        terminal_status = (
+            "stopped"
+            if was_stopped
+            else "completed"
+            if stream_completed_normally
+            else "failed"
+        )
+        outcome = getattr(agent_run_info, "attempt_outcome", None)
+        if (
+            getattr(agent_run_info, "human_interaction", None) is not None
+            and isinstance(outcome, str)
+        ):
+            terminal_status = outcome if stream_completed_normally else "recovery_required"
+            agent_run_info.attempt_outcome = terminal_status
+        elif outcome in {"failed", "stopped"}:
+            # A typed terminal model error is delivered as a normal observer
+            # ``error`` chunk, so the async iterator can finish normally while
+            # the worker outcome still authoritatively marks the run failed.
+            terminal_status = outcome
 
         try:
             skill_file_payloads = list(captured_skill_files.values())
@@ -650,14 +828,20 @@ async def _stream_agent_chunks(
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
-                skill_file_uploads = await asyncio.to_thread(
+                skill_file_uploads = await runtime_thread_manager.run(
+                    "control-io",
+                    ManagedTaskSpec(
+                        task_name="enrich-skill-file-urls",
+                        owner="management.services.agent.run",
+                    ),
                     _enrich_file_uploads_with_presigned_urls,
                     skill_file_uploads,
                 )
                 logger.info(
                     "[skill-file] upload finished conversation=%s result_count=%s results=%s",
                     agent_request.conversation_id,
-                    len(skill_file_uploads), skill_file_uploads
+                    len(skill_file_uploads),
+                    skill_file_uploads,
                 )
                 if skill_file_uploads:
                     files_payload = json.dumps(
@@ -685,7 +869,12 @@ async def _stream_agent_chunks(
             logger.exception("Failed to process skill file uploads")
 
         if workspace_file_uploads:
-            uploaded_files = await asyncio.to_thread(
+            uploaded_files = await runtime_thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(
+                    task_name="enrich-workspace-file-urls",
+                    owner="management.services.agent.run",
+                ),
                 _enrich_file_uploads_with_presigned_urls,
                 list(workspace_file_uploads.values()),
             )
@@ -720,7 +909,12 @@ async def _stream_agent_chunks(
                     len(buffered_units),
                     persistence_bytes,
                 )
-                await asyncio.to_thread(
+                await runtime_thread_manager.run(
+                    "control-io",
+                    ManagedTaskSpec(
+                        task_name="persist-assistant-run-batch",
+                        owner="management.services.agent.run",
+                    ),
                     persist_assistant_run_batch,
                     message_id=streaming_message_id,
                     conversation_id=agent_request.conversation_id,
@@ -737,13 +931,20 @@ async def _stream_agent_chunks(
             except Exception:
                 persistence_failed = True
                 terminal_status = "failed"
+                if getattr(agent_run_info, "human_interaction", None) is not None:
+                    agent_run_info.attempt_outcome = "recovery_required"
                 logger.exception(
                     "Failed to persist assistant stream batch conversation=%s message=%s",
                     agent_request.conversation_id,
                     streaming_message_id,
                 )
                 try:
-                    await asyncio.to_thread(
+                    await runtime_thread_manager.run(
+                        "control-io",
+                        ManagedTaskSpec(
+                            task_name="mark-assistant-message-failed",
+                            owner="management.services.agent.run",
+                        ),
                         update_message_status,
                         streaming_message_id,
                         "failed",
@@ -762,7 +963,7 @@ async def _stream_agent_chunks(
             except RuntimeError:
                 pass
 
-        agent_run_manager.unregister_agent_run(
+        _unregister_agent_run_after_execution(
             _agent_run_identifier(agent_request),
             user_id,
             status=terminal_status,
@@ -773,7 +974,7 @@ async def _stream_agent_chunks(
             await streaming_channel_manager.complete_channel(
                 conversation_id=agent_request.conversation_id,
                 user_id=user_id,
-                status=terminal_status
+                status=terminal_status,
             )
             cleanup_task = asyncio.create_task(
                 _cleanup_channel_later(
@@ -795,8 +996,11 @@ async def _stream_agent_chunks(
             terminal_status == "completed"
             and streaming_message_id is not None
             and memory_ctx is not None
-            and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
+            and getattr(
+                getattr(memory_ctx, "user_config", None), "memory_switch", False
+            )
         ):
+
             async def _per_turn_supplement() -> None:
                 try:
                     units = get_units_by_message(streaming_message_id)
@@ -832,15 +1036,20 @@ async def _stream_agent_chunks(
         if (
             final_answer_content
             and memory_ctx is not None
-            and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
+            and getattr(
+                getattr(memory_ctx, "user_config", None), "memory_switch", False
+            )
         ):
+
             async def _run_fa_extraction() -> None:
                 try:
                     config = tenant_config_manager.get_model_config(
                         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
                     )
                     if not config:
-                        logger.warning("fa_memory_extraction: no tenant LLM configured, skipping")
+                        logger.warning(
+                            "fa_memory_extraction: no tenant LLM configured, skipping"
+                        )
                         return
 
                     model = OpenAIModel(
@@ -860,7 +1069,15 @@ async def _stream_agent_chunks(
                             self._model = sync_model
 
                         async def chat(self, messages):
-                            result = await asyncio.to_thread(self._model.generate, messages)
+                            result = await runtime_thread_manager.run(
+                                "model-tool-io",
+                                ManagedTaskSpec(
+                                    task_name="memory-extractor-model-generate",
+                                    owner="management.services.agent.run",
+                                ),
+                                self._model.generate,
+                                messages,
+                            )
                             content = getattr(result, "content", result)
                             return content if isinstance(content, str) else str(content)
 
@@ -868,7 +1085,9 @@ async def _stream_agent_chunks(
                         tenant_id=tenant_id,
                         user_id=user_id,
                         agent_id=str(getattr(agent_request, "agent_id", "")),
-                        conversation_id=str(getattr(agent_request, "conversation_id", "")),
+                        conversation_id=str(
+                            getattr(agent_request, "conversation_id", "")
+                        ),
                         memory_service=build_memory_service_for_fa_extraction(),
                         model_client=_ModelAdapter(model),
                     )
@@ -913,7 +1132,8 @@ async def prepare_agent_run(
     """
 
     memory_context = build_memory_context(
-        user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
+        user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search
+    )
 
     create_run_kwargs = {
         "agent_id": agent_request.agent_id,
@@ -933,7 +1153,9 @@ async def prepare_agent_run(
         "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
     }
-    runtime_knowledge_context = getattr(agent_request, "_runtime_knowledge_context", None)
+    runtime_knowledge_context = getattr(
+        agent_request, "_runtime_knowledge_context", None
+    )
     if isinstance(runtime_knowledge_context, dict):
         create_run_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
     if not agent_request.enable_automation_tool:
@@ -955,9 +1177,13 @@ async def prepare_agent_run(
         current_message_id = get_current_run_user_message_id(
             agent_request.conversation_id, user_id
         )
-        if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
+        if not isinstance(current_message_id, int) or isinstance(
+            current_message_id, bool
+        ):
             current_message_id = None
-            logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
+            logger.warning(
+                "Current user message boundary is unavailable; historical checkpoint loading skipped"
+            )
         if current_message_id is not None:
             historical_context = load_historical_context(
                 agent_request.conversation_id, current_message_id, user_id, tenant_id
@@ -971,13 +1197,16 @@ async def prepare_agent_run(
     # ContextManager is created exactly once by the SDK Agent creation entry.
     # The application boundary only injects the persistence callback into its
     # configuration before the worker thread starts.
-    cm_config = getattr(agent_run_info.agent_config,
-                        'context_manager_config', None)
+    cm_config = getattr(agent_run_info.agent_config, "context_manager_config", None)
     if cm_config:
         cm_config.history_summary_sink = (
-            (lambda candidate: persist_history_summary_candidate(
-                agent_request.conversation_id, candidate, user_id, tenant_id
-            )) if historical_context is not None else None
+            (
+                lambda candidate: persist_history_summary_candidate(
+                    agent_request.conversation_id, candidate, user_id, tenant_id
+                )
+            )
+            if historical_context is not None
+            else None
         )
     register_kwargs = {}
     if reservation_token is not None:
@@ -994,7 +1223,9 @@ async def prepare_agent_run(
 # Helper function for run_agent_stream, used to save the user-side message
 # before streaming begins. Assistant output is buffered by _stream_agent_chunks
 # and finalized through persist_assistant_run_batch.
-def save_messages(agent_request, target: str, user_id: str, tenant_id: str, messages=None):
+def save_messages(
+    agent_request, target: str, user_id: str, tenant_id: str, messages=None
+):
     if target == MESSAGE_ROLE["USER"]:
         if messages is not None:
             raise ValueError("Messages should be None when saving for user.")
@@ -1021,6 +1252,8 @@ async def generate_stream(
     enable_memory: bool = False,
     channel: Optional[Any] = None,
     reservation_token: Optional[str] = None,
+    execution: Optional[ManagedExecution] = None,
+    deferred_run: Optional[DeferredAgentRun] = None,
 ):
     """Unified streaming entry point.
 
@@ -1058,6 +1291,7 @@ async def generate_stream(
         )
 
     memory_enabled_runtime = False
+    agent_run_info = None
     try:
         if enable_memory:
             # Resolve the user-level switch for tool loading only.
@@ -1097,15 +1331,26 @@ async def generate_stream(
             agent_run_info=agent_run_info,
             memory_ctx=memory_context,
             channel=channel,
+            execution=execution,
+            deferred_run=deferred_run,
         ):
             yield data_chunk
 
+    except (asyncio.CancelledError, GeneratorExit):
+        if agent_run_info is not None:
+            run_identifier = _agent_run_identifier(agent_request)
+            agent_run_manager.stop_agent_run(run_identifier, user_id)
+            _unregister_agent_run_after_execution(
+                run_identifier,
+                user_id,
+                status="stopped",
+                agent_run_info=agent_run_info,
+            )
+        raise
     except MemoryPreparationException:
         if not enable_memory:
             # No-memory path has no fallback; surface the failure cleanly.
-            logger.error(
-                "Agent run error without memory: %r", None, exc_info=True
-            )
+            logger.error("Agent run error without memory: %r", None, exc_info=True)
             await channel.publish(_safe_agent_stream_error_chunk())
             yield _safe_agent_stream_error_chunk()
             return
@@ -1121,6 +1366,8 @@ async def generate_stream(
                 enable_memory=False,
                 channel=channel,
                 reservation_token=reservation_token,
+                execution=execution,
+                deferred_run=deferred_run,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -1144,6 +1391,19 @@ async def generate_stream(
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
+        if (
+            agent_run_info is None
+            and deferred_run is not None
+            and execution is not None
+            and not execution.future.done()
+        ):
+            deferred_run.cancel()
+            runtime_thread_manager.cancel(
+                execution.execution_id,
+                reason="agent preparation ended before worker binding",
+                wait_timeout=0,
+                mark_stuck_on_timeout=False,
+            )
         if reservation_token is not None:
             agent_run_manager.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
@@ -1175,54 +1435,54 @@ def _detect_resume_position(
 
     if latest_msg is None:
         return {
-            'should_resume': False,
-            'message_id': None,
-            'message_status': None,
-            'resume_from_unit_index': None,
-            'reason': 'no_assistant_message'
+            "should_resume": False,
+            "message_id": None,
+            "message_status": None,
+            "resume_from_unit_index": None,
+            "reason": "no_assistant_message",
         }
 
-    message_status = latest_msg.get('status')
-    message_id = latest_msg['message_id']
+    message_status = latest_msg.get("status")
+    message_id = latest_msg["message_id"]
 
     # Check if channel exists and is still active
     channel = streaming_channel_manager.get_channel(conversation_id, user_id)
     channel_active = channel is not None and not channel.is_completed
 
-    if message_status == 'streaming':
+    if message_status == "streaming":
         # Backend still running - get last unit position
         last_unit = get_last_unit_for_message(message_id)
-        resume_from = last_unit['unit_index'] + 1 if last_unit else 0
+        resume_from = last_unit["unit_index"] + 1 if last_unit else 0
         return {
-            'should_resume': True,
-            'message_id': message_id,
-            'message_status': message_status,
-            'resume_from_unit_index': resume_from,
-            'resume_message_id': message_id,
-            'reason': 'backend_streaming'
+            "should_resume": True,
+            "message_id": message_id,
+            "message_status": message_status,
+            "resume_from_unit_index": resume_from,
+            "resume_message_id": message_id,
+            "reason": "backend_streaming",
         }
     elif channel_active:
         # Message shows completed but channel is still active - resume to get remaining chunks
         # This handles edge case where message status was updated but channel not yet cleaned up
         last_unit = get_last_unit_for_message(message_id)
-        resume_from = last_unit['unit_index'] + 1 if last_unit else 0
+        resume_from = last_unit["unit_index"] + 1 if last_unit else 0
         return {
-            'should_resume': True,
-            'message_id': message_id,
-            'message_status': message_status,
-            'resume_from_unit_index': resume_from,
-            'resume_message_id': message_id,
-            'reason': 'channel_active'
+            "should_resume": True,
+            "message_id": message_id,
+            "message_status": message_status,
+            "resume_from_unit_index": resume_from,
+            "resume_message_id": message_id,
+            "reason": "channel_active",
         }
     else:
         # Backend finished - no more chunks to stream
         return {
-            'should_resume': False,
-            'message_id': message_id,
-            'message_status': message_status,
-            'resume_from_unit_index': None,
-            'resume_message_id': None,
-            'reason': f'backend_{message_status}'
+            "should_resume": False,
+            "message_id": message_id,
+            "message_status": message_status,
+            "resume_from_unit_index": None,
+            "resume_message_id": None,
+            "reason": f"backend_{message_status}",
         }
 
 
@@ -1248,6 +1508,32 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if isinstance(agent_request.hitl_run_id, str) and agent_request.hitl_run_id:
+        from services.human_interaction.application import stream_run
+
+        return await stream_run(
+            agent_request.hitl_run_id,
+            resolved_tenant_id,
+            resolved_user_id,
+            after=agent_request.hitl_after_event,
+        )
+
+    from consts.const import HITL_ENABLED
+
+    if HITL_ENABLED and not agent_request.is_debug and agent_request.conversation_id:
+        from services.human_interaction.application import get_service, stream_run
+        from services.human_interaction.models import InteractionError
+
+        active_hitl = await run_blocking(
+            "hitl-get_service-repository-latest", get_service().repository.latest, resolved_tenant_id,
+            resolved_user_id, agent_request.conversation_id, active_only=True, lane="control-io",
+            owner=__name__,
+        )
+        if active_hitl:
+            if resume:
+                return await stream_run(active_hitl, resolved_tenant_id, resolved_user_id)
+            raise InteractionError("This conversation has a paused or active human interaction run")
+
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -1270,7 +1556,9 @@ async def run_agent_stream(
             tenant_id=resolved_tenant_id,
         )
         if conversation is None:
-            raise ForbiddenError("Conversation is not accessible to the current identity")
+            raise ForbiddenError(
+                "Conversation is not accessible to the current identity"
+            )
 
     metadata_supplied = "metadata" in agent_request.model_fields_set
     metadata_update_requested = metadata_supplied and agent_request.metadata is not None
@@ -1287,7 +1575,9 @@ async def run_agent_stream(
                 error_code,
                 details={"reason": exc.code.value},
             ) from exc
-    metadata_entrypoint = getattr(agent_request, "_runtime_metadata_entrypoint", "native")
+    metadata_entrypoint = getattr(
+        agent_request, "_runtime_metadata_entrypoint", "native"
+    )
     if metadata_update_requested and metadata_entrypoint in {"native", "debug"}:
         agent_record = search_agent_info_by_agent_id(
             agent_id=agent_request.agent_id,
@@ -1297,11 +1587,15 @@ async def run_agent_stream(
         if not bool(agent_record.get("allow_chat_metadata", False)):
             raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
 
-    raw_request_scope = None if resume else getattr(agent_request, "knowledge_scope", None)
+    raw_request_scope = (
+        None if resume else getattr(agent_request, "knowledge_scope", None)
+    )
     if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
         request_scope = raw_request_scope
     elif isinstance(raw_request_scope, dict):
-        request_scope = ConversationKnowledgeScopeRequest.model_validate(raw_request_scope)
+        request_scope = ConversationKnowledgeScopeRequest.model_validate(
+            raw_request_scope
+        )
     else:
         request_scope = None
     stored_scope = conversation.get("knowledge_scope") if conversation else None
@@ -1360,7 +1654,9 @@ async def run_agent_stream(
             agent_request.conversation_id,
         )
     elif agent_request.conversation_id is None:
-        default_title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
+        default_title = (
+            DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
+        )
         conversation_kwargs = {
             "title": default_title,
             "user_id": resolved_user_id,
@@ -1382,7 +1678,9 @@ async def run_agent_stream(
 
     if not resume:
         if agent_request.is_debug:
-            metadata_snapshot = dict(agent_request.metadata or {}) if metadata_update_requested else {}
+            metadata_snapshot = (
+                dict(agent_request.metadata or {}) if metadata_update_requested else {}
+            )
             metadata_version = None
         elif is_new_conversation:
             metadata_snapshot = dict(
@@ -1401,7 +1699,9 @@ async def run_agent_stream(
             )
         elif not metadata_update_requested:
             metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
-            metadata_version = int((conversation or {}).get("runtime_metadata_version") or 0)
+            metadata_version = int(
+                (conversation or {}).get("runtime_metadata_version") or 0
+            )
         else:
             try:
                 resolved_metadata = resolve_conversation_runtime_metadata(
@@ -1465,6 +1765,15 @@ async def run_agent_stream(
             user_id=resolved_user_id,
         )
 
+    if agent_request.enable_hitl is True and not resume:
+        from services.human_interaction.application import start_run
+
+        human_response = await start_run(
+            agent_request, resolved_tenant_id, resolved_user_id, language, skip_user_save=skip_user_save,
+        )
+        if human_response is not None:
+            return human_response
+
     # Resume mode: check for existing streaming message
     if resume:
         resume_info = _detect_resume_position(
@@ -1472,20 +1781,19 @@ async def run_agent_stream(
             user_id=resolved_user_id,
         )
 
-        if not resume_info['should_resume']:
+        if not resume_info["should_resume"]:
             # Backend already finished
             return JSONResponse(
                 status_code=HTTPStatus.OK,
                 content={
-                    'status': resume_info['message_status'],
-                    'message': f"Stream already {resume_info['message_status']}: {resume_info['reason']}",
-                }
+                    "status": resume_info["message_status"],
+                    "message": f"Stream already {resume_info['message_status']}: {resume_info['reason']}",
+                },
             )
 
         # Check if the agent is still running by querying the agent_run_manager
         existing_run_info = agent_run_manager.get_agent_run_info(
-            user_id=resolved_user_id,
-            conversation_id=agent_request.conversation_id
+            user_id=resolved_user_id, conversation_id=agent_request.conversation_id
         )
         run_state = await runtime_state_service.get_run_state_async(
             user_id=resolved_user_id,
@@ -1498,8 +1806,7 @@ async def run_agent_stream(
             # Update message status to completed if it's still streaming
             try:
                 update_message_status(
-                    message_id=resume_info['message_id'],
-                    status='completed'
+                    message_id=resume_info["message_id"], status="completed"
                 )
             except Exception:
                 pass
@@ -1507,39 +1814,41 @@ async def run_agent_stream(
             return JSONResponse(
                 status_code=HTTPStatus.OK,
                 content={
-                    'status': 'completed',
-                    'message': 'Agent finished during disconnection',
-                }
+                    "status": "completed",
+                    "message": "Agent finished during disconnection",
+                },
             )
 
         # Agent is still running - subscribe to the channel to receive new chunks
         channel = streaming_channel_manager.get_channel(
-            conversation_id=agent_request.conversation_id,
-            user_id=resolved_user_id
+            conversation_id=agent_request.conversation_id, user_id=resolved_user_id
         )
         last_unit_index = resume_info["resume_from_unit_index"] - 1
 
         def _resume_status_chunk(replay_chunk_count: int) -> str:
             payload = {
-                'status': 'resumed',
-                'last_unit_index': last_unit_index,
-                'replay_chunk_count': replay_chunk_count,
+                "status": "resumed",
+                "last_unit_index": last_unit_index,
+                "replay_chunk_count": replay_chunk_count,
             }
             return f"data: {json.dumps(payload)}\n\n"
 
         def _resume_completed_chunk(status: str = "completed") -> str:
             payload = {
-                'status': status,
-                'last_unit_index': last_unit_index,
+                "status": status,
+                "last_unit_index": last_unit_index,
             }
             return f"data: {json.dumps(payload)}\n\n"
 
         if channel is None:
             if runtime_state_service.enabled and is_remote_running:
+
                 async def redis_channel_stream():
-                    replay_events = await runtime_state_service.read_stream_events_async(
-                        user_id=resolved_user_id,
-                        conversation_id=agent_request.conversation_id,
+                    replay_events = (
+                        await runtime_state_service.read_stream_events_async(
+                            user_id=resolved_user_id,
+                            conversation_id=agent_request.conversation_id,
+                        )
                     )
                     replay_chunk_count = len(replay_events)
 
@@ -1553,32 +1862,44 @@ async def run_agent_stream(
                             yield chunk
 
                     while True:
-                        events = await runtime_state_service.wait_for_stream_events_async(
-                            user_id=resolved_user_id,
-                            conversation_id=agent_request.conversation_id,
-                            last_id=last_event_id,
+                        events = (
+                            await runtime_state_service.wait_for_stream_events_async(
+                                user_id=resolved_user_id,
+                                conversation_id=agent_request.conversation_id,
+                                last_id=last_event_id,
+                            )
                         )
                         for event_id, chunk in events:
                             last_event_id = event_id
                             if chunk:
                                 yield chunk
 
-                        stream_status = await runtime_state_service.get_stream_status_async(
-                            user_id=resolved_user_id,
-                            conversation_id=agent_request.conversation_id,
+                        stream_status = (
+                            await runtime_state_service.get_stream_status_async(
+                                user_id=resolved_user_id,
+                                conversation_id=agent_request.conversation_id,
+                            )
                         )
-                        latest_run_state = await runtime_state_service.get_run_state_async(
-                            user_id=resolved_user_id,
-                            conversation_id=agent_request.conversation_id,
+                        latest_run_state = (
+                            await runtime_state_service.get_run_state_async(
+                                user_id=resolved_user_id,
+                                conversation_id=agent_request.conversation_id,
+                            )
                         )
-                        if stream_status.get("status") or latest_run_state.get("status") in {
+                        if stream_status.get("status") or latest_run_state.get(
+                            "status"
+                        ) in {
                             "completed",
                             "failed",
                             "stopped",
                         }:
                             break
 
-                    terminal_status = stream_status.get("status") or latest_run_state.get("status") or "completed"
+                    terminal_status = (
+                        stream_status.get("status")
+                        or latest_run_state.get("status")
+                        or "completed"
+                    )
                     yield STREAM_STATUS_EVENT
                     yield _resume_completed_chunk(terminal_status)
 
@@ -1589,7 +1910,7 @@ async def run_agent_stream(
                         "Cache-Control": "no-cache",
                         "Connection": "keep-alive",
                         "X-Stream-Status": "resumed",
-                        "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
+                        "X-Last-Unit-Index": str(resume_info["resume_from_unit_index"]),
                     },
                 )
 
@@ -1597,9 +1918,9 @@ async def run_agent_stream(
             return JSONResponse(
                 status_code=HTTPStatus.OK,
                 content={
-                    'status': 'streaming',
-                    'message': 'Stream channel not found',
-                }
+                    "status": "streaming",
+                    "message": "Stream channel not found",
+                },
             )
 
         # Subscribe to the channel and stream chunks to the frontend
@@ -1628,17 +1949,72 @@ async def run_agent_stream(
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Stream-Status": "resumed",
-                "X-Last-Unit-Index": str(resume_info['resume_from_unit_index']),
+                "X-Last-Unit-Index": str(resume_info["resume_from_unit_index"]),
             },
         )
 
     # Normal mode: start new stream
+    deferred_run = DeferredAgentRun()
+    run_identifier = _agent_run_identifier(agent_request)
+    execution = None
+    agent_capacity_token = None
+    try:
+        agent_capacity_token = agent_run_manager.reserve_agent_capacity(
+            agent_request.agent_id,
+            RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
+        )
+        execution = runtime_thread_manager.submit(
+            "agent-run",
+            ManagedTaskSpec(
+                task_name="agent-run",
+                owner="backend.management.services.agent.run",
+                run_id=str(run_identifier),
+                close_hook=deferred_run.cancel,
+                pass_cancel_event=True,
+            ),
+            deferred_run.run,
+        )
+        execution.future.add_done_callback(
+            lambda _future: agent_run_manager.release_agent_capacity(
+                agent_capacity_token
+            )
+        )
+        await runtime_thread_manager.wait_until_started(execution)
+    except AgentRunConcurrencyExceededError as exc:
+        raise RuntimeCapacityExceededError() from exc
+    except ThreadCapacityExceeded as exc:
+        if execution is None and agent_capacity_token is not None:
+            agent_run_manager.release_agent_capacity(agent_capacity_token)
+        raise RuntimeCapacityExceededError() from exc
+    except ThreadQueueTimedOut as exc:
+        deferred_run.cancel()
+        raise RuntimeQueueTimeoutError(exc.timeout_seconds) from exc
+    except BaseException:
+        deferred_run.cancel()
+        if execution is not None:
+            runtime_thread_manager.cancel(
+                execution.execution_id,
+                reason="agent admission failed",
+                wait_timeout=0,
+                mark_stuck_on_timeout=False,
+            )
+        elif agent_capacity_token is not None:
+            agent_run_manager.release_agent_capacity(agent_capacity_token)
+        raise
+
     try:
         reservation_token = agent_run_manager.reserve_agent_run(
-            _agent_run_identifier(agent_request),
+            run_identifier,
             resolved_user_id,
         )
     except AgentRunAlreadyActiveError:
+        deferred_run.cancel()
+        runtime_thread_manager.cancel(
+            execution.execution_id,
+            reason="agent run already active",
+            wait_timeout=0,
+            mark_stuck_on_timeout=False,
+        )
         logger.warning(
             "Rejected concurrent agent run, user_id=%s, conversation_id=%s",
             resolved_user_id,
@@ -1682,7 +2058,10 @@ async def run_agent_stream(
             )
 
         run_context = build_agent_run_context(
-            agent_request, resolved_user_id, resolved_tenant_id, language,
+            agent_request,
+            resolved_user_id,
+            resolved_tenant_id,
+            language,
             extra_metadata={
                 "skip_user_save": skip_user_save,
                 "has_override_user_id": user_id is not None,
@@ -1699,6 +2078,13 @@ async def run_agent_stream(
                 user_id=resolved_user_id,
             )
     except Exception:
+        deferred_run.cancel()
+        runtime_thread_manager.cancel(
+            execution.execution_id,
+            reason="agent stream setup failed",
+            wait_timeout=0,
+            mark_stuck_on_timeout=False,
+        )
         agent_run_manager.release_agent_run_reservation(
             _agent_run_identifier(agent_request),
             resolved_user_id,
@@ -1712,6 +2098,8 @@ async def run_agent_stream(
         "language": language,
         "enable_memory": use_memory_stream,
         "reservation_token": reservation_token,
+        "execution": execution,
+        "deferred_run": deferred_run,
     }
     if channel is not None:
         stream_kwargs["channel"] = channel
@@ -1731,15 +2119,27 @@ async def run_agent_stream(
                     )
                 )
                 _agent_stream_producer_tasks.add(producer_task)
-                producer_task.add_done_callback(
-                    _agent_stream_producer_tasks.discard
-                )
+                producer_task.add_done_callback(_agent_stream_producer_tasks.discard)
 
             # Emit conversation_created event for new conversations
             if is_new_conversation:
-                yield "data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": agent_request.conversation_id}}, ensure_ascii=False) + "\n\n"
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "conversation_created",
+                            "content": {
+                                "conversation_id": agent_request.conversation_id
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
 
-            scope_event = getattr(agent_request, "_resolved_knowledge_scope_event", None)
+            scope_event = getattr(
+                agent_request, "_resolved_knowledge_scope_event", None
+            )
             if scope_event is not None:
                 yield (
                     "data: "
@@ -1767,6 +2167,14 @@ async def run_agent_stream(
             )
             yield _safe_agent_stream_error_chunk()
         finally:
+            if channel is None and not execution.future.done():
+                deferred_run.cancel()
+                runtime_thread_manager.cancel(
+                    execution.execution_id,
+                    reason="agent response stream closed",
+                    wait_timeout=0,
+                    mark_stuck_on_timeout=False,
+                )
             agent_run_manager.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
                 resolved_user_id,
@@ -1779,9 +2187,7 @@ async def run_agent_stream(
         headers["run_id"] = debug_run_id
     if agent_request.conversation_id is not None:
         headers["conversation_id"] = str(agent_request.conversation_id)
-    runtime_metadata_version = getattr(
-        agent_request, "_runtime_metadata_version", None
-    )
+    runtime_metadata_version = getattr(agent_request, "_runtime_metadata_version", None)
     if runtime_metadata_version is not None:
         headers["X-Runtime-Metadata-Version"] = str(runtime_metadata_version)
 
@@ -1818,12 +2224,18 @@ async def run_agent_background(
         )
 
     run_context = build_agent_run_context(
-        agent_request, user_id, tenant_id, language,
+        agent_request,
+        user_id,
+        tenant_id,
+        language,
         extra_metadata={"background": True, "skip_user_save": skip_user_save},
     )
     agent_metadata = run_context.metadata
     stream_gen = generate_stream(
-        agent_request, user_id=user_id, tenant_id=tenant_id, language=language,
+        agent_request,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        language=language,
         enable_memory=run_context.enable_memory,
     )
 
@@ -1832,10 +2244,14 @@ async def run_agent_background(
         async for _ in stream_gen:
             chunks += 1
 
-    latest_message = get_latest_assistant_message(agent_request.conversation_id, user_id)
+    latest_message = get_latest_assistant_message(
+        agent_request.conversation_id, user_id
+    )
     return {
         "conversation_id": agent_request.conversation_id,
-        "assistant_message_id": latest_message.get("message_id") if latest_message else None,
+        "assistant_message_id": latest_message.get("message_id")
+        if latest_message
+        else None,
         "chunks": chunks,
     }
 
@@ -1872,4 +2288,13 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str):
 
 
 def is_agent_running(conversation_id: int, user_id: str) -> bool:
-    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
+    if agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None:
+        return True
+
+    from consts.const import HITL_ENABLED
+
+    if not HITL_ENABLED:
+        return False
+    from services.human_interaction.application import is_conversation_running
+
+    return is_conversation_running(conversation_id, user_id)

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -26,3 +28,35 @@ def test_health_endpoints_are_not_exposed_in_openapi():
 
     assert "/health/live" not in paths
     assert "/health/ready" not in paths
+
+
+def test_ready_follows_thread_manager_lifecycle():
+    app = FastAPI()
+    install_health_contract(app)
+    manager = SimpleNamespace(
+        snapshot=lambda: SimpleNamespace(
+            state=SimpleNamespace(value="running"), stuck_count=0
+        )
+    )
+    app.state.thread_manager = manager
+
+    client = TestClient(app)
+    assert client.get("/health/ready").json() == {
+        "status": "ready",
+        "manager_state": "running",
+        "stuck_count": 0,
+    }
+
+    manager.snapshot = lambda: SimpleNamespace(
+        state=SimpleNamespace(value="draining"), stuck_count=0
+    )
+    draining = client.get("/health/ready")
+    assert draining.status_code == 503
+    assert draining.json()["manager_state"] == "draining"
+
+    manager.snapshot = lambda: SimpleNamespace(
+        state=SimpleNamespace(value="running"), stuck_count=1
+    )
+    stuck = client.get("/health/ready")
+    assert stuck.status_code == 503
+    assert stuck.json()["stuck_count"] == 1

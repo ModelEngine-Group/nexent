@@ -257,54 +257,6 @@ export const fetchPublishedAgentList = async () => {
 };
 
 /**
- * get creating sub agent id
- * @param mainAgentId current main agent id
- * @returns new sub agent id
- */
-export const getCreatingSubAgentId = async () => {
-  try {
-    const response = await fetch(API_ENDPOINTS.agent.getCreatingSubAgentId, {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return {
-      success: true,
-      data: {
-        agentId: data.agent_id,
-        name: data.name,
-        displayName: data.display_name,
-        description: data.description,
-        enabledToolIds: data.enable_tool_id_list || [],
-        modelIds: data.model_ids || (data.model_id ? [data.model_id] : []),
-        modelNames:
-          data.model_names || (data.model_name ? [data.model_name] : []),
-        maxSteps: data.max_steps,
-        requestedOutputTokens: data.requested_output_tokens ?? null,
-        businessDescription: data.business_description,
-        dutyPrompt: data.duty_prompt,
-        constraintPrompt: data.constraint_prompt,
-        fewShotsPrompt: data.few_shots_prompt,
-        sub_agent_id_list: data.sub_agent_id_list || [],
-      },
-      message: "",
-    };
-  } catch (error) {
-    log.error("Failed to get creating sub agent ID:", error);
-    return {
-      success: false,
-      data: null,
-      message: "agentConfig.agents.createSubAgentIdFailed",
-    };
-  }
-};
-
-/**
  * update tool config
  * @param toolId tool id
  * @param agentId agent id
@@ -466,6 +418,16 @@ export interface UpdateAgentInfoPayload {
   model_ids?: number[];
   max_steps?: number;
   requested_output_tokens?: number | null;
+  // v2.6.0: per-agent overrides for model inference params.
+  // Shape: { "<model_id>": { temperature?: number|null, top_p?: number|null, extra_params?: Record<string, unknown>|null } }
+  model_params_override?: Record<
+    string,
+    {
+      temperature?: number | null;
+      top_p?: number | null;
+      extra_params?: Record<string, unknown> | null;
+    }
+  > | null;
   is_main_agent?: boolean;
   provide_run_summary?: boolean;
   allow_chat_metadata?: boolean;
@@ -905,6 +867,8 @@ export const searchAgentInfo = async (
         data.model_names || (data.model_name ? [data.model_name] : []),
       max_step: data.max_steps,
       requested_output_tokens: data.requested_output_tokens ?? null,
+      // v2.6.0: per-agent model params override (model_id -> { temperature, top_p, extra_params })
+      model_params_override: data.model_params_override ?? null,
       is_main_agent: data.is_main_agent ?? true,
       duty_prompt: data.duty_prompt,
       constraint_prompt: data.constraint_prompt,

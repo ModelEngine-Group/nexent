@@ -2,6 +2,13 @@
 
 set -euo pipefail
 
+requested_umask="${UMASK:-0022}"
+if [[ ! "$requested_umask" =~ ^0?[0-7]{3}$ ]]; then
+  printf '[start-backend] ERROR: unsupported UMASK: %s\n' "$requested_umask" >&2
+  exit 1
+fi
+umask "$requested_umask"
+
 SQL_STARTUP_MODE="${NEXENT_SQL_STARTUP_MODE:-off}"
 
 if [ -z "${NEXENT_SQL_STARTUP_MODE+x}" ] && [ -n "${NEXENT_RUN_SQL_MIGRATIONS:-}" ]; then

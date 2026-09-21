@@ -683,7 +683,7 @@ const ConversationStatusIndicatorWrapper: FC<{
   completedConversations: Set<string>;
 }> = ({ completedConversations }) => {
   const aui = useAui();
-  const status = aui.threadListItem.getState().status as string;
+  const status = aui.threadListItem().getState().status as string;
   const isRunning = status === "running" || status === "streaming";
 
   return (

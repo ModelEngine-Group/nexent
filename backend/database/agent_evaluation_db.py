@@ -213,19 +213,21 @@ def get_agent_evaluation(agent_evaluation_id: int, tenant_id: str) -> dict[str, 
 
 
 def list_agent_evaluations_by_agent(
-    agent_id: int,
+    agent_ids: list[int],
     tenant_id: str,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Return evaluation runs for an agent, most-recent first.
+    """Return tenant evaluation runs, optionally filtered by agent IDs.
 
-    ``limit == 0`` means "return all rows" (the caller has already narrowed
-    the query to a single agent, so the window is bounded by the tenant's
-    per-agent run count); otherwise ``limit``/``offset`` are applied as a
-    normal pagination window.
+    ``limit == 0`` means "return all rows"; otherwise ``limit``/``offset``
+    are applied as a normal pagination window.
     """
     with get_db_session() as session:
+        filters = [AgentEvaluation.tenant_id == tenant_id]
+        if agent_ids:
+            filters.append(AgentEvaluation.agent_id.in_(agent_ids))
+
         q = (
             session.query(
                 AgentEvaluation,
@@ -242,10 +244,7 @@ def list_agent_evaluations_by_agent(
                 (AgentEvaluation.judge_model_id == ModelRecord.model_id)
                 & (AgentEvaluation.tenant_id == ModelRecord.tenant_id),
             )
-            .filter(
-                AgentEvaluation.tenant_id == tenant_id,
-                AgentEvaluation.agent_id == agent_id,
-            )
+            .filter(*filters)
             .order_by(AgentEvaluation.create_time.desc())
         )
         if limit > 0:
@@ -757,7 +756,7 @@ def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
 def reap_stale_runs(tenant_id: str, timeout_minutes: int = 10) -> int:
     """Mark RUNNING evaluations as FAILED if they haven't been updated recently.
 
-    Handles the case where a server restart loses in-flight ``pool.submit()``
+    Handles the case where a server restart loses an in-flight managed task
     tasks, leaving zombie RUNNING records.  Called on startup and periodically.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)

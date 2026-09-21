@@ -1,3 +1,6 @@
+{{- $global := default dict .Values.global -}}
+{{- $sharedStorage := default dict $global.sharedStorage -}}
+{{- $projectConfigStorage := default dict $sharedStorage.projectConfig -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -53,6 +56,13 @@ spec:
               value: {{ .Values.config.sseProxyTimeoutMs | quote }}
             - name: MODEL_ENGINE_ENABLED
               value: {{ .Values.config.modelEngine.enabled | quote }}
+            - name: PROJECT_CONFIG_DIR
+              value: "/mnt/nexent-data/project-config"
+            - name: FILE_UPLOAD_SIZE_LIMIT
+              value: {{ .Values.config.fileUploadSizeLimit | quote }}
+          volumeMounts:
+            - name: nexent-project-config
+              mountPath: /mnt/nexent-data/project-config
           resources:
             requests:
               memory: {{ .Values.resources.web.requests.memory }}
@@ -80,3 +90,7 @@ spec:
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - name: nexent-project-config
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-project-config" $projectConfigStorage.existingClaim }}

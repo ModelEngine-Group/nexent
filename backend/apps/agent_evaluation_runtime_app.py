@@ -13,8 +13,9 @@ from database.agent_evaluation_db import (
     claim_agent_evaluation_run,
     get_agent_evaluation,
 )
+from nexent.core.concurrency import ManagedTaskSpec
+from services.thread_lifecycle_service import runtime_thread_manager
 from utils.auth_utils import verify_internal_runtime_jwt
-from utils.thread_utils import pool
 
 
 logger = logging.getLogger("agent_evaluation_runtime_app")
@@ -116,7 +117,13 @@ async def dispatch_evaluation_run_api(
 
     try:
         execute_agent_evaluation_run = _load_evaluation_executor()
-        pool.submit(
+        runtime_thread_manager.submit(
+            "evaluation",
+            ManagedTaskSpec(
+                task_name="agent-evaluation-dispatch",
+                owner="runtime",
+                run_id=str(payload.agent_evaluation_id),
+            ),
             execute_agent_evaluation_run,
             tenant_id,
             user_id,

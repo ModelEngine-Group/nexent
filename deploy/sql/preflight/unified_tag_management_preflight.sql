@@ -56,6 +56,8 @@ WITH legacy_source AS (
            resource_type || '/' || COALESCE(resource_id::TEXT, '?') AS resource,
            CASE WHEN source_name = 'skill.skill_tags'
                 THEN 'skipped_skill_tags_without_tenant'
+                 WHEN source_name = 'mcp_community.tags'
+                 THEN 'skipped_mcp_community_tags'
                 ELSE 'null_or_empty_tenant' END::TEXT AS reason,
            1::BIGINT AS issue_count, payload AS sample
     FROM legacy_source WHERE tenant_id IS NULL OR btrim(tenant_id) = ''
@@ -92,7 +94,7 @@ WITH legacy_source AS (
            CASE WHEN source_name = 'agent_repository.tags'
                 THEN 'skipped_agent_tags_without_canonical_source'
                 WHEN source_name = 'mcp_community.tags'
-                THEN 'community_canonical_source_unprovable'
+                THEN 'skipped_mcp_community_tags'
                 ELSE 'canonical_source_missing_or_tenant_mismatch' END,
            canonical_match_count, payload
     FROM legacy_source WHERE canonical_match_count = 0

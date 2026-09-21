@@ -60,6 +60,7 @@ import {
   StreamingMessage,
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
+import { createConversationTitleRequest } from "@/lib/conversationTitle";
 
 import { Button, Checkbox, Input, Layout, message, Modal } from "antd";
 import log from "@/lib/logger";
@@ -512,6 +513,7 @@ export function ChatInterface() {
     const selectedAgentIdForRun = selectedAgentId;
     const agentIdForRun =
       selectedAgentIdForRun !== null ? Number(selectedAgentIdForRun) : null;
+    const modelIdForRun = selectedModelId;
     let cid: number | null = null; // set after guard, used in try/catch/finally
 
     // Prepare attachment information
@@ -829,8 +831,8 @@ export function ChatInterface() {
       }
 
       // Add selected model_id for agent run
-      if (selectedModelId !== null) {
-        runAgentParams.model_id = selectedModelId;
+      if (modelIdForRun !== null) {
+        runAgentParams.model_id = modelIdForRun;
       }
 
       const reader = await conversationService.runAgent(
@@ -974,10 +976,13 @@ export function ChatInterface() {
           if (!titleGenerationConversationIdsRef.current.has(conversationId)) {
             titleGenerationConversationIdsRef.current.add(conversationId);
             void conversationService
-              .generateTitle({
-                conversation_id: conversationId,
-                question: userMessageContent,
-              })
+              .generateTitle(
+                createConversationTitleRequest(
+                  conversationId,
+                  userMessageContent,
+                  modelIdForRun
+                )
+              )
               .then((title) => {
                 if (title) {
                   conversationManagement.setConversationTitle(title);
