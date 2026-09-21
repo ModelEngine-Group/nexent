@@ -20,7 +20,7 @@ import {
 } from "@assistant-ui/react";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import { conversationThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
-import { compositeAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
+import { createNewChatAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
 import { ServerDictationAdapter } from "@/app/newchat/adapter/server-dictation-adapter";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
@@ -64,9 +64,11 @@ export function useWorkbenchSession(): WorkbenchSession {
 function useLocalChatRuntime(
   dictationAdapter: ServerDictationAdapter
 ): AssistantRuntime {
+  const attachmentAdapter = useMemo(() => createNewChatAttachmentAdapter(), []);
+
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
-      attachments: compositeAttachmentAdapter,
+      attachments: attachmentAdapter,
       dictation: dictationAdapter,
     },
   });

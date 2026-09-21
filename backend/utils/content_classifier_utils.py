@@ -4,6 +4,10 @@ import re
 from typing import Any, Dict, List, Optional
 
 
+FINAL_ANSWER_OPEN_TAG = "<FINAL_ANSWER>"
+FINAL_ANSWER_CLOSE_TAG = "</FINAL_ANSWER>"
+
+
 class ContentClassifier:
     """Parse XML tags from LLM output and classify streaming content in real-time.
 
@@ -31,6 +35,8 @@ class ContentClassifier:
         self._origin_type: Optional[str] = None
         self._state_before_file = "others"
         self._known_tags = {
+            FINAL_ANSWER_OPEN_TAG,
+            FINAL_ANSWER_CLOSE_TAG,
             "<SKILL>",
             "</SKILL>",
             "<SUMMARY>",
@@ -103,7 +109,11 @@ class ContentClassifier:
             content_after_tag = self.buffer[gt_pos + 1:]
             if not content_after_tag and not final:
                 return None
-            if content_after_tag and not content_after_tag.startswith(("\n", "\r\n")):
+            if (
+                content_after_tag
+                and not content_after_tag.startswith(("\n", "\r\n"))
+                and matched not in {FINAL_ANSWER_OPEN_TAG, FINAL_ANSWER_CLOSE_TAG}
+            ):
                 return self._emit_potential_tag_start()
             results.extend(self._handle_matched_tag(gt_pos, potential_tag, matched))
         elif len(potential_tag) > self.MAX_TAG_LENGTH:
@@ -258,6 +268,10 @@ class ContentClassifier:
 
     def _handle_tag(self, tag: str) -> Optional[Dict[str, Any]]:
         """Handle matched tag and update state."""
+        if tag in {FINAL_ANSWER_OPEN_TAG, FINAL_ANSWER_CLOSE_TAG}:
+            self.saw_control_tag = True
+            return None
+
         if tag == "<SKILL>":
             self.saw_control_tag = True
             self.state = "skill_body"

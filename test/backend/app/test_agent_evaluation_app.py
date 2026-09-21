@@ -261,11 +261,35 @@ class TestCreateEvaluation:
 
 
 class TestListEvaluations:
-    def test_returns_list(self, client):
-        _mock_impls()
-        response = client.get("/agent-evaluations?agent_id=1&limit=10&offset=0")
+    def test_returns_all_tenant_evaluations_without_agent_filter(self, client):
+        app = _mock_impls()
+        response = client.get("/agent-evaluations?limit=10&offset=0")
         assert response.status_code == 200
         assert response.json()["data"] == [{"id": 1}]
+        assert app.list_agent_evaluations_by_agent_impl.call_args.kwargs == {
+            "agent_ids": [],
+            "tenant_id": "t1",
+            "limit": 10,
+            "offset": 0,
+        }
+
+    def test_filters_by_json_agent_id_list_and_deduplicates(self, client):
+        app = _mock_impls()
+        response = client.get("/agent-evaluations?agent_ids=%5B7%2C9%2C7%5D")
+        assert response.status_code == 200
+        assert app.list_agent_evaluations_by_agent_impl.call_args.kwargs["agent_ids"] == [7, 9]
+
+    def test_filters_by_single_agent_id_list(self, client):
+        app = _mock_impls()
+        response = client.get("/agent-evaluations?agent_ids=%5B9%5D")
+        assert response.status_code == 200
+        assert app.list_agent_evaluations_by_agent_impl.call_args.kwargs["agent_ids"] == [9]
+
+    def test_rejects_non_integer_json_agent_id_list(self, client):
+        app = _mock_impls()
+        response = client.get("/agent-evaluations?agent_ids=%5B7%2C%22nine%22%5D")
+        assert response.status_code == 400
+        app.list_agent_evaluations_by_agent_impl.assert_not_called()
 
     def test_500_on_exception(self, client):
         _mock_impls(
@@ -273,14 +297,14 @@ class TestListEvaluations:
                 side_effect=RuntimeError("boom")
             )
         )
-        response = client.get("/agent-evaluations?agent_id=1")
+        response = client.get("/agent-evaluations?agent_ids=%5B1%5D")
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
         from consts.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
-        response = client.get("/agent-evaluations?agent_id=1")
+        response = client.get("/agent-evaluations?agent_ids=%5B1%5D")
         assert response.status_code == 401
 
     def test_app_exception_propagates(self, client):
@@ -289,7 +313,7 @@ class TestListEvaluations:
                 side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "missing")
             )
         )
-        response = client.get("/agent-evaluations?agent_id=1")
+        response = client.get("/agent-evaluations?agent_ids=%5B1%5D")
         assert response.status_code == 404
 
 

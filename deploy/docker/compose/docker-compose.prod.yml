@@ -85,7 +85,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: migrate
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
@@ -120,7 +120,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
@@ -152,7 +152,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
     user: root
@@ -184,7 +184,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
     user: root

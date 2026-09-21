@@ -29,6 +29,7 @@ def search_version_by_version_no(
     with get_db_session() as session:
         version = session.query(AgentVersion).filter(
             AgentVersion.agent_id == agent_id,
+            AgentVersion.tenant_id == tenant_id,
             AgentVersion.version_no == version_no,
             AgentVersion.delete_flag == 'N',
         ).first()

@@ -613,6 +613,18 @@ def test_get_version_impl_success(monkeypatch):
     assert result["version_name"] == "v1.0"
 
 
+def test_get_version_impl_rejects_missing_version(monkeypatch):
+    """A direct version lookup must not report a missing version as success."""
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "search_version_by_version_no",
+        MagicMock(return_value=None),
+    )
+
+    with pytest.raises(ValueError, match="Version 999 not found"):
+        get_version_impl(agent_id=1, tenant_id="tenant1", version_no=999)
+
+
 def test_get_version_detail_impl_success(monkeypatch):
     """Test successfully getting version detail"""
     mock_version = {

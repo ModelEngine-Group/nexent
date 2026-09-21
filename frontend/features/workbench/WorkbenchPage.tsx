@@ -4,6 +4,7 @@ import { restoreKnowledgeDisplay } from "./knowledgeDisplay";
 import { useCallback, useEffect, useRef, useState, type FC } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { Chat } from "@/app/newchat/assistant-ui/chat";
+import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type { ChatMode } from "@/app/newchat/assistant-ui/composer";
 import { ThreadListSidebar } from "@/app/newchat/assistant-ui/threadlist-sidebar";
 import {
@@ -21,6 +22,14 @@ import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import { ApiError } from "@/services/api";
+import {
+  HumanInteractionCards,
+  useHumanInteractionController,
+} from "@/features/humanInteraction";
+import {
+  RunMessageQueueContext,
+  useRunMessageQueue,
+} from "@/features/humanInteraction/useRunMessageQueue";
 import {
   WorkbenchSessionProvider,
   useWorkbenchSession,
@@ -633,6 +642,46 @@ const HomeContent: FC = () => {
     workbenchState.resolving,
   ]);
 
+  const [enableHitl, setEnableHitl] = useState(false);
+  const hitlIsRunning = useAuiState((state) => state.thread.isRunning);
+  const continueHitl = useCallback(
+    (runId: string, after: number) => {
+      if (!activeConversationId || runtime.thread.getState().isRunning) return;
+      const messages = runtime.thread.getState().messages;
+      runtime.thread.resumeRun({
+        parentId: messages.at(-1)?.id ?? null,
+        sourceId: null,
+        runConfig: {
+          custom: {
+            threadId: String(activeConversationId),
+            hitlRunId: runId,
+            hitlAfterEvent: after,
+            resume: true,
+            onGenerationStopped: handleGenerationStopped,
+          },
+        },
+        stream: async function* (options) {
+          const result = remoteChatModelAdapter.run(options);
+          if (Symbol.asyncIterator in result) yield* result;
+          else yield await result;
+        },
+      });
+    },
+    [activeConversationId, runtime, handleGenerationStopped]
+  );
+  const hitlController = useHumanInteractionController({
+    conversationId: Number(activeConversationId) || undefined,
+    onEnabledChange: setEnableHitl,
+    isRunning: hitlIsRunning,
+    onContinue: continueHitl,
+  });
+  const refreshHitl = hitlController.refresh;
+  const runMessageQueue = useRunMessageQueue({
+    scope: activeThreadId || runtimeMainThreadId || "new",
+    runtime,
+    controller: hitlController,
+  });
+
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
   // `onServerConversationId` lets the adapter report back the server-issued
@@ -677,7 +726,11 @@ const HomeContent: FC = () => {
         },
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         onGenerationStopped: handleGenerationStopped,
+        // HITL events must bypass snapshot throttling because the stream can
+        // become quiet immediately after an ask-user suspension.
+        onHumanInteractionEvent: () => refreshHitl(true),
         enablePlan: chatMode === "planning",
+        enableHitl,
         ...(!["agent_create", "skill_create"].includes(
           workbenchState.config.mode
         )
@@ -717,6 +770,8 @@ const HomeContent: FC = () => {
     handleServerConversationId,
     workbenchState,
     dispatchWorkbench,
+    refreshHitl,
+    enableHitl,
   ]);
 
   // Restore historical plan and chat mode from the same conversation detail
@@ -859,88 +914,106 @@ const HomeContent: FC = () => {
         </SidebarProvider>
       </div>
 
-      <div className="flex-1 min-w-0">
-        <Chat
-          generatedTitle={
-            activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-          }
-          conversationId={
-            activeConversationId && Number(activeConversationId) > 0
-              ? Number(activeConversationId)
-              : undefined
-          }
-          isLoadingAgents={isLoadingAgents}
-          selectedAgent={
-            workbenchState.config.agent_mounts.length === 1
-              ? selectedAgent
-              : null
-          }
-          modelSelectionScope={
-            workbenchState.config.agent_mounts.length === 1 ? "agent" : "tenant"
-          }
-          fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
-          selectedModelId={workbenchState.config.model_id?.toString()}
-          onModelChange={(id) => void handleModelChange(id)}
-          onAgentSelected={handleAgentSelectedFromLanding}
-          chatMode={chatMode}
-          onChatModeChange={handleChatModeChange}
-          isDictationConfigured={isDictationConfigured}
-          knowledgeScope={isCreating ? null : knowledgeScope}
-          knowledgePreview={isCreating ? null : knowledgePreview}
-          knowledgeCapabilities={isCreating ? null : knowledgeCapabilities}
-          onKnowledgeScopeChange={
-            isCreating ? undefined : handleKnowledgeScopeChange
-          }
-          runtimeMetadata={runtimeMetadata}
-          onRuntimeMetadataChange={handleRuntimeMetadataChange}
-          readOnly={!workbenchSendability.canSend}
-          readOnlyReason={workbenchSendability.reason}
-          workbenchResources={
-            isCreating
-              ? undefined
-              : {
-                  agentName: selectedAgent?.display_name || selectedAgent?.name,
-                  agents: workbenchState.config.agent_mounts.map((mount) => {
-                    const agent = agents.find(
-                      (item) => Number(item.id) === mount.agent_id
-                    );
-                    return {
-                      id: mount.agent_id,
-                      name:
-                        agent?.display_name ||
-                        agent?.name ||
-                        `#${mount.agent_id}`,
-                      remove: () => void removeMountedAgent(mount.agent_id),
-                    };
-                  }),
-                  onSelectAgent: () => setAgentPickerOpen(true),
-                  onRemoveAgent: () =>
-                    void changeAgentTopology(runtime, onBack).catch((error) =>
-                      message.error(error.message)
-                    ),
-                  skills: workbenchState.config.skill_mounts.map((mount) => ({
-                    id: mount.skill_id,
-                    name:
-                      workbenchState.skillNames[mount.skill_id] ||
-                      `#${mount.skill_id}`,
-                  })),
-                }
-          }
-          onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
-          onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
-          workbenchPresentation={{
-            mode: workbenchState.config.mode,
-            onExitCreation: () => void changeCreationMode("generic_chat"),
-            actions: (
-              <CreationActions
-                canCreateAgent={canAccessRoute("/agents")}
-                canCreateSkill={canAccessRoute("/skill-space")}
-                disabled={isThreadRunning}
-                onSelect={(mode) => void changeCreationMode(mode)}
-              />
-            ),
-          }}
-        />
+      <div className="flex min-h-0 flex-1 min-w-0 flex-col">
+        <div className="min-h-0 flex-1">
+          <RunMessageQueueContext.Provider value={runMessageQueue}>
+            <Chat
+              generatedTitle={
+                activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+              }
+              conversationId={
+                activeConversationId && Number(activeConversationId) > 0
+                  ? Number(activeConversationId)
+                  : undefined
+              }
+              isLoadingAgents={isLoadingAgents}
+              interactionContent={
+                <HumanInteractionCards controller={hitlController} />
+              }
+              selectedAgent={
+                workbenchState.config.agent_mounts.length === 1
+                  ? selectedAgent
+                  : null
+              }
+              modelSelectionScope={
+                workbenchState.config.agent_mounts.length === 1
+                  ? "agent"
+                  : "tenant"
+              }
+              fallbackAgentName={t(
+                "workbench.genericAgentName",
+                "智能体工作台"
+              )}
+              selectedModelId={workbenchState.config.model_id?.toString()}
+              onModelChange={(id) => void handleModelChange(id)}
+              onAgentSelected={handleAgentSelectedFromLanding}
+              chatMode={chatMode}
+              onChatModeChange={handleChatModeChange}
+              isDictationConfigured={isDictationConfigured}
+              knowledgeScope={isCreating ? null : knowledgeScope}
+              knowledgePreview={isCreating ? null : knowledgePreview}
+              knowledgeCapabilities={isCreating ? null : knowledgeCapabilities}
+              onKnowledgeScopeChange={
+                isCreating ? undefined : handleKnowledgeScopeChange
+              }
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={handleRuntimeMetadataChange}
+              readOnly={!workbenchSendability.canSend}
+              readOnlyReason={workbenchSendability.reason}
+              workbenchResources={
+                isCreating
+                  ? undefined
+                  : {
+                      agentName:
+                        selectedAgent?.display_name || selectedAgent?.name,
+                      agents: workbenchState.config.agent_mounts.map(
+                        (mount) => {
+                          const agent = agents.find(
+                            (item) => Number(item.id) === mount.agent_id
+                          );
+                          return {
+                            id: mount.agent_id,
+                            name:
+                              agent?.display_name ||
+                              agent?.name ||
+                              `#${mount.agent_id}`,
+                            remove: () =>
+                              void removeMountedAgent(mount.agent_id),
+                          };
+                        }
+                      ),
+                      onSelectAgent: () => setAgentPickerOpen(true),
+                      onRemoveAgent: () =>
+                        void changeAgentTopology(runtime, onBack).catch(
+                          (error) => message.error(error.message)
+                        ),
+                      skills: workbenchState.config.skill_mounts.map(
+                        (mount) => ({
+                          id: mount.skill_id,
+                          name:
+                            workbenchState.skillNames[mount.skill_id] ||
+                            `#${mount.skill_id}`,
+                        })
+                      ),
+                    }
+              }
+              onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
+              workbenchPresentation={{
+                mode: workbenchState.config.mode,
+                onExitCreation: () => void changeCreationMode("generic_chat"),
+                actions: (
+                  <CreationActions
+                    canCreateAgent={canAccessRoute("/agents")}
+                    canCreateSkill={canAccessRoute("/skill-space")}
+                    disabled={isThreadRunning}
+                    onSelect={(mode) => void changeCreationMode(mode)}
+                  />
+                ),
+              }}
+            />
+          </RunMessageQueueContext.Provider>
+        </div>
         <SkillPicker
           open={skillPickerOpen}
           selected={workbenchState.config.skill_mounts}
