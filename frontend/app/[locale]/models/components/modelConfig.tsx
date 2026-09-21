@@ -733,39 +733,10 @@ export const ModelConfigSection = forwardRef<
   };
 
   const verifyModels = async () => {
-    if (isVerifying || models.length === 0) return;
-    // Verify ALL models in the list (not just the default-model selection):
-    // mark every row as checking, probe in parallel, update rows as they land.
-    setIsVerifying(true);
-    try {
-      await Promise.all(
-        models.map(async (m) => {
-          if (!m.displayName) return;
-          updateModelStatus(m.displayName, m.type, MODEL_STATUS.CHECKING);
-          try {
-            const isConnected = await modelService.verifyCustomModel(
-              m.displayName,
-              m.type
-            );
-            updateModelStatus(
-              m.displayName,
-              m.type,
-              isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
-            );
-          } catch (error: any) {
-            log.error(
-              t("modelConfig.error.verifyCustomModel", {
-                model: m.displayName,
-              }),
-              error
-            );
-            updateModelStatus(m.displayName, m.type, MODEL_STATUS.UNAVAILABLE);
-          }
-        })
-      );
-    } finally {
-      setIsVerifying(false);
-    }
+    // v0 redesign: the button lives in the 默认配置 section, so it verifies
+    // only the models currently occupying default slots — not the whole
+    // library. Non-default models are checked per-row via the list action.
+    await verifyModelsInternal(models);
   };
 
   /* ------------------ Sync ModelEngine ------------------ */
