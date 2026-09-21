@@ -66,6 +66,7 @@ test("MCP repository grid uses the agent repository responsive capacity", async 
   assert.match(page, /const pageSize = columns \* rows;/);
   assert.match(page, /onPageSizeChange\(pageSize\)/);
   assert.match(page, /const gridHeight =/);
+  assert.match(page, /browser\.total > 0 \? PAGINATION_HEIGHT : 0/);
   assert.match(
     page,
     /<ResourceCardGrid[\s\S]*page=\{browser\.page\}[\s\S]*total=\{browser\.total\}[\s\S]*onPageChange=\{browser\.setPage\}[\s\S]*columns=\{columns\}[\s\S]*rows=\{rows\}[\s\S]*gridHeight=\{gridHeight\}/
@@ -82,6 +83,7 @@ test("my MCP grid uses the agent repository responsive capacity", async () => {
   assert.match(page, /const pageSize = columns \* rows;/);
   assert.match(page, /const itemsPerPage = Math\.max\(1, pageSize - 1\);/);
   assert.match(page, /const gridHeight =/);
+  assert.match(page, /filteredItems\.length > 0 \? PAGINATION_HEIGHT : 0/);
   assert.match(
     page,
     /<ResourceCardGrid[\s\S]*page=\{page\}[\s\S]*total=\{filteredItems\.length\}[\s\S]*onPageChange=\{setPage\}[\s\S]*columns=\{columns\}[\s\S]*rows=\{rows\}[\s\S]*gridHeight=\{gridHeight\}/
@@ -99,7 +101,7 @@ test("my MCP cards open on click and retain only the enabled action", async () =
   assert.match(card, /footerLayout="inline"/);
   assert.match(card, /meta=\{[\s\S]*createDate/);
   assert.match(card, /headerActions=\{/);
-  assert.match(card, /flex items-start gap-1/);
+  assert.match(card, /flex flex-col items-start gap-1/);
   assert.match(
     card,
     /className="h-8 px-3 text-xs font-medium text-primary !shadow-none hover:!bg-transparent hover:!text-primary\/80"/

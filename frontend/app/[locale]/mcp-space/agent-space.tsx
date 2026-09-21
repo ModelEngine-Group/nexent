@@ -119,8 +119,7 @@ export function McpSpace({
       ? undefined
       : Math.max(
           0,
-          availableGridHeight -
-            (browser.total > pageSize ? PAGINATION_HEIGHT : 0)
+          availableGridHeight - (browser.total > 0 ? PAGINATION_HEIGHT : 0)
         );
 
   const isInstalled = (service: CommunityMcpCard) => {

@@ -357,7 +357,8 @@ export function MyMcp({
       ? undefined
       : Math.max(
           0,
-          availableGridHeight - (totalPages > 1 ? PAGINATION_HEIGHT : 0)
+          availableGridHeight -
+            (filteredItems.length > 0 ? PAGINATION_HEIGHT : 0)
         );
 
   useEffect(() => {

@@ -70,6 +70,14 @@ test("agent repository displays up to twelve unified cards in four desktop colum
     /const columns = screens\.xxl\s*\? 4\s*:\s*screens\.xl\s*\? 3\s*:\s*screens\.lg \|\| screens\.md \|\| screens\.sm\s*\? 2/
   );
   assert.match(agentSpace, /gridHeight=\{/);
+  assert.match(
+    agentSpace,
+    /availableGridHeight - \(total > 0 \? PAGINATION_HEIGHT : 0\)/
+  );
+  assert.match(
+    mineAgent,
+    /availableGridHeight - \(total > 0 \? PAGINATION_HEIGHT : 0\)/
+  );
   assert.match(agentSpace, /descriptionLines=\{descriptionLines\}/);
   assert.match(agentSpace, /const pageBottomPadding = screens\.sm \? 40 : 32;/);
   assert.match(agentSpace, /viewportHeight - top - pageBottomPadding - 8/);

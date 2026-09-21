@@ -125,10 +125,7 @@ export function AgentSpace({ active }: { active: boolean }) {
   const gridHeight =
     availableGridHeight === null
       ? undefined
-      : Math.max(
-          0,
-          availableGridHeight - (total > pageSize ? PAGINATION_HEIGHT : 0)
-        );
+      : Math.max(0, availableGridHeight - (total > 0 ? PAGINATION_HEIGHT : 0));
   const cardHeight =
     gridHeight === undefined
       ? undefined
