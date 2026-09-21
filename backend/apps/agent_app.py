@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
+from nexent.core.concurrency import run_blocking
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID
@@ -33,13 +34,14 @@ from consts.exceptions import (
     AppException,
     UnauthorizedError,
     ValidationError,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
-from services.agent_service import (
+from management.services.agent.service import (
     get_agent_info_impl,
     get_agent_icon_impl,
-    get_creating_sub_agent_info_impl,
     update_agent_info_impl,
     upload_agent_icon_impl,
     delete_agent_impl,
@@ -58,6 +60,7 @@ from services.agent_service import (
     check_skill_conflicts_impl,
 )
 from services.prompt_service import generate_guardrail_rules_impl
+from services.human_interaction.models import InteractionError
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
@@ -84,6 +87,22 @@ from utils.auth_utils import (
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
 logger = logging.getLogger("agent_app")
+
+
+def _runtime_overload_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, RuntimeQueueTimeoutError):
+        code = "RUNTIME_QUEUE_TIMEOUT"
+        retry_after = exc.retry_after_seconds
+        message = "Agent runtime queue wait timed out."
+    else:
+        code = "RUNTIME_CAPACITY_FULL"
+        retry_after = 1
+        message = "Agent runtime is at capacity."
+    return JSONResponse(
+        status_code=HTTPStatus.TOO_MANY_REQUESTS,
+        content={"code": code, "message": message, "retryable": True},
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 @agent_config_router.get("/{agent_id}/knowledge-capabilities")
@@ -134,6 +153,8 @@ async def agent_run_api(
             authorization=authorization,
             resume=resume,
         )
+    except InteractionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except ValidationError as e:
@@ -141,6 +162,10 @@ async def agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -169,6 +194,8 @@ async def northbound_agent_run_api(
             tenant_id=tenant_id,
             skip_user_save=True,
         )
+    except InteractionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
@@ -184,6 +211,10 @@ async def northbound_agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
+    except AppException:
+        raise
     except Exception as exc:
         logger.error("Northbound agent run error: %s", exc)
         raise HTTPException(
@@ -246,13 +277,20 @@ async def nl2agent_run_api(
         ) from exc
 
 
-@agent_runtime_router.get("/stop/{conversation_id}")
-async def agent_stop_api(conversation_id: int, authorization: Optional[str] = Header(None)):
+@agent_runtime_router.get("/stop/{run_id}")
+async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None)):
     """
-    stop agent run and preprocess tasks for specified conversation_id
+    Stop an agent run by conversation ID or ephemeral debug run ID.
     """
-    user_id, _ = get_current_user_id(authorization)
-    return stop_agent_tasks(conversation_id, user_id)
+    user_id, tenant_id = get_current_user_id(authorization)
+    from consts.const import HITL_ENABLED
+    if HITL_ENABLED:
+        from services.human_interaction.application import get_service
+        service = get_service()
+        durable_id = service.repository.latest(tenant_id, user_id, int(run_id), active_only=True) if run_id.isdigit() else None
+        if durable_id:
+            service.control(durable_id, tenant_id, user_id, "terminate")
+    return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id)
 
 
 @agent_runtime_router.post(
@@ -265,8 +303,23 @@ async def northbound_agent_stop_api(
 ):
     """Stop a northbound agent run inside the runtime service."""
     try:
-        user_id, _ = verify_internal_runtime_jwt(authorization)
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+        from consts.const import HITL_ENABLED
+        if HITL_ENABLED:
+            from services.human_interaction.application import get_service
+            service = get_service()
+            durable_id = await run_blocking(
+                "hitl-service-repository-latest", service.repository.latest, tenant_id, user_id,
+                conversation_id, active_only=True, lane="control-io", owner=__name__,
+            )
+            if durable_id:
+                await run_blocking(
+                    "hitl-service-control", service.control, durable_id, tenant_id, user_id, "terminate",
+                    lane="control-io", owner=__name__,
+                )
         return stop_agent_tasks(conversation_id, user_id)
+    except InteractionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
@@ -318,19 +371,6 @@ async def get_agent_by_name_api(
         logger.error(f"Agent by name lookup error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent not found.")
-
-
-@agent_config_router.get("/get_creating_sub_agent_id")
-async def get_creating_sub_agent_info_api(authorization: Optional[str] = Header(None)):
-    """
-    Create a new sub agent, return agent_ID
-    """
-    try:
-        return await get_creating_sub_agent_info_impl(authorization)
-    except Exception as e:
-        logger.error(f"Agent create error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent create error.")
 
 
 @agent_config_router.post("/update")

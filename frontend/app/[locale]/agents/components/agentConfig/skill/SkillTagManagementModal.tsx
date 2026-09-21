@@ -116,7 +116,6 @@ export default function SkillTagManagementModal({
       open={open}
       onCancel={onClose}
       mask={{ closable: true }}
-      maskClosable
       footer={null}
       width={1000}
       zIndex={1100}

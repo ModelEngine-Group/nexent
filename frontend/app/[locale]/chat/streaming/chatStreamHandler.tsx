@@ -83,6 +83,8 @@ interface JsonData {
   last_unit_index?: number;
   replay_chunk_count?: number;
   conversation_id?: number;
+  attempt_id?: string;
+  phase?: "begin" | "rollback" | "commit";
 }
 
 // Reconstruct streaming state from persisted units (for tab-switch recovery)
@@ -129,6 +131,7 @@ const createNewStep = (
 
 type HistorySummaryPayload = {
   covered_through_message_id?: number;
+  status?: "compacting" | "accepted" | "idle";
 };
 
 export const upsertHistorySummaryInMessages = (
@@ -142,8 +145,42 @@ export const upsertHistorySummaryInMessages = (
     return messages;
   }
 
+  const withoutTransient = messages.map((message) => ({
+    ...message,
+    steps: (message.steps || []).filter(
+      (step) => step.id !== "history-summary-compacting"
+    ),
+  }));
+  if (payload.status === "compacting") {
+    let messageIndex = -1;
+    for (let index = withoutTransient.length - 1; index >= 0; index -= 1) {
+      if (withoutTransient[index].role === MESSAGE_ROLES.ASSISTANT) {
+        messageIndex = index;
+        break;
+      }
+    }
+    if (messageIndex < 0) return messages;
+    const updatedMessages = [...withoutTransient];
+    const targetMessage = { ...updatedMessages[messageIndex] };
+    targetMessage.steps = [
+      ...(targetMessage.steps || []),
+      createNewStep(
+        0,
+        0,
+        "history-summary-compacting",
+        "History Summary",
+        content,
+        chatConfig.messageTypes.HISTORY_SUMMARY
+      ),
+    ];
+    updatedMessages[messageIndex] = targetMessage;
+    return updatedMessages;
+  }
+
   const coverage = payload.covered_through_message_id;
-  if (typeof coverage !== "number") return messages;
+  if (payload.status !== "accepted" || typeof coverage !== "number") {
+    return withoutTransient;
+  }
 
   const messageIndex = messages.findIndex(
     (message) =>
@@ -154,7 +191,7 @@ export const upsertHistorySummaryInMessages = (
 
   const stepId = `history-summary-${coverage}`;
   const contentId = `${stepId}-content`;
-  const updatedMessages = [...messages];
+  const updatedMessages = [...withoutTransient];
   const targetMessage = { ...updatedMessages[messageIndex] };
   const steps = [...(targetMessage.steps || [])];
   const existingStepIndex = steps.findIndex((step) => step.id === stepId);
@@ -425,6 +462,10 @@ export const handleStreamResponse = async (
   let finalAnswer = "";
   let lastModelOutputIndex = -1;
   let lastContentType: string | null = null;
+  const attemptBlockCheckpoints = new Map<
+    string,
+    { originalLengths: Map<string, number>; createdIds: Set<string> }
+  >();
 
   if (resumeConfig) {
     const recovered = reconstructFromStreamingMessage(
@@ -512,6 +553,42 @@ export const handleStreamResponse = async (
                 // This chunk was already processed before disconnect (unit_index <= last processed index)
                 continue;
               }
+            }
+
+            if (
+              jsonData.type === "model_attempt_control" &&
+              jsonData.attempt_id &&
+              jsonData.phase
+            ) {
+              if (jsonData.phase === "begin") {
+                attemptBlockCheckpoints.set(jsonData.attempt_id, {
+                  originalLengths: new Map(),
+                  createdIds: new Set(),
+                });
+              } else if (jsonData.phase === "rollback") {
+                const checkpoints = attemptBlockCheckpoints.get(
+                  jsonData.attempt_id
+                );
+                currentStep.contents = currentStep.contents.filter((item) => {
+                  if (checkpoints?.createdIds.has(item.id)) {
+                    return false;
+                  }
+                  const originalLength = checkpoints?.originalLengths.get(
+                    item.id
+                  );
+                  if (originalLength !== undefined) {
+                    item.content = item.content.slice(0, originalLength);
+                  }
+                  return true;
+                });
+                attemptBlockCheckpoints.delete(jsonData.attempt_id);
+                lastModelOutputIndex = currentStep.contents.length - 1;
+                lastContentType =
+                  currentStep.contents[lastModelOutputIndex]?.type ?? null;
+              } else {
+                attemptBlockCheckpoints.delete(jsonData.attempt_id);
+              }
+              continue;
             }
 
             if (jsonData.type && jsonData.content) {
@@ -651,21 +728,40 @@ export const handleStreamResponse = async (
                     lastContentBlock && lastContentBlock.type === messageType;
 
                   if (shouldAppend) {
+                    if (jsonData.attempt_id) {
+                      const checkpoints = attemptBlockCheckpoints.get(
+                        jsonData.attempt_id
+                      );
+                      if (
+                        !checkpoints?.originalLengths.has(lastContentBlock.id)
+                      ) {
+                        checkpoints?.originalLengths.set(
+                          lastContentBlock.id,
+                          lastContentBlock.content.length
+                        );
+                      }
+                    }
                     // Same type - append to existing block
                     lastContentBlock.content += messageContent;
                   } else {
                     // Different type or no existing block - create new content block
                     // This ensures thinking and deep_thinking are shown as separate nodes
+                    const blockId = `model-${Date.now()}-${Math.random()
+                      .toString(36)
+                      .substring(2, 7)}`;
                     currentStep.contents.push({
-                      id: `model-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 7)}`,
+                      id: blockId,
                       type: messageType,
                       subType,
                       content: messageContent,
                       expanded: true,
                       timestamp: Date.now(),
                     });
+                    if (jsonData.attempt_id) {
+                      attemptBlockCheckpoints
+                        .get(jsonData.attempt_id)
+                        ?.createdIds.add(blockId);
+                    }
                     lastModelOutputIndex = currentStep.contents.length - 1;
                   }
 
@@ -706,19 +802,35 @@ export const handleStreamResponse = async (
                       lastModelOutputIndex >= 0 &&
                       currentStep.contents[lastModelOutputIndex]
                     ) {
-                      currentStep.contents[lastModelOutputIndex].content +=
-                        processedContent;
+                      const codeBlock =
+                        currentStep.contents[lastModelOutputIndex];
+                      if (jsonData.attempt_id) {
+                        const checkpoints = attemptBlockCheckpoints.get(
+                          jsonData.attempt_id
+                        );
+                        if (!checkpoints?.originalLengths.has(codeBlock.id)) {
+                          checkpoints?.originalLengths.set(
+                            codeBlock.id,
+                            codeBlock.content.length
+                          );
+                        }
+                      }
+                      codeBlock.content += processedContent;
                     } else {
                       // Create new main content block for code
+                      const blockId = `model-code-${crypto.randomUUID()}`;
                       currentStep.contents.push({
-                        id: `model-code-${Date.now()}-${Math.random()
-                          .toString(36)
-                          .substring(2, 7)}`,
+                        id: blockId,
                         type: chatConfig.messageTypes.MODEL_OUTPUT_CODE,
                         content: processedContent,
                         expanded: true,
                         timestamp: Date.now(),
                       });
+                      if (jsonData.attempt_id) {
+                        attemptBlockCheckpoints
+                          .get(jsonData.attempt_id)
+                          ?.createdIds.add(blockId);
+                      }
                       lastModelOutputIndex = currentStep.contents.length - 1;
                     }
 
@@ -734,8 +846,9 @@ export const handleStreamResponse = async (
                     }
 
                     // If it does not exist, add one
+                    const blockId = `generating-code-${stepIdCounter.current}`;
                     const newGeneratingItem = {
-                      id: `generating-code-${stepIdCounter.current}`,
+                      id: blockId,
                       type: chatConfig.messageTypes.GENERATING_CODE,
                       content: t("chatStreamHandler.callingTool"),
                       expanded: true,
@@ -744,6 +857,11 @@ export const handleStreamResponse = async (
                     };
 
                     currentStep.contents.push(newGeneratingItem);
+                    if (jsonData.attempt_id) {
+                      attemptBlockCheckpoints
+                        .get(jsonData.attempt_id)
+                        ?.createdIds.add(blockId);
+                    }
 
                     // Mark as code generation type
                     lastContentType = chatConfig.contentTypes.GENERATING_CODE;

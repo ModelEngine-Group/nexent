@@ -24,8 +24,6 @@ export const CONFIG_QUERY_KEY = ["config"];
 
 const defaultConfig: GlobalConfig = {
   app: {
-    appName: "",
-    appDescription: "",
     iconType: ICON_TYPES.PRESET,
     iconKey: "search",
     customIconUrl: "",
@@ -175,8 +173,6 @@ function transformBackendToFrontend(backendConfig: any): GlobalConfig {
 
   const app: AppConfig = backendConfig.app
     ? {
-        appName: backendConfig.app.name || "",
-        appDescription: backendConfig.app.description || "",
         iconType:
           (backendConfig.app.icon?.type as "preset" | "custom") || "preset",
         iconKey: iconKey,
@@ -226,7 +222,10 @@ function loadConfigFromStorage(): GlobalConfig | null {
 
     if (storedAppConfig) {
       try {
-        mergedConfig.app = JSON.parse(storedAppConfig);
+        const stored = JSON.parse(storedAppConfig);
+        delete stored.appName;
+        delete stored.appDescription;
+        mergedConfig.app = stored;
       } catch (error) {
         log.error("Failed to parse app config:", error);
       }
@@ -260,7 +259,10 @@ function saveConfigToStorage(config: GlobalConfig): void {
 
   try {
     if (config.app) {
-      localStorage.setItem(APP_CONFIG_KEY, JSON.stringify(config.app));
+      const app = { ...config.app } as Record<string, unknown>;
+      delete app.appName;
+      delete app.appDescription;
+      localStorage.setItem(APP_CONFIG_KEY, JSON.stringify(app));
     }
     if (config.models) {
       localStorage.setItem(MODEL_CONFIG_KEY, JSON.stringify(config.models));

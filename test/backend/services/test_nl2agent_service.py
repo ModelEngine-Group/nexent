@@ -1,10 +1,16 @@
 import asyncio
 import json
+import sys
+import types
 from threading import Event
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nexent.core.agents.context import ContextItemInput, ContextItemType
+from nexent.core.models.capacity_budget import (
+    ContextBudgetSnapshot,
+    compute_context_budget_fingerprint,
+)
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
@@ -43,6 +49,45 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
 from utils.http_client_utils import create_httpx_client
 
 
+def _context_budget_snapshot() -> ContextBudgetSnapshot:
+    values = {
+        "resolver_version": "2.0.0",
+        "w1_fingerprint": "capacity-fingerprint",
+        "provider": "openai",
+        "model_name": "gpt-4o",
+        "requested_output_tokens": 2768,
+        "output_reserve_source": "model_default",
+        "uncertainty_reserve_tokens": 0,
+        "uncertainty_reserve_basis": "none",
+        "approved_profile_reserve_tokens": None,
+        "effective_input_limit_tokens": 30000,
+        "compaction_trigger_ratio": 0.8,
+        "compaction_trigger_ratio_source": "code_default",
+        "compaction_trigger_threshold_tokens": 24000,
+        "compaction_target_ratio": 0.6,
+        "compaction_target_ratio_source": "code_default",
+        "compaction_target_tokens": 18000,
+        "field_sources": {},
+        "warnings": [],
+    }
+    return ContextBudgetSnapshot(
+        **values,
+        fingerprint=compute_context_budget_fingerprint(**values),
+    )
+
+
+@pytest.fixture
+def skill_repository(monkeypatch):
+    """Provide the listing boundary without initializing repository mutations."""
+    import services
+
+    module = types.ModuleType("services.skill_repository_service")
+    module.list_skill_repository_listings_impl = MagicMock()
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(services, "skill_repository_service", module, raising=False)
+    return module
+
+
 def _basic_draft_fields(**overrides):
     values = {
         "description": "Collect and summarize reliable information.",
@@ -78,7 +123,7 @@ def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     observer.add_message("nl2agent", ProcessType.FINAL_ANSWER, "<user_break>")
     observer.add_message(
         "nl2agent",
-        ProcessType.ERROR,
+        ProcessType.WARNING,
         "Agent execution interrupted by external stop signal",
     )
     observer.add_message("nl2agent", ProcessType.ERROR, "real runtime failure")
@@ -145,6 +190,106 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
         tenant_id="tenant-a",
         fields={"duty_prompt": "Updated duty", "example_questions": []},
     )
+
+
+def test_update_agent_draft_initializes_generated_name_once(mocker):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[
+            {
+                "agent_id": 22,
+                "tenant_id": "tenant-a",
+                "version_no": 0,
+                "delete_flag": "N",
+                "created_by": "user-a",
+                "name": None,
+                "display_name": "Research Helper",
+            }
+        ],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=[{"agent_id": 22, "name": None}],
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields",
+        return_value=1,
+    )
+
+    result = save_agent_draft_fields_impl(
+        agent_id=22,
+        fields=AgentDraftFields(name="research_assistant"),
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["updated_fields"] == ["name"]
+    update_fields.assert_called_once_with(
+        agent_id=22,
+        tenant_id="tenant-a",
+        fields={"name": "research_assistant"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("draft_name", "existing_agents", "expected_code", "retryable"),
+    [
+        ("existing_assistant", [], "agent_name_already_set", False),
+        (
+            None,
+            [{"agent_id": 99, "name": "research_assistant"}],
+            "agent_name_duplicate",
+            True,
+        ),
+    ],
+)
+def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
+    mocker,
+    draft_name,
+    existing_agents,
+    expected_code,
+    retryable,
+):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[
+            {
+                "agent_id": 22,
+                "tenant_id": "tenant-a",
+                "version_no": 0,
+                "delete_flag": "N",
+                "created_by": "user-a",
+                "name": draft_name,
+            }
+        ],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=existing_agents,
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields"
+    )
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            22,
+            AgentDraftFields(name="research_assistant"),
+            "tenant-a",
+            "user-a",
+        )
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.retryable is retryable
+    update_fields.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -300,6 +445,15 @@ def test_agent_draft_update_rejects_unexpected_row_count(mocker):
 def test_agent_draft_fields_reject_empty_null_and_extra_patches(fields):
     with pytest.raises(ValidationError):
         AgentDraftFields.model_validate(fields)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["9invalid_assistant", "invalid-name_assistant", "中文助手", "researcher"],
+)
+def test_agent_draft_fields_reject_invalid_generated_name(name):
+    with pytest.raises(ValidationError):
+        AgentDraftFields(name=name)
 
 
 def test_search_filters_catalog_and_returns_safe_metadata(mocker):
@@ -555,7 +709,7 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
         ),
     )
     mocker.patch(
-        "services.skill_service.SkillService.list_visible_skills",
+        "management.services.skill.service.SkillService.list_visible_skills",
         return_value=[
             {
                 "skill_id": 11,
@@ -567,6 +721,10 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
             }
         ],
     )
+    mocker.patch(
+        "services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE",
+        False,
+    )
 
     catalog = await _load_installed_resource_catalog(
         tenant_id="tenant-a",
@@ -575,7 +733,7 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
     catalog_by_name = {item["name"]: item for item in catalog}
     assert "wrapper" in catalog_by_name
     assert "knowledge_base_search" in catalog_by_name
-    assert "aidp_search" in catalog_by_name
+    assert "aidp_search" not in catalog_by_name
     assert catalog_by_name["knowledge_base_search"]["config"] == [
         {
             "name": "top_k",
@@ -586,8 +744,6 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
             "description_zh": "",
         }
     ]
-    assert catalog_by_name["aidp_search"]["config"] == []
-
     result = await search_installed_resources_impl(
         requirements=[
             ResourceRequirement(
@@ -625,6 +781,58 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
     )
     assert knowledge_result.candidates[0].candidate_ref == "tool:12"
     assert knowledge_result.uncovered_requirement_ids == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enable_aidp_knowledge", "expected_knowledge_tools"),
+    [
+        (True, {"aidp_search"}),
+        (False, {"knowledge_base_search", "ind_aidp_search"}),
+    ],
+)
+async def test_installed_resource_catalog_filters_knowledge_tools_by_deployment(
+    mocker,
+    enable_aidp_knowledge,
+    expected_knowledge_tools,
+):
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(
+            return_value=[
+                {
+                    "tool_id": tool_id,
+                    "name": name,
+                    "description": "Knowledge search",
+                    "source": "local",
+                    "is_available": True,
+                }
+                for tool_id, name in enumerate(
+                    (
+                        "knowledge_base_search",
+                        "ind_aidp_search",
+                        "aidp_search",
+                    ),
+                    start=1,
+                )
+            ]
+        ),
+    )
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        return_value=[],
+    )
+    mocker.patch(
+        "services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE",
+        enable_aidp_knowledge,
+    )
+
+    catalog = await _load_installed_resource_catalog(
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert {item["name"] for item in catalog} == expected_knowledge_tools
 
 
 def test_resource_config_normalization_is_frontend_safe():
@@ -690,10 +898,10 @@ def test_resource_config_normalization_is_frontend_safe():
 
 @pytest.mark.asyncio
 async def test_search_internal_uninstalled_resources_aggregates_sources_and_excludes_refs(
-    mocker,
+    mocker, skill_repository,
 ):
     mocker.patch(
-        "services.skill_service.get_official_skills_with_status",
+        "management.services.skill.service.get_official_skills_with_status",
         return_value=[
             {
                 "skill_id": 0,
@@ -870,9 +1078,9 @@ def test_installation_snapshot_redacts_nested_secret_shapes():
 
 
 @pytest.mark.asyncio
-async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker):
+async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker, skill_repository):
     mocker.patch(
-        "services.skill_service.get_official_skills_with_status",
+        "management.services.skill.service.get_official_skills_with_status",
         return_value=[
             {
                 "name": "PDF report",
@@ -1352,7 +1560,7 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
     mocker.patch(
         "services.nl2agent_service._load_verified_nl2agent_state",
         new_callable=AsyncMock,
-        return_value=({"description": " "}, []),
+        return_value=({"name": "draft_assistant", "description": " "}, []),
     )
 
     with pytest.raises(Nl2AgentCompletionError) as exc_info:
@@ -1367,6 +1575,25 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
 
 
 @pytest.mark.asyncio
+async def test_validate_agent_generation_complete_requires_generated_name(mocker):
+    mocker.patch(
+        "services.nl2agent_service._load_verified_nl2agent_state",
+        new_callable=AsyncMock,
+        return_value=({"display_name": "Draft", "description": "Ready"}, []),
+    )
+
+    with pytest.raises(Nl2AgentCompletionError) as exc_info:
+        await validate_agent_generation_complete_impl(
+            agent_id=42,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    assert exc_info.value.code == "draft_fields_incomplete"
+    assert exc_info.value.failed_fields == ["name"]
+
+
+@pytest.mark.asyncio
 async def test_build_run_info_is_ephemeral(mocker):
     default_model = {
         "model_factory": "openai",
@@ -1375,10 +1602,7 @@ async def test_build_run_info_is_ephemeral(mocker):
     }
     capacity_snapshot = {"capacity_fingerprint": "capacity-fingerprint"}
     resolved_capacity_snapshot = MagicMock(context_window_tokens=32768)
-    safe_input_budget_snapshot = {
-        "soft_input_budget_tokens": 24000,
-        "hard_input_budget_tokens": 30000,
-    }
+    context_budget_snapshot = _context_budget_snapshot()
     join_query = mocker.patch(
         "services.nl2agent_service.join_minio_file_description_to_query",
         new_callable=AsyncMock,
@@ -1397,9 +1621,9 @@ async def test_build_run_info_is_ephemeral(mocker):
         "services.nl2agent_service._resolve_input_budget",
         return_value=(32768, capacity_snapshot, resolved_capacity_snapshot),
     )
-    resolve_safe_input_budget = mocker.patch(
-        "services.nl2agent_service._resolve_safe_input_budget",
-        return_value=safe_input_budget_snapshot,
+    resolve_context_budget = mocker.patch(
+        "services.nl2agent_service._resolve_context_budget",
+        return_value=context_budget_snapshot,
     )
     mocker.patch(
         "services.nl2agent_service.LOCAL_MCP_SERVER",
@@ -1445,17 +1669,15 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.query == "final query"
     assert run_info.agent_config.name == "__nl2agent_runtime__"
     assert run_info.agent_config.context_manager_config.token_threshold == 24000
-    assert (
-        run_info.agent_config.context_manager_config.hard_input_budget_tokens
-        == 30000
-    )
+    assert run_info.agent_config.context_manager_config.effective_input_limit_tokens == 30000
+    assert run_info.agent_config.context_manager_config.compaction_target_tokens == 18000
     assert run_info.agent_config.capacity_snapshot == capacity_snapshot
     assert (
-        run_info.agent_config.safe_input_budget_snapshot
-        == safe_input_budget_snapshot
+        run_info.agent_config.context_budget_snapshot
+        == context_budget_snapshot
     )
     assert run_info.capacity_snapshot == capacity_snapshot
-    assert run_info.safe_input_budget_snapshot == safe_input_budget_snapshot
+    assert run_info.context_budget_snapshot == context_budget_snapshot
     assert run_info.history[0].content == (
         "Build an agent that summarizes weather risks."
     )
@@ -1503,7 +1725,7 @@ async def test_build_run_info_is_ephemeral(mocker):
         tenant_id="tenant-a",
     )
     resolve_input_budget.assert_called_once_with(default_model)
-    resolve_safe_input_budget.assert_called_once_with(
+    resolve_context_budget.assert_called_once_with(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id="tenant-a",
         agent_requested_output_tokens=None,
@@ -1633,7 +1855,7 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
         return_value=(8192, capacity_snapshot, None),
     )
     mocker.patch(
-        "services.nl2agent_service._resolve_safe_input_budget",
+        "services.nl2agent_service._resolve_context_budget",
         return_value=None,
     )
     mocker.patch(
@@ -1666,8 +1888,9 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
     context_config = run_info.agent_config.context_manager_config
     assert context_config.token_threshold == 8192
     assert context_config.context_window_tokens == 8192
-    assert context_config.soft_input_budget_tokens == 0
-    assert context_config.hard_input_budget_tokens == 0
+    assert context_config.compaction_trigger_threshold_tokens == 0
+    assert context_config.effective_input_limit_tokens == 0
+    assert context_config.compaction_target_tokens == 0
     assert run_info.model_config_list == model_configs
     assert run_info.history == []
     assert len(run_info.context_input.items) == 2
@@ -1697,8 +1920,9 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def fake_agent_run(received_run_info):
+    async def fake_agent_run(received_run_info, *, thread_manager):
         assert received_run_info is run_info
+        assert thread_manager is not None
         yield json.dumps({"type": "tool", "content": "call"})
         yield json.dumps(
             {
@@ -1788,7 +2012,8 @@ async def test_create_stream_yields_process_chunks_without_waiting_for_later_out
     ]
     release_next = [asyncio.Event() for _ in process_chunks]
 
-    async def gated_agent_run(_run_info):
+    async def gated_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         for payload, gate in zip(process_chunks, release_next, strict=True):
             yield json.dumps(payload)
             await gate.wait()
@@ -1831,7 +2056,8 @@ async def test_create_stream_preserves_final_answers_without_fallback(mocker, co
         return_value=run_info,
     )
 
-    async def final_answer_agent_run(_run_info):
+    async def final_answer_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         yield json.dumps({"type": "final_answer", "content": content})
 
     mocker.patch(
@@ -1864,7 +2090,8 @@ async def test_create_stream_ends_without_synthesizing_nl2a_fallback(mocker):
         return_value=run_info,
     )
 
-    async def no_action_agent_run(_run_info):
+    async def no_action_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         yield json.dumps({"type": "model_output_thinking", "content": "reason"})
 
     mocker.patch(
@@ -1895,7 +2122,8 @@ async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def failing_agent_run(_run_info):
+    async def failing_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         if False:
             yield "unreachable"
         raise RuntimeError("private provider credentials")
@@ -1934,7 +2162,8 @@ async def test_create_stream_propagates_cancellation_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def cancelled_agent_run(_run_info):
+    async def cancelled_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         if False:
             yield "unreachable"
         raise asyncio.CancelledError

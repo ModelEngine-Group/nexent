@@ -34,8 +34,10 @@ COLUMN IF NOT EXISTS`, and conflict-safe inserts where possible.
 
 Historical migrations through v2.4.0 are consolidated by minor version in
 `v2.2_merged_migrations.sql`, `v2.3_merged_migrations.sql`, and
-`v2.4_merged_migrations.sql`. Newer migrations remain separate until their
-minor-version history is consolidated.
+`v2.4_merged_migrations.sql`, and migrations since v2.4.0 are consolidated in
+`v2.5.0_merged_migrations.sql` and `v2.6.0_merged_migrations.sql` (which merges
+all migrations applied after the v2.5.1 release, through v2.6.0). Newer
+migrations remain separate until their minor-version history is consolidated.
 
 Important: do NOT modify a `*_merged_migrations.sql` file after it has been
 deployed. Because it bundles many historical migrations, even a comment-only

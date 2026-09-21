@@ -47,16 +47,36 @@ from consts.exceptions import AppException
 
 from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
+from database.oauth_account_db import list_oauth_accounts_by_user_id
 from database.group_db import query_group_ids_by_user
 from database.client import as_dict, get_db_session
 from database.db_models import RolePermission
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
-from services.skill_service import init_skill_list_for_tenant
+from management.services.skill.service import init_skill_list_for_tenant
 
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
+
+
+def get_provider_username(user_id: str, provider: str) -> Optional[str]:
+    """Return a non-empty username stored for a linked authentication provider."""
+    try:
+        accounts = list_oauth_accounts_by_user_id(user_id)
+    except Exception as e:
+        logging.warning(
+            "Failed to load %s username for user %s: %s", provider, user_id, e
+        )
+        return None
+
+    for account in accounts:
+        if account.get("provider") != provider:
+            continue
+        username = str(account.get("provider_username") or "").strip()
+        if username:
+            return username
+    return None
 
 
 def set_auth_token_to_client(client: Client, token: str) -> None:

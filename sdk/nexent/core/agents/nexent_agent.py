@@ -21,12 +21,13 @@ from smolagents.tools import Tool
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 from ..models.openai_llm import OpenAIModel
+from ..model_errors import ModelInvocationTerminalError
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
-from .tool_user_context import apply_user_context_to_mcp_tool
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
+from .tool_user_context import apply_user_context_to_mcp_tool
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
@@ -53,6 +54,17 @@ def get_local_python_authorized_imports() -> List[str]:
 
 
 logger = logging.getLogger(__name__)
+
+_WORKSPACE_UPLOAD_EXCLUDED_DIRS = {
+    ".cache",
+    ".npm",
+    ".parcel-cache",
+    ".pnpm-store",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
 
 
 def cleanup_run_workspace(
@@ -220,6 +232,7 @@ class NexentAgent:
                  workspace_path=None,
                  workspace_run_id=None,
                  minio_files=None,
+                 cancellation_scope=None,
                  user_context=None):
         """
         Initialize the NexentAgent factory.
@@ -240,6 +253,7 @@ class NexentAgent:
             workspace_path: Run-scoped host workspace path.
             workspace_run_id: Opaque run id used to validate cleanup scope.
             minio_files: Authorized files attached to the current request.
+            cancellation_scope: Optional run-scoped cancellation registry.
             user_context: Optional caller user context (tenant/user/groups)
                 passed through to tools for tool-side authorization.
         """
@@ -249,6 +263,7 @@ class NexentAgent:
         self.observer = observer
         self.model_config_list = model_config_list
         self.stop_event = stop_event
+        self.cancellation_scope = cancellation_scope
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
@@ -263,6 +278,7 @@ class NexentAgent:
         self._workspace_uploads: List[Dict[str, Any]] = []
         self._workspace_uploaded_paths: set[str] = set()
         self._sandbox_executors: List[Any] = []
+        self._sandbox_skill_runners: List[Any] = []
 
         self.agent = None
 
@@ -276,7 +292,7 @@ class NexentAgent:
         )
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
-        model = OpenAIModel(
+        model_kwargs = dict(
             observer=self.observer,
             model_id=model_config.model_name,
             api_key=model_config.api_key,
@@ -291,6 +307,16 @@ class NexentAgent:
             timeout_seconds=model_config.timeout_seconds,
             prompt_cache=model_config.prompt_cache,
         )
+        if self.cancellation_scope is not None:
+            model_kwargs["cancellation_scope"] = self.cancellation_scope
+        if model_config.concurrency_limit is not None:
+            model_kwargs["concurrency_limit"] = model_config.concurrency_limit
+            model_kwargs["concurrency_key"] = (
+                str(self.tenant_id or "default"),
+                str(model_config.model_factory or "unknown"),
+                str(model_config.model_name),
+            )
+        model = OpenAIModel(**model_kwargs)
         model.stop_event = self.stop_event
         return model
 
@@ -524,6 +550,7 @@ class NexentAgent:
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 observer=self.observer,
+                authorized_skill_names=params.get("authorized_skill_names"),
             )
             if params.get("workspace_path"):
                 kwargs["workspace_path"] = params["workspace_path"]
@@ -686,9 +713,9 @@ class NexentAgent:
 
         try:
             model = self.create_model(agent_config.model_name)
-            model.safe_input_budget_snapshot = getattr(
+            model.context_budget_snapshot = getattr(
                 agent_config,
-                "safe_input_budget_snapshot",
+                "context_budget_snapshot",
                 None,
             )
             model.capacity_snapshot = getattr(
@@ -738,6 +765,7 @@ class NexentAgent:
                             agent_info=a2a_agent_info,
                             stop_event=self.stop_event,
                             observer=self.observer,
+                            cancellation_scope=self.cancellation_scope,
                             user_context=self.user_context,
                         )
                         managed_agents_list.append(
@@ -777,7 +805,7 @@ class NexentAgent:
             # nested execution deadlocks; session containers can still be shared.
             python_executor = None
             if self.sandbox_config is not None:
-                from .sandbox import build_python_executor, SandboxLevel
+                from .sandbox import SandboxLevel, build_python_executor
                 has_managed = bool(
                     agent_config.managed_agents
                     or getattr(agent_config, "external_a2a_agents", [])
@@ -793,6 +821,7 @@ class NexentAgent:
                     session_container_group=_sandbox_tree_context.get(
                         "session_container_group"
                     ),
+                    cancellation_scope=self.cancellation_scope,
                 )
                 session_container_group = None
                 if (
@@ -814,6 +843,30 @@ class NexentAgent:
                             "Agent tree received multiple session sandbox containers"
                         )
                 self._sandbox_executors.append(python_executor)
+                if self.sandbox_config.level != SandboxLevel.LOCAL:
+                    from .sandbox import SandboxSkillScriptRunner
+
+                    configured_timeout = getattr(self.sandbox_config, "timeout_seconds", None)
+                    skill_timeout = (
+                        max(1, int(configured_timeout))
+                        if isinstance(configured_timeout, (int, float))
+                        and not isinstance(configured_timeout, bool)
+                        else 300
+                    )
+                    script_runner = SandboxSkillScriptRunner(
+                        python_executor,
+                        timeout_seconds=skill_timeout,
+                        workspace_path=self.workspace_path,
+                        network_enabled=not self.sandbox_config.network_disabled,
+                    )
+                    for tool in tool_list:
+                        bind_backend = getattr(tool, "bind_execution_backend", None)
+                        if callable(bind_backend) and _tool_name(tool) == "run_skill_script":
+                            bind_backend(
+                                script_runner,
+                                on_complete=lambda _result: self._pull_file_workspace_from_sandbox(),
+                            )
+                    self._sandbox_skill_runners.append(script_runner)
                 # Eager warm-up for remote executors (skip for LOCAL which is instant).
                 if self.sandbox_config.level != SandboxLevel.LOCAL:
                     try:
@@ -866,6 +919,7 @@ class NexentAgent:
                 user_id=self.user_id,
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
+                output_protocol=getattr(agent_config, "output_protocol", "code_action"),
                 workspace_path=self.workspace_path,
             )
             agent.stop_event = self.stop_event
@@ -1036,13 +1090,13 @@ class NexentAgent:
 
                         token_threshold = None
                         context_window_tokens = None
-                        hard_input_budget_tokens = None
+                        effective_input_limit_tokens = None
                         context_processing_mode = None
                         context_runtime = getattr(self.agent, "context_runtime", None)
                         if context_runtime is not None:
                             token_threshold = context_runtime.token_threshold
                             context_window_tokens = context_runtime.context_window_tokens
-                            hard_input_budget_tokens = context_runtime.hard_input_budget_tokens
+                            effective_input_limit_tokens = context_runtime.effective_input_limit_tokens
                             context_processing_mode = context_runtime.processing_mode
 
                         token_data = {
@@ -1054,7 +1108,7 @@ class NexentAgent:
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
                             "context_window_tokens": context_window_tokens,
-                            "hard_input_budget_tokens": hard_input_budget_tokens,
+                            "effective_input_limit_tokens": effective_input_limit_tokens,
                             "context_processing_mode": context_processing_mode,
                             "output_finish_reason": getattr(
                                 getattr(self.agent, "model", None),
@@ -1097,8 +1151,16 @@ class NexentAgent:
                             })
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
-                        if hasattr(step_log, "error") and step_log.error is not None:
-                            observer.add_message("", ProcessType.ERROR, str(step_log.error))
+                        if (
+                            hasattr(step_log, "error")
+                            and step_log.error is not None
+                            and not getattr(step_log, "_suppress_user_error", False)
+                        ):
+                            # Action-step failures are observations in the ReAct loop:
+                            # the model receives them and can repair/retry on the next
+                            # step. Surface them as warnings so the UI does not imply
+                            # that the whole run has already failed.
+                            observer.add_message("", ProcessType.WARNING, str(step_log.error))
 
                     if step_log is None:
                         raise ValueError("Agent run produced no output")
@@ -1126,8 +1188,17 @@ class NexentAgent:
 
                     # Check if we need to stop from external stop_event
                     if self.agent.stop_event.is_set():
-                        observer.add_message(self.agent.agent_name, ProcessType.ERROR,
+                        observer.add_message(self.agent.agent_name, ProcessType.WARNING,
                                              "Agent execution interrupted by external stop signal")
+                except ModelInvocationTerminalError as e:
+                    observer.add_message(
+                        agent_name=self.agent.agent_name,
+                        process_type=ProcessType.ERROR,
+                        content=e.safe_message(getattr(observer, "lang", "en")),
+                        error_code=e.error_code.value,
+                        retryable=False,
+                    )
+                    raise
                 except Exception as e:
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
@@ -1189,6 +1260,18 @@ class NexentAgent:
             "The code executor already runs in that outputs directory. Use bare relative "
             "paths such as 'report.pdf', not 'outputs/report.pdf', to avoid creating an "
             "outputs/outputs directory.\n"
+            "Exception: run_skill_script(source='workspace') resolves script_path from the "
+            "run workspace root. If code writes a generated script as bare 'build.js', call "
+            "run_skill_script with script_path='outputs/build.js'. The generated script itself "
+            "still writes output artifacts with bare filenames because its CWD is outputs.\n"
+            "Direct subprocess, os.system, and shell calls for system commands are blocked by "
+            "the code executor. Use run_skill_script with a skill-bundled wrapper, or use a "
+            "shell-free Python/Node.js API instead. When sandbox networking is enabled, only a "
+            "shell-free argv call to sys.executable -m pip install is permitted for dependency "
+            "installation.\n"
+            "For skill-creator output packages, create the new skill under outputs/<new-skill> "
+            "with normal code-executor file APIs; write_skill_file edits installed tenant skills "
+            "and does not create files in this run workspace.\n"
             "Files created there are uploaded to MinIO automatically when the run finishes."
         )
         if file_lines:
@@ -1319,7 +1402,7 @@ class NexentAgent:
 
     @staticmethod
     def _grant_sandbox_output_access(container: Any, workspace: Path) -> None:
-        """Allow the sandbox user to read and write the exact run workspace."""
+        """Allow sandbox traversal of the user directory and writes in the run workspace."""
         gid_result = container.exec_run(["id", "-g"])
         gid_exit_code = getattr(gid_result, "exit_code", None)
         gid_output = getattr(gid_result, "output", b"")
@@ -1333,7 +1416,10 @@ class NexentAgent:
             raise RuntimeError("Sandbox user returned an invalid group ID")
 
         workspace_dir = str(workspace)
+        workspace_parent_dir = str(workspace.parent)
         commands = (
+            ["chgrp", sandbox_gid, workspace_parent_dir],
+            ["chmod", "g+xs", workspace_parent_dir],
             ["chgrp", "-R", sandbox_gid, workspace_dir],
             ["chmod", "-R", "g+rwX", workspace_dir],
             ["find", workspace_dir, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"],
@@ -1394,7 +1480,9 @@ class NexentAgent:
             if not path.is_file():
                 continue
             relative = path.relative_to(workspace)
-            if relative.parts and relative.parts[0] == "inputs":
+            if relative.parts and relative.parts[0] in {"inputs", "skills"}:
+                continue
+            if any(part in _WORKSPACE_UPLOAD_EXCLUDED_DIRS for part in relative.parts[:-1]):
                 continue
             normalized = os.path.normcase(os.path.abspath(str(path)))
             if normalized in uploaded_paths:
@@ -1403,7 +1491,11 @@ class NexentAgent:
                 upload_tool.forward(str(path), relative.as_posix())
             except Exception as exc:
                 logger.error("Failed to upload workspace output %s: %s", path, exc)
-                self.observer.add_message("", ProcessType.ERROR, f"Failed to upload output file {relative}: {exc}")
+                self.observer.add_message(
+                    "",
+                    ProcessType.WARNING,
+                    f"Failed to upload output file {relative}: {exc}",
+                )
 
         if self._workspace_uploads:
             self.observer.add_message(
@@ -1560,6 +1652,10 @@ class NexentAgent:
             return
 
         scope = getattr(self, "_sandbox_scope", None)
+
+        for runner in self._sandbox_skill_runners:
+            runner.cleanup()
+        self._sandbox_skill_runners.clear()
 
         # Sync outputs to MinIO before destroying the container.
         if (

@@ -75,7 +75,7 @@ async def test_dimension_check_success(openai_embedding_instance):
     expected_embeddings = [[0.1, 0.2, 0.3]]
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         return_value=expected_embeddings,
     ) as mock_to_thread:
@@ -90,7 +90,7 @@ async def test_dimension_check_failure(openai_embedding_instance):
     """dimension_check should return an empty list when an exception is raised inside to_thread."""
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ) as mock_to_thread:
@@ -107,7 +107,7 @@ async def test_openai_dimension_check_timeout_returns_empty(openai_embedding_ins
         raise requests.exceptions.Timeout()
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         side_effect=raise_timeout,
     ):
         result = await openai_embedding_instance.dimension_check(timeout=3.0)
@@ -126,7 +126,7 @@ async def test_jina_dimension_check_success(jina_embedding_instance):
     expected_embeddings = [[0.5, 0.4, 0.3]]
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         return_value=expected_embeddings,
     ) as mock_to_thread:
@@ -141,7 +141,7 @@ async def test_jina_dimension_check_failure(jina_embedding_instance):
     """dimension_check should return an empty list when an exception is raised inside to_thread."""
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ) as mock_to_thread:
@@ -158,7 +158,7 @@ async def test_jina_dimension_check_timeout_returns_empty(jina_embedding_instanc
         raise requests.exceptions.Timeout()
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         side_effect=raise_timeout,
     ):
         result = await jina_embedding_instance.dimension_check(timeout=3.0)
@@ -484,7 +484,7 @@ async def test_jina_dimension_check_connection_error_returns_empty(jina_embeddin
     """dimension_check should return [] on ConnectionError."""
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         side_effect=requests.exceptions.ConnectionError(),
     ):
@@ -548,7 +548,7 @@ async def test_openai_dimension_check_connection_error_returns_empty(openai_embe
     """dimension_check should return [] on ConnectionError."""
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         side_effect=requests.exceptions.ConnectionError(),
     ):
@@ -1038,7 +1038,7 @@ def test_jina_get_multimodal_embeddings_generic_exception_propagates(jina_embedd
 async def test_jina_dimension_check_generic_exception_returns_empty(jina_embedding_instance):
     """JinaEmbedding.dimension_check should return [] on generic Exception."""
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         side_effect=RuntimeError("unexpected"),
     ):
@@ -1050,7 +1050,7 @@ async def test_jina_dimension_check_generic_exception_returns_empty(jina_embeddi
 async def test_openai_dimension_check_generic_exception_returns_empty(openai_embedding_instance):
     """OpenAICompatibleEmbedding.dimension_check should return [] on generic Exception."""
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         side_effect=RuntimeError("unexpected"),
     ):
@@ -1582,7 +1582,7 @@ def test_siliconflow_get_embeddings_calls_record_model_call(mocker):
 @pytest.mark.asyncio
 async def test_siliconflow_dimension_check_success(siliconflow_embedding_instance):
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         return_value=[[0.1, 0.2, 0.3]],
     ):
@@ -1596,7 +1596,7 @@ async def test_siliconflow_dimension_check_timeout_returns_empty(siliconflow_emb
         raise requests.exceptions.Timeout()
 
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         side_effect=raise_timeout,
     ):
         result = await siliconflow_embedding_instance.dimension_check(timeout=3.0)
@@ -1606,7 +1606,7 @@ async def test_siliconflow_dimension_check_timeout_returns_empty(siliconflow_emb
 @pytest.mark.asyncio
 async def test_siliconflow_dimension_check_connection_error_returns_empty(siliconflow_embedding_instance):
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         side_effect=requests.exceptions.ConnectionError(),
     ):
@@ -1617,7 +1617,7 @@ async def test_siliconflow_dimension_check_connection_error_returns_empty(silico
 @pytest.mark.asyncio
 async def test_siliconflow_dimension_check_generic_exception_returns_empty(siliconflow_embedding_instance):
     with patch(
-        "nexent.core.models.embedding_model.asyncio.to_thread",
+        "nexent.core.models.embedding_model.run_blocking",
         new_callable=AsyncMock,
         side_effect=RuntimeError("unexpected"),
     ):

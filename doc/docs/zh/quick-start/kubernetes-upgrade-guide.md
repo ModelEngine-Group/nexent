@@ -1,102 +1,83 @@
-# Nexent Kubernetes 升级指导
+# Nexent Kubernetes 升级指南
 
-## 🚀 升级流程概览
+本文适用于使用 Helm 部署的 Nexent。建议在无人使用或业务低峰窗口执行。备份前必须停止业务写入，但不需要停止 Pod。
 
-在 Kubernetes 上升级 Nexent 时，建议依次完成以下几个步骤：
+> ⚠️ 如果复制期间仍有业务写入，PostgreSQL、Elasticsearch、Redis 和 MinIO 等组件的数据可能不属于同一时间点，备份可能无法恢复。
 
-1. 拉取最新代码
-2. 执行 Helm 部署脚本
-3. 打开站点确认服务可用
+## 1. 升级前检查和备份
 
----
+先进入当前正在使用的 Nexent 仓库根目录；离线部署则进入上一版已解压部署包的根目录。执行 `kubectl` 的本地机器是备份目标，必须能访问目标集群。默认 namespace 为 `nexent`，应按实际环境调整。
 
-## 🔄 步骤一：更新代码
-
-更新之前，先记录下当前部署的版本和数据目录信息。
-
-- 当前部署版本信息的位置：根目录 `VERSION`
-- 本地卷目录信息的位置：各 Helm 子 chart 的 `storage.hostPath`，默认位于 `/var/lib/nexent-data/nexent-*`
-
-**git 方式下载的代码**
-
-通过 git 指令更新代码：
+执行以下命令前必须停止用户操作、接口请求和定时任务等业务写入；Pod 保持运行，不需要缩容或停止。脚本不会检测业务写入状态，也不会要求输入确认：
 
 ```bash
-git pull
+bash deploy/k8s/backup.sh \
+  --backup-dir /mnt/backup/nexent \
+  --namespace nexent
 ```
 
-**zip 包等方式下载的代码**
+脚本会发现指定 namespace 中的全部 PVC，并为每个 PVC 选择一个完整挂载该卷的运行中容器。所有 PVC 都必须为 `Bound`，并且必须存在不使用 `subPath` 的完整挂载点；否则脚本会在复制前输出 `[ERROR]` 并指出未满足条件的 PVC，避免静默漏备份。使用自定义 `existingClaim` 时，脚本按集群中的实际 PVC 名处理，不依赖默认组件名称。
 
-1. 需要去 GitHub 上重新下载一份最新代码，并解压缩。
-2. 将之前部署目录 `deploy/k8s` 下的 `deploy.options` 文件拷贝到新代码目录的 `deploy/k8s` 目录中。（如果不存在该文件则忽略此步骤）。
+脚本通过容器内 `du` 回显每个 PVC 的未压缩数据量和总量，并通过本地 `df` 回显备份目录的可用空间。出现 `[PASS] Pre-upgrade space check passed.` 表示本地空间充足，随后脚本直接开始复制；空间不足时会在复制前退出。数据不会压缩，因此空间检查按文件原始大小计算。
 
-## 🔄 步骤二：执行升级
+脚本优先使用 `kubectl cp` 将各 PVC 的文件复制到本地；如果该命令失败且目标容器包含 `tar`，则使用 `kubectl exec ... tar -cf -` 流式传输并立即在本地解包，不保留 tar 文件。MinIO 等精简镜像不包含 `tar` 时，脚本会使用容器内的 Bash 和基础 coreutils 枚举目录，并通过 `kubectl exec ... cat` 逐文件流式导出；该路径在文件很多时会更慢。脚本不使用 `sudo`，不创建临时 Pod，也不生成压缩包或 SHA-256 文件。
 
-在更新后的代码仓库根目录执行 Kubernetes 部署入口：
+实际备份目录的最外层使用 PVC 原名，例如 `nexent-postgresql/`、`nexent-workspace/`、`nexent-skills/` 和已启用监控组件的 PVC 名。通过 `[INFO]` 查看来源和复制进度；只有出现 `[PASS] Backup complete: <path>` 才表示指定 namespace 中的全部 PVC 已复制完成，`<path>` 是实际备份目录。出现 `[ERROR]` 时不要使用脚本回显的 `.partial` 未完成目录。
+
+## 2. 执行升级
+
+### 2.1 在线升级
+
+在能够访问 GitHub 和所需镜像仓库的环境中，使用当前 Nexent 仓库执行在线升级。先确认当前分支和目标版本，再以快进方式更新。
 
 ```bash
-bash deploy.sh k8s
+git branch --show-current
+git pull --ff-only
+bash deploy.sh k8s --defaults --version X.Y.Z
 ```
 
-脚本会自动检测您之前保存的部署设置（组件组合、端口策略、镜像来源等）。如果 `deploy.options` 文件不存在，系统会提示您输入配置信息。
+`--defaults` 会复用已保存的 Kubernetes 部署配置并跳过交互界面。升级前应确认 `deploy/k8s/deploy.options` 中的组件、端口策略、镜像源、持久化模式和 namespace 与原环境一致。更多在线部署说明参见 [Kubernetes 安装部署](./kubernetes-installation.md#在线部署)。
 
-> 💡 提示
-> - 升级时会保留 `deploy/env/.env` 中的已有值、注释、顺序和旧版独有变量，并自动追加当前 `deploy/env/.env.example` 新增的变量。部署前必须存在可读的模板。Helm generated values 会根据合并后的 `.env` 重新生成，请勿直接修改。语音模型（STT/TTS）也请在 `deploy/env/.env` 中配置。
+### 2.2 离线升级
 
----
-
-## 🌐 步骤三：验证部署
-
-部署完成后：
-
-1. 在浏览器打开 `http://localhost:30000`
-2. 参考 [用户指南](../user-guide/home-page) 完成智能体配置与验证
-
----
-
-## 🗄️ 数据库迁移
-
-SQL 增量不再手动执行。Kubernetes 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动按文件名顺序检查并执行 `deploy/sql/migrations/` 下的 `*.sql` 文件；其他后端服务只等待迁移记录达到目标状态。部署脚本会将 `deploy/sql` 渲染到共享 SQL ConfigMap，并挂载到 `/opt/nexent/sql`，因此只修改 SQL 时重新执行部署即可，不需要重新构建镜像。
-
-迁移脚本使用 SQL 文件名作为 `nexent.schema_migrations` 中的迁移 ID。已记录且 checksum 相同会跳过；已记录但 checksum 变化时会重新执行同名 SQL，并更新 checksum、执行时间、应用版本和源文件路径。
-
-> 💡 提示
-> - 执行前建议先备份数据库：
-
-   ```bash
-   POSTGRES_POD=$(kubectl get pods -n nexent -l app=nexent-postgresql -o jsonpath='{.items[0].metadata.name}')
-   kubectl exec nexent/$POSTGRES_POD -n nexent -- pg_dump -U root nexent > backup_$(date +%F).sql
-   ```
-
-> - Supabase 初始化 SQL 由部署脚本从 `deploy/sql/supabase/` 渲染到 Helm values，不需要手动复制执行。
-
----
-
-## 🔍 故障排查
-
-### 查看部署状态
+目标集群无法访问公网镜像仓库时，按 [Kubernetes 离线部署](./kubernetes-installation.md#离线部署) 下载与集群节点架构匹配的目标版本包，复制到能够访问目标集群的管理节点并解压：
 
 ```bash
-kubectl get pods -n nexent
-kubectl rollout status deployment/nexent-config -n nexent
+unzip nexent-<version>-amd64.zip -d nexent-<version>
+cd nexent-<version>
 ```
 
-### 查看日志
+单节点且使用 Docker 容器运行时的集群，可直接加载新包镜像并升级：
 
 ```bash
-kubectl logs -n nexent -l app=nexent-config --tail=100
-kubectl logs -n nexent -l app=nexent-web --tail=100
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  --defaults \
+  k8s
 ```
 
-### 迁移重试后重启服务
+其他单节点或多节点集群，应将新包镜像推送到集群可访问的内部仓库：
 
 ```bash
-kubectl rollout restart deployment/nexent-config -n nexent
-kubectl rollout restart deployment/nexent-runtime -n nexent
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  --defaults \
+  k8s
 ```
 
-### 重新初始化 Elasticsearch（如需要）
+`/path/to/previous/nexent` 必须是上一版已解压部署包的实际根目录，且包含 `deploy/env/.env`。`--reuse-from` 会复用旧包的 `.env`、`monitoring.env` 和 Kubernetes 部署选项。ARM64 集群节点应使用对应的 `arm64` 包名。
+
+升级时由 `nexent-config` 执行数据库自动迁移，其他后端服务会等待迁移达到目标状态。已合并的 SQL 文件不可修改、改名或删除。
+
+## 3. 升级后检查
+
+检查指定 namespace 中的 Pod 状态；以下示例使用默认 namespace `nexent`：
 
 ```bash
-bash deploy/k8s/init-elasticsearch.sh
+kubectl get pods -n nexent -o wide
 ```
+
+所有 Nexent Pod 均为 `Running`，且 READY 数量符合预期，即表示检查通过。Pod 显示 `ContainerCreating` 时继续等待；显示 `CrashLoopBackOff`、`Error` 或长时间 `Pending` 时检查不通过。

@@ -128,6 +128,60 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
+# The pure-logic service import installs lightweight dependency doubles during
+# collection. Restore the surrounding process state so sibling test modules do
+# not inherit those doubles.
+_MODULE_ROOTS = (
+    "adapters",
+    "boto3",
+    "botocore",
+    "consts",
+    "database",
+    "management",
+    "nexent",
+    "openjiuwen",
+    "services",
+    "sqlalchemy",
+    "utils",
+)
+
+
+def _owns_module(name: str) -> bool:
+    return name in _MODULE_ROOTS or any(
+        name.startswith(f"{root}.") for root in _MODULE_ROOTS
+    )
+
+
+def _capture_module_state():
+    """Capture modules and package attributes under the pure-test roots."""
+    modules = {name: module for name, module in sys.modules.items() if _owns_module(name)}
+    package_attrs = {
+        name: dict(module.__dict__)
+        for name, module in modules.items()
+        if isinstance(module, types.ModuleType) and hasattr(module, "__path__")
+    }
+    return modules, package_attrs
+
+
+def _apply_module_state(state) -> None:
+    """Restore a previously captured module graph."""
+    modules, package_attrs = state
+    current_names = [name for name in sys.modules if _owns_module(name)]
+    for name in current_names:
+        if name not in modules:
+            sys.modules.pop(name, None)
+    sys.modules.update(modules)
+    for name, attrs in package_attrs.items():
+        package = sys.modules.get(name)
+        if not isinstance(package, types.ModuleType):
+            continue
+        for key in set(package.__dict__) - set(attrs):
+            package.__dict__.pop(key, None)
+        package.__dict__.update(attrs)
+
+
+_BASE_MODULE_STATE = _capture_module_state()
+
 
 def _register_package(name: str) -> types.ModuleType:
     """Register ``name`` as a real package on ``sys.modules``.
@@ -191,6 +245,15 @@ def _install_sys_modules_stubs() -> None:
     _nexent_core.agents = _nexent_core_agents
     _nexent_core.utils = _nexent_core_utils
 
+    class _ManagedTaskSpec:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    concurrency_mock = types.ModuleType("nexent.core.concurrency")
+    concurrency_mock.ManagedTaskSpec = _ManagedTaskSpec
+    sys.modules["nexent.core.concurrency"] = concurrency_mock
+    _nexent_core.concurrency = concurrency_mock
+
     run_agent_mock = types.ModuleType("nexent.core.agents.run_agent")
     run_agent_mock.agent_run = lambda *a, **kw: None
     sys.modules["nexent.core.agents.run_agent"] = run_agent_mock
@@ -243,7 +306,11 @@ def _install_sys_modules_stubs() -> None:
             self.code = code
             self.message = msg
 
-    _ex_mod = _mk_mod("consts.exceptions", AppException=_AppException)
+    _ex_mod = _mk_mod(
+        "consts.exceptions",
+        AppException=_AppException,
+        UnauthorizedError=type("UnauthorizedError", (Exception,), {}),
+    )
     _consts_pkg.exceptions = _ex_mod
     _m_mod = _mk_mod("consts.model", AgentRequest=type("AgentRequest", (), {}))
     _consts_pkg.model = _m_mod
@@ -266,7 +333,11 @@ def _install_sys_modules_stubs() -> None:
         update_agent_evaluation_status=MagicMock(),
     )
     _db_pkg.agent_evaluation_db = _aedb_mod
-    _dc_mod = _mk_mod("database.client", get_db_session=MagicMock())
+    # database/client imports ``as_dict`` in sibling database tests; expose both
+    # names so this test's collection-time graph is self-contained as well.
+    _dc_mod = _mk_mod(
+        "database.client", get_db_session=MagicMock(), as_dict=MagicMock()
+    )
     _db_pkg.client = _dc_mod
     _dm_mod = _mk_mod(
         "database.db_models",
@@ -279,6 +350,7 @@ def _install_sys_modules_stubs() -> None:
         create_evaluation_set=MagicMock(),
         get_evaluation_set_cases_all=MagicMock(),
         insert_evaluation_set_cases=MagicMock(),
+        materialize_virtual_evaluation_set_for_run=MagicMock(),
         update_evaluation_set_case_count=MagicMock(),
     )
     _db_pkg.evaluation_set_db = _esdb_mod
@@ -290,13 +362,18 @@ def _install_sys_modules_stubs() -> None:
 
     # ---- services / utils --------------------------------------------------
     _services_pkg = _register_package("services")
-    _as_mod = _mk_mod("services.agent_service", prepare_agent_run=MagicMock())
+    _as_mod = _mk_mod("management.services.agent.service", prepare_agent_run=MagicMock())
     _services_pkg.agent_service = _as_mod
     _ess_mod = _mk_mod(
         "services.evaluation_set_service",
         resolve_latest_published_version_no=MagicMock(),
     )
     _services_pkg.evaluation_set_service = _ess_mod
+    _tls_mod = _mk_mod(
+        "services.thread_lifecycle_service",
+        runtime_thread_manager=MagicMock(),
+    )
+    _services_pkg.thread_lifecycle_service = _tls_mod
 
     _utils_pkg = _register_package("utils")
     _lu_mod = _mk_mod("utils.llm_utils", call_llm_for_system_prompt=MagicMock())
@@ -309,6 +386,12 @@ def _install_sys_modules_stubs() -> None:
 
 _install_sys_modules_stubs()
 
+# Keep the dependency graph available as a snapshot, but restore the process
+# state immediately after collection. The fixture below reinstalls this graph
+# only while the pure-logic tests are running.
+_STUB_MODULE_STATE = _capture_module_state()
+_apply_module_state(_BASE_MODULE_STATE)
+
 
 # ---------------------------------------------------------------------------
 # 4. Fixture – fresh import of the real agent_evaluation_service module
@@ -319,33 +402,30 @@ SERVICE_PATH = "services.agent_evaluation_service"
 
 @pytest.fixture(scope="module")
 def service_module():
-    """Module-scoped fresh import of the real service – only pure-logic functions are used.
+    """Import the service with pure-logic dependency stubs in place."""
+    previous_module_state = _capture_module_state()
+    _apply_module_state(_STUB_MODULE_STATE)
+    try:
+        repo_root = _REPO_ROOT
+        backend_root = _BACKEND_DIR
+        for extra in (str(repo_root), str(backend_root)):
+            if extra not in sys.path:
+                sys.path.insert(0, extra)
 
-    Stubs are pre-installed at module-collection time (see ``_install_sys_modules_stubs``
-    above) so this fixture only needs to ensure ``sys.path`` contains the backend
-    roots, drop any cached copy of the target module, and perform a clean import.
-    No ``monkeypatch`` undo is required because the stubs are intentionally
-    permanent (idempotent registration via ``_register_package`` keeps them
-    consistent across sibling test files).
-    """
-    repo_root = _REPO_ROOT
-    backend_root = _BACKEND_DIR
-    for extra in (str(repo_root), str(backend_root)):
-        if extra not in sys.path:
-            sys.path.insert(0, extra)
+        if SERVICE_PATH in sys.modules:
+            del sys.modules[SERVICE_PATH]
+        services_pkg = _register_package("services")
+        if hasattr(services_pkg, "agent_evaluation_service"):
+            try:
+                delattr(services_pkg, "agent_evaluation_service")
+            except AttributeError:
+                pass
 
-    if SERVICE_PATH in sys.modules:
-        del sys.modules[SERVICE_PATH]
-    services_pkg = _register_package("services")
-    if hasattr(services_pkg, "agent_evaluation_service"):
-        try:
-            delattr(services_pkg, "agent_evaluation_service")
-        except AttributeError:
-            pass
-
-    mod = importlib.import_module(SERVICE_PATH)
-    services_pkg.agent_evaluation_service = mod
-    yield mod
+        mod = importlib.import_module(SERVICE_PATH)
+        services_pkg.agent_evaluation_service = mod
+        yield mod
+    finally:
+        _apply_module_state(previous_module_state)
 
 
 # ---------------------------------------------------------------------------

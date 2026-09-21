@@ -1,91 +1,64 @@
-# Nexent 升级指导
+# Nexent Docker 升级指南
 
-## 🚀 升级流程概览
+本文适用于使用 Docker Compose 部署的 Nexent。建议在无人使用或业务低峰窗口执行。备份前必须停止业务写入，但不需要停止容器。
 
-升级 Nexent 时建议依次完成以下几个步骤：
+> ⚠️ 如果复制期间仍有业务写入，PostgreSQL、Elasticsearch、Redis 和 MinIO 等组件的数据可能不属于同一时间点，备份可能无法恢复。
 
-1. 拉取最新代码
-2. 执行升级脚本
-3. 打开站点确认服务可用
+## 1. 升级前检查和备份
 
----
+先进入当前正在使用的 Nexent 仓库根目录；离线部署则进入上一版已解压部署包的根目录。备份目录必须位于 `ROOT_DIR` 和 `NEXENT_USER_DIR` 之外。
 
-## 🔄 步骤一：更新代码
-
-更新之前，先记录下当前部署的版本和数据目录
-
-- 当前部署版本信息的位置：根目录 `VERSION`
-- 数据目录信息的位置：`deploy/env/.env`中的 ROOT_DIR
-
-**git 方式下载的代码**
-
-通过 git 指令更新代码
+执行以下命令前必须停止用户操作、接口请求和定时任务等业务写入；容器保持运行，不需要执行 `docker stop` 或 `docker compose down`。脚本不会检测业务写入状态，也不会要求输入确认：
 
 ```bash
-git pull
+bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
 ```
 
-**zip 包等方式下载的代码**
+脚本会先回显 `ROOT_DIR`、`NEXENT_USER_DIR`、本次部署使用的 named volumes、未压缩数据总量以及备份目录可用空间。`NEXENT_USER_DIR` 未显式设置时使用部署默认值 `${HOME}/nexent`。出现 `[PASS] Pre-upgrade space check passed.` 表示空间充足，随后脚本直接开始复制；空间不足时会在复制前输出 `[ERROR]` 并退出。数据不会压缩，因此空间检查按文件原始大小计算。
 
-需要去 github 上重新下载一份最新代码，并解压缩。另外，需要从之前执行部署脚本目录下 docker 目录中拷贝 deploy.options 到新代码目录下的 docker 目录中（如果不存在该文件则忽略）。
+脚本会直接复制 `ROOT_DIR`、`NEXENT_USER_DIR` 和 Docker named volumes 中的文件，不使用 `sudo`，不生成压缩包或 SHA-256 文件。实际备份目录的最外层使用数据源原名：两个宿主机目录使用各自的目录名，每个 named volume 使用其 volume 名；例如默认部署会生成 `nexent-data/`、`nexent/`、`nexent-agent-workspace/` 和 `nexent_db-config/`。通过 `[INFO]` 查看复制进度；只有出现 `[PASS] Backup complete: <path>` 才表示完成，`<path>` 是实际备份目录。出现 `[ERROR]` 时不要使用脚本回显的未完成目录。
 
-## 🔄 步骤二：执行升级
+## 2. 执行升级
 
-在更新后的代码仓库根目录执行 Docker 部署入口：
+### 2.1 在线升级
+
+在能够访问 GitHub 和所需镜像仓库的环境中，使用当前 Nexent 仓库执行在线升级。先确认当前分支和目标版本，再以快进方式更新。不要用未记录的 `latest` 代替明确版本。
 
 ```bash
-bash deploy.sh docker
+git branch --show-current
+git pull --ff-only
+bash deploy.sh docker --defaults --version X.Y.Z
 ```
 
-缺少 deploy.options 的情况下，会提示需要重新选择部署配置，例如组件组合、端口策略、镜像来源等。按照您之前的部署方式重新选择即可。
+`--defaults` 会复用已保存的部署配置并跳过交互界面。升级前应确认 `deploy/docker/deploy.options` 存在且组件、端口策略、镜像源与原环境一致。更多在线部署说明参见 [Docker 安装部署](./installation.md#在线部署)。
 
-> 💡 提示
-> - 升级时会保留 `deploy/env/.env` 中的已有值、注释、顺序和旧版独有变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板。加载镜像或启动服务前必须存在可读的 `.env.example`。
-> - 若需配置语音模型（STT/TTS），请在 `deploy/env/.env` 中补充相关变量，我们将尽快提供前端配置入口。
+### 2.2 离线升级
 
-## 🌐 步骤三：验证部署
-
-部署完成后：
-
-1. 在浏览器打开 `http://localhost:3000`
-2. 参考 [用户指南](https://doc.nexent.tech/zh/user-guide/home-page) 完成智能体配置与验证
-
-## 可选操作
-
-### 🧹 清理旧版本镜像
-
-如果镜像未正确更新，可以在升级前先清理旧容器与镜像：
+目标主机无法访问公网镜像仓库时，按 [Docker 离线部署](./installation.md#离线部署) 下载与服务器架构匹配的目标版本包，复制到目标主机并解压到新目录：
 
 ```bash
-# 停止并删除现有容器
-docker compose down
-
-# 查看 Nexent 镜像
-docker images --filter "reference=nexent/*"
-
-# 删除 Nexent 镜像
-# Windows PowerShell:
-docker images -q --filter "reference=nexent/*" | ForEach-Object { docker rmi -f $_ }
-
-# Linux/WSL:
-docker images -q --filter "reference=nexent/*" | xargs -r docker rmi -f
-
-# （可选）清理未使用的镜像与缓存
-docker system prune -af
+unzip nexent-<version>-amd64.zip -d nexent-<version>
+cd nexent-<version>
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  --defaults \
+  docker
 ```
 
-> ⚠️ 注意事项
-> - 删除镜像前请先备份重要数据。
-> - 若需保留数据库数据，请勿删除数据库 volume（通常位于 `/nexent/docker/volumes` 或自定义挂载路径）。
+`/path/to/previous/nexent` 必须是上一版已解压部署包的实际根目录，且包含 `deploy/env/.env`。`--reuse-from` 会复用旧包的 `.env`、`monitoring.env` 和 Docker 部署选项，`--load-images` 会加载新包中的镜像。ARM64 服务器应使用对应的 `arm64` 包名。
 
----
+升级时由 `nexent-config` 执行数据库自动迁移，其他后端容器会等待迁移达到目标状态。已合并的 SQL 文件不可修改、改名或删除。
 
-### 🗄️ 数据库迁移
+## 3. 升级后检查
 
-SQL 增量不再手动执行。Docker 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动按文件名顺序检查并执行 `deploy/sql/migrations/` 下的 `*.sql` 文件；其他后端容器只等待迁移记录达到目标状态。SQL 会从 `deploy/sql` 挂载到 `/opt/nexent/sql`，因此只修改 SQL 时重新执行部署即可，不需要重新构建镜像。
+查看 Nexent 及可选监控项目的容器健康状态：
 
-迁移脚本使用 SQL 文件名作为 `nexent.schema_migrations` 中的迁移 ID。已记录且 checksum 相同会跳过；已记录但 checksum 变化时会重新执行同名 SQL，并更新 checksum、执行时间、应用版本和源文件路径。
+```bash
+docker ps -a --filter label=com.docker.compose.project=nexent \
+  --format 'table {{.Names}}\t{{.Status}}'
+docker ps -a --filter label=com.docker.compose.project=monitor \
+  --format 'table {{.Names}}\t{{.Status}}'
+```
 
-> 💡 提示
-> - 升级前请备份数据库，生产环境尤为重要。
-> - 如果服务启动失败，请查看后端容器日志中的 `[sql-migrations]` 记录。
+所有配置了健康检查的容器均显示 `healthy` 即表示检查通过；显示 `starting` 时继续等待，显示 `unhealthy` 时检查不通过。未配置健康检查的容器不会显示 `healthy`，不在本项检查范围内。

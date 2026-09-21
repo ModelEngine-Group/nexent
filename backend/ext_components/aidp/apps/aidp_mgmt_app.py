@@ -18,22 +18,22 @@ import logging
 import time
 from http import HTTPStatus
 from typing import Annotated, List, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, File, Path, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
+from starlette.background import BackgroundTask
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
 from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
-    AidpKbConflictError,
-    AidpKbNotFoundError,
-    AidpKbPermissionDeniedError,
-    AidpKbSyncError,
     AidpGroupValidationError,
+    AidpKbConflictError,
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
@@ -45,6 +45,13 @@ from ext_components.aidp.services.aidp_access_service import (
     invalidate_aidp_kb_detail_cache,
     resolve_current_aidp_access,
 )
+from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
+from ext_components.aidp.services.aidp_permission_service import (
+    EDIT,
+    PRIVATE,
+    READ_ONLY,
+    _validate_group_ids_strict,  # noqa: F401 - retained as a module-level compatibility symbol
+)
 from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
     count_aidp_docs_impl,
@@ -53,16 +60,13 @@ from ext_components.aidp.services.aidp_service import (
     get_aidp_kb_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
+    remove_aidp_docs_impl,
+    stream_aidp_doc_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from ext_components.aidp.services.aidp_permission_service import (
-    EDIT,
-    PRIVATE,
-    READ_ONLY,
-    _validate_group_ids_strict,
-)
 from utils import auth_utils as auth_utils_module
+
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
@@ -120,6 +124,20 @@ def _validate_upload_files(files: List[UploadFile]) -> tuple[List[UploadFile], l
     return valid_files, failed_files
 
 
+def _cleanup_document_assignments_for_deleted_knowledge_base(
+    tenant_id: str,
+    knowledge_base_id: str,
+    user_id: str,
+) -> None:
+    """Keep document assignment usage in sync after AIDP confirms knowledge-base deletion."""
+
+    from services.tag_management_service import TagManagementService
+
+    TagManagementService.cleanup_document_assignments_for_knowledge_base(
+        tenant_id, "aidp", knowledge_base_id, user_id
+    )
+
+
 # ---------------------------------------------------------------------------
 # Request Models
 # ---------------------------------------------------------------------------
@@ -160,17 +178,26 @@ class UpdateKbRequest(BaseModel):
 
 
 class SetPermissionRequest(BaseModel):
-    """Request body for setting a KB's group-level permission.
+    """Save permissions and optionally synchronize explicitly changed metadata."""
 
-    The AIDP platform is not invoked; the change is purely a local table
-    write that controls who can see the KB in subsequent list/search calls.
-    """
-
+    name: Optional[str] = Field(None, min_length=1, description="Changed KB name; omit when unchanged")
+    description: Optional[str] = Field(None, description="Changed description; omit when unchanged")
     ingroup_permission: str = Field(..., description="EDIT / READ_ONLY / PRIVATE")
     group_ids: Optional[List[int]] = Field(
         None,
         description="Group IDs granted the in-group permission. Ignored when PRIVATE.",
     )
+
+
+class RemoveAidpDocumentsRequest(BaseModel):
+
+    file_uuids: List[UUID] = Field(..., min_length=1, description="AIDP file UUIDs")
+
+
+class DownloadAidpDocumentRequest(BaseModel):
+    """AIDP file selected for download."""
+
+    file_uuid: UUID = Field(..., description="AIDP file UUID")
 
 
 # ---------------------------------------------------------------------------
@@ -227,11 +254,6 @@ def _raise_aidp_conflict(exc: IntegrityError) -> None:
         status_code=HTTPStatus.CONFLICT,
         detail="Knowledge base already exists for this tenant",
     )
-
-
-# HTTPException is imported lazily to keep FastAPI's exception handler in
-# control of the response body.
-from fastapi import HTTPException  # noqa: E402  (placed here to avoid editing mid-file)
 
 
 def _credentials() -> tuple[str, str]:
@@ -324,7 +346,10 @@ async def list_knowledge_bases(
 
     server_url, api_key = _credentials()
     started_at = time.perf_counter()
-    rows = await asyncio.to_thread(_current_accessible_rows, user_id, tenant_id)
+    rows = await run_blocking(
+        "aidp-accessible-rows", _current_accessible_rows, user_id, tenant_id,
+        lane="control-io", owner="config",
+    )
     access_resolve_ms = (time.perf_counter() - started_at) * 1000
     total_count = len(rows)
     if total_count == 0:
@@ -344,11 +369,14 @@ async def list_knowledge_bases(
         kb_id = row["kb_id"]
         async with detail_semaphore:
             try:
-                detail = await asyncio.to_thread(
+                detail = await run_blocking(
+                    "aidp-kb-detail",
                     _load_cached_kb_detail,
                     server_url,
                     api_key,
                     kb_id,
+                    lane="control-io",
+                    owner="config",
                 )
                 return detail, "ACTIVE"
             except AppException as exc:
@@ -424,7 +452,10 @@ async def list_knowledge_bases(
 async def count_knowledge_bases(request: Request) -> JSONResponse:
     """Return the accessible KB count for the calling user/tenant."""
     user_id, tenant_id = await _auth(request)
-    rows = await asyncio.to_thread(_current_accessible_rows, user_id, tenant_id)
+    rows = await run_blocking(
+        "aidp-accessible-rows", _current_accessible_rows, user_id, tenant_id,
+        lane="control-io", owner="config",
+    )
     total = len(rows)
     return JSONResponse(status_code=HTTPStatus.OK, content={"total_count": total})
 
@@ -555,11 +586,14 @@ async def get_knowledge_base(
 
     server_url, api_key = _credentials()
     try:
-        detail = await asyncio.to_thread(
+        detail = await run_blocking(
+            "aidp-kb-detail",
             _load_cached_kb_detail,
             server_url,
             api_key,
             kds_id,
+            lane="control-io",
+            owner="config",
         )
         resource_status = "ACTIVE"
     except AppException as exc:
@@ -632,6 +666,7 @@ async def delete_knowledge_base(
         invalidate_aidp_catalog_cache(server_url, api_key)
         invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
         invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+        _cleanup_document_assignments_for_deleted_knowledge_base(tenant_id, kds_id, user_id)
     return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
 
 
@@ -647,12 +682,15 @@ async def upload_documents(
     valid_files, validation_failures = _validate_upload_files(files)
     server_url, api_key = _credentials()
     if valid_files:
-        result = await asyncio.to_thread(
+        result = await run_blocking(
+            "aidp-upload-documents",
             upload_aidp_docs_impl,
             server_url,
             api_key,
             kds_id,
             valid_files,
+            lane="control-io",
+            owner="config",
         )
         invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
         invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
@@ -691,19 +729,25 @@ async def list_documents(
     server_url, api_key = _credentials()
     started_at = time.perf_counter()
     list_result, count_result = await asyncio.gather(
-        asyncio.to_thread(
+        run_blocking(
+            "aidp-list-documents",
             list_aidp_docs_impl,
             server_url,
             api_key,
             kds_id,
             page,
             page_size,
+            lane="control-io",
+            owner="config",
         ),
-        asyncio.to_thread(
+        run_blocking(
+            "aidp-document-count",
             _load_cached_doc_count,
             server_url,
             api_key,
             kds_id,
+            lane="control-io",
+            owner="config",
         ),
         return_exceptions=True,
     )
@@ -749,13 +793,72 @@ async def list_documents(
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/remove")
+async def remove_documents(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: RemoveAidpDocumentsRequest,
+) -> JSONResponse:
+    """Remove AIDP documents."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-remove-documents",
+        remove_aidp_docs_impl,
+        server_url,
+        api_key,
+        kds_id,
+        [str(file_uuid) for file_uuid in body.file_uuids],
+        lane="control-io",
+        owner="config",
+    )
+
+    success_list = result["success_list"]
+    if success_list:
+        invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+        invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/download")
+async def download_document(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: DownloadAidpDocumentRequest,
+) -> StreamingResponse:
+    """Proxy an AIDP document as a binary attachment."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+
+    server_url, api_key = _credentials()
+    aidp_response = await stream_aidp_doc_impl(
+        server_url,
+        api_key,
+        kds_id,
+        str(body.file_uuid),
+    )
+    response_headers = {
+        "Content-Disposition": aidp_response.headers["Content-Disposition"],
+        "X-File-Size": aidp_response.headers["X-File-Size"],
+    }
+
+    return StreamingResponse(
+        aidp_response.aiter_bytes(),
+        media_type=aidp_response.headers["Content-Type"],
+        headers=response_headers,
+        background=BackgroundTask(aidp_response.aclose),
+    )
+
+
 @aidp_mgmt_router.patch("/aidp-permissions/{kds_id}")
 async def set_permission(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     body: SetPermissionRequest,
 ) -> JSONResponse:
-    """Update the in-group permission for a KB (does not call AIDP)."""
+    """Save local permissions first, then synchronize supplied metadata changes."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
@@ -787,14 +890,23 @@ async def set_permission(
                 detail=str(exc),
             )
 
-    perms.update_permission(
+    metadata = body.model_dump(include={"name", "description"}, exclude_none=True)
+    if "name" in metadata:
+        metadata["name"] = metadata["name"].strip()
+        if not metadata["name"]:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Name must not be blank")
+    result = await asyncio.to_thread(
+        save_kb_settings,
         kb_id=kds_id,
         tenant_id=tenant_id,
+        user_id=user_id,
         ingroup_permission=body.ingroup_permission,
         group_ids=final_group_ids,
-        updated_by=user_id,
+        metadata=metadata,
+        server_url=AIDP_SERVER_URL,
+        api_key=AIDP_API_KEY,
     )
-    return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
 @aidp_mgmt_router.get("/models")

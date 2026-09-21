@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Switch, Tag, Tour } from "antd";
+import { Button, Spin, Switch, Tag, Tour } from "antd";
 import {
   History,
   Maximize2,
@@ -26,7 +26,10 @@ import AgentSelectorHeader from "./agent-selector-header";
 import AgentConfig from "./agent-config";
 import AgentVersion from "./agent-version";
 import AgentDebugPanel from "./agent-debug";
-import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
+import {
+  Nl2AgentChatPanel,
+  type Nl2AgentChatPanelHandle,
+} from "../newchat/assistant-ui/nl2agent-chat-panel";
 import {
   Nl2AgentFlowProvider,
   useNl2AgentFlow,
@@ -61,7 +64,7 @@ function resolveDraftFocusTarget(
   if (updatedFields.includes("duty_prompt")) {
     return { section: "role_model", promptTab: "duty" };
   }
-  if (updatedFields.includes("description")) {
+  if (updatedFields.includes("name") || updatedFields.includes("description")) {
     return { section: "display_info" };
   }
   return null;
@@ -111,6 +114,7 @@ function AgentSetupContent() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
+  const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
   const generationPanelRef = useRef<HTMLElement>(null);
   const configPanelRef = useRef<HTMLElement>(null);
   const actionAreaRef = useRef<HTMLDivElement>(null);
@@ -124,31 +128,46 @@ function AgentSetupContent() {
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const { agentInfo } = useAgentInfo(currentAgentId);
-  const { total } = useAgentVersionList(currentAgentId);
-  const { agentVersionDetail } = useAgentVersionDetail(
-    currentAgentId,
-    agentInfo?.current_version_no ?? null
-  );
-  const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
-  const {
-    isComposerDisabled,
-    completionSyncFailed,
-    markCompletionSynced,
-    markCompletionSyncFailed,
-    markGenerationCompleted,
-    markGenerationStopped,
-    markPromptGenerationFailed,
-    requestConfigFocus,
-    resetFlow,
-    sessionGeneration,
-  } = useNl2AgentFlow();
   const requestedAgentId = Number(searchParams.get("agent_id"));
   const isRequestedAgentLoading =
     Number.isInteger(requestedAgentId) &&
     requestedAgentId > 0 &&
     requestedAgentId !== currentAgentId;
+  const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(
+    currentAgentId
+  );
+  const { total } = useAgentVersionList(currentAgentId);
+  const shouldFetchVersionDetail = !isRequestedAgentLoading && total > 0;
+  const { agentVersionDetail } = useAgentVersionDetail(
+    currentAgentId,
+    agentInfo?.current_version_no ?? null,
+    shouldFetchVersionDetail
+  );
+  const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
+  const {
+    agentId: flowAgentId,
+    completionSyncFailed,
+    isComposerDisabled,
+    isFormLocked,
+    markCompletionSynced,
+    markCompletionSyncFailed,
+    markGenerationCompleted,
+    markGenerationStopped,
+    markRunFinished,
+    markRunStarted,
+    markPromptGenerationFailed,
+    requestConfigFocus,
+    resetFlow,
+    sessionGeneration,
+  } = useNl2AgentFlow();
   const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
+  const canManualUnlock =
+    !isNl2AgentUnavailable &&
+    flowAgentId === currentAgentId &&
+    !isRequestedAgentLoading &&
+    (isFormLocked || isComposerDisabled);
+  const showOptimizationSuggestions =
+    !isRequestedAgentLoading && !isNl2AgentUnavailable;
 
   useEffect(() => {
     resetFlow(currentAgentId);
@@ -195,9 +214,7 @@ function AgentSetupContent() {
 
   const synchronizeCompletion = useCallback(
     (agentId: number) => {
-      void enqueueSnapshotRefresh(agentId, {
-        section: "conversation_guide",
-      }).then((synchronized) => {
+      void enqueueSnapshotRefresh(agentId).then((synchronized) => {
         if (synchronized) markCompletionSynced(agentId);
         else markCompletionSyncFailed(agentId);
       });
@@ -234,6 +251,12 @@ function AgentSetupContent() {
     [markGenerationStopped]
   );
 
+  const handleManualUnlock = useCallback(() => {
+    if (!canManualUnlock || currentAgentId === null) return;
+    nl2AgentChatPanelRef.current?.cancelRun();
+    markGenerationStopped(currentAgentId);
+  }, [canManualUnlock, currentAgentId, markGenerationStopped]);
+
   const retryCompletionSync = useCallback(() => {
     if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
   }, [currentAgentId, synchronizeCompletion]);
@@ -249,6 +272,22 @@ function AgentSetupContent() {
     setAgentTourCurrent(0);
     setIsAgentTourPending(true);
   }, []);
+
+  const handleAgentPublished = useCallback(() => {
+    if (currentAgentId === null) return;
+
+    void Promise.all([
+      refetchAgentInfo(),
+      queryClient.invalidateQueries({
+        queryKey: ["agentVersions", currentAgentId],
+      }),
+    ]).catch((error) => {
+      log.warn("[AgentVersion] Failed to refresh version information", {
+        agentId: currentAgentId,
+        error,
+      });
+    });
+  }, [currentAgentId, queryClient, refetchAgentInfo]);
 
   useEffect(() => {
     if (
@@ -281,8 +320,11 @@ function AgentSetupContent() {
         />
       </div>
 
-      <main className="flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
-        <div className="flex min-w-0 min-h-0 flex-1 flex-row gap-4">
+      <main className="relative flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
+        <div
+          className="flex min-w-0 min-h-0 flex-1 flex-row gap-4"
+          style={{ visibility: isRequestedAgentLoading ? "hidden" : "visible" }}
+        >
           <PanelCard
             panelRef={generationPanelRef}
             title={t("agent.page.panel.nl2agent")}
@@ -333,8 +375,10 @@ function AgentSetupContent() {
                 </div>
               ) : null}
               <Nl2AgentChatPanel
+                ref={nl2AgentChatPanelRef}
                 key={sessionGeneration}
                 agentId={currentAgentId}
+                showOptimizationSuggestions={showOptimizationSuggestions}
                 disabled={
                   isComposerDisabled ||
                   isRequestedAgentLoading ||
@@ -342,6 +386,8 @@ function AgentSetupContent() {
                 }
                 onStateEvent={handleStateEvent}
                 onStopped={handleGenerationStopped}
+                onRunStart={markRunStarted}
+                onRunEnd={markRunFinished}
               />
             </div>
           </PanelCard>
@@ -396,7 +442,10 @@ function AgentSetupContent() {
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
               <AgentConfig
                 actionAreaRef={actionAreaRef}
+                canManualUnlock={canManualUnlock}
+                onManualUnlock={handleManualUnlock}
                 onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
+                onPublished={handleAgentPublished}
               />
             </div>
           </PanelCard>
@@ -478,11 +527,23 @@ function AgentSetupContent() {
               }
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentVersion />
+                <AgentVersion
+                  currentVersionNo={agentInfo?.current_version_no}
+                  onRefreshAgentInfo={refetchAgentInfo}
+                />
               </div>
             </PanelCard>
           )}
         </div>
+        {isRequestedAgentLoading ? (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-gray-50"
+            role="status"
+          >
+            <Spin size="large" />
+            <span className="text-sm text-gray-500">{t("common.loading")}</span>
+          </div>
+        ) : null}
       </main>
       <Tour
         open={isAgentTourOpen}

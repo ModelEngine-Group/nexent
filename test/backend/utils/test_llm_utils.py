@@ -1,3 +1,4 @@
+import os
 import sys
 import types
 import pytest
@@ -13,7 +14,10 @@ sys.modules['elasticsearch'] = elasticsearch_mock
 
 # Create placeholder nexent package hierarchy for patching
 nexent_module = types.ModuleType("nexent")
-nexent_module.__path__ = []
+_sdk_nexent_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../sdk/nexent")
+)
+nexent_module.__path__ = [_sdk_nexent_path]
 sys.modules['nexent'] = nexent_module
 
 sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
@@ -83,6 +87,7 @@ sys.modules["nexent.core.utils.observer"] = observer_mod
 
 # Minimal nexent.core.models.OpenAIModel stub to satisfy imports (tests will patch behavior)
 models_mod = types.ModuleType("nexent.core.models")
+models_mod.__path__ = [os.path.join(_sdk_nexent_path, "core", "models")]
 
 
 class _SimpleOpenAIModel:
@@ -100,8 +105,32 @@ sys.modules["nexent.core.models"] = models_mod
 # Stub the gateway bridge modules so importing model_gateway_service via
 # llm_utils does not pull the real gateway registry (heavy + vendor imports).
 nexent_core_pkg = types.ModuleType("nexent.core")
-nexent_core_pkg.__path__ = []
+nexent_core_pkg.__path__ = [os.path.join(_sdk_nexent_path, "core")]
 sys.modules["nexent.core"] = nexent_core_pkg
+# Stub nexent.core.agents.agent_model: backend/consts/model.py (reached via
+# database.model_management_db) imports AgentVerificationConfig/ToolConfig from
+# it at module level, and the empty __path__ above blocks the real SDK package.
+agents_pkg = types.ModuleType("nexent.core.agents")
+agents_pkg.__path__ = []
+sys.modules["nexent.core.agents"] = agents_pkg
+nexent_core_pkg.agents = agents_pkg
+agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+
+
+class _StubAgentVerificationConfig:  # pylint: disable=too-few-public-methods
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+class _StubToolConfig:  # pylint: disable=too-few-public-methods
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+agent_model_mod.AgentVerificationConfig = _StubAgentVerificationConfig
+agent_model_mod.ToolConfig = _StubToolConfig
+sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+agents_pkg.agent_model = agent_model_mod
 gateway_mod = types.ModuleType("nexent.core.gateway")
 for _name in ("EmbeddingContext", "LLMContext", "LongContextLLMContext", "ModelContext", "VLMContext", "get_gateway"):
     setattr(gateway_mod, _name, MagicMock(name=f"nexent.core.gateway.{_name}"))
@@ -160,6 +189,35 @@ class TestCallLLMForSystemPrompt:
             top_p=0.95,
             display_name=None,
             timeout_seconds=None,
+        )
+
+    def test_call_llm_for_system_prompt_removes_prepared_stream(self, mocker: MockFixture):
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+
+        mock_get_model_by_id.return_value = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+            "model_factory": "qwen",
+        }
+
+        mock_llm_instance = mock_adapter.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_llm_instance._prepare_completion_kwargs.return_value = {
+            "stream": False,
+            "temperature": 0.3,
+        }
+
+        result = call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert result == "Generated prompt"
+        mock_llm_instance.client.chat.completions.create.assert_called_once_with(
+            stream=True,
+            temperature=0.3,
         )
 
     def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):
@@ -565,6 +623,7 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_with_reasoning_content(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with reasoning_content"""
+        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
         mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
         mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
 
@@ -574,6 +633,7 @@ class TestAdditionalLLMUtilsTests:
         mock_chunk = MagicMock()
         mock_chunk.choices = [MagicMock()]
         mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_chunk.choices[0].delta.reasoning = None
         mock_chunk.choices[0].delta.reasoning_content = "Some reasoning"
 
         mock_llm_instance.client = MagicMock()
@@ -587,6 +647,39 @@ class TestAdditionalLLMUtilsTests:
         )
 
         assert result == "Generated prompt"
+        mock_logger.debug.assert_any_call(
+            "Received reasoning_content (metadata only, not filtering content)"
+        )
+
+    def test_call_llm_for_system_prompt_with_reasoning(self, mocker: MockFixture):
+        """Test call_llm_for_system_prompt with the alternate reasoning field."""
+        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+
+        mock_llm_instance = mock_adapter.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_chunk.choices[0].delta.reasoning = "Some reasoning"
+        mock_chunk.choices[0].delta.reasoning_content = None
+
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_llm_instance._prepare_completion_kwargs.return_value = {}
+
+        result = call_llm_for_system_prompt(
+            1,
+            "user prompt",
+            "system prompt",
+        )
+
+        assert result == "Generated prompt"
+        mock_logger.debug.assert_any_call(
+            "Received reasoning_content (metadata only, not filtering content)"
+        )
 
     def test_call_llm_for_system_prompt_multiple_chunks(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with multiple chunks"""

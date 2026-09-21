@@ -50,6 +50,12 @@ config:
     cancelTtlSeconds: "86400"
     completedTtlSeconds: "300"
     cancelPollIntervalSeconds: "1.0"
+  humanInteraction:
+    enabled: "true"
+    acceptNewRuns: "true"
+    toolApprovalEnabled: "false"
+    waitSeconds: "86400"
+    maxConcurrency: "2"
   northbound:
     idempotencyTtlSeconds: "600"
     rateLimitEnabled: "true"
@@ -69,7 +75,8 @@ config:
   umask: "0022"
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
-  marketBackend: "http://60.204.251.153:8010"
+  memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
+  logDir: "/mnt/nexent-data/logs"
   modelEngine:
     enabled: "false"
   voiceService:
@@ -150,6 +157,7 @@ config:
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
+    dashboardAllowedRoles: "SU,SPEED"
     telemetrySampleRate: "1.0"
     traceContentMode: "full"
     traceMaxChars: "4000"
@@ -221,9 +229,9 @@ config:
 
 # Secrets used by common templates
 secrets:
-  elasticPassword: "nexent@2025"
   elasticsearchApiKey: ""
   postgresPassword: "nexent@4321"
+  hitlEncryptionKey: ""
   minio:
     rootUser: "nexent"
     rootPassword: "nexent@4321"

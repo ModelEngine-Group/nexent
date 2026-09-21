@@ -22,7 +22,7 @@ from services.agent_draft_permission_service import (
     require_agent_draft_edit,
 )
 from services.nl2skill_service import create_nl2skill_stream
-from services.skill_service import (
+from management.services.skill.service import (
     SkillService,
     UnsupportedSkillFilePreview,
     get_official_skills_with_status,
@@ -132,7 +132,8 @@ async def install_skills(
     """Install official skills for the current tenant (or a specific tenant for super admin).
 
     Uses ZIP-based installation for each skill name provided.
-    Skills that already exist are skipped.
+    Existing official skills are refreshed from the bundled ZIP. Same-name
+    custom skills are preserved.
     """
     try:
         user_id, current_tenant_id = get_current_user_id(authorization)

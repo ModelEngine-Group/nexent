@@ -10,9 +10,12 @@ The conventional fields are hidden from the model-visible schema: the model
 neither sees nor fills them, so injected values can only come from the
 authenticated session.
 """
+
 import functools
 import inspect
-from typing import Any, Dict, Optional
+from collections.abc import Mapping
+from typing import Any
+
 
 # Conventional user-context parameter names. Declaring one of these in an MCP
 # tool's inputSchema means "this tool requests that user information".
@@ -26,7 +29,10 @@ USER_CONTEXT_FIELDS = (
 )
 
 
-def apply_user_context_to_mcp_tool(tool_obj: Any, user_context: Optional[Dict[str, Any]]) -> Any:
+def apply_user_context_to_mcp_tool(
+    tool_obj: Any,
+    user_context: Mapping[str, Any] | None,
+) -> Any:
     """Hide conventional user-context fields from the model and inject them at call time.
 
     Tools whose input schema declares any of ``USER_CONTEXT_FIELDS`` receive the
@@ -40,9 +46,9 @@ def apply_user_context_to_mcp_tool(tool_obj: Any, user_context: Optional[Dict[st
 
     Returns:
         The (possibly wrapped) tool object. Tools declaring no conventional
-        fields, or runs without a user context, are returned unchanged.
+        fields are returned unchanged.
     """
-    if not user_context or getattr(tool_obj, "_nexent_user_context_wrapped", False):
+    if getattr(tool_obj, "_nexent_user_context_wrapped", False):
         return tool_obj
     inputs = getattr(tool_obj, "inputs", None)
     if not isinstance(inputs, dict):
@@ -53,19 +59,36 @@ def apply_user_context_to_mcp_tool(tool_obj: Any, user_context: Optional[Dict[st
 
     # Hide the conventional fields from the model-visible schema.
     tool_obj.inputs = {k: v for k, v in inputs.items() if k not in USER_CONTEXT_FIELDS}
-    injected = {field: user_context.get(field) for field in declared}
+    trusted_context = user_context or {}
+    injected = {
+        field: trusted_context[field]
+        for field in declared
+        if field in trusted_context
+    }
     original_forward = tool_obj.forward
+
+    def trusted_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Drop model-supplied identity fields before adding trusted values."""
+        sanitized = dict(kwargs)
+        for field in declared:
+            sanitized.pop(field, None)
+        sanitized.update(injected)
+        return sanitized
 
     if inspect.iscoroutinefunction(original_forward):
         @functools.wraps(original_forward)
         async def forward_with_user_context(*args, **kwargs):
-            kwargs.update(injected)
-            return await original_forward(*args, **kwargs)
+            # MCPAdapt also accepts one positional mapping as the complete
+            # arguments object. Sanitize that path as well as keyword calls.
+            if len(args) == 1 and isinstance(args[0], Mapping) and not kwargs:
+                return await original_forward(trusted_kwargs(args[0]))
+            return await original_forward(*args, **trusted_kwargs(kwargs))
     else:
         @functools.wraps(original_forward)
         def forward_with_user_context(*args, **kwargs):
-            kwargs.update(injected)
-            return original_forward(*args, **kwargs)
+            if len(args) == 1 and isinstance(args[0], Mapping) and not kwargs:
+                return original_forward(trusted_kwargs(args[0]))
+            return original_forward(*args, **trusted_kwargs(kwargs))
 
     tool_obj.forward = forward_with_user_context
     setattr(tool_obj, "_nexent_user_context_wrapped", True)

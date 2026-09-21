@@ -60,11 +60,6 @@ THINKING_OFF_EXTRA_BODY = {
     "thinking": {"type": "disabled"},
 }
 
-APP_NAME = os.getenv("APP_NAME", "Nexent")
-APP_DESCRIPTION = os.getenv("APP_DESCRIPTION")
-DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体SDK和平台"
-DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent SDK and platform"
-
 # ============ Default Prompt Templates ============
 DEFAULT_DUTY_PROMPT = """You are an intelligent assistant focused on helping users solve problems. You need to:
 1. Understand the user's needs and provide accurate answers
@@ -100,13 +95,6 @@ def build_prompt_templates(
     prompt_templates = get_agent_prompt_template(is_manager=is_manager, language=language)
     prompt_templates["system_prompt"] = ""
     return prompt_templates
-
-
-def resolve_app_description(language: str) -> str:
-    """Resolve the app description using the same language fallback as production."""
-    if APP_DESCRIPTION:
-        return APP_DESCRIPTION
-    return DEFAULT_APP_DESCRIPTION_ZH if language == "zh" else DEFAULT_APP_DESCRIPTION_EN
 
 
 # ============ AgentRunInfo Construction Functions ============
@@ -188,9 +176,6 @@ def build_agent_run_info(
         duty=duty,
         constraint=constraint,
         few_shots=few_shots,
-        app_name=APP_NAME,
-        app_description=resolve_app_description(language),
-        user_id=user_id,
         language=language,
         is_manager=is_manager,
         tools={tool.name: tool for tool in tools},
@@ -511,7 +496,7 @@ def inject_production_managed_tools(
             "run_skill_script",
             "Execute a skill script with given parameters. Use this to run "
             "Python or shell scripts that are part of a skill.",
-            '{"skill_name": "str", "script_path": "str", "params": "dict"}',
+            '{"skill_name": "str", "script_path": "str", "params": "str"}',
         ),
         (
             "ReadSkillMdTool",

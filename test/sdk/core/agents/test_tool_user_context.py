@@ -81,10 +81,31 @@ def test_declared_fields_injected_and_hidden_from_model():
     # Model-visible schema no longer contains the conventional fields.
     assert set(wrapped.inputs) == {"query"}
     # Model only supplies business args; identity values come from the session.
-    assert wrapped.forward(query="hello") == "ok"
+    assert wrapped.forward(
+        query="hello",
+        user_account="forged@example.com",
+        user_groups=["Forged Group"],
+    ) == "ok"
     assert received["query"] == "hello"
     assert received["user_account"] == "bug-admin@qq.com"
     assert received["user_groups"] == ["Default Group"]
+
+
+def test_positional_arguments_mapping_cannot_forge_identity():
+    captured = {}
+
+    def forward(arguments):
+        captured.update(arguments)
+        return "ok"
+
+    tool = _FakeTool(
+        {"query": {"type": "string"}, "user_id": {"type": "string"}},
+        forward,
+    )
+    wrapped = apply_user_context_to_mcp_tool(tool, SAMPLE_CONTEXT)
+
+    assert wrapped.forward({"query": "hello", "user_id": "forged-user"}) == "ok"
+    assert captured == {"query": "hello", "user_id": "u-1"}
 
 
 @pytest.mark.asyncio
@@ -134,18 +155,24 @@ def test_tool_without_conventional_fields_untouched():
     assert not getattr(tool, "_nexent_user_context_wrapped", False)
 
 
-def test_missing_user_context_untouched():
-    def forward(query, user_account=None):
-        return query
+@pytest.mark.parametrize("empty_context", [None, {}])
+def test_missing_user_context_still_hides_and_strips_identity(empty_context):
+    captured = {}
 
-    tool = _FakeTool(
-        {"query": {"type": "string"}, "user_account": {"type": "string"}},
-        forward,
-    )
-    for empty_context in (None, {}):
-        result = apply_user_context_to_mcp_tool(tool, empty_context)
-        assert result is tool
-        assert "user_account" in result.inputs
+    def forward(**kwargs):
+        captured.update(kwargs)
+        return "ok"
+
+    tool = _FakeTool({
+        "query": {"type": "string"},
+        "user_account": {"type": "string"},
+    }, forward)
+
+    wrapped = apply_user_context_to_mcp_tool(tool, empty_context)
+    wrapped.forward(query="hello", user_account="forged@example.com")
+
+    assert set(wrapped.inputs) == {"query"}
+    assert captured == {"query": "hello"}
 
 
 def test_wrapping_is_idempotent():

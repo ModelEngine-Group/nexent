@@ -1483,6 +1483,32 @@ def update_task_state(
         return True
 
 
+def fail_active_tasks_on_startup() -> int:
+    """Move A2A work owned by the previous northbound process to FAILED."""
+    now = datetime.now(timezone.utc)
+    with _get_db_session() as session:
+        result = session.query(A2ATask).filter(
+            A2ATask.task_state.in_(
+                ("TASK_STATE_SUBMITTED", "TASK_STATE_WORKING")
+            )
+        ).update(
+            {
+                "task_state": "TASK_STATE_FAILED",
+                "state_timestamp": now,
+                "result_data": {
+                    "error": {
+                        "code": "CONTAINER_RESTARTED",
+                        "message": "Northbound service restarted before the task completed",
+                    }
+                },
+                "completed_at": now,
+                "update_time": now,
+            },
+            synchronize_session=False,
+        )
+        return int(result or 0)
+
+
 def list_tasks(
     endpoint_id: Optional[str] = None,
     caller_user_id: Optional[str] = None,

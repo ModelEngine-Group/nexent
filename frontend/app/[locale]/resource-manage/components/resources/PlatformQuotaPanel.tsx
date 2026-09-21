@@ -424,6 +424,10 @@ export function PlatformQuotaPanel({
               ? ` / ${record.hard_limit_readable}`
               : ""}
           </Text>
+          <Text type="secondary" style={{ display: "block", fontSize: 11 }}>
+            {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
+            {record.es_physical_readable || "0 B"}
+          </Text>
         </div>
       ),
     },
@@ -454,7 +458,7 @@ export function PlatformQuotaPanel({
               {t("quota.platformOverview", "Platform Quota Overview")}
             </Text>
             <Row gutter={[24, 16]} style={{ marginTop: 16 }}>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.platformCapacity", "Platform Capacity")}
@@ -466,7 +470,7 @@ export function PlatformQuotaPanel({
                   </Text>
                 </Space>
               </Col>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.allocated", "Allocated")}
@@ -476,13 +480,23 @@ export function PlatformQuotaPanel({
                   </Text>
                 </Space>
               </Col>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.used", "Used")}
                   </Text>
                   <Text strong style={{ fontSize: 20 }}>
                     {data?.total_actual_readable || "0 B"}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={6}>
+                <Space direction="vertical" size={2}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("quota.esPhysicalIndex", "ES Physical Index")}
+                  </Text>
+                  <Text strong style={{ fontSize: 20 }}>
+                    {data?.total_es_physical_readable || "0 B"}
                   </Text>
                 </Space>
               </Col>
@@ -547,7 +561,7 @@ export function PlatformQuotaPanel({
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message={t("quota.unmanagedTenants", {
+            title={t("quota.unmanagedTenants", {
               count: data.unmanaged_tenant_count,
               defaultValue: "{{count}} tenant(s) have no hard quota",
             })}
@@ -563,7 +577,7 @@ export function PlatformQuotaPanel({
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
-          message={t(
+          title={t(
             "quota.platformOversubscribed",
             "Tenant quotas exceed platform capacity"
           )}

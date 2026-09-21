@@ -186,9 +186,8 @@ function AgentCard({ agent, onSelect }: AgentCardProps) {
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-foreground">{displayName}</p>
-        <p className="text-xs text-primary line-clamp-1 text-muted-foreground">{agent.name}</p>
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-          {agent.greeting_message || agent.description}
+          {agent.description}
         </p>
       </div>
     </button>
@@ -226,9 +225,8 @@ function LastUsedAgentCard({ agent, onSelect }: LastUsedAgentCardProps) {
               {t("chat.agentLanding.continue")}
             </span>
           </div>
-          <p className="text-xs text-primary">{agent.name}</p>
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-            {agent.greeting_message || agent.description}
+            {agent.description}
           </p>
         </div>
       </button>

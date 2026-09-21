@@ -17,24 +17,6 @@ dependencies:
     version: 0.1.0
     repository: "file://./charts/nexent-common"
 
-  # Infrastructure services
-  - name: nexent-elasticsearch
-    version: 0.1.0
-    repository: "file://./charts/nexent-elasticsearch"
-    condition: nexent-elasticsearch.enabled
-  - name: nexent-postgresql
-    version: 0.1.0
-    repository: "file://./charts/nexent-postgresql"
-    condition: nexent-postgresql.enabled
-  - name: nexent-redis
-    version: 0.1.0
-    repository: "file://./charts/nexent-redis"
-    condition: nexent-redis.enabled
-  - name: nexent-minio
-    version: 0.1.0
-    repository: "file://./charts/nexent-minio"
-    condition: nexent-minio.enabled
-
   # Supabase services (only deployed when global.deploymentVersion == "full")
   - name: nexent-supabase-kong
     version: 0.1.0

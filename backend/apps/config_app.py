@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from apps.app_factory import create_app
 from apps.agent_app import agent_config_router as agent_router
@@ -47,23 +49,52 @@ from apps.memory_config_app import router as memory_config_router
 from apps.memory_record_app import router as memory_record_router
 from apps.memory_long_term_app import router as memory_long_term_router
 from apps.memory_dreaming_app import router as memory_dreaming_router
-from apps.quota_app import tenant_quota_router, platform_quota_router, personal_quota_router
+from apps.memory_provider_app import router as memory_provider_router
+from apps.tag_management_app import router as tag_management_router
+from apps.quota_app import (
+    tenant_quota_router,
+    platform_quota_router,
+    personal_quota_router,
+)
 from consts.const import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     ENABLE_AIDP_KNOWLEDGE,
     IS_SPEED_MODE,
+    RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
 )
+from nexent.core.concurrency import (
+    ManagedTaskSpec,
+    ManagerState,
+    clear_default_thread_manager,
+    set_default_thread_manager,
+)
+from consts.task_recovery import CONFIG_SERVICE_NAME
 from services.prompt_template_service import sync_system_default_prompt_template
+from services.thread_lifecycle_service import config_thread_manager
 
-# Create logger instance
 logger = logging.getLogger("base_app")
 
-# Create FastAPI app with common configurations
-app = create_app(title="Nexent Config API", description="Configuration APIs")
+
+async def recover_config_tasks_on_startup():
+    from services.evaluation_maintenance import start as start_eval_maintenance
+    from services.startup_recovery_service import (
+        recover_config_tasks,
+        schedule_interrupted_upload_cleanup,
+    )
+
+    await config_thread_manager.run(
+        "control-io",
+        ManagedTaskSpec(
+            task_name="recover-config-tasks",
+            owner="apps.config_app",
+        ),
+        recover_config_tasks,
+    )
+    start_eval_maintenance(config_thread_manager)
+    await schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)
 
 
-@app.on_event("startup")
 async def sync_default_prompt_template_on_startup():
     """Sync defaults and validate enabled external service configuration."""
     if ENABLE_AIDP_KNOWLEDGE and (not AIDP_SERVER_URL or not AIDP_API_KEY):
@@ -78,16 +109,56 @@ async def sync_default_prompt_template_on_startup():
         logger.error(f"Failed to sync system default prompt template: {str(exc)}")
 
 
-@app.on_event("startup")
 async def start_dreaming_scheduler():
     from services.memory_dreaming_scheduler import dreaming_scheduler
+
     await dreaming_scheduler.start()
 
 
-@app.on_event("shutdown")
 async def stop_dreaming_scheduler():
     from services.memory_dreaming_scheduler import dreaming_scheduler
+
     await dreaming_scheduler.stop()
+
+
+@asynccontextmanager
+async def config_lifespan(_app):
+    if config_thread_manager.state is ManagerState.CREATED:
+        config_thread_manager.start()
+    set_default_thread_manager(config_thread_manager)
+    await recover_config_tasks_on_startup()
+    await sync_default_prompt_template_on_startup()
+    await start_dreaming_scheduler()
+    try:
+        yield
+    finally:
+        # Preserve the scheduler's existing graceful shutdown behavior. Task
+        # state recovery remains exclusively in the startup path above.
+        await stop_dreaming_scheduler()
+        from services.evaluation_maintenance import stop as stop_eval_maintenance
+
+        stop_eval_maintenance()
+        try:
+            await config_thread_manager.shutdown(
+                timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+            )
+        finally:
+            clear_default_thread_manager(config_thread_manager)
+
+
+app = create_app(
+    title="Nexent Config API",
+    description="Configuration APIs",
+    lifespan=config_lifespan,
+)
+if hasattr(app, "state"):
+    app.state.thread_manager = config_thread_manager
+
+
+@app.get("/internal/thread-capacity", include_in_schema=False)
+async def thread_capacity():
+    """Return process-local Config capacity for trusted service probes."""
+    return config_thread_manager.snapshot()
 
 
 app.include_router(model_manager_router)
@@ -140,6 +211,7 @@ app.include_router(evaluator_router)
 app.include_router(evaluation_annotation_router)
 if ENABLE_AIDP_KNOWLEDGE:
     from ext_components.aidp.apps.aidp_mgmt_app import aidp_mgmt_router
+
     app.include_router(aidp_mgmt_router)
 # New memory architecture routers (upstream #3497)
 app.include_router(memory_config_router)
@@ -149,3 +221,5 @@ app.include_router(tenant_quota_router)
 app.include_router(platform_quota_router)
 app.include_router(personal_quota_router)
 app.include_router(memory_dreaming_router)
+app.include_router(memory_provider_router)
+app.include_router(tag_management_router)

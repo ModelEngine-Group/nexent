@@ -12,7 +12,10 @@ import {
 import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
+import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
+import { UserGuidanceMessage } from "@/features/humanInteraction/UserGuidanceMessage";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
+import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
@@ -49,11 +52,14 @@ import {
   CopyIcon,
   DownloadIcon,
   FileTextIcon,
+  LoaderCircleIcon,
   ImageIcon,
   MoreHorizontalIcon,
   RefreshCwIcon,
   ArrowLeft,
+  AlertTriangleIcon,
   SparklesIcon,
+  type LucideIcon,
   PencilIcon,
   Share2Icon,
   XCircleIcon,
@@ -62,6 +68,7 @@ import {
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
@@ -94,6 +101,47 @@ import {
   type Nl2SkillFileCardData,
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+
+type HistorySummaryData = {
+  status?: "compacting" | "accepted";
+  summary?: { markdown?: string } | string;
+  covered_through_message_id?: number;
+};
+
+const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {
+  const { t } = useTranslation();
+  if (data.status === "compacting") {
+    return (
+      <div className="my-2 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+        <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
+        {t("taskWindow.historySummary.compacting")}
+      </div>
+    );
+  }
+  const markdown =
+    typeof data.summary === "string"
+      ? data.summary
+      : data.summary?.markdown || "";
+  if (!markdown) return null;
+  return (
+    <details className="my-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+      <summary className="flex cursor-pointer items-center gap-2 font-medium">
+        <FileTextIcon className="size-4" aria-hidden="true" />
+        {t("taskWindow.historySummary.title")}
+        {typeof data.covered_through_message_id === "number" && (
+          <span className="text-xs font-normal text-muted-foreground">
+            {t("taskWindow.historySummary.coveredThrough", {
+              id: data.covered_through_message_id,
+            })}
+          </span>
+        )}
+      </summary>
+      <div className="mt-3 whitespace-pre-wrap border-t pt-3 text-muted-foreground">
+        {markdown}
+      </div>
+    </details>
+  );
+};
 import {
   formatMessageDate,
   formatMessageTime,
@@ -103,6 +151,7 @@ import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
+import { formatWarningText } from "@/lib/warningText";
 import { configService } from "@/services/configService";
 import { conversationService } from "@/services/conversationService";
 import type {
@@ -113,10 +162,19 @@ import type {
 import { SkillFileCard } from "../ui/skill-file-card";
 import type { SkillFileContent } from "@/types/skill";
 
+export interface WelcomeSuggestion {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+  icon: LucideIcon;
+}
+
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
   welcomeTitle?: string;
+  welcomeSuggestions?: readonly WelcomeSuggestion[];
   conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
@@ -140,6 +198,7 @@ export interface ThreadProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
   showComposer?: boolean;
+  interactionContent?: ReactNode;
 }
 
 /**
@@ -149,6 +208,8 @@ export interface ThreadProps {
 const useAgentModels = (
   agent: Agent | PublishedAgent
 ): readonly ModelOption[] => {
+  const { models: availableModels } = useModelList();
+
   return useMemo(() => {
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
@@ -159,33 +220,52 @@ const useAgentModels = (
       model_names &&
       model_names.length > 0
     ) {
-      return model_ids.map((id, i) => ({
+      const configuredModels = model_ids.map((id, i) => ({
         id: String(id),
         name: model_names[i] ?? `Model ${id}`,
       }));
+      const availableModelIds = new Set(
+        availableModels
+          .filter((model) => model.connect_status === "available")
+          .map((model) => String(model.id))
+      );
+      return configuredModels.filter((model) =>
+        availableModelIds.has(model.id)
+      );
     }
 
     // Fallback for single model: check model_name on typedAgent
     const modelName = (typedAgent as unknown as { model_name?: string })
       .model_name;
-    if (modelName) {
+    const modelIsAvailable = availableModels.some(
+      (model) =>
+        model.connect_status === "available" &&
+        (model.displayName === modelName || model.name === modelName)
+    );
+    if (modelName && modelIsAvailable) {
       return [{ id: modelName, name: modelName }];
     }
 
     // Fallback to the single model field (used by AgentDraft / debug panel)
     const singleModel = (typedAgent as unknown as { model?: string }).model;
-    if (singleModel) {
+    const singleModelIsAvailable = availableModels.some(
+      (model) =>
+        model.connect_status === "available" &&
+        (model.displayName === singleModel || model.name === singleModel)
+    );
+    if (singleModel && singleModelIsAvailable) {
       return [{ id: singleModel, name: singleModel }];
     }
 
     return [];
-  }, [agent]);
+  }, [agent, availableModels]);
 };
 
 export const Thread: FC<ThreadProps> = ({
   agent,
   generatedTitle,
   welcomeTitle,
+  welcomeSuggestions,
   conversationId,
   onBack,
   selectedModelId,
@@ -206,9 +286,32 @@ export const Thread: FC<ThreadProps> = ({
   onRuntimeMetadataChange,
   readOnly = false,
   showComposer = true,
+  interactionContent,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
+  const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
+  const selectedModelIsValid = Boolean(
+    selectedModelId && models.some((model) => model.id === selectedModelId)
+  );
+  const fallbackModelId = models[0]?.id;
+  const effectiveSelectedModelId = selectedModelIsValid
+    ? selectedModelId
+    : localSelectedModelId &&
+        models.some((model) => model.id === localSelectedModelId)
+      ? localSelectedModelId
+      : fallbackModelId;
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      if (!models.some((model) => model.id === modelId)) return;
+      if (selectedModelId !== undefined) {
+        onModelChange?.(modelId);
+      } else {
+        setLocalSelectedModelId(modelId);
+      }
+    },
+    [models, onModelChange, selectedModelId]
+  );
 
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
@@ -406,10 +509,11 @@ export const Thread: FC<ThreadProps> = ({
       <ThreadView
         agent={agent}
         welcomeTitle={welcomeTitle}
+        welcomeSuggestions={welcomeSuggestions}
         onBack={onBack}
         models={models}
-        selectedModelId={selectedModelId}
-        onModelChange={onModelChange}
+        selectedModelId={effectiveSelectedModelId}
+        onModelChange={handleModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
@@ -426,6 +530,7 @@ export const Thread: FC<ThreadProps> = ({
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
         showComposer={showComposer}
+        interactionContent={interactionContent}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -502,6 +607,7 @@ export const Thread: FC<ThreadProps> = ({
 interface ThreadViewProps {
   agent: Agent | PublishedAgent;
   welcomeTitle?: string;
+  welcomeSuggestions?: readonly WelcomeSuggestion[];
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
@@ -541,11 +647,13 @@ interface ThreadViewProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
   showComposer: boolean;
+  interactionContent?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
   welcomeTitle,
+  welcomeSuggestions,
   onBack,
   models,
   selectedModelId,
@@ -582,6 +690,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   onRuntimeMetadataChange,
   readOnly,
   showComposer,
+  interactionContent,
 }) => {
   const { t } = useTranslation();
 
@@ -623,7 +732,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                   </span>
                   {hasMessages && variant !== "embedded" && (
                     <span className="text-xs text-muted-foreground">
-                      {t("chat.thread.conversation")}
+                      {displayName}
                     </span>
                   )}
                 </div>
@@ -706,8 +815,13 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent agent={agent} title={welcomeTitle} />
+            <ThreadWelcomeContent
+              agent={agent}
+              title={welcomeTitle}
+              suggestions={welcomeSuggestions}
+            />
           )}
+          {interactionContent}
         </ThreadPrimitive.Viewport>
 
         {showComposer && (
@@ -745,7 +859,8 @@ const ThreadView: FC<ThreadViewProps> = ({
         sources={selection?.sources ?? []}
         images={selection?.images ?? []}
         open={selection !== null}
-        selectedCiteIndex={selection?.selectedCiteIndex}
+        selectedCitationKey={selection?.selectedCitationKey}
+        citationContext={selection?.citationContext}
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
@@ -797,7 +912,8 @@ export const ReadOnlyConversation: FC<{
           sources={selection?.sources ?? []}
           images={selection?.images ?? []}
           open={selection !== null}
-          selectedCiteIndex={selection?.selectedCiteIndex}
+          selectedCitationKey={selection?.selectedCitationKey}
+          citationContext={selection?.citationContext}
           onClose={close}
         />
       </ThreadPrimitive.Root>
@@ -808,17 +924,20 @@ export const ReadOnlyConversation: FC<{
 interface ThreadWelcomeContentProps {
   agent: Agent | PublishedAgent;
   title?: string;
+  suggestions?: readonly WelcomeSuggestion[];
 }
 
 const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
   agent,
   title,
+  suggestions = [],
 }) => {
   const aui = useAui();
   const { t } = useTranslation();
   const Icon = getAgentIcon(agent);
   const displayName = agent.display_name || agent.name;
   const sampleQuestions = (agent.example_questions || []).slice(0, 4);
+  const displayedSuggestions = suggestions.slice(0, 4);
 
   const handleSampleQuestionClick = useCallback(
     (question: string) => {
@@ -844,7 +963,33 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
             </p>
           </div>
 
-          {sampleQuestions.length > 0 && (
+          {displayedSuggestions.length > 0 ? (
+            <div className="grid w-full auto-rows-fr grid-cols-1 gap-2 sm:grid-cols-2">
+              {displayedSuggestions.map((suggestion) => {
+                const SuggestionIcon = suggestion.icon;
+                return (
+                  <button
+                    key={suggestion.id}
+                    type="button"
+                    onClick={() => handleSampleQuestionClick(suggestion.prompt)}
+                    className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
+                  >
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <SuggestionIcon className="size-5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium leading-5 text-foreground">
+                        {suggestion.title}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                        {suggestion.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : sampleQuestions.length > 0 ? (
             <div className="w-full">
               <p className="mb-4 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <SparklesIcon className="size-3.5 text-primary" />
@@ -863,7 +1008,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
@@ -1219,21 +1364,28 @@ const AssistantMessage: FC<{
                 Boolean((part as { image?: string }).image)) ||
               (part.type === "text" &&
                 Boolean(
-                  (part as {
-                    isSearchImage?: boolean;
-                    imageSource?: SourcePartLike;
-                  }).isSearchImage &&
-                    (part as { imageSource?: SourcePartLike }).imageSource
+                  (
+                    part as {
+                      isSearchImage?: boolean;
+                      imageSource?: SourcePartLike;
+                    }
+                  ).isSearchImage &&
+                  (part as { imageSource?: SourcePartLike }).imageSource
                 ));
+            const isExecutionCodePart =
+              part.type === "data" &&
+              (part as { name?: string }).name === "execution-code";
             const chainPath: `group-${string}`[] = isImagePart
               ? ["group-image"]
               : part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
-                : part.type === "tool-call"
-                  ? ["group-chainOfThought", "group-tool"]
-                  : part.type === "source"
-                    ? ["group-source"]
-                    : ["group-default"];
+                : isExecutionCodePart
+                  ? ["group-chainOfThought", "group-execution-code"]
+                  : part.type === "tool-call"
+                    ? ["group-chainOfThought", "group-tool"]
+                    : part.type === "source"
+                      ? ["group-source"]
+                      : ["group-default"];
             if (subagentId !== undefined) {
               const groupKey =
                 `group-subagent-${subagentId}-${runId ?? "unknown"}` as const;
@@ -1318,6 +1470,8 @@ const AssistantMessage: FC<{
                   </Reasoning.Root>
                 );
               }
+              case "group-execution-code":
+                return <div data-slot="aui_execution-code">{children}</div>;
               case "group-source":
                 return (
                   <SourceGroupButton
@@ -1332,6 +1486,7 @@ const AssistantMessage: FC<{
               case "text": {
                 const textPart = part as typeof part & {
                   isError?: boolean;
+                  isWarning?: boolean;
                   text?: string;
                   isSearchImage?: boolean;
                   imageSource?: SourcePartLike;
@@ -1344,6 +1499,17 @@ const AssistantMessage: FC<{
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                       <XCircleIcon className="mt-0.5 size-4 shrink-0 text-red-500 dark:text-red-400" />
                       <span className="break-all">{textPart.text}</span>
+                    </div>
+                  );
+                }
+                if (textPart.isWarning) {
+                  const warningText = formatWarningText(textPart.text ?? "");
+                  return (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
+                      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
+                      <span className="line-clamp-3 min-w-0 break-all">
+                        {warningText}
+                      </span>
                     </div>
                   );
                 }
@@ -1379,6 +1545,38 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
+                if ((part as typeof part & { name?: string }).name === "user-steering") {
+                  return <UserGuidanceMessage data={(part as typeof part & { data?: unknown }).data} />;
+                }
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "history-summary"
+                ) {
+                  return (
+                    <HistorySummaryCard
+                      data={
+                        (part as typeof part & { data?: unknown })
+                          .data as HistorySummaryData
+                      }
+                    />
+                  );
+                }
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "execution-code"
+                ) {
+                  const data = (
+                    part as typeof part & {
+                      data?: { code?: unknown; language?: string };
+                    }
+                  ).data;
+                  return (
+                    <ExecutionCodeBlock
+                      code={data?.code}
+                      language={data?.language}
+                    />
+                  );
+                }
                 if (
                   (part as typeof part & { name?: string }).name ===
                   "nl2skill-file"
@@ -1551,7 +1749,7 @@ const UserMessage: FC<{
         <UserMessageAttachments />
 
         <div className="aui-user-message-content-wrapper relative self-end inline-block min-w-0">
-          <div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
+          <UserMessageBubble>
             <MessagePrimitive.Quote>
               {(quote) => <QuoteBlock {...quote} />}
             </MessagePrimitive.Quote>
@@ -1562,7 +1760,7 @@ const UserMessage: FC<{
                   : DirectiveText,
               }}
             />
-          </div>
+          </UserMessageBubble>
           {!readOnly && (
             <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">
               <UserActionBar />
@@ -1614,11 +1812,13 @@ interface SourcePartLike {
   url?: string;
   title?: string;
   text?: string;
+  publishedDate?: string;
   filename?: string;
   downloadUrl?: string;
   objectName?: string;
   isImage?: boolean;
   citeIndex?: number;
+  toolSign?: string;
   messageId?: string;
 }
 
@@ -1858,11 +2058,13 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           url: source.url,
           title: source.title,
           text: source.text,
+          publishedDate: source.publishedDate,
           filename: source.filename,
           downloadUrl: source.downloadUrl,
           objectName: source.objectName,
           isImage: source.isImage,
           citeIndex: source.citeIndex,
+          toolSign: source.toolSign,
         }))
       : groupedSources;
     for (const item of displaySources) {

@@ -47,6 +47,7 @@ class SearchRecord(TypedDict):
     score_overall: Optional[float]
     score_accuracy: Optional[float]
     score_semantic: Optional[float]
+    retrieval_highlight_terms: Optional[List[str]]
     published_date: Optional[datetime]
     cite_index: Optional[int]
     search_type: Optional[str]
@@ -298,7 +299,7 @@ def persist_assistant_run_batch(
     Returns:
         Mapping from unit_index to the generated unit_id.
     """
-    if terminal_status not in {"completed", "failed", "stopped"}:
+    if terminal_status not in {"completed", "failed", "stopped", "waiting_human", "recovery_required"}:
         raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
 
     message_id = int(message_id)
@@ -518,6 +519,53 @@ def update_conversation_message_status(message_id: int, status: str,
         )
 
 
+def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
+    """Mark assistant messages left streaming by a stopped runtime as failed.
+
+    Returns the affected runtime identities so the caller can finish the
+    corresponding short-lived Redis state with the existing runtime-state API.
+    The conditional update makes repeated startup recovery idempotent.
+    """
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                ConversationMessage.message_id,
+                ConversationMessage.conversation_id,
+                ConversationMessage.created_by,
+            )
+            .filter(
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.status == "streaming",
+                ConversationMessage.delete_flag == "N",
+            )
+            .with_for_update()
+            .all()
+        )
+        if not rows:
+            return []
+
+        message_ids = [int(row.message_id) for row in rows]
+        session.query(ConversationMessage).filter(
+            ConversationMessage.message_id.in_(message_ids),
+            ConversationMessage.status == "streaming",
+            ConversationMessage.delete_flag == "N",
+        ).update(
+            {
+                "status": "failed",
+                "update_time": func.current_timestamp(),
+            },
+            synchronize_session=False,
+        )
+        return [
+            {
+                "message_id": int(row.message_id),
+                "conversation_id": int(row.conversation_id),
+                "user_id": row.created_by,
+            }
+            for row in rows
+        ]
+
+
 def update_conversation_message_content(message_id: int, content: str,
                                          user_id: Optional[str] = None) -> None:
     """
@@ -729,6 +777,43 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
 
         # Convert SQLAlchemy model instances to dictionaries
         return list(map(as_dict, records))
+
+
+def get_units_by_message(message_id: int) -> List[Dict[str, Any]]:
+    """Query all completed units for a given assistant message.
+
+    Returns a list of dicts with keys: unit_id, unit_type, unit_content,
+    unit_index, message_id.  Used by the per-turn external memory supplement.
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+
+        stmt = (
+            select(
+                ConversationMessageUnit.unit_id,
+                ConversationMessageUnit.unit_type,
+                ConversationMessageUnit.unit_content,
+                ConversationMessageUnit.unit_index,
+                ConversationMessageUnit.message_id,
+            )
+            .where(
+                ConversationMessageUnit.message_id == message_id,
+                ConversationMessageUnit.unit_status == "completed",
+                ConversationMessageUnit.delete_flag == "N",
+            )
+            .order_by(ConversationMessageUnit.unit_index.asc())
+        )
+        results = session.execute(stmt).all()
+        return [
+            {
+                "unit_id": r.unit_id,
+                "unit_type": r.unit_type,
+                "unit_content": r.unit_content,
+                "unit_index": r.unit_index,
+                "message_id": r.message_id,
+            }
+            for r in results
+        ]
 
 
 def get_conversation_list(
@@ -1044,6 +1129,89 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
 
         # Check if the conversation record was affected
         return conversation_result.rowcount > 0
+
+
+def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[str] = None) -> List[int]:
+    """
+    Soft-delete multiple conversations owned by the user (cascading).
+
+    Only conversations whose created_by matches user_id are affected. Child
+    rows cascade by conversation_id for the validated set only, so a caller
+    passing ids it does not own cannot touch another user's data.
+
+    Args:
+        conversation_ids: Conversation IDs to delete
+        user_id: Owner filter (created_by) and audit value for updated_by
+
+    Returns:
+        List of conversation IDs that were actually deleted
+    """
+    with get_db_session() as session:
+        ids = [int(i) for i in conversation_ids]
+        if not ids:
+            return []
+
+        # Ownership boundary: resolve requested ids that belong to the user.
+        # Only this set is cascaded below, enforcing tenant isolation.
+        owned_rows = session.execute(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id.in_(ids),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N'
+            )
+        ).all()
+        owned_ids = [row[0] for row in owned_rows]
+        if not owned_ids:
+            return []
+
+        update_data = {
+            "delete_flag": 'Y',
+            "update_time": func.current_timestamp()
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+
+        # 1. Mark the owned conversations as deleted
+        session.execute(
+            update(ConversationRecord).where(
+                ConversationRecord.conversation_id.in_(owned_ids),
+                ConversationRecord.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 2. Mark related messages as deleted
+        session.execute(
+            update(ConversationMessage).where(
+                ConversationMessage.conversation_id.in_(owned_ids),
+                ConversationMessage.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 3. Mark message units as deleted
+        session.execute(
+            update(ConversationMessageUnit).where(
+                ConversationMessageUnit.conversation_id.in_(owned_ids),
+                ConversationMessageUnit.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 4. Mark search sources as deleted
+        session.execute(
+            update(ConversationSourceSearch).where(
+                ConversationSourceSearch.conversation_id.in_(owned_ids),
+                ConversationSourceSearch.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 5. Mark image sources as deleted
+        session.execute(
+            update(ConversationSourceImage).where(
+                ConversationSourceImage.conversation_id.in_(owned_ids),
+                ConversationSourceImage.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        return owned_ids
 
 
 def soft_delete_all_conversations_by_user(user_id: str) -> int:
@@ -1467,6 +1635,7 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             - score_overall: Overall relevance score
             - score_accuracy: Accuracy score
             - score_semantic: Semantic relevance score
+            - retrieval_highlight_terms: Exact lexical terms returned by retrieval
             - published_date: Publication date
         user_id: Reserved parameter for created_by and updated_by fields
 
@@ -1504,6 +1673,10 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             data["score_accuracy"] = search_data['score_accuracy']
         if 'score_semantic' in search_data:
             data["score_semantic"] = search_data['score_semantic']
+        if 'retrieval_highlight_terms' in search_data:
+            data["retrieval_highlight_terms"] = search_data[
+                'retrieval_highlight_terms'
+            ]
         if 'published_date' in search_data:
             data["published_date"] = search_data['published_date']
         if user_id:
@@ -1860,6 +2033,11 @@ def save_history_summary(
     summary: Dict[str, Any], covered_through_message_id: int,
     previous_summary_unit_id: Optional[int] = None,
     trigger: Optional[str] = None,
+    history_tokens_before: Optional[int] = None,
+    history_tokens_after: Optional[int] = None,
+    compaction_attempts: Optional[int] = None,
+    compaction_trigger_threshold_tokens: Optional[int] = None,
+    compaction_target_tokens: Optional[int] = None,
 ) -> int:
     """Persist a validated checkpoint on its last covered assistant message."""
     if not user_id or not tenant_id or not isinstance(summary, dict):
@@ -1933,6 +2111,15 @@ def save_history_summary(
             payload["previous_summary_unit_id"] = int(previous_summary_unit_id)
         if trigger:
             payload["trigger"] = trigger
+        for key, value in {
+            "history_tokens_before": history_tokens_before,
+            "history_tokens_after": history_tokens_after,
+            "compaction_attempts": compaction_attempts,
+            "compaction_trigger_threshold_tokens": compaction_trigger_threshold_tokens,
+            "compaction_target_tokens": compaction_target_tokens,
+        }.items():
+            if value is not None:
+                payload[key] = int(value)
         row = add_creation_tracking({
             "message_id": covered_through_message_id,
             "conversation_id": conversation_id,

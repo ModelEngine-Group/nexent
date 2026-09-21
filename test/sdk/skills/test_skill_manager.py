@@ -11,6 +11,7 @@ import sys
 import tempfile
 import zipfile
 import threading
+import types
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
@@ -72,9 +73,12 @@ import importlib.util
 from unittest.mock import MagicMock
 
 # Mock the nexent.skills package before importing
-mock_skills_module = MagicMock()
+mock_skills_module = types.ModuleType("nexent.skills")
 mock_skills_module.__path__ = [os.path.join(os.path.dirname(__file__), "../../../sdk/nexent/skills")]
-sys.modules['nexent'] = MagicMock()
+nexent_package = types.ModuleType('nexent')
+nexent_package.__path__ = [os.path.join(os.path.dirname(__file__), '../../../sdk/nexent')]
+nexent_package.skills = mock_skills_module
+sys.modules['nexent'] = nexent_package
 sys.modules['nexent.skills'] = mock_skills_module
 
 # Load constants first
@@ -107,6 +111,8 @@ SkillManager = module_manager.SkillManager
 SkillNotFoundError = module_manager.SkillNotFoundError
 SkillScriptNotFoundError = module_manager.SkillScriptNotFoundError
 SkillLoader = module_loader.SkillLoader
+InvalidSkillNameError = sys.modules["nexent.skills.paths"].InvalidSkillNameError
+UnsafeSkillPathError = sys.modules["nexent.skills.paths"].UnsafeSkillPathError
 
 @pytest.fixture(autouse=True)
 def _reset_skill_manager_singleton():
@@ -956,6 +962,17 @@ class TestSkillManagerCleanupSkillDirectory:
 
 class TestSkillManagerRunSkillScript:
     """Test SkillManager.run_skill_script method."""
+
+    def test_run_skill_script_rejects_unsupported_resolved_extension(self, mocker):
+        manager = SkillManager(base_skills_dir="/tmp/skills")
+        mocker.patch.object(
+            manager,
+            "resolve_skill_script",
+            return_value=("/tmp/skills/demo", "/tmp/skills/demo/script.js", "script.js"),
+        )
+
+        with pytest.raises(ValueError, match="Unsupported script type: script.js"):
+            manager.run_skill_script("demo", "script.js", tenant_id=None)
 
     def test_run_skill_script_not_found_raises(self):
         """Test running script in non-existent skill raises SkillNotFoundError."""
@@ -2106,7 +2123,7 @@ class TestSkillManagerZipPathSecurity:
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
 
-            with pytest.raises(ValueError, match="outside the skill directory"):
+            with pytest.raises(UnsafeSkillPathError, match="Unsafe local skill path"):
                 manager.upload_skill_from_file(
                     self._archive_with_traversal(),
                     file_type="zip",
@@ -2124,7 +2141,7 @@ class TestSkillManagerZipPathSecurity:
                 tenant_id=None,
             )
 
-            with pytest.raises(ValueError, match="outside the skill directory"):
+            with pytest.raises(UnsafeSkillPathError, match="Unsafe local skill path"):
                 manager.update_skill_from_file(
                     self._archive_with_traversal(),
                     "safe-skill",
@@ -2317,7 +2334,7 @@ class TestSkillManagerSaveSkillExtraFiles:
                 "files": [{"path": "../outside.txt", "content": "escaped"}],
             }
 
-            with pytest.raises(ValueError, match="outside the skill directory"):
+            with pytest.raises(UnsafeSkillPathError, match="Unsafe local skill path"):
                 manager.save_skill(skill_data, tenant_id=None)
 
             assert not os.path.exists(os.path.join(temp.skills_dir, "unsafe-skill"))
@@ -3885,7 +3902,7 @@ class TestSkillManagerResolveSkillDir:
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             with pytest.raises(
-                ValueError, match="skill_name must be a non-empty string"
+                InvalidSkillNameError, match="Invalid skill name for local file access"
             ):
                 manager.resolve_skill_dir(None, tenant_id=None)
 
@@ -3894,7 +3911,7 @@ class TestSkillManagerResolveSkillDir:
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             with pytest.raises(
-                ValueError, match="skill_name must be a non-empty string"
+                InvalidSkillNameError, match="Invalid skill name for local file access"
             ):
                 manager.resolve_skill_dir("", tenant_id=None)
 
@@ -3903,7 +3920,7 @@ class TestSkillManagerResolveSkillDir:
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             with pytest.raises(
-                ValueError, match="skill_name must be a non-empty string"
+                InvalidSkillNameError, match="Invalid skill name for local file access"
             ):
                 manager.resolve_skill_dir("   ", tenant_id=None)
 
@@ -3914,7 +3931,7 @@ class TestSkillManagerResolveSkillDir:
             # Use a platform-appropriate absolute path so ``os.path.isabs``
             # returns True on both POSIX and Windows.
             abs_skill = os.path.abspath(os.sep + "etc" + os.sep + "passwd")
-            with pytest.raises(ValueError, match="skill_name must not be an absolute path"):
+            with pytest.raises(InvalidSkillNameError, match="Invalid skill name for local file access"):
                 manager.resolve_skill_dir(abs_skill, tenant_id=None)
 
     def test_resolve_skill_dir_rejects_traversal_escape(self):
@@ -3922,7 +3939,7 @@ class TestSkillManagerResolveSkillDir:
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             with pytest.raises(
-                ValueError, match="skill_name resolves outside the tenant directory"
+                InvalidSkillNameError, match="Invalid skill name for local file access"
             ):
                 manager.resolve_skill_dir("..", tenant_id=None)
 
@@ -3931,7 +3948,7 @@ class TestSkillManagerResolveSkillDir:
         with TempSkillDir() as temp:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             with pytest.raises(
-                ValueError, match="skill_name resolves outside the tenant directory"
+                InvalidSkillNameError, match="Invalid skill name for local file access"
             ):
                 manager.resolve_skill_dir("..", tenant_id="tenant-a")
 
@@ -3993,8 +4010,8 @@ class TestSkillManagerResolveSkillFilePathValidation:
     @pytest.mark.parametrize(
         ("file_path", "message"),
         [
-            ("bad\x00name.py", "null byte"),
-            (os.path.abspath(os.sep + "tmp" + os.sep + "script.py"), "absolute path"),
+            ("bad\x00name.py", "Unsafe local skill path"),
+            (os.path.abspath(os.sep + "tmp" + os.sep + "script.py"), "Unsafe local skill path"),
             ("./", "must point to a file"),
         ],
     )
@@ -4025,7 +4042,7 @@ class TestSkillManagerResolveSkillFilePathValidation:
             manager = SkillManager(base_skills_dir=temp.skills_dir)
             skill_dir = manager.resolve_skill_dir("demo", tenant_id=None)
 
-            with pytest.raises(ValueError, match="outside the skill directory"):
+            with pytest.raises(UnsafeSkillPathError, match="Unsafe local skill path"):
                 manager._resolve_skill_file_path(skill_dir, "../other/script.py")
 
 

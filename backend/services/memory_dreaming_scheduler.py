@@ -12,6 +12,7 @@ from consts.const import (
 )
 from database import memory_dreaming_db
 from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig
+from nexent.core.concurrency import run_blocking
 
 
 logger = logging.getLogger("memory_dreaming.scheduler")
@@ -28,7 +29,13 @@ class DreamingLeaseStore:
         return memory_dreaming_db.claim_queued(owner_id, lease_seconds)
 
     async def recover(self) -> None:
-        await asyncio.to_thread(memory_dreaming_db.recover_stale)
+        await run_blocking(
+            "dreaming-recover-stale",
+            memory_dreaming_db.recover_stale,
+            True,
+            lane="control-io",
+            owner="config",
+        )
 
     async def claim_due(
         self,
@@ -36,29 +43,38 @@ class DreamingLeaseStore:
         limit: int,
         lease_seconds: float,
     ) -> list[ClaimedJob[Dict[str, Any]]]:
-        row = await asyncio.to_thread(
+        row = await run_blocking(
+            "dreaming-claim-due",
             self._materialize_and_claim,
             owner_id,
             limit,
             lease_seconds,
+            lane="control-io",
+            owner="config",
         )
         if row is None:
             return []
         return [ClaimedJob(job_id=row["run_id"], payload=row)]
 
     async def renew(self, job_id: Hashable, owner_id: str, lease_seconds: float) -> bool:
-        return await asyncio.to_thread(
+        return await run_blocking(
+            "dreaming-renew-lease",
             memory_dreaming_db.renew_lease,
             int(job_id),
             owner_id,
             lease_seconds,
+            lane="control-io",
+            owner="config",
         )
 
     async def release(self, job_id: Hashable, owner_id: str) -> bool:
-        return await asyncio.to_thread(
+        return await run_blocking(
+            "dreaming-release-lease",
             memory_dreaming_db.release_lease,
             int(job_id),
             owner_id,
+            lane="control-io",
+            owner="config",
         )
 
 
@@ -77,13 +93,16 @@ async def execute_dreaming(
     trigger_source = payload.get("trigger_source", "scheduler")
 
     try:
-        await asyncio.to_thread(
+        await run_blocking(
+            "dreaming-execute",
             get_memory_dreaming_service().run,
             tenant_id=tenant_id,
             user_id=user_id,
             agent_id=agent_id,
             run_id=int(job.job_id),
             trigger_source=trigger_source,
+            lane="evaluation",
+            owner="config",
         )
         logger.info(
             "Dreaming job completed: run_id=%s tenant=%s user=%s agent=%s",

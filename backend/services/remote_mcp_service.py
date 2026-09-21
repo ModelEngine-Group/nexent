@@ -1038,44 +1038,51 @@ async def delete_mcp_service(
         except Exception as exc:
             logger.warning(f"Failed to stop container: {exc}, but continue to delete MCP record")
 
-    # Hide the deleted MCP's tools from the agent tool selection list so they
-    # no longer appear after deletion (tool rows are kept for agent references).
-    try:
-        set_mcp_tools_unavailable(
-            tenant_id=tenant_id,
-            mcp_server_name=current_record.get("mcp_name") or "",
-            user_id=user_id,
-        )
-    except Exception as exc:
-        logger.warning(f"Failed to mark MCP tools unavailable for '{current_record.get('mcp_name')}': {exc}")
+    # Hide the deleted MCP's tools and remove their editable agent draft bindings.
+    # Cleanup must succeed before the MCP record is deleted to avoid stale bindings.
+    set_mcp_tools_unavailable(
+        tenant_id=tenant_id,
+        mcp_server_name=current_record.get("mcp_name") or "",
+        user_id=user_id,
+    )
 
     delete_mcp_record_by_id(
         mcp_id=mcp_id,
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    from services.tag_management_service import TagManagementService
+
+    TagManagementService.cleanup_resource_assignments(
+        tenant_id, "mcp_service", str(mcp_id), user_id
+    )
 
 
 async def delete_mcp_by_container_id(tenant_id: str, user_id: str, container_id: str) -> None:
     """Soft delete MCP record associated with a specific container ID."""
-    # Hide the deleted MCP's tools from the agent tool selection list.
-    try:
-        for record in get_mcp_records_by_tenant(tenant_id=tenant_id):
-            if str(record.get("container_id") or "") == str(container_id):
-                set_mcp_tools_unavailable(
-                    tenant_id=tenant_id,
-                    mcp_server_name=record.get("mcp_name") or "",
-                    user_id=user_id,
-                )
-                break
-    except Exception as exc:
-        logger.warning(f"Failed to mark MCP tools unavailable for container {container_id}: {exc}")
+    # Hide the deleted MCP's tools and remove their editable agent draft bindings.
+    deleted_mcp_id = None
+    for record in get_mcp_records_by_tenant(tenant_id=tenant_id):
+        if str(record.get("container_id") or "") == str(container_id):
+            deleted_mcp_id = record.get("mcp_id")
+            set_mcp_tools_unavailable(
+                tenant_id=tenant_id,
+                mcp_server_name=record.get("mcp_name") or "",
+                user_id=user_id,
+            )
+            break
 
     delete_mcp_record_by_container_id(
         container_id=container_id,
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    if deleted_mcp_id is not None:
+        from services.tag_management_service import TagManagementService
+
+        TagManagementService.cleanup_resource_assignments(
+            tenant_id, "mcp_service", str(deleted_mcp_id), user_id
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,8 @@
  * Types for tenant skill repository marketplace listings.
  */
 
+import type { TagResourcePredicate } from "@/types/tagManagement";
+
 export type SkillRepositoryListingStatus =
   "not_shared" | "pending_review" | "rejected" | "shared";
 
@@ -43,6 +45,8 @@ export interface SkillRepositoryListingListParams {
   page?: number;
   page_size?: number;
   search?: string;
+  tag_predicates?: TagResourcePredicate[];
+  tag?: string;
   sort_by_update_time?: boolean;
 }
 
@@ -101,6 +105,7 @@ export interface MyEditableSkillListParams {
   page_size?: number;
   search?: string;
   new_skill_padding?: boolean;
+  tag_predicates?: TagResourcePredicate[];
 }
 
 export interface MyEditableSkillPagination {

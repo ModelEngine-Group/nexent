@@ -10,6 +10,7 @@ import type {
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
+import type { GenerateConversationTitleParams } from "@/lib/conversationTitle";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -272,9 +273,26 @@ export const conversationService = {
     throw new ApiError(data.code, data.message);
   },
 
+  // Batch delete conversations
+  async deleteBatch(conversationIds: number[]) {
+    const response = await fetch(API_ENDPOINTS.conversation.batchDelete, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ conversation_ids: conversationIds }),
+    });
+
+    const data = await response.json();
+
+    if (data.code === 0) {
+      return data.data as { deleted_count: number; failed_ids: number[] };
+    }
+
+    throw new ApiError(data.code, data.message);
+  },
+
   // Stop conversation agent
-  async stop(conversationId: number) {
-    const response = await fetch(API_ENDPOINTS.agent.stop(conversationId), {
+  async stop(runId: string | number) {
+    const response = await fetch(API_ENDPOINTS.agent.stop(runId), {
       method: "GET",
       headers: getAuthHeaders(),
     });
@@ -1001,6 +1019,9 @@ export const conversationService = {
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
+      enable_hitl?: boolean;
+      hitl_run_id?: string;
+      hitl_after_event?: number;
       knowledge_scope?: ConversationKnowledgeScope;
       metadata?: Record<string, unknown> | null;
       expected_metadata_version?: number;
@@ -1011,7 +1032,8 @@ export const conversationService = {
     },
     signal?: AbortSignal,
     onConversationId?: (id: string) => void,
-    onRuntimeMetadataVersion?: (version: number) => void
+    onRuntimeMetadataVersion?: (version: number) => void,
+    onRunId?: (id: string) => void
   ): Promise<
     ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
   > {
@@ -1024,6 +1046,9 @@ export const conversationService = {
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
+        enable_hitl: params.enable_hitl === true,
+        hitl_run_id: params.hitl_run_id,
+        hitl_after_event: params.hitl_after_event ?? 0,
       };
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
@@ -1086,6 +1111,10 @@ export const conversationService = {
       if (conversationId && onConversationId) {
         onConversationId(conversationId);
       }
+      const runId = response.headers.get("run_id");
+      if (runId && onRunId) {
+        onRunId(runId);
+      }
       const runtimeMetadataVersion = response.headers.get(
         "X-Runtime-Metadata-Version"
       );
@@ -1132,7 +1161,7 @@ export const conversationService = {
   },
 
   // Generate conversation title from user question
-  async generateTitle(params: { conversation_id: number; question: string }) {
+  async generateTitle(params: GenerateConversationTitleParams) {
     const response = await fetch(API_ENDPOINTS.conversation.generateTitle, {
       method: "POST",
       headers: getAuthHeaders(),
