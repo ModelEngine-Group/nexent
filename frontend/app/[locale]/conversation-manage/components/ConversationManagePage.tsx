@@ -30,6 +30,7 @@ import dayjs from "dayjs";
 import { useConversationManage } from "@/hooks/chat/useConversationManage";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { conversationService } from "@/services/conversationService";
+import { ApiConversationDetail, ApiConversationResponse } from "@/types/conversation";
 
 const { Text } = Typography;
 
@@ -41,14 +42,14 @@ interface ConversationDetail {
   message?: Array<{
     role?: string;
     message?: string | Array<{ content?: string }>;
-    create_time?: number;
+    create_time?: number | null;
   }>;
 }
 
 interface MessageItem {
   role?: string;
   message?: string | Array<{ content?: string }>;
-  create_time?: number;
+  create_time?: number | null;
 }
 
 export function ConversationManagePage({ className = "" }: ConversationManagePageProps) {
@@ -114,10 +115,11 @@ export function ConversationManagePage({ className = "" }: ConversationManagePag
     setConversationDetail(null);
     setDetailModalOpen(true);
     try {
-      const detail = await conversationService.getDetail(conversation.conversation_id);
-      // Convert ApiConversationDetail to ConversationDetail format
+      const response = await conversationService.getDetail(conversation.conversation_id);
+      // conversationService.getDetail returns ApiConversationResponse: { code, data: ApiConversationDetail[], message }
+      const detail = (response as ApiConversationResponse).data?.[0] as ApiConversationDetail | undefined;
       const convertedDetail: ConversationDetail = {
-        message: detail.message as unknown as ConversationDetail["message"],
+        message: detail?.message,
       };
       setConversationDetail(convertedDetail);
     } catch (e) {
