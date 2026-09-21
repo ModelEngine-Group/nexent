@@ -54,7 +54,7 @@ test = [
     "coverage",
     "jsonschema>=4.25.0",
     "openpyxl>=3.1.5",
-    "langfuse==2.60.10",
+    "langfuse==4.15.4",
     "unittest2",
     "mock",
     "pytest-asyncio",
