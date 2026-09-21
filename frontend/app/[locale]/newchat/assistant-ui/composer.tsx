@@ -62,10 +62,8 @@ import {
   combinedSkillDirectiveFormatter,
   skillDirectiveIconMap,
 } from "../ui/skill-directives";
+import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
-
-import { useRunMessageQueueContext } from "@/features/humanInteraction/useRunMessageQueue";
-import { QueuedRunMessageStrip } from "@/features/humanInteraction/QueuedRunMessageStrip";
 
 export type ChatMode = "planning" | "execution";
 
@@ -221,15 +219,27 @@ export const Composer: FC<ComposerProps> = ({
   disabled = false,
 }) => {
   const { t, i18n } = useTranslation();
-  const zh = i18n.language.startsWith("zh");
   const aui = useAui();
-  const queue = useRunMessageQueueContext();
-  const composerText = useAuiState((state) => state.composer.text);
-  const bufferedInput = Boolean(queue && (queue.active || queue.entry));
-  const queueLocked = Boolean(queue?.entry || (queue?.active && queue.used));
-  const enqueue = () => {
-    if (queue?.enqueue(aui.composer().getState().text))
-      aui.composer().setText("");
+  const runtime = aui.threads().__internal_getAssistantRuntime?.();
+  const [sendError, setSendError] = useState("");
+  const prepareSend = () => {
+    if (!runtime || runtime.thread.getState().isRunning) return;
+    const threadId = runtime.threads.getState().mainThreadId;
+    const thread = runtime.threads.getById(threadId);
+    const config = thread.composer.getState().runConfig;
+    setSendError("");
+    const feedback = protectOrdinarySend(thread, {
+      restoreDraft: true,
+      onRejected: (error) => {
+        if (runtime.threads.getState().mainThreadId === threadId) {
+          setSendError(ordinarySendError(error, i18n.language));
+        }
+      },
+    });
+    thread.composer.setRunConfig({
+      ...config,
+      custom: { ...config.custom, ...feedback },
+    });
   };
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
   const isRunning = useAuiState((state) => state.thread.isRunning);
@@ -324,7 +334,6 @@ export const Composer: FC<ComposerProps> = ({
 
   return (
     <div className="relative w-full">
-      <QueuedRunMessageStrip key={queue?.scope} />
       <fieldset
         disabled={disabled}
         aria-disabled={disabled}
@@ -381,35 +390,16 @@ export const Composer: FC<ComposerProps> = ({
           <ComposerPrimitive.Root
             className="flex w-full flex-col px-1 py-1 outline-none"
             onSubmit={(event) => {
-              if (bufferedInput || queueLocked) {
+              if (isRunning) event.preventDefault();
+              else prepareSend();
+            }}
+            onKeyDownCapture={(event) => {
+              if (isRunning && event.key === "Enter" && !event.shiftKey)
                 event.preventDefault();
-                enqueue();
-              }
             }}
           >
-            {!compact && !bufferedInput && <ComposerAttachments />}
-            {bufferedInput || queueLocked ? (
-              <textarea
-                value={composerText}
-                disabled={queueLocked}
-                maxLength={8000}
-                rows={2}
-                aria-label={zh ? "运行中补充内容" : "Message while running"}
-                placeholder={t("chat.composer.placeholder")}
-                onChange={(event) => aui.composer().setText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    !event.shiftKey &&
-                    !event.nativeEvent.isComposing
-                  ) {
-                    event.preventDefault();
-                    enqueue();
-                  }
-                }}
-                className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-              />
-            ) : skillFiles ? (
+            {!compact && <ComposerAttachments />}
+            {skillFiles ? (
               <LexicalComposerInput
                 placeholder={t("chat.composer.placeholder")}
                 className="relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
@@ -471,10 +461,8 @@ export const Composer: FC<ComposerProps> = ({
                   )}
               </div>
               <div className="ml-auto flex items-center gap-1">
-                {!compact && !bufferedInput && !queueLocked && (
-                  <ComposerAddAttachment />
-                )}
-                {!compact && !bufferedInput && !queueLocked && (
+                {!compact && <ComposerAddAttachment />}
+                {!compact && (
                   <AuiIf condition={(s) => !s.composer.dictation}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -500,7 +488,7 @@ export const Composer: FC<ComposerProps> = ({
                     </Tooltip>
                   </AuiIf>
                 )}
-                {!compact && !bufferedInput && !queueLocked && (
+                {!compact && (
                   <AuiIf condition={(s) => !!s.composer.dictation}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -521,37 +509,7 @@ export const Composer: FC<ComposerProps> = ({
                     </Tooltip>
                   </AuiIf>
                 )}
-                {queue?.active ? (
-                  <>
-                    {!queueLocked && composerText.trim() ? (
-                      <Button
-                        type="button"
-                        size="icon"
-                        className="size-8 rounded-full"
-                        onClick={enqueue}
-                        aria-label={zh ? "加入等待队列" : "Queue message"}
-                      >
-                        <ArrowUp className="size-4" />
-                      </Button>
-                    ) : null}
-                    {queue.canStop ? (
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        className="size-8 rounded-full"
-                        onClick={() => void queue.stop()}
-                        aria-label={t("chat.composer.stopGenerating")}
-                      >
-                        <Square className="size-4 fill-current" />
-                      </Button>
-                    ) : (
-                      <ComposerSendOrCancel />
-                    )}
-                  </>
-                ) : queue?.entry ? null : (
-                  <ComposerSendOrCancel />
-                )}
+                <ComposerSendOrCancel onSend={prepareSend} />
               </div>
             </div>
           </ComposerPrimitive.Root>
@@ -569,9 +527,9 @@ export const Composer: FC<ComposerProps> = ({
           )}
         </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       </fieldset>
-      {queue?.error ? (
+      {sendError ? (
         <p role="alert" className="mt-2 px-3 text-xs text-destructive">
-          {queue.error}
+          {sendError}
         </p>
       ) : null}
     </div>
@@ -583,7 +541,7 @@ export const Composer: FC<ComposerProps> = ({
 // the click handler to actually fire. The tooltip wrapper sits outside so its
 // Trigger can use `asChild` against the Button. `AuiIf` toggles between the
 // two branches declaratively based on `thread.isRunning`.
-const ComposerSendOrCancel: FC = () => {
+const ComposerSendOrCancel: FC<{ onSend: () => void }> = ({ onSend }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -591,7 +549,10 @@ const ComposerSendOrCancel: FC = () => {
     <>
       <AuiIf condition={(s) => s.thread.isRunning}>
         <TooltipWrapper tooltip={t("chat.composer.stopGenerating")} side="top">
-          <ComposerPrimitive.Cancel asChild>
+          <ComposerPrimitive.Cancel
+            asChild
+            aria-label={t("chat.composer.stopGenerating")}
+          >
             <Button
               size="icon"
               variant="outline"
@@ -604,7 +565,7 @@ const ComposerSendOrCancel: FC = () => {
       </AuiIf>
       <AuiIf condition={(s) => !s.thread.isRunning}>
         <TooltipWrapper tooltip={t("chat.composer.send")} side="top">
-          <ComposerPrimitive.Send asChild>
+          <ComposerPrimitive.Send asChild onClick={onSend}>
             <Button
               size="icon"
               className="size-8 rounded-full ml-2"

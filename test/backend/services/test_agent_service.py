@@ -14126,9 +14126,8 @@ async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("hitl", [False, True])
 async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
-    monkeypatch, caplog, hitl
+    monkeypatch, caplog
 ):
     """A failed final batch emits a safe error and marks the message failed."""
     from management.services.agent import service as agent_service
@@ -14160,8 +14159,7 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
         agent_run_service, "update_message_status", fallback_status, raising=False
     )
     run_info = MagicMock()
-    run_info.human_interaction = object() if hitl else None
-    run_info.attempt_outcome = "completed" if hitl else None
+    run_info.attempt_outcome = "completed"
 
     with caplog.at_level("ERROR", logger=agent_service.logger.name):
         collected = [
@@ -14175,8 +14173,7 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
     assert SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[-1]
     assert "Failed to persist assistant stream batch" in caplog.text
     fallback_status.assert_called_once_with(4242, "failed", "user")
-    if hitl:
-        assert run_info.attempt_outcome == "recovery_required"
+    assert run_info.attempt_outcome == "failed"
 
 
 @pytest.mark.asyncio
