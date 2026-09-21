@@ -31,8 +31,9 @@ import socket
 import tarfile
 import threading
 import time
+from concurrent.futures import CancelledError as FuturesCancelledError
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from contextlib import closing
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,6 +41,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
+from nexent.core.agents.sandbox_workspace import SandboxWorkspace, validate_container_root
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagedThreadSpec,
@@ -79,11 +81,15 @@ class SandboxSkillScriptRunner:
         timeout_seconds: int = 300,
         workspace_path: Optional[str] = None,
         network_enabled: bool = False,
+        workspace_mapping: Optional[SandboxWorkspace] = None,
     ) -> None:
         self._executor = executor
         self._container = getattr(executor, "container", None)
         self._timeout_seconds = max(1, int(timeout_seconds))
         self._workspace_path = (workspace_path or "").rstrip("/")
+        self._workspace_mapping = workspace_mapping
+        if workspace_mapping is not None:
+            self._workspace_path = str(workspace_mapping.container_root)
         self._network_enabled = bool(network_enabled)
         self._pnpm_store_path = ""
         self._pnpm_store_seeded = False
@@ -289,6 +295,8 @@ class SandboxSkillScriptRunner:
             )
 
         normalized_source = (source or "skill").strip().lower()
+        if self._workspace_mapping is not None and working_directory:
+            working_directory = str(self._workspace_mapping.to_container(working_directory))
         skill_python_path = ""
         if normalized_source == "skill":
             skills_root = self._resolve_skills_root(working_directory)
@@ -746,6 +754,26 @@ class SandboxConfig:
     output_dir: str = "/home/sandbox/workdir/output"
     auto_sync_outputs: bool = True
     extra_kwargs: dict[str, Any] = field(default_factory=dict)
+    workspace_mode: str = "legacy"
+    container_workspace_root: str = ""
+    failure_policy: str = "local"
+
+    def __post_init__(self) -> None:
+        if self.workspace_mode not in {"legacy", "bind"}:
+            raise ValueError("Unknown sandbox workspace mode")
+        if self.failure_policy not in {"local", "error"}:
+            raise ValueError("Unknown sandbox failure policy")
+        if self.workspace_mode == "bind":
+            validate_container_root(self.container_workspace_root)
+
+    def bind_workspace(self) -> Optional[SandboxWorkspace]:
+        """Build the explicit mount mapping; never infer a mode from the host OS."""
+        if self.workspace_mode != "bind":
+            return None
+        root = self.extra_kwargs.get("workspace_root")
+        if not root or not Path(root).is_absolute():
+            raise ValueError("bind workspace requires an absolute host workspace_root")
+        return SandboxWorkspace(Path(root), validate_container_root(self.container_workspace_root))
 
     @classmethod
     def from_dict(cls, data: Optional[dict[str, Any]]) -> "SandboxConfig":
@@ -771,6 +799,9 @@ class SandboxConfig:
             output_dir=data.get("output_dir", "/home/sandbox/workdir/output"),
             auto_sync_outputs=bool(data.get("auto_sync_outputs", True)),
             extra_kwargs=data.get("extra_kwargs", {}),
+            workspace_mode=data.get("workspace_mode", "legacy"),
+            container_workspace_root=data.get("container_workspace_root", ""),
+            failure_policy=data.get("failure_policy", "local"),
         )
 
 
@@ -1586,6 +1617,21 @@ def _sandbox_connection_hosts(container: Any) -> list[str]:
         hosts.append(network_ip)
     return hosts
 
+
+def _published_sandbox_port(container: Any) -> int:
+    """Read the effective loopback mapping, never a requested or guessed port."""
+    ports = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
+    for binding in ports.get(f"{SANDBOX_JUPYTER_PORT}/tcp") or []:
+        if binding.get("HostIp") != "127.0.0.1":
+            continue
+        try:
+            port = int(binding.get("HostPort", ""))
+        except (TypeError, ValueError):
+            continue
+        if 0 < port < 65536:
+            return port
+    raise RuntimeError("Docker sandbox has no effective loopback port mapping for Jupyter")
+
 class _RecoveredDockerExecutor:
     """Minimal Docker executor facade for a container owned by another runtime."""
 
@@ -1652,6 +1698,81 @@ class _DockerKernelLease:
         self._cached_variables: Optional[dict[str, Any]] = None
         self._cached_tools: Optional[dict[str, Any]] = None
         self._kernel_bootstrap_code: list[str] = []
+        self._cancellation_scope: Optional[RunCancellationScope] = None
+
+    def _check_execution_cancelled(self) -> None:
+        """Cancellation must stop channel waits and framework-state replay."""
+        scope = getattr(self, "_cancellation_scope", None)
+        if scope is not None and scope.stop_event.is_set():
+            raise FuturesCancelledError("Sandbox kernel execution cancelled")
+
+    def _wait_for_kernel_channel_ready(self, ws: Any) -> None:
+        """Verify shell and IOPub delivery before sending code with side effects."""
+        from websocket import ABNF, WebSocketConnectionClosedException, WebSocketTimeoutException
+
+        request_id = secrets.token_hex(16)
+        ws.send(json.dumps({
+            "header": {
+                "msg_id": request_id, "session": self._channel_session_id,
+                "username": "nexent", "msg_type": "kernel_info_request", "version": "5.3",
+            },
+            "parent_header": {}, "metadata": {}, "content": {}, "channel": "shell",
+        }))
+        deadline = time.monotonic() + min(3.0, self._receive_timeout_seconds)
+        reply_received = idle_received = False
+        while not (reply_received and idle_received):
+            self._check_execution_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise WebSocketTimeoutException("Kernel channel readiness handshake timed out")
+            ws.settimeout(remaining)
+            opcode, raw = ws.recv_data(control_frame=True)
+            if opcode in (ABNF.OPCODE_PING, ABNF.OPCODE_PONG):
+                continue
+            if opcode == ABNF.OPCODE_CLOSE or not raw:
+                raise WebSocketConnectionClosedException("Kernel channel closed during handshake")
+            message = json.loads(raw)
+            if message.get("parent_header", {}).get("msg_id") != request_id:
+                continue
+            kind = message.get("msg_type") or message.get("header", {}).get("msg_type")
+            reply_received |= kind == "kernel_info_reply"
+            idle_received |= kind == "status" and message.get("content", {}).get("execution_state") == "idle"
+
+    @contextmanager
+    def _kernel_channel(self):
+        """Retry only the side-effect-free handshake, never a submitted execution."""
+        from websocket import WebSocketConnectionClosedException, WebSocketTimeoutException, create_connection
+
+        for attempt in range(3):
+            self._check_execution_cancelled()
+            ws = create_connection(self.ws_url, timeout=self._receive_timeout_seconds)
+            scope = getattr(self, "_cancellation_scope", None)
+            token = None
+            try:
+                if scope is not None:
+                    token = scope.register_closer(ws.shutdown)
+                self._check_execution_cancelled()
+                try:
+                    self._wait_for_kernel_channel_ready(ws)
+                except (WebSocketTimeoutException, WebSocketConnectionClosedException) as exc:
+                    self._check_execution_cancelled()
+                    if attempt == 2:
+                        raise RuntimeError("Sandbox kernel channel readiness failed before code submission") from exc
+                    self._logger.warning(
+                        "Sandbox channel handshake retry: kernel_id=%s attempt=%d error_type=%s",
+                        self.kernel_id, attempt + 1, type(exc).__name__,
+                    )
+                    continue
+                self._check_execution_cancelled()
+                yield ws
+                return
+            except Exception:
+                self._check_execution_cancelled()
+                raise
+            finally:
+                if scope is not None and token is not None:
+                    scope.unregister_closer(token)
+                ws.close()
 
     def _build_channels_url(self, kernel_id: str) -> str:
         """Build a Kernel Gateway channel URL with a stable client session."""
@@ -1684,17 +1805,15 @@ class _DockerKernelLease:
             ABNF,
             WebSocketConnectionClosedException,
             WebSocketTimeoutException,
-            create_connection,
         )
 
+        self._check_execution_cancelled()
         if self._closed:
             raise RuntimeError("Sandbox kernel lease is already closed")
         if self._unhealthy:
             self._replace_unhealthy_kernel()
 
-        with closing(
-            create_connection(self.ws_url, timeout=self._receive_timeout_seconds)
-        ) as ws:
+        with self._kernel_channel() as ws:
             msg_id = _websocket_send_execute_request(code, ws)
             outputs = []
             result = None
@@ -1702,6 +1821,7 @@ class _DockerKernelLease:
             status_deadline = time.monotonic() + self._receive_timeout_seconds
 
             while True:
+                self._check_execution_cancelled()
                 now = time.monotonic()
                 if now >= status_deadline:
                     self._check_kernel_channel_health(
@@ -1752,7 +1872,7 @@ class _DockerKernelLease:
                 if parent_msg_id != msg_id:
                     continue
 
-                msg_type = message.get("msg_type", "")
+                msg_type = message.get("msg_type") or message.get("header", {}).get("msg_type", "")
                 content = message.get("content", {})
                 if msg_type == "stream":
                     outputs.append(content["text"])
@@ -1782,6 +1902,7 @@ class _DockerKernelLease:
         allow_busy: bool = True,
     ) -> None:
         """Fail a lost kernel channel while allowing a genuinely busy kernel to continue."""
+        self._check_execution_cancelled()
         state = self._get_kernel_execution_state()
         if allow_busy and state == "busy":
             self._logger.debug(
@@ -1824,6 +1945,7 @@ class _DockerKernelLease:
             _create_kernel_http,
         )
 
+        self._check_execution_cancelled()
         previous_kernel_id = self.kernel_id
         try:
             response = self._requests.delete(
@@ -1848,6 +1970,7 @@ class _DockerKernelLease:
             previous_kernel_id,
         )
         try:
+            self._check_execution_cancelled()
             kernel_id = _create_kernel_http(f"{self.base_url}/api/kernels", self.logger)
             self.kernel_id = kernel_id
             self._channel_session_id = secrets.token_hex(16)
@@ -1860,6 +1983,8 @@ class _DockerKernelLease:
                 RemotePythonExecutor.send_tools(self, self._cached_tools)
             for code in self._kernel_bootstrap_code:
                 self.run_code_raise_errors(code)
+        except FuturesCancelledError:
+            raise
         except Exception as exc:
             self._unhealthy = True
             self._logger.exception(
@@ -1911,6 +2036,7 @@ class _DockerKernelLease:
         try:
             RemotePythonExecutor.send_variables(self, variables)
         except Exception as exc:
+            self._check_execution_cancelled()
             if not self._unhealthy:
                 raise
             self._logger.warning(
@@ -1970,6 +2096,7 @@ class _DockerKernelLease:
         try:
             RemotePythonExecutor.send_tools(self, tools)
         except Exception as exc:
+            self._check_execution_cancelled()
             if not self._unhealthy:
                 raise
             self._logger.warning(
@@ -1985,6 +2112,7 @@ class _DockerKernelLease:
         try:
             output = self.run_code_raise_errors(code)
         except Exception as exc:
+            self._check_execution_cancelled()
             if not self._unhealthy:
                 raise
             self._logger.warning(
@@ -2197,6 +2325,15 @@ class SandboxPoolManager:
         )
         return ex
 
+    def _check_system_startup_cancelled(
+        self, cancellation_scope: Optional[RunCancellationScope],
+    ) -> None:
+        """Stop startup without treating run cancellation as a shared-owner failure."""
+        if self._stop_evict.is_set() or (
+            cancellation_scope is not None and cancellation_scope.stop_event.is_set()
+        ):
+            raise FuturesCancelledError("System sandbox startup cancelled")
+
     def _acquire_shared_docker_kernel(
         self,
         config: SandboxConfig,
@@ -2222,14 +2359,23 @@ class SandboxPoolManager:
                 self._destroy_executor(owner, logger_)
 
         def get_or_create_owner() -> Any:
+            self._check_system_startup_cancelled(cancellation_scope)
             with self._lock:
                 owner = self._system_containers.get(pool_key)
+                if owner is not None:
+                    previous = getattr(owner, "_nexent_sandbox_config", None)
+                    if isinstance(previous, SandboxConfig):
+                        if previous.bind_workspace() != config.bind_workspace():
+                            raise RuntimeError("System sandbox workspace changed; restart runtime before reuse")
             if owner is not None and self._is_alive(owner):
                 return owner
             if owner is not None:
                 discard_owner(owner)
 
-            with self._container_build_lock:
+            while not self._container_build_lock.acquire(timeout=0.1):
+                self._check_system_startup_cancelled(cancellation_scope)
+            try:
+                self._check_system_startup_cancelled(cancellation_scope)
                 with self._lock:
                     owner = self._system_containers.get(pool_key)
                 if owner is not None and self._is_alive(owner):
@@ -2244,15 +2390,26 @@ class SandboxPoolManager:
                 )
                 if owner is None:
                     self._remove_stale_docker_containers(config, logger_)
-                    owner = self._build_executor(config, logger_, host_tools_exist)
+                    owner = self._build_executor(
+                        config, logger_, host_tools_exist, cancellation_scope=cancellation_scope,
+                    )
                 if not hasattr(owner, "base_url") or not hasattr(owner, "container"):
                     return owner
                 with self._lock:
-                    existing = self._system_containers.setdefault(pool_key, owner)
+                    cancelled = self._stop_evict.is_set() or (
+                        cancellation_scope is not None and cancellation_scope.stop_event.is_set()
+                    )
+                    existing = owner if cancelled else self._system_containers.setdefault(pool_key, owner)
+                if cancelled:
+                    # This owner has not been published; no other run can lease it.
+                    self._destroy_executor(owner, logger_)
+                    raise FuturesCancelledError("System sandbox startup cancelled before publication")
                 if existing is not owner:
                     self._destroy_executor(owner, logger_)
                     owner = existing
                 return owner
+            finally:
+                self._container_build_lock.release()
 
         container_executor = None
         lease = None
@@ -2264,6 +2421,7 @@ class SandboxPoolManager:
             ):
                 return container_executor
             try:
+                self._check_system_startup_cancelled(cancellation_scope)
                 # Revalidate immediately before creating the kernel. This closes
                 # the restart window between owner lookup and the Kernel Gateway
                 # request, while the one retry rebuilds stale recovered owners.
@@ -2274,8 +2432,23 @@ class SandboxPoolManager:
                     logger_,
                     receive_timeout_seconds=config.timeout_seconds,
                 )
+                lease._cancellation_scope = cancellation_scope
                 break
+            except FuturesCancelledError:
+                # The owner is already shared. Cancelling this run must not remove it.
+                raise
             except Exception as exc:
+                self._check_system_startup_cancelled(cancellation_scope)
+                with self._lock:
+                    active = any(
+                        getattr(executor, "container", None) is getattr(container_executor, "container", None)
+                        for executor in self._executors.values()
+                        if getattr(executor, "container", None) is not None
+                    )
+                if active:
+                    raise RuntimeError(
+                        "Kernel connection failed; preserving the shared container with active leases"
+                    ) from exc
                 discard_owner(container_executor)
                 if attempt == 0:
                     logger_.warning(
@@ -2289,6 +2462,11 @@ class SandboxPoolManager:
 
         if lease is None:  # pragma: no cover - loop either assigns or raises
             raise RuntimeError("Failed to create a shared sandbox kernel lease")
+        try:
+            self._check_system_startup_cancelled(cancellation_scope)
+        except FuturesCancelledError:
+            lease.cleanup()
+            raise
         if host_tools_exist:
             lease = _install_host_tool_bridge(
                 lease,
@@ -2300,10 +2478,17 @@ class SandboxPoolManager:
         lease._nexent_sandbox_config = config
         lease._nexent_pool_key = pool_key
         with self._lock:
-            self._in_use[id(lease)] = pool_key
-            self._lease_owners[id(lease)] = container_executor
-            self._executors[id(lease)] = lease
-            self._last_touch[id(lease)] = _now()
+            cancelled = self._stop_evict.is_set() or (
+                cancellation_scope is not None and cancellation_scope.stop_event.is_set()
+            )
+            if not cancelled:
+                self._in_use[id(lease)] = pool_key
+                self._lease_owners[id(lease)] = container_executor
+                self._executors[id(lease)] = lease
+                self._last_touch[id(lease)] = _now()
+        if cancelled:
+            lease.cleanup()
+            raise FuturesCancelledError("System sandbox kernel acquisition cancelled")
         logger_.debug(
             "Leased dedicated Jupyter kernel %s from shared sandbox (key=%s)",
             lease.kernel_id,
@@ -2363,6 +2548,9 @@ class SandboxPoolManager:
         self._destroy_executor(executor, logger_)
         if shared_container is not None:
             with self._lock:
+                if any(owner is shared_container for owner in self._lease_owners.values()):
+                    logger_.info("Preserving shared sandbox with other active kernel leases")
+                    return
                 if self._system_containers.get(pool_key) is shared_container:
                     self._system_containers.pop(pool_key, None)
             self._destroy_executor(shared_container, logger_)
@@ -2472,7 +2660,16 @@ class SandboxPoolManager:
 
             workspace_volume_name = config.extra_kwargs.get("workspace_volume_name")
             workspace_root = config.extra_kwargs.get("workspace_root")
-            if workspace_volume_name and workspace_root:
+            mapping = config.bind_workspace()
+            if mapping is not None:
+                mounts = container.attrs.get("Mounts") or []
+                if labels.get("com.nexent.workspace") != mapping.mount_id or not any(
+                    mapping.matches_mount(mount)
+                    for mount in mounts
+                ):
+                    logger_.warning("Persisted sandbox bind workspace does not match configuration")
+                    return None
+            elif workspace_volume_name and workspace_root:
                 expected_destination = str(Path(workspace_root).resolve())
                 mounts = container.attrs.get("Mounts") or []
                 has_expected_mount = any(
@@ -2491,21 +2688,17 @@ class SandboxPoolManager:
                     return None
 
             networks = (container.attrs.get("NetworkSettings") or {}).get("Networks") or {}
-            if SANDBOX_NETWORK_NAME not in networks:
+            containerized_runtime = _is_containerized_runtime()
+            if containerized_runtime and SANDBOX_NETWORK_NAME not in networks:
                 logger_.warning("Persisted sandbox container is not attached to network %s", SANDBOX_NETWORK_NAME)
                 return None
 
-            if not _is_containerized_runtime():
-                ports = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
-                bindings = ports.get(f"{SANDBOX_JUPYTER_PORT}/tcp") or []
-                if not any(str(binding.get("HostPort")) == str(SANDBOX_JUPYTER_PORT) for binding in bindings):
-                    logger_.warning("Persisted sandbox container does not expose host port %s", SANDBOX_JUPYTER_PORT)
-                    return None
+            connection_port = SANDBOX_JUPYTER_PORT if containerized_runtime else _published_sandbox_port(container)
 
             selected_host = None
             kernels = None
-            for candidate_host in _sandbox_connection_hosts(container):
-                base_url = f"http://{candidate_host}:{SANDBOX_JUPYTER_PORT}"
+            for candidate_host in (_sandbox_connection_hosts(container) if containerized_runtime else ["127.0.0.1"]):
+                base_url = f"http://{candidate_host}:{connection_port}"
                 try:
                     response = requests.get(f"{base_url}/api/kernels", timeout=3)
                     response.raise_for_status()
@@ -2523,6 +2716,7 @@ class SandboxPoolManager:
                 logger_,
                 selected_host,
                 config.extra_kwargs.get("additional_imports", []),
+                port=connection_port,
             )
             recovered._nexent_sandbox_config = config
             recovered._nexent_kernel_count = len(kernels)
@@ -2538,7 +2732,7 @@ class SandboxPoolManager:
             return None
 
     def _remove_stale_docker_containers(self, config: SandboxConfig, logger_: logging.Logger) -> None:
-        """Remove stale containers that would conflict with the stable sandbox name or port."""
+        """Remove only Nexent-owned containers conflicting with the stable system name."""
         try:
             import docker
 
@@ -2546,14 +2740,10 @@ class SandboxPoolManager:
             containers = []
             for container in client.containers.list(all=True):
                 container.reload()
-                if container.name == SANDBOX_CONTAINER_NAME:
+                if container.name == SANDBOX_CONTAINER_NAME and (container.labels or {}).get(
+                    "com.nexent.sandbox"
+                ) == "runtime":
                     containers.append(container)
-                    continue
-                if container.image.tags and config.docker_image in container.image.tags:
-                    ports = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
-                    bindings = ports.get(f"{SANDBOX_JUPYTER_PORT}/tcp") or []
-                    if any(str(binding.get("HostPort")) == str(SANDBOX_JUPYTER_PORT) for binding in bindings):
-                        containers.append(container)
             for container in containers:
                 try:
                     container.remove(force=True)
@@ -2579,7 +2769,7 @@ class SandboxPoolManager:
         container_name = f"{SANDBOX_SESSION_CONTAINER_PREFIX}-{secrets.token_hex(8)}"
         run_kwargs.update({
             "name": container_name,
-            "labels": {"com.nexent.sandbox": "session"},
+            "labels": {**run_kwargs.get("labels", {}), "com.nexent.sandbox": "session"},
             "command": _kernel_gateway_command(),
             "detach": True,
             # Kernel Gateway needs a network namespace for its HTTP/WebSocket
@@ -2619,17 +2809,17 @@ class SandboxPoolManager:
             connection_port = 0
 
         container = client.containers.run(config.docker_image, **run_kwargs)
-        if _is_containerized_runtime() and not config.network_disabled:
-            _attach_sandbox_to_control_network(
-                client,
-                container,
-                alias=container_name,
-            )
-        _seed_pnpm_offline_store(container)
         owner = None
         container_group = None
         executor = None
         try:
+            if _is_containerized_runtime() and not config.network_disabled:
+                _attach_sandbox_to_control_network(
+                    client,
+                    container,
+                    alias=container_name,
+                )
+            _seed_pnpm_offline_store(container)
             container.reload()
             if not _is_containerized_runtime():
                 ports = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
@@ -2672,7 +2862,7 @@ class SandboxPoolManager:
                 container_group,
             )
             logger_.info(
-                "Created session Docker sandbox %s (url=%s)",
+                "Sandbox CREATED scope=session container_id=%s (url=%s)",
                 container.short_id,
                 executor.base_url,
             )
@@ -2720,6 +2910,7 @@ class SandboxPoolManager:
         config: SandboxConfig,
         logger_: logging.Logger,
         container_run_kwargs: dict[str, Any],
+        cancellation_scope: Optional[RunCancellationScope] = None,
     ) -> Any:
         """Create a shared Docker sandbox and connect over host or container networking."""
         import docker
@@ -2728,54 +2919,108 @@ class SandboxPoolManager:
         client = docker.from_env()
         run_kwargs = dict(container_run_kwargs)
         _apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger_)
-        if _is_containerized_runtime():
+        containerized_runtime = _is_containerized_runtime()
+        if containerized_runtime:
             run_kwargs.pop("ports", None)
         else:
+            run_kwargs["network"] = "bridge"
+            run_kwargs["network_disabled"] = False
             run_kwargs["ports"] = {
-                f"{SANDBOX_JUPYTER_PORT}/tcp": ("127.0.0.1", SANDBOX_JUPYTER_PORT)
+                f"{SANDBOX_JUPYTER_PORT}/tcp": ("127.0.0.1", None)
             }
+            if config.network_disabled:
+                logger_.warning(
+                    "Native system sandbox uses bridge networking for the Jupyter control endpoint; "
+                    "the published port is loopback-only, but outbound network isolation is not enforced"
+                )
         run_kwargs["detach"] = True
+        logger_.info(
+            "Sandbox create requested: scope=system runtime_containerized=%s image=%s "
+            "policy_network_disabled=%s network=%s network_mode=%s "
+            "docker_network_disabled=%s ports=%s",
+            containerized_runtime,
+            config.docker_image,
+            config.network_disabled,
+            run_kwargs.get("network"),
+            run_kwargs.get("network_mode"),
+            run_kwargs.get("network_disabled", False),
+            run_kwargs.get("ports"),
+        )
+        self._check_system_startup_cancelled(cancellation_scope)
         container = client.containers.run(config.docker_image, **run_kwargs)
-        if _is_containerized_runtime() and not config.network_disabled:
-            _attach_sandbox_to_control_network(
-                client,
-                container,
-                alias=SANDBOX_CONTAINER_NAME,
-            )
-        _seed_pnpm_offline_store(container)
         try:
+            self._check_system_startup_cancelled(cancellation_scope)
+            if containerized_runtime and not config.network_disabled:
+                _attach_sandbox_to_control_network(
+                    client,
+                    container,
+                    alias=SANDBOX_CONTAINER_NAME,
+                )
             container.reload()
+            host_config = container.attrs.get("HostConfig", {})
+            network_settings = container.attrs.get("NetworkSettings", {})
+            logger_.info(
+                "Sandbox container inspected: scope=system container_id=%s name=%s "
+                "network_mode=%s configured_bindings=%s effective_ports=%s networks=%s",
+                container.short_id,
+                container.name,
+                host_config.get("NetworkMode"),
+                host_config.get("PortBindings"),
+                network_settings.get("Ports"),
+                sorted(network_settings.get("Networks", {})),
+            )
+            _seed_pnpm_offline_store(container)
+            connection_port = SANDBOX_JUPYTER_PORT if containerized_runtime else _published_sandbox_port(container)
             deadline = time.monotonic() + max(10, config.timeout_seconds)
             selected_host = None
+            last_probe_errors: dict[str, str] = {}
             while time.monotonic() < deadline:
+                self._check_system_startup_cancelled(cancellation_scope)
                 container.reload()
-                for candidate_host in _sandbox_connection_hosts(container):
-                    base_url = f"http://{candidate_host}:{SANDBOX_JUPYTER_PORT}"
+                for candidate_host in (_sandbox_connection_hosts(container) if containerized_runtime else ["127.0.0.1"]):
+                    base_url = f"http://{candidate_host}:{connection_port}"
                     try:
                         response = requests.get(f"{base_url}/api/kernels", timeout=1)
                         response.raise_for_status()
                         if isinstance(response.json(), list):
                             selected_host = candidate_host
                             break
-                    except Exception:
+                        last_probe_errors[base_url] = "Kernel API response is not a list"
+                    except Exception as exc:
+                        last_probe_errors[base_url] = f"{type(exc).__name__}: {exc}"
                         continue
                 if selected_host is not None:
                     break
-                time.sleep(0.5)
+                self._stop_evict.wait(0.5)
+            self._check_system_startup_cancelled(cancellation_scope)
             if selected_host is None:
+                logger_.error(
+                    "Sandbox gateway failed: scope=system container_id=%s "
+                    "effective_ports=%s last_probe_errors=%s",
+                    container.short_id,
+                    container.attrs.get("NetworkSettings", {}).get("Ports"),
+                    last_probe_errors,
+                )
                 raise RuntimeError("Jupyter kernel API did not become ready")
+            logger_.info(
+                "Sandbox gateway ready: scope=system container_id=%s endpoint=http://%s:%s/api/kernels",
+                container.short_id,
+                selected_host,
+                connection_port,
+            )
             executor = _RecoveredDockerExecutor(
                 container,
                 logger_,
                 selected_host,
                 config.extra_kwargs.get("additional_imports", []),
+                port=connection_port,
             )
             executor._nexent_sandbox_config = config
             logger_.info(
-                "Created shared Docker sandbox %s (url=%s, network=%s)",
+                "Sandbox CREATED scope=system container_id=%s (url=%s, network=%s)",
                 container.short_id,
                 executor.base_url,
-                SANDBOX_NETWORK_NAME,
+                sorted(network_settings.get("Networks", {})),
             )
             return executor
         except Exception:
@@ -2800,6 +3045,8 @@ class SandboxPoolManager:
             if DockerExecutor is None:
                 raise ImportError("DockerExecutor is unavailable")
         except ImportError:
+            if config.failure_policy == "error":
+                raise RuntimeError("Docker sandbox FAILED phase=dependency; local fallback is disabled")
             logger_.error(
                 "DockerExecutor requires smolagents[docker]. "
                 "Install it with: pip install 'smolagents[docker]'. "
@@ -2822,7 +3069,10 @@ class SandboxPoolManager:
                 else False
             ),
         }
-        if host_tools_exist and not _is_containerized_runtime():
+        if (
+            host_tools_exist and not _is_containerized_runtime()
+            and not (config.workspace_mode == "bind" and Path().resolve().drive)
+        ):
             import docker
 
             docker_client = docker.from_env()
@@ -2834,7 +3084,16 @@ class SandboxPoolManager:
             container_environment.update(_ONLINE_PACKAGE_ENV)
             container_run_kwargs["environment"] = container_environment
         workspace_root = config.extra_kwargs.get("workspace_root")
-        if workspace_root:
+        mapping = config.bind_workspace()
+        if mapping is not None:
+            from docker.types import Mount
+
+            mapping.host_root.mkdir(parents=True, exist_ok=True)
+            container_run_kwargs["mounts"] = [Mount(
+                source=str(mapping.host_root), target=str(mapping.container_root), type="bind",
+            )]
+            container_run_kwargs["labels"] = {"com.nexent.workspace": mapping.mount_id}
+        elif workspace_root:
             resolved_workspace_root = str(Path(workspace_root).resolve())
             workspace_volume_name = config.extra_kwargs.get("workspace_volume_name")
             if not workspace_volume_name:
@@ -2850,21 +3109,23 @@ class SandboxPoolManager:
                 import docker
 
                 docker_client = docker.from_env()
-                _ensure_sandbox_control_network(docker_client)
+                if _is_containerized_runtime():
+                    _ensure_sandbox_control_network(docker_client)
                 container_run_kwargs.update({
                     "name": SANDBOX_CONTAINER_NAME,
-                    "labels": {"com.nexent.sandbox": "runtime"},
+                    "labels": {**container_run_kwargs.get("labels", {}), "com.nexent.sandbox": "runtime"},
                     "command": _kernel_gateway_command(),
                 })
-                if config.network_disabled:
+                if _is_containerized_runtime() and config.network_disabled:
                     container_run_kwargs["network"] = SANDBOX_NETWORK_NAME
                 else:
                     container_run_kwargs.pop("network", None)
-                logger_.debug("Using Docker network %s for system sandbox", SANDBOX_NETWORK_NAME)
             except Exception as exc:
+                if config.failure_policy == "error":
+                    raise RuntimeError("Docker sandbox FAILED phase=network_setup") from exc
                 logger_.warning("Could not prepare Docker network %s: %s", SANDBOX_NETWORK_NAME, exc)
 
-        if host_tools_exist and config.network_disabled:
+        if host_tools_exist and config.network_disabled and config.scope != SandboxScope.SYSTEM:
             logger_.warning(
                 "Docker network isolation is relaxed to bridge mode so sandbox code can call "
                 "token-authenticated Nexent host tools"
@@ -2876,6 +3137,7 @@ class SandboxPoolManager:
                     config,
                     logger_,
                     container_run_kwargs,
+                    cancellation_scope=cancellation_scope,
                 )
             else:
                 if session_container_group is None:
@@ -2891,6 +3153,8 @@ class SandboxPoolManager:
                         session_container_group,
                     )
             executor._nexent_sandbox_config = config  # store for pool bookkeeping
+            if config.scope == SandboxScope.SESSION:
+                executor._cancellation_scope = cancellation_scope
             executor._nexent_backend = "docker"
             logger_.debug(
                 "DockerExecutor created (image=%s, mem=%dm, network=%s)",
@@ -2898,7 +3162,12 @@ class SandboxPoolManager:
                 config.memory_limit_mb,
                 network_mode,
             )
+        except FuturesCancelledError:
+            raise
         except Exception as exc:
+            if config.failure_policy == "error":
+                logger_.error("Docker sandbox FAILED phase=create_or_connect: %s", exc)
+                raise RuntimeError("Docker sandbox unavailable; local fallback is disabled") from exc
             logger_.error(
                 "DockerExecutor construction failed: %s. "
                 "Falling back to LocalPythonExecutor.",
@@ -3092,9 +3361,13 @@ def build_python_executor(
             the existing container instead of starting another container.
 
     Returns:
-        A wrapped python_executor.  Never raises — always returns a usable
-        executor (falls back to LocalPythonExecutor on any error).
+        A wrapped python_executor. Strict Docker policy propagates startup
+        failures; the compatibility policy permits local construction fallback.
     """
+    logger_.info(
+        "Sandbox requested_backend=%s scope=%s workspace_mode=%s failure_policy=%s image=%s",
+        config.level.value, config.scope.value, config.workspace_mode, config.failure_policy, config.docker_image,
+    )
     pool = SandboxPoolManager.get_instance()
 
     if config.scope == SandboxScope.SESSION:

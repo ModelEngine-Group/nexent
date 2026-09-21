@@ -71,6 +71,7 @@ class DownloadFromS3Tool(Tool):
         on_download: object = Field(description="Download synchronization callback", default=None, exclude=True),
     ):
         super().__init__()
+        self.workspace_mapping = None
         # Guard against FieldInfo objects when called without arguments
         _default_ws = "/mnt/nexent"
         if not isinstance(workspace_path, str):
@@ -180,6 +181,8 @@ class DownloadFromS3Tool(Tool):
         if not filename:
             raise ValueError(f"Cannot determine filename from S3 path: {object_key}")
 
+        if self.workspace_mapping is not None:
+            return self.workspace_mapping.resolve_file(filename, self.workspace_path)
         workspace = Path(self.workspace_path).resolve()
         local_path = (workspace / filename).resolve()
         try:
@@ -254,6 +257,9 @@ class DownloadFromS3Tool(Tool):
             }
             if self.on_download is not None:
                 self.on_download(dict(result))
+            if self.workspace_mapping is not None:
+                result["local_path"] = str(self.workspace_mapping.to_container(local_path))
+                result["relative_path"] = Path(relative_path).as_posix()
             return json.dumps(result, ensure_ascii=False)
 
         except ValueError as e:

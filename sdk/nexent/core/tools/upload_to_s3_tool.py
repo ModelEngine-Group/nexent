@@ -89,6 +89,7 @@ class UploadToS3Tool(Tool):
         self.observer = observer if hasattr(observer, 'add_message') else None
         self.run_id = run_id if isinstance(run_id, str) else ""
         self.on_upload = on_upload if callable(on_upload) else None
+        self.workspace_mapping = None
         self.ensure_local_file = ensure_local_file if callable(ensure_local_file) else None
         self.uploaded_paths: set[str] = uploaded_paths if isinstance(uploaded_paths, set) else set()
 
@@ -101,6 +102,8 @@ class UploadToS3Tool(Tool):
         Raises:
             Exception: If path is outside workspace or invalid.
         """
+        if self.workspace_mapping is not None:
+            return str(self.workspace_mapping.resolve_file(file_path, self.workspace_path))
         workspace = Path(self.workspace_path).resolve()
         if os.path.isabs(file_path):
             abs_path = Path(file_path).resolve()

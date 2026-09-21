@@ -72,6 +72,9 @@ from utils.http_client_utils import create_httpx_client
 from utils.redis_utils import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
+    NEXENT_SANDBOX_WORKSPACE_MODE,
+    NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
+    NEXENT_SANDBOX_FAILURE_POLICY,
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
@@ -2428,7 +2431,12 @@ async def create_agent_run_info(
     sandbox_policy = build_sandbox_policy(tenant_id=tenant_id, agent_type="")
     agent_db_policy = getattr(agent_config, "sandbox_policy", None)
     merged_policy = sandbox_policy if sandbox_policy else agent_db_policy
-    sandbox_config = SandboxConfig.from_dict(merged_policy) if merged_policy else None
+    sandbox_config = SandboxConfig.from_dict({
+        **merged_policy,
+        "workspace_mode": NEXENT_SANDBOX_WORKSPACE_MODE,
+        "container_workspace_root": NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
+        "failure_policy": NEXENT_SANDBOX_FAILURE_POLICY,
+    }) if merged_policy else None
     sandbox_minio_client = (
         get_sandbox_minio_client()
         if sandbox_config and sandbox_config.auto_sync_outputs
@@ -2444,6 +2452,7 @@ async def create_agent_run_info(
         if (
             getattr(sandbox_config.level, "value", sandbox_config.level) == "docker"
             and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
+            and sandbox_config.workspace_mode == "legacy"
         ):
             sandbox_config.extra_kwargs.update({
                 "workspace_volume_name": NEXENT_SANDBOX_WORKSPACE_VOLUME,

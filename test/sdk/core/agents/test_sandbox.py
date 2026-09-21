@@ -1424,7 +1424,7 @@ class TestDockerRecovery:
         container.attrs = {
             "NetworkSettings": {
                 "Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}},
-                "Ports": {"8888/tcp": [{"HostPort": "8888"}]},
+                "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49173"}]},
             }
         }
 
@@ -1444,7 +1444,7 @@ class TestDockerRecovery:
 
         assert recovered is not None
         assert recovered.container is container
-        assert recovered.base_url == "http://127.0.0.1:8888"
+        assert recovered.base_url == "http://127.0.0.1:49173"
         assert recovered._nexent_backend == "docker"
         container.reload.assert_called_once()
 
@@ -1455,7 +1455,10 @@ class TestDockerRecovery:
         container = MagicMock()
         container.short_id = "host123"
         container.client = MagicMock()
-        container.attrs = {"NetworkSettings": {"Networks": {}}}
+        container.attrs = {"NetworkSettings": {
+            "Networks": {},
+            "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49173"}]},
+        }}
         run = MagicMock(return_value=container)
         docker_module = SimpleNamespace(
             from_env=lambda: SimpleNamespace(containers=SimpleNamespace(run=run))
@@ -1472,8 +1475,8 @@ class TestDockerRecovery:
 
         executor = pm._build_system_docker_executor(cfg, logger, {"name": "sandbox"})
 
-        assert executor.base_url == "http://127.0.0.1:8888"
-        assert run.call_args.kwargs["ports"] == {"8888/tcp": ("127.0.0.1", 8888)}
+        assert executor.base_url == "http://127.0.0.1:49173"
+        assert run.call_args.kwargs["ports"] == {"8888/tcp": ("127.0.0.1", None)}
 
     def test_system_creation_uses_container_dns_without_host_port(self, monkeypatch):
         pm = SandboxPoolManager.get_instance()
@@ -1606,7 +1609,7 @@ class TestPoolManagerLogic:
         bridge_installer = MagicMock(side_effect=AssertionError("owner bridge installation"))
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
-        monkeypatch.setattr(pm, "_build_system_docker_executor", lambda *args: owner)
+        monkeypatch.setattr(pm, "_build_system_docker_executor", lambda *args, **kwargs: owner)
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", bridge_installer)
 
         executor = pm._build_docker_executor(cfg, logger, host_tools_exist=True)
@@ -1633,7 +1636,7 @@ class TestPoolManagerLogic:
         monkeypatch.setattr(
             pm,
             "_build_system_docker_executor",
-            lambda config, logger_, kwargs: captured_kwargs.update(kwargs) or owner,
+            lambda config, logger_, kwargs, **options: captured_kwargs.update(kwargs) or owner,
         )
         cfg = SandboxConfig(
             level=SandboxLevel.DOCKER,
@@ -1689,7 +1692,7 @@ class TestPoolManagerLogic:
             bridge_timeouts.append(request_timeout_seconds)
             return executor
 
-        monkeypatch.setattr(pm, "_build_executor", lambda *args: owner)
+        monkeypatch.setattr(pm, "_build_executor", lambda *args, **kwargs: owner)
         monkeypatch.setattr(pm, "_recover_docker_container", lambda *args: None)
         lease_timeouts = []
 
@@ -2550,6 +2553,8 @@ class TestDockerKernelLease:
         lease._cached_variables = None
         lease._cached_tools = None
         lease._kernel_bootstrap_code = []
+        # These tests isolate execution/recovery; readiness has dedicated protocol tests.
+        lease._wait_for_kernel_channel_ready = lambda ws: None
         return lease
 
     def test_busy_kernel_continues_after_receive_timeout(self, monkeypatch):
@@ -3411,6 +3416,7 @@ class TestRemoveStaleDockerContainers:
         cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM)
 
         stale_container = MagicMock()
+        stale_container.labels = {"com.nexent.sandbox": "runtime"}
         stale_container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         stale_container.short_id = "stale123"
         stale_container.attrs = {"NetworkSettings": {"Ports": {}}}
@@ -3434,6 +3440,7 @@ class TestRemoveStaleDockerContainers:
         cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM)
 
         stale_container = MagicMock()
+        stale_container.labels = {"com.nexent.sandbox": "runtime"}
         stale_container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         stale_container.short_id = "stale456"
         stale_container.attrs = {"NetworkSettings": {"Ports": {}}}
@@ -3569,7 +3576,10 @@ class TestBuildSystemDockerExecutor:
 
         container = MagicMock()
         container.short_id = "ready123"
-        container.attrs = {"NetworkSettings": {"Networks": {}}}
+        container.attrs = {"NetworkSettings": {
+            "Networks": {},
+            "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49173"}]},
+        }}
         container.reload = MagicMock()
 
         call_count = [0]
@@ -3597,7 +3607,7 @@ class TestBuildSystemDockerExecutor:
 
         executor = pm._build_system_docker_executor(cfg, logger, {"name": "test-sandbox"})
 
-        assert executor.base_url == "http://127.0.0.1:8888"
+        assert executor.base_url == "http://127.0.0.1:49173"
         assert call_count[0] >= 2
         assert run.call_args.kwargs["security_opt"] == ["seccomp=unconfined"]
 
@@ -3613,7 +3623,10 @@ class TestBuildSystemDockerExecutor:
 
         container = MagicMock()
         container.short_id = "fail123"
-        container.attrs = {"NetworkSettings": {"Networks": {}}}
+        container.attrs = {"NetworkSettings": {
+            "Networks": {},
+            "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49173"}]},
+        }}
         container.reload = MagicMock()
         container.remove = MagicMock()
 
@@ -4306,7 +4319,7 @@ class TestPoolManagerMultipleSystemContainers:
         executor1 = _FakeExecutor(image="image1:latest", alive=True)
         executor2 = _FakeExecutor(image="image2:latest", alive=True)
 
-        def mock_build_executor(config, logger_, host_tools=False):
+        def mock_build_executor(config, logger_, host_tools=False, **kwargs):
             if config.docker_image == "image1:latest":
                 return executor1
             return executor2
@@ -5123,6 +5136,7 @@ class TestTargetedSandboxCoverage:
 
         lease = object.__new__(sandbox_module._DockerKernelLease)
         lease._closed = False
+        lease._wait_for_kernel_channel_ready = lambda ws: None
         lease._unhealthy = False
         lease._receive_timeout_seconds = 5
         lease.ws_url = "ws://kernel"
@@ -5378,7 +5392,7 @@ class TestTargetedSandboxCoverage:
             SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM), MagicMock(), False
         ) is None
 
-    def test_remove_stale_container_using_image_and_port(self, monkeypatch):
+    def test_preserves_unrelated_container_using_image_and_port(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()
         container = MagicMock(
             name="old-name",
@@ -5392,11 +5406,14 @@ class TestTargetedSandboxCoverage:
 
         pool._remove_stale_docker_containers(SandboxConfig(docker_image="custom:image"), MagicMock())
 
-        container.remove.assert_called_once_with(force=True)
+        container.remove.assert_not_called()
 
     def test_system_docker_cleanup_preserves_original_error_when_remove_fails(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()
-        container = MagicMock(attrs={"NetworkSettings": {"Networks": {}}})
+        container = MagicMock(attrs={"NetworkSettings": {
+            "Networks": {},
+            "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49173"}]},
+        }})
         container.remove.side_effect = RuntimeError("remove failed")
         docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
             containers=SimpleNamespace(run=MagicMock(return_value=container))
@@ -5468,6 +5485,7 @@ class TestTargetedSandboxCoverage:
 
     def test_system_docker_creates_missing_network(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
         executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
         networks = SimpleNamespace(
             get=MagicMock(side_effect=KeyError("missing")),

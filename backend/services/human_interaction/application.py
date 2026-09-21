@@ -223,7 +223,7 @@ async def execute_attempt(job, lease):
         finally:
             if anext_task is not None:
                 anext_task.cancel()
-                with suppress(asyncio.CancelledError):
+                with suppress(asyncio.CancelledError, StopAsyncIteration):
                     await anext_task
             try:
                 await chunk_iter.aclose()

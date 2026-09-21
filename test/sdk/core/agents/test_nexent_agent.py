@@ -6666,6 +6666,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             timeout_seconds=300,
             workspace_path=nexent_agent_instance.workspace_path,
             network_enabled=False,
+            workspace_mapping=None,
         )
         tool.bind_execution_backend.assert_called_once_with(
             runner,

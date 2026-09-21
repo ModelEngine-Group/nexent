@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import threading
+from concurrent.futures import CancelledError
 from copy import deepcopy
 from typing import Any, Dict, Union
 
@@ -352,7 +353,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
     except AttemptSuspended:
         agent_run_info.attempt_outcome = "waiting_human"
-    except RunTerminated:
+    except (RunTerminated, CancelledError):
         agent_run_info.attempt_outcome = "stopped"
     except RecoveryRequired:
         agent_run_info.attempt_outcome = "recovery_required"
