@@ -19,7 +19,7 @@ def system(monkeypatch):
         "Networks": {"bridge": {}},
         "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49173"}]},
     }}
-    container.labels = {"com.nexent.sandbox": "runtime"}
+    container.labels = {"com.nexent.sandbox": "runtime", sb.TLS_LABEL: sb.TLS_VERSION}
     container.name = sb.SANDBOX_CONTAINER_NAME
     container.status = "running"
     run = MagicMock(return_value=container)
@@ -28,6 +28,8 @@ def system(monkeypatch):
         containers=SimpleNamespace(run=run, list=lambda **kwargs: [container]),
     )
     get = MagicMock(return_value=SimpleNamespace(raise_for_status=lambda: None, json=list))
+    tls = SimpleNamespace(http=SimpleNamespace(get=get), ssl_context=object(), close=MagicMock())
+    monkeypatch.setattr(sb, 'load_container_tls', lambda *args, **kwargs: tls)
     monkeypatch.setitem(sys.modules, "docker", SimpleNamespace(from_env=lambda: client))
     monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=get))
     monkeypatch.setattr(sb, "_is_containerized_runtime", lambda: False)
@@ -43,15 +45,15 @@ def test_native_system_uses_actual_dynamic_port(system):
     owner = s.pool._build_system_docker_executor(s.config, s.logger, {"network": sb.SANDBOX_NETWORK_NAME})
     assert s.run.call_args.kwargs["network"] == "bridge"
     assert s.run.call_args.kwargs["ports"] == {"8888/tcp": ("127.0.0.1", None)}
-    assert owner.base_url == "http://127.0.0.1:49173"
+    assert owner.base_url == "https://127.0.0.1:49173"
     assert owner.port == 49173
-    s.get.assert_called_once_with("http://127.0.0.1:49173/api/kernels", timeout=1)
+    s.get.assert_called_once_with("https://127.0.0.1:49173/api/kernels", timeout=1)
 
 
 def test_recovery_reads_dynamic_mapping_on_bridge(system):
     s = system
     owner = s.pool._recover_docker_container(s.config, s.logger, False)
-    assert owner.base_url == "http://127.0.0.1:49173"
+    assert owner.base_url == "https://127.0.0.1:49173"
     s.run.assert_not_called()
 
 
@@ -169,3 +171,106 @@ def test_system_cancellation_never_falls_back_to_local(system, monkeypatch):
         s.pool._build_docker_executor(s.config, s.logger, cancellation_scope=s.scope)
     assert builder.call_args.kwargs["cancellation_scope"] is s.scope
     local.assert_not_called()
+
+
+@pytest.mark.parametrize('port', ['', None, 'bad', '0', '-1', '65536'])
+def test_invalid_published_ports_are_not_used(system, port):
+    system.container.attrs['NetworkSettings']['Ports']['8888/tcp'] = [
+        {'HostIp': '127.0.0.1', 'HostPort': port},
+    ]
+    with pytest.raises(RuntimeError, match='no effective loopback'):
+        sb._published_sandbox_port(system.container)
+    assert system.pool._recover_docker_container(system.config, system.logger, False) is None
+    system.get.assert_not_called()
+
+
+def test_port_parser_skips_invalid_binding_and_uses_valid_loopback(system):
+    system.container.attrs['NetworkSettings']['Ports']['8888/tcp'] = [
+        {'HostIp': '0.0.0.0', 'HostPort': '8888'},
+        {'HostIp': '127.0.0.1', 'HostPort': 'bad'},
+        {'HostIp': '127.0.0.1', 'HostPort': '65535'},
+    ]
+    assert sb._published_sandbox_port(system.container) == 65535
+
+
+@pytest.mark.parametrize('matching_mount', [False, True])
+def test_recovery_requires_matching_bind_mount(system, tmp_path, matching_mount):
+    system.config.workspace_mode = 'bind'
+    system.config.container_workspace_root = '/mnt/work'
+    system.config.extra_kwargs = {'workspace_root': str(tmp_path)}
+    mapping = system.config.bind_workspace()
+    system.container.labels['com.nexent.workspace'] = mapping.mount_id
+    system.container.attrs['Mounts'] = [{
+        'Type': 'bind', 'Source': str(tmp_path if matching_mount else tmp_path / 'wrong'),
+        'Destination': '/mnt/work', 'RW': True,
+    }]
+    result = system.pool._recover_docker_container(system.config, system.logger, False)
+    if matching_mount:
+        assert result.container is system.container
+        system.get.assert_called_once()
+    else:
+        assert result is None
+        system.get.assert_not_called()
+    system.container.remove.assert_not_called()
+
+
+@pytest.mark.parametrize('response', ['invalid', 'exception'])
+def test_system_startup_timeout_cleans_created_container(system, monkeypatch, response):
+    times = iter([0, 0, 1000])
+    monkeypatch.setattr(sb.time, 'monotonic', lambda: next(times))
+    monkeypatch.setattr(system.pool._stop_evict, 'wait', lambda _: None)
+    if response == 'invalid':
+        system.get.return_value = SimpleNamespace(raise_for_status=lambda: None, json=dict)
+    else:
+        system.get.side_effect = OSError('unavailable')
+    with pytest.raises(RuntimeError, match='did not become ready'):
+        system.pool._build_system_docker_executor(system.config, system.logger, {})
+    system.container.remove.assert_called_once_with(force=True)
+    assert not system.pool._system_containers
+
+
+def test_changed_system_workspace_does_not_destroy_active_owner(system, tmp_path, monkeypatch):
+    original = sb.SandboxConfig(
+        level=sb.SandboxLevel.DOCKER, workspace_mode='bind', container_workspace_root='/mnt/old',
+        extra_kwargs={'workspace_root': str(tmp_path)},
+    )
+    owner = SimpleNamespace(_nexent_sandbox_config=original, container=system.container)
+    system.pool._system_containers[system.config.docker_image] = owner
+    destroy = MagicMock()
+    monkeypatch.setattr(system.pool, '_destroy_executor', destroy)
+    with pytest.raises(RuntimeError, match='workspace changed'):
+        system.pool._acquire_shared_docker_kernel(system.config, system.logger, False)
+    destroy.assert_not_called()
+    assert system.pool._system_containers[system.config.docker_image] is owner
+
+
+def test_failed_new_lease_preserves_owner_with_active_leases(system, monkeypatch):
+    owner = SimpleNamespace(_nexent_sandbox_config=system.config, container=system.container, base_url='http://127.0.0.1')
+    system.pool._system_containers[system.config.docker_image] = owner
+    active = SimpleNamespace(container=system.container)
+    system.pool._executors[id(active)] = active
+    monkeypatch.setattr(system.pool, '_is_alive', lambda _: True)
+    monkeypatch.setattr(sb, '_DockerKernelLease', MagicMock(side_effect=OSError('connect failed')))
+    destroy = MagicMock()
+    monkeypatch.setattr(system.pool, '_destroy_executor', destroy)
+    with pytest.raises(RuntimeError, match='preserving the shared container'):
+        system.pool._acquire_shared_docker_kernel(system.config, system.logger, False)
+    destroy.assert_not_called()
+    assert system.pool._executors[id(active)] is active
+
+
+def test_cancel_before_lease_registration_preserves_shared_owner(system, monkeypatch):
+    owner = SimpleNamespace(_nexent_sandbox_config=system.config, container=system.container, base_url='http://127.0.0.1')
+    system.pool._system_containers[system.config.docker_image] = owner
+    lease = MagicMock()
+    monkeypatch.setattr(system.pool, '_is_alive', lambda _: True)
+    monkeypatch.setattr(sb, '_DockerKernelLease', lambda *args, **kwargs: lease)
+    def wrap(executor, *args):
+        system.scope.cancel()
+        return executor
+    monkeypatch.setattr(sb, '_wrap_executor', wrap)
+    with pytest.raises(CancelledError, match='acquisition cancelled'):
+        system.pool._acquire_shared_docker_kernel(system.config, system.logger, False, system.scope)
+    lease.cleanup.assert_called_once()
+    assert not system.pool._executors
+    assert system.pool._system_containers[system.config.docker_image] is owner

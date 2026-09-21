@@ -61,6 +61,21 @@ SandboxSkillScriptRunner = sandbox_module.SandboxSkillScriptRunner
 seed_pnpm_offline_store = sandbox_module._seed_pnpm_offline_store
 
 
+@pytest.fixture(autouse=True)
+def mock_container_tls_transport(monkeypatch, request):
+    """Keep lifecycle tests independent of Docker certificate I/O.
+
+    Certificate loading and real TLS verification are tested in test_sandbox_tls.
+    Existing per-test HTTP mocks remain the transport collaborators.
+    """
+    if request.node.cls is not None and request.node.cls.__name__ == 'TestDockerIntegration':
+        return
+    def transport(*args, **kwargs):
+        import requests
+        return SimpleNamespace(http=requests, ssl_context=object(), close=MagicMock())
+    monkeypatch.setattr(sandbox_module, 'load_container_tls', transport)
+
+
 def test_docker_bridge_gateway_returns_concrete_ipv4_address():
     network = MagicMock(
         attrs={
@@ -1419,7 +1434,7 @@ class TestDockerRecovery:
         container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         container.short_id = "abc123"
         container.status = "running"
-        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         container.client = MagicMock()
         container.attrs = {
             "NetworkSettings": {
@@ -1444,7 +1459,7 @@ class TestDockerRecovery:
 
         assert recovered is not None
         assert recovered.container is container
-        assert recovered.base_url == "http://127.0.0.1:49173"
+        assert recovered.base_url == "https://127.0.0.1:49173"
         assert recovered._nexent_backend == "docker"
         container.reload.assert_called_once()
 
@@ -1475,7 +1490,7 @@ class TestDockerRecovery:
 
         executor = pm._build_system_docker_executor(cfg, logger, {"name": "sandbox"})
 
-        assert executor.base_url == "http://127.0.0.1:49173"
+        assert executor.base_url == "https://127.0.0.1:49173"
         assert run.call_args.kwargs["ports"] == {"8888/tcp": ("127.0.0.1", None)}
 
     def test_system_creation_uses_container_dns_without_host_port(self, monkeypatch):
@@ -1506,10 +1521,10 @@ class TestDockerRecovery:
             {"name": sandbox_module.SANDBOX_CONTAINER_NAME, "ports": {"old": "mapping"}},
         )
 
-        assert executor.base_url == "http://nexent-runtime-sandbox:8888"
+        assert executor.base_url == "https://nexent-runtime-sandbox:8888"
         assert "ports" not in run.call_args.kwargs
         assert requests_made == [
-            ("http://nexent-runtime-sandbox:8888/api/kernels", {"timeout": 1})
+            ("https://nexent-runtime-sandbox:8888/api/kernels", {"timeout": 1})
         ]
 
     def test_recovery_rejects_container_without_nexent_network(self, monkeypatch):
@@ -1519,7 +1534,7 @@ class TestDockerRecovery:
         container = MagicMock()
         container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         container.status = "running"
-        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         container.attrs = {
             "NetworkSettings": {
                 "Networks": {},
@@ -1548,7 +1563,7 @@ class TestDockerRecovery:
         container = MagicMock()
         container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         container.status = "running"
-        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         container.attrs = {
             "Mounts": [{
                 "Type": "bind",
@@ -2537,19 +2552,20 @@ class TestDockerKernelLease:
         lease = object.__new__(sandbox_module._DockerKernelLease)
         lease.logger = MagicMock()
         lease._logger = MagicMock()
-        lease.base_url = "http://sandbox:8888"
+        lease.base_url = "https://sandbox:8888"
         lease.host = "sandbox"
         lease.port = 8888
         lease.kernel_id = "kernel-1"
         lease._channel_session_id = "session-1"
         lease.ws_url = (
-            "ws://sandbox:8888/api/kernels/kernel-1/channels?session_id=session-1"
+            "wss://sandbox:8888/api/kernels/kernel-1/channels?session_id=session-1"
         )
         lease._receive_timeout_seconds = 0.25
         lease._closed = False
         lease._unhealthy = False
         lease._nexent_kernel_recovery_supported = True
         lease._requests = MagicMock()
+        lease._ssl_context = object()
         lease._cached_variables = None
         lease._cached_tools = None
         lease._kernel_bootstrap_code = []
@@ -2598,21 +2614,22 @@ class TestDockerKernelLease:
         assert result.logs == "done\n"
         assert lease._unhealthy is False
         lease._get_kernel_execution_state.assert_called_once_with()
-        create_connection.assert_called_once_with(lease.ws_url, timeout=0.25)
+        create_connection.assert_called_once_with(lease.ws_url, timeout=0.25, sslopt={"context": lease._ssl_context})
         websocket.close.assert_called_once_with()
 
     def test_kernel_lease_uses_stable_gateway_session_id(self, monkeypatch):
         container_executor = SimpleNamespace(
+            tls_client=SimpleNamespace(http=MagicMock(), ssl_context=object()),
             logger=MagicMock(),
             additional_imports=[],
             installed_packages=[],
             _nexent_backend="docker",
-            base_url="http://sandbox:8888",
+            base_url="https://sandbox:8888",
             host="sandbox",
             port=8888,
         )
         monkeypatch.setattr(
-            "smolagents.remote_executors._create_kernel_http",
+            sandbox_module._DockerKernelLease, "_create_kernel",
             MagicMock(return_value="kernel-1"),
         )
         monkeypatch.setattr(sandbox_module.secrets, "token_hex", lambda _size: "stable-session")
@@ -2620,7 +2637,7 @@ class TestDockerKernelLease:
         lease = sandbox_module._DockerKernelLease(container_executor, MagicMock())
 
         assert lease.ws_url == (
-            "ws://sandbox:8888/api/kernels/kernel-1/channels"
+            "wss://sandbox:8888/api/kernels/kernel-1/channels"
             "?session_id=stable-session"
         )
         assert lease._build_channels_url("kernel-1") == lease.ws_url
@@ -2693,7 +2710,7 @@ class TestDockerKernelLease:
         monkeypatch.setattr(RemotePythonExecutor, "send_variables", send_variables)
         monkeypatch.setattr(RemotePythonExecutor, "send_tools", send_tools)
         monkeypatch.setattr(
-            "smolagents.remote_executors._create_kernel_http",
+            sandbox_module._DockerKernelLease, "_create_kernel",
             MagicMock(return_value="kernel-2"),
         )
         monkeypatch.setattr(lease, "run_code_raise_errors", run_code)
@@ -2701,12 +2718,12 @@ class TestDockerKernelLease:
         lease._replace_unhealthy_kernel()
 
         lease._requests.delete.assert_called_once_with(
-            "http://sandbox:8888/api/kernels/kernel-1",
+            "https://sandbox:8888/api/kernels/kernel-1",
             timeout=5,
         )
         assert lease.kernel_id == "kernel-2"
         assert lease.ws_url.startswith(
-            "ws://sandbox:8888/api/kernels/kernel-2/channels?session_id="
+            "wss://sandbox:8888/api/kernels/kernel-2/channels?session_id="
         )
         assert lease.ws_url.endswith(lease._channel_session_id)
         assert lease._unhealthy is False
@@ -2853,7 +2870,7 @@ class TestDockerKernelLease:
 
         assert lease._get_kernel_execution_state() is None
         lease._requests.get.assert_called_once_with(
-            "http://sandbox:8888/api/kernels/kernel-1",
+            "https://sandbox:8888/api/kernels/kernel-1",
             timeout=0.25,
         )
         lease._logger.warning.assert_called_once()
@@ -2862,12 +2879,13 @@ class TestDockerKernelLease:
         """System kernel leases must remain identifiable as Docker executors."""
         from smolagents import remote_executors
 
-        monkeypatch.setattr(remote_executors, "_create_kernel_http", lambda *_args: "kernel-1")
+        monkeypatch.setattr(sandbox_module._DockerKernelLease, "_create_kernel", lambda *_args: "kernel-1")
         owner = SimpleNamespace(
+            tls_client=SimpleNamespace(http=MagicMock(), ssl_context=object()),
             logger=MagicMock(),
             additional_imports=[],
             installed_packages=[],
-            base_url="http://sandbox:8888",
+            base_url="https://sandbox:8888",
             host="sandbox",
             port=8888,
             _nexent_backend="docker",
@@ -3322,7 +3340,7 @@ class TestRecoverDockerContainer:
         container = MagicMock()
         container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         container.status = "exited"
-        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         container.attrs = {
             "NetworkSettings": {
                 "Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}},
@@ -3387,7 +3405,7 @@ class TestRecoverDockerContainer:
         container = MagicMock()
         container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         container.status = "running"
-        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         container.attrs = {
             "NetworkSettings": {
                 "Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}},
@@ -3416,7 +3434,7 @@ class TestRemoveStaleDockerContainers:
         cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM)
 
         stale_container = MagicMock()
-        stale_container.labels = {"com.nexent.sandbox": "runtime"}
+        stale_container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         stale_container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         stale_container.short_id = "stale123"
         stale_container.attrs = {"NetworkSettings": {"Ports": {}}}
@@ -3440,7 +3458,7 @@ class TestRemoveStaleDockerContainers:
         cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM)
 
         stale_container = MagicMock()
-        stale_container.labels = {"com.nexent.sandbox": "runtime"}
+        stale_container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         stale_container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         stale_container.short_id = "stale456"
         stale_container.attrs = {"NetworkSettings": {"Ports": {}}}
@@ -3607,7 +3625,7 @@ class TestBuildSystemDockerExecutor:
 
         executor = pm._build_system_docker_executor(cfg, logger, {"name": "test-sandbox"})
 
-        assert executor.base_url == "http://127.0.0.1:49173"
+        assert executor.base_url == "https://127.0.0.1:49173"
         assert call_count[0] >= 2
         assert run.call_args.kwargs["security_opt"] == ["seccomp=unconfined"]
 
@@ -3687,7 +3705,7 @@ class TestBuildSessionDockerExecutor:
             client=MagicMock(),
             attrs={
                 "NetworkSettings": {
-                    "Ports": {"8888/tcp": [{"HostPort": "49152"}]}
+                    "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49152"}]}
                 }
             },
         )
@@ -3714,7 +3732,7 @@ class TestBuildSessionDockerExecutor:
         assert run.call_args.kwargs["ports"] == {"8888/tcp": ("127.0.0.1", None)}
         assert run.call_args.kwargs["network_disabled"] is False
         assert run.call_args.kwargs["security_opt"] == ["seccomp=unconfined"]
-        assert captured["owner"].base_url == "http://127.0.0.1:49152"
+        assert captured["owner"].base_url == "https://127.0.0.1:49152"
         assert captured["installed"] == ["numpy"]
         assert executor.installed_packages == ["numpy"]
 
@@ -3777,7 +3795,7 @@ class TestBuildSessionDockerExecutor:
             aliases=["nexent-runtime-sandbox-session-unique"],
         )
         assert captured["owner"].base_url == (
-            "http://nexent-runtime-sandbox-session-unique:8888"
+            "https://nexent-runtime-sandbox-session-unique:8888"
         )
 
     def test_cleanup_removes_shared_container_after_last_kernel(self, monkeypatch):
@@ -3858,7 +3876,7 @@ class TestBuildSessionDockerExecutor:
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace())
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
 
-        with pytest.raises(RuntimeError, match="did not allocate"):
+        with pytest.raises(RuntimeError, match="no effective loopback port mapping"):
             pm._build_session_docker_executor(
                 SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
                 MagicMock(),
@@ -3872,7 +3890,7 @@ class TestBuildSessionDockerExecutor:
         container = MagicMock(
             attrs={
                 "NetworkSettings": {
-                    "Ports": {"8888/tcp": [{"HostPort": "49153"}]}
+                    "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49153"}]}
                 }
             },
             status="exited",
@@ -3903,7 +3921,7 @@ class TestBuildSessionDockerExecutor:
         container = MagicMock(
             attrs={
                 "NetworkSettings": {
-                    "Ports": {"8888/tcp": [{"HostPort": "49154"}]}
+                    "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49154"}]}
                 }
             },
             status="running",
@@ -3948,7 +3966,7 @@ class TestBuildSessionDockerExecutor:
             client=MagicMock(),
             attrs={
                 "NetworkSettings": {
-                    "Ports": {"8888/tcp": [{"HostPort": "49155"}]}
+                    "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49155"}]}
                 }
             },
             status="running",
@@ -3987,7 +4005,7 @@ class TestBuildSessionDockerExecutor:
             short_id="session3",
             attrs={
                 "NetworkSettings": {
-                    "Ports": {"8888/tcp": [{"HostPort": "49156"}]}
+                    "Ports": {"8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49156"}]}
                 }
             },
             status="running",
@@ -4770,7 +4788,7 @@ class TestTargetedSandboxCoverage:
         monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
         owner = SimpleNamespace(
             logger=MagicMock(),
-            base_url="http://sandbox:8888",
+            base_url="https://sandbox:8888",
             host="sandbox",
             port=8888,
         )
@@ -4866,10 +4884,12 @@ class TestTargetedSandboxCoverage:
                 send_variables=MagicMock(),
                 send_tools=MagicMock(),
             ),
-            _create_kernel_http=MagicMock(return_value="kernel-2"),
         )
         monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
 
+        lease._requests.post.return_value = SimpleNamespace(
+            status_code=201, json=lambda: {"id": "kernel-2"}
+        )
         lease._replace_unhealthy_kernel()
 
         assert lease.kernel_id == "kernel-2"
@@ -4882,10 +4902,10 @@ class TestTargetedSandboxCoverage:
         lease._requests.delete.return_value = SimpleNamespace(status_code=204)
         remote_module = SimpleNamespace(
             RemotePythonExecutor=SimpleNamespace(),
-            _create_kernel_http=MagicMock(side_effect=RuntimeError("create failed")),
         )
         monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
 
+        lease._requests.post.side_effect = RuntimeError("create failed")
         with pytest.raises(RuntimeError, match="Failed to replace unhealthy sandbox kernel"):
             lease._replace_unhealthy_kernel()
 
@@ -5139,16 +5159,19 @@ class TestTargetedSandboxCoverage:
         lease._wait_for_kernel_channel_ready = lambda ws: None
         lease._unhealthy = False
         lease._receive_timeout_seconds = 5
-        lease.ws_url = "ws://kernel"
+        lease.ws_url = "wss://kernel"
+        lease._ssl_context = object()
         lease.logger = MagicMock()
-        lease.base_url = "http://kernel"
+        lease.base_url = "https://kernel"
         lease.kernel_id = "kernel-id"
         lease._logger = MagicMock()
         lease._requests = SimpleNamespace(delete=MagicMock(return_value=SimpleNamespace(status_code=500)))
 
         assert lease.run_code_raise_errors("1 + 1") == "result"
         remote_module._websocket_send_execute_request.assert_called_once_with("1 + 1", websocket)
-        websocket_module.create_connection.assert_called_once_with("ws://kernel", timeout=5)
+        websocket_module.create_connection.assert_called_once_with(
+            "wss://kernel", timeout=5, sslopt={"context": lease._ssl_context}
+        )
         lease.cleanup()
         lease._logger.warning.assert_called_once()
         lease._requests.delete.assert_called_once()
@@ -5353,7 +5376,7 @@ class TestTargetedSandboxCoverage:
         container = MagicMock()
         container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         container.status = "running"
-        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         container.attrs = {"NetworkSettings": {"Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}}}}
         container.client = MagicMock()
         docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
@@ -5378,7 +5401,7 @@ class TestTargetedSandboxCoverage:
         container = MagicMock()
         container.name = sandbox_module.SANDBOX_CONTAINER_NAME
         container.status = "running"
-        container.labels = {"com.nexent.sandbox": "runtime"}
+        container.labels = {"com.nexent.sandbox": "runtime", sandbox_module.TLS_LABEL: sandbox_module.TLS_VERSION}
         container.attrs = {"NetworkSettings": {"Networks": {sandbox_module.SANDBOX_NETWORK_NAME: {}}}}
         docker_module = SimpleNamespace(from_env=lambda: SimpleNamespace(
             containers=SimpleNamespace(list=lambda **kwargs: [container])

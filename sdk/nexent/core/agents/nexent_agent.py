@@ -28,7 +28,7 @@ from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
-from .sandbox_workspace import probe_workspace
+from .sandbox_workspace import SandboxWorkspace, probe_workspace
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
@@ -1369,17 +1369,7 @@ class NexentAgent:
         workspace = Path(self.workspace_path).resolve()
         mapping = getattr(self, "workspace_mapping", None)
         if mapping is not None:
-            for container in containers:
-                try:
-                    if not workspace.drive:
-                        self._grant_sandbox_output_access(container, mapping.container_root)
-                    probe_workspace(container, mapping.container_root)
-                except Exception:
-                    logger.exception(
-                        "Sandbox FAILED phase=workspace_access run_id=%s container_id=%s",
-                        self.workspace_run_id, getattr(container, "id", None),
-                    )
-                    raise
+            self._verify_bind_workspace_access(containers, workspace, mapping)
             return
         if not workspace.exists() or workspace.drive:
             return
@@ -1395,6 +1385,20 @@ class NexentAgent:
             if archive_bytes is not None and not container.put_archive("/", archive_bytes):
                 raise RuntimeError("Failed to copy run workspace into the sandbox")
             self._grant_sandbox_output_access(container, workspace)
+
+    def _verify_bind_workspace_access(self, containers, workspace: Path, mapping: SandboxWorkspace) -> None:
+        """Probe the mounted run directory without copying or changing Windows ACLs."""
+        for container in containers:
+            try:
+                if not workspace.drive:
+                    self._grant_sandbox_output_access(container, mapping.container_root)
+                probe_workspace(container, mapping.container_root)
+            except Exception:
+                logger.exception(
+                    "Sandbox FAILED phase=workspace_access run_id=%s container_id=%s",
+                    self.workspace_run_id, getattr(container, "id", None),
+                )
+                raise
 
     def _initialize_sandbox_workspaces(self) -> None:
         """Set every Docker kernel's cwd and workspace environment for this run."""
@@ -1464,6 +1468,7 @@ class NexentAgent:
                     logger.warning(
                         "Retrying sandbox workspace initialization with a replacement kernel: %s",
                         exc,
+                        exc_info=True,
                     )
                     try:
                         execute_bootstrap(bootstrap_code)
@@ -1472,8 +1477,12 @@ class NexentAgent:
                     except CancelledError:
                         raise
                     except Exception as retry_exc:
+                        self._check_sandbox_cancelled()
                         exc = retry_exc
-                logger.error("Sandbox FAILED phase=workspace run_id=%s: %s", self.workspace_run_id, exc)
+                logger.error(
+                    "Sandbox FAILED phase=workspace run_id=%s: %s", self.workspace_run_id, exc,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
                 raise RuntimeError(
                     f"Failed to initialize sandbox workspace '{workspace}': {exc}"
                 ) from exc

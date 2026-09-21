@@ -1,6 +1,6 @@
 import json
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -26,8 +26,9 @@ def test_mapping_roundtrip_and_run_boundary(tmp_path):
 
 @pytest.mark.parametrize('value', ['/mnt/work/../secret', r'/mnt/work/a\b', '/mnt/work/a:b', 'D:/work'])
 def test_reject_unsafe_container_paths(tmp_path, value):
+    mapping = SandboxWorkspace(tmp_path, '/mnt/work')
     with pytest.raises(ValueError):
-        SandboxWorkspace(tmp_path, '/mnt/work').to_host(value)
+        mapping.to_host(value)
 
 
 def test_symlink_escape(tmp_path):
@@ -39,8 +40,9 @@ def test_symlink_escape(tmp_path):
         (root / 'link').symlink_to(outside, target_is_directory=True)
     except OSError:
         pytest.skip('Host does not permit symlink creation')
+    mapping = SandboxWorkspace(root, '/mnt/run')
     with pytest.raises(ValueError):
-        SandboxWorkspace(root, '/mnt/run').to_host('/mnt/run/link/secret')
+        mapping.to_host('/mnt/run/link/secret')
 
 
 def test_permission_probe_failure_is_not_ignored(mocker):
@@ -84,8 +86,9 @@ def test_strict_creation_failure_never_constructs_local(mocker, scope, error):
     local = mocker.patch.object(sandbox, '_make_local_executor')
     method = '_build_system_docker_executor' if scope == sandbox.SandboxScope.SYSTEM else '_build_session_docker_executor'
     mocker.patch.object(manager, method, side_effect=error)
+    logger = logging.getLogger('test')
     with pytest.raises(RuntimeError, match='fallback is disabled'):
-        manager._build_docker_executor(config, logging.getLogger('test'))
+        manager._build_docker_executor(config, logger)
     local.assert_not_called()
 
 
@@ -124,3 +127,91 @@ def test_skill_runner_translates_host_working_directory(tmp_path, mocker):
             tenant_id=None, working_directory=str(tmp_path), source='workspace',
         )
     resolve.assert_called_once_with('outputs/probe.py', '/mnt/run')
+
+
+@pytest.mark.parametrize('value', ['/mnt/run/inputs/secret.txt', '/mnt/run/outputs-other/secret.txt', '../inputs/secret.txt'])
+def test_resolve_file_enforces_tool_base(tmp_path, value):
+    mapping = SandboxWorkspace(tmp_path, '/mnt/run')
+    base = tmp_path / 'outputs'
+    with pytest.raises(ValueError):
+        mapping.resolve_file(value, base)
+
+
+def test_resolve_file_rejects_base_outside_workspace(tmp_path):
+    mapping = SandboxWorkspace(tmp_path / 'run', '/mnt/run')
+    base = tmp_path / 'outside'
+    with pytest.raises(ValueError):
+        mapping.resolve_file('/mnt/run/outputs/file.txt', base)
+
+
+def test_resolve_file_accepts_new_nested_targets(tmp_path):
+    mapping = SandboxWorkspace(tmp_path, '/mnt/run')
+    base = tmp_path / 'outputs'
+    target = base / 'new' / 'file.txt'
+    assert mapping.resolve_file('new/file.txt', base) == target
+    assert mapping.resolve_file('/mnt/run/outputs/new/file.txt', base) == target
+    assert not target.exists()
+
+
+@pytest.mark.parametrize('value', ['link/new.txt', '/mnt/run/outputs/link/new.txt'])
+def test_tool_base_rejects_symlink_into_other_workspace_directory(tmp_path, value):
+    outputs = tmp_path / 'outputs'
+    inputs = tmp_path / 'inputs'
+    outputs.mkdir()
+    inputs.mkdir()
+    try:
+        (outputs / 'link').symlink_to(inputs, target_is_directory=True)
+    except OSError:
+        pytest.skip('Host does not permit symlink creation')
+    mapping = SandboxWorkspace(tmp_path, '/mnt/run')
+    with pytest.raises(ValueError):
+        mapping.resolve_file(value, outputs)
+
+
+@pytest.mark.parametrize('source', ['/run/desktop/mnt/host/c/work', '/host_mnt/c/work', 'C:/WORK'])
+def test_windows_mount_comparison_is_portable(source):
+    mapping = SimpleNamespace(host_root=PureWindowsPath('C:/work'), container_root=PurePosixPath('/mnt/work'))
+    mount = {'Type': 'bind', 'Source': source, 'Destination': '/mnt/work', 'RW': True}
+    assert SandboxWorkspace.matches_mount(mapping, mount)
+    assert not SandboxWorkspace.matches_mount(mapping, {**mount, 'Destination': '/mnt/other'})
+    assert not SandboxWorkspace.matches_mount(mapping, {**mount, 'Type': 'volume'})
+
+
+@pytest.mark.parametrize('name', ['NUL', 'CON.txt', 'COM1'])
+def test_reserved_windows_names_rejected_on_all_hosts(tmp_path, name):
+    mapping = SandboxWorkspace(tmp_path, '/mnt/work')
+    with pytest.raises(ValueError, match='Reserved host filename'):
+        mapping.to_host('/mnt/work/' + name)
+
+
+@pytest.mark.parametrize('scope', list(sandbox.SandboxScope))
+def test_allowed_creation_failure_keeps_local_fallback(mocker, scope):
+    manager = object.__new__(sandbox.SandboxPoolManager)
+    config = sandbox.SandboxConfig(level=sandbox.SandboxLevel.DOCKER, scope=scope, failure_policy='local')
+    mocker.patch('smolagents.remote_executors.DockerExecutor', Mock())
+    mocker.patch.object(sandbox, '_ensure_sandbox_control_network')
+    mocker.patch('docker.from_env')
+    local = mocker.patch.object(sandbox, '_make_local_executor', return_value=SimpleNamespace())
+    wrap = mocker.patch.object(sandbox, '_wrap_executor', side_effect=lambda executor, *_: executor)
+    method = '_build_system_docker_executor' if scope == sandbox.SandboxScope.SYSTEM else '_build_session_docker_executor'
+    mocker.patch.object(manager, method, side_effect=RuntimeError('create failed'))
+    result = manager._build_docker_executor(config, logging.getLogger('test'))
+    assert result is local.return_value
+    local.assert_called_once()
+    wrap.assert_called_once()
+
+
+@pytest.mark.parametrize('strict', [False, True])
+def test_missing_docker_dependency_respects_failure_policy(mocker, strict):
+    manager = object.__new__(sandbox.SandboxPoolManager)
+    config = sandbox.SandboxConfig(level=sandbox.SandboxLevel.DOCKER, failure_policy='error' if strict else 'local')
+    mocker.patch('smolagents.remote_executors.DockerExecutor', None)
+    local = mocker.patch.object(sandbox, '_make_local_executor', return_value=SimpleNamespace())
+    mocker.patch.object(sandbox, '_wrap_executor', side_effect=lambda executor, *_: executor)
+    logger = logging.getLogger('test')
+    if strict:
+        with pytest.raises(RuntimeError, match='phase=dependency'):
+            manager._build_docker_executor(config, logger)
+        local.assert_not_called()
+    else:
+        assert manager._build_docker_executor(config, logger) is local.return_value

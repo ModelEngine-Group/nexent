@@ -42,6 +42,11 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 from nexent.core.agents.sandbox_workspace import SandboxWorkspace, validate_container_root
+from nexent.core.agents.sandbox_tls import (
+    TLS_BOOTSTRAP, TLS_CERTIFICATE, TLS_DIRECTORY, TLS_LABEL, TLS_VERSION,
+    SandboxTLSClient, SandboxTLSMigrationRequired, SandboxTLSRecoveryError,
+    load_container_tls, require_tls_container,
+)
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagedThreadSpec,
@@ -1592,11 +1597,14 @@ def _seed_pnpm_offline_store(container: Any) -> None:
             )
 
 
-def _kernel_gateway_command() -> list[str]:
+def _kernel_gateway_command(hostname: Optional[str] = None) -> list[str]:
     """Return the Kernel Gateway command required by Nexent's health checks."""
     return [
+        "python", "-c", TLS_BOOTSTRAP, hostname or SANDBOX_CONTAINER_NAME, TLS_DIRECTORY,
         "jupyter",
         "kernelgateway",
+        f"--KernelGatewayApp.certfile={TLS_CERTIFICATE}",
+        f"--KernelGatewayApp.keyfile={TLS_DIRECTORY}/server.key",
         "--KernelGatewayApp.ip=0.0.0.0",
         f"--KernelGatewayApp.port={SANDBOX_JUPYTER_PORT}",
         "--KernelGatewayApp.allow_origin=*",
@@ -1642,6 +1650,7 @@ class _RecoveredDockerExecutor:
         host: str,
         additional_imports: Optional[list[str]] = None,
         port: int = SANDBOX_JUPYTER_PORT,
+        tls_client: Optional[SandboxTLSClient] = None,
     ) -> None:
         self.container = container
         self.client = container.client
@@ -1649,7 +1658,8 @@ class _RecoveredDockerExecutor:
         self._logger = logger_
         self.host = host
         self.port = port
-        self.base_url = f"http://{self.host}:{self.port}"
+        self.base_url = f"https://{self.host}:{self.port}"
+        self.tls_client = tls_client if tls_client is not None else load_container_tls(container)
         self.additional_imports = additional_imports or []
         self.installed_packages = []
         self._nexent_backend = "docker"
@@ -1660,6 +1670,8 @@ class _RecoveredDockerExecutor:
             self.container.remove(force=True)
         except Exception as exc:
             self._logger.warning("Failed to remove recovered sandbox container: %s", exc)
+        finally:
+            self.tls_client.close()
 
 
 class _DockerKernelLease:
@@ -1673,9 +1685,6 @@ class _DockerKernelLease:
         logger_: logging.Logger,
         receive_timeout_seconds: float = 30,
     ) -> None:
-        import requests
-        from smolagents.remote_executors import _create_kernel_http
-
         self._container_executor = container_executor
         self.logger = container_executor.logger
         self.additional_imports = getattr(container_executor, "additional_imports", [])
@@ -1685,20 +1694,30 @@ class _DockerKernelLease:
         self.base_url = container_executor.base_url
         self.host = container_executor.host
         self.port = container_executor.port
-        self.kernel_id = _create_kernel_http(f"{self.base_url}/api/kernels", self.logger)
-        self._channel_session_id = secrets.token_hex(16)
-        self.ws_url = self._build_channels_url(self.kernel_id)
         self._receive_timeout_seconds = float(receive_timeout_seconds)
         if self._receive_timeout_seconds <= 0:
             raise ValueError("Sandbox WebSocket receive timeout must be positive")
+        self._requests = container_executor.tls_client.http
+        self._ssl_context = container_executor.tls_client.ssl_context
+        self.kernel_id = self._create_kernel()
+        self._channel_session_id = secrets.token_hex(16)
+        self.ws_url = self._build_channels_url(self.kernel_id)
         self._closed = False
         self._unhealthy = False
         self._nexent_kernel_recovery_supported = True
-        self._requests = requests
         self._cached_variables: Optional[dict[str, Any]] = None
         self._cached_tools: Optional[dict[str, Any]] = None
         self._kernel_bootstrap_code: list[str] = []
         self._cancellation_scope: Optional[RunCancellationScope] = None
+
+    def _create_kernel(self) -> str:
+        """Create kernels using this owner's pinned trust, including on recovery."""
+        response = self._requests.post(
+            f"{self.base_url}/api/kernels", timeout=self._receive_timeout_seconds,
+        )
+        if response.status_code != 201:
+            raise RuntimeError(f"Jupyter kernel creation failed (status={response.status_code})")
+        return response.json()["id"]
 
     def _check_execution_cancelled(self) -> None:
         """Cancellation must stop channel waits and framework-state replay."""
@@ -1745,7 +1764,10 @@ class _DockerKernelLease:
 
         for attempt in range(3):
             self._check_execution_cancelled()
-            ws = create_connection(self.ws_url, timeout=self._receive_timeout_seconds)
+            ws = create_connection(
+                self.ws_url, timeout=self._receive_timeout_seconds,
+                sslopt={"context": self._ssl_context},
+            )
             scope = getattr(self, "_cancellation_scope", None)
             token = None
             try:
@@ -1781,7 +1803,7 @@ class _DockerKernelLease:
             session_id = secrets.token_hex(16)
             self._channel_session_id = session_id
         return (
-            f"ws://{self.host}:{self.port}/api/kernels/{kernel_id}/channels"
+            f"wss://{self.host}:{self.port}/api/kernels/{kernel_id}/channels"
             f"?session_id={session_id}"
         )
 
@@ -1942,7 +1964,6 @@ class _DockerKernelLease:
         """Replace a failed kernel and restore framework-managed execution state."""
         from smolagents.remote_executors import (
             RemotePythonExecutor,
-            _create_kernel_http,
         )
 
         self._check_execution_cancelled()
@@ -1971,7 +1992,7 @@ class _DockerKernelLease:
         )
         try:
             self._check_execution_cancelled()
-            kernel_id = _create_kernel_http(f"{self.base_url}/api/kernels", self.logger)
+            kernel_id = self._create_kernel()
             self.kernel_id = kernel_id
             self._channel_session_id = secrets.token_hex(16)
             self.ws_url = self._build_channels_url(kernel_id)
@@ -2635,9 +2656,11 @@ class SandboxPoolManager:
         host_tools_exist: bool,
     ) -> Optional[Any]:
         """Recover a healthy Docker sandbox left by a previous runtime process."""
+        from requests.exceptions import SSLError
+
+        tls_client = None
         try:
             import docker
-            import requests
 
             client = docker.from_env()
             containers = [
@@ -2654,6 +2677,7 @@ class SandboxPoolManager:
             if labels.get("com.nexent.sandbox") != "runtime":
                 logger_.warning("Ignoring unrelated container named %s", SANDBOX_CONTAINER_NAME)
                 return None
+            require_tls_container(container)
             if container.status != "running":
                 logger_.warning("Persisted sandbox container is not running (status=%s)", container.status)
                 return None
@@ -2694,19 +2718,31 @@ class SandboxPoolManager:
                 return None
 
             connection_port = SANDBOX_JUPYTER_PORT if containerized_runtime else _published_sandbox_port(container)
+            try:
+                tls_client = load_container_tls(container)
+            except Exception as exc:
+                raise SandboxTLSRecoveryError(
+                    "Cannot load the running sandbox's TLS identity; container preserved. "
+                    "Drain active runs and explicitly stop it before recreating."
+                ) from exc
 
             selected_host = None
             kernels = None
             for candidate_host in (_sandbox_connection_hosts(container) if containerized_runtime else ["127.0.0.1"]):
-                base_url = f"http://{candidate_host}:{connection_port}"
+                base_url = f"https://{candidate_host}:{connection_port}"
                 try:
-                    response = requests.get(f"{base_url}/api/kernels", timeout=3)
+                    response = tls_client.http.get(f"{base_url}/api/kernels", timeout=3)
                     response.raise_for_status()
                     candidate_kernels = response.json()
                     if isinstance(candidate_kernels, list):
                         selected_host = candidate_host
                         kernels = candidate_kernels
                         break
+                except SSLError as exc:
+                    raise SandboxTLSRecoveryError(
+                        "Running sandbox TLS verification failed; container preserved. "
+                        "Drain active runs and explicitly stop it before recreating."
+                    ) from exc
                 except Exception:
                     continue
             if selected_host is None or kernels is None:
@@ -2717,7 +2753,9 @@ class SandboxPoolManager:
                 selected_host,
                 config.extra_kwargs.get("additional_imports", []),
                 port=connection_port,
+                tls_client=tls_client,
             )
+            tls_client = None
             recovered._nexent_sandbox_config = config
             recovered._nexent_kernel_count = len(kernels)
             logger_.info(
@@ -2727,9 +2765,14 @@ class SandboxPoolManager:
                 len(kernels),
             )
             return recovered
+        except (SandboxTLSMigrationRequired, SandboxTLSRecoveryError):
+            raise
         except Exception as exc:
             logger_.warning("Persisted Docker sandbox recovery failed: %s", exc)
             return None
+        finally:
+            if tls_client is not None:
+                tls_client.close()
 
     def _remove_stale_docker_containers(self, config: SandboxConfig, logger_: logging.Logger) -> None:
         """Remove only Nexent-owned containers conflicting with the stable system name."""
@@ -2743,6 +2786,7 @@ class SandboxPoolManager:
                 if container.name == SANDBOX_CONTAINER_NAME and (container.labels or {}).get(
                     "com.nexent.sandbox"
                 ) == "runtime":
+                    require_tls_container(container)
                     containers.append(container)
             for container in containers:
                 try:
@@ -2750,6 +2794,8 @@ class SandboxPoolManager:
                     logger_.info("Removed stale persisted sandbox container %s", container.short_id)
                 except Exception as exc:
                     logger_.warning("Failed to remove stale sandbox container: %s", exc)
+        except SandboxTLSMigrationRequired:
+            raise
         except Exception as exc:
             logger_.debug("Could not inspect stale sandbox containers: %s", exc)
 
@@ -2761,7 +2807,6 @@ class SandboxPoolManager:
     ) -> Any:
         """Create a per-session container without a fixed host-port binding."""
         import docker
-        import requests
 
         client = docker.from_env()
         run_kwargs = dict(container_run_kwargs)
@@ -2769,8 +2814,8 @@ class SandboxPoolManager:
         container_name = f"{SANDBOX_SESSION_CONTAINER_PREFIX}-{secrets.token_hex(8)}"
         run_kwargs.update({
             "name": container_name,
-            "labels": {**run_kwargs.get("labels", {}), "com.nexent.sandbox": "session"},
-            "command": _kernel_gateway_command(),
+            "labels": {**run_kwargs.get("labels", {}), "com.nexent.sandbox": "session", TLS_LABEL: TLS_VERSION},
+            "command": _kernel_gateway_command(container_name),
             "detach": True,
             # Kernel Gateway needs a network namespace for its HTTP/WebSocket
             # control plane. Its published endpoint remains constrained to host
@@ -2812,6 +2857,7 @@ class SandboxPoolManager:
         owner = None
         container_group = None
         executor = None
+        tls_client = None
         try:
             if _is_containerized_runtime() and not config.network_disabled:
                 _attach_sandbox_to_control_network(
@@ -2822,14 +2868,11 @@ class SandboxPoolManager:
             _seed_pnpm_offline_store(container)
             container.reload()
             if not _is_containerized_runtime():
-                ports = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
-                bindings = ports.get(f"{SANDBOX_JUPYTER_PORT}/tcp") or []
-                if not bindings or not bindings[0].get("HostPort"):
-                    raise RuntimeError("Docker did not allocate a Jupyter host port")
-                connection_port = int(bindings[0]["HostPort"])
+                connection_port = _published_sandbox_port(container)
 
+            tls_client = load_container_tls(container, timeout=max(10, config.timeout_seconds))
             deadline = time.monotonic() + max(10, config.timeout_seconds)
-            base_url = f"http://{connection_host}:{connection_port}"
+            base_url = f"https://{connection_host}:{connection_port}"
             while time.monotonic() < deadline:
                 container.reload()
                 if container.status not in (None, "created", "running"):
@@ -2838,7 +2881,7 @@ class SandboxPoolManager:
                         f"(status={container.status})"
                     )
                 try:
-                    response = requests.get(f"{base_url}/api/kernels", timeout=1)
+                    response = tls_client.http.get(f"{base_url}/api/kernels", timeout=1)
                     response.raise_for_status()
                     if isinstance(response.json(), list):
                         break
@@ -2854,7 +2897,9 @@ class SandboxPoolManager:
                 connection_host,
                 config.extra_kwargs.get("additional_imports", []),
                 port=connection_port,
+                tls_client=tls_client,
             )
+            tls_client = None
             container_group = _SessionDockerContainerGroup(owner)
             executor = self._lease_session_docker_kernel(
                 config,
@@ -2868,6 +2913,8 @@ class SandboxPoolManager:
             )
             return executor
         except Exception:
+            if tls_client is not None:
+                tls_client.close()
             if executor is not None:
                 executor.cleanup()
             if container_group is not None:
@@ -2914,10 +2961,11 @@ class SandboxPoolManager:
     ) -> Any:
         """Create a shared Docker sandbox and connect over host or container networking."""
         import docker
-        import requests
 
         client = docker.from_env()
         run_kwargs = dict(container_run_kwargs)
+        run_kwargs["command"] = _kernel_gateway_command()
+        run_kwargs["labels"] = {**run_kwargs.get("labels", {}), TLS_LABEL: TLS_VERSION}
         _apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger_)
         containerized_runtime = _is_containerized_runtime()
         if containerized_runtime:
@@ -2948,6 +2996,7 @@ class SandboxPoolManager:
         )
         self._check_system_startup_cancelled(cancellation_scope)
         container = client.containers.run(config.docker_image, **run_kwargs)
+        tls_client = None
         try:
             self._check_system_startup_cancelled(cancellation_scope)
             if containerized_runtime and not config.network_disabled:
@@ -2971,6 +3020,10 @@ class SandboxPoolManager:
             )
             _seed_pnpm_offline_store(container)
             connection_port = SANDBOX_JUPYTER_PORT if containerized_runtime else _published_sandbox_port(container)
+            tls_client = load_container_tls(
+                container, timeout=max(10, config.timeout_seconds),
+                check_cancelled=lambda: self._check_system_startup_cancelled(cancellation_scope),
+            )
             deadline = time.monotonic() + max(10, config.timeout_seconds)
             selected_host = None
             last_probe_errors: dict[str, str] = {}
@@ -2978,9 +3031,9 @@ class SandboxPoolManager:
                 self._check_system_startup_cancelled(cancellation_scope)
                 container.reload()
                 for candidate_host in (_sandbox_connection_hosts(container) if containerized_runtime else ["127.0.0.1"]):
-                    base_url = f"http://{candidate_host}:{connection_port}"
+                    base_url = f"https://{candidate_host}:{connection_port}"
                     try:
-                        response = requests.get(f"{base_url}/api/kernels", timeout=1)
+                        response = tls_client.http.get(f"{base_url}/api/kernels", timeout=1)
                         response.raise_for_status()
                         if isinstance(response.json(), list):
                             selected_host = candidate_host
@@ -3003,7 +3056,7 @@ class SandboxPoolManager:
                 )
                 raise RuntimeError("Jupyter kernel API did not become ready")
             logger_.info(
-                "Sandbox gateway ready: scope=system container_id=%s endpoint=http://%s:%s/api/kernels",
+                "Sandbox gateway ready: scope=system container_id=%s endpoint=https://%s:%s/api/kernels",
                 container.short_id,
                 selected_host,
                 connection_port,
@@ -3014,7 +3067,9 @@ class SandboxPoolManager:
                 selected_host,
                 config.extra_kwargs.get("additional_imports", []),
                 port=connection_port,
+                tls_client=tls_client,
             )
+            tls_client = None
             executor._nexent_sandbox_config = config
             logger_.info(
                 "Sandbox CREATED scope=system container_id=%s (url=%s, network=%s)",
@@ -3024,6 +3079,8 @@ class SandboxPoolManager:
             )
             return executor
         except Exception:
+            if tls_client is not None:
+                tls_client.close()
             try:
                 container.remove(force=True)
             except Exception:
@@ -3166,7 +3223,7 @@ class SandboxPoolManager:
             raise
         except Exception as exc:
             if config.failure_policy == "error":
-                logger_.error("Docker sandbox FAILED phase=create_or_connect: %s", exc)
+                logger_.exception("Docker sandbox FAILED phase=create_or_connect: %s", exc)
                 raise RuntimeError("Docker sandbox unavailable; local fallback is disabled") from exc
             logger_.error(
                 "DockerExecutor construction failed: %s. "

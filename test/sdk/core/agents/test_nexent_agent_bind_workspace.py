@@ -1,7 +1,7 @@
 import json
 import logging
 from concurrent.futures import CancelledError
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -104,3 +104,95 @@ def test_download_returns_kernel_path_but_writes_host_path(tmp_path):
     result = json.loads(tool.forward('s3://bucket/input.txt', 'inputs/input.txt'))
     assert result['local_path'] == '/mnt/run/inputs/input.txt'
     assert (tmp_path / 'inputs' / 'input.txt').read_text(encoding='utf-8') == 'hello'
+
+
+def test_bootstrap_retries_only_failed_initialization(bind_agent):
+    executor = bind_agent._sandbox_executors[0]
+    executor._nexent_kernel_recovery_supported = True
+    executor._unhealthy = True
+    executor.side_effect = [RuntimeError('lost channel'), None]
+    bind_agent._initialize_sandbox_workspaces()
+    assert executor.call_count == 2
+    assert executor.call_args_list[0] == executor.call_args_list[1]
+
+
+def test_bootstrap_retry_logs_and_chains_actual_retry_failure(bind_agent, caplog):
+    executor = bind_agent._sandbox_executors[0]
+    executor._nexent_kernel_recovery_supported = True
+    executor._unhealthy = True
+    retry_error = PermissionError('replacement cwd denied')
+    executor.side_effect = [RuntimeError('lost channel'), retry_error]
+    with pytest.raises(RuntimeError, match='replacement cwd denied') as caught:
+        bind_agent._initialize_sandbox_workspaces()
+    assert caught.value.__cause__ is retry_error
+    failure = next(record for record in caplog.records if 'phase=workspace' in record.message)
+    assert failure.exc_info[1] is retry_error
+    assert executor.call_count == 2
+
+
+@pytest.mark.parametrize('cancel_during_retry', [False, True])
+def test_bootstrap_retry_preserves_cancellation(bind_agent, cancel_during_retry):
+    executor = bind_agent._sandbox_executors[0]
+    executor._nexent_kernel_recovery_supported = True
+    executor._unhealthy = True
+    def bootstrap(code):
+        if cancel_during_retry and executor.call_count == 1:
+            raise RuntimeError('lost channel')
+        bind_agent.stop_event.set()
+        raise RuntimeError('closed during cancellation')
+    executor.side_effect = bootstrap
+    with pytest.raises(CancelledError):
+        bind_agent._initialize_sandbox_workspaces()
+    assert executor.call_count == (2 if cancel_during_retry else 1)
+
+
+def test_bootstrap_deduplicates_executors_and_skips_local(bind_agent):
+    executor = bind_agent._sandbox_executors[0]
+    local = Mock(_nexent_backend='local')
+    other = Mock(_nexent_backend='wasm', container=None)
+    bind_agent._sandbox_executors = [executor, executor, local, other]
+    bind_agent._initialize_sandbox_workspaces()
+    executor.assert_called_once()
+    local.assert_not_called()
+    other.assert_not_called()
+
+
+def test_bind_probe_checks_each_distinct_container(bind_agent, mocker):
+    second = Mock()
+    second.container.id = 'second-container'
+    bind_agent._sandbox_executors.append(second)
+    probe = mocker.patch('nexent.core.agents.nexent_agent.probe_workspace')
+    grant = mocker.patch.object(bind_agent, '_grant_sandbox_output_access')
+    bind_agent._push_file_workspace_to_sandbox()
+    assert probe.call_count == 2
+    assert [call.args[0] for call in probe.call_args_list] == [
+        bind_agent._sandbox_executors[0].container, second.container,
+    ]
+    assert grant.call_count == (0 if Path(bind_agent.workspace_path).drive else 2)
+
+
+def test_no_workspace_does_not_initialize_or_copy(bind_agent):
+    bind_agent.workspace_path = None
+    bind_agent._initialize_sandbox_workspaces()
+    bind_agent._push_file_workspace_to_sandbox()
+    bind_agent._sandbox_executors[0].assert_not_called()
+    bind_agent._sandbox_executors[0].container.exec_run.assert_not_called()
+
+
+def test_direct_retry_cancellation_is_not_wrapped(bind_agent):
+    executor = bind_agent._sandbox_executors[0]
+    executor._nexent_kernel_recovery_supported = True
+    executor._unhealthy = True
+    executor.side_effect = [RuntimeError('lost channel'), CancelledError('stopped')]
+    with pytest.raises(CancelledError, match='stopped'):
+        bind_agent._initialize_sandbox_workspaces()
+    assert executor.call_count == 2
+
+
+def test_posix_bind_access_grants_permissions_before_probe(bind_agent, mocker):
+    container = bind_agent._sandbox_executors[0].container
+    grant = mocker.patch.object(bind_agent, '_grant_sandbox_output_access')
+    probe = mocker.patch('nexent.core.agents.nexent_agent.probe_workspace')
+    bind_agent._verify_bind_workspace_access([container], PurePosixPath('/host/run'), bind_agent.workspace_mapping)
+    grant.assert_called_once_with(container, bind_agent.workspace_mapping.container_root)
+    probe.assert_called_once_with(container, bind_agent.workspace_mapping.container_root)

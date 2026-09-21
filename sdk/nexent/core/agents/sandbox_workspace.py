@@ -41,12 +41,15 @@ class SandboxWorkspace:
 
     def resolve_file(self, value: str, base: str | Path) -> Path:
         """Resolve a tool path without changing that tool's relative-path convention."""
+        base_path = Path(base).resolve()
+        base_path.relative_to(self.host_root)
         if value.startswith('/'):
-            return self.to_host(value)
-        if '..' in PureWindowsPath(value).parts:
-            raise ValueError('Workspace traversal is not allowed')
-        target = (Path(base) / value).resolve()
-        target.relative_to(self.host_root)
+            target = self.to_host(value)
+        else:
+            if '..' in PureWindowsPath(value).parts:
+                raise ValueError('Workspace traversal is not allowed')
+            target = (base_path / value).resolve()
+        target.relative_to(base_path)
         return target
 
     def for_run(self, host_run: str | Path) -> 'SandboxWorkspace':

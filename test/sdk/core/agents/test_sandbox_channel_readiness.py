@@ -8,6 +8,7 @@ import pytest
 from nexent.core.agents import sandbox as sb
 from websocket import (
     ABNF,
+    WebSocketConnectionClosedException,
     WebSocketTimeoutException,
 )
 
@@ -27,6 +28,7 @@ def lease():
     item.kernel_id = "owned-kernel"
     item.ws_url = "ws://127.0.0.1:58023/api/kernels/owned-kernel/channels"
     item._receive_timeout_seconds = 0.05
+    item._ssl_context = object()
     item._cancellation_scope = sb.RunCancellationScope()
     item._logger = item.logger = MagicMock()
     item._get_kernel_execution_state = MagicMock(return_value="idle")
@@ -165,3 +167,41 @@ def test_handshake_requires_both_matching_shell_reply_and_iopub_idle(lease):
     ws.recv_data.side_effect = receive
     with pytest.raises(WebSocketTimeoutException):
         lease._wait_for_kernel_channel_ready(ws)
+
+
+def test_handshake_tolerates_control_frames(lease):
+    ws = MagicMock()
+    frames = [(ABNF.OPCODE_PING, b'ping'), (ABNF.OPCODE_PONG, b'pong')]
+    def send(payload):
+        request_id = json.loads(payload)['header']['msg_id']
+        frames.extend([message(request_id, 'kernel_info_reply'),
+                       message(request_id, 'status', {'execution_state': 'idle'})])
+    ws.send.side_effect = send
+    ws.recv_data.side_effect = lambda **_: frames.pop(0)
+    lease._wait_for_kernel_channel_ready(ws)
+    assert not frames
+
+
+@pytest.mark.parametrize('frame', [(ABNF.OPCODE_CLOSE, b'closed'), (ABNF.OPCODE_TEXT, b'')])
+def test_handshake_rejects_closed_channels(lease, frame):
+    ws = MagicMock()
+    ws.recv_data.return_value = frame
+    with pytest.raises(WebSocketConnectionClosedException):
+        lease._wait_for_kernel_channel_ready(ws)
+
+
+def test_handshake_obeys_total_deadline(lease, monkeypatch):
+    times = iter([0, 1])
+    monkeypatch.setattr(sb.time, 'monotonic', lambda: next(times))
+    ws = MagicMock()
+    with pytest.raises(WebSocketTimeoutException, match='handshake timed out'):
+        lease._wait_for_kernel_channel_ready(ws)
+    ws.recv_data.assert_not_called()
+
+
+def test_execution_without_cancellation_scope_still_closes_channel(lease, monkeypatch):
+    lease._cancellation_scope = None
+    ws, _ = socket_for_execution()
+    monkeypatch.setattr('websocket.create_connection', MagicMock(return_value=ws))
+    assert lease.run_code_raise_errors("print('OK')").logs == 'OK\n'
+    ws.close.assert_called_once()
