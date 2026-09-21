@@ -260,7 +260,7 @@ export default function MineMcpServiceCard({
           </div>
           {reviewBadge ? (
             <span
-              className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+              className={`self-end rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
                 reviewBadge.variant === "pending"
                   ? "bg-orange-50 text-orange-700"
                   : reviewBadge.variant === "approved"

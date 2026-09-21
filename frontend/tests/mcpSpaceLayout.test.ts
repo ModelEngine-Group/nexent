@@ -112,6 +112,6 @@ test("my MCP header actions keep the more menu beside refresh", async () => {
 
   assert.match(
     card,
-    /flex flex-col items-start gap-1[\s\S]*flex items-center gap-1[\s\S]*RefreshCw[\s\S]*MoreHorizontal[\s\S]*reviewBadge/
+    /flex flex-col items-start gap-1[\s\S]*flex items-center gap-1[\s\S]*RefreshCw[\s\S]*MoreHorizontal[\s\S]*reviewBadge[\s\S]*self-end/
   );
 });
