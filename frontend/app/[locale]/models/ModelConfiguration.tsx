@@ -54,7 +54,11 @@ export default function AppModelConfig({
     <div
       className="w-full h-full mx-auto"
       style={{
-        maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
+        // v0 redesign: cap the content column (~1440px) instead of the
+        // shared 1920px setup-container width — the redesigned layout was
+        // authored for a ~1150px column and stretched to 1920px it leaves
+        // wide empty gaps in the library rows.
+        maxWidth: "1440px",
         padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
       }}
     >
