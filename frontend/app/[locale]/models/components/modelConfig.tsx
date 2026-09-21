@@ -969,7 +969,9 @@ export const ModelConfigSection = forwardRef<
   return (
     <>
       <TooltipProvider>
-        <div className="flex w-full flex-col gap-8">
+        {/* px-2 matches CARD_HEADER.PADDING so section titles align with the
+          page header ("模型设置") above. */}
+        <div className="flex w-full flex-col gap-8 px-2">
           {/* ========== Section 1: 默认配置 (inline slots, v0 redesign) ========== */}
           <section>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
