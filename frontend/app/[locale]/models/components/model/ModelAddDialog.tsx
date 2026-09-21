@@ -671,8 +671,6 @@ function BatchAddForm({
               if (sug.defaultOutputReserveTokens != null)
                 val.default_output_reserve_tokens =
                   sug.defaultOutputReserveTokens;
-              if (sug.tokenizerFamily)
-                val.tokenizer_family = sug.tokenizerFamily;
               if (Object.keys(val).length > 0) {
                 suggestions[row.id] = { settings: val };
               }
@@ -1059,6 +1057,20 @@ function BatchAddForm({
   );
 }
 
+/** Filter the tokenizer_family field out of the specs — it's an internal
+ *  implementation detail, not something operators should configure per-model. */
+function filterOutTokenizer(
+  specs: InferenceFieldSpecsByType,
+  modelType: string
+): InferenceFieldSpecsByType {
+  const list = specs[modelType];
+  if (!Array.isArray(list)) return specs;
+  return {
+    ...specs,
+    [modelType]: list.filter((s: any) => s.key !== "tokenizer_family"),
+  };
+}
+
 /* ------------------------ per-row advanced settings ------------------------ */
 
 function RowSettingsDialog({
@@ -1105,7 +1117,7 @@ function RowSettingsDialog({
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <ModelAdvancedSettings
             modelType={row.model_type}
-            specs={specs}
+            specs={filterOutTokenizer(specs, row.model_type)}
             value={settings}
             onChange={setSettings}
             mode="override"
