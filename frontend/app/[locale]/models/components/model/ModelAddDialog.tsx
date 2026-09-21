@@ -591,10 +591,8 @@ function BatchAddForm({
           model_type: (m.model_type || MODEL_TYPES.LLM) as ModelType,
         }));
       setFetched(rows);
-      // v0 behavior: everything fetched is selected by default.
-      const next: Record<string, boolean> = {};
-      rows.forEach((row) => (next[row.id] = true));
-      setSelected(next);
+      // Nothing selected by default — the user picks what to import.
+      setSelected({});
     } catch (error: any) {
       log.error("fetch provider models failed", error);
       message.error(
