@@ -2,6 +2,14 @@
 
 This directory contains a standalone A2A test double. It does not contain formal D1-D5 cases, manifests, or product test automation.
 
+## One-command deployment
+
+From the repository root, run `python3 test/mock-services/deploy.py up a2a`.
+Use `python` on Windows. For an existing stack under Compose project `compose`,
+add `--project compose` to avoid starting a second stack on occupied ports.
+See [the deployment guide](../README.md) for standalone mode, status, logs,
+stop commands, and registration of additional Mock services.
+
 ## Endpoints
 
 - `/basic`, `/idkey`, `/jwt`, and `/both` expose mounted official A2A SDK applications.
