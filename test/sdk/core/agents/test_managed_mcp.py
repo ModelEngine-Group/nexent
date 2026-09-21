@@ -8,6 +8,7 @@ import mcp.types
 import mcpadapt.core
 import pytest
 from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
+from nexent.core.agents.mcp_errors import MCPToolTimeoutError
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 
 
@@ -160,6 +161,7 @@ def test_ut_sdk_tlm_032_tool_deadline_cancels_active_call_future(monkeypatch):
             cancellation_scope=scope,
             tool_timeout_seconds=0.02,
             close_timeout_seconds=0.5,
+            request_timeout_seconds=10,
             session_context_factory=session_factory,
         ) as collection,
         pytest.raises(FutureTimeoutError),
@@ -170,9 +172,37 @@ def test_ut_sdk_tlm_032_tool_deadline_cancels_active_call_future(monkeypatch):
     assert cancelled.wait(1)
     assert exited.wait(1)
     assert context.exit_count == 1
-    assert session_factory.call_args.kwargs["client_session_timeout_seconds"] is None
+    assert session_factory.call_args.kwargs["client_session_timeout_seconds"] == 10
     sync_mcpadapt.assert_not_called()
     assert manager.snapshot().active_count == 0
+    asyncio.run(manager.shutdown(timeout=1))
+
+
+def test_ut_sdk_mcp_tool_deadline_raises_mcp_timeout_error():
+    manager = _manager()
+    scope = RunCancellationScope()
+    entered = threading.Event()
+    cancelled = threading.Event()
+    exited = threading.Event()
+    context = _AsyncMCPContext(_BlockingAsyncSession(entered, cancelled), exited)
+
+    with (
+        ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[{"url": "http://mcp.invalid/mcp"}],
+            cancellation_scope=scope,
+            tool_timeout_seconds=0.02,
+            close_timeout_seconds=0.5,
+            request_timeout_seconds=10,
+            session_context_factory=_async_context_factory(context),
+        ) as collection,
+        pytest.raises(MCPToolTimeoutError, match="10 seconds"),
+    ):
+        collection.tools[0].forward()
+
+    assert entered.is_set()
+    assert cancelled.wait(1)
+    assert exited.wait(1)
     asyncio.run(manager.shutdown(timeout=1))
 
 
