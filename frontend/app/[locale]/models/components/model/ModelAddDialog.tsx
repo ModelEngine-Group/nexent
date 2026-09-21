@@ -1047,26 +1047,28 @@ function BatchAddForm({
           </Button>
         </div>
       </div>
-      {/* Per-row advanced settings: user overrides win, else show catalog suggestions */}
-      <RowSettingsDialog
-        row={fetched.find((r) => r.id === settingsRowId) ?? null}
-        override={
-          settingsRowId
-            ? (rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId])
-            : undefined
-        }
-        specs={inferenceSpecs}
-        onSave={(next) => {
-          if (settingsRowId) {
+      {/* Per-row advanced settings: user overrides win, else show catalog
+          suggestions. key forces remount per row so useState picks up the
+          correct initial values (otherwise the first open's empty state
+          sticks for all subsequent rows). */}
+      {settingsRowId && (
+        <RowSettingsDialog
+          key={settingsRowId}
+          row={fetched.find((r) => r.id === settingsRowId) ?? null}
+          override={
+            rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
+          }
+          specs={inferenceSpecs}
+          onSave={(next) => {
             setRowOverrides((prev) => ({
               ...prev,
               [settingsRowId]: next,
             }));
-          }
-          setSettingsRowId(null);
-        }}
-        onClose={() => setSettingsRowId(null)}
-      />
+            setSettingsRowId(null);
+          }}
+          onClose={() => setSettingsRowId(null)}
+        />
+      )}
     </div>
   );
 }
