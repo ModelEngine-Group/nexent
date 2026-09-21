@@ -9,11 +9,11 @@ idle flush before opening its own transaction.
 
 import threading
 import time
-import types
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
+from nexent.core.human_interaction.contracts import AttemptSuspended
 
 
 def _make_port():
@@ -199,7 +199,6 @@ def test_dispatch_calls_flush_before_transaction():
     # Interaction path needs payload with questions for the early-return
     # "already answered" branches — let's use no interaction so we fall
     # through to the "not suspended → emit STARTED" case.
-    from nexent.core.human_interaction.contracts import AttemptSuspended
 
     # We expect either normal return or AttemptSuspended; both are fine as
     # long as flush_chunks_until_idle is called before any DB work.
@@ -291,17 +290,17 @@ def test_wait_until_ready_calls_flush_before_status_transition():
 # --- in-flight emit and failure recovery --------------------------------------
 
 def test_flush_until_idle_treats_in_flight_emit_as_busy():
-    """An empty buffer is NOT idle while an async emit is handing chunks to
-    the DB thread — flush keeps polling until the emit completes.
+    """An empty buffer is NOT idle while an async drain holds the emit lock —
+    flush keeps polling until the drain completes.
     """
     port = _make_port()
     port.emit_chunks = MagicMock()
-    port._emit_in_flight.set()
+    port._emit_lock.acquire()
     result: dict = {}
 
     def clear_soon():
         time.sleep(0.06)
-        port._emit_in_flight.clear()
+        port._emit_lock.release()
 
     threading.Thread(target=clear_soon, daemon=True).start()
 
@@ -318,7 +317,7 @@ def test_flush_until_idle_treats_in_flight_emit_as_busy():
     # Without the in-flight guard the flush would settle at ~10ms on the
     # empty buffer; observing >= 50ms proves it waited for the emit.
     assert result["elapsed"] >= 0.05, result
-    assert not port._emit_in_flight.is_set()
+    assert not port._emit_lock.locked()
 
 
 def test_flush_until_idle_restores_chunks_when_emit_chunks_raises():
@@ -334,7 +333,116 @@ def test_flush_until_idle_restores_chunks_when_emit_chunks_raises():
         port.flush_chunks_until_idle(max_wait_ms=200, settle_ms=10)
 
     assert port.peek_chunks() == 2
-    assert not port._emit_in_flight.is_set(), "begin_emit without end_emit leaked"
+    assert not port._emit_lock.locked(), "emit lock leaked on failure"
+
+
+# --- SSE ordering race regressions --------------------------------------------
+
+def test_flush_waits_for_in_flight_drain_past_deadline():
+    """Regression: the hard deadline must NOT fire while an async drain holds
+    the emit lock, even past max_wait_ms.
+
+    On a loaded server the async drain's run_blocking(emit_chunks) can exceed
+    500ms; the old implementation broke out of the flush on the deadline and
+    wrote the HITL row, so the drained chunks landed after it in DB seq order
+    (the "form before model output" disorder). The flush must instead wait
+    for the lock, drain what arrived, and only then return.
+    """
+    port = _make_port()
+    port._emit_lock.acquire()
+    result: dict = {}
+
+    def drain_slowly():
+        # Simulate an in-flight async drain that finishes after the deadline.
+        time.sleep(0.6)
+        port.add_chunk("late-chunk")
+        port._emit_lock.release()
+
+    threading.Thread(target=drain_slowly, daemon=True).start()
+
+    def run_flush():
+        started = time.monotonic()
+        port.flush_chunks_until_idle(max_wait_ms=100, settle_ms=10)
+        result["elapsed"] = time.monotonic() - started
+
+    worker = threading.Thread(target=run_flush, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive(), "flush blocked past the join timeout"
+    # The flush must have waited for the in-flight drain (0.6s), well past
+    # its own 100ms deadline, so the late chunks are persisted BEFORE the
+    # caller proceeds to write its HITL transaction.
+    assert result["elapsed"] >= 0.6, result
+    assert port.emit_chunks.call_args.args[0] == ["late-chunk"]
+    assert not port._emit_lock.locked()
+
+
+def test_concurrent_drain_and_flush_preserve_chunk_order():
+    """Regression: take_chunks + emit_chunks must be one atomic critical section.
+
+    With the old design (take outside the lock) a worker flush and the async
+    drain could drain concurrently and the DB seq assignment followed lock
+    acquisition order instead of production order. With the shared critical
+    section, a chunk added earlier can never be persisted later.
+    """
+
+    def run_round():
+        port = _make_port()
+        emitted: list[str] = []
+        emit_lock = threading.Lock()
+
+        def record(chunks, *, _lock=emit_lock, _out=emitted):
+            with _lock:
+                _out.extend(chunks)
+
+        port.emit_chunks = MagicMock(side_effect=record)
+        total = 100
+
+        def drainer(stop: threading.Event, *, _port=port):
+            while not stop.is_set() or _port.peek_chunks():
+                _port.drain_and_emit()
+
+        stop = threading.Event()
+        threads = [threading.Thread(target=drainer, args=(stop,), daemon=True) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for i in range(total):
+            port.add_chunk(f"c{i}")
+        stop.set()
+        for t in threads:
+            t.join(timeout=5)
+            assert not t.is_alive(), "drainer thread did not finish"
+
+        assert emitted == [f"c{i}" for i in range(total)], (
+            f"chunk order corrupted: {emitted[:10]}..."
+        )
+        assert port.peek_chunks() == 0
+        assert not port._emit_lock.locked()
+
+    for _round in range(10):
+        run_round()
+
+
+def test_drain_and_emit_empty_buffer_is_noop():
+    """drain_and_emit on an empty buffer must not call emit_chunks."""
+    port = _make_port()
+    port.drain_and_emit()
+    port.emit_chunks.assert_not_called()
+    assert not port._emit_lock.locked()
+
+
+def test_drain_and_emit_restores_chunks_on_failure():
+    """A failed DB emit inside drain_and_emit puts the chunks back."""
+    port = _make_port()
+    port.emit_chunks = MagicMock(side_effect=RuntimeError("db down"))
+    port.add_chunk("x")
+
+    with pytest.raises(RuntimeError, match="db down"):
+        port.drain_and_emit()
+
+    assert port.peek_chunks() == 1
+    assert not port._emit_lock.locked()
 
 
 def test_finish_flush_failure_still_writes_terminal_status():

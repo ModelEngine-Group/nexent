@@ -2195,10 +2195,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "human_run") {
-            const value =
-              typeof chunk.content === "string"
+            // The stream loop below has a finally but no catch: a malformed
+            // payload must not kill the whole chat stream. Skip the chunk and
+            // let the HITL controller snapshot/polling recover the state.
+            let value: Record<string, unknown>;
+            try {
+              value = (typeof chunk.content === "string"
                 ? JSON.parse(chunk.content)
-                : chunk.content;
+                : chunk.content) as Record<string, unknown>;
+            } catch (error) {
+              log.warn(
+                "[ChatModelAdapter] Failed to parse human_run chunk:",
+                error
+              );
+              continue;
+            }
             if (value && typeof value.run_id === "string")
               humanRunId = value.run_id;
             custom?.onHumanInteractionEvent?.();
