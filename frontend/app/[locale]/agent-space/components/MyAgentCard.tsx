@@ -136,14 +136,6 @@ export function MyAgentCard({
               <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
                 {title}
               </h3>
-              {repositoryStatusBadge ? (
-                <span
-                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
-                >
-                  {t(repositoryStatusBadge.labelKey)}{" "}
-                  {repositoryStatusBadge.versionLabel}
-                </span>
-              ) : null}
             </div>
             <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
               {versionLabel != null ? (
@@ -173,17 +165,27 @@ export function MyAgentCard({
               />
             </Dropdown>
           ) : null}
-          <span
-            className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-              published
-                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
-            }`}
-          >
-            {published
-              ? t("agentRepository.mine.lifecycle.published")
-              : t("agentRepository.mine.lifecycle.draft")}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {repositoryStatusBadge ? (
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
+              >
+                {t(repositoryStatusBadge.labelKey)}{" "}
+                {repositoryStatusBadge.versionLabel}
+              </span>
+            ) : null}
+            <span
+              className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                published
+                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                  : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+              }`}
+            >
+              {published
+                ? t("agentRepository.mine.lifecycle.published")
+                : t("agentRepository.mine.lifecycle.draft")}
+            </span>
+          </div>
         </div>
       </div>
 
