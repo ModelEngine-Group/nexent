@@ -3505,17 +3505,27 @@ def _patch_created_ms(monkeypatch):
     )
 
 
-def _stub_session(monkeypatch, rows):
-    session, ctx = mock_session_ctx
+def _stub_session(monkeypatch, session_ctx, rows):
+    """Build a stubbed DB session for the CHEN-183 list_page tests.
+
+    ``session_ctx`` must be the *value* produced by the ``mock_session_ctx``
+    fixture (i.e. the test receives ``mock_session_ctx`` as a parameter and
+    forwards it here). Calling the fixture function directly would hand us a
+    ``FixtureFunctionDefinition`` object instead of the (session, ctx) tuple.
+    """
+    session, ctx = session_ctx
     session.execute.return_value = rows
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
     return session
 
 
-def test_get_conversation_list_page_applies_start_date_filter(monkeypatch):
+def test_get_conversation_list_page_applies_start_date_filter(
+    monkeypatch, mock_session_ctx
+):
     """start_date_ms pushes a create_time >= start_date_ms predicate (AC-1)."""
     session = _stub_session(
         monkeypatch,
+        mock_session_ctx,
         [
             types.SimpleNamespace(
                 conversation_id=1,
@@ -3544,10 +3554,13 @@ def test_get_conversation_list_page_applies_start_date_filter(monkeypatch):
     session.execute.assert_called_once()
 
 
-def test_get_conversation_list_page_applies_end_date_filter(monkeypatch):
+def test_get_conversation_list_page_applies_end_date_filter(
+    monkeypatch, mock_session_ctx
+):
     """end_date_ms pushes a create_time <= end_date_ms predicate (AC-1, inclusive)."""
     session = _stub_session(
         monkeypatch,
+        mock_session_ctx,
         [
             types.SimpleNamespace(
                 conversation_id=2,
@@ -3576,10 +3589,13 @@ def test_get_conversation_list_page_applies_end_date_filter(monkeypatch):
     session.execute.assert_called_once()
 
 
-def test_get_conversation_list_page_applies_agent_id_filter(monkeypatch):
+def test_get_conversation_list_page_applies_agent_id_filter(
+    monkeypatch, mock_session_ctx
+):
     """agent_id pushes an equality predicate on ConversationRecord.agent_id (AC-2)."""
     session = _stub_session(
         monkeypatch,
+        mock_session_ctx,
         [
             types.SimpleNamespace(
                 conversation_id=3,
@@ -3608,10 +3624,13 @@ def test_get_conversation_list_page_applies_agent_id_filter(monkeypatch):
     session.execute.assert_called_once()
 
 
-def test_get_conversation_list_page_applies_keyword_filter(monkeypatch):
+def test_get_conversation_list_page_applies_keyword_filter(
+    monkeypatch, mock_session_ctx
+):
     """keyword pushes a case-insensitive ilike on conversation_title (AC-3)."""
     session = _stub_session(
         monkeypatch,
+        mock_session_ctx,
         [
             types.SimpleNamespace(
                 conversation_id=4,
@@ -3640,10 +3659,13 @@ def test_get_conversation_list_page_applies_keyword_filter(monkeypatch):
     session.execute.assert_called_once()
 
 
-def test_get_conversation_list_page_combines_all_filters(monkeypatch):
+def test_get_conversation_list_page_combines_all_filters(
+    monkeypatch, mock_session_ctx
+):
     """All four filters compose with and_ on the same WHERE chain (AC-4)."""
     session = _stub_session(
         monkeypatch,
+        mock_session_ctx,
         [
             types.SimpleNamespace(
                 conversation_id=5,
@@ -3675,10 +3697,13 @@ def test_get_conversation_list_page_combines_all_filters(monkeypatch):
     session.execute.assert_called_once()
 
 
-def test_get_conversation_list_page_no_filter_is_legacy_compatible(monkeypatch):
+def test_get_conversation_list_page_no_filter_is_legacy_compatible(
+    monkeypatch, mock_session_ctx
+):
     """Omitting every new filter preserves the pre-CHEN-183 contract exactly."""
     session = _stub_session(
         monkeypatch,
+        mock_session_ctx,
         [
             types.SimpleNamespace(
                 conversation_id=6,
