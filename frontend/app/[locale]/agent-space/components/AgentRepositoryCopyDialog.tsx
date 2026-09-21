@@ -662,7 +662,8 @@ function RequirementTypeGroup({
             >
               <span className="flex items-center gap-1 text-amber-600">
                 <AlertCircle className="size-3.5" />
-                {t("agentRepository.copy.notActivated", { type: typeLabel })}
+                {getRepositoryRequirementReasonLabel(items[0]?.reason_code, t) ||
+                  t("agentRepository.copy.notActivated", { type: typeLabel })}
               </span>
               <span className="flex items-center gap-0.5 text-primary hover:underline">
                 {t("agentRepository.copy.activate")}
