@@ -191,6 +191,18 @@ def test_filter_extra_params_accepts_reasoning_effort_for_llm_only():
     ) is None
 
 
+def test_filter_extra_params_validates_reasoning_switch():
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_enabled": True, "reasoning_effort": "medium"}
+    ) == {"reasoning_enabled": True, "reasoning_effort": "medium"}
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_enabled": False, "reasoning_effort": "high"}
+    ) == {"reasoning_enabled": False, "reasoning_effort": "high"}
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_enabled": "true"}
+    ) is None
+
+
 def test_filter_extra_params_passes_through_custom_for_all_types():
     """__custom__ is type-agnostic: it survives for embedding/rerank/vlm too."""
     for model_type in ("embedding", "rerank", "vlm", "stt", "tts"):

@@ -2795,3 +2795,14 @@ def test_reasoning_budget_uses_anthropic_compatible_extra_body(openai_model_inst
             "thinking": {"type": "enabled", "budget_tokens": 8192},
         },
     }
+
+
+def test_missing_reasoning_budget_is_a_configuration_error(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {
+        "wire_format": "thinking_budget",
+        "effort_budgets": {},
+    }
+
+    with pytest.raises(openai_llm_module.ReasoningConfigurationError):
+        openai_model_instance._apply_reasoning_control({})

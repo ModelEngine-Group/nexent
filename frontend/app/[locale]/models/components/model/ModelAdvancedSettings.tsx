@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 
 import { Input, InputNumber, Select, Switch, Tooltip, Empty, Button } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
@@ -13,6 +13,10 @@ import type {
   ReasoningCapability,
   ReasoningEffort,
 } from "@/types/modelConfig";
+import {
+  DEFAULT_REASONING_EFFORT,
+  DEFAULT_REASONING_EFFORTS,
+} from "@/const/modelConfig";
 
 // =============================================================================
 // v2.6.0: ModelAdvancedSettings — per-type fixed-field form
@@ -227,10 +231,12 @@ export const buildInferenceParamsPayload = (
 } => {
   const result: Record<string, unknown> = {};
   const extraParams: Record<string, unknown> = {};
+  const reasoningEnabled = value.reasoning_enabled === true;
 
   for (const [key, raw] of Object.entries(value)) {
     if (raw === undefined || raw === null || raw === "") continue;
     if (REMOVED_ADVANCED_PARAM_KEYS.has(key)) continue;
+    if (key === "reasoning_effort" && !reasoningEnabled) continue;
     if (key === "__custom__") {
       const dict = buildCustomDict(raw);
       if (Object.keys(dict).length > 0) {
@@ -243,6 +249,10 @@ export const buildInferenceParamsPayload = (
     } else {
       extraParams[key] = raw;
     }
+  }
+
+  if (!reasoningEnabled) {
+    delete extraParams.reasoning_effort;
   }
 
   if (Object.keys(extraParams).length > 0) {
@@ -309,8 +319,17 @@ export const advancedSettingsValueFromRecord = (
 
   // The model-level reasoning default is catalog-driven rather than part of
   // the generic field-spec payload, but it still lives in extra_params.
+  const hasReasoningFlag = typeof extra.reasoning_enabled === "boolean";
+  if (hasReasoningFlag) {
+    value.reasoning_enabled = extra.reasoning_enabled;
+  }
   if (typeof extra.reasoning_effort === "string") {
-    value.reasoning_effort = extra.reasoning_effort;
+    if (!hasReasoningFlag || extra.reasoning_enabled === true) {
+      value.reasoning_effort = extra.reasoning_effort;
+    }
+    if (!hasReasoningFlag) {
+      value.reasoning_enabled = true;
+    }
   }
 
   // Pass through user-defined custom params (extra_params.__custom__).
@@ -691,13 +710,23 @@ export const ModelAdvancedSettings = ({
     ([k], i) => k !== "" && customEntries.findIndex(([k2]) => k2 === k) !== i
   );
 
+  const reasoningControlVisible = mode === "default" && modelType === "llm";
+  const reasoningEnabled = value.reasoning_enabled === true;
   const reasoningLevels =
-    mode === "default" &&
     reasoningCapability?.status === "supported" &&
     reasoningCapability.levels.length > 0
       ? reasoningCapability.levels
-      : [];
+      : [...DEFAULT_REASONING_EFFORTS];
   const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
+  const reasoningDefault =
+    reasoningEffort && reasoningLevels.includes(reasoningEffort)
+      ? reasoningEffort
+      : reasoningCapability?.default &&
+          reasoningLevels.includes(reasoningCapability.default)
+        ? reasoningCapability.default
+        : reasoningLevels.includes(DEFAULT_REASONING_EFFORT)
+          ? DEFAULT_REASONING_EFFORT
+          : reasoningLevels[0];
   const reasoningLabel = (level: ReasoningEffort) =>
     level === "none"
       ? t("model.advanced.reasoningOff", { defaultValue: "关闭" })
@@ -713,30 +742,52 @@ export const ModelAdvancedSettings = ({
                 ? t("model.advanced.reasoningXHigh", { defaultValue: "超高" })
                 : t("model.advanced.reasoningMax", { defaultValue: "最大" });
 
-  const renderReasoningEffort = reasoningLevels.length > 0 && (
+  const renderReasoningEffort = reasoningControlVisible && (
     <div>
-      <label className="block mb-1 text-sm font-medium text-gray-700">
-        {t("model.advanced.defaultReasoningEffort", {
-          defaultValue: "默认思考挡位",
-        })}
-      </label>
-      <Select
-        className="w-full"
-        value={reasoningEffort}
-        disabled={disabled}
-        options={reasoningLevels.map((level) => ({
-          value: level,
-          label: reasoningLabel(level),
-        }))}
-        onChange={(next: ReasoningEffort | undefined) =>
-          onChange({ ...value, reasoning_effort: next })
-        }
-      />
-      <div className="mt-1 text-xs text-gray-500">
-        {t("model.advanced.defaultReasoningEffortHint", {
-          defaultValue: "聊天界面可在此模型的挡位范围内临时切换。",
-        })}
+      <div className="flex items-center justify-start gap-2 mb-1">
+        <label className="text-sm font-medium text-gray-700">
+          {t("model.advanced.reasoningEnabled", {
+            defaultValue: "思考挡位",
+          })}
+        </label>
+        <Switch
+          size="small"
+          checked={reasoningEnabled}
+          disabled={disabled}
+          onChange={(checked) =>
+            onChange({
+              ...value,
+              reasoning_enabled: checked,
+              reasoning_effort: checked ? reasoningDefault : undefined,
+            })
+          }
+        />
       </div>
+      {reasoningEnabled && (
+        <>
+          <Select
+            className="w-full"
+            value={
+              reasoningEffort && reasoningLevels.includes(reasoningEffort)
+                ? reasoningEffort
+                : reasoningDefault
+            }
+            disabled={disabled}
+            options={reasoningLevels.map((level) => ({
+              value: level,
+              label: reasoningLabel(level),
+            }))}
+            onChange={(next: ReasoningEffort | undefined) =>
+              onChange({ ...value, reasoning_effort: next })
+            }
+          />
+          <div className="mt-1 text-xs text-gray-500">
+            {t("model.advanced.defaultReasoningEffortHint", {
+              defaultValue: "聊天界面可在此模型的挡位范围内临时切换。",
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 
@@ -766,7 +817,7 @@ export const ModelAdvancedSettings = ({
     commitCustomEntries(next);
   };
 
-  if (specList.length === 0 && reasoningLevels.length === 0) {
+  if (specList.length === 0 && !reasoningControlVisible) {
     return (
       <div className="space-y-3">
         <Empty
@@ -799,7 +850,6 @@ export const ModelAdvancedSettings = ({
         </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {renderReasoningEffort}
         {specList.map((spec) => {
           const fieldValue = value[spec.key];
           const rangeHint =
@@ -807,40 +857,46 @@ export const ModelAdvancedSettings = ({
               ? `(${spec.range[0]} ~ ${spec.range[1]})`
               : null;
           return (
-            <div key={spec.key}>
-              <label className="block mb-1 text-sm font-medium text-gray-700">
-                <Tooltip
-                  title={
-                    rangeHint
-                      ? `${spec.label} ${rangeHint}`
-                      : spec.label
-                  }
-                >
-                  <span>{spec.label}</span>
-                </Tooltip>
-                {rangeHint && (
-                  <span className="ml-1 text-xs text-gray-400">
-                    {rangeHint}
-                  </span>
-                )}
-              </label>
-              {renderFieldControl(
-                spec,
-                fieldValue,
-                (next) => handleFieldChange(spec.key, next),
-                disabled,
-                // Show what an empty field inherits (model-level defaults in
-                // override mode) so "empty" is an informed choice.
-                fieldValue === undefined || fieldValue === null || fieldValue === ""
-                  ? inheritedDefaults?.[spec.key] !== undefined &&
-                    inheritedDefaults?.[spec.key] !== null
-                    ? String(inheritedDefaults[spec.key])
+            <Fragment key={spec.key}>
+              <div>
+                <label className="block mb-1 text-sm font-medium text-gray-700">
+                  <Tooltip
+                    title={
+                      rangeHint
+                        ? `${spec.label} ${rangeHint}`
+                        : spec.label
+                    }
+                  >
+                    <span>{spec.label}</span>
+                  </Tooltip>
+                  {rangeHint && (
+                    <span className="ml-1 text-xs text-gray-400">
+                      {rangeHint}
+                    </span>
+                  )}
+                </label>
+                {renderFieldControl(
+                  spec,
+                  fieldValue,
+                  (next) => handleFieldChange(spec.key, next),
+                  disabled,
+                  // Show what an empty field inherits (model-level defaults in
+                  // override mode) so "empty" is an informed choice.
+                  fieldValue === undefined || fieldValue === null || fieldValue === ""
+                    ? inheritedDefaults?.[spec.key] !== undefined &&
+                      inheritedDefaults?.[spec.key] !== null
+                      ? String(inheritedDefaults[spec.key])
+                      : undefined
                     : undefined
-                  : undefined
-              )}
-            </div>
+                )}
+              </div>
+              {spec.key === "top_p" && renderReasoningEffort}
+            </Fragment>
           );
         })}
+        {reasoningControlVisible &&
+          !specList.some((spec) => spec.key === "top_p") &&
+          renderReasoningEffort}
       </div>
       {renderCustomParamsSection({
         t,

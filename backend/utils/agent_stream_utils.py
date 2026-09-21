@@ -3,9 +3,20 @@
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
+
+try:
+    from consts.agent import (
+        REASONING_CONFIGURATION_ERROR_CODE,
+        SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE,
+    )
+except ImportError:  # Compatibility with slim test/runtime consts stubs.
+    from backend.consts.agent import (
+        REASONING_CONFIGURATION_ERROR_CODE,
+        SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE,
+    )
 from database.attachment_db import _build_mcp_presigned_url, get_file_url, upload_fileobj
 from services.file_management_service import is_allowed_skill_upload_path
 
@@ -195,8 +206,27 @@ async def process_skill_file_uploads(
     return upload_results
 
 
-def safe_agent_stream_error_chunk() -> str:
+def safe_agent_stream_error_chunk(exception: Optional[BaseException] = None) -> str:
     """Return a sanitized SSE error chunk without internal exception details."""
+    is_reasoning_error = False
+    current = exception
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, "is_reasoning_configuration_error", False):
+            is_reasoning_error = True
+            break
+        current = current.__cause__ or current.__context__
+    if is_reasoning_error:
+        error_payload = json.dumps(
+            {
+                "type": "error",
+                "code": REASONING_CONFIGURATION_ERROR_CODE,
+                "content": SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE,
+            },
+            ensure_ascii=False,
+        )
+        return f"data: {error_payload}\n\n"
     error_payload = json.dumps(
         {"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE},
         ensure_ascii=False,

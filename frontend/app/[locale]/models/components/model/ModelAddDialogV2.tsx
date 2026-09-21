@@ -32,7 +32,7 @@ import {
   ReasoningCapability,
   SingleModelConfig,
 } from "@/types/modelConfig";
-import { MODEL_TYPES } from "@/const/modelConfig";
+import { MODEL_IMPORT_PROVIDER_KEYS, MODEL_TYPES } from "@/const/modelConfig";
 import log from "@/lib/logger";
 
 import {
@@ -295,9 +295,6 @@ const makeInitialRowState = (
   catalogProfile?: any
 ): BatchRowState => {
   const advanced = advancedSettingsValueFromRecord(catalogProfile, {}, modelType);
-  if (catalogProfile?.reasoning_capability?.default) {
-    advanced.reasoning_effort = catalogProfile.reasoning_capability.default;
-  }
   // STT/TTS default provider to DashScope (阿里灵积) when not provided by the
   // catalog, matching the original ModelAddDialog (sttProvider/ttsProvider:
   // "dashscope"). Ensures the STT服务商 dropdown is pre-selected when a voice
@@ -452,11 +449,6 @@ export const ModelAddDialogV2 = ({
     if (model.modelFactory) advancedValue.model_factory = model.modelFactory;
     if (model.modelAppid) advancedValue.model_appid = model.modelAppid;
     if (model.accessToken) advancedValue.access_token = model.accessToken;
-    const defaultReasoningEffort =
-      model.defaultReasoningEffort ?? model.reasoningCapability?.default;
-    if (defaultReasoningEffort) {
-      advancedValue.reasoning_effort = defaultReasoningEffort;
-    }
     setCustomAdvanced(advancedValue);
     setCustomConnectivity({ status: null, message: "" });
     // Edit mode: if the existing model already carries capacity values, show
@@ -485,19 +477,6 @@ export const ModelAddDialogV2 = ({
     model?.reasoningCapability ??
     findCatalogProfile(customForm.name)?.reasoning_capability ??
     undefined;
-
-  useEffect(() => {
-    const defaultEffort = customReasoningCapability?.default;
-    if (
-      defaultEffort &&
-      customAdvanced.reasoning_effort === undefined
-    ) {
-      setCustomAdvanced((previous) => ({
-        ...previous,
-        reasoning_effort: defaultEffort,
-      }));
-    }
-  }, [customReasoningCapability, customAdvanced.reasoning_effort]);
 
   // ---------- Tab B: debounced capacity auto-lookup on model name ----------
   // When the operator types a model name in the custom-access form, wait for a
@@ -564,13 +543,14 @@ export const ModelAddDialogV2 = ({
 
   // ---------- derived: provider options ----------
   const providerOptions = useMemo(() => {
-    console.log("catalog", catalog);
     const preset =
-      catalog?.providers.map((p) => ({
-        value: p.models?.[0]?.provider_key,
-        label: p.provider_info.display_name,
-        info: p.provider_info,
-      })) || [];
+      catalog?.providers
+        .filter((p) => MODEL_IMPORT_PROVIDER_KEYS.includes(p.provider_info.id))
+        .map((p) => ({
+          value: p.provider_info.id,
+          label: p.provider_info.display_name,
+          info: p.provider_info,
+        })) || [];
     return [
       ...preset,
       { value: "__custom__", label: t("model.dialog.v2.customProvider", { defaultValue: "自定义 provider (OpenAI 兼容)" }), info: null },
@@ -580,7 +560,7 @@ export const ModelAddDialogV2 = ({
   const selectedProviderInfo = useMemo<ModelCatalogProviderInfo | null>(() => {
     if (!catalog) return null;
     for (const p of catalog.providers) {
-      if (p.models?.[0]?.provider_key === providerKey) {
+      if (p.provider_info.id === providerKey) {
         return p.provider_info;
       }
     }

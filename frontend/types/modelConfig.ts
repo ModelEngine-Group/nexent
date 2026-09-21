@@ -84,6 +84,8 @@ export interface ModelOption {
   topP?: number;
   extraParams?: Record<string, unknown>;
   reasoningCapability?: ReasoningCapability;
+  /** Whether the model-level reasoning effort switch is enabled. */
+  reasoningEnabled?: boolean;
   /** Persisted model-level default, stored in extra_params.reasoning_effort. */
   defaultReasoningEffort?: ReasoningEffort;
 }

@@ -74,6 +74,52 @@ class EmptyModelResponseError(RuntimeError):
     """Raised when a completed provider stream contains no user-visible content."""
 
 
+class ReasoningConfigurationError(RuntimeError):
+    """Raised when a provider rejects the configured reasoning parameters."""
+
+    is_reasoning_configuration_error = True
+
+
+_REASONING_ERROR_MARKERS = (
+    "reasoning_effort",
+    "reasoning effort",
+    "thinking",
+    "budget_tokens",
+    "thinking_budget",
+    "enable_thinking",
+)
+
+
+def _has_reasoning_parameters(completion_kwargs: Dict[str, Any]) -> bool:
+    """Return whether the request contains a reasoning-related wire field."""
+    if "reasoning_effort" in completion_kwargs:
+        return True
+    extra_body = completion_kwargs.get("extra_body")
+    return isinstance(extra_body, dict) and any(
+        key in extra_body
+        for key in ("thinking", "enable_thinking", "chat_template_kwargs")
+    )
+
+
+def _is_reasoning_parameter_error(
+    exc: Exception, completion_kwargs: Dict[str, Any]
+) -> bool:
+    """Identify a provider 400 that specifically rejects reasoning settings."""
+    error_type = _bad_request_error_type()
+    status_code = getattr(exc, "status_code", None)
+    is_bad_request = (
+        (error_type is not None and isinstance(exc, error_type))
+        or status_code == 400
+        or type(exc).__name__.lower() in {"badrequesterror", "badrequestexception"}
+    )
+    if not is_bad_request:
+        return False
+    if not _has_reasoning_parameters(completion_kwargs):
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _REASONING_ERROR_MARKERS)
+
+
 def _is_timeout_error(exc: BaseException) -> bool:
     """Return whether an exception chain represents a network or caller timeout."""
     current: BaseException | None = exc
@@ -874,6 +920,10 @@ class OpenAIModel(OpenAIServerModel):
         try:
             return self.client.chat.completions.create(**completion_kwargs)
         except Exception as exc:
+            if _is_reasoning_parameter_error(exc, completion_kwargs):
+                raise ReasoningConfigurationError(
+                    "The provider rejected the configured reasoning parameters"
+                ) from exc
             # Reasoning-only models (kimi-k3, o1-mini, ...) reject any
             # sampling value other than their enforced default, which makes
             # the instance-level default temperature/top_p (possibly just a
@@ -954,7 +1004,7 @@ class OpenAIModel(OpenAIServerModel):
                 budgets = capability.get("effort_budgets") or {}
                 budget = budgets.get(self.reasoning_effort)
                 if budget is None:
-                    raise ValueError(
+                    raise ReasoningConfigurationError(
                         f"Missing thinking budget for reasoning effort: {self.reasoning_effort}"
                     )
                 thinking["budget_tokens"] = budget

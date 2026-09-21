@@ -70,6 +70,10 @@ import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
+import {
+  DEFAULT_REASONING_EFFORT,
+  DEFAULT_REASONING_EFFORTS,
+} from "@/const/modelConfig";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
@@ -222,19 +226,28 @@ const useAgentModels = (
           item.displayName === id
       );
       const capability = model?.reasoningCapability;
+      const reasoningEnabled = model?.reasoningEnabled === true;
       const supportsEffort =
-        capability?.status === "supported" && capability.levels.length > 0;
+        reasoningEnabled;
+      const effortLevels =
+        capability?.status === "supported" && capability.levels.length > 0
+          ? capability.levels
+          : [...DEFAULT_REASONING_EFFORTS];
       const defaultEffort =
         model?.defaultReasoningEffort &&
-        capability?.levels.includes(model.defaultReasoningEffort)
+        effortLevels.includes(model.defaultReasoningEffort)
           ? model.defaultReasoningEffort
-          : capability?.default;
+          : capability?.default && effortLevels.includes(capability.default)
+            ? capability.default
+            : effortLevels.includes(DEFAULT_REASONING_EFFORT)
+              ? DEFAULT_REASONING_EFFORT
+              : effortLevels[0];
       return {
         id,
         name: fallbackName,
         ...(supportsEffort
           ? {
-              efforts: capability.levels.map((level) => ({
+              efforts: effortLevels.map((level) => ({
                 id: level,
                 name:
                   level === "none"

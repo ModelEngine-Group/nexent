@@ -173,11 +173,6 @@ export const ModelEditDialogV2 = ({
           filteredSpecs,
           model.type
         );
-        const defaultReasoningEffort =
-          model.defaultReasoningEffort ?? model.reasoningCapability?.default;
-        if (defaultReasoningEffort) {
-          advancedValue.reasoning_effort = defaultReasoningEffort;
-        }
         setAdvanced(advancedValue);
       } else {
         setAdvanced({});

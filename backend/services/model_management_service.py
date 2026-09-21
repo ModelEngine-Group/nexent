@@ -76,6 +76,8 @@ logger = logging.getLogger("model_management_service")
 
 INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3", "vlm4"}
 CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
+COMMON_REASONING_LEVELS = ("low", "medium", "high")
+COMMON_REASONING_DEFAULT = "medium"
 
 
 def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
@@ -97,13 +99,21 @@ def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
 def _apply_model_reasoning_default(
     model_data: Dict[str, Any], provider_hint: Optional[str]
 ) -> None:
-    """Persist the catalog/rule default for newly created LLM records.
+    """Persist an enabled model's reasoning default without enabling it implicitly.
 
     The value is kept in the existing ``extra_params`` JSONB column, so this
     also upgrades old/custom model IDs without requiring a schema migration.
-    Explicit valid user values are preserved.
+    New models keep the switch disabled unless the caller explicitly enables
+    it. Legacy rows that already contain a reasoning effort remain compatible.
     """
-    if model_data.get("model_type") != "llm":
+    if model_data.get("model_type") not in {"llm", "chat"}:
+        return
+    extra_params = dict(model_data.get("extra_params") or {})
+    enabled = extra_params.get("reasoning_enabled")
+    if enabled is not True:
+        if enabled is False:
+            extra_params.pop("reasoning_effort", None)
+            model_data["extra_params"] = extra_params or None
         return
     model_name = add_repo_to_name(
         model_data.get("model_repo", ""), model_data.get("model_name", "")
@@ -113,13 +123,15 @@ def _apply_model_reasoning_default(
         base_url=model_data.get("base_url"),
         provider_hint=provider_hint or model_data.get("model_factory"),
     )
-    if not isinstance(capability, dict) or capability.get("status") != "supported":
-        return
-    levels = capability.get("levels") or []
-    default = capability.get("default")
+    if isinstance(capability, dict) and capability.get("status") == "supported":
+        levels = capability.get("levels") or []
+        default = capability.get("default")
+    else:
+        levels = list(COMMON_REASONING_LEVELS)
+        default = COMMON_REASONING_DEFAULT
     if not levels or default not in levels:
-        return
-    extra_params = dict(model_data.get("extra_params") or {})
+        levels = list(COMMON_REASONING_LEVELS)
+        default = COMMON_REASONING_DEFAULT
     if extra_params.get("reasoning_effort") in levels:
         return
     extra_params["reasoning_effort"] = default

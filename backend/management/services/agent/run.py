@@ -255,7 +255,7 @@ async def _consume_agent_stream_producer(
         )
         if not channel.is_completed:
             try:
-                await channel.publish(_safe_agent_stream_error_chunk())
+                await channel.publish(_safe_agent_stream_error_chunk(stream_exc))
             except Exception:
                 logger.exception(
                     "Failed to publish producer error conversation=%s",
@@ -797,8 +797,8 @@ async def _stream_agent_chunks(
         stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        await channel.publish(_safe_agent_stream_error_chunk(run_exc))
+        yield _safe_agent_stream_error_chunk(run_exc)
     finally:
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
@@ -1376,8 +1376,8 @@ async def generate_stream(
                 run_exc,
                 exc_info=True,
             )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            await channel.publish(_safe_agent_stream_error_chunk(run_exc))
+            yield _safe_agent_stream_error_chunk(run_exc)
             return
     except Exception as stream_exc:
         logger.error(
@@ -1385,8 +1385,8 @@ async def generate_stream(
             stream_exc,
             exc_info=True,
         )
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        await channel.publish(_safe_agent_stream_error_chunk(stream_exc))
+        yield _safe_agent_stream_error_chunk(stream_exc)
         return
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
@@ -2165,7 +2165,7 @@ async def run_agent_stream(
                 stream_exc,
                 exc_info=True,
             )
-            yield _safe_agent_stream_error_chunk()
+            yield _safe_agent_stream_error_chunk(stream_exc)
         finally:
             if channel is None and not execution.future.done():
                 deferred_run.cancel()

@@ -199,6 +199,20 @@ _OPERATOR_OVERRIDE_FIELDS = (
     "tokenizer_family",
 )
 
+COMMON_REASONING_LEVELS = ("low", "medium", "high")
+COMMON_REASONING_DEFAULT = "medium"
+
+
+def _is_reasoning_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
+    """Return whether the model explicitly or legacy implicitly enables reasoning."""
+    if not isinstance(extra_params, dict):
+        return False
+    if extra_params.get("reasoning_enabled") is True:
+        return True
+    return "reasoning_enabled" not in extra_params and isinstance(
+        extra_params.get("reasoning_effort"), str
+    )
+
 
 def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Build extra_body for ModelConfig from model_record_t.extra_params.
@@ -211,6 +225,7 @@ def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[s
         return None
     extra_body = dict(extra_params)
     # This is a dedicated ModelConfig field, not a provider request-body key.
+    extra_body.pop("reasoning_enabled", None)
     extra_body.pop("reasoning_effort", None)
     custom = extra_body.pop("__custom__", None)
     if custom and isinstance(custom, dict):
@@ -239,14 +254,23 @@ def _resolve_model_reasoning_effort(
     extra_params: Optional[Dict[str, Any]],
     capability: Optional[Dict[str, Any]],
 ) -> Optional[str]:
-    """Use a persisted model default when valid, otherwise the catalog default."""
-    if not isinstance(capability, dict) or capability.get("status") != "supported":
+    """Resolve the enabled model's effort from its profile or common defaults."""
+    if not isinstance(extra_params, dict) or not _is_reasoning_enabled(extra_params):
         return None
-    levels = capability.get("levels") or []
-    saved = extra_params.get("reasoning_effort") if isinstance(extra_params, dict) else None
+    if isinstance(capability, dict) and capability.get("status") == "supported":
+        levels = capability.get("levels") or []
+        default = capability.get("default")
+    else:
+        levels = list(COMMON_REASONING_LEVELS)
+        default = COMMON_REASONING_DEFAULT
+    if not levels:
+        levels = list(COMMON_REASONING_LEVELS)
+    if default not in levels:
+        default = levels[0]
+    saved = extra_params.get("reasoning_effort")
     if saved in levels:
         return saved
-    return capability.get("default") if capability.get("default") in levels else None
+    return default
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -976,6 +1000,7 @@ async def create_model_config_list(tenant_id):
                         # temperature/top_p/extra_params flow into SDK.
                         temperature=record.get("temperature"),
                         top_p=record.get("top_p"),
+                        reasoning_enabled=_is_reasoning_enabled(record.get("extra_params")),
                         reasoning_capability=reasoning_capability,
                         reasoning_effort=_resolve_model_reasoning_effort(
                             record.get("extra_params"), reasoning_capability
@@ -2345,6 +2370,12 @@ async def create_agent_run_info(
                     if override_extra and isinstance(override_extra, dict):
                         merged = dict(mc.extra_body or {})
                         for k, v in override_extra.items():
+                            if k == "reasoning_enabled":
+                                if isinstance(v, bool):
+                                    mc.reasoning_enabled = v
+                                    if not v:
+                                        mc.reasoning_effort = None
+                                continue
                             if k == "reasoning_effort":
                                 if isinstance(v, str):
                                     mc.reasoning_effort = v
@@ -2358,21 +2389,23 @@ async def create_agent_run_info(
                         mc.reasoning_effort = override_entry["reasoning_effort"]
                     break
 
-    # A request-level effort is valid only when the selected model has an
-    # explicit catalog capability. Unknown/custom models fail closed instead
-    # of silently pretending to support a provider-specific control.
+    # A request-level effort is valid only when the selected model's switch is
+    # enabled. Known capabilities use their declared levels; unknown/custom
+    # models use the common low/medium/high range and let the provider reject
+    # an unsupported wire parameter with a user-safe configuration error.
     if reasoning_effort is not None:
         selected_config = next(
             (mc for mc in model_list if mc.cite_name == agent_config.model_name),
             None,
         )
         capability = selected_config.reasoning_capability if selected_config else None
-        supported_levels = (capability or {}).get("levels", [])
+        if isinstance(capability, dict) and capability.get("status") == "supported":
+            supported_levels = capability.get("levels") or []
+        else:
+            supported_levels = list(COMMON_REASONING_LEVELS)
         if (
             not selected_config
-            or not isinstance(capability, dict)
-            or capability.get("status") != "supported"
-            or capability.get("control") != "effort"
+            or not selected_config.reasoning_enabled
             or reasoning_effort not in supported_levels
         ):
             raise ValidationError(

@@ -36,6 +36,17 @@ export const MODEL_SOURCES = {
   XAI: "xai",
 } as const;
 
+// Providers exposed by the "Import from provider" flow.
+export const MODEL_IMPORT_PROVIDER_KEYS: readonly string[] = [
+  "silicon",
+  "dashscope",
+  "tokenpony",
+  "openai",
+  "volcengine",
+  "modelengine",
+  "deepseek",
+];
+
 // Model status constants
 export const MODEL_STATUS = {
   AVAILABLE: "available",
@@ -43,6 +54,10 @@ export const MODEL_STATUS = {
   CHECKING: "detecting",
   UNCHECKED: "not_detected",
 } as const;
+
+// Common fallback used when a provider/model has no declared effort range.
+export const DEFAULT_REASONING_EFFORTS = ["low", "medium", "high"] as const;
+export const DEFAULT_REASONING_EFFORT = "medium" as const;
 
 // Icon type constants
 export const ICON_TYPES = {

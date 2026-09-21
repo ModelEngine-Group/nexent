@@ -237,3 +237,15 @@ def test_safe_agent_stream_error_chunk_is_sanitized():
         "type": "error",
         "content": agent_stream_utils.SAFE_AGENT_STREAM_ERROR_MESSAGE,
     }
+
+
+def test_safe_agent_stream_error_chunk_exposes_reasoning_configuration_error():
+    error = RuntimeError("provider rejected reasoning_effort")
+    error.is_reasoning_configuration_error = True
+
+    chunk = agent_stream_utils.safe_agent_stream_error_chunk(error)
+    payload = json.loads(chunk[6:].strip())
+
+    assert payload["type"] == "error"
+    assert payload["code"] == "MODEL_REASONING_CONFIG_INVALID"
+    assert "思考挡位参数配置错误" in payload["content"]

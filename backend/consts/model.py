@@ -2448,6 +2448,7 @@ def get_extra_param_keys_for_type(model_type: str) -> List[str]:
     if model_type in {"llm", "chat"}:
         # Stored in the existing JSONB column so this feature remains
         # backwards-compatible with installations that have no migration.
+        keys.append("reasoning_enabled")
         keys.append("reasoning_effort")
     return keys
 
@@ -2552,6 +2553,13 @@ def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]])
                 filtered["__custom__"] = clean_custom
             continue
         if key in allowed:
+            if key == "reasoning_enabled" and not isinstance(value, bool):
+                logger.warning(
+                    "Dropped invalid reasoning_enabled value %r; expected a boolean",
+                    value,
+                )
+                dropped.append(key)
+                continue
             if key == "reasoning_effort" and value not in REASONING_EFFORT_VALUES:
                 logger.warning(
                     "Dropped invalid reasoning_effort value %r; expected one of %s",

@@ -26,6 +26,10 @@ class ModelConfig(BaseModel):
     url: str = Field(description="Model endpoint URL")
     temperature: Optional[float] = Field(description="Temperature", default=0.1)
     top_p: Optional[float] = Field(description="Top P", default=0.95)
+    reasoning_enabled: bool = Field(
+        description="Whether model-level reasoning effort control is enabled",
+        default=False,
+    )
     reasoning_effort: Optional[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(
         description="Canonical per-request reasoning effort, when supported",
         default=None,
