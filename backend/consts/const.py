@@ -9,6 +9,30 @@ from dotenv import load_dotenv
 # avoids silently replacing operator-provided service addresses.
 load_dotenv(override=False)
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    """Read a positive integer configuration value with a clear validation error."""
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    """Read a positive floating-point configuration value with validation."""
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive number") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    return value
+
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
 TEST_VOICE_PATH = os.path.join(os.path.dirname(
@@ -205,13 +229,13 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
-# Tenant resource hard limits. These values are intentionally not configurable.
+# Tenant resource hard limits. These values are overridden in the tenant-limit PR.
 MAX_TENANT_COUNT = 100
 MAX_USERS_PER_TENANT = 10_000
 MAX_GROUPS_PER_TENANT = 1_000
 MAX_SUPER_ADMIN_COUNT = 1
 MAX_ADMINS_PER_TENANT = 1_000
-MAX_MCP_SERVICES_PER_TENANT = 1_000
+MAX_MCP_SERVICES_PER_TENANT = _positive_int_env("MAX_MCP_SERVICES_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -517,7 +541,7 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
 MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 # Hard timeout for a request made to a configured MCP service at runtime.
-MCP_REQUEST_TIMEOUT_SECONDS = 10
+MCP_REQUEST_TIMEOUT_SECONDS = _positive_float_env("MCP_REQUEST_TIMEOUT_SECONDS", 10)
 
 
 # Invite code
