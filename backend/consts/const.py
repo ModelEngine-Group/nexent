@@ -21,6 +21,16 @@ def _positive_int_env(name: str, default: int) -> int:
         raise ValueError(f"{name} must be a positive integer")
     return value
 
+def _positive_float_env(name: str, default: float) -> float:
+    """Read a positive floating-point configuration value with validation."""
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive number") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    return value
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
 TEST_VOICE_PATH = os.path.join(os.path.dirname(
@@ -555,7 +565,7 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
 MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 # Hard timeout for a request made to a configured MCP service at runtime.
-MCP_REQUEST_TIMEOUT_SECONDS = _positive_int_env("MCP_REQUEST_TIMEOUT_SECONDS", 10)
+MCP_REQUEST_TIMEOUT_SECONDS = _positive_float_env("MCP_REQUEST_TIMEOUT_SECONDS", 10)
 
 
 # Invite code
