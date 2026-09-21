@@ -496,7 +496,6 @@ function MineSkillCard({
       description={
         skill.description || t("skillRepository.common.noDescription")
       }
-      descriptionLines={2}
       tags={
         tags.length > 0 ? (
           <>

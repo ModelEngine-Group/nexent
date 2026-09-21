@@ -98,6 +98,12 @@ test("my skill cards move shared status beside More and keep only the lower-righ
   assert.match(view, /footerLayout="inline"/);
 });
 
+test("my skill descriptions use the shared three-line ResourceCard default", async () => {
+  const view = await readFile(mineView, "utf8");
+
+  assert.doesNotMatch(view, /descriptionLines=\{2\}/);
+});
+
 test("skill grids share Agent-style adaptive dimensions and default-height controls", async () => {
   const [repository, mine, repositoryContainer, mineContainer, tagFilter] =
     await Promise.all([
