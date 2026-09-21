@@ -21,11 +21,65 @@ from services.agent_repository_service import (
     list_agent_repository_tag_stats_impl,
     list_my_editable_agents_impl,
     update_agent_repository_status_impl,
+    delete_official_agent_impl,
+    list_official_agent_management_impl,
+    set_official_agent_visibility_impl,
 )
+from database.user_tenant_db import get_user_role_by_tenant
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
+
+
+def _require_super_admin(user_id: str, current_tenant_id: str) -> None:
+    if get_user_role_by_tenant(user_id, current_tenant_id).upper() != "SU":
+        raise UnauthorizedError("Super admin role is required")
+
+
+@agent_repository_router.get("/official/management")
+async def list_official_agent_management_api(
+    tenant_id: str = Query(...), authorization: str = Header(None)
+):
+    try:
+        user_id, current_tenant_id = get_current_user_id(authorization)
+        _require_super_admin(user_id, current_tenant_id)
+        return JSONResponse(content={"items": list_official_agent_management_impl(tenant_id)})
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
+
+
+@agent_repository_router.patch("/official/management/{agent_repository_id}")
+async def set_official_agent_visibility_api(
+    agent_repository_id: int,
+    visible: bool = Body(..., embed=True),
+    tenant_id: str = Query(...),
+    authorization: str = Header(None),
+):
+    try:
+        user_id, current_tenant_id = get_current_user_id(authorization)
+        _require_super_admin(user_id, current_tenant_id)
+        return JSONResponse(content=set_official_agent_visibility_impl(
+            agent_repository_id, tenant_id, visible, user_id
+        ))
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
+    except ValueError as error:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(error))
+
+
+@agent_repository_router.delete("/official/management/{agent_repository_id}")
+async def delete_official_agent_api(
+    agent_repository_id: int, authorization: str = Header(None)
+):
+    try:
+        user_id, current_tenant_id = get_current_user_id(authorization)
+        _require_super_admin(user_id, current_tenant_id)
+        return JSONResponse(content=delete_official_agent_impl(agent_repository_id, user_id))
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
+    except ValueError as error:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(error))
 
 
 def _parse_tag_predicates(raw: str | None) -> list[TagAssignmentFilter]:

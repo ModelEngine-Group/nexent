@@ -412,6 +412,26 @@ def increment_agent_repository_downloads(agent_repository_id: int) -> int:
         return int(result.rowcount or 0)
 
 
+def soft_delete_agent_repository_record(
+    repository_id: int,
+    *,
+    publisher_tenant_id: str,
+    user_id: str,
+) -> int:
+    """Soft-delete one repository listing scoped to its publisher tenant."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentRepository)
+            .where(
+                AgentRepository.agent_repository_id == repository_id,
+                AgentRepository.publisher_tenant_id == publisher_tenant_id,
+                AgentRepository.delete_flag != "Y",
+            )
+            .values(delete_flag="Y", updated_by=user_id)
+        )
+        return int(result.rowcount or 0)
+
+
 def sum_agent_repository_downloads_by_agent_ids(
     agent_ids: List[int],
 ) -> Dict[int, int]:

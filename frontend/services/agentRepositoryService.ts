@@ -17,6 +17,7 @@ import type {
   OfficialAgentInstallItem,
   OfficialAgentInstallOptions,
   OfficialAgentItem,
+  OfficialAgentManagementItem,
   RepositoryImportPrecheckResponse,
 } from "@/types/agentRepository";
 
@@ -323,6 +324,42 @@ export async function installOfficialAgents(
   }
 }
 
+export async function fetchOfficialAgentManagement(
+  tenantId: string
+): Promise<OfficialAgentManagementItem[]> {
+  const response = await fetchWithErrorHandling(
+    `${API_ENDPOINTS.agentRepository.officialManagement}?tenant_id=${encodeURIComponent(tenantId)}`,
+    { method: "GET", headers: getAuthHeaders() }
+  );
+  if (!response.ok) throw new Error(`Failed to fetch official agents: ${response.statusText}`);
+  const data = await response.json();
+  return data.items ?? [];
+}
+
+export async function setOfficialAgentVisibility(
+  agentRepositoryId: number,
+  tenantId: string,
+  visible: boolean
+): Promise<void> {
+  const response = await fetchWithErrorHandling(
+    `${API_ENDPOINTS.agentRepository.officialManagementItem(agentRepositoryId)}?tenant_id=${encodeURIComponent(tenantId)}`,
+    {
+      method: "PATCH",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ visible }),
+    }
+  );
+  if (!response.ok) throw new Error(`Failed to update official agent visibility: ${response.statusText}`);
+}
+
+export async function deleteOfficialAgent(agentRepositoryId: number): Promise<void> {
+  const response = await fetchWithErrorHandling(
+    API_ENDPOINTS.agentRepository.officialManagementItem(agentRepositoryId),
+    { method: "DELETE", headers: getAuthHeaders() }
+  );
+  if (!response.ok) throw new Error(`Failed to delete official agent: ${response.statusText}`);
+}
+
 const agentRepositoryService = {
   fetchAgentRepositoryListings,
   fetchAgentRepositoryTagStats,
@@ -334,6 +371,9 @@ const agentRepositoryService = {
   importAgentFromRepository,
   fetchOfficialAgentsWithStatus,
   installOfficialAgents,
+  fetchOfficialAgentManagement,
+  setOfficialAgentVisibility,
+  deleteOfficialAgent,
 };
 
 export default agentRepositoryService;
