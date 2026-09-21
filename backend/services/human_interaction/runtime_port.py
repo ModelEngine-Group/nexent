@@ -17,7 +17,8 @@ from .models import digest, redact
 
 
 class RuntimeInteractionPort:
-    def __init__(self, service, identity, owner_id, authorize, allowed_tools=(), *, live_resume=False, stop_event=None):
+    def __init__(self, service, identity, owner_id, authorize, allowed_tools=(), *, live_resume=False, stop_event=None,
+                 wait_reporter=None):
         """Bind the port and set up async-worker chunk coordination.
 
         ``_chunk_buffer`` stages processed observer chunks: the async consumer
@@ -26,6 +27,8 @@ class RuntimeInteractionPort:
         ``_emit_lock`` serializes every take_chunks + emit_chunks critical
         section (async drain_and_emit and the worker's own flush), so a held
         lock also means "a drain is in flight and its chunks are uncommitted".
+        ``wait_reporter`` relays enter/exit of human-input waits to the
+        scheduler so parked runs stop consuming execution concurrency slots.
         """
         self.service = service
         self.repository = service.repository
@@ -39,6 +42,7 @@ class RuntimeInteractionPort:
         self.allowed_tools = frozenset(allowed_tools)
         self.live_resume = live_resume
         self.stop_event = stop_event
+        self.wait_reporter = wait_reporter
         self._chunk_buffer: list[str] = []
         self._chunk_buffer_lock = threading.Lock()
         self._emit_lock = threading.Lock()
@@ -211,33 +215,39 @@ class RuntimeInteractionPort:
 
     def _wait_until_ready(self):
         """Park this worker while retaining the current Python continuation."""
-        next_authorization_check = 0.0
-        while True:
-            if self.stop_event is not None and self.stop_event.is_set():
-                raise RunTerminated("The managed execution was cancelled")
-            now = time.monotonic()
-            if now >= next_authorization_check:
-                self.authorize()
-                next_authorization_check = now + 5.0
-            with self.repository.transaction(self.run_id, self.tenant_id, self.user_id) as tx:
-                if (tx is None or tx.run.fence != self.fence or tx.run.lock_owner != self.owner_id
-                        or tx.run.lock_until is None or tx.run.lock_until <= utcnow()):
-                    raise RunTerminated("Execution lease is no longer valid")
-                self.service._expire(tx)
-                if tx.run.status == "READY":
-                    # Flush so lingering chunks precede the human_run row.
-                    self.flush_chunks_until_idle()
-                    tx.run.status = "RUNNING"
-                    tx.emit({"type": "human_run", "content": {
-                        "run_id": self.run_id, "status": "RUNNING",
-                    }})
-                    return
-                if tx.run.status != "WAITING_HUMAN":
-                    raise RunTerminated("Run no longer permits live continuation")
-            if self.stop_event is not None:
-                self.stop_event.wait(0.2)
-            else:
-                time.sleep(0.2)
+        if self.wait_reporter is not None:
+            self.wait_reporter(True)
+        try:
+            next_authorization_check = 0.0
+            while True:
+                if self.stop_event is not None and self.stop_event.is_set():
+                    raise RunTerminated("The managed execution was cancelled")
+                now = time.monotonic()
+                if now >= next_authorization_check:
+                    self.authorize()
+                    next_authorization_check = now + 5.0
+                with self.repository.transaction(self.run_id, self.tenant_id, self.user_id) as tx:
+                    if (tx is None or tx.run.fence != self.fence or tx.run.lock_owner != self.owner_id
+                            or tx.run.lock_until is None or tx.run.lock_until <= utcnow()):
+                        raise RunTerminated("Execution lease is no longer valid")
+                    self.service._expire(tx)
+                    if tx.run.status == "READY":
+                        # Flush so lingering chunks precede the human_run row.
+                        self.flush_chunks_until_idle()
+                        tx.run.status = "RUNNING"
+                        tx.emit({"type": "human_run", "content": {
+                            "run_id": self.run_id, "status": "RUNNING",
+                        }})
+                        return
+                    if tx.run.status != "WAITING_HUMAN":
+                        raise RunTerminated("Run no longer permits live continuation")
+                if self.stop_event is not None:
+                    self.stop_event.wait(0.2)
+                else:
+                    time.sleep(0.2)
+        finally:
+            if self.wait_reporter is not None:
+                self.wait_reporter(False)
 
     def dispatch(self, slot, tool, arguments, *, interaction=None):
         self.authorize()
