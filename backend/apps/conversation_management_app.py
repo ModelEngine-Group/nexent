@@ -68,15 +68,16 @@ async def list_conversations_endpoint(
     authorization: Optional[str] = Header(None),
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
+    start_date_ms: Annotated[Optional[int], Query(ge=0)] = None,
+    end_date_ms: Annotated[Optional[int], Query(ge=0)] = None,
+    agent_id: Annotated[Optional[int], Query()] = None,
+    keyword: Annotated[Optional[str], Query()] = None,
 ):
     """
-    Get all conversation list
+    Get conversation list with optional filters (CHEN-183).
 
-    Args:
-        authorization: Authorization header
-
-    Returns:
-        ConversationResponse object containing conversation list
+    All new filters are optional; omitting them preserves the legacy
+    contract exactly (AC-1~4, REV-1).
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
@@ -88,6 +89,18 @@ async def list_conversations_endpoint(
             week_start_ms=week_start_ms,
             limit=limit,
             offset=offset,
+            start_date_ms=start_date_ms,
+            end_date_ms=end_date_ms,
+            agent_id=agent_id,
+            keyword=keyword,
+        )
+        logging.info(
+            "conversation list query: user_id=%s offset=%s limit=%s "
+            "start_date_ms=%s end_date_ms=%s agent_id=%s keyword=%s "
+            "metadata=%s",
+            user_id, offset, limit, start_date_ms, end_date_ms,
+            agent_id, keyword,
+            conversations.get("metadata"),
         )
         return ConversationResponse(code=0, message="success", data=conversations)
     except TokenExpiredError as e:

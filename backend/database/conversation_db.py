@@ -880,8 +880,19 @@ def get_conversation_list_page(
     week_start_ms: int,
     limit: Optional[int] = None,
     offset: int = 0,
+    start_date_ms: Optional[int] = None,
+    end_date_ms: Optional[int] = None,
+    agent_id: Optional[int] = None,
+    keyword: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Return one conversation page and its bucket counts in one query."""
+    """Return one conversation page and its bucket counts in one query.
+
+    Optional filters are applied on the same WHERE chain as the existing
+    ownership / soft-delete predicates, so bucket metadata (total / today /
+    last_7_days / older) is computed from the filtered result set in a single
+    query with no sub-query. When no filter is supplied, behaviour is identical
+    to the pre-CHEN-183 contract.
+    """
     with get_db_session() as session:
         created_ms = func.extract('epoch', ConversationRecord.create_time) * 1000
         stmt = select(
@@ -901,7 +912,19 @@ def get_conversation_list_page(
         ).where(
             ConversationRecord.delete_flag == 'N',
             ConversationRecord.created_by == user_id,
-        ).order_by(
+        )
+        # CHEN-183: optional filters, pushed down to SQL (AC-1~4, REV-1).
+        if start_date_ms is not None:
+            stmt = stmt.where(created_ms >= start_date_ms)
+        if end_date_ms is not None:
+            stmt = stmt.where(created_ms <= end_date_ms)
+        if agent_id is not None:
+            stmt = stmt.where(ConversationRecord.agent_id == agent_id)
+        if keyword:
+            stmt = stmt.where(
+                ConversationRecord.conversation_title.ilike(f"%{keyword}%")
+            )
+        stmt = stmt.order_by(
             desc(ConversationRecord.create_time),
             desc(ConversationRecord.conversation_id),
         )

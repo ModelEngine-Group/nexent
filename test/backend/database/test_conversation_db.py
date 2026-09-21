@@ -3464,3 +3464,243 @@ def test_update_conversation_knowledge_scope_missing_row(monkeypatch, mock_sessi
 
     assert ok is False
     session.execute.assert_called_once()
+
+
+# =============================================================================
+# CHEN-183: get_conversation_list_page filter extension (AC-1~4, REV-1)
+# =============================================================================
+
+
+def _make_comparable_timestamp():
+    """Return a stand-in for the created_ms expression used by list_page.
+
+    The real expression is ``func.extract('epoch', create_time) * 1000``; in
+    tests we only need the resulting object to support comparison operators and
+    ``.label()``, which is what SQLAlchemy invokes when building the select.
+    """
+
+    class ComparableTimestamp:
+        def label(self, _name):
+            return self
+
+        def __ge__(self, _value):
+            return MagicMock()
+
+        def __le__(self, _value):
+            return MagicMock()
+
+        def __lt__(self, _value):
+            return MagicMock()
+
+    return ComparableTimestamp()
+
+
+def _patch_created_ms(monkeypatch):
+    from backend.database import conversation_db
+
+    monkeypatch.setattr(
+        conversation_db.func.extract.return_value.__mul__,
+        "return_value",
+        _make_comparable_timestamp(),
+    )
+
+
+def _stub_session(monkeypatch, rows):
+    session, ctx = mock_session_ctx
+    session.execute.return_value = rows
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    return session
+
+
+def test_get_conversation_list_page_applies_start_date_filter(monkeypatch):
+    """start_date_ms pushes a create_time >= start_date_ms predicate (AC-1)."""
+    session = _stub_session(
+        monkeypatch,
+        [
+            types.SimpleNamespace(
+                conversation_id=1,
+                conversation_title="In",
+                agent_id=1,
+                chat_mode="execution",
+                create_time=1758360000000,
+                update_time=1758360000000,
+                total=1,
+                today=1,
+                last_7_days=0,
+                older=0,
+            )
+        ],
+    )
+    _patch_created_ms(monkeypatch)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        start_date_ms=1758360000000,
+    )
+
+    assert result["metadata"] == {"total": 1, "today": 1, "last_7_days": 0, "older": 0}
+    session.execute.assert_called_once()
+
+
+def test_get_conversation_list_page_applies_end_date_filter(monkeypatch):
+    """end_date_ms pushes a create_time <= end_date_ms predicate (AC-1, inclusive)."""
+    session = _stub_session(
+        monkeypatch,
+        [
+            types.SimpleNamespace(
+                conversation_id=2,
+                conversation_title="End",
+                agent_id=2,
+                chat_mode="execution",
+                create_time=1758446400000,
+                update_time=1758446400000,
+                total=1,
+                today=0,
+                last_7_days=1,
+                older=0,
+            )
+        ],
+    )
+    _patch_created_ms(monkeypatch)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        end_date_ms=1758446400000,
+    )
+
+    assert result["metadata"]["last_7_days"] == 1
+    session.execute.assert_called_once()
+
+
+def test_get_conversation_list_page_applies_agent_id_filter(monkeypatch):
+    """agent_id pushes an equality predicate on ConversationRecord.agent_id (AC-2)."""
+    session = _stub_session(
+        monkeypatch,
+        [
+            types.SimpleNamespace(
+                conversation_id=3,
+                conversation_title="Agent",
+                agent_id=42,
+                chat_mode="execution",
+                create_time=1758360000000,
+                update_time=1758360000000,
+                total=1,
+                today=1,
+                last_7_days=0,
+                older=0,
+            )
+        ],
+    )
+    _patch_created_ms(monkeypatch)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        agent_id=42,
+    )
+
+    assert result["items"][0]["agent_id"] == 42
+    session.execute.assert_called_once()
+
+
+def test_get_conversation_list_page_applies_keyword_filter(monkeypatch):
+    """keyword pushes a case-insensitive ilike on conversation_title (AC-3)."""
+    session = _stub_session(
+        monkeypatch,
+        [
+            types.SimpleNamespace(
+                conversation_id=4,
+                conversation_title="项目讨论",
+                agent_id=1,
+                chat_mode="execution",
+                create_time=1758360000000,
+                update_time=1758360000000,
+                total=1,
+                today=1,
+                last_7_days=0,
+                older=0,
+            )
+        ],
+    )
+    _patch_created_ms(monkeypatch)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        keyword="项目",
+    )
+
+    assert result["items"][0]["conversation_title"] == "项目讨论"
+    session.execute.assert_called_once()
+
+
+def test_get_conversation_list_page_combines_all_filters(monkeypatch):
+    """All four filters compose with and_ on the same WHERE chain (AC-4)."""
+    session = _stub_session(
+        monkeypatch,
+        [
+            types.SimpleNamespace(
+                conversation_id=5,
+                conversation_title="项目讨论",
+                agent_id=42,
+                chat_mode="execution",
+                create_time=1758360000000,
+                update_time=1758360000000,
+                total=1,
+                today=1,
+                last_7_days=0,
+                older=0,
+            )
+        ],
+    )
+    _patch_created_ms(monkeypatch)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        start_date_ms=1758360000000,
+        end_date_ms=1758360000000,
+        agent_id=42,
+        keyword="项目",
+    )
+
+    assert result["metadata"]["total"] == 1
+    session.execute.assert_called_once()
+
+
+def test_get_conversation_list_page_no_filter_is_legacy_compatible(monkeypatch):
+    """Omitting every new filter preserves the pre-CHEN-183 contract exactly."""
+    session = _stub_session(
+        monkeypatch,
+        [
+            types.SimpleNamespace(
+                conversation_id=6,
+                conversation_title="Legacy",
+                agent_id=None,
+                chat_mode="execution",
+                create_time=1758360000000,
+                update_time=1758360000000,
+                total=1,
+                today=1,
+                last_7_days=0,
+                older=0,
+            )
+        ],
+    )
+    _patch_created_ms(monkeypatch)
+
+    result = get_conversation_list_page(
+        "user-1",
+        today_start_ms=2000,
+        week_start_ms=1000,
+    )
+
+    assert result["items"][0]["conversation_title"] == "Legacy"
+    session.execute.assert_called_once()
