@@ -1,0 +1,19 @@
+version: "3.7"
+
+services:
+  ext-knowledge:
+    build:
+      # Context is test/ so the Dockerfile can also embed the AIDP mock from
+      # test/ext_components/aidp/mock_servers/ (see test/.dockerignore).
+      context: ".."
+      dockerfile: mock-services/ext-knowledge-mock/Dockerfile
+    environment:
+      EXT_KNOWLEDGE_AIDP_MOCK_PATH: /app/aidp_mock_servers/aidp_mgmt_mock_server.py
+    ports:
+      - "30090:30090"
+    networks:
+      - nexent-ext-knowledge
+
+networks:
+  nexent-ext-knowledge:
+    name: nexent-ext-knowledge

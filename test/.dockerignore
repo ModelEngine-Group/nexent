@@ -1,0 +1,8 @@
+# Docker build context for compose.ext-knowledge.yaml is the test/ directory.
+# Whitelist only what the ext-knowledge image needs; everything else in test/
+# (backend/sdk test trees, caches, runtime state) stays out of the context.
+*
+!mock-services
+!ext_components
+**/__pycache__
+**/_state

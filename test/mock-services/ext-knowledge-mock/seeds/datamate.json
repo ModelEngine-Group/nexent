@@ -1,0 +1,86 @@
+{
+  "knowledge_bases": [
+    {"id": "datamate-kb-001", "type": "DOCUMENT", "name": "运行手册知识库", "description": "Operations runbooks and escalation procedures."},
+    {"id": "datamate-kb-002", "type": "DOCUMENT", "name": "产品文档库", "description": "Product specifications across releases."},
+    {"id": "datamate-kb-003", "type": "DOCUMENT", "name": "DataMate KB 003", "description": "Pagination seed 003."},
+    {"id": "datamate-kb-004", "type": "DOCUMENT", "name": "DataMate KB 004", "description": "Pagination seed 004."},
+    {"id": "datamate-kb-005", "type": "DOCUMENT", "name": "DataMate KB 005", "description": "Pagination seed 005."},
+    {"id": "datamate-kb-006", "type": "DOCUMENT", "name": "DataMate KB 006", "description": "Pagination seed 006."},
+    {"id": "datamate-kb-007", "type": "DOCUMENT", "name": "DataMate KB 007", "description": "Pagination seed 007."},
+    {"id": "datamate-kb-008", "type": "DOCUMENT", "name": "DataMate KB 008", "description": "Pagination seed 008."},
+    {"id": "datamate-kb-009", "type": "DOCUMENT", "name": "DataMate KB 009", "description": "Pagination seed 009."},
+    {"id": "datamate-kb-010", "type": "DOCUMENT", "name": "DataMate KB 010", "description": "Pagination seed 010."},
+    {"id": "datamate-kb-011", "type": "DOCUMENT", "name": "DataMate KB 011", "description": "Pagination seed 011."},
+    {"id": "datamate-kb-012", "type": "DOCUMENT", "name": "DataMate KB 012", "description": "Pagination seed 012."},
+    {"id": "datamate-kb-013", "type": "DOCUMENT", "name": "DataMate KB 013", "description": "Pagination seed 013."},
+    {"id": "datamate-kb-014", "type": "DOCUMENT", "name": "DataMate KB 014", "description": "Pagination seed 014."},
+    {"id": "datamate-kb-015", "type": "DOCUMENT", "name": "DataMate KB 015", "description": "Pagination seed 015."},
+    {"id": "datamate-kb-016", "type": "DOCUMENT", "name": "DataMate KB 016", "description": "Pagination seed 016."},
+    {"id": "datamate-kb-017", "type": "DOCUMENT", "name": "DataMate KB 017", "description": "Pagination seed 017."},
+    {"id": "datamate-kb-018", "type": "DOCUMENT", "name": "DataMate KB 018", "description": "Pagination seed 018."},
+    {"id": "datamate-kb-019", "type": "DOCUMENT", "name": "DataMate KB 019", "description": "Pagination seed 019."},
+    {"id": "datamate-kb-020", "type": "DOCUMENT", "name": "DataMate KB 020", "description": "Pagination seed 020."},
+    {"id": "datamate-kb-021", "type": "DOCUMENT", "name": "DataMate KB 021", "description": "Second page seed 021."},
+    {"id": "datamate-kb-graph", "type": "GRAPH", "name": "Graph Analytics Dataset", "description": "Non-DOCUMENT type; filtered out by get_user_indices."}
+  ],
+  "files_by_kb": {
+    "datamate-kb-001": [
+      {"fileId": "f-001", "fileName": "运行手册.pdf", "fileSize": 204800, "createdAt": "2024-06-10T08:00:00Z", "chunkCount": 42, "errMsg": "", "path_or_url": "/datasets/datamate-kb-001/files/f-001"},
+      {"fileId": "f-002", "fileName": "escalation.md", "fileSize": 4096, "createdAt": "2024-06-11T09:30:00Z", "chunkCount": 8, "errMsg": "", "path_or_url": "/datasets/datamate-kb-001/files/f-002"},
+      {"fileId": "f-003", "fileName": "broken.docx", "fileSize": 10240, "createdAt": "2024-06-12T10:00:00Z", "chunkCount": 0, "errMsg": "parse failed: unsupported format", "path_or_url": "/datasets/datamate-kb-001/files/f-003"}
+    ],
+    "datamate-kb-002": [
+      {"fileId": "f-101", "fileName": "spec-v2.pdf", "fileSize": 1048576, "createdAt": "2024-06-15T12:00:00Z", "chunkCount": 15, "errMsg": "", "path_or_url": "/datasets/datamate-kb-002/files/f-101"},
+      {"fileId": "f-102", "fileName": "spec-v1.pdf", "fileSize": 524288, "createdAt": "2024-06-16T13:00:00Z", "chunkCount": 3, "errMsg": "forward failed: es timeout", "path_or_url": "/datasets/datamate-kb-002/files/f-102"}
+    ]
+  },
+  "kb_info_by_id": {
+    "datamate-kb-001": {
+      "fileCount": 3,
+      "name": "运行手册知识库",
+      "chunkCount": 50,
+      "storeSize": "2.5MB",
+      "processSource": "Unstructured",
+      "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-01T00:00:00Z",
+      "updatedAt": "2024-06-12T10:00:00Z"
+    },
+    "datamate-kb-002": {
+      "fileCount": 2,
+      "name": "产品文档库",
+      "chunkCount": 18,
+      "storeSize": "1.5MB",
+      "processSource": "MinerU",
+      "embedding": {"modelName": "text-embedding-3-small"},
+      "createdAt": "2024-06-14T00:00:00Z",
+      "updatedAt": "2024-06-16T13:00:00Z"
+    }
+  },
+  "chunks_by_kb": {
+    "datamate-kb-001": [
+      {
+        "text": "DataMate runbook: restart the ingestion worker and check the Redis queue depth before retrying failed forwards.",
+        "score": 0.9,
+        "createTime": "2024-06-10T08:05:00Z",
+        "metadata": {"absolute_directory_path": "/data/datasets/datamate-kb-001", "original_file_id": "f-001", "file_name": "运行手册.pdf"},
+        "scoreDetails": {"vsScore": 0.82, "esScore": 0.71}
+      },
+      {
+        "text": "升级流程包含数据备份、灰度发布与回滚预案三个阶段。",
+        "score": 0.85,
+        "createTime": "2024-06-11T09:35:00Z",
+        "metadata": {"absolute_directory_path": "/data/datasets/datamate-kb-001", "original_file_id": "f-002", "file_name": "escalation.md"},
+        "scoreDetails": {"vsScore": 0.78, "esScore": 0.66}
+      }
+    ],
+    "datamate-kb-002": [
+      {
+        "text": "Product spec: the external knowledge source list is synced from DataMate on demand and skipped for datamate-sourced indices.",
+        "score": 0.88,
+        "createTime": "2024-06-15T12:05:00Z",
+        "metadata": {"absolute_directory_path": "/data/datasets/datamate-kb-002", "original_file_id": "f-101", "file_name": "spec-v2.pdf"},
+        "scoreDetails": {"vsScore": 0.8, "esScore": 0.7}
+      }
+    ]
+  }
+}
