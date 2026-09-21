@@ -3876,10 +3876,12 @@ class TestBuildSessionDockerExecutor:
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace())
         monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
 
+        config = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
+        logger_ = MagicMock()
         with pytest.raises(RuntimeError, match="no effective loopback port mapping"):
             pm._build_session_docker_executor(
-                SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
-                MagicMock(),
+                config,
+                logger_,
                 {},
             )
 

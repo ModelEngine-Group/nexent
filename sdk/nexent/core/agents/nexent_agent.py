@@ -1479,7 +1479,7 @@ class NexentAgent:
                     except Exception as retry_exc:
                         self._check_sandbox_cancelled()
                         exc = retry_exc
-                logger.error(
+                logger.exception(
                     "Sandbox FAILED phase=workspace run_id=%s: %s", self.workspace_run_id, exc,
                     exc_info=(type(exc), exc, exc.__traceback__),
                 )
