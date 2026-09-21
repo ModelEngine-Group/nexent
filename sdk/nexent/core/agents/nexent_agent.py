@@ -1464,6 +1464,8 @@ class NexentAgent:
                 if (
                     getattr(executor, "_nexent_kernel_recovery_supported", False)
                     and getattr(executor, "_unhealthy", False)
+                    # Registered bootstraps already own their bounded recovery.
+                    and not callable(register_bootstrap)
                 ):
                     logger.warning(
                         "Retrying sandbox workspace initialization with a replacement kernel: %s",

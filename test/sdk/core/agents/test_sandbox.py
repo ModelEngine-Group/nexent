@@ -5123,6 +5123,8 @@ class TestTargetedSandboxCoverage:
         container.kill.assert_called_once()
 
     def test_kernel_lease_execution_and_cleanup_paths(self, monkeypatch):
+        from websocket import WebSocketBadStatusException
+
         class FakeABNF:
             OPCODE_TEXT = 1
             OPCODE_CLOSE = 8
@@ -5142,6 +5144,7 @@ class TestTargetedSandboxCoverage:
         )
         websocket_module = SimpleNamespace(
             ABNF=FakeABNF,
+            WebSocketBadStatusException=WebSocketBadStatusException,
             create_connection=MagicMock(return_value=websocket),
             WebSocketConnectionClosedException=ConnectionError,
             WebSocketTimeoutException=TimeoutError,

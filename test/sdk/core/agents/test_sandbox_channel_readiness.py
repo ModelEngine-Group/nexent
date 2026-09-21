@@ -1,6 +1,7 @@
 """Channel readiness must precede execution; cancelled requests must not retry."""
 
 import json
+import ssl
 from concurrent.futures import CancelledError
 from unittest.mock import MagicMock
 
@@ -8,6 +9,7 @@ import pytest
 from nexent.core.agents import sandbox as sb
 from websocket import (
     ABNF,
+    WebSocketBadStatusException,
     WebSocketConnectionClosedException,
     WebSocketTimeoutException,
 )
@@ -91,7 +93,116 @@ def test_handshake_retry_is_bounded_and_never_sends_code(lease, monkeypatch):
         lease.run_code_raise_errors("side_effect()")
     assert connect.call_count == 3
     assert all(m["header"]["msg_type"] == "kernel_info_request" for m in sent)
-    assert not lease._unhealthy
+    assert lease._unhealthy
+
+
+def test_connection_timeout_is_retried_before_submission(lease, monkeypatch):
+    ws, sent = socket_for_execution()
+    connect = MagicMock(side_effect=[TimeoutError('connect timed out'), ws])
+    monkeypatch.setattr('websocket.create_connection', connect)
+    assert lease.run_code_raise_errors('pass').logs == 'OK\n'
+    assert connect.call_count == 2
+    assert sum(m['header']['msg_type'] == 'execute_request' for m in sent) == 1
+
+
+def test_initialization_replaces_kernel_after_channel_failure(lease, monkeypatch):
+    lease._cached_variables = lease._cached_tools = None
+    lease._kernel_bootstrap_code = []
+    lease.base_url = 'https://sandbox:8888'
+    lease.host, lease.port = 'sandbox', 8888
+    lease._requests = MagicMock()
+    lease._requests.delete.return_value.status_code = 204
+    lease._create_kernel = MagicMock(return_value='replacement')
+    ws, sent = socket_for_execution()
+    connect = MagicMock(side_effect=[TimeoutError('failed')] * 3 + [ws])
+    monkeypatch.setattr('websocket.create_connection', connect)
+    lease.register_kernel_bootstrap_code('initialize_workspace()')
+    assert lease.kernel_id == 'replacement'
+    lease._create_kernel.assert_called_once()
+    assert lease._kernel_bootstrap_code == ['initialize_workspace()']
+    assert sum(m['header']['msg_type'] == 'execute_request' for m in sent) == 1
+
+
+@pytest.fixture
+def recoverable_lease(lease):
+    lease._cached_variables = lease._cached_tools = None
+    lease._kernel_bootstrap_code = []
+    lease.base_url = 'https://sandbox:8888'
+    lease.host, lease.port = 'sandbox', 8888
+    lease._requests = MagicMock()
+    lease._requests.delete.return_value.status_code = 204
+    lease._create_kernel = MagicMock(return_value='replacement')
+    return lease
+
+
+@pytest.mark.parametrize('operation', ['variables', 'tools', 'bootstrap'])
+def test_failed_replacement_does_not_recurse(recoverable_lease, monkeypatch, operation):
+    lease = recoverable_lease
+    from smolagents.remote_executors import RemotePythonExecutor
+
+    monkeypatch.setattr(RemotePythonExecutor, 'send_variables', lambda self, _: self.run_code_raise_errors('variables'))
+    monkeypatch.setattr(RemotePythonExecutor, 'send_tools', lambda self, _: self.run_code_raise_errors('tools'))
+    connect = MagicMock(side_effect=TimeoutError('unavailable'))
+    monkeypatch.setattr('websocket.create_connection', connect)
+    call = {
+        'variables': lambda: lease.send_variables({'x': 1}),
+        'tools': lambda: lease.send_tools({}),
+        'bootstrap': lambda: lease.register_kernel_bootstrap_code('workspace'),
+    }[operation]
+    with pytest.raises(RuntimeError):
+        call()
+    lease._create_kernel.assert_called_once()
+    assert connect.call_count == 6
+    assert lease._unhealthy
+    assert not lease._kernel_replacement_in_progress
+
+
+def test_initially_unhealthy_setup_has_only_one_replacement(recoverable_lease, monkeypatch):
+    lease = recoverable_lease
+    lease._unhealthy = True
+    monkeypatch.setattr('websocket.create_connection', MagicMock(side_effect=TimeoutError('unavailable')))
+    with pytest.raises(RuntimeError):
+        lease.register_kernel_bootstrap_code('workspace')
+    lease._create_kernel.assert_called_once()
+
+
+@pytest.mark.parametrize('failure', [
+    ssl.SSLCertVerificationError('wrong certificate'),
+    WebSocketBadStatusException('unauthorized', status_code=401),
+    WebSocketBadStatusException('forbidden', status_code=403),
+])
+def test_security_failure_does_not_retry_or_replace(recoverable_lease, monkeypatch, failure):
+    lease = recoverable_lease
+    connect = MagicMock(side_effect=failure)
+    monkeypatch.setattr('websocket.create_connection', connect)
+    exception_type = type(failure)
+    with pytest.raises(exception_type):
+        lease.register_kernel_bootstrap_code('workspace')
+    connect.assert_called_once()
+    lease._create_kernel.assert_not_called()
+
+
+def test_missing_kernel_can_be_replaced(recoverable_lease, monkeypatch):
+    lease = recoverable_lease
+    ws, _ = socket_for_execution()
+    failure = WebSocketBadStatusException('missing kernel', status_code=404)
+    connect = MagicMock(side_effect=[failure, failure, failure, ws])
+    monkeypatch.setattr('websocket.create_connection', connect)
+    lease.register_kernel_bootstrap_code('workspace')
+    lease._create_kernel.assert_called_once()
+
+
+def test_cancel_during_connection_failure_stops_recovery(recoverable_lease, monkeypatch):
+    lease = recoverable_lease
+    def connect(*args, **kwargs):
+        lease._cancellation_scope.cancel()
+        raise TimeoutError('cancelled connection')
+    connect_mock = MagicMock(side_effect=connect)
+    monkeypatch.setattr('websocket.create_connection', connect_mock)
+    with pytest.raises(CancelledError):
+        lease.register_kernel_bootstrap_code('workspace')
+    connect_mock.assert_called_once()
+    lease._create_kernel.assert_not_called()
 
 
 def test_lost_execution_is_not_replayed_or_accepted_from_http_idle(lease, monkeypatch):

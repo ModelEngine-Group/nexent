@@ -1760,25 +1760,33 @@ class _DockerKernelLease:
     @contextmanager
     def _kernel_channel(self):
         """Retry only the side-effect-free handshake, never a submitted execution."""
-        from websocket import WebSocketConnectionClosedException, WebSocketTimeoutException, create_connection
+        from websocket import (
+            WebSocketBadStatusException, WebSocketConnectionClosedException,
+            WebSocketTimeoutException, create_connection,
+        )
 
         for attempt in range(3):
             self._check_execution_cancelled()
-            ws = create_connection(
-                self.ws_url, timeout=self._receive_timeout_seconds,
-                sslopt={"context": self._ssl_context},
-            )
+            ws = None
             scope = getattr(self, "_cancellation_scope", None)
             token = None
             try:
-                if scope is not None:
-                    token = scope.register_closer(ws.shutdown)
-                self._check_execution_cancelled()
                 try:
-                    self._wait_for_kernel_channel_ready(ws)
-                except (WebSocketTimeoutException, WebSocketConnectionClosedException) as exc:
+                    ws = create_connection(
+                        self.ws_url, timeout=self._receive_timeout_seconds,
+                        sslopt={"context": self._ssl_context},
+                    )
+                    if scope is not None:
+                        token = scope.register_closer(ws.shutdown)
                     self._check_execution_cancelled()
+                    self._wait_for_kernel_channel_ready(ws)
+                except (TimeoutError, ConnectionError, WebSocketTimeoutException,
+                        WebSocketConnectionClosedException, WebSocketBadStatusException) as exc:
+                    self._check_execution_cancelled()
+                    if isinstance(exc, WebSocketBadStatusException) and exc.status_code != 404:
+                        raise
                     if attempt == 2:
+                        self._unhealthy = True
                         raise RuntimeError("Sandbox kernel channel readiness failed before code submission") from exc
                     self._logger.warning(
                         "Sandbox channel handshake retry: kernel_id=%s attempt=%d error_type=%s",
@@ -1794,7 +1802,8 @@ class _DockerKernelLease:
             finally:
                 if scope is not None and token is not None:
                     scope.unregister_closer(token)
-                ws.close()
+                if ws is not None:
+                    ws.close()
 
     def _build_channels_url(self, kernel_id: str) -> str:
         """Build a Kernel Gateway channel URL with a stable client session."""
@@ -1961,6 +1970,18 @@ class _DockerKernelLease:
             return None
 
     def _replace_unhealthy_kernel(self) -> None:
+        """Bound recovery even when replaying framework state enters setup again."""
+        self._check_execution_cancelled()
+        if getattr(self, "_kernel_replacement_in_progress", False):
+            raise RuntimeError("Sandbox kernel recovery failed during framework-state replay")
+        self._kernel_replacement_count = getattr(self, "_kernel_replacement_count", 0) + 1
+        self._kernel_replacement_in_progress = True
+        try:
+            self._replace_kernel_and_restore_state()
+        finally:
+            self._kernel_replacement_in_progress = False
+
+    def _replace_kernel_and_restore_state(self) -> None:
         """Replace a failed kernel and restore framework-managed execution state."""
         from smolagents.remote_executors import (
             RemotePythonExecutor,
@@ -2054,11 +2075,12 @@ class _DockerKernelLease:
     def send_variables(self, variables: dict[str, Any]) -> None:
         from smolagents.remote_executors import RemotePythonExecutor
         self._cached_variables = dict(variables)
+        recovery_count = getattr(self, "_kernel_replacement_count", 0)
         try:
             RemotePythonExecutor.send_variables(self, variables)
         except Exception as exc:
             self._check_execution_cancelled()
-            if not self._unhealthy:
+            if not self._can_retry_initialization(recovery_count):
                 raise
             self._logger.warning(
                 "Retrying sandbox variable registration with a replacement kernel: %s",
@@ -2114,11 +2136,12 @@ class _DockerKernelLease:
     def send_tools(self, tools: dict[str, Any]) -> None:
         from smolagents.remote_executors import RemotePythonExecutor
         self._cached_tools = dict(tools)
+        recovery_count = getattr(self, "_kernel_replacement_count", 0)
         try:
             RemotePythonExecutor.send_tools(self, tools)
         except Exception as exc:
             self._check_execution_cancelled()
-            if not self._unhealthy:
+            if not self._can_retry_initialization(recovery_count):
                 raise
             self._logger.warning(
                 "Retrying sandbox tool registration with a replacement kernel: %s",
@@ -2130,11 +2153,12 @@ class _DockerKernelLease:
 
     def register_kernel_bootstrap_code(self, code: str) -> Any:
         """Execute and retain framework bootstrap code for future kernel replacement."""
+        recovery_count = getattr(self, "_kernel_replacement_count", 0)
         try:
             output = self.run_code_raise_errors(code)
         except Exception as exc:
             self._check_execution_cancelled()
-            if not self._unhealthy:
+            if not self._can_retry_initialization(recovery_count):
                 raise
             self._logger.warning(
                 "Retrying sandbox bootstrap registration with a replacement kernel: %s",
@@ -2145,6 +2169,13 @@ class _DockerKernelLease:
         if code not in self._kernel_bootstrap_code:
             self._kernel_bootstrap_code.append(code)
         return output
+
+    def _can_retry_initialization(self, recovery_count: int) -> bool:
+        return (
+            self._unhealthy
+            and not getattr(self, "_kernel_replacement_in_progress", False)
+            and getattr(self, "_kernel_replacement_count", 0) == recovery_count
+        )
 
     def cleanup(self) -> None:
         """Delete this kernel while leaving the shared container running."""

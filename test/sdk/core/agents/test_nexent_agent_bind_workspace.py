@@ -130,6 +130,24 @@ def test_bootstrap_retry_logs_and_chains_actual_retry_failure(bind_agent, caplog
     assert executor.call_count == 2
 
 
+def test_registered_bootstrap_does_not_receive_outer_recovery_retry(bind_agent):
+    class Executor:
+        _nexent_backend = 'docker'
+        _nexent_kernel_recovery_supported = True
+        _unhealthy = True
+        calls = 0
+
+        def register_kernel_bootstrap_code(self, code):
+            self.calls += 1
+            raise RuntimeError('replacement already failed')
+
+    executor = Executor()
+    bind_agent._sandbox_executors = [executor]
+    with pytest.raises(RuntimeError, match='replacement already failed'):
+        bind_agent._initialize_sandbox_workspaces()
+    assert executor.calls == 1
+
+
 @pytest.mark.parametrize('cancel_during_retry', [False, True])
 def test_bootstrap_retry_preserves_cancellation(bind_agent, cancel_during_retry):
     executor = bind_agent._sandbox_executors[0]
