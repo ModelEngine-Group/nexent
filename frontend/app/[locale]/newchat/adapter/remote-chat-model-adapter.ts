@@ -1925,9 +1925,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             };
       nl2SkillAttemptCheckpoints.set(attemptId, { files, summary });
     };
-    const rollbackNl2SkillAttempt = (
-      checkpoint: Nl2SkillAttemptCheckpoint
+    const resolveNl2SkillAttempt = (
+      attemptId: string,
+      phase: "rollback" | "commit"
     ) => {
+      if (!isNl2Skill) return;
+      const checkpoint = nl2SkillAttemptCheckpoints.get(attemptId);
+      nl2SkillAttemptCheckpoints.delete(attemptId);
+      if (phase !== "rollback" || !checkpoint) return;
+
       const createdIndices = new Set<number>();
       for (const [path, index] of nl2SkillFilePartIndices) {
         if (!checkpoint.files.has(path)) createdIndices.add(index);
@@ -1953,16 +1959,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       } else {
         nl2SkillSummaryPartIndex = null;
       }
-    };
-    const resolveNl2SkillAttempt = (
-      attemptId: string,
-      phase: "rollback" | "commit"
-    ) => {
-      if (!isNl2Skill) return;
-      const checkpoint = nl2SkillAttemptCheckpoints.get(attemptId);
-      nl2SkillAttemptCheckpoints.delete(attemptId);
-      if (phase !== "rollback" || !checkpoint) return;
-      rollbackNl2SkillAttempt(checkpoint);
     };
     const handleModelAttemptControl = (chunk: SseChunk): boolean => {
       if (

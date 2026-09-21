@@ -7,7 +7,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal
 
 
 OutputProtocol = Literal["code_action", "final_answer_envelope"]
@@ -127,81 +127,8 @@ def _raise_protocol_error(
     reason: ProtocolErrorReason,
     protocol: OutputProtocol,
     logger: Any,
-) -> NoReturn:
+) -> None:
     raise ModelOutputProtocolError(reason, protocol, logger)
-
-
-def _parse_executable_action(
-    code: str,
-    *,
-    protocol: OutputProtocol,
-    logger: Any,
-    legacy_format: bool = False,
-) -> ExecutableAction:
-    code = code.strip()
-    if not has_meaningful_visible_content(code):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-    try:
-        ast.parse(code)
-    except (SyntaxError, ValueError, TypeError):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-    return ExecutableAction(code=code, legacy_format=legacy_format)
-
-
-def _classify_code_action(
-    text: str,
-    *,
-    protocol: OutputProtocol,
-    logger: Any,
-) -> ExecutableAction:
-    code_match = _CODE_RE.fullmatch(text)
-    if code_match:
-        return _parse_executable_action(
-            code_match.group("body"),
-            protocol=protocol,
-            logger=logger,
-        )
-
-    run_match = _RUN_RE.fullmatch(text)
-    if run_match and text.count("```<RUN>") == 1:
-        return _parse_executable_action(
-            run_match.group("body"),
-            protocol=protocol,
-            logger=logger,
-            legacy_format=True,
-        )
-
-    if any(marker in text for marker in ("<code>", "</code>", "```<RUN>")):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-    if _TAG_RE.search(text):
-        _raise_protocol_error(
-            ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
-            protocol,
-            logger,
-        )
-    _raise_protocol_error(
-        ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION,
-        protocol,
-        logger,
-    )
-
-
-def _classify_final_envelope(
-    text: str,
-    *,
-    protocol: OutputProtocol,
-    logger: Any,
-) -> ExplicitFinalAnswer:
-    envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
-    if envelope_match and text.count("<FINAL_ANSWER>") == 1 and text.count("</FINAL_ANSWER>") == 1:
-        answer = envelope_match.group("body")
-        if has_meaningful_visible_content(answer):
-            return ExplicitFinalAnswer(answer=answer)
-    _raise_protocol_error(
-        ProtocolErrorReason.INVALID_FINAL_ENVELOPE,
-        protocol,
-        logger,
-    )
 
 
 def classify_model_output(
@@ -223,5 +150,55 @@ def classify_model_output(
         _raise_protocol_error(ProtocolErrorReason.EMPTY_VISIBLE_CONTENT, protocol, logger)
 
     if protocol == "code_action":
-        return _classify_code_action(text, protocol=protocol, logger=logger)
-    return _classify_final_envelope(text, protocol=protocol, logger=logger)
+        code_match = _CODE_RE.fullmatch(text)
+        if code_match:
+            code = code_match.group("body").strip()
+            if not has_meaningful_visible_content(code):
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            try:
+                ast.parse(code)
+            except (SyntaxError, ValueError, TypeError):
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            return ExecutableAction(code=code)
+
+        run_match = _RUN_RE.fullmatch(text)
+        if run_match and text.count("```<RUN>") == 1:
+            code = run_match.group("body").strip()
+            if not has_meaningful_visible_content(code):
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            try:
+                ast.parse(code)
+            except (SyntaxError, ValueError, TypeError):
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            return ExecutableAction(code=code, legacy_format=True)
+
+        if any(marker in text for marker in ("<code>", "</code>", "```<RUN>")):
+            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+        if _TAG_RE.search(text):
+            _raise_protocol_error(
+                ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
+                protocol,
+                logger,
+            )
+        _raise_protocol_error(
+            ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION,
+            protocol,
+            logger,
+        )
+
+    envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
+    if envelope_match and text.count("<FINAL_ANSWER>") == 1 and text.count("</FINAL_ANSWER>") == 1:
+        answer = envelope_match.group("body")
+        if not has_meaningful_visible_content(answer):
+            _raise_protocol_error(
+                ProtocolErrorReason.INVALID_FINAL_ENVELOPE,
+                protocol,
+                logger,
+            )
+        return ExplicitFinalAnswer(answer=answer)
+
+    _raise_protocol_error(
+        ProtocolErrorReason.INVALID_FINAL_ENVELOPE,
+        protocol,
+        logger,
+    )

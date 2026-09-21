@@ -39,6 +39,15 @@ export interface AidpDocumentItem {
   file_size?: number;
   file_type?: string;
   created_at?: string;
+  /**
+   * Processing status reported by the AIDP file history endpoint:
+   * `PROCESSING` | `COMPLETED` | `FAILED` (upper-cased by the backend).
+   * Absent when the backend falls back to the completed-files listing, which
+   * only ever reports ingested files.
+   */
+  status?: string;
+  /** Channel directory the file was ingested from. */
+  dir_path?: string;
 }
 
 export interface AidpDocumentListResponse {
@@ -49,6 +58,12 @@ export interface AidpDocumentListResponse {
    *  fallback estimate when Count fails (false). When false the frontend
    *  should treat the total as approximate and avoid displaying "共 N 条". */
   total_reliable?: boolean;
+  /**
+   * Number of files still being processed across the WHOLE knowledge base
+   * (not just the returned page). The list polls while this is greater than
+   * zero and stops once every file has reached a terminal status.
+   */
+  processing_count?: number;
 }
 
 export interface AidpUploadSuccessItem {
@@ -228,15 +243,21 @@ function buildUrl(
 
 class AidpKnowledgeService {
   /**
-   * List knowledge bases (paginated).
+   * List knowledge bases (paginated), optionally filtered by name.
+   *
+   * `keyword` is forwarded to the backend, which passes it on to AIDP for
+   * server-side filtering. A blank keyword is omitted from the query string
+   * entirely so an unfiltered call produces the same request as before.
    */
   async listKbs(
     page: number = 1,
-    pageSize: number = 10
+    pageSize: number = 10,
+    keyword?: string
   ): Promise<AidpKnowledgeBaseListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.knowledgeBases, {
       page,
       page_size: pageSize,
+      keyword: keyword?.trim() || undefined,
     });
 
     const response = await fetchWithErrorHandling(url, {
@@ -484,6 +505,10 @@ class AidpKnowledgeService {
         typeof result.total_reliable === "boolean"
           ? result.total_reliable
           : typeof result.total_count === "number",
+      processing_count:
+        typeof result.processing_count === "number"
+          ? result.processing_count
+          : undefined,
     };
   }
 

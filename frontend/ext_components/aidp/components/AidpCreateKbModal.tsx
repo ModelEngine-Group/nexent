@@ -29,7 +29,22 @@ import type {
   AidpUploadResponse,
 } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
-import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
+import { USER_ROLES } from "@/const/auth";
+
+/**
+ * Antd's Upload component (Dragger) requires ``originFileObj`` to satisfy
+ * the ``RcFile`` shape (``File`` + ``uid`` + ``lastModifiedDate``). We
+ * store raw ``File`` objects in component state, so we cast at the
+ * render boundary. The structural cast is sufficient because antd does
+ * not read the extra fields — it only requires them to exist for type
+ * compatibility.
+ */
+type RcFileLike = File & { uid: string; lastModifiedDate: Date };
+import {
+  AIDP_ACCEPT_STRING,
+  AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
+} from "@/const/knowledgeBase";
+import { collectUploadedFileIds } from "@/lib/aidpDocumentStatus";
 import {
   partitionAidpFiles,
   validateAidpFiles,
@@ -163,7 +178,10 @@ interface AidpCreateKbModalProps {
   open: boolean;
   existingKbs: AidpKnowledgeBaseItem[];
   onCancel: () => void;
-  onSuccess: (knowledgeBase: AidpKnowledgeBaseItem) => void;
+  onSuccess: (
+    knowledgeBase: AidpKnowledgeBaseItem,
+    uploadedFileIds?: string[]
+  ) => void;
 }
 
 const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
@@ -269,6 +287,67 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           values.chunk_token_num ?? AIDP_CREATE_DEFAULTS.chunk_token_num,
         chunk_overlap_num:
           values.chunk_overlap_num ?? AIDP_CREATE_DEFAULTS.chunk_overlap_num,
+        caption_enable: values.caption_enable ? 1 : 0,
+        // The permission select is disabled at PRIVATE so users cannot pick
+        // group_ids while PRIVATE; we always coerce to [] for safety.
+        ingroup_permission: isUser
+          ? "PRIVATE"
+          : (values.ingroup_permission ?? "READ_ONLY"),
+        group_ids:
+          isUser || (values.ingroup_permission ?? "READ_ONLY") === "PRIVATE"
+            ? []
+            : Array.isArray(values.group_ids)
+              ? values.group_ids
+              : [],
+      });
+      setCurrent(1);
+    } catch {
+      // form validation error, do nothing
+    }
+  };
+
+  const handleBack = () => {
+    // Restore formValues into the Form when remounting Step 0,
+    // since antd Form clears field values when the Form is unmounted.
+    form.setFieldsValue(formValues);
+    setCurrent(0);
+  };
+
+  const handleSubmit = async (skipUpload: boolean) => {
+    let knowledgeBaseCreated = false;
+    // Files accepted by AIDP while creating the KB. Reported to the parent so
+    // it can keep refreshing the document list until they finish processing.
+    let uploadedFileIds: string[] = [];
+    let createdKdsId = "";
+    let createdKnowledgeBase: AidpKnowledgeBaseItem | null = null;
+    try {
+      if (!formValues.name?.trim()) {
+        message.error(t("aidpKnowledge.kbNameRequired"));
+        setCurrent(0);
+        return;
+      }
+      setLoading(true);
+
+      const permission = isUser ? "PRIVATE" : formValues.ingroup_permission;
+      const groupIds = isUser ? [] : formValues.group_ids;
+
+      // Defense-in-depth: re-validate every file in case beforeUpload was bypassed
+      if (!skipUpload && fileList.length > 0) {
+        const validation = validateAidpFiles(fileList);
+        if (validation.valid.length !== fileList.length) {
+          setLoading(false);
+          partitionAidpFiles(fileList, t, message);
+          return;
+        }
+      }
+
+      // Step 1: Create KB
+      // Aligned with sdk/nexent/core/knowledge_base/mapper.py#build_create_payload
+      const created = await aidpKnowledgeService.createKb({
+        name: formValues.name.trim(),
+        description: formValues.description || "",
+        chunk_token_num: formValues.chunk_token_num,
+        chunk_overlap_num: formValues.chunk_overlap_num,
         embedding_model: AIDP_CREATE_DEFAULTS.embedding_model,
         vlm_model: captionEnable
           ? values.vlm_model || defaultVlmModel || ""
@@ -299,13 +378,59 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           created.kds_id,
           fileList
         );
-        showAidpCreateUploadResult(result, i18n.language, t);
+        uploadedFileIds = collectUploadedFileIds(result.success_list);
+
+        const failureDetails = result.failed_list.map((item) => {
+          const reason = i18n.language.startsWith("zh")
+            ? item.reason_zh || item.reason_en
+            : item.reason_en || item.reason_zh;
+          return `${item.file_name}: ${reason || t("aidpKnowledge.uploadFailed")}`;
+        });
+        const failureLines = failureDetails.map((detail, index) => (
+          <div key={`${index}-${detail}`}>{detail}</div>
+        ));
+
+        if (result.summary.failed > 0 && result.summary.success === 0) {
+          message.warning(
+            <div className="text-left">
+              <div>{t("aidpKnowledge.createKbSuccess")}</div>
+              {failureLines.length > 0 ? (
+                failureLines
+              ) : (
+                <div>{t("aidpKnowledge.uploadFailed")}</div>
+              )}
+            </div>
+          );
+        } else if (result.summary.failed > 0) {
+          message.info(
+            <div className="text-left">
+              <div>{t("aidpKnowledge.createKbSuccess")}</div>
+              <div>
+                {t("aidpKnowledge.uploadPartial", {
+                  success: result.summary.success,
+                  failed: result.summary.failed,
+                })}
+              </div>
+              {failureLines}
+            </div>
+          );
+        } else {
+          message.success(
+            t("aidpKnowledge.createKbSuccess") +
+              " | " +
+              t("aidpKnowledge.uploadSuccess", {
+                count: result.summary.success,
+              })
+          );
+        }
       } else {
         message.success(t("aidpKnowledge.createKbSuccess"));
       }
 
       handleReset();
-      if (createdKnowledgeBase) onSuccess(createdKnowledgeBase);
+      if (createdKnowledgeBase) {
+        onSuccess(createdKnowledgeBase, uploadedFileIds);
+      }
     } catch (error) {
       const reason = getAidpCreateErrorReason(error, knowledgeBaseCreated, t);
       message.error(
@@ -315,7 +440,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       );
       if (knowledgeBaseCreated) {
         handleReset();
-        if (createdKnowledgeBase) onSuccess(createdKnowledgeBase);
+        if (createdKnowledgeBase) {
+          onSuccess(createdKnowledgeBase, uploadedFileIds);
+        }
       }
     } finally {
       setLoading(false);

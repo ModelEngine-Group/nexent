@@ -900,12 +900,6 @@ Additional Args:
 
             repair_messages = getattr(self, "_protocol_repair_messages", [])
             if repair_messages:
-                suppress_repair_generation_stream = True
-                if (
-                    getattr(self.model, "supports_suppressed_attempt_stream", False)
-                    is True
-                ):
-                    additional_args["_suppress_attempt_stream"] = True
                 input_messages = [*input_messages, *repair_messages]
             input_messages = self._ensure_open_model_turn(input_messages)
             memory_step.model_input_messages = input_messages
@@ -1001,10 +995,7 @@ Additional Args:
                     logger=self.logger,
                 )
             if isinstance(classified_output, ExplicitFinalAnswer):
-                self._resolve_deferred_model_attempt(
-                    memory_step.model_output_message,
-                    accepted=not suppress_repair_generation_stream,
-                )
+                self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
                 getattr(self, "_protocol_repair_messages", []).clear()
                 self._consecutive_protocol_errors = 0
                 self._record_output_protocol("explicit_final_answer")
@@ -1018,10 +1009,7 @@ Additional Args:
             code_action = fix_final_answer_code(code_action)
             code_action = _remove_parallel_executor_import(code_action)
             memory_step.code_action = code_action
-            self._resolve_deferred_model_attempt(
-                memory_step.model_output_message,
-                accepted=not suppress_repair_generation_stream,
-            )
+            self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
             getattr(self, "_protocol_repair_messages", []).clear()
             self._consecutive_protocol_errors = 0
             self._record_output_protocol(

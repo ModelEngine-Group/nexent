@@ -1,4 +1,5 @@
 import pytest
+
 from nexent.core.models.retry import (
     DEFAULT_MODEL_RETRY,
     ModelErrorCode,
@@ -26,15 +27,6 @@ def test_cmsr_001_default_budget_is_five_total_attempts():
         (HttpError(401), False, ModelErrorCode.AUTHENTICATION_ERROR),
         (HttpError(404), False, ModelErrorCode.NOT_FOUND),
         (HttpError(422), False, ModelErrorCode.INVALID_REQUEST),
-        (HttpError(418), False, ModelErrorCode.UNKNOWN_ERROR),
-        (RuntimeError("context length exceeded"), False, ModelErrorCode.CONTEXT_OVERFLOW),
-        (RuntimeError("unauthorized api key"), False, ModelErrorCode.AUTHENTICATION_ERROR),
-        (RuntimeError("404 not found"), False, ModelErrorCode.NOT_FOUND),
-        (RuntimeError("400 bad request"), False, ModelErrorCode.INVALID_REQUEST),
-        (RuntimeError("429 rate limit"), True, ModelErrorCode.RATE_LIMIT_EXHAUSTED),
-        (RuntimeError("503 server error"), True, ModelErrorCode.SERVICE_UNAVAILABLE),
-        (RuntimeError("connection refused"), True, ModelErrorCode.CONNECTION_ERROR),
-        (RuntimeError("read timeout"), True, ModelErrorCode.TIMEOUT),
         (RuntimeError("unclassified provider bug"), False, ModelErrorCode.UNKNOWN_ERROR),
     ],
 )

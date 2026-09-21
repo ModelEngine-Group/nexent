@@ -1,19 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Input, Pagination, Tooltip } from "antd";
+import { Button, Input, Pagination, Tag, Tooltip } from "antd";
 import {
-  BookOpen,
-  CircleOff,
-  Eye,
-  FolderOpen,
-  Glasses,
-  PencilRuler,
-  Search,
-  SquarePen,
-  Trash2,
-} from "lucide-react";
-import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+} from "@ant-design/icons";
+import { SquarePen, Trash2 } from "lucide-react";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -30,6 +24,10 @@ interface AidpKnowledgeListProps {
   hasMore: boolean;
   currentPage: number;
   pageSize: number;
+  /** Raw search box value. The parent debounces it before querying, so this is
+   *  intentionally the un-debounced text the user is currently typing. */
+  keyword: string;
+  onKeywordChange: (value: string) => void;
   onPageChange: (page: number) => void;
   onSelect: (kb: AidpKnowledgeBaseItem) => void;
   onRefresh: () => void;
@@ -61,6 +59,8 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   hasMore,
   currentPage,
   pageSize,
+  keyword,
+  onKeywordChange,
   onPageChange,
   onSelect,
   onRefresh,
@@ -315,61 +315,143 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
             </Tooltip>
           </div>
         </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-gray-900">
-            {t("knowledgeBase.page.all")}
-            <span className="ml-2 text-sm font-normal text-gray-400">
-              {t("knowledgeBase.page.count", { count: total })}
-            </span>
-          </h2>
-          <Input
-            size="large"
-            placeholder={t("knowledgeBase.search.placeholder")}
-            prefix={<Search className="h-4 w-4 text-gray-400" />}
-            value={searchKeyword}
-            onChange={(event) => setSearchKeyword(event.target.value)}
-            className="h-10 min-w-[240px] max-w-[420px] flex-1 !rounded-lg"
-            allowClear
-          />
-        </div>
+        {/* Search box. `keyword` is the raw input value and the parent debounces
+            it, so typing stays responsive and only the settled text triggers a
+            request. Clearing the field restores the unfiltered list. */}
+        <Input
+          allowClear
+          className="mt-3"
+          placeholder={t("aidpKnowledge.searchPlaceholder")}
+          prefix={<SearchOutlined className="text-gray-400" />}
+          value={keyword}
+          onChange={(e) => onKeywordChange(e.target.value)}
+          size="small"
+        />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-6">
-        {isLoading && kbs.length === 0 ? (
-          <div className="py-10 text-center text-sm text-gray-400">
-            Loading...
+      {/* List */}
+      <div>
+        {displayedKbs.length > 0 ? (
+          <div>
+            {displayedKbs.map((kb) => {
+              const isActive = activeKbId === kb.kds_id;
+              const isUnavailable =
+                kb.resource_status === "UNAVAILABLE" ||
+                kb.resource_status === "ORPHANED";
+              // Only EDIT-level callers may modify the KB or its files.
+              const canModify = kb.permission === "EDIT" && !isUnavailable;
+
+              return (
+                <div
+                  key={kb.kds_id}
+                  className="px-2 py-3 hover:bg-gray-50 cursor-pointer transition-colors border-t border-gray-100 first:border-t-0"
+                  style={{
+                    borderLeftWidth: "4px",
+                    borderLeftStyle: "solid",
+                    borderLeftColor: isActive ? "#3b82f6" : "transparent",
+                    backgroundColor: isActive
+                      ? "rgb(226, 240, 253)"
+                      : undefined,
+                  }}
+                  onClick={() => onSelect(kb)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0 mr-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p
+                          className="min-w-0 truncate text-sm font-medium text-gray-800"
+                          title={kb.kds_name}
+                        >
+                          {kb.kds_name}
+                        </p>
+                        {isUnavailable && (
+                          <Tag color="default">
+                            {t("aidpKnowledge.kbUnavailable")}
+                          </Tag>
+                        )}
+                        {kb.permission === "READ_ONLY" && !isUnavailable && (
+                          <Tag color="default">
+                            {t("aidpKnowledge.kbReadOnly")}
+                          </Tag>
+                        )}
+                      </div>
+                      {kb.description && (
+                        <p className="text-xs text-gray-500 truncate mt-1">
+                          {kb.description}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        {kb.ingroup_permission === "PRIVATE" && (
+                          <Tag>
+                            {t("knowledgeBase.ingroup.permission.PRIVATE")}
+                          </Tag>
+                        )}
+                        {/* Authorized user-group tags. Aligned with the local
+                            knowledge base list: only render group names when
+                            ``ingroup_permission !== "PRIVATE"``, each group
+                            gets its own blue tag, and when there are no
+                            groups to show we render nothing (no "not
+                            authorized" fallback). Gated by the ``group:read``
+                            permission so users without group visibility see
+                            the KB card cleanly without the tag area. */}
+                        <Can permission="group:read">
+                          {kb.ingroup_permission !== "PRIVATE" &&
+                            getGroupNames(kb.group_ids).map((groupName, idx) => (
+                              <Tag key={idx} color="blue">
+                                {groupName}
+                              </Tag>
+                            ))}
+                        </Can>
+                        {kb.created_at ? (
+                          <Tag>
+                            {t("aidpKnowledge.createdAt", {
+                              date: new Date(kb.created_at).toLocaleDateString(),
+                            })}
+                          </Tag>
+                        ) : (
+                          <Tag>{t("aidpKnowledge.createdAtUnknown")}</Tag>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {canModify && (
+                        <Tooltip title={t("common.edit")}>
+                          <Button
+                            type="text"
+                            icon={<SquarePen className="h-4 w-4" />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEdit(kb);
+                            }}
+                            size="small"
+                          />
+                        </Tooltip>
+                      )}
+                      {canModify && (
+                        <Tooltip title={t("common.delete")}>
+                          <Button
+                            type="text"
+                            danger
+                            icon={<Trash2 className="h-4 w-4" />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(kb);
+                            }}
+                            size="small"
+                          />
+                        </Tooltip>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <button
-              type="button"
-              data-knowledge-base-row
-              className="group flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-blue-300 bg-blue-50/40 p-6 text-center transition hover:border-blue-500 hover:bg-blue-50"
-              onClick={onCreateNew}
-            >
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-2xl font-light text-blue-600 transition group-hover:scale-105">
-                +
-              </span>
-              <span className="mt-4 text-base font-semibold text-blue-700">
-                {t("knowledgeBase.card.create")}
-              </span>
-              <span className="mt-1 text-sm text-blue-500">
-                {t("knowledgeBase.card.createDescription")}
-              </span>
-            </button>
-            {displayedKbs.map(renderKnowledgeCard)}
-          </div>
-        )}
-
-        {!isLoading && displayedKbs.length === 0 && kbs.length > 0 && (
-          <div className="py-10 text-center text-sm text-gray-400">
-            {t("knowledgeBase.list.noResults")}
-          </div>
-        )}
-        {!isLoading && displayedKbs.length === 0 && kbs.length === 0 && (
-          <div className="py-10 text-center text-sm text-gray-400">
-            {t("aidpKnowledge.listEmpty")}
+          <div className="p-6 text-center text-gray-500 text-sm">
+            {keyword.trim()
+              ? t("aidpKnowledge.searchEmpty")
+              : t("aidpKnowledge.listEmpty")}
           </div>
         )}
       </div>
