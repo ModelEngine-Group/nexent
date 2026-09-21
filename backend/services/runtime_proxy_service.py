@@ -213,52 +213,6 @@ async def _forward_runtime_stream(
     )
 
 
-async def forward_human_interaction(
-    method: str,
-    path: str,
-    user_id: str,
-    tenant_id: str,
-    *,
-    payload: dict | None = None,
-) -> dict | None:
-    """Forward a server-built HITL path using the authenticated northbound owner."""
-    try:
-        async with create_httpx_client(
-            headers=_authorization_headers(user_id, tenant_id), timeout=_REQUEST_TIMEOUT,
-        ) as client:
-            response = await client.request(
-                method, _runtime_url(f"/agent/internal/northbound/human-interactions/{path}"), json=payload,
-            )
-    except httpx.TimeoutException as exc:
-        raise RuntimeServiceTimeoutError("Runtime human interaction request timed out") from exc
-    except httpx.RequestError as exc:
-        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
-
-    if response.status_code >= 400:
-        raise RuntimeUpstreamError(
-            status_code=response.status_code, content=response.content, headers=_forwarded_headers(response.headers),
-        )
-    try:
-        result = response.json()
-    except ValueError as exc:
-        raise RuntimeServiceUnavailableError("Runtime human interaction response is not valid JSON") from exc
-    if result is None and path.startswith("conversation/"):
-        return None
-    if not isinstance(result, dict):
-        raise RuntimeServiceUnavailableError("Runtime human interaction response is not a JSON object")
-    return result
-
-
-async def forward_human_interaction_events(
-    run_id: str, user_id: str, tenant_id: str, *, after_event: int = 0,
-) -> StreamingResponse:
-    """Subscribe to an existing run without creating or persisting a chat message."""
-    return await _forward_runtime_stream(
-        "GET", f"/agent/internal/northbound/human-interactions/{run_id}/events", user_id, tenant_id,
-        params={"after_event": after_event},
-    )
-
-
 async def forward_agent_stop(
     conversation_id: int,
     user_id: str,
