@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Check,
   PackageOpen,
+  Search,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -525,6 +526,7 @@ function BatchAddForm({
   const [fetching, setFetching] = useState(false);
   const [fetched, setFetched] = useState<FetchedRow[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [search, setSearch] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // Default to the first preset once loaded.
@@ -547,14 +549,25 @@ function BatchAddForm({
     () => Object.values(selected).filter(Boolean).length,
     [selected]
   );
-  const allSelected = fetched.length > 0 && selectedCount === fetched.length;
+
+  // Search filters the display only; selections are keyed by model id so they
+  // survive searching.
+  const visibleRows = useMemo(() => {
+    const kw = search.trim().toLowerCase();
+    if (!kw) return fetched;
+    return fetched.filter((row) => row.model_name.toLowerCase().includes(kw));
+  }, [fetched, search]);
+  const allSelected =
+    visibleRows.length > 0 && visibleRows.every((row) => selected[row.id]);
 
   function toggleAll(on: boolean) {
-    const next: Record<string, boolean> = {};
-    if (on) {
-      fetched.forEach((row) => (next[row.id] = true));
-    }
-    setSelected(next);
+    setSelected((s) => {
+      const next = { ...s };
+      visibleRows.forEach((row) => {
+        next[row.id] = on;
+      });
+      return next;
+    });
   }
 
   async function fetchModels() {
@@ -720,6 +733,19 @@ function BatchAddForm({
         {/* Fetched list */}
         {fetched.length > 0 && (
           <div className="mt-5 overflow-hidden rounded-xl border">
+            <div className="border-b bg-secondary/30 px-4 py-2.5">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={t("modelConfig.addDialog.searchPlaceholder", {
+                    defaultValue: "搜索模型名称",
+                  })}
+                  className="h-8 pl-9"
+                />
+              </div>
+            </div>
             <button
               type="button"
               onClick={() => toggleAll(!allSelected)}
@@ -752,7 +778,14 @@ function BatchAddForm({
               </span>
             </button>
             <ul className="max-h-64 divide-y overflow-y-auto">
-              {fetched.map((row) => {
+              {visibleRows.length === 0 && (
+                <li className="px-4 py-8 text-center text-xs text-muted-foreground">
+                  {t("modelConfig.addDialog.noMatch", {
+                    defaultValue: "未找到匹配的模型",
+                  })}
+                </li>
+              )}
+              {visibleRows.map((row) => {
                 const on = !!selected[row.id];
                 return (
                   <li key={row.id}>
