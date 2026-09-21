@@ -70,7 +70,6 @@ def _agent_run_info(outcome: str = "completed"):
         agent_config=SimpleNamespace(pre_run_tool_events=()),
         cancellation_scope=None,
         stop_event=asyncio.Event(),
-        human_interaction=None,
         attempt_outcome=outcome,
         thread_future=None,
     )
@@ -170,3 +169,29 @@ async def test_cmsr_004_terminal_error_is_persisted_once_with_failed_status(monk
     assert '"retryable": false' in error_chunks[0]
     assert persisted_batches[0]["terminal_status"] == "failed"
     assert [unit["type"] for unit in persisted_batches[0]["message_units"]] == ["error"]
+
+
+@pytest.mark.asyncio
+async def test_human_interaction_streams_json_and_persists_nonmerged_units(monkeypatch):
+    form = {"schema_version": 1, "questions": [{"id": "region", "type": "text", "title": "Which region?"}]}
+
+    async def fake_agent_run(*_args, **_kwargs):
+        yield json.dumps({"type": "human_interaction", "content": form})
+        yield json.dumps({"type": "final_answer", "content": "1. Which region?"})
+
+    batches = []
+    _configure_stream_mocks(monkeypatch, batches)
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    chunks = [chunk async for chunk in agent_run_service._stream_agent_chunks(
+        _agent_request(), "owner", "tenant", _agent_run_info(), MagicMock(),
+        channel=SimpleNamespace(publish=AsyncMock()),
+    )]
+    assert len(batches) == 1
+    batch = batches[0]
+    assert batch["terminal_status"] == "completed"
+    assert batch["message_content"] == "1. Which region?"
+    assert [unit["unit_type"] for unit in batch["message_units"]] == ["human_interaction", "final_answer"]
+    assert json.loads(batch["message_units"][0]["unit_content"]) == form
+    events = [json.loads(chunk.removeprefix("data: ")) for chunk in chunks]
+    assert [event["unit_index"] for event in events] == [0, 1]
+    assert events[0] == {"type": "human_interaction", "content": form, "unit_index": 0}

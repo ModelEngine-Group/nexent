@@ -384,7 +384,6 @@ async def start_streaming_chat(
     tool_params: Optional[ToolParamsRequest] = None,
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None,
-    enable_hitl: bool = False,
 ) -> StreamingResponse:
     new_conversation_data: Optional[Dict[str, Any]] = None
     try:
@@ -448,7 +447,6 @@ async def start_streaming_chat(
             version_no=latest_version_no,
             metadata=metadata,
             enable_automation_tool=False,
-            enable_hitl=enable_hitl,
         )
         agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
 

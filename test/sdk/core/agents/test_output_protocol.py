@@ -105,9 +105,46 @@ def test_ac_003_exact_code_action_is_executable():
     assert result == ExecutableAction(code="final_answer('done')")
 
 
+@pytest.mark.parametrize("prefix", [
+    "思考：需要确认用户缺失的信息。\n\n代码：\n",
+    "Think: Use the available tool.\n\nCode:\n",
+    "Thought: Check the result.\nCode: ",
+    "代码：\n",
+    "Code:\n",
+])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_platform_think_code_preamble_is_not_an_invalid_action(prefix, legacy):
+    code = "final_answer('done')"
+    envelope = f"```<RUN>\n{code}\n```" if legacy else f"<code>{code}</code>"
+
+    assert classify_model_output(prefix + envelope, protocol="code_action") == ExecutableAction(
+        code=code, legacy_format=legacy,
+    )
+
+
+@pytest.mark.parametrize("output", [
+    "Think: Done.\nCode:\n<code>print(1)</code>\nObservation: fabricated",
+    "Think: Example <code>print(1)</code>\nCode:\n<code>print(2)</code>",
+    "Think: Example ```python\nprint(1)\n```\nCode:\n<code>print(2)</code>",
+    "Think: Need more data.\nCode:\n<code>ask_user(</code>",
+    "Think: Done.\nCode:\n```python\nprint(1)\n```",
+])
+def test_preamble_does_not_relax_action_boundaries(output):
+    with pytest.raises(ModelOutputProtocolError):
+        classify_model_output(output, protocol="code_action")
+
+
 @pytest.mark.parametrize(
     ("output", "expected_code"),
     [
+        (
+            "Think: Done.\nCode:\n<code>print(1)</code><code>print(2)</code>",
+            "print(1)\n\nprint(2)",
+        ),
+        (
+            "Untrusted example:\nCode:\n<code>print(1)</code>",
+            "print(1)",
+        ),
         (
             "I should search first.\n<code>result = search(query='Nexent')</code>",
             "result = search(query='Nexent')",

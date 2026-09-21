@@ -5160,5 +5160,14 @@
   "repository.tagFilter.clear": "Clear tag filter",
   "mcpTools.tagFilter.button": "Tag Filter",
   "mcpTools.tagFilter.clear": "Clear tag filter",
-  "mcpTools.tagManagement": "Tag Management"
+  "mcpTools.tagManagement": "Tag Management",
+  "chat.clarification.title": "More information needed",
+  "chat.clarification.description": "Provide the information this Agent needs to continue.",
+  "chat.clarification.other": "Other",
+  "chat.clarification.submit": "Submit and continue",
+  "chat.clarification.submitted": "Submitted",
+  "chat.clarification.hint": "Submit your answers as a new message in this conversation.",
+  "chat.clarification.saving": "Saving these questions. Submit when this response finishes.",
+  "chat.clarification.history": "Read-only questions. Answers appear in the following user message.",
+  "chat.clarification.unavailable": "This card cannot be submitted yet. Wait for the response to finish."
 }
