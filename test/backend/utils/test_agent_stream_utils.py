@@ -249,3 +249,16 @@ def test_safe_agent_stream_error_chunk_exposes_reasoning_configuration_error():
     assert payload["type"] == "error"
     assert payload["code"] == "MODEL_REASONING_CONFIG_INVALID"
     assert "思考挡位参数配置错误" in payload["content"]
+
+
+def test_safe_agent_stream_error_chunk_follows_exception_chain():
+    cause = RuntimeError("provider rejected reasoning_effort")
+    cause.is_reasoning_configuration_error = True
+    error = RuntimeError("request failed")
+    error.__cause__ = cause
+
+    payload = json.loads(
+        agent_stream_utils.safe_agent_stream_error_chunk(error)[6:].strip()
+    )
+
+    assert payload["code"] == "MODEL_REASONING_CONFIG_INVALID"

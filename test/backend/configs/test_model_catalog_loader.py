@@ -158,6 +158,12 @@ class TestModelCatalogLoaderSmoke:
         assert new_openai_id is not None
         assert new_openai_id["default"] == "medium"
 
+        new_gpt_id = resolve_reasoning_capability(
+            "gpt-5.1-unsupported", provider_hint="openai"
+        )
+        assert new_gpt_id is not None
+        assert new_gpt_id["levels"] == ["minimal", "low", "medium", "high"]
+
         # An exact catalog entry with no reasoning declaration remains
         # explicitly unsupported; heuristics must not over-enable it.
         known_non_reasoning = resolve_reasoning_capability(
@@ -212,6 +218,26 @@ class TestModelCatalogLoaderSmoke:
 
         assert resolve_reasoning_capability("") is None
         assert resolve_reasoning_capability("unknown-model", provider_hint="custom") is None
+
+    @pytest.mark.parametrize(
+        ("model_name", "provider_hint"),
+        [
+            ("deepseek-v3-unsupported", "deepseek"),
+            ("glm-4.0-unsupported", "zhipu"),
+            ("claude-3-unsupported", "anthropic"),
+            ("gemini-2.0-unsupported", "google"),
+            ("gpt-4o-unsupported", "openai"),
+            ("grok-3-unsupported", "xai"),
+            ("qwen2.5-unsupported", "dashscope"),
+            ("mistral-small-unsupported", "mistral"),
+        ],
+    )
+    def test_vendor_fallbacks_leave_unsupported_families_disabled(
+        self, model_name, provider_hint
+    ):
+        from configs.model_catalog_loader import resolve_reasoning_capability
+
+        assert resolve_reasoning_capability(model_name, provider_hint=provider_hint) is None
 
     def test_pydantic_models_match_catalog(self):
         from consts.model import ModelCatalogProfile, ModelCatalogProviderInfo
