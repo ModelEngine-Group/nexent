@@ -11,7 +11,10 @@ import {
   CARD_HEADER,
 } from "@/const/layoutConstants";
 
-import { ModelConfigSection, ModelConfigSectionRef } from "./components/modelConfig";
+import {
+  ModelConfigSection,
+  ModelConfigSectionRef,
+} from "./components/modelConfig";
 
 const { Title } = Typography;
 
