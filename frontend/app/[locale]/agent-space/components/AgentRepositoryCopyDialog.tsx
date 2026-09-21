@@ -112,7 +112,12 @@ export function AgentRepositoryCopyDialog({
   });
 
   const abnormalItems = useMemo(
-    () => precheck?.items.filter((item) => !item.available) ?? [],
+    () =>
+      precheck?.items.filter(
+        (item) =>
+          !item.available &&
+          !(item.type === "skill" && item.reason_code === "skill_duplicate")
+      ) ?? [],
     [precheck]
   );
   const availableItems = useMemo(
@@ -122,11 +127,11 @@ export function AgentRepositoryCopyDialog({
 
   const skillConflictItems = useMemo(
     () =>
-      abnormalItems.filter(
+      precheck?.items.filter(
         (item) =>
           item.type === "skill" && item.reason_code === "skill_duplicate"
-      ),
-    [abnormalItems]
+      ) ?? [],
+    [precheck]
   );
   const hasSkillConflicts = skillConflictItems.length > 0;
   const officialKnowledgeItems = useMemo(
