@@ -225,24 +225,24 @@ export default function MineMcpServiceCard({
         </span>
       }
       headerActions={
-        <div className="flex items-start gap-1">
-          {onHealthCheck && isOwned ? (
-            <Tooltip
-              title={t("mcpConfig.serverList.button.healthCheck")}
-              placement="top"
-            >
-              <Button
-                type="text"
-                size="small"
-                icon={<RefreshCw className="size-4" />}
-                loading={healthChecking}
-                aria-label={t("mcpConfig.serverList.button.healthCheck")}
-                className="-mt-1 text-slate-500 hover:!text-slate-700"
-                onClick={() => onHealthCheck(item)}
-              />
-            </Tooltip>
-          ) : null}
-          <div className="flex flex-col items-start gap-1">
+        <div className="flex flex-col items-start gap-1">
+          <div className="flex items-center gap-1">
+            {onHealthCheck && isOwned ? (
+              <Tooltip
+                title={t("mcpConfig.serverList.button.healthCheck")}
+                placement="top"
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<RefreshCw className="size-4" />}
+                  loading={healthChecking}
+                  aria-label={t("mcpConfig.serverList.button.healthCheck")}
+                  className="-mt-1 text-slate-500 hover:!text-slate-700"
+                  onClick={() => onHealthCheck(item)}
+                />
+              </Tooltip>
+            ) : null}
             <Dropdown
               menu={{ items: actionItems }}
               trigger={["click"]}
@@ -257,20 +257,20 @@ export default function MineMcpServiceCard({
                 className="-mt-1 text-slate-500 hover:!text-slate-700"
               />
             </Dropdown>
-            {reviewBadge ? (
-              <span
-                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-                  reviewBadge.variant === "pending"
-                    ? "bg-orange-50 text-orange-700"
-                    : reviewBadge.variant === "approved"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-red-50 text-red-700"
-                }`}
-              >
-                {t(reviewBadge.labelKey)}
-              </span>
-            ) : null}
           </div>
+          {reviewBadge ? (
+            <span
+              className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                reviewBadge.variant === "pending"
+                  ? "bg-orange-50 text-orange-700"
+                  : reviewBadge.variant === "approved"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-red-50 text-red-700"
+              }`}
+            >
+              {t(reviewBadge.labelKey)}
+            </span>
+          ) : null}
         </div>
       }
       footer={
