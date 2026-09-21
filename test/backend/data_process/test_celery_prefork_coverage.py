@@ -50,6 +50,12 @@ def tasks(monkeypatch):
     return module
 
 
+def test_tasks_reexports_prefork_process_sync(tasks):
+    from data_process import parse_tasks
+
+    assert tasks.process_sync is parse_tasks.process_sync
+
+
 @pytest.fixture()
 def parser_runtime(monkeypatch):
     _configure_celery_environment(monkeypatch)

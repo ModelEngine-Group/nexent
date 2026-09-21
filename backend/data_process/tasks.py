@@ -35,6 +35,7 @@ from utils.knowledge_telemetry import set_span_attributes, trace_knowledge_opera
 
 from .app import app
 from .parse_tasks import process
+from .parse_tasks import process_sync as process_sync
 from .utils import (
     DocumentDeleteRequested,
     ensure_document_not_deleted,
