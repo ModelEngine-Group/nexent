@@ -50,7 +50,9 @@ def test_retrievals_response_shape(http_client):
     assert chunks[0]["documentId"] == "idoc-001"
     assert "维护" in chunks[0]["content"]
     assert isinstance(chunks[0]["createTime"], int)  # milliseconds
-    assert "reRankScore" in chunks[0] and "vsScore" in chunks[0] and "esScore" in chunks[0]
+    assert "reRankScore" in chunks[0]
+    assert "vsScore" in chunks[0]
+    assert "esScore" in chunks[0]
 
 
 def test_documents_download_serves_built_url(http_client):

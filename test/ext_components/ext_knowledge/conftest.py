@@ -160,7 +160,7 @@ def mock_base_url(mock_server) -> str:
     return f"http://127.0.0.1:{mock_server.port}"
 
 
-@pytest.fixture()
+@pytest.fixture
 def http_client(mock_base_url):
     with httpx.Client(base_url=mock_base_url, timeout=15) as client:
         yield client

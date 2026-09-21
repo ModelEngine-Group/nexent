@@ -41,7 +41,8 @@ def test_search_returns_code_zero_with_sorted_chunks(http_client):
     top = chunks[0]
     assert top["docnm_kwd"] == "ragflow-overview.md"
     assert top["content_with_weight"]
-    assert "term_similarity" in top and "vector_similarity" in top
+    assert "term_similarity" in top
+    assert "vector_similarity" in top
 
 
 def test_datasets_require_bearer(http_client):

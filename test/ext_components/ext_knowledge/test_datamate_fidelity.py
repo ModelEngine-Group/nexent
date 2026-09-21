@@ -5,7 +5,7 @@ from urllib.parse import quote
 import pytest
 
 
-@pytest.fixture()
+@pytest.fixture
 def datamate_client(mock_base_url, require_real_nexent):
     from nexent.datamate.datamate_client import DataMateClient
 
