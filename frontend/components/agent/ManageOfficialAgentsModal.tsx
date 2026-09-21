@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, List, Modal, Popconfirm, Spin, message } from "antd";
+import { Button, List, Modal, Spin, message } from "antd";
 import { Trash2 } from "lucide-react";
 import {
   deleteOfficialAgent,
@@ -38,6 +38,18 @@ export default function ManageOfficialAgentsModal({ open, onClose }: Props) {
     finally { setBusyId(null); }
   };
 
+  const confirmRemove = (item: OfficialAgentManagementItem) => {
+    Modal.confirm({
+      title: "确认删除官方智能体？",
+      content:
+        "删除后所有租户都无法再看到该官方智能体，同时会删除官方资源包文件；已经复制到租户中的智能体副本不受影响。",
+      okText: "删除",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      onOk: () => remove(item),
+    });
+  };
+
   return (
     <Modal open={open} onCancel={onClose} footer={null} title="管理官方智能体" destroyOnHidden>
       {loading ? <div className="flex justify-center py-8"><Spin /></div> : (
@@ -46,9 +58,14 @@ export default function ManageOfficialAgentsModal({ open, onClose }: Props) {
           dataSource={items}
           renderItem={(item) => (
             <List.Item actions={[
-              <Popconfirm key="delete" title="删除后所有租户都无法看到该官方智能体，且会删除官方资源包文件；已复制的智能体不受影响，确定继续吗？" onConfirm={() => void remove(item)} okText="删除" cancelText="取消">
-                <Button danger type="text" icon={<Trash2 className="h-4 w-4" />} loading={busyId === item.agent_repository_id} />
-              </Popconfirm>,
+              <Button
+                key="delete"
+                danger
+                type="text"
+                icon={<Trash2 className="h-4 w-4" />}
+                loading={busyId === item.agent_repository_id}
+                onClick={() => confirmRemove(item)}
+              />,
             ]}>
               <List.Item.Meta title={item.display_name || item.name} description={item.name} />
             </List.Item>
