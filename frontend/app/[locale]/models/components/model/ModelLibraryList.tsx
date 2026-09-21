@@ -154,9 +154,9 @@ export function ModelLibraryList({
   const paged = filtered.slice(start, start + PAGE_SIZE);
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* ---------- Toolbar ---------- */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-4">
+      {/* ---------- Toolbar (fixed) ---------- */}
+      <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -216,8 +216,8 @@ export function ModelLibraryList({
         </Select>
       </div>
 
-      {/* ---------- List ---------- */}
-      <div className="overflow-hidden rounded-xl border">
+      {/* ---------- List (internal scroll area) ---------- */}
+      <div className="min-h-[240px] flex-1 overflow-y-auto rounded-xl border">
         {/* Header (desktop only) */}
         <div className="hidden items-center gap-3 border-b bg-secondary/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:flex">
           <span className="w-52 shrink-0">
@@ -266,9 +266,9 @@ export function ModelLibraryList({
         </div>
       </div>
 
-      {/* ---------- Pagination ---------- */}
+      {/* ---------- Pagination (fixed) ---------- */}
       {filtered.length > 0 && (
-        <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
+        <div className="flex shrink-0 flex-col items-center justify-between gap-3 sm:flex-row">
           <p className="text-xs text-muted-foreground">
             {t("modelConfig.pagination.pageInfo", {
               total: filtered.length,

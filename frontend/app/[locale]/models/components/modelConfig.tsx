@@ -970,10 +970,12 @@ export const ModelConfigSection = forwardRef<
     <>
       <TooltipProvider>
         {/* px-2 matches CARD_HEADER.PADDING so section titles align with the
-          page header ("模型设置") above. */}
-        <div className="flex w-full flex-col gap-8 px-2">
+          page header ("模型设置") above. h-full: the default-config card
+          takes its natural height; the library section fills the rest and
+          scrolls its list internally. */}
+        <div className="flex h-full w-full flex-col gap-8 px-2">
           {/* ========== Section 1: 默认配置 (inline slots, v0 redesign) ========== */}
-          <section>
+          <section className="shrink-0">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-baseline gap-2">
                 <h3 className="text-base font-semibold text-foreground">
@@ -1056,8 +1058,8 @@ export const ModelConfigSection = forwardRef<
             </Card>
           </section>
 
-          {/* ========== Section 2: 模型库 ========== */}
-          <section className="flex w-full flex-col gap-3">
+          {/* ========== Section 2: 模型库 (fills the remaining height) ========== */}
+          <section className="flex min-h-0 w-full flex-1 flex-col gap-3">
             <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-baseline gap-2">
                 <h3 className="text-base font-semibold text-foreground">
