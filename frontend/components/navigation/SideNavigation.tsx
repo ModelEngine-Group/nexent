@@ -17,6 +17,7 @@ import {
   Zap,
   CalendarClock,
   LineChart,
+  MessageSquare,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -162,6 +163,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     Icon: Building2,
     labelKey: "sidebar.ownerManage",
     order: 14,
+    parentKey: null,
+  },
+  {
+    path: "/conversation-manage",
+    Icon: MessageSquare,
+    labelKey: "sidebar.conversationManage",
+    order: 15,
     parentKey: null,
   },
 ];

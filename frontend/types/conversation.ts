@@ -11,6 +11,13 @@ export interface ConversationListParams {
   limit: number;
 }
 
+export interface ConversationListFilterParams {
+  startDateMs?: number;
+  endDateMs?: number;
+  agentId?: number | null;
+  keyword?: string;
+}
+
 export interface ConversationListResponse {
   code: number;
   data: ConversationListPage;
