@@ -122,7 +122,9 @@ export default function RepositoryMcpCard({
       }
       footer={
         <Button
-          type={installed ? "default" : "primary"}
+          type="text"
+          size="small"
+          className="h-8 px-3 text-xs font-medium text-primary !shadow-none hover:!bg-transparent hover:!text-primary/80"
           disabled={installed}
           icon={<Download className="size-3.5" />}
           onClick={() => onInstall(service)}
