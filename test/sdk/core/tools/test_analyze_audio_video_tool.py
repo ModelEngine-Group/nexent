@@ -53,6 +53,25 @@ def test_analyze_audio_uses_video_understanding_model(observer_en, mock_vlm_mode
     assert hasattr(request.media_input, "read")
     assert request.kwargs["content_type"].startswith("audio/")
 
+def test_analyze_audio_raises_audio_model_error(observer_en, mock_vlm_model, mock_storage_client, monkeypatch):
+    monkeypatch.setattr(
+        analyze_audio_tool,
+        "get_prompt_template",
+        lambda template_type, language=None, **_: {"system_prompt": "Analyze audio for {{ query }}"},
+    )
+    mock_vlm_model.invoke_sync.side_effect = RuntimeError("audio model unavailable")
+    tool = AnalyzeAudioTool(
+        observer=observer_en,
+        vlm_model=mock_vlm_model,
+        storage_client=mock_storage_client,
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        tool._forward_impl(audio_url=b"ID3audio-bytes", query="what happened?")
+
+    assert "Failed to analyze audio 1" in str(exc_info.value)
+    assert "audio understanding model is configured correctly" in str(exc_info.value)
+
 def test_analyze_audio_schema_uses_single_url():
     assert "audio_url" in AnalyzeAudioTool.inputs
     assert "audio_urls_list" not in AnalyzeAudioTool.inputs
