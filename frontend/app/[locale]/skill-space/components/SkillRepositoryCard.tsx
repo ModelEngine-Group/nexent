@@ -64,7 +64,7 @@ export function SkillRepositoryCard({
     <ResourceCard
       className="h-full"
       title={listing.name}
-      footerLayout="stacked"
+      footerLayout="inline"
       icon={
         <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Bot className="size-5" aria-hidden />
@@ -74,20 +74,18 @@ export function SkillRepositoryCard({
         listing.description || t("skillRepository.common.noDescription")
       }
       tags={
-        tags.length > 0 ? (
-          <>
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-              >
-                {tag}
-              </span>
-            ))}
-          </>
-        ) : undefined
+        <div className="flex min-h-6 flex-wrap gap-2">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
       }
-      meta={
+      headerActions={
         <span
           className="inline-flex items-center gap-1"
           aria-label={t("skillRepository.card.downloadAria", {
@@ -98,7 +96,7 @@ export function SkillRepositoryCard({
           {(listing.downloads ?? 0).toLocaleString()}
         </span>
       }
-      headerActions={
+      actions={
         menuItems.length > 0 ? (
           <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
             <Button
@@ -113,7 +111,7 @@ export function SkillRepositoryCard({
         ) : undefined
       }
       footer={action}
-      onDoubleClick={onDetailClick}
+      onClick={onDetailClick}
     />
   );
 }

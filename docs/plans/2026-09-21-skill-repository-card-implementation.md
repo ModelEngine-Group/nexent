@@ -20,7 +20,7 @@
 
 **Step 2:** Run `node --test frontend/tests/skillSpaceLayout.test.ts`; confirm it fails because the page state is not yet passed to the shared grid.
 
-**Step 3:** Pass the existing server-page state into `ResourceCardGrid`, remove `PaginationBar`, and use the grid's default pagination display.
+**Step 3:** Derive Agent-style responsive columns, rows, available grid height, and matching server page size; pass the server-page state into `ResourceCardGrid`, remove `PaginationBar`, and use the grid's default pagination display.
 
 **Step 4:** Re-run the focused test; confirm it passes.
 
@@ -49,7 +49,7 @@
 
 **Step 2:** Run the focused test and confirm the failure reflects the legacy card layout.
 
-**Step 3:** Make the smallest card-slot and menu changes that satisfy the requested layout without changing listing operations.
+**Step 3:** Make the smallest card-slot and menu changes that satisfy the requested layout without changing listing operations. Move Edit/View to the inline lower-right footer, retain Apply only for a not-yet-listed Skill, and use the shared grid's responsive pagination.
 
 **Step 4:** Re-run the focused test; confirm it passes.
 

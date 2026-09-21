@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { App, Button, Dropdown, Input, Popover, Tooltip } from "antd";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { App, Button, Dropdown, Input, Popover } from "antd";
 import type { MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
 import {
@@ -14,7 +14,6 @@ import {
   Plus,
   Power,
   Search,
-  Share2,
   Tag,
   Trash2,
 } from "lucide-react";
@@ -24,15 +23,10 @@ import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { MineApplyListingModal } from "./MineApplyListingModal";
 import { SkillReviewStatusModal } from "./SkillReviewStatusModal";
-import {
-  AsyncContent,
-  FilterButton,
-  PaginationBar,
-} from "./SkillRepositoryControls";
+import { AsyncContent, FilterButton } from "./SkillRepositoryControls";
 import {
   formatRepositoryDate,
   getSkillRepositoryStatusLabel,
-  getSkillSourceLabel,
   pickReviewDisplayRepositoryInfo,
 } from "./skillRepositoryShared";
 import type {
@@ -92,9 +86,12 @@ export function MineSkillsView({
   isError,
   isFetching,
   page,
-  pageSize,
   total,
   onPageChange,
+  columns,
+  rows,
+  gridHeight,
+  gridRegionRef,
   onRetry,
   onCreateSkill,
   onEditSkill,
@@ -121,9 +118,12 @@ export function MineSkillsView({
   isError: boolean;
   isFetching: boolean;
   page: number;
-  pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
+  columns: number;
+  rows: number;
+  gridHeight?: number;
+  gridRegionRef: RefObject<HTMLDivElement | null>;
   onRetry: () => void;
   onCreateSkill: () => void;
   onEditSkill: (skill: MyEditableSkillItem) => void;
@@ -293,13 +293,13 @@ export function MineSkillsView({
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={t("skillRepository.searchPlaceholder")}
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-            className="h-11 rounded-xl"
+            className="rounded-xl"
             allowClear
           />
         </div>
         <Button
           type="primary"
-          className="flex h-11 shrink-0 items-center gap-1.5"
+          className="flex shrink-0 items-center gap-1.5"
           icon={<Plus className="size-4" />}
           onClick={onCreateSkill}
         >
@@ -354,51 +354,48 @@ export function MineSkillsView({
         </div>
       </div>
 
-      <p className="text-sm text-slate-500 dark:text-slate-400">
-        {t("skillRepository.mine.summary", { count: counts.all })}
-      </p>
-
-      <AsyncContent
-        isLoading={isLoading}
-        isError={isError}
-        isFetching={isFetching}
-        onRetry={onRetry}
-        isEmpty={skills.length === 0}
-        emptyDescription={t("skillRepository.mine.empty")}
-      >
-        <>
-          <ResourceCardGrid
-            items={skills}
-            columns={3}
-            paginateItems={false}
-            showToolbar={false}
-            renderItem={(skill) =>
-              isNewSkillPaddingItem(skill) ? (
-                <CreateNewSkillCard
-                  key="new-skill-padding"
-                  onClick={onCreateSkill}
-                />
-              ) : (
-                <MineSkillCard
-                  key={skill.skill_id}
-                  skill={skill}
-                  onEdit={() => onEditSkill(skill)}
-                  onView={() => onViewSkill(skill)}
-                  onDelete={() => handleDeleteSkill(skill)}
-                  onApplyListing={() => handleEnableSkill(skill)}
-                  onViewReview={() => openReviewModal(skill)}
-                />
-              )
-            }
-          />
-          <PaginationBar
-            page={page}
-            pageSize={pageSize}
-            total={total}
-            onPageChange={onPageChange}
-          />
-        </>
-      </AsyncContent>
+      <div ref={gridRegionRef} className="min-h-0">
+        <AsyncContent
+          isLoading={isLoading}
+          isError={isError}
+          isFetching={isFetching}
+          onRetry={onRetry}
+          isEmpty={skills.length === 0}
+          emptyDescription={t("skillRepository.mine.empty")}
+        >
+          <>
+            <ResourceCardGrid
+              items={skills}
+              page={page}
+              total={total}
+              onPageChange={onPageChange}
+              columns={columns}
+              rows={rows}
+              gridHeight={gridHeight}
+              paginateItems={false}
+              showToolbar={false}
+              renderItem={(skill) =>
+                isNewSkillPaddingItem(skill) ? (
+                  <CreateNewSkillCard
+                    key="new-skill-padding"
+                    onClick={onCreateSkill}
+                  />
+                ) : (
+                  <MineSkillCard
+                    key={skill.skill_id}
+                    skill={skill}
+                    onEdit={() => onEditSkill(skill)}
+                    onView={() => onViewSkill(skill)}
+                    onDelete={() => handleDeleteSkill(skill)}
+                    onApplyListing={() => handleEnableSkill(skill)}
+                    onViewReview={() => openReviewModal(skill)}
+                  />
+                )
+              }
+            />
+          </>
+        </AsyncContent>
+      </div>
 
       <SkillReviewStatusModal
         open={reviewModalOpen}
@@ -431,17 +428,6 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
   shared:
     "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
 };
-
-function getApplyButtonLabel(
-  hasRepositoryInfo: boolean,
-  repositoryStatus: SkillRepositoryListingStatus,
-  t: (key: string) => string
-) {
-  if (hasRepositoryInfo) {
-    return getSkillRepositoryStatusLabel(t, repositoryStatus);
-  }
-  return t("skillRepository.mine.button.apply");
-}
 
 function getMineSkillMenuItems({
   canPublish,
@@ -494,24 +480,14 @@ function MineSkillCard({
   const latestRepository = pickReviewDisplayRepositoryInfo(
     skill.repository_info ?? []
   );
-  const repositoryInfo = skill.repository_info ?? [];
   const hasRepositoryInfo = latestRepository != null;
   const repositoryStatus = latestRepository?.status ?? "not_shared";
-  const hasSharedRepository = repositoryInfo.some(
-    (info) => info.status === "shared"
-  );
   const canEdit =
     skill.permission !== "READ_ONLY" && skill.permission !== "PRIVATE";
   const canPublish = skill.can_publish === true;
   const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
-  const sourceLabel = getSkillSourceLabel(skill.source, t);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
   const canApplyListing = canPublish && !hasRepositoryInfo;
-  const applyButtonLabel = getApplyButtonLabel(
-    hasRepositoryInfo,
-    repositoryStatus,
-    t
-  );
   const menuItems = getMineSkillMenuItems({
     canPublish,
     hasRepositoryInfo,
@@ -524,87 +500,76 @@ function MineSkillCard({
     <ResourceCard
       title={skill.name || t("skillRepository.common.untitled")}
       className="h-full min-h-[200px] p-4"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Bot className="size-5" aria-hidden />
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
-                {skill.name || t("skillRepository.common.untitled")}
-              </h3>
-              {hasSharedRepository ? (
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                  <Share2 className="size-2.5" aria-hidden />
-                  Hub
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <span
-                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
-              >
-                {getSkillRepositoryStatusLabel(t, repositoryStatus)}
-              </span>
-            </div>
-          </div>
+      icon={
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Bot className="size-5" aria-hidden />
         </div>
-        {canEdit ? (
-          <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+      }
+      description={
+        skill.description || t("skillRepository.common.noDescription")
+      }
+      descriptionLines={2}
+      tags={
+        tags.length > 0 ? (
+          <>
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                {tag}
+              </span>
+            ))}
+          </>
+        ) : undefined
+      }
+      meta={
+        updatedAt ? (
+          <span className="inline-flex min-w-0 items-center gap-1 truncate">
+            <Clock className="size-3.5" aria-hidden />
+            {updatedAt}
+          </span>
+        ) : undefined
+      }
+      footerLayout="inline"
+      headerActions={
+        <div className="flex flex-col items-end gap-1">
+          {canEdit ? (
+            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+              <Button
+                type="text"
+                size="small"
+                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                icon={<MoreHorizontal className="size-4" aria-hidden />}
+                aria-label={t("skillRepository.common.moreActions")}
+              />
+            </Dropdown>
+          ) : null}
+          {hasRepositoryInfo ? (
+            <span
+              className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
+            >
+              {getSkillRepositoryStatusLabel(t, repositoryStatus)}
+            </span>
+          ) : null}
+        </div>
+      }
+      footer={
+        <div className="flex items-center gap-2">
+          {canApplyListing ? (
+            <Button
+              type="primary"
+              size="small"
+              icon={<Power className="size-3.5" aria-hidden />}
+              onClick={onApplyListing}
+            >
+              {t("skillRepository.mine.button.apply")}
+            </Button>
+          ) : null}
+          {canEdit ? (
             <Button
               type="text"
               size="small"
-              className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-              icon={<MoreHorizontal className="size-4" aria-hidden />}
-              aria-label={t("skillRepository.common.moreActions")}
-            />
-          </Dropdown>
-        ) : null}
-      </div>
-
-      <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-        {skill.description || t("skillRepository.common.noDescription")}
-      </p>
-
-      {tags.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="mt-auto flex flex-col gap-3 pt-3">
-        <div className="flex min-h-[1.75rem] items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          {updatedAt ? (
-            <span className="inline-flex min-w-0 items-center gap-1 truncate">
-              <Clock className="size-3.5" aria-hidden />
-              {updatedAt}
-            </span>
-          ) : (
-            <span />
-          )}
-          <span className="inline-flex shrink-0 items-center gap-1.5">
-            <span
-              className="size-1.5 shrink-0 rounded-full bg-primary"
-              aria-hidden
-            />
-            {sourceLabel}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {canEdit ? (
-            <Button
-              type="default"
-              className="min-w-0 flex-1"
               icon={<Pencil className="size-3.5" aria-hidden />}
               onClick={onEdit}
             >
@@ -612,33 +577,16 @@ function MineSkillCard({
             </Button>
           ) : (
             <Button
-              type="default"
-              className="min-w-0 flex-1"
+              type="text"
+              size="small"
               icon={<Eye className="size-3.5" aria-hidden />}
               onClick={onView}
             >
               {t("skillRepository.common.view")}
             </Button>
           )}
-          <Tooltip
-            title={
-              canPublish ? undefined : t("skillRepository.mine.applyForbidden")
-            }
-          >
-            <span className="min-w-0 flex-1">
-              <Button
-                type={hasSharedRepository ? "default" : "primary"}
-                className="w-full"
-                icon={<Power className="size-3.5" aria-hidden />}
-                disabled={!canPublish}
-                onClick={canApplyListing ? onApplyListing : onViewReview}
-              >
-                {applyButtonLabel}
-              </Button>
-            </span>
-          </Tooltip>
         </div>
-      </div>
-    </ResourceCard>
+      }
+    />
   );
 }

@@ -14,8 +14,8 @@ My Skills continues to use the same grid and card height. It removes the Hub and
 
 ## Scope
 
-- Modify only `frontend/app/[locale]/skill-space/components/RepositoryView.tsx`, `SkillRepositoryCard.tsx`, `MineSkillsView.tsx`, and focused layout tests as needed.
-- Reuse the in-progress shared `ResourceCard` / `ResourceCardGrid` behavior; do not modify backend APIs, queries, translations, Agent/MCP cards, or non-Skill tabs.
+- Modify the Skill tab containers and card views so their query page sizes track the same responsive grid dimensions as Agent cards; adjust the shared tag filter button to use Ant Design's default size; add focused layout tests.
+- Reuse the in-progress shared `ResourceCard` / `ResourceCardGrid` behavior; do not modify backend APIs, translations, Agent/MCP cards, or non-Skill tabs.
 
 ## Validation
 

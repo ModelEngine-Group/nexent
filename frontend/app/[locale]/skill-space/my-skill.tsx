@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { App } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { App, Grid } from "antd";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -37,12 +37,60 @@ const SkillDetailModal = dynamic(
   () => import("../agents/components/agentConfig/SkillDetailModal"),
   { ssr: false }
 );
-const MINE_PAGE_SIZE = 6;
+const CARD_GAP = 20;
+const MIN_CARD_HEIGHT = 240;
+const PAGINATION_HEIGHT = 60;
 const SEARCH_DEBOUNCE_MS = 300;
 
 export function MySkill({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const screens = Grid.useBreakpoint();
+  const gridRegionRef = useRef<HTMLDivElement>(null);
+  const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
+    null
+  );
+  const columns = screens.xxl
+    ? 4
+    : screens.xl
+      ? 3
+      : screens.lg || screens.md || screens.sm
+        ? 2
+        : screens.xs
+          ? 1
+          : 4;
+  const pageBottomPadding = screens.sm ? 40 : 32;
+  const rows = getRowCount(
+    Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
+  );
+  const pageSize = columns * rows;
+  const measureGridHeight = useCallback(() => {
+    if (!active || !gridRegionRef.current) return;
+
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const { top } = gridRegionRef.current.getBoundingClientRect();
+    setAvailableGridHeight(
+      Math.max(0, Math.floor(viewportHeight - top - pageBottomPadding - 8))
+    );
+  }, [active, pageBottomPadding]);
+
+  useEffect(() => {
+    if (!active) return;
+
+    const frame = window.requestAnimationFrame(measureGridHeight);
+    const observer = new ResizeObserver(measureGridHeight);
+    const visualViewport = window.visualViewport;
+    if (gridRegionRef.current) observer.observe(gridRegionRef.current);
+    window.addEventListener("resize", measureGridHeight);
+    visualViewport?.addEventListener("resize", measureGridHeight);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", measureGridHeight);
+      visualViewport?.removeEventListener("resize", measureGridHeight);
+    };
+  }, [active, measureGridHeight]);
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -93,7 +141,7 @@ export function MySkill({ active }: { active: boolean }) {
     () => ({
       ownership: mineOwnership,
       page: minePage,
-      page_size: MINE_PAGE_SIZE,
+      page_size: pageSize,
       ...(debouncedMineSearch.trim()
         ? { search: debouncedMineSearch.trim() }
         : {}),
@@ -106,7 +154,7 @@ export function MySkill({ active }: { active: boolean }) {
         ? { new_skill_padding: true }
         : {}),
     }),
-    [debouncedMineSearch, mineOwnership, minePage, mineTagPredicates]
+    [debouncedMineSearch, mineOwnership, minePage, mineTagPredicates, pageSize]
   );
   const {
     data: mineData,
@@ -144,13 +192,20 @@ export function MySkill({ active }: { active: boolean }) {
   useEffect(() => {
     const total = mineData?.pagination?.total;
     if (total == null) return;
-    const totalPages = Math.max(1, Math.ceil(total / MINE_PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
     if (minePage > totalPages) {
       /* eslint-disable react-hooks/set-state-in-effect -- Clamp after server pagination changes. */
       setMinePage(totalPages);
       /* eslint-enable react-hooks/set-state-in-effect */
     }
-  }, [mineData?.pagination?.total, minePage]);
+  }, [mineData?.pagination?.total, minePage, pageSize]);
+  const gridHeight =
+    availableGridHeight === null
+      ? undefined
+      : Math.max(
+          0,
+          availableGridHeight - (mineTotal > 0 ? PAGINATION_HEIGHT : 0)
+        );
 
   const handleSetNotShared = async (
     repositoryInfo: MySkillRepositoryInfoItem
@@ -204,9 +259,12 @@ export function MySkill({ active }: { active: boolean }) {
           isError={isMineError}
           isFetching={isMineFetching}
           page={minePage}
-          pageSize={MINE_PAGE_SIZE}
           total={mineTotal}
           onPageChange={setMinePage}
+          columns={columns}
+          rows={rows}
+          gridHeight={gridHeight}
+          gridRegionRef={gridRegionRef}
           onRetry={() => refetchMine()}
           onCreateSkill={() => {
             setEditingSkill(null);
@@ -294,5 +352,16 @@ export function MySkill({ active }: { active: boolean }) {
         />
       ) : null}
     </>
+  );
+}
+
+function getRowCount(availableHeight: number) {
+  if (availableHeight <= 0) return 3;
+  return Math.min(
+    3,
+    Math.max(
+      1,
+      Math.floor((availableHeight + CARD_GAP) / (MIN_CARD_HEIGHT + CARD_GAP))
+    )
   );
 }
