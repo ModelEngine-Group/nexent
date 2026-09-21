@@ -59,6 +59,8 @@ class _RepositoryImportRequirementItem(BaseModel):
     available: bool
     reason_code: str | None = None
     suggested_new_name: str | None = None
+    resolution_required: bool = False
+    existing_index_name: str | None = None
 
 
 class _RepositoryImportPrecheckResponse(BaseModel):
@@ -364,15 +366,12 @@ def test_build_precheck_falls_back_to_bundle_knowledge_name_and_checks_embedding
     mock_query_tools,
     mock_list_skills,
 ):
-    mock_kb_record.side_effect = [
-        None,
-        None,
-        {
-            "knowledge_id": 9,
-            "knowledge_describe": "Official guidance",
-            "embedding_model_id": 7,
-        },
-    ]
+    mock_kb_record.return_value = {
+        "knowledge_id": 9,
+        "knowledge_describe": "Official guidance",
+        "embedding_model_id": 7,
+        "index_name": "42-abc",
+    }
     mock_get_model_by_id.return_value = {"connect_status": "available"}
     snapshot = _snapshot(
         tools=[
@@ -405,12 +404,9 @@ def test_build_precheck_falls_back_to_bundle_knowledge_name_and_checks_embedding
     assert kb_items[0].available is True
     assert kb_items[0].description == "Official guidance"
     assert mock_kb_record.call_args_list == [
-        call({"index_name": "kb_index", "tenant_id": "tenant_a"}),
-        call({"index_name": "kb_index", "tenant_id": "tenant_a"}),
         call({"knowledge_name": "Official KB", "tenant_id": "tenant_a"}),
     ]
-    assert mock_get_model_by_id.call_count == 2
-    assert mock_get_model_by_id.call_args_list == [
-        call(7, "tenant_a"),
-        call(7, "tenant_a"),
-    ]
+    assert mock_get_model_by_id.call_count == 1
+    assert mock_get_model_by_id.call_args_list == [call(7, "tenant_a")]
+    assert kb_items[0].resolution_required is True
+    assert kb_items[0].existing_index_name == "42-abc"

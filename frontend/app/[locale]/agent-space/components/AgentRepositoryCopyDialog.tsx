@@ -82,6 +82,9 @@ export function AgentRepositoryCopyDialog({
   const [skillResolutionActions, setSkillResolutionActions] = useState<
     Record<string, "rename" | "use_existing">
   >({});
+  const [knowledgeResolutionActions, setKnowledgeResolutionActions] = useState<
+    Record<string, "reuse" | "create_new">
+  >({});
   const [selectedModelId, setSelectedModelId] = useState<number>();
   const [selectedEmbeddingModelId, setSelectedEmbeddingModelId] =
     useState<number>();
@@ -131,10 +134,22 @@ export function AgentRepositoryCopyDialog({
       precheck?.items.filter((item) => item.type === "knowledge_base") ?? [],
     [precheck]
   );
-  const hasOfficialKnowledge = isOfficialListing && officialKnowledgeItems.length > 0;
+  const hasOfficialKnowledge =
+    isOfficialListing && officialKnowledgeItems.length > 0;
   const hasExistingOfficialKnowledge = Boolean(
     hasOfficialKnowledge &&
-      officialKnowledgeItems.every((item) => item.available)
+    officialKnowledgeItems.every((item) => item.resolution_required === true)
+  );
+  const officialKnowledgeConflictItems = useMemo(
+    () => officialKnowledgeItems.filter((item) => item.resolution_required),
+    [officialKnowledgeItems]
+  );
+  const hasOfficialKnowledgeToCreate = Boolean(
+    hasOfficialKnowledge &&
+    (officialKnowledgeItems.some((item) => !item.resolution_required) ||
+      officialKnowledgeConflictItems.some(
+        (item) => knowledgeResolutionActions[item.name] === "create_new"
+      ))
   );
   const availableEmbeddingModels = useMemo(
     () =>
@@ -147,15 +162,15 @@ export function AgentRepositoryCopyDialog({
   );
   const officialEmbeddingModelMissing = Boolean(
     isOfficialListing &&
-      hasOfficialKnowledge &&
-      !hasExistingOfficialKnowledge &&
-      availableEmbeddingModels.length === 0
+    hasOfficialKnowledge &&
+    hasOfficialKnowledgeToCreate &&
+    availableEmbeddingModels.length === 0
   );
 
   useEffect(() => {
     if (!open || !isOfficialListing) return;
     setSelectedModelId((current) => current ?? availableLlmModels[0]?.id);
-    if (hasOfficialKnowledge && !hasExistingOfficialKnowledge) {
+    if (hasOfficialKnowledgeToCreate) {
       setSelectedEmbeddingModelId(
         (current) => current ?? availableEmbeddingModels[0]?.id
       );
@@ -167,6 +182,7 @@ export function AgentRepositoryCopyDialog({
     isOfficialListing,
     hasOfficialKnowledge,
     hasExistingOfficialKnowledge,
+    hasOfficialKnowledgeToCreate,
     availableLlmModels,
     availableEmbeddingModels,
   ]);
@@ -198,12 +214,19 @@ export function AgentRepositoryCopyDialog({
             : {}),
         }))
       : undefined;
+    const knowledgeBaseResolutions =
+      officialKnowledgeConflictItems.length > 0
+        ? officialKnowledgeConflictItems.map((item) => ({
+            knowledge_name: item.name,
+            action: knowledgeResolutionActions[item.name] ?? "reuse",
+          }))
+        : undefined;
 
     if (
       isOfficialListing &&
       (!selectedModelId ||
         (hasOfficialKnowledge &&
-          !hasExistingOfficialKnowledge &&
+          hasOfficialKnowledgeToCreate &&
           !selectedEmbeddingModelId))
     ) {
       message.error(
@@ -225,10 +248,11 @@ export function AgentRepositoryCopyDialog({
                 : undefined,
               embeddingModelIds:
                 hasOfficialKnowledge &&
-                !hasExistingOfficialKnowledge &&
+                hasOfficialKnowledgeToCreate &&
                 selectedEmbeddingModelId
                   ? { [listing.name]: selectedEmbeddingModelId }
                   : undefined,
+              knowledgeBaseResolutions,
             }
           : undefined,
       });
@@ -269,6 +293,7 @@ export function AgentRepositoryCopyDialog({
     setAbnormalOpen(true);
     setAvailableOpen(true);
     setSkillResolutionActions({});
+    setKnowledgeResolutionActions({});
     setSelectedModelId(undefined);
     setSelectedEmbeddingModelId(undefined);
   };
@@ -462,7 +487,38 @@ export function AgentRepositoryCopyDialog({
                   }))}
                 />
               </div>
-              {hasOfficialKnowledge && !hasExistingOfficialKnowledge ? (
+              {officialKnowledgeConflictItems.length > 0 ? (
+                <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-500/10">
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                    检测到同名知识库，请选择处理方式
+                  </p>
+                  {officialKnowledgeConflictItems.map((item) => (
+                    <div key={item.key} className="space-y-2">
+                      <Tag color="orange">{item.name}</Tag>
+                      <Radio.Group
+                        value={knowledgeResolutionActions[item.name] ?? "reuse"}
+                        onChange={(event) => {
+                          setKnowledgeResolutionActions((prev) => ({
+                            ...prev,
+                            [item.name]: event.target.value,
+                          }));
+                        }}
+                      >
+                        <Space direction="vertical" size={8}>
+                          <Radio value="reuse">复用已有知识库</Radio>
+                          <Radio value="create_new">
+                            创建新的知识库
+                            <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
+                              将自动使用不冲突的名称
+                            </span>
+                          </Radio>
+                        </Space>
+                      </Radio.Group>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {hasOfficialKnowledge && hasOfficialKnowledgeToCreate ? (
                 <div className="space-y-2">
                   <label className="block text-xs text-slate-600 dark:text-slate-300">
                     向量模型

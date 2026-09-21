@@ -167,6 +167,8 @@ export interface RepositoryImportRequirementItem {
   available: boolean;
   reason_code?: string | null;
   suggested_new_name?: string | null;
+  resolution_required?: boolean;
+  existing_index_name?: string | null;
 }
 
 export interface RepositoryImportPrecheckResponse {
@@ -183,10 +185,7 @@ export interface RepositoryImportPrecheckResponse {
 // Official (platform-provided) agents
 // ---------------------------------------------------------------------------
 
-export type OfficialAgentStatus =
-  | "installed"
-  | "needs_model"
-  | "installable";
+export type OfficialAgentStatus = "installed" | "needs_model" | "installable";
 
 export type OfficialAgentInstallStatus =
   | "installed"

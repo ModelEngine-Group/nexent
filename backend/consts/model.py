@@ -1483,6 +1483,8 @@ class RepositoryImportRequirementItem(BaseModel):
     available: bool
     reason_code: Optional[str] = None
     suggested_new_name: Optional[str] = None
+    resolution_required: bool = False
+    existing_index_name: Optional[str] = None
 
 
 class RepositoryImportPrecheckResponse(BaseModel):
@@ -1578,6 +1580,12 @@ class SkillResolution(BaseModel):
     skill_name: str
     action: Literal["rename", "use_existing"]
     new_name: Optional[str] = None
+
+
+class KnowledgeBaseResolution(BaseModel):
+    """User-selected resolution for an existing official knowledge base."""
+    knowledge_name: str
+    action: Literal["reuse", "create_new"]
 
 
 class SkillConflictCheckRequest(BaseModel):

@@ -14,7 +14,7 @@ from consts.agent_repository import (
 )
 from consts.exceptions import UnauthorizedError
 from consts.const import OFFICIAL_AGENT_TENANT_ID
-from consts.model import AgentRepositorySnapshot, SkillResolution
+from consts.model import AgentRepositorySnapshot, KnowledgeBaseResolution, SkillResolution
 from consts.notification import (
     EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
     RESOURCE_TYPE_AGENT_REPOSITORY,
@@ -1317,6 +1317,7 @@ async def import_agent_from_repository_impl(
     skill_resolutions: Optional[List[SkillResolution]] = None,
     model_ids: Optional[Dict[str, int]] = None,
     embedding_model_ids: Optional[Dict[str, int]] = None,
+    knowledge_base_resolutions: Optional[List[KnowledgeBaseResolution]] = None,
     user_id: Optional[str] = None,
 ) -> Dict[int, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
@@ -1358,6 +1359,7 @@ async def import_agent_from_repository_impl(
             model_ids=model_ids,
             embedding_model_ids=embedding_model_ids,
             skill_resolutions=skill_resolutions,
+            knowledge_base_resolutions=knowledge_base_resolutions,
         )
         item = results[0] if results else None
         if item is None:

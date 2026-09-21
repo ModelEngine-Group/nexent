@@ -137,6 +137,11 @@ class _SkillResolution(BaseModel):
     new_name: Optional[str] = None
 
 
+class _KnowledgeBaseResolution(BaseModel):
+    knowledge_name: str
+    action: str
+
+
 class _AgentRepositorySnapshot(BaseModel):
     agent_id: int
     agent_info: Dict[str, _ExportAndImportAgentInfo]
@@ -176,6 +181,7 @@ consts_model.OfficialAgentInstallStep = _OfficialAgentInstallStep
 consts_model.KnowledgeBaseSeedDoc = _KnowledgeBaseSeedDoc
 consts_model.SkillZipEntry = _SkillZipEntry
 consts_model.SkillResolution = _SkillResolution
+consts_model.KnowledgeBaseResolution = _KnowledgeBaseResolution
 consts_model.AgentRepositorySnapshot = _AgentRepositorySnapshot
 consts_model.ProcessParams = _ProcessParams
 consts_model.ToolInstanceInfoRequest = _ToolInstanceInfoRequest
@@ -989,6 +995,60 @@ async def test_create_knowledge_bases_reuses_existing():
     )
     fake_vdb.ElasticSearchService.create_knowledge_base.assert_not_called()
     fake_vdb.ElasticSearchService.index_documents.assert_not_called()
+
+
+async def test_create_knowledge_bases_can_create_unique_copy():
+    bundle = _make_bundle(name="research", has_knowledge=True)
+    bundle.knowledge_bases[0].documents = []
+    fake_kb_db = types.ModuleType("database.knowledge_db")
+    fake_kb_db.get_knowledge_record = MagicMock(
+        side_effect=[
+            {"knowledge_id": 9, "index_name": "42-abc"},
+            None,
+        ]
+    )
+    fake_kb_db.update_knowledge_record = MagicMock()
+    fake_vdb = types.ModuleType("management.services.knowledge_base.service")
+    fake_vdb.ElasticSearchService = MagicMock()
+    fake_vdb.ElasticSearchService.create_knowledge_base.return_value = {
+        "id": "43-def"
+    }
+    fake_vdb.get_embedding_model_by_id = MagicMock(return_value=(MagicMock(), 5))
+    fake_vdb.get_vector_db_core = MagicMock(return_value=MagicMock())
+    fake_kb_common = types.ModuleType("management.services.knowledge_base.common")
+    fake_kb_common.get_vector_db_core = fake_vdb.get_vector_db_core
+    fake_kb_service = types.ModuleType("management.services.knowledge_base.service")
+    fake_kb_service.ElasticSearchService = fake_vdb.ElasticSearchService
+    fake_model_resolver = types.ModuleType("management.services.model.resolver")
+    fake_model_resolver.get_embedding_model_by_id = fake_vdb.get_embedding_model_by_id
+    fake_group_db = types.ModuleType("database.group_db")
+    fake_group_db.query_groups_by_tenant = MagicMock(return_value={"groups": []})
+
+    with patch.dict(
+        sys.modules,
+        {
+            "database.knowledge_db": fake_kb_db,
+            "management.services.knowledge_base.common": fake_kb_common,
+            "management.services.knowledge_base.service": fake_kb_service,
+            "management.services.model.resolver": fake_model_resolver,
+            "database.group_db": fake_group_db,
+        },
+    ):
+        mapping = await official_agent_service._create_knowledge_bases(
+            bundle,
+            "tenant-1",
+            "u",
+            embedding_model_id=5,
+            authorization="auth",
+            knowledge_base_resolutions=[
+                _KnowledgeBaseResolution(knowledge_name="KB", action="create_new")
+            ],
+        )
+
+    assert mapping == {"kb-1": "43-def"}
+    assert fake_vdb.ElasticSearchService.create_knowledge_base.call_args.kwargs[
+        "knowledge_name"
+    ] == "KB 副本"
 
 
 # ---------------------------------------------------------------------------

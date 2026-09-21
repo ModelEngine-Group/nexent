@@ -309,23 +309,29 @@ def build_repository_import_precheck(
             reason_code=reason,
         ))
 
+    # Only the official-bundle precheck opts into logical-name resolution.
+    # Ordinary repository snapshots must keep their existing index_name path.
+    official_snapshot = require_kb_embedding_model and bool(
+        getattr(snapshot, "knowledge_bases", None)
+    )
     for key, kb_name, description in _extract_knowledge_bases(snapshot, tenant_id):
         index_name = key.split(":", 1)[1]
-        available, reason = _check_kb_available(index_name, tenant_id)
-        record = get_knowledge_record({
-            "index_name": index_name,
-            "tenant_id": tenant_id,
-        })
-        if not record and getattr(snapshot, "knowledge_bases", None):
+        if official_snapshot:
+            # Official bundles do not contain a tenant index_name. They carry
+            # a logical reference and a user-facing knowledge_name instead.
             record = get_knowledge_record({
                 "knowledge_name": kb_name,
                 "tenant_id": tenant_id,
             })
-            if record:
-                available = True
-                reason = None
-        if record and require_kb_embedding_model:
-            available, reason = _check_kb_embedding_available(record, tenant_id)
+            available, reason = True, None
+            if record and require_kb_embedding_model:
+                available, reason = _check_kb_embedding_available(record, tenant_id)
+        else:
+            available, reason = _check_kb_available(index_name, tenant_id)
+            record = get_knowledge_record({
+                "index_name": index_name,
+                "tenant_id": tenant_id,
+            })
         kb_description = record.get("knowledge_describe") if record else description
         items.append(RepositoryImportRequirementItem(
             type="knowledge_base",
@@ -334,6 +340,8 @@ def build_repository_import_precheck(
             description=kb_description,
             available=available,
             reason_code=reason,
+            resolution_required=bool(official_snapshot and record),
+            existing_index_name=record.get("index_name") if record else None,
         ))
 
     for server_name in sorted(_extract_mcp_server_names(snapshot)):

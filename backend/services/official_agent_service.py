@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 
 from consts.const import OFFICIAL_AGENTS_PATH
 from consts.model import (
+    KnowledgeBaseResolution,
     KnowledgeBaseSeedDoc,
     ModelConnectStatusEnum,
     OfficialAgentAgentInfo,
@@ -558,6 +559,7 @@ async def _create_knowledge_bases(
     user_id: str,
     embedding_model_id: int,
     authorization: str,
+    knowledge_base_resolutions: Optional[List[KnowledgeBaseResolution]] = None,
 ) -> Dict[str, str]:
     """Create the bundle's knowledge bases for the tenant and index seed docs.
 
@@ -580,6 +582,10 @@ async def _create_knowledge_bases(
     vdb_core = get_vector_db_core()
     embedding_model, _ = get_embedding_model_by_id(tenant_id, embedding_model_id)
     mapping: Dict[str, str] = {}
+    resolution_map = {
+        item.knowledge_name: item.action
+        for item in (knowledge_base_resolutions or [])
+    }
 
     for kb in bundle.knowledge_bases or []:
         logical = kb.logical_index_name
@@ -590,7 +596,8 @@ async def _create_knowledge_bases(
         existing = get_knowledge_record(
             {"knowledge_name": kb_name, "tenant_id": tenant_id}
         )
-        if existing:
+        action = resolution_map.get(kb_name, "reuse")
+        if existing and action == "reuse":
             existing_index = existing.get("index_name") or logical
             tenant_groups = query_groups_by_tenant(
                 tenant_id, page=None, page_size=None
@@ -633,8 +640,18 @@ async def _create_knowledge_bases(
             mapping[logical] = existing_index
             continue
 
+        if existing and action == "create_new":
+            candidate = f"{kb_name} 副本"
+            suffix = 2
+            while get_knowledge_record(
+                {"knowledge_name": candidate, "tenant_id": tenant_id}
+            ):
+                candidate = f"{kb_name} 副本 {suffix}"
+                suffix += 1
+            kb_name = candidate
+
         created = ElasticSearchService.create_knowledge_base(
-            knowledge_name=kb.display_name or logical,
+            knowledge_name=kb_name,
             embedding_dim=None,
             vdb_core=vdb_core,
             user_id=user_id,
@@ -845,6 +862,7 @@ async def _install_bundle(
     skill_resolutions: Optional[List[SkillResolution]] = None,
     steps: Optional[List[OfficialAgentInstallStep]] = None,
     existing_agent_id: Optional[int] = None,
+    knowledge_base_resolutions: Optional[List[KnowledgeBaseResolution]] = None,
 ) -> Optional[int]:
     """Install one official agent bundle, returning the new main agent id.
 
@@ -901,6 +919,7 @@ async def _install_bundle(
                 user_id,
                 embedding_model_id,
                 authorization=authorization,
+                knowledge_base_resolutions=knowledge_base_resolutions,
             ),
         )
         _remap_kb_refs(bundle, kb_mapping)
@@ -977,6 +996,7 @@ async def install_official_agents(
     model_ids: Optional[Dict[str, int]] = None,
     embedding_model_ids: Optional[Dict[str, int]] = None,
     skill_resolutions: Optional[List[SkillResolution]] = None,
+    knowledge_base_resolutions: Optional[List[KnowledgeBaseResolution]] = None,
 ) -> List[OfficialAgentInstallItem]:
     """Install the requested official agents for a tenant.
 
@@ -1088,6 +1108,7 @@ async def install_official_agents(
                 authorization,
                 embedding_model_id=embedding_model_id,
                 skill_resolutions=skill_resolutions,
+                knowledge_base_resolutions=knowledge_base_resolutions,
                 steps=steps,
                 existing_agent_id=existing_agent_id,
             )

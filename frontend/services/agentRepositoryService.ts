@@ -51,7 +51,8 @@ export async function fetchAgentRepositoryTagStats(): Promise<
     API_ENDPOINTS.agentRepository.tagStats,
     { method: "GET", headers: getAuthHeaders() }
   );
-  if (!response.ok) throw new Error("Failed to fetch agent repository tag stats");
+  if (!response.ok)
+    throw new Error("Failed to fetch agent repository tag stats");
   const data = (await response.json()) as {
     items?: Array<{ tag: string; count: number }>;
   };
@@ -208,6 +209,10 @@ export interface SkillResolutionInput {
 export interface RepositoryImportModelOptions {
   modelIds?: Record<string, number>;
   embeddingModelIds?: Record<string, number>;
+  knowledgeBaseResolutions?: {
+    knowledge_name: string;
+    action: "reuse" | "create_new";
+  }[];
 }
 
 export async function importAgentFromRepository(
@@ -232,6 +237,12 @@ export async function importAgentFromRepository(
                   : {}),
                 ...(modelOptions?.embeddingModelIds
                   ? { embedding_model_ids: modelOptions.embeddingModelIds }
+                  : {}),
+                ...(modelOptions?.knowledgeBaseResolutions
+                  ? {
+                      knowledge_base_resolutions:
+                        modelOptions.knowledgeBaseResolutions,
+                    }
                   : {}),
               })
             : undefined,
@@ -324,22 +335,28 @@ export async function installOfficialAgents(
   }
 }
 
-export async function fetchOfficialAgentManagement(): Promise<OfficialAgentManagementItem[]> {
+export async function fetchOfficialAgentManagement(): Promise<
+  OfficialAgentManagementItem[]
+> {
   const response = await fetchWithErrorHandling(
     API_ENDPOINTS.agentRepository.officialManagement,
     { method: "GET", headers: getAuthHeaders() }
   );
-  if (!response.ok) throw new Error(`Failed to fetch official agents: ${response.statusText}`);
+  if (!response.ok)
+    throw new Error(`Failed to fetch official agents: ${response.statusText}`);
   const data = await response.json();
   return data.items ?? [];
 }
 
-export async function deleteOfficialAgent(agentRepositoryId: number): Promise<void> {
+export async function deleteOfficialAgent(
+  agentRepositoryId: number
+): Promise<void> {
   const response = await fetchWithErrorHandling(
     API_ENDPOINTS.agentRepository.officialManagementItem(agentRepositoryId),
     { method: "DELETE", headers: getAuthHeaders() }
   );
-  if (!response.ok) throw new Error(`Failed to delete official agent: ${response.statusText}`);
+  if (!response.ok)
+    throw new Error(`Failed to delete official agent: ${response.statusText}`);
 }
 
 const agentRepositoryService = {

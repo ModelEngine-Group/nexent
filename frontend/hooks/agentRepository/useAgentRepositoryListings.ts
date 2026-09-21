@@ -164,6 +164,10 @@ export function useImportAgentFromRepository() {
       modelOptions?: {
         modelIds?: Record<string, number>;
         embeddingModelIds?: Record<string, number>;
+        knowledgeBaseResolutions?: {
+          knowledge_name: string;
+          action: "reuse" | "create_new";
+        }[];
       };
     }) =>
       agentRepositoryService.importAgentFromRepository(

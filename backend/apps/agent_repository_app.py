@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
 from consts.model import (
     AgentRepositoryListingCreateRequest,
+    KnowledgeBaseResolution,
     SkillResolution,
     TagAssignmentFilter,
 )
@@ -352,6 +353,7 @@ async def import_agent_from_repository_api(
         skill_resolutions = None
         model_ids = None
         embedding_model_ids = None
+        knowledge_base_resolutions = None
         if isinstance(payload, list):
             skill_resolutions = [SkillResolution.model_validate(item) for item in payload]
         elif isinstance(payload, dict):
@@ -361,6 +363,10 @@ async def import_agent_from_repository_api(
             ] or None
             model_ids = payload.get("model_ids")
             embedding_model_ids = payload.get("embedding_model_ids")
+            knowledge_base_resolutions = [
+                KnowledgeBaseResolution.model_validate(item)
+                for item in (payload.get("knowledge_base_resolutions") or [])
+            ] or None
 
         await import_agent_from_repository_impl(
             agent_repository_id=agent_repository_id,
@@ -369,6 +375,7 @@ async def import_agent_from_repository_api(
             skill_resolutions=skill_resolutions,
             model_ids=model_ids,
             embedding_model_ids=embedding_model_ids,
+            knowledge_base_resolutions=knowledge_base_resolutions,
             user_id=user_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={})
