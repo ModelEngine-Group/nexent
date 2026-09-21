@@ -305,7 +305,6 @@ export function AgentSpace({ active }: { active: boolean }) {
           <Button
             type="text"
             size="small"
-            className="h-8 px-3 text-xs font-medium text-primary !shadow-none hover:!bg-transparent hover:!text-primary/80"
             icon={<Copy className="size-3.5" aria-hidden />}
             onClick={() => setCopyListing(listing)}
           >

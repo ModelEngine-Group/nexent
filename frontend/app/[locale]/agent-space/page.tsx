@@ -88,7 +88,7 @@ export default function AgentRepositoryPage() {
             exit="out"
             variants={pageVariants}
             transition={pageTransition}
-            className="w-full px-4 py-8 sm:px-6 sm:py-10 xl:px-16"
+            className="w-full h-full px-4 py-8 sm:px-6 sm:py-10 xl:px-16"
           >
             <div className="flex flex-col gap-6">
               <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

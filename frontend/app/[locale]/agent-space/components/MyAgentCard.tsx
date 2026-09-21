@@ -220,7 +220,6 @@ export function MyAgentCard({
             <Button
               type="text"
               size="small"
-              className="h-8 px-3 text-xs font-medium text-primary !shadow-none hover:!bg-transparent hover:!text-primary/80"
               icon={<Pencil className="size-3.5" aria-hidden />}
               onClick={onEdit}
             >
@@ -230,7 +229,6 @@ export function MyAgentCard({
             <Button
               type="text"
               size="small"
-              className="h-8 px-3 text-xs font-medium text-primary !shadow-none hover:!bg-transparent hover:!text-primary/80"
               icon={<Eye className="size-3.5" aria-hidden />}
               onClick={onView}
               disabled={!canView}

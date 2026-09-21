@@ -2723,7 +2723,7 @@
   "skillRepository.detail.downloads": "安装次数",
   "skillRepository.detail.updatedAt": "更新时间",
   "skillRepository.detail.empty": "暂无详情",
-  "mcpTools.page.title": "MCP 空间",
+  "mcpTools.page.title": "MCP 仓库",
   "mcpTools.page.subtitle": "统一管理本地与公共市场的 MCP 服务，支持搜索、添加与启用配置。",
   "mcpTools.page.sourceFilter.all": "全部来源",
   "mcpTools.page.transportFilter.all": "全部类型",
