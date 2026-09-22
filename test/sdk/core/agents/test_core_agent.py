@@ -2534,10 +2534,63 @@ class TestRunStreamRealExecution:
         )
         agent.observer.commit_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
-        assert all(
-            call_.args[1] is not module.ProcessType.STEP_COUNT
-            for call_ in agent.observer.add_message.call_args_list
+        step_labels = [
+            call_ for call_ in agent.observer.add_message.call_args_list
+            if call_.args[1] is module.ProcessType.STEP_COUNT
+        ]
+        assert len(step_labels) == 1
+        assert step_labels[0].args[2] == 1
+
+    def test_step_stream_commits_valid_repair_generation_raw_stream(self):
+        """A valid semantic repair commits its streamed output and action."""
+        module = core_agent_module
+        agent = object.__new__(module.CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[])
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._protocol_repair_messages = [MagicMock()]
+        agent.output_protocol = "final_answer_envelope"
+        agent.verification_controller = None
+        agent.stop_event = MagicMock(is_set=MagicMock(return_value=False))
+
+        response = SimpleNamespace(
+            content="<FINAL_ANSWER>recovered</FINAL_ANSWER>",
+            token_usage=None,
+            model_attempt_id="repair-attempt",
+            model_attempt_number=2,
+            model_attempt_commit_deferred=True,
         )
+        model = MagicMock(return_value=response)
+        model.supports_deferred_attempt_commit = True
+        model.supports_suppressed_attempt_stream = True
+        model.last_finish_reason = "stop"
+        agent.model = model
+        action_step = SimpleNamespace(
+            model_output=None,
+            model_output_message=None,
+            token_usage=None,
+            model_input_messages=None,
+            action_output=None,
+        )
+
+        outputs = list(agent._step_stream(action_step))
+
+        assert outputs
+        assert action_step.action_output == "recovered"
+        assert "_suppress_attempt_stream" not in model.call_args.kwargs
+        agent.observer.rollback_model_attempt.assert_not_called()
+        agent.observer.commit_model_attempt.assert_called_once_with("repair-attempt", 2)
+        assert response.model_attempt_commit_deferred is False
+        assert agent._protocol_repair_messages == []
 
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""

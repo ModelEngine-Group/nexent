@@ -1,0 +1,26 @@
+schema_version: '1.0'
+module:
+  id: CHAT-MESSAGE
+  name: Chat message
+features:
+  - feature_id: CMSR-005
+    name: Silent model retry stream visibility
+    status: active
+    description: Successful model attempts stream raw content while failed attempts leave no visible or persisted fragments.
+    business_rules:
+      - rule_id: CMSR-RULE-013
+        description: Safe model content is observable before the next provider fragment or completion.
+      - rule_id: CMSR-RULE-014
+        description: Rollback removes only the failed attempt and successful code remains visible as raw reasoning until parsing.
+      - rule_id: CMSR-RULE-015
+        description: A running step label appears before model output and survives retry rollback, but a terminal label-only card is removed.
+      - rule_id: CMSR-RULE-016
+        description: Valid semantic protocol-repair attempts stream and persist like other successful attempts, with sanitized lifecycle logs.
+      - rule_id: CMSR-RULE-017
+        description: Historical late step labels are prepended to the matching existing reasoning without duplicate cards or cross-invocation mutation.
+      - rule_id: CMSR-RULE-018
+        description: Every rejected model response has correlated content-free diagnostics; bounded model-output previews require an explicit short-lived diagnostic opt-in.
+    required_test_stages: [D1, D2, D3, D4, D5]
+    source:
+      requirement_ids: [CMSR-005]
+      spec_path: nexent-doc/docs/Developing/chat-message-model-silent-retry/proposal.md
