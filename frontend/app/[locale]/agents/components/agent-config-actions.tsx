@@ -10,6 +10,7 @@ import {
   Copy,
   FileOutput,
   Globe,
+  GitBranch,
   MoreHorizontal,
   Network,
   Trash2,
@@ -34,10 +35,12 @@ export default function AgentConfigActions({
   agentId: agentIdProp,
   readOnly,
   variant = "buttons",
+  onManageVersions,
 }: {
   agentId?: number | null;
   readOnly?: boolean;
   variant?: "buttons" | "menu";
+  onManageVersions?: (agentId: number) => void;
 }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -259,6 +262,15 @@ export default function AgentConfigActions({
       label: t("agent.action.viewCallRelationship"),
       disabled,
       onClick: () => setIsRelationshipVisible(true),
+    },
+    {
+      key: "versions",
+      icon: <GitBranch className="size-3.5" />,
+      label: t("agent.version.manage"),
+      disabled,
+      onClick: () => {
+        if (agentId !== null) onManageVersions?.(agentId);
+      },
     },
     {
       key: "export",

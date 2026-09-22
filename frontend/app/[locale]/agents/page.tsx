@@ -22,7 +22,6 @@ import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal from "@/components/agent/CreateAgentModal";
 import CreateResourceCard from "@/components/resource/CreateResourceCard";
 import ResourceCard from "@/components/resource/ResourceCard";
-import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
   openImportWizardWithFile,
@@ -68,9 +67,6 @@ export default function AgentsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [importData, setImportData] = useState<ImportAgentData | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(
-    selectedAgent?.id ? Number(selectedAgent.id) : null
-  );
 
   const loadAgent = useCallback(
     async (agentId: number) => {
@@ -113,6 +109,23 @@ export default function AgentsPage() {
     },
     [loadAgent]
   );
+
+  const handleManageVersions = useCallback(
+    async (agentId: number) => {
+      const loadedAgent = await loadAgent(agentId);
+      if (!loadedAgent) return;
+      setSelectedAgent(loadedAgent);
+      setIsVersionManageOpen(true);
+    },
+    [loadAgent]
+  );
+
+  const refreshSelectedAgentInfo = useCallback(async () => {
+    if (!selectedAgent?.id) return null;
+    const loadedAgent = await loadAgent(Number(selectedAgent.id));
+    if (loadedAgent) setSelectedAgent(loadedAgent);
+    return loadedAgent;
+  }, [loadAgent, selectedAgent?.id]);
 
   const handleCreate = ({ agentId }: { agentId: number }) => {
     setIsCreateOpen(false);
@@ -266,6 +279,7 @@ export default function AgentsPage() {
                                 agentId={Number(agent.id)}
                                 readOnly={agent.permission === "READ_ONLY"}
                                 variant="menu"
+                                onManageVersions={handleManageVersions}
                               />
                               <Tag
                                 color={
@@ -337,8 +351,8 @@ export default function AgentsPage() {
         footer={null}
       >
         <AgentVersion
-          currentVersionNo={agentInfo?.current_version_no}
-          onRefreshAgentInfo={refetchAgentInfo}
+          currentVersionNo={selectedAgent?.current_version_no}
+          onRefreshAgentInfo={refreshSelectedAgentInfo}
         />
       </Modal>
       <CreateAgentModal
