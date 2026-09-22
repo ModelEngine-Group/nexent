@@ -379,6 +379,7 @@ function DeleteGroupContent({
 }) {
   const { t } = useTranslation();
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const modelKey = (m: ModelOption) => `${m.id}-${m.displayName}-${m.type}`;
   const selectedModels = useMemo(
@@ -475,47 +476,69 @@ function DeleteGroupContent({
                   })}
                 </Button>
               </div>
-              <ul className="divide-y">
-                {g.models.map((m) => {
-                  const on = selectedKeys.has(modelKey(m));
-                  return (
-                    <li key={modelKey(m)}>
-                      <button
-                        type="button"
-                        onClick={() => toggleModel(m)}
-                        className={cn(
-                          "flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-secondary/40",
-                          on && "bg-secondary/30"
-                        )}
-                      >
-                        <span className="flex min-w-0 items-center gap-3">
-                          <span
-                            className={cn(
-                              "flex size-4 shrink-0 items-center justify-center rounded border",
-                              on
-                                ? "border-destructive bg-destructive text-white"
-                                : "border-input"
-                            )}
-                          >
-                            {on && <Check className="size-3" />}
-                          </span>
-                          <span className="truncate font-medium">
-                            {m.displayName}
-                          </span>
-                        </span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {t(
-                            `model.type.${TYPE_LABEL_KEY_MAP[m.type] ?? m.type}`,
-                            {
-                              defaultValue: m.type,
-                            }
+              <button
+                type="button"
+                onClick={() =>
+                  setExpanded((s) => ({ ...s, [g.key]: !s[g.key] }))
+                }
+                className="flex w-full items-center gap-1 border-t px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {expanded[g.key] ? (
+                  <ChevronDown className="size-3.5" />
+                ) : (
+                  <ChevronRight className="size-3.5" />
+                )}
+                {expanded[g.key]
+                  ? t("modelConfig.batchEdit.collapse", {
+                      defaultValue: "收起",
+                    })
+                  : t("modelConfig.batchEdit.expand", {
+                      defaultValue: "查看下属模型",
+                    })}
+              </button>
+              {expanded[g.key] && (
+                <ul className="divide-y">
+                  {g.models.map((m) => {
+                    const on = selectedKeys.has(modelKey(m));
+                    return (
+                      <li key={modelKey(m)}>
+                        <button
+                          type="button"
+                          onClick={() => toggleModel(m)}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-secondary/40",
+                            on && "bg-secondary/30"
                           )}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+                        >
+                          <span className="flex min-w-0 items-center gap-3">
+                            <span
+                              className={cn(
+                                "flex size-4 shrink-0 items-center justify-center rounded border",
+                                on
+                                  ? "border-destructive bg-destructive text-white"
+                                  : "border-input"
+                              )}
+                            >
+                              {on && <Check className="size-3" />}
+                            </span>
+                            <span className="truncate font-medium">
+                              {m.displayName}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {t(
+                              `model.type.${TYPE_LABEL_KEY_MAP[m.type] ?? m.type}`,
+                              {
+                                defaultValue: m.type,
+                              }
+                            )}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
           );
         })}
