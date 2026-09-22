@@ -12,6 +12,7 @@ Uses direct module loading to bypass the sdk.nexent package __init__.py
 which has heavy dependencies not needed for this module.
 """
 import importlib.util
+import inspect
 import os
 
 import pytest
@@ -80,6 +81,10 @@ def test_declared_fields_injected_and_hidden_from_model():
 
     # Model-visible schema no longer contains the conventional fields.
     assert set(wrapped.inputs) == {"query"}
+    # Code agents can inspect ``forward`` directly, so its public signature
+    # must not leak the hidden identity parameter names either.
+    assert tuple(inspect.signature(wrapped.forward).parameters) == ("query",)
+    assert not hasattr(wrapped.forward, "__wrapped__")
     # Model only supplies business args; identity values come from the session.
     assert wrapped.forward(
         query="hello",

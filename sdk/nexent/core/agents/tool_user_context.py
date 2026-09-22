@@ -11,7 +11,6 @@ neither sees nor fills them, so injected values can only come from the
 authenticated session.
 """
 
-import functools
 import inspect
 from collections.abc import Mapping
 from typing import Any
@@ -27,6 +26,33 @@ USER_CONTEXT_FIELDS = (
     "user_account",
     "user_groups",
 )
+
+
+def _set_model_visible_signature(
+    wrapper: Any,
+    original_forward: Any,
+    hidden_fields: list[str],
+) -> None:
+    """Expose a forward signature that matches the model-visible tool schema.
+
+    ``tool.inputs`` is not the only metadata a code agent can inspect.  In
+    particular, ``functools.wraps`` preserves ``__wrapped__`` and lets
+    ``inspect.signature`` recover the original MCP function signature.  That
+    would reveal hidden identity parameter names in generated reasoning code.
+    """
+    try:
+        signature = inspect.signature(original_forward)
+        visible_parameters = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.name not in hidden_fields
+        ]
+        wrapper.__signature__ = signature.replace(parameters=visible_parameters)
+    except (TypeError, ValueError):
+        # Some third-party callable objects do not expose an inspectable
+        # signature.  Their already-sanitized ``tool.inputs`` remains the
+        # model-visible contract in that case.
+        return
 
 
 def apply_user_context_to_mcp_tool(
@@ -76,7 +102,6 @@ def apply_user_context_to_mcp_tool(
         return sanitized
 
     if inspect.iscoroutinefunction(original_forward):
-        @functools.wraps(original_forward)
         async def forward_with_user_context(*args, **kwargs):
             # MCPAdapt also accepts one positional mapping as the complete
             # arguments object. Sanitize that path as well as keyword calls.
@@ -84,12 +109,12 @@ def apply_user_context_to_mcp_tool(
                 return await original_forward(trusted_kwargs(args[0]))
             return await original_forward(*args, **trusted_kwargs(kwargs))
     else:
-        @functools.wraps(original_forward)
         def forward_with_user_context(*args, **kwargs):
             if len(args) == 1 and isinstance(args[0], Mapping) and not kwargs:
                 return original_forward(trusted_kwargs(args[0]))
             return original_forward(*args, **trusted_kwargs(kwargs))
 
+    _set_model_visible_signature(forward_with_user_context, original_forward, declared)
     tool_obj.forward = forward_with_user_context
     setattr(tool_obj, "_nexent_user_context_wrapped", True)
     return tool_obj
