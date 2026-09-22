@@ -125,34 +125,44 @@ export function MyAgentCard({
   }
 
   return (
-    <ResourceCard title={title} className="h-full">
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Bot className="size-5" aria-hidden />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
-                {title}
-              </h3>
-            </div>
-            <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-              {versionLabel != null ? (
-                <span className="inline-flex items-center gap-1.5 truncate">
-                  <span
-                    className="size-1.5 shrink-0 rounded-full bg-primary"
-                    aria-hidden
-                  />
-                  {t("agentRepository.mine.currentVersion", {
-                    version: versionLabel,
-                  })}
-                </span>
-              ) : null}
-            </div>
-          </div>
+    <ResourceCard
+      title={title}
+      className="h-full"
+      subtitle={
+        versionLabel != null ? (
+          <span className="inline-flex items-center gap-1.5 truncate">
+            <span
+              className="size-1.5 shrink-0 rounded-full bg-primary"
+              aria-hidden
+            />
+            {t("agentRepository.mine.currentVersion", {
+              version: versionLabel,
+            })}
+          </span>
+        ) : undefined
+      }
+      icon={
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Bot className="size-5" aria-hidden />
         </div>
-
+      }
+      description={description}
+      descriptionLines={2}
+      tags={
+        tags.length > 0 ? (
+          <>
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                {getAgentRepositoryTagLabel(tag, t)}
+              </span>
+            ))}
+          </>
+        ) : undefined
+      }
+      headerActions={
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {menuItems.length > 0 ? (
             <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
@@ -187,57 +197,44 @@ export function MyAgentCard({
             </span>
           </div>
         </div>
-      </div>
-
-      <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-        {description}
-      </p>
-
-      {tags.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              {getAgentRepositoryTagLabel(tag, t)}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        <div className="min-w-0">
-          {footerDate ? (
-            <span className="inline-flex items-center gap-1">
-              <Clock className="size-3.5" aria-hidden />
-              {footerDate}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {canEdit ? (
-            <Button
-              type="text"
-              size="small"
-              icon={<Pencil className="size-3.5" aria-hidden />}
-              onClick={onEdit}
-            >
-              {t("agentRepository.mine.edit")}
-            </Button>
-          ) : (
-            <Button
-              type="text"
-              size="small"
-              icon={<Eye className="size-3.5" aria-hidden />}
-              onClick={onView}
-              disabled={!canView}
-            >
-              {t("agentRepository.mine.view")}
-            </Button>
-          )}
-        </div>
-      </div>
-    </ResourceCard>
+      }
+      footerLayout="inline"
+      meta={
+        footerDate ? (
+          <span className="inline-flex items-center gap-1">
+            <Clock className="size-3.5" aria-hidden />
+            {footerDate}
+          </span>
+        ) : undefined
+      }
+      footer={
+        canEdit ? (
+          <Button
+            type="text"
+            size="small"
+            className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+            icon={<Pencil className="size-3.5" aria-hidden />}
+            onClick={onEdit}
+          >
+            {t("agentRepository.mine.edit")}
+          </Button>
+        ) : (
+          <Button
+            type="text"
+            size="small"
+            className={
+              canView
+                ? "!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                : undefined
+            }
+            icon={<Eye className="size-3.5" aria-hidden />}
+            onClick={onView}
+            disabled={!canView}
+          >
+            {t("agentRepository.mine.view")}
+          </Button>
+        )
+      }
+    />
   );
 }

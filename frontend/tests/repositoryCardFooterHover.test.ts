@@ -7,6 +7,7 @@ const footerButtonClass =
 
 const footerButtonSources = new Map([
   ["app/[locale]/agent-space/agent-space.tsx", 1],
+  ["app/[locale]/agent-space/components/MyAgentCard.tsx", 1],
   ["app/[locale]/mcp-space/components/MineMcpServiceCard.tsx", 1],
   ["app/[locale]/mcp-space/components/RepositoryMcpCard.tsx", 0],
   ["app/[locale]/skill-space/components/MineSkillsView.tsx", 3],
@@ -40,4 +41,29 @@ test("does not apply hover styling to an installed MCP card action", () => {
       `className=\\{\\s*installed\\s*\\? undefined\\s*:\\s*["']${footerButtonClass}["']\\s*\\}`
     )
   );
+});
+
+test("does not apply hover styling to an unavailable my-agent view action", () => {
+  const source = readFileSync(
+    "./app/[locale]/agent-space/components/MyAgentCard.tsx",
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    new RegExp(
+      `className=\\{\\s*canView\\s*\\? ["']${footerButtonClass}["']\\s*:\\s*undefined\\s*\\}`
+    )
+  );
+});
+
+test("uses the shared resource card footer for my-agent actions", () => {
+  const source = readFileSync(
+    "./app/[locale]/agent-space/components/MyAgentCard.tsx",
+    "utf8"
+  );
+
+  assert.match(source, /footerLayout="inline"/);
+  assert.match(source, /meta=\{/);
+  assert.match(source, /footer=\{/);
 });
