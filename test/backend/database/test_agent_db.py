@@ -91,6 +91,7 @@ sys.modules['backend.database.db_models'] = db_models_mock
 from backend.database.agent_db import (
     search_agent_info_by_agent_id,
     search_agent_id_by_agent_name,
+    find_agent_id_by_agent_name,
     search_blank_sub_agent_by_main_agent_id,
     query_sub_agents_id_list,
     query_sub_agent_relations,
@@ -231,6 +232,22 @@ def test_search_agent_id_by_agent_name_not_found(monkeypatch, mock_session):
 
     with pytest.raises(ValueError, match="agent not found"):
         search_agent_id_by_agent_name("nonexistent_agent", "tenant1")
+
+
+def test_find_agent_id_by_agent_name_returns_none_when_not_found(monkeypatch, mock_session):
+    """The non-raising lookup treats a missing agent as an expected result."""
+    session, query = mock_session
+    mock_first = MagicMock(return_value=None)
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    assert find_agent_id_by_agent_name("nonexistent_agent", "tenant1") is None
 
 def test_search_blank_sub_agent_by_main_agent_id_found(monkeypatch, mock_session):
     """测试成功搜索空白子agent"""

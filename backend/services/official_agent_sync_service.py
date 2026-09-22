@@ -13,7 +13,7 @@ from consts.const import (
     OFFICIAL_AGENTS_PATH,
     OFFICIAL_AGENT_PROFILES,
 )
-from database.agent_db import create_agent, search_agent_id_by_agent_name
+from database.agent_db import create_agent, find_agent_id_by_agent_name
 from database.agent_repository_db import upsert_agent_repository_record
 from database.agent_repository_db import update_agent_repository_by_id
 from services.official_agent_bundle_service import (
@@ -52,16 +52,16 @@ def _source_agent_payload(agent: Any) -> dict[str, Any]:
 
 
 def _find_or_create_source_agent(agent: Any) -> int:
-    try:
-        return int(search_agent_id_by_agent_name(
-            agent.name, OFFICIAL_AGENT_TENANT_ID
-        ))
-    except ValueError:
-        return int(create_agent(
-            _source_agent_payload(agent),
-            tenant_id=OFFICIAL_AGENT_TENANT_ID,
-            user_id=OFFICIAL_AGENT_USER_ID,
-        )["agent_id"])
+    existing_agent_id = find_agent_id_by_agent_name(
+        agent.name, OFFICIAL_AGENT_TENANT_ID
+    )
+    if existing_agent_id is not None:
+        return int(existing_agent_id)
+    return int(create_agent(
+        _source_agent_payload(agent),
+        tenant_id=OFFICIAL_AGENT_TENANT_ID,
+        user_id=OFFICIAL_AGENT_USER_ID,
+    )["agent_id"])
 
 
 def _materialize_snapshot(bundle: OfficialAgentBundle):

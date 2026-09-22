@@ -67,7 +67,7 @@ def test_source_agent_payload_copies_agent_fields():
 
 
 def test_find_or_create_source_agent_reuses_existing_agent():
-    with patch.object(sync_service, "search_agent_id_by_agent_name", return_value="17") as search:
+    with patch.object(sync_service, "find_agent_id_by_agent_name", return_value="17") as search:
         with patch.object(sync_service, "create_agent") as create:
             result = sync_service._find_or_create_source_agent(_agent())
 
@@ -79,7 +79,7 @@ def test_find_or_create_source_agent_reuses_existing_agent():
 def test_find_or_create_source_agent_creates_when_source_is_missing():
     agent = _agent()
     with patch.object(
-        sync_service, "search_agent_id_by_agent_name", side_effect=ValueError
+        sync_service, "find_agent_id_by_agent_name", return_value=None
     ) as search:
         with patch.object(sync_service, "create_agent", return_value={"agent_id": 23}) as create:
             result = sync_service._find_or_create_source_agent(agent)
