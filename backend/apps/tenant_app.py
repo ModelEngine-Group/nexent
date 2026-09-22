@@ -13,12 +13,18 @@ from consts.model import (
     TenantCreateRequest,
     TenantUpdateRequest,
 )
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
 from services.audit_service import (
     AUDIT_RESULT_FAILURE,
     AUDIT_RESULT_SUCCESS,
     reason_from_exception,
     record_security_event,
+from consts.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from services.tenant_service import (
     create_tenant,
@@ -85,6 +91,12 @@ async def create_tenant_endpoint(
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
+        )
+    except TenantResourceLimitError as exc:
+        logger.warning("Tenant creation rejected by resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
         )
     except ValidationError as exc:
         logger.warning(f"Tenant creation validation error: {str(exc)}")

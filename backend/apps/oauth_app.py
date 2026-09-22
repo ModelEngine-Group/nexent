@@ -9,7 +9,13 @@ from pydantic import ValidationError as PydanticValidationError
 
 from consts.const import JWT_EXPIRY_SECONDS
 from consts.model import OAuthCompleteRequest
-from consts.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError
+from consts.exceptions import (
+    OAuthLinkError,
+    OAuthProviderError,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    tenant_resource_limit_error_payload,
+)
 from consts.oauth_providers import get_all_provider_definitions
 from database.oauth_account_db import get_oauth_account_by_provider
 from services.audit_service import AUDIT_RESULT_FAILURE, AUDIT_RESULT_SUCCESS, record_security_event
@@ -246,14 +252,8 @@ async def callback(
                           reason="tenant_resource_limit",
                           details={"provider": provider})
         return JSONResponse(
-            status_code=HTTPStatus.BAD_REQUEST,
-            content={
-                "message": str(e),
-                "data": {
-                    "oauth_error": "tenant_resource_limit_exceeded",
-                    "oauth_error_description": str(e),
-                },
-            },
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(e),
         )
     except OAuthLinkError as e:
         logger.warning(f"OAuth callback link failed for provider={provider}: {e}")
@@ -342,7 +342,10 @@ async def complete(
     except TenantResourceLimitError as e:
         record_security_event("oauth_signup", AUDIT_RESULT_FAILURE, request=request,
                           reason="tenant_resource_limit")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(e),
+        )
     except PydanticValidationError as e:
         record_security_event("oauth_signup", AUDIT_RESULT_FAILURE, request=request,
                           reason="validation_error")

@@ -13,12 +13,17 @@ from consts.model import (
     GroupUserRequest, GroupListRequest, SetDefaultGroupRequest,
     GroupMembersUpdateRequest
 )
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
 from services.audit_service import (
     AUDIT_RESULT_FAILURE,
     AUDIT_RESULT_SUCCESS,
     reason_from_exception,
     record_security_event,
+from consts.exceptions import (
+    NotFoundException,
+    TenantResourceLimitError,
+    UnauthorizedError,
+    ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from services.group_service import (
     create_group, get_group_info, update_group, delete_group,
@@ -85,6 +90,12 @@ async def create_group_endpoint(
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc)
+        )
+    except TenantResourceLimitError as exc:
+        logger.warning("Group creation rejected by resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
         )
     except ValidationError as exc:
         logger.warning(f"Group creation validation error: {str(exc)}")

@@ -7,7 +7,10 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from consts.exceptions import TenantResourceLimitError
+from consts.exceptions import (
+    TenantResourceLimitError,
+    tenant_resource_limit_error_payload,
+)
 
 from services.audit_service import AUDIT_RESULT_FAILURE, AUDIT_RESULT_SUCCESS, record_security_event
 from services.cas_service import (
@@ -64,7 +67,10 @@ async def callback(request: Request, ticket: str = "", redirect: str = "/"):
         logger.warning("CAS callback rejected by tenant resource limit: %s", exc)
         record_security_event("cas_login", AUDIT_RESULT_FAILURE, request=request,
                           reason="tenant_resource_limit")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
+        )
     except Exception as exc:
         logger.error(f"CAS callback failed: {exc}")
         record_security_event("cas_login", AUDIT_RESULT_FAILURE, request=request,

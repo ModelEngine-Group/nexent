@@ -198,12 +198,21 @@ export const authService = {
       const data = await response.json();
 
       if (!response.ok) {
+        const errorPayload =
+          data?.detail && typeof data.detail === "object"
+            ? data.detail
+            : data;
         return {
           error: {
             message:
-              data.detail || data.message || "Registration failed",
-            code: response.status,
+              typeof errorPayload?.message === "string"
+                ? errorPayload.message
+                : typeof data?.detail === "string"
+                  ? data.detail
+                  : "Registration failed",
+            code: errorPayload?.code || response.status,
             data: data.data || null,
+            details: errorPayload?.details || null,
           },
         };
       }

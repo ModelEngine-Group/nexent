@@ -256,6 +256,10 @@ class AgentConfig(BaseModel):
         ge=1,
     )
     model_name: str = Field(description="Model alias from ModelConfig")
+    output_protocol: Literal["code_action", "final_answer_envelope"] = Field(
+        description="Closed model-output protocol used by the Agent runtime",
+        default="code_action",
+    )
     provide_run_summary: Optional[bool] = Field(
         description="Whether to provide run summary to upper-level Agent", default=False
     )
@@ -340,9 +344,6 @@ class AgentPlan(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
-    human_interaction: Optional[Any] = Field(
-        default=None, description="Application-injected durable human interaction runtime; never built from model input"
-    )
     attempt_outcome: Optional[str] = Field(default=None, description="Typed worker outcome for the application host")
     query: str = Field(description="User query")
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")

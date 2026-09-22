@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexent.dev/schemas/change.schema.json",
+  "title": "Nexent formal test asset change record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "changes"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$"},
+    "nonEmpty": {"type": "string", "minLength": 1},
+    "idList": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true},
+    "caseDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["existing", "added", "modified", "retired"],
+      "properties": {
+        "existing": {"$ref": "#/$defs/idList"},
+        "added": {"$ref": "#/$defs/idList"},
+        "modified": {"$ref": "#/$defs/idList"},
+        "retired": {"$ref": "#/$defs/idList"}
+      }
+    },
+    "featureDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["existing", "added", "modified", "retired"],
+      "properties": {
+        "existing": {"$ref": "#/$defs/idList"},
+        "added": {"$ref": "#/$defs/idList"},
+        "modified": {"$ref": "#/$defs/idList"},
+        "retired": {"$ref": "#/$defs/idList"}
+      }
+    },
+    "coverageGap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "description"],
+      "properties": {
+        "type": {"enum": ["missing_case", "missing_boundary", "missing_assertion", "manifest_omission", "incorrect_skip", "non_blocking_result", "missing_contract"]},
+        "description": {"$ref": "#/$defs/nonEmpty"}
+      }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change_id", "change_type", "title", "description", "affected_features", "affected_cases"],
+      "properties": {
+        "change_id": {"$ref": "#/$defs/identifier"},
+        "change_type": {"enum": ["requirement", "bugfix", "refactor", "test-fix"]},
+        "title": {"$ref": "#/$defs/nonEmpty"},
+        "description": {"$ref": "#/$defs/nonEmpty"},
+        "requirement_id": {"$ref": "#/$defs/identifier"},
+        "bug_id": {"$ref": "#/$defs/identifier"},
+        "observed_behavior": {"type": "string"},
+        "expected_behavior": {"type": "string"},
+        "escaped_stage": {"enum": ["D1", "D2", "D3", "D4", "D5", "production", "unknown"]},
+        "coverage_gap": {"$ref": "#/$defs/coverageGap"},
+        "feature_contract_changed": {"type": "boolean"},
+        "affected_features": {"$ref": "#/$defs/featureDelta"},
+        "affected_cases": {"$ref": "#/$defs/caseDelta"},
+        "no_case_change_reason": {"type": "string"},
+        "notes": {"type": "string"}
+      },
+      "allOf": [
+        {"if": {"properties": {"change_type": {"const": "requirement"}}}, "then": {"required": ["requirement_id"]}},
+        {"if": {"properties": {"change_type": {"const": "bugfix"}}}, "then": {"required": ["bug_id", "observed_behavior", "expected_behavior", "escaped_stage", "coverage_gap", "feature_contract_changed"]}},
+        {"if": {"properties": {"change_type": {"enum": ["refactor", "test-fix"]}}}, "then": {"anyOf": [{"required": ["no_case_change_reason"]}, {"properties": {"affected_cases": {"not": {"properties": {"added": {"maxItems": 0}, "modified": {"maxItems": 0}, "retired": {"maxItems": 0}}}}}}]}}
+      ]
+    }
+  }
+}
