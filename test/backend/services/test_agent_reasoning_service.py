@@ -94,6 +94,15 @@ def test_snapshot_agent_reasoning_config_removes_effort_when_disabled():
     ) == {"1": {"extra_params": {"enable_thinking": False}}}
 
 
+def test_snapshot_agent_reasoning_config_preserves_effort_without_toggle():
+    assert snapshot_agent_reasoning_config(
+        model_ids=[1],
+        requested_overrides={"1": {"extra_params": {"reasoning_effort": "high"}}},
+        existing_overrides=None,
+        tenant_id="tenant-1",
+    ) == {"1": {"extra_params": {"reasoning_effort": "high"}}}
+
+
 def test_snapshot_agent_reasoning_config_uses_existing_map_when_request_is_omitted():
     existing = {"7": {"extra_params": {"enable_thinking": False}}}
     assert snapshot_agent_reasoning_config(
