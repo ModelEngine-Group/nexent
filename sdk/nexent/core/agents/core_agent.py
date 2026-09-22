@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_model import AgentVerificationConfig
+from .tool_user_context import sanitize_user_context_arguments_in_code
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
 from .verification import (
     VerificationController,
@@ -507,6 +508,30 @@ class CoreAgent(CodeAgent):
                 continue
         return names
 
+    def _hidden_user_context_fields_by_tool(self) -> Dict[str, tuple[str, ...]]:
+        """Return identity fields intentionally absent from each MCP tool schema.
+
+        The tool wrapper adds this metadata after it removes platform-injected
+        identity fields from the model-visible MCP contract.  It lets the
+        action pipeline clean up a model-invented field name before the action
+        is shown, retained in memory, or passed to the Python executor.
+        """
+        hidden_by_tool: Dict[str, tuple[str, ...]] = {}
+        tools = getattr(self, "tools", {}) or {}
+        try:
+            iterable = tools.items()
+        except AttributeError:
+            iterable = ((getattr(tool, "name", None), tool) for tool in tools)
+
+        for configured_name, tool in iterable:
+            hidden_fields = getattr(tool, "_nexent_hidden_user_context_fields", ())
+            if not hidden_fields:
+                continue
+            name = configured_name or getattr(tool, "name", None)
+            if name:
+                hidden_by_tool[str(name)] = tuple(hidden_fields)
+        return hidden_by_tool
+
     def _managed_agent_names(self) -> set:
         """Return the set of names belonging to managed sub-agents.
 
@@ -860,6 +885,7 @@ Additional Args:
         """
         hitl = getattr(self, "human_interaction", None)
         suppress_repair_generation_stream = False
+        hidden_user_context_fields = self._hidden_user_context_fields_by_tool()
         if hitl is not None and memory_step.model_output is not None:
             model_output = memory_step.model_output
         else:
@@ -897,6 +923,15 @@ Additional Args:
                 additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
             if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
                 additional_args["_defer_attempt_commit"] = True
+
+            # The model output stream is emitted before executable code can be
+            # parsed.  For an MCP tool with platform-injected identity fields,
+            # defer this one action's stream so a model-invented ``tenant_id``
+            # (etc.) cannot reach the UI or persisted trace before sanitizing.
+            if hidden_user_context_fields and (
+                getattr(self.model, "supports_suppressed_attempt_stream", False) is True
+            ):
+                additional_args["_suppress_attempt_stream"] = True
 
             repair_messages = getattr(self, "_protocol_repair_messages", [])
             if repair_messages:
@@ -1017,6 +1052,10 @@ Additional Args:
             code_action = classified_output.code
             code_action = fix_final_answer_code(code_action)
             code_action = _remove_parallel_executor_import(code_action)
+            code_action = sanitize_user_context_arguments_in_code(
+                code_action,
+                hidden_user_context_fields,
+            )
             memory_step.code_action = code_action
             self._resolve_deferred_model_attempt(
                 memory_step.model_output_message,

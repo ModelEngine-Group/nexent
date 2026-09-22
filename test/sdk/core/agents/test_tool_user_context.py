@@ -32,6 +32,9 @@ def _load_tool_user_context_module():
 tool_user_context = _load_tool_user_context_module()
 USER_CONTEXT_FIELDS = tool_user_context.USER_CONTEXT_FIELDS
 apply_user_context_to_mcp_tool = tool_user_context.apply_user_context_to_mcp_tool
+sanitize_user_context_arguments_in_code = (
+    tool_user_context.sanitize_user_context_arguments_in_code
+)
 
 
 class _FakeTool:
@@ -85,6 +88,9 @@ def test_declared_fields_injected_and_hidden_from_model():
     # must not leak the hidden identity parameter names either.
     assert tuple(inspect.signature(wrapped.forward).parameters) == ("query",)
     assert not hasattr(wrapped.forward, "__wrapped__")
+    assert wrapped._nexent_hidden_user_context_fields == (
+        "user_account", "user_groups",
+    )
     # Model only supplies business args; identity values come from the session.
     assert wrapped.forward(
         query="hello",
@@ -210,3 +216,33 @@ def test_non_dict_inputs_untouched():
     result = apply_user_context_to_mcp_tool(tool, SAMPLE_CONTEXT)
     assert result is tool
     assert not getattr(tool, "_nexent_user_context_wrapped", False)
+
+
+def test_generated_action_hides_only_injected_fields_for_that_tool():
+    code = '''
+result = inspect_caller_identity(
+    request_note="verify",
+    tenant_id="invented",
+    user_groups=[],
+)
+other_tool(tenant_id="keep-this")
+'''
+
+    sanitized = sanitize_user_context_arguments_in_code(
+        code,
+        {"inspect_caller_identity": ("tenant_id", "user_groups")},
+    )
+
+    assert "request_note='verify'" in sanitized
+    assert "tenant_id" not in sanitized.split("other_tool", maxsplit=1)[0]
+    assert "user_groups" not in sanitized
+    assert "other_tool(tenant_id='keep-this')" in sanitized
+
+
+def test_generated_action_with_invalid_python_is_left_for_protocol_handling():
+    code = "inspect_caller_identity(tenant_id=)"
+
+    assert sanitize_user_context_arguments_in_code(
+        code,
+        {"inspect_caller_identity": ("tenant_id",)},
+    ) == code
