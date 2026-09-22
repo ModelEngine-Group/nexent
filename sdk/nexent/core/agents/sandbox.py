@@ -40,6 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from nexent.core.agents.sandbox_workspace import SandboxWorkspace, validate_container_root
 from nexent.core.agents.sandbox_tls import (
@@ -1765,6 +1766,9 @@ class _DockerKernelLease:
             WebSocketTimeoutException, create_connection,
         )
 
+        channel_host = urlsplit(self.ws_url).hostname
+        if not channel_host:
+            raise ValueError("Sandbox WebSocket URL must contain a hostname")
         for attempt in range(3):
             self._check_execution_cancelled()
             ws = None
@@ -1775,7 +1779,16 @@ class _DockerKernelLease:
                     ws = create_connection(
                         self.ws_url, timeout=self._receive_timeout_seconds,
                         sslopt={"context": self._ssl_context},
+                        # websocket-client only retains no_proxy with an explicit proxy host.
+                        # The matching bypass entry prevents any proxy connection to this host.
+                        http_proxy_host=channel_host,
+                        http_no_proxy=[channel_host], redirect_limit=0,
                     )
+                    status = ws.getstatus()
+                    if status != 101:
+                        raise WebSocketBadStatusException(
+                            "Sandbox WebSocket handshake requires status 101", status,
+                        )
                     if scope is not None:
                         token = scope.register_closer(ws.shutdown)
                     self._check_execution_cancelled()

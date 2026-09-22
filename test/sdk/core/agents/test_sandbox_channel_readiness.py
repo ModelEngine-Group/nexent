@@ -39,6 +39,7 @@ def lease():
 
 def socket_for_execution(*, handshake_lost=False, execution_lost=False):
     ws = MagicMock()
+    ws.getstatus.return_value = 101
     frames = []
     sent = []
 
@@ -263,6 +264,7 @@ def test_cancelled_unhealthy_lease_is_not_replaced(lease):
 
 def test_handshake_requires_both_matching_shell_reply_and_iopub_idle(lease):
     ws = MagicMock()
+    ws.getstatus.return_value = 101
     frames = []
     def send(payload):
         request_id = json.loads(payload)["header"]["msg_id"]
@@ -282,6 +284,7 @@ def test_handshake_requires_both_matching_shell_reply_and_iopub_idle(lease):
 
 def test_handshake_tolerates_control_frames(lease):
     ws = MagicMock()
+    ws.getstatus.return_value = 101
     frames = [(ABNF.OPCODE_PING, b'ping'), (ABNF.OPCODE_PONG, b'pong')]
     def send(payload):
         request_id = json.loads(payload)['header']['msg_id']
@@ -296,6 +299,7 @@ def test_handshake_tolerates_control_frames(lease):
 @pytest.mark.parametrize('frame', [(ABNF.OPCODE_CLOSE, b'closed'), (ABNF.OPCODE_TEXT, b'')])
 def test_handshake_rejects_closed_channels(lease, frame):
     ws = MagicMock()
+    ws.getstatus.return_value = 101
     ws.recv_data.return_value = frame
     with pytest.raises(WebSocketConnectionClosedException):
         lease._wait_for_kernel_channel_ready(ws)
@@ -305,6 +309,7 @@ def test_handshake_obeys_total_deadline(lease, monkeypatch):
     times = iter([0, 1])
     monkeypatch.setattr(sb.time, 'monotonic', lambda: next(times))
     ws = MagicMock()
+    ws.getstatus.return_value = 101
     with pytest.raises(WebSocketTimeoutException, match='handshake timed out'):
         lease._wait_for_kernel_channel_ready(ws)
     ws.recv_data.assert_not_called()

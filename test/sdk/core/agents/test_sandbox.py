@@ -2579,6 +2579,7 @@ class TestDockerKernelLease:
         lease = self._lease()
         lease._get_kernel_execution_state = MagicMock(return_value="busy")
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.side_effect = [
             WebSocketTimeoutException("poll timeout"),
             (
@@ -2614,7 +2615,10 @@ class TestDockerKernelLease:
         assert result.logs == "done\n"
         assert lease._unhealthy is False
         lease._get_kernel_execution_state.assert_called_once_with()
-        create_connection.assert_called_once_with(lease.ws_url, timeout=0.25, sslopt={"context": lease._ssl_context})
+        create_connection.assert_called_once_with(
+            lease.ws_url, timeout=0.25, sslopt={"context": lease._ssl_context},
+            http_proxy_host="sandbox", http_no_proxy=["sandbox"], redirect_limit=0,
+        )
         websocket.close.assert_called_once_with()
 
     def test_kernel_lease_uses_stable_gateway_session_id(self, monkeypatch):
@@ -2651,6 +2655,7 @@ class TestDockerKernelLease:
         lease = self._lease()
         lease._get_kernel_execution_state = MagicMock(return_value="idle")
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.side_effect = WebSocketTimeoutException("terminal message lost")
         monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
         monkeypatch.setattr(
@@ -2672,6 +2677,7 @@ class TestDockerKernelLease:
             side_effect=lambda: setattr(lease, "_unhealthy", False)
         )
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.return_value = (
             ABNF.OPCODE_TEXT,
             json.dumps(
@@ -2796,6 +2802,7 @@ class TestDockerKernelLease:
         lease = self._lease()
         lease._get_kernel_execution_state = MagicMock(return_value="idle")
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.return_value = (
             ABNF.OPCODE_TEXT,
             json.dumps(
@@ -2827,6 +2834,7 @@ class TestDockerKernelLease:
         lease = self._lease()
         lease._get_kernel_execution_state = MagicMock(return_value="idle")
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.return_value = (ABNF.OPCODE_PING, b"heartbeat")
         monkeypatch.setattr(
             sandbox_module.time,
@@ -2851,6 +2859,7 @@ class TestDockerKernelLease:
         lease = self._lease()
         lease._get_kernel_execution_state = MagicMock(return_value="busy")
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.side_effect = WebSocketConnectionClosedException("channel closed")
         monkeypatch.setattr("websocket.create_connection", MagicMock(return_value=websocket))
         monkeypatch.setattr(
@@ -4833,6 +4842,7 @@ class TestTargetedSandboxCoverage:
         from websocket import ABNF
 
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.return_value = (
             ABNF.OPCODE_TEXT,
             json.dumps(
@@ -4966,6 +4976,7 @@ class TestTargetedSandboxCoverage:
             "content": {"execution_state": "idle"},
         }
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.side_effect = [
             (ABNF.OPCODE_TEXT, json.dumps(message)),
             (ABNF.OPCODE_TEXT, json.dumps(idle)),
@@ -4999,6 +5010,7 @@ class TestTargetedSandboxCoverage:
         from websocket import ABNF
 
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.return_value = (
             ABNF.OPCODE_CLOSE if frame == "close" else ABNF.OPCODE_TEXT,
             b"closed" if frame == "close" else b"",
@@ -5132,6 +5144,7 @@ class TestTargetedSandboxCoverage:
             OPCODE_PONG = 10
 
         websocket = MagicMock()
+        websocket.getstatus.return_value = 101
         websocket.recv_data.return_value = (
             FakeABNF.OPCODE_TEXT,
             json.dumps(
@@ -5175,7 +5188,8 @@ class TestTargetedSandboxCoverage:
         assert lease.run_code_raise_errors("1 + 1") == "result"
         remote_module._websocket_send_execute_request.assert_called_once_with("1 + 1", websocket)
         websocket_module.create_connection.assert_called_once_with(
-            "wss://kernel", timeout=5, sslopt={"context": lease._ssl_context}
+            "wss://kernel", timeout=5, sslopt={"context": lease._ssl_context},
+            http_proxy_host="kernel", http_no_proxy=["kernel"], redirect_limit=0,
         )
         lease.cleanup()
         lease._logger.warning.assert_called_once()
