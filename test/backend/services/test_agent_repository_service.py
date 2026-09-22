@@ -1481,6 +1481,161 @@ def test_update_status_same_status_noop(mock_status_update_deps):
     )
 
 
+def test_update_status_uses_official_fallback_listing(mock_status_update_deps):
+    deps = mock_status_update_deps
+    official_record = _repository_record(
+        status="shared",
+        publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+    )
+    deps["get_by_id"].side_effect = [None, official_record, official_record]
+    deps["update_status"].return_value = 1
+
+    result = ars.update_agent_repository_status_impl(
+        agent_repository_id=1,
+        status="shared",
+        user_id="su_user",
+        tenant_id="tenant_a",
+    )
+
+    assert result["status"] == "shared"
+    assert deps["get_by_id"].call_args_list == [
+        call(1, "tenant_a"),
+        call(1, ars.OFFICIAL_AGENT_TENANT_ID),
+        call(1, "tenant_a"),
+    ]
+
+
+def test_check_repository_import_precheck_rejects_snapshotless_listing():
+    record = _repository_record(agent_repository_id=42, status="shared")
+
+    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+        with pytest.raises(ValueError, match="Repository listing has no agent snapshot"):
+            ars.check_repository_import_precheck_impl(42, "tenant_a")
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_rejects_missing_listing():
+    with patch.object(ars, "get_agent_repository_by_id", return_value=None):
+        with pytest.raises(ValueError, match="Repository listing not found"):
+            await ars.import_agent_from_repository_impl(
+                agent_repository_id=42,
+                tenant_id="tenant_a",
+                authorization="Bearer token",
+            )
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_rejects_snapshotless_listing():
+    record = _repository_record(agent_repository_id=42, status="shared")
+
+    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+        with pytest.raises(ValueError, match="Repository listing has no agent snapshot"):
+            await ars.import_agent_from_repository_impl(
+                agent_repository_id=42,
+                tenant_id="tenant_a",
+                authorization="Bearer token",
+            )
+
+
+def test_list_official_agent_management_marks_records_as_official():
+    records = [_repository_record(agent_repository_id=42, status="shared")]
+
+    with patch.object(ars, "list_agent_repository_summaries", return_value=records) as mock_list:
+        result = ars.list_official_agent_management_impl()
+
+    mock_list.assert_called_once_with(
+        publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+        status="shared",
+    )
+    assert result == [
+        {
+            **records[0],
+            "publisher_tenant_id": ars.OFFICIAL_AGENT_TENANT_ID,
+        }
+    ]
+
+
+def test_delete_official_agent_removes_bundle_sources_and_listing(tmp_path):
+    bundle_dir = tmp_path / "medical-assistant"
+    bundle_dir.mkdir()
+    (bundle_dir / "agent.json").write_text("{}", encoding="utf-8")
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    nested_json = nested_dir / "medical-assistant.json"
+    nested_zip = nested_dir / "medical-assistant.zip"
+    nested_json.write_text("{}", encoding="utf-8")
+    nested_zip.write_bytes(b"zip")
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+        "agent_info_json": {"agent_info": {"10": {}, "child": {}, "11": {}}},
+    }
+
+    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch.object(
+        ars, "get_agent_repository_by_id", return_value=record
+    ), patch.object(ars, "delete_agent_by_id") as mock_delete_agent, patch.object(
+        ars, "soft_delete_agent_repository_record", return_value=1
+    ) as mock_soft_delete:
+        result = ars.delete_official_agent_impl(42, "su_user")
+
+    assert not bundle_dir.exists()
+    assert not nested_json.exists()
+    assert not nested_zip.exists()
+    mock_delete_agent.assert_has_calls([
+        call(10, ars.OFFICIAL_AGENT_TENANT_ID, "su_user"),
+        call(11, ars.OFFICIAL_AGENT_TENANT_ID, "su_user"),
+    ])
+    mock_soft_delete.assert_called_once_with(
+        42,
+        publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+        user_id="su_user",
+    )
+    assert result["preserved_tenant_copies"] is True
+    assert result["deleted_bundle_paths"]
+
+
+def test_delete_official_agent_rejects_missing_listing():
+    with patch.object(ars, "get_agent_repository_by_id", return_value=None):
+        with pytest.raises(ValueError, match="Official agent repository listing not found"):
+            ars.delete_official_agent_impl(42, "su_user")
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "nested/name", r"nested\\name"])
+def test_delete_official_agent_rejects_invalid_bundle_name(name):
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+        ),
+        "name": name,
+    }
+
+    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+        with pytest.raises(ValueError, match="Official agent bundle name is invalid"):
+            ars.delete_official_agent_impl(42, "su_user")
+
+
+def test_delete_official_agent_rejects_already_deleted_listing(tmp_path):
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+    }
+
+    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch.object(
+        ars, "get_agent_repository_by_id", return_value=record
+    ), patch.object(
+        ars, "soft_delete_agent_repository_record", return_value=0
+    ):
+        with pytest.raises(ValueError, match="Official agent repository listing was already deleted"):
+            ars.delete_official_agent_impl(42, "su_user")
+
+
 def test_list_repository_listings_includes_submitted_by():
     records = [
         {
