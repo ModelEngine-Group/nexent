@@ -658,6 +658,8 @@ function RequirementTypeGroup({
   const hasKnowledgeConflict =
     type === "knowledge_base" &&
     items.some((item) => item.resolution_required === true);
+  const hasNameConflict =
+    (type === "skill" || type === "knowledge_base") && hasResolutionConflict(items);
   const reasonLabel =
     getRepositoryRequirementReasonLabel(items[0]?.reason_code, t) ||
     (hasKnowledgeConflict
@@ -675,7 +677,7 @@ function RequirementTypeGroup({
           {typeLabel}
         </div>
         {abnormal ? (
-          activatePath ? (
+          activatePath && !hasNameConflict ? (
             <button
               type="button"
               onClick={onActivate}
@@ -728,4 +730,8 @@ function RequirementTypeGroup({
       </ul>
     </div>
   );
+}
+
+function hasResolutionConflict(items: RepositoryImportRequirementItem[]) {
+  return items.some((item) => item.resolution_required === true);
 }
