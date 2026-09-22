@@ -184,13 +184,13 @@ copy_profiles() {
     mkdir -p "$target"
     cp -R "$source/." "$target/"
     if [ -n "$NEXENT_USER_DIR_EXPLICIT" ] || [ "${DEPLOY_OFFICIAL_K8S:-false}" = true ]; then
-      mkdir -p "$TARGET_DIR"
-      cp -R "$target" "$TARGET_DIR/"
+      mkdir -p "$TARGET_DIR/$profile"
+      cp -R "$target/." "$TARGET_DIR/$profile/"
     else
       command -v docker >/dev/null 2>&1 || die "docker is required for Docker deployment"
       docker inspect "$TARGET_CONTAINER" >/dev/null 2>&1 || die "container not found: $TARGET_CONTAINER"
-      docker exec "$TARGET_CONTAINER" mkdir -p "$TARGET_CONTAINER_DIR"
-      docker cp "$target" "$TARGET_CONTAINER:$TARGET_CONTAINER_DIR/"
+      docker exec "$TARGET_CONTAINER" mkdir -p "$TARGET_CONTAINER_DIR/$profile"
+      docker cp "$target/." "$TARGET_CONTAINER:$TARGET_CONTAINER_DIR/$profile/"
     fi
   done
 }
