@@ -87,6 +87,35 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
   [MODEL_TYPES.VLM4]: "bg-emerald-100 text-emerald-700",
 };
 
+/** v0-style advanced field: label + input + hint below. */
+function AdvField({
+  label,
+  placeholder,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder?: string;
+  hint?: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm">{label}</Label>
+      <Input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
 export interface ModelEditDialogProps {
   model: ModelOption | null;
   onClose: () => void;
@@ -269,13 +298,83 @@ export const ModelEditDialog = ({
             </button>
             {showAdvanced && (
               <div className="mt-4 border-t pt-4">
-                <ModelAdvancedSettings
-                  modelType={model.type}
-                  specs={filterOutTokenizer(inferenceSpecs, model.type)}
-                  value={advanced}
-                  onChange={setAdvanced}
-                  mode="override"
-                />
+                {/* Capacity fields with v0-style hints */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                  <AdvField
+                    label="上下文窗口"
+                    placeholder="如 131072"
+                    hint="模型可处理的总 Token 数"
+                    value={advanced.context_window_tokens?.toString() ?? ""}
+                    onChange={(v) =>
+                      setAdvanced((a) => ({
+                        ...a,
+                        context_window_tokens: v ? Number(v) : undefined,
+                      }))
+                    }
+                  />
+                  <AdvField
+                    label="最大输入Token数"
+                    placeholder="如 98304"
+                    value={advanced.max_input_tokens?.toString() ?? ""}
+                    onChange={(v) =>
+                      setAdvanced((a) => ({
+                        ...a,
+                        max_input_tokens: v ? Number(v) : undefined,
+                      }))
+                    }
+                  />
+                  <AdvField
+                    label="最大输出Token数"
+                    placeholder="如 8192"
+                    value={advanced.max_output_tokens?.toString() ?? ""}
+                    onChange={(v) =>
+                      setAdvanced((a) => ({
+                        ...a,
+                        max_output_tokens: v ? Number(v) : undefined,
+                      }))
+                    }
+                  />
+                  <AdvField
+                    label="输出预留Token数"
+                    placeholder="如 1024"
+                    hint="为输出预留的 Token 空间"
+                    value={
+                      advanced.default_output_reserve_tokens?.toString() ?? ""
+                    }
+                    onChange={(v) =>
+                      setAdvanced((a) => ({
+                        ...a,
+                        default_output_reserve_tokens: v
+                          ? Number(v)
+                          : undefined,
+                      }))
+                    }
+                  />
+                  <AdvField
+                    label="温度"
+                    placeholder="如 0.7"
+                    hint="0 - 2，越高越随机"
+                    value={advanced.temperature?.toString() ?? ""}
+                    onChange={(v) =>
+                      setAdvanced((a) => ({
+                        ...a,
+                        temperature: v ? Number(v) : undefined,
+                      }))
+                    }
+                  />
+                  <AdvField
+                    label="Top P"
+                    placeholder="如 0.9"
+                    hint="0 - 1，核采样阈值"
+                    value={advanced.top_p?.toString() ?? ""}
+                    onChange={(v) =>
+                      setAdvanced((a) => ({
+                        ...a,
+                        top_p: v ? Number(v) : undefined,
+                      }))
+                    }
+                  />
+                </div>
               </div>
             )}
           </div>
