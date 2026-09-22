@@ -74,6 +74,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         A dictionary ready to be passed to *create_model_record*.
     """
     # Split repo/name once so it can be reused multiple times.
+    if not model.get("id"):
+        raise ValueError("batch model entry is missing required field 'id'")
     model_repo, model_name = split_repo_name(model["id"])
     model_display_name = add_repo_to_name(model_repo, model_name)
 

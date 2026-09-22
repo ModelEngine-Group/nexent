@@ -562,9 +562,10 @@ async def test_create_model_for_tenant_conflict_raises():
             "model_type": "llm",
         }
 
-        with pytest.raises(Exception) as exc:
+        with pytest.raises(ValueError) as exc:
             await svc.create_model_for_tenant(user_id, tenant_id, model_data)
-        assert "Failed to create model" in str(exc.value)
+        # ValueError propagates so the API layer can map it to 409.
+        assert "already in use" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -1702,9 +1703,9 @@ async def test_create_model_for_tenant_embedding_dimension_none():
             "model_type": "embedding",
         }
 
-        # ValueError is raised at line 116 but caught by outer except Exception at line 144,
-        # which re-raises as Exception with "Failed to create model: ..."
-        with pytest.raises(Exception) as exc:
+        # ValueError from the embedding-dimension check propagates unchanged
+        # so the API layer can map it to a 4xx.
+        with pytest.raises(ValueError) as exc:
             await svc.create_model_for_tenant("u1", "t1", model_data)
         assert "Failed to get embedding dimension" in str(exc.value)
 
