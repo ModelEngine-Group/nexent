@@ -4366,12 +4366,30 @@ class TestCreateAgentRunInfo:
                 )
 
     @pytest.mark.asyncio
-    async def test_create_agent_run_info_accepts_valid_reasoning_effort(self):
+    @pytest.mark.parametrize(
+        "reasoning_effort, expected_effort, capability",
+        [
+            (
+                "high",
+                "high",
+                {"status": "supported", "levels": ["low", "high"]},
+            ),
+            (
+                "auto",
+                None,
+                {"status": "supported", "levels": ["low", "high"]},
+            ),
+            ("high", "high", None),
+        ],
+    )
+    async def test_create_agent_run_info_accepts_valid_reasoning_effort(
+        self, reasoning_effort, expected_effort, capability
+    ):
         selected = types.SimpleNamespace(
             cite_name="selected",
             enable_thinking=True,
             reasoning_effort=None,
-            reasoning_capability={"status": "supported", "levels": ["low", "high"]},
+            reasoning_capability=capability,
             extra_body=None,
         )
         with patch(
@@ -4412,10 +4430,10 @@ class TestCreateAgentRunInfo:
                 tenant_id="tenant-1",
                 language="zh",
                 is_debug=True,
-                reasoning_effort="high",
+                reasoning_effort=reasoning_effort,
             )
 
-        assert selected.reasoning_effort == "high"
+        assert selected.reasoning_effort == expected_effort
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_success(self):

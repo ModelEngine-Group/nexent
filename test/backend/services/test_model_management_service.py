@@ -557,6 +557,24 @@ def test_apply_model_reasoning_default_handles_disabled_and_supported_profiles()
     assert unsupported["extra_params"]["reasoning_effort"] == "high"
 
 
+def test_apply_model_reasoning_default_preserves_auto_effort():
+    svc = import_svc()
+    model = {
+        "model_type": "llm",
+        "model_repo": "openai",
+        "model_name": "o3",
+        "extra_params": {"enable_thinking": True, "reasoning_effort": "auto"},
+    }
+    with mock.patch.object(
+        svc,
+        "resolve_reasoning_capability",
+        return_value={"status": "supported", "levels": ["low", "high"]},
+    ):
+        svc._apply_model_reasoning_default(model, "openai")
+
+    assert model["extra_params"]["reasoning_effort"] == "auto"
+
+
 @pytest.mark.parametrize(
     "capability",
     [

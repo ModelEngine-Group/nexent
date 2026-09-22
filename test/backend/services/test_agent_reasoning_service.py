@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from services.agent_reasoning_service import (
+    _resolve_model_reasoning_capability,
     reasoning_snapshot_from_model,
     snapshot_agent_reasoning_config,
 )
@@ -38,6 +39,13 @@ def test_reasoning_snapshot_from_model_normalizes_model_rows():
     }
 
 
+def test_resolve_model_reasoning_capability_handles_invalid_model_and_import_error():
+    assert _resolve_model_reasoning_capability(None) is None
+
+    with patch.dict("sys.modules", {"configs.model_catalog_loader": None}):
+        assert _resolve_model_reasoning_capability({"model_name": "reasoner"}) is None
+
+
 def test_snapshot_agent_reasoning_config_preserves_explicit_values_and_fills_missing():
     model_rows = {
         1: {
@@ -73,6 +81,17 @@ def test_snapshot_agent_reasoning_config_preserves_explicit_values_and_fills_mis
     }
     assert result["3"]["extra_params"] == {"enable_thinking": False}
     assert result["4"]["extra_params"] == {"enable_thinking": False}
+
+
+def test_snapshot_agent_reasoning_config_removes_effort_when_disabled():
+    assert snapshot_agent_reasoning_config(
+        model_ids=[1],
+        requested_overrides={
+            "1": {"extra_params": {"enable_thinking": False, "reasoning_effort": "high"}}
+        },
+        existing_overrides=None,
+        tenant_id="tenant-1",
+    ) == {"1": {"extra_params": {"enable_thinking": False}}}
 
 
 def test_snapshot_agent_reasoning_config_uses_existing_map_when_request_is_omitted():
