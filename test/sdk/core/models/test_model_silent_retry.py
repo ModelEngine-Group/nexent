@@ -1,4 +1,5 @@
 import pytest
+
 from nexent.core.models.retry import (
     DEFAULT_MODEL_RETRY,
     ModelErrorCode,
@@ -35,6 +36,7 @@ def test_cmsr_001_default_budget_is_five_total_attempts():
         (RuntimeError("503 server error"), True, ModelErrorCode.SERVICE_UNAVAILABLE),
         (RuntimeError("connection refused"), True, ModelErrorCode.CONNECTION_ERROR),
         (RuntimeError("read timeout"), True, ModelErrorCode.TIMEOUT),
+
         (RuntimeError("unclassified provider bug"), False, ModelErrorCode.UNKNOWN_ERROR),
     ],
 )
