@@ -3231,7 +3231,7 @@
   "agentAutomation.page.recurring": "Recurring",
   "agentAutomation.page.everySeconds": "Every {{count}} seconds",
   "agentAutomation.page.cronSchedule": "Cron {{expression}}",
-  "agentAutomation.page.nextFireAt": "Next run",
+  "agentAutomation.page.lastFireAt": "Last run",
   "agentAutomation.page.lastResult": "Latest result",
   "agentAutomation.page.actions": "Actions",
   "agentAutomation.page.run": "Run now",
