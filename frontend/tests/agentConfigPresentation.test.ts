@@ -26,4 +26,8 @@ test("keeps the agent configuration workspace white", async () => {
     page,
     /subtitle=\{\s*agent\.current_version_no\s*\?\s*t\("agentRepository\.mine\.currentVersion",/
   );
+  assert.match(
+    page,
+    /className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"/
+  );
 });
