@@ -1,0 +1,87 @@
+schema_version: '1.0'
+stage: D1
+module: CHAT-MESSAGE
+cases:
+  - case_id: CMSR-D1-001
+    feature_id: CMSR-005
+    requirement_ids: [CMSR-005]
+    business_rule_ids: [CMSR-RULE-013, CMSR-RULE-014]
+    title: Observer emits safe content before stream completion
+    type: SDK-UT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify bounded marker lookahead and attempt state reset.
+    preconditions: [Create an isolated observer and a controlled chunk sequence.]
+    test_data: {profile: mock, sequence: 'failed partial, rollback, successful split code and think markers'}
+    steps:
+      - {order: 1, action: Feed a safe prefix and pause the source., expected: The prefix is emitted before flush or commit.}
+      - {order: 2, action: Roll back the first attempt and feed split markers in the second., expected: The second output is ordered and contains no first-attempt residue.}
+    expected_results: [The earliest safe content is observable before completion., Split markers retain their original semantics.]
+    forbidden_side_effects: [No stale fragment crosses attempts., No code is executed by the observer.]
+    unit_boundary: Observer.add_model_new_token and attempt lifecycle
+    inputs: ['normal content', 'split <think> and </think>', 'raw <code> content']
+    assertions: [Safe prefix emitted before flush., Raw code tag retained., No failed-attempt residue.]
+  - case_id: CMSR-D1-002
+    feature_id: CMSR-005
+    requirement_ids: [CMSR-005]
+    business_rule_ids: [CMSR-RULE-014, CMSR-RULE-015]
+    title: Running step labels precede reasoning and survive retry rollback
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify immediate running labels, rollback preservation, legacy history and removal of terminal label-only cards.
+    preconditions: [Create the streaming adapter with a controlled SSE fixture.]
+    test_data: {profile: mock, sequences: ['step 1, failed attempt, rollback, successful raw code, parse', 'legacy content before step label']}
+    steps:
+      - {order: 1, action: Emit a step label before any model content., expected: A running reasoning card displays Step 1 immediately.}
+      - {order: 2, action: Roll back a partial attempt and stream successful raw code., expected: Step 1 remains during rollback and only successful raw code follows it.}
+      - {order: 3, action: Parse and reload both new and legacy-order history., expected: One code card and one labeled nonempty reasoning card remain; a terminal label-only card is absent.}
+    expected_results: [Step label appears before first token., Rollback preserves the label., Successful original content remains after the label., Old history prepends late labels.]
+    forbidden_side_effects: [No failed-attempt content., No duplicate code card., No sibling invocation mutation.]
+    unit_boundary: Frontend live and history reasoning projection
+    inputs: ['step_count', 'model_attempt_control', 'model_output_thinking', 'parse']
+    assertions: [Running label is visible before content., Terminal label-only step is hidden., Successful code is visible after the label before commit., History equals live output.]
+  - case_id: CMSR-D1-003
+    feature_id: CMSR-005
+    requirement_ids: [CMSR-005]
+    business_rule_ids: [CMSR-RULE-014, CMSR-RULE-016]
+    title: CoreAgent commits streamed valid semantic repair
+    type: SDK-UT
+    priority: P0
+    status: active
+    automation: automated
+    objective: A protocol-invalid first attempt rolls back while its single preceding step label survives and the corrected result streams and commits.
+    preconditions: [A controlled model yields an invalid response then a pausable valid code action at step one.]
+    test_data: {profile: mock, sequence: 'invalid code, rollback, corrected code chunks, commit, parse'}
+    steps:
+      - {order: 1, action: Begin step one and return protocol-invalid model content., expected: Exactly one step label precedes begin; the attempt rolls back and one repair is scheduled.}
+      - {order: 2, action: Pause the valid repair after its first safe chunk., expected: That chunk is visible before model completion.}
+      - {order: 3, action: Complete the repair and classify it., expected: Its attempt commits and a single parse follows.}
+    expected_results: [Corrected content is streamed and committed., Only the corrected action is executed., Lifecycle logs identify the repair without content.]
+    forbidden_side_effects: [No failed content after rollback., No repair instruction in user output., No suppressed successful stream.]
+    unit_boundary: CoreAgent semantic repair and deferred model attempt lifecycle
+    inputs: ['step one', 'invalid model content', 'valid streamed <code> action']
+    assertions: [Step label occurs before both model attempts and only once., Successful repair does not set stream suppression., Corrected attempt commits once., Invalid attempt rolls back once.]
+  - case_id: CMSR-D1-004
+    feature_id: CMSR-005
+    requirement_ids: [CMSR-005]
+    business_rule_ids: [CMSR-RULE-018]
+    title: Rejected model output diagnostics distinguish budget exhaustion without default content leakage
+    type: SDK-UT
+    priority: P1
+    status: active
+    automation: automated
+    objective: Correlate each protocol rejection to the model response shape and budget while gating bounded raw previews.
+    preconditions: [Use isolated model diagnostics for a reasoning-only length response and a malformed nonempty response.]
+    test_data: {profile: mock, responses: ['length with 4096 reasoning-only output tokens', 'malformed nonempty code Action']}
+    steps:
+      - {order: 1, action: Reject a reasoning-only length response with diagnostics disabled., expected: 'The log records model, attempt, requested and consumed tokens, reasoning and content counts, and reasoning-only budget exhaustion without raw text.'}
+      - {order: 2, action: Reject a malformed content response., expected: The distinct protocol reason and response shape are logged under its own attempt identifier.}
+      - {order: 3, action: Enable diagnostic content preview for a rejected response longer than the preview cap., expected: Only a single escaped bounded prefix of model content and reasoning is logged; the full text remains absent.}
+    expected_results: [Each rejection is attributable to one attempt and specific failure class., Raw output is absent by default and bounded on explicit opt-in.]
+    forbidden_side_effects: [No model output or user prompt enters SSE or persisted history from diagnostics., No secret or full raw payload is logged by default., No retry-budget or execution behavior changes.]
+    unit_boundary: OpenAI model response diagnostics and CoreAgent protocol-error logging
+    inputs: ['finish_reason=length', 'reasoning_content', 'invalid code Action', 'explicit diagnostic flag']
+    assertions: [Reasoning-only budget exhaustion flag is accurate., Logs include attempt and token counts., Default logs omit raw content., Opt-in previews are escaped and capped.]

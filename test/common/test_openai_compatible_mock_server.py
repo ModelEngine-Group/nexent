@@ -154,6 +154,70 @@ def test_cmsr_mock_partial_then_success_is_deterministic(mock_server):
     assert server.mock_state.snapshot()["request_count"] == 2
 
 
+def test_cmsr_mock_can_pause_after_first_success_content(mock_server):
+    server, port = mock_server
+    _post_json(
+        port,
+        "/__control",
+        {
+            "scenario": "success",
+            "response_text": "PAUSED_OK",
+            "pause_after_success_chunks": 3,
+        },
+    )
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+    connection.request(
+        "POST",
+        "/v1/chat/completions",
+        body=json.dumps(
+            {"model": "nexent-mock-model", "messages": [], "stream": True}
+        ),
+        headers={"Content-Type": "application/json", "Authorization": "Bearer test"},
+    )
+    response = connection.getresponse()
+    prefix = b"".join(response.readline() for _ in range(6))
+    assert response.status == 200
+    assert _stream_content(prefix).startswith("<code>fi")
+    assert server.mock_state.snapshot()["success_stream_paused"] is True
+    _post_json(port, "/__release", {})
+    assert _stream_content(prefix + response.read()) == (
+        '<code>final_answer("PAUSED_OK")</code>'
+    )
+    connection.close()
+
+
+def test_cmsr_mock_can_emit_code_without_reasoning(mock_server):
+    _server, port = mock_server
+    _post_json(
+        port,
+        "/__control",
+        {"scenario": "success", "response_text": "CODE_ONLY", "emit_reasoning": False},
+    )
+    status, _headers, body = _post_json(
+        port,
+        "/v1/chat/completions",
+        {"model": "nexent-mock-model", "messages": [], "stream": True},
+    )
+    assert status == 200
+    assert b"reasoning_content" not in body
+    assert _stream_content(body) == '<code>final_answer("CODE_ONLY")</code>'
+
+
+def test_cmsr_mock_invalid_protocol_then_valid_repair(mock_server):
+    server, port = mock_server
+    _post_json(
+        port,
+        "/__control",
+        {"scenario": "invalid_then_success", "response_text": "REPAIR_OK"},
+    )
+    request = {"model": "nexent-mock-model", "messages": [], "stream": True}
+    first = _post_json(port, "/v1/chat/completions", request)
+    second = _post_json(port, "/v1/chat/completions", request)
+    assert _stream_content(first[2]) == "INVALID_SEMANTIC_FIRST <code></code>"
+    assert _stream_content(second[2]) == '<code>final_answer("REPAIR_OK")</code>'
+    assert server.mock_state.snapshot()["request_count"] == 2
+
+
 def test_cmsr_mock_non_stream_and_models_contract(mock_server):
     _server, port = mock_server
     with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=3) as response:

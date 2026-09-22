@@ -1320,11 +1320,16 @@ def test_call_with_reasoning_content_only(openai_model_instance):
             "Final response")
 
 
+@pytest.mark.parametrize("content_preview_enabled", [False, True])
 def test_call_rejects_reasoning_only_response_and_records_diagnostics(
-    openai_model_instance, caplog
+    openai_model_instance, caplog, monkeypatch, content_preview_enabled
 ):
     """A reasoning stream that exhausts its budget must not become an empty success."""
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    if content_preview_enabled:
+        monkeypatch.setenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", "1")
+    else:
+        monkeypatch.delenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", raising=False)
 
     reasoning_chunk = MagicMock()
     reasoning_chunk.choices = [MagicMock()]
@@ -1363,7 +1368,14 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
     assert diagnostics["reasoning_chunk_count"] == 1
     assert diagnostics["reasoning_char_count"] == len("Internal reasoning")
     assert diagnostics["output_tokens"] == 20
+    assert diagnostics["reasoning_only_budget_exhausted"] is True
     assert "event=empty_model_response" in caplog.text
+    assert f"attempt_id={openai_model_instance.last_attempt_id}" in caplog.text
+    assert "output_tokens=20" in caplog.text
+    if content_preview_enabled:
+        assert 'reasoning_preview="Internal reasoning"' in caplog.text
+    else:
+        assert "Internal reasoning" not in caplog.text
 
 
 def test_call_with_reasoning_content_and_content_together(openai_model_instance):
