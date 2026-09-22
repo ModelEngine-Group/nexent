@@ -97,7 +97,9 @@ def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
         "name": bundle.name,
         "display_name": bundle.display_name or root.display_name,
         "description": bundle.description or root.description,
-        "author": root.author or "Nexent",
+        # Official repository cards are published by Nexent, regardless of
+        # the author metadata carried by an exported source Agent.
+        "author": "Nexent",
         "submitted_by": OFFICIAL_AGENT_USER_ID,
         "version_name": "Official",
         "agent_info_json": snapshot.model_dump(mode="json"),

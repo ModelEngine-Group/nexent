@@ -138,7 +138,12 @@ def test_materialize_snapshot_remaps_agent_and_managed_agent_ids():
 
 
 def test_sync_bundle_upserts_official_repository_record():
-    root = _agent(601, display_name="Root Agent", description="Root description", author="")
+    root = _agent(
+        601,
+        display_name="Root Agent",
+        description="Root description",
+        author="mlh@dev.com",
+    )
     snapshot = SimpleNamespace(
         agent_id=601,
         agent_info={"601": root},
