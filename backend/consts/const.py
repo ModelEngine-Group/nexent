@@ -229,13 +229,12 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
-# Tenant resource hard limits. These values are overridden in the tenant-limit PR.
+# Tenant resource hard limits. These values are configured in the tenant-limit PR.
 MAX_TENANT_COUNT = 100
 MAX_USERS_PER_TENANT = 10_000
 MAX_GROUPS_PER_TENANT = 1_000
 MAX_SUPER_ADMIN_COUNT = 1
 MAX_ADMINS_PER_TENANT = 1_000
-MAX_MCP_SERVICES_PER_TENANT = _positive_int_env("MAX_MCP_SERVICES_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -540,6 +539,8 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
 MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
+# Maximum number of configured MCP services per tenant.
+MAX_MCP_SERVICES_PER_TENANT = _positive_int_env("MAX_MCP_SERVICES_PER_TENANT", 1_000)
 # Hard timeout for a request made to a configured MCP service at runtime.
 MCP_REQUEST_TIMEOUT_SECONDS = _positive_float_env("MCP_REQUEST_TIMEOUT_SECONDS", 10)
 
