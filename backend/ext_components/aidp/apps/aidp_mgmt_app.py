@@ -398,6 +398,112 @@ def _resolve_doc_history_channel(
     return channel
 
 
+# How many history pages one document-list request may read. The endpoint is
+# paginated and puts files that are still being processed in front, so a burst
+# of simultaneous uploads can spill past the first page.
+_HISTORY_PAGE_LIMIT = 20
+
+
+def _history_reports_more(payload: dict) -> bool | None:
+    """Whether the payload explicitly says another history page exists.
+
+    Only unambiguous signals are trusted: this endpoint family reports
+    ``total_count`` as the size of the current page elsewhere, so it cannot be
+    read as a grand total. ``None`` means the payload does not say, and the
+    caller has to ask for the next page to find out.
+    """
+    has_more = payload.get("has_more")
+    if isinstance(has_more, bool):
+        return has_more
+    if "next_link" in payload:
+        return bool(payload.get("next_link"))
+    return None
+
+
+async def _load_doc_history_items(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    fs_id: str,
+    dir_path: str,
+) -> list[dict]:
+    """Read the channel directory's all-status history across its pages.
+
+    Reading only the first page would drop precisely the files this listing
+    exists to show: the endpoint sorts files that are still being processed to
+    the front, so more simultaneous uploads than fit in a page push the rest out
+    of view.
+
+    The walk stops at an empty page, stops when the payload says there is no
+    further page, and stops when a page adds nothing new — the last one keeps a
+    build that ignores ``page`` from looping over the same files. It is capped
+    at ``_HISTORY_PAGE_LIMIT`` so one list request cannot turn into an unbounded
+    number of upstream calls; reaching the cap is logged because the files
+    beyond it are then unknown.
+    """
+    collected: list[dict] = []
+    seen: set[str] = set()
+    for page in range(1, _HISTORY_PAGE_LIMIT + 1):
+        payload = await run_blocking(
+            "aidp-doc-history",
+            list_aidp_doc_history_impl,
+            server_url,
+            api_key,
+            fs_id,
+            dir_path,
+            kds_id,
+            None,
+            page,
+            lane="control-io",
+            owner="config",
+        )
+        raw_items = payload.get("value") if isinstance(payload, dict) else None
+        page_items = (
+            [item for item in raw_items if isinstance(item, dict)]
+            if isinstance(raw_items, list)
+            else []
+        )
+        if not page_items:
+            return collected
+
+        added = 0
+        for item in page_items:
+            identities = _document_identities(item)
+            key = identities[0] if identities else f"anonymous-{page}-{len(collected)}"
+            if key in seen:
+                continue
+            seen.add(key)
+            collected.append(item)
+            added += 1
+
+        reported_more = (
+            _history_reports_more(payload) if isinstance(payload, dict) else None
+        )
+        if reported_more is False:
+            return collected
+        if added == 0:
+            # The same page came back again, so this build does not honour
+            # `page`: stop instead of looping over the same files, but say so,
+            # because everything beyond the first page stays invisible.
+            logger.warning(
+                "AIDP file history for KB %s answered page %d without new items (%d read); "
+                "the endpoint appears to ignore `page`, so files beyond the first page stay "
+                "invisible",
+                kds_id,
+                page,
+                len(collected),
+            )
+            return collected
+    logger.warning(
+        "AIDP file history for KB %s reached %d pages (%d files); the statuses of further "
+        "files are not read",
+        kds_id,
+        _HISTORY_PAGE_LIMIT,
+        len(collected),
+    )
+    return collected
+
+
 async def _load_doc_history(
     server_url: str,
     api_key: str,
@@ -424,19 +530,14 @@ async def _load_doc_history(
         if not channel:
             # The reason is reported by ``_resolve_doc_history_channel``.
             return None
-        history = await run_blocking(
-            "aidp-doc-history",
-            list_aidp_doc_history_impl,
+        items = await _load_doc_history_items(
             server_url,
             api_key,
+            kds_id,
             channel["fs_id"],
             channel["src_dir"],
-            kds_id,
-            lane="control-io",
-            owner="config",
         )
-        items = history.get("value") if isinstance(history, dict) else None
-        if isinstance(items, list) and not items:
+        if not items:
             # A resolved channel directory holding no file would blank the table
             # and hide the KB's ingested files — the directory may simply not be
             # where this KB's uploads live. The KB-scoped listing is always safe
@@ -448,7 +549,7 @@ async def _load_doc_history(
                 f"(fs_id={channel['fs_id']}, dir_path={channel['src_dir']})",
             )
             return None
-        return history
+        return {"value": items}
     except AppException as exc:
         _log_history_fallback(kds_id, f"history request failed: {exc}")
         return None

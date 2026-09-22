@@ -2673,6 +2673,7 @@ class TestListAidpDocHistoryImpl:
         assert call_args.kwargs["json"] == {
             "fs_id": "fs-1",
             "dir_path": "/aidp/knowledge/kb-1",
+            "page": 1,
         }
         assert call_args.kwargs["headers"]["Authorization"] == "Bearer jwt-token"
 
