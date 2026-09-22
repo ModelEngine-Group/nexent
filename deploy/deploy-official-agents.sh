@@ -165,7 +165,7 @@ select_profiles() {
 }
 
 copy_profiles() {
-  local profile source target staged_root
+  local profile source target staged_root docker_source
   staged_root="$TMP_ROOT/staged"
   mkdir -p "$staged_root"
   IFS=',' read -r -a selected <<< "$PROFILES"
@@ -199,7 +199,11 @@ copy_profiles() {
         rm -rf "$TARGET_CONTAINER_DIR/$profile"
       MSYS_NO_PATHCONV=1 docker exec "$TARGET_CONTAINER" \
         mkdir -p "$TARGET_CONTAINER_DIR/$profile"
-      MSYS_NO_PATHCONV=1 docker cp "$target/." \
+      docker_source="$target"
+      if command -v cygpath >/dev/null 2>&1; then
+        docker_source="$(cygpath -w "$target")"
+      fi
+      MSYS_NO_PATHCONV=1 docker cp "$docker_source/." \
         "$TARGET_CONTAINER:$TARGET_CONTAINER_DIR/$profile/"
     fi
   done
