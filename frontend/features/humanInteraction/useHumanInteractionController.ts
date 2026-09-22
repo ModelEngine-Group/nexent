@@ -19,6 +19,8 @@ const ACTIVE_STATUSES = new Set([
   "RECOVERY_REQUIRED",
 ]);
 const STREAM_RECONNECT_STATUSES = new Set(["READY", "RUNNING"]);
+// Safety-net snapshot poll while a run is active (see the polling effect below).
+const ACTIVE_SNAPSHOT_POLL_INTERVAL_MS = 5000;
 const TERMINAL_STATUSES = new Set([
   "COMPLETED",
   "FAILED",
@@ -42,7 +44,7 @@ export interface HumanInteractionController {
     decision: HumanDecision,
     response: string | HumanClarificationAnswer[]
   ) => Promise<void>;
-  refresh: () => Promise<HumanRun | null>;
+  refresh: (force?: boolean) => Promise<HumanRun | null>;
 }
 
 export function useHumanInteractionController({
@@ -71,6 +73,12 @@ export function useHumanInteractionController({
   const refreshInFlight = useRef(false);
   const lastSnapshotAt = useRef(0);
   const MIN_SNAPSHOT_INTERVAL_MS = 3000;
+  // A forced refresh that arrived while another snapshot was in flight is
+  // re-run afterwards, so critical HITL transitions are never dropped.
+  const pendingForceRefresh = useRef(false);
+  const refreshRef = useRef<
+    (force?: boolean) => Promise<HumanRun | null> | undefined
+  >(undefined);
   // Mirror of the latest `run` state; keeps `refresh` dependencies stable.
   const runRef = useRef<HumanRun | null>(null);
   activeConversation.current = conversationId;
@@ -98,7 +106,7 @@ export function useHumanInteractionController({
     };
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     const requestedConversation = conversationId;
     if (!conversationId) {
       runRef.current = null;
@@ -106,13 +114,16 @@ export function useHumanInteractionController({
       setActiveRunId(null);
       return null;
     }
-    // Guard 1: coalesce while a snapshot is in flight.
+    // Guard 1: coalesce while a snapshot is in flight. Forced callers are
+    // re-run once the in-flight snapshot completes instead of being dropped.
     if (refreshInFlight.current) {
+      if (force) pendingForceRefresh.current = true;
       return runRef.current;
     }
-    // Guard 2: respect the minimum snapshot interval.
+    // Guard 2: respect the minimum snapshot interval; forced calls bypass it
+    // because they carry run-state transitions (e.g. ask_user suspends).
     const now = Date.now();
-    if (now - lastSnapshotAt.current < MIN_SNAPSHOT_INTERVAL_MS) {
+    if (!force && now - lastSnapshotAt.current < MIN_SNAPSHOT_INTERVAL_MS) {
       return runRef.current;
     }
     refreshInFlight.current = true;
@@ -146,8 +157,18 @@ export function useHumanInteractionController({
       return null;
     } finally {
       refreshInFlight.current = false;
+      if (pendingForceRefresh.current) {
+        pendingForceRefresh.current = false;
+        // Routed through the latest refresh closure, which re-validates the
+        // active conversation and sequence before applying a snapshot.
+        void refreshRef.current?.(true);
+      }
     }
   }, [conversationId]);
+
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
   /**
    * Discovery: one-shot snapshots at conversation change and agent pause.
@@ -197,15 +218,29 @@ export function useHumanInteractionController({
       // auto-reconnecting against a run that already finished.
       try {
         const parsed = JSON.parse(ev.data);
+        if (parsed.type === "human_run") {
+          if (
+            parsed.content &&
+            typeof parsed.content === "object" &&
+            TERMINAL_STATUSES.has(parsed.content.status)
+          ) {
+            stoppedByUs = true;
+            es.close();
+            void refresh(true);
+            return;
+          }
+          // Status transitions (e.g. ask_user → WAITING_HUMAN) carry the
+          // request form; they must not be dropped by the snapshot throttle —
+          // the event stream goes quiet afterwards, so nothing re-triggers.
+          void refresh(true);
+          return;
+        }
         if (
-          parsed.type === "human_run" &&
-          parsed.content &&
-          typeof parsed.content === "object" &&
-          TERMINAL_STATUSES.has(parsed.content.status)
+          ["human_interaction", "human_decision", "human_execution"].includes(
+            parsed.type
+          )
         ) {
-          stoppedByUs = true;
-          es.close();
-          void refresh();
+          void refresh(true);
           return;
         }
       } catch {
@@ -266,6 +301,20 @@ export function useHumanInteractionController({
 
   const scopedRun = run?.conversation_id === conversationId ? run : null;
   const active = Boolean(scopedRun && ACTIVE_STATUSES.has(scopedRun.status));
+
+  // Safety-net polling: the SSE stream is the primary delivery channel, but a
+  // silently stalled connection (hung dev proxy, half-open socket that never
+  // raises an error event) must not hide a pending form until a manual page
+  // refresh. The read-only snapshot is cheap; poll it at a low frequency while
+  // the scoped run is still active. Calls share the refresh() throttle and
+  // in-flight guard, so live SSE delivery simply coalesces with these ticks.
+  useEffect(() => {
+    if (!available || !conversationId || !active) return;
+    const timer = setInterval(() => {
+      void refresh();
+    }, ACTIVE_SNAPSHOT_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [available, conversationId, active, refresh]);
 
   const control = useCallback(
     async (action: "pause" | "terminate") => {

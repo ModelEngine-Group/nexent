@@ -5,18 +5,23 @@ import { Tag } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import TagFilterControls from "@/components/tag/TagFilterControls";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
+import type {
+  TagDefinition,
+  TagResourcePredicate,
+} from "@/types/tagManagement";
 
 interface TagFilterPopoverProps {
   definitions: TagDefinition[];
   value: TagResourcePredicate[];
   onChange: (predicates: TagResourcePredicate[]) => void;
+  buttonClassName?: string;
 }
 
 export default function TagFilterPopover({
   definitions,
   value,
   onChange,
+  buttonClassName,
 }: TagFilterPopoverProps) {
   const { t } = useTranslation("common");
 
@@ -45,7 +50,7 @@ export default function TagFilterPopover({
     >
       <Button
         type={value.length > 0 ? "primary" : "default"}
-        className="h-11"
+        className={buttonClassName}
         icon={<Tag className="size-3.5" aria-hidden />}
       >
         {t("repository.tagFilter.button")}

@@ -31,7 +31,7 @@ This is a Nexent adaptation of [OpenSpec's spec-driven schema](https://github.co
 
 ## Capabilities and Scenarios
 
-<Record the canonical SPEC name, selected level-1 module, optional level-2 module or its omission reason, change type, document mode, baseline path/section IDs, revision or dated snapshot, status and search scope. Give each in-scope requirement a stable feature ID such as `[AUTH-001]` and list its observable Scenarios. Preserve existing IDs where available. List new/modified capabilities or preserved refactor behavior. Reference any delta requirement targets. These feature IDs and Scenarios are the source inventory for design.md's D1 case matrix. Do not invent behavioral changes.>
+<Record the canonical SPEC name, selected level-1 module, optional level-2 module or its omission reason, change type, document mode, baseline path/section IDs, revision or dated snapshot, status and search scope. Give each in-scope requirement a stable feature ID such as `[AUTH-001]` and list its observable Scenarios. Preserve existing IDs where available. List new/modified capabilities or preserved refactor behavior. Reference any delta requirement targets. These feature IDs and Scenarios are the source inventory for design.md's formal D1-D5 case contracts. Do not invent behavioral changes.>
 
 ## Baseline Inventory
 

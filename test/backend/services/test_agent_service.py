@@ -410,10 +410,8 @@ def mock_convert_list_to_string(items):
 
     import management.services.agent.service as agent_service
     from management.services.agent.service import update_agent_info_impl
-    from management.services.agent.service import get_creating_sub_agent_info_impl
     from management.services.agent.service import list_all_agent_info_impl
     from management.services.agent.service import get_agent_info_impl
-    from management.services.agent.service import get_creating_sub_agent_id_service
     from management.services.agent.service import get_enable_tool_id_by_agent_id
     from management.services.agent.service import (
         get_agent_call_relationship_impl,
@@ -615,10 +613,8 @@ import management.services.agent.naming as naming_service
 import management.services.agent.run as agent_run_service
 import management.services.agent.service as agent_service
 from management.services.agent.service import update_agent_info_impl
-from management.services.agent.service import get_creating_sub_agent_info_impl
 from management.services.agent.service import list_all_agent_info_impl
 from management.services.agent.service import get_agent_info_impl
-from management.services.agent.service import get_creating_sub_agent_id_service
 from management.services.agent.service import get_enable_tool_id_by_agent_id
 from management.services.agent.service import (
     get_agent_call_relationship_impl,
@@ -720,61 +716,6 @@ async def test_get_enable_tool_id_by_agent_id():
         # Assert
         assert sorted(result) == [1, 3, 4]
         mock_query.assert_called_once_with(agent_id=123, tenant_id="test_tenant")
-
-
-@patch("management.services.agent.management.create_agent")
-@patch("management.services.agent.service.search_blank_sub_agent_by_main_agent_id")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_id_service_existing_agent(
-    mock_search, mock_create
-):
-    """
-    Test retrieving an existing sub-agent ID associated with a main agent.
-
-    This test verifies that when a sub-agent already exists for a main agent:
-    1. The function returns the existing sub-agent ID
-    2. No new agent is created (create_agent is not called)
-    """
-    # Setup - existing sub agent found
-    mock_search.return_value = 456
-
-    # Execute
-    result = await get_creating_sub_agent_id_service(
-        tenant_id="test_tenant", user_id="test_user"
-    )
-
-    # Assert
-    assert result == 456
-    mock_search.assert_called_once_with(tenant_id="test_tenant")
-    mock_create.assert_not_called()
-
-
-@patch("management.services.agent.service.create_agent")
-@patch("management.services.agent.service.search_blank_sub_agent_by_main_agent_id")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_id_service_new_agent(mock_search, mock_create):
-    """
-    Test creating a new sub-agent when none exists for a main agent.
-
-    This test verifies that when no sub-agent exists for a main agent:
-    1. A new agent is created with appropriate parameters
-    2. The function returns the newly created agent's ID
-    """
-    # Setup - no existing sub agent found
-    mock_search.return_value = None
-    mock_create.return_value = {"agent_id": 789}
-
-    # Execute
-    result = await get_creating_sub_agent_id_service(
-        tenant_id="test_tenant", user_id="test_user"
-    )
-
-    # Assert
-    assert result == 789
-    mock_search.assert_called_once_with(tenant_id="test_tenant")
-    mock_create.assert_called_once_with(
-        agent_info={"enabled": False}, tenant_id="test_tenant", user_id="test_user"
-    )
 
 
 @patch("management.services.agent.service.SkillService")
@@ -958,80 +899,6 @@ async def test_get_agent_info_impl_with_version_no(
     mock_check_availability.assert_called_once()
     # Verify query_current_version_no is called for version_no > 0
     mock_query_current_version_no.assert_called_once_with(123, "test_tenant")
-
-
-@patch("management.services.agent.service.get_model_by_model_id")
-@patch("management.services.agent.service.query_sub_agents_id_list")
-@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
-@patch("management.services.agent.service.search_agent_info_by_agent_id")
-@patch("management.services.agent.service.get_creating_sub_agent_id_service")
-@patch("management.services.agent.service.get_current_user_info")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_info_impl_success(
-    mock_get_current_user_info,
-    mock_get_creating_sub_agent,
-    mock_search_agent_info,
-    mock_get_enable_tools,
-    mock_query_sub_agents_id,
-    mock_get_model_by_model_id,
-):
-    """
-    Test successful retrieval of creating sub-agent information.
-
-    This test verifies that:
-    1. The function correctly gets the current user and tenant IDs
-    2. It retrieves or creates the sub-agent ID
-    3. It fetches the sub-agent's information and enabled tools
-    4. It returns a complete data structure with the sub-agent information
-    """
-    # Setup
-    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
-    mock_get_creating_sub_agent.return_value = 456
-    mock_search_agent_info.return_value = {
-        "model_ids": None,
-        "model_names": "test_model",
-        "name": "agent_name",
-        "display_name": "display name",
-        "description": "description...",
-        "max_steps": 5,
-        "business_description": "Sub agent",
-        "duty_prompt": "Sub duty prompt",
-        "constraint_prompt": "Sub constraint prompt",
-        "few_shots_prompt": "Sub few shots prompt",
-    }
-    mock_get_enable_tools.return_value = [1, 2]
-    mock_query_sub_agents_id.return_value = [789]
-
-    # Mock get_model_by_model_id - return None for model_id=None
-    mock_get_model_by_model_id.return_value = None
-
-    # Execute
-    # Ensure the sub agent id remains as initially configured (456)
-    mock_get_enable_tools.return_value = [1, 2]
-    result = await get_creating_sub_agent_info_impl(authorization="Bearer token")
-
-    # Assert
-    # W2 added `requested_output_tokens` to the response shape at
-    # agent_service.py:1112. The mocked `search_agent_info` payload does not
-    # include the key, so `agent_info.get("requested_output_tokens")` is None
-    # in the returned dict.
-    expected_result = {
-        "agent_id": 456,
-        "name": "agent_name",
-        "display_name": "display name",
-        "description": "description...",
-        "enable_tool_id_list": [1, 2],
-        "model_ids": None,
-        "model_names": "test_model",
-        "max_steps": 5,
-        "requested_output_tokens": None,
-        "business_description": "Sub agent",
-        "duty_prompt": "Sub duty prompt",
-        "constraint_prompt": "Sub constraint prompt",
-        "few_shots_prompt": "Sub few shots prompt",
-        "sub_agent_id_list": [789],
-    }
-    assert result == expected_result
 
 
 @patch("management.services.agent.service.create_or_update_tool_by_tool_info")
@@ -10716,81 +10583,6 @@ async def test_list_all_agent_info_impl_creator_no_group_overlap_hidden(
 # ============================================================================
 # Additional tests for uncovered code paths (improving coverage)
 # ============================================================================
-
-
-# Tests for get_creating_sub_agent_info_impl exception handling
-@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
-@patch("management.services.agent.service.query_sub_agents_id_list")
-@patch("management.services.agent.service.search_agent_info_by_agent_id")
-@patch("management.services.agent.service.get_creating_sub_agent_id_service")
-@patch("management.services.agent.service.get_current_user_info")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_info_impl_get_id_exception(
-    mock_get_user_info,
-    mock_get_sub_agent_id,
-    mock_search_info,
-    mock_query_sub_agents,
-    mock_get_enable_tool,
-):
-    """Test that exception getting sub agent ID is raised as ValueError."""
-    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
-    mock_get_sub_agent_id.side_effect = Exception("Database error getting sub agent id")
-
-    with pytest.raises(ValueError, match="Failed to get creating sub agent id"):
-        await get_creating_sub_agent_info_impl(authorization="Bearer token")
-
-
-@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
-@patch("management.services.agent.service.query_sub_agents_id_list")
-@patch("management.services.agent.service.search_agent_info_by_agent_id")
-@patch("management.services.agent.service.get_creating_sub_agent_id_service")
-@patch("management.services.agent.service.get_current_user_info")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_info_impl_search_info_exception(
-    mock_get_user_info,
-    mock_get_sub_agent_id,
-    mock_search_info,
-    mock_query_sub_agents,
-    mock_get_enable_tool,
-):
-    """Test that exception searching agent info is raised as ValueError."""
-    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
-    mock_get_sub_agent_id.return_value = 123
-    mock_search_info.side_effect = Exception("Database error searching agent info")
-
-    with pytest.raises(ValueError, match="Failed to get sub agent info"):
-        await get_creating_sub_agent_info_impl(authorization="Bearer token")
-
-
-@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
-@patch("management.services.agent.service.query_sub_agents_id_list")
-@patch("management.services.agent.service.search_agent_info_by_agent_id")
-@patch("management.services.agent.service.get_creating_sub_agent_id_service")
-@patch("management.services.agent.service.get_current_user_info")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_info_impl_get_tool_ids_exception(
-    mock_get_user_info,
-    mock_get_sub_agent_id,
-    mock_search_info,
-    mock_query_sub_agents,
-    mock_get_enable_tool,
-):
-    """Test that exception getting tool IDs is raised as ValueError."""
-    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
-    mock_get_sub_agent_id.return_value = 123
-    mock_search_info.return_value = {
-        "name": "sub_agent",
-        "display_name": "Sub Agent",
-        "description": "desc",
-        "model_name": "model",
-        "model_id": 1,
-        "max_steps": 10,
-        "business_description": "biz desc",
-    }
-    mock_get_enable_tool.side_effect = Exception("Database error getting tool ids")
-
-    with pytest.raises(ValueError, match="Failed to get sub agent enable tool id list"):
-        await get_creating_sub_agent_info_impl(authorization="Bearer token")
 
 
 # Tests for get_agent_by_name_impl
