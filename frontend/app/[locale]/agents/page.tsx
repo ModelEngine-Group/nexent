@@ -403,7 +403,6 @@ export default function AgentsPage() {
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
         onEdit={() => selectedAgent && updateUrl(Number(selectedAgent.id))}
-        actions={<AgentConfigActions />}
         onManageVersions={() => setIsVersionManageOpen(true)}
       />
       <Modal

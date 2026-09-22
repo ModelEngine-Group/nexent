@@ -12,7 +12,6 @@ interface AgentDetailProps {
   open: boolean;
   onClose: () => void;
   onEdit: () => void;
-  actions?: React.ReactNode;
   onManageVersions: () => void;
 }
 
@@ -21,7 +20,6 @@ export default function AgentDetail({
   open,
   onClose,
   onEdit,
-  actions,
   onManageVersions,
 }: AgentDetailProps) {
   const { t } = useTranslation("common");
@@ -45,24 +43,26 @@ export default function AgentDetail({
         </span>
       </div>
       <div className="p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-1">{actions}</div>
-          <div className="flex gap-2">
-            <Button onClick={onClose}>{t("common.cancel")}</Button>
-            <Button
-              type="primary"
-              icon={<Pencil className="size-4" />}
-              onClick={onEdit}
-            >
-              {t("agentRepository.mine.edit")}
-            </Button>
-          </div>
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
+          <Button
+            type="primary"
+            icon={<Pencil className="size-4" />}
+            onClick={onEdit}
+          >
+            {t("agentRepository.mine.edit")}
+          </Button>
         </div>
         {agent ? (
           <div className="space-y-5 py-2">
-            <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-              {agent.description || t("agentRepository.card.noDescription")}
-            </p>
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {t("agentRepository.detail.intro")}
+              </h3>
+              <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+                {agent.description || t("agentRepository.card.noDescription")}
+              </p>
+            </section>
             <Descriptions column={{ xs: 1, sm: 2 }} size="small">
               <Descriptions.Item
                 label={t("agentRepository.mine.currentVersion")}
