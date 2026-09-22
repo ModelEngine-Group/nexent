@@ -1139,9 +1139,6 @@ export const ModelConfigSection = forwardRef<
               </div>
             </div>
 
-              />
-            )}
-
             {/* -------------------- Model library list (v0 redesign) -------------------- */}
             <ModelLibraryList
               models={models}
