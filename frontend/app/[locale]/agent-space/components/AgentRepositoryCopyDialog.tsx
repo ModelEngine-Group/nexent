@@ -659,15 +659,18 @@ function RequirementTypeGroup({
     type === "knowledge_base" &&
     items.some((item) => item.resolution_required === true);
   const hasNameConflict =
-    (type === "skill" || type === "knowledge_base") && hasResolutionConflict(items);
+    (type === "knowledge_base" && hasKnowledgeConflict) ||
+    (type === "skill" &&
+      items.some((item) => item.reason_code === "skill_duplicate"));
   const reasonLabel =
-    getRepositoryRequirementReasonLabel(items[0]?.reason_code, t) ||
-    (hasKnowledgeConflict
+    (hasNameConflict && type === "knowledge_base"
       ? t(
           "agentRepository.copy.reason.kb_duplicate",
           "Knowledge base name conflict"
         )
-      : "");
+      : hasNameConflict && type === "skill"
+        ? t("agentRepository.copy.reason.skill_duplicate", "Skill name conflict")
+        : getRepositoryRequirementReasonLabel(items[0]?.reason_code, t));
 
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
@@ -730,8 +733,4 @@ function RequirementTypeGroup({
       </ul>
     </div>
   );
-}
-
-function hasResolutionConflict(items: RepositoryImportRequirementItem[]) {
-  return items.some((item) => item.resolution_required === true);
 }
