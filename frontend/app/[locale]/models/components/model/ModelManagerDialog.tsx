@@ -94,7 +94,10 @@ const TYPE_LABEL_KEY_MAP: Record<string, string> = {
 };
 
 function maskKey(key: string) {
-  if (!key) return "未设置";
+  // The model list API doesn't return the actual key value (security), so an
+  // empty key means "configured but not visible to the client" — show
+  // 已配置 rather than the misleading 未设置.
+  if (!key) return "已配置";
   if (key.length <= 8) return `${key.slice(0, 2)}••••${key.slice(-2)}`;
   return `${key.slice(0, 5)}••••${key.slice(-4)}`;
 }
