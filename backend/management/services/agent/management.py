@@ -66,6 +66,7 @@ from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids
+from database.tag_management_db import TagManagementDB
 from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_ID,
     SYSTEM_PROMPT_TEMPLATE_NAME,
@@ -837,6 +838,22 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
         # mark later ones as unavailable due to duplication.
         apply_duplicate_name_availability_rules(enriched_agents)
 
+        agent_tag_values: Dict[str, List[str]] = {}
+        agent_ids = [
+            str(entry["raw_agent"]["agent_id"])
+            for entry in enriched_agents
+            if entry["raw_agent"].get("agent_id") is not None
+        ]
+        if agent_ids:
+            try:
+                agent_tag_values = (
+                    TagManagementDB.list_resource_assignment_display_values_by_ids(
+                        tenant_id, "agent", agent_ids
+                    )
+                )
+            except Exception as error:
+                logger.warning("Failed to load agent tags: %s", error)
+
         simple_agent_list: list[dict] = []
         for entry in enriched_agents:
             agent = entry["raw_agent"]
@@ -861,6 +878,9 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
                 "description": agent["description"],
                 "author": agent.get("author"),
+                "created_by": agent.get("created_by"),
+                "create_time": agent.get("create_time"),
+                "tags": agent_tag_values.get(str(agent["agent_id"]), []),
                 "model_ids": model_ids,
                 "model_names": model_names,
                 "model_name": first_model_name,
@@ -879,6 +899,70 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
     except Exception as e:
         logger.error(f"Failed to query all agent info: {str(e)}")
         raise ValueError(f"Failed to query all agent info: {str(e)}")
+
+
+async def list_agent_page_impl(
+    tenant_id: str,
+    user_id: str,
+    permission: Optional[str] = None,
+    tag: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    additional_tenant_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """List visible agents with server-side filters and pagination."""
+    agents = await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
+    if additional_tenant_id:
+        agents.extend(
+            await list_all_agent_info_impl(
+                tenant_id=additional_tenant_id, user_id=user_id
+            )
+        )
+
+    if permission:
+        normalized_permission = permission.strip().upper()
+        if normalized_permission not in {"EDIT", "READ_ONLY"}:
+            raise ValueError("permission must be EDIT or READ_ONLY")
+        agents = [
+            agent
+            for agent in agents
+            if agent.get("permission") == normalized_permission
+        ]
+
+    if tag and tag.strip():
+        normalized_tag = tag.strip().casefold()
+        agents = [
+            agent
+            for agent in agents
+            if any(
+                str(agent_tag).casefold() == normalized_tag
+                for agent_tag in agent.get("tags", [])
+            )
+        ]
+
+    if search and search.strip():
+        normalized_search = search.strip().casefold()
+        agents = [
+            agent
+            for agent in agents
+            if any(
+                normalized_search in str(agent.get(field) or "").casefold()
+                for field in ("name", "display_name", "description")
+            )
+        ]
+
+    total = len(agents)
+    offset = (page - 1) * page_size
+    return {
+        "items": agents[offset:offset + page_size],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": (total + page_size - 1) // page_size if total else 0,
+        },
+    }
 
 
 

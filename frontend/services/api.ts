@@ -85,6 +85,7 @@ export const API_ENDPOINTS = {
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    listPage: `${API_BASE_URL}/agent/list/page`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
     stop: (runId: string | number) =>

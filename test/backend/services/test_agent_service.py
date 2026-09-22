@@ -610,10 +610,12 @@ if hasattr(sys.modules.get("consts"), "model"):
 
 # Now import backend modules
 import management.services.agent.naming as naming_service
+import management.services.agent.management as agent_management
 import management.services.agent.run as agent_run_service
 import management.services.agent.service as agent_service
 from management.services.agent.service import update_agent_info_impl
 from management.services.agent.service import list_all_agent_info_impl
+from management.services.agent.service import list_agent_page_impl
 from management.services.agent.service import get_agent_info_impl
 from management.services.agent.service import get_enable_tool_id_by_agent_id
 from management.services.agent.service import (
@@ -2982,6 +2984,64 @@ async def test_get_agent_info_impl_breaks_after_selected_model_id(
     assert result["tools"][0]["unavailable_reasons"] == []
     # Only one lookup per tool should be issued thanks to the `break`.
     mock_get_model_by_model_id_ignore_delete.assert_called_once_with(9, "test_tenant")
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_impl_filters_before_paginating(monkeypatch):
+    """Search, tag, and permission constraints apply before page slicing."""
+    agents = [
+        {
+            "agent_id": 1,
+            "name": "Support Alpha",
+            "description": "General help",
+            "permission": "EDIT",
+            "tags": ["support"],
+        },
+        {
+            "agent_id": 2,
+            "name": "Support Read Only",
+            "description": "General help",
+            "permission": "READ_ONLY",
+            "tags": ["support"],
+        },
+        {
+            "agent_id": 3,
+            "name": "Operations",
+            "description": "Support escalation",
+            "permission": "EDIT",
+            "tags": ["support"],
+        },
+        {
+            "agent_id": 4,
+            "name": "Billing",
+            "description": "Support billing",
+            "permission": "EDIT",
+            "tags": ["billing"],
+        },
+    ]
+
+    async def list_agents(**_kwargs):
+        return agents
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123",
+        user_id="test_user",
+        permission="EDIT",
+        tag="support",
+        search="support",
+        page=2,
+        page_size=1,
+    )
+
+    assert [agent["agent_id"] for agent in result["items"]] == [3]
+    assert result["pagination"] == {
+        "page": 2,
+        "page_size": 1,
+        "total": 2,
+        "total_pages": 2,
+    }
 
 
 @pytest.mark.asyncio

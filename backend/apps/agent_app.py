@@ -50,6 +50,7 @@ from management.services.agent.service import (
     check_agent_name_conflict_batch_impl,
     regenerate_agent_name_batch_impl,
     list_all_agent_info_impl,
+    list_agent_page_impl,
     run_agent_stream,
     stop_agent_tasks,
     get_agent_call_relationship_impl,
@@ -680,6 +681,48 @@ async def list_all_agent_info_api(
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent list error.")
+
+
+@agent_config_router.get("/list/page")
+async def list_agent_page_api(
+    tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering"),
+    permission: Optional[str] = Query(None, description="EDIT or READ_ONLY"),
+    tag: Optional[str] = Query(None, description="Exact agent tag"),
+    search: Optional[str] = Query(None, description="Agent name or description search"),
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    authorization: Optional[str] = Header(None),
+    request: Request = None,
+):
+    """List visible agents with filters and pagination."""
+    try:
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        resolved_tenant_id = tenant_id or auth_tenant_id
+        additional_tenant_id = (
+            ASSET_OWNER_TENANT_ID
+            if tenant_id is None and auth_tenant_id != ASSET_OWNER_TENANT_ID
+            else None
+        )
+        kwargs = {
+            "tenant_id": resolved_tenant_id,
+            "user_id": user_id,
+            "permission": permission,
+            "tag": tag,
+            "search": search,
+            "page": page,
+            "page_size": page_size,
+        }
+        if additional_tenant_id:
+            kwargs["additional_tenant_id"] = additional_tenant_id
+        return await list_agent_page_impl(**kwargs)
+    except ValueError as error:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(error)) from error
+    except Exception as error:
+        logger.error(f"Paged agent list error: {str(error)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Paged agent list error.",
+        ) from error
 
 
 @agent_config_router.get("/call_relationship/{agent_id}")

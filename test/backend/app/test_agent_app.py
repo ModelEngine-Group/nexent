@@ -1504,6 +1504,55 @@ def test_import_agent_api_exception(mocker, mock_auth_header):
 # ---------------------------------------------------------------------------
 
 
+def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
+    mocker, mock_auth_header
+):
+    """The paged list endpoint delegates filters after resolving the caller."""
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_list_agent_page = mocker.patch(
+        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock, create=True
+    )
+    mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
+    mock_list_agent_page.return_value = {
+        "items": [
+            {
+                "agent_id": 7,
+                "name": "Support Agent",
+                "permission": "EDIT",
+                "created_by": "test_user",
+                "create_time": "2026-09-22T08:00:00+00:00",
+                "tags": ["support"],
+            }
+        ],
+        "pagination": {"page": 2, "page_size": 5, "total": 6, "total_pages": 2},
+    }
+
+    response = config_client.get(
+        "/agent/list/page",
+        params={
+            "tenant_id": "tenant_123",
+            "permission": "EDIT",
+            "tag": "support",
+            "search": "support",
+            "page": 2,
+            "page_size": 5,
+        },
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == mock_list_agent_page.return_value
+    mock_list_agent_page.assert_awaited_once_with(
+        tenant_id="tenant_123",
+        user_id="test_user",
+        permission="EDIT",
+        tag="support",
+        search="support",
+        page=2,
+        page_size=5,
+    )
+
+
 def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     """Test list_all_agent_info_api success case without tenant_id."""
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
