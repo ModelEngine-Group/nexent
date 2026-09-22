@@ -1139,25 +1139,6 @@ export const ModelConfigSection = forwardRef<
               </div>
             </div>
 
-            {/* -------------------- Capacity coverage warning -------------------- */}
-            {capacityCoverage && capacityCoverage.bareCount > 0 && (
-              <Alert
-                type="warning"
-                showIcon
-                title={t("modelConfig.capacityCoverage.warning", {
-                  bareCount: capacityCoverage.bareCount,
-                  total: capacityCoverage.totalLlmVlm,
-                })}
-                description={t(
-                  "modelConfig.capacityCoverage.descriptionV2",
-                  {
-                    suggestionCount: capacityCoverage.bareModels.filter(
-                      (m) => m.suggestionAvailable
-                    ).length,
-                    defaultValue:
-                      "其中 {{suggestionCount}} 个有容量建议。在下方模型列表中找到容量为空的模型，点击编辑填入即可。",
-                  }
-                )}
               />
             )}
 

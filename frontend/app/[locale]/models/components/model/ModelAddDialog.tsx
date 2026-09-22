@@ -764,6 +764,18 @@ function BatchAddForm({
   async function submit() {
     const rows = fetched.filter((row) => selected[row.id]);
     if (rows.length === 0 || submitting) return;
+    // Require all selected models to have passed the connectivity probe —
+    // same gate as the old dialog. Prevents adding models that can't connect.
+    const untested = rows.filter((row) => rowCheck[row.id] !== "available");
+    if (untested.length > 0) {
+      message.warning(
+        t("modelConfig.addDialog.untestedWarning", {
+          defaultValue: `有 ${untested.length} 个模型未通过连通性检测，请先批量检测`,
+          count: untested.length,
+        })
+      );
+      return;
+    }
     setSubmitting(true);
     let created = 0;
     const failed: string[] = [];
