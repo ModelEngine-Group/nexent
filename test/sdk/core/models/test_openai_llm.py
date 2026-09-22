@@ -2919,6 +2919,18 @@ def test_reasoning_effort_uses_top_level_wire_field(openai_model_instance):
     assert completion_kwargs == {"reasoning_effort": "max"}
 
 
+def test_auto_reasoning_effort_is_omitted_from_provider_request(openai_model_instance):
+    openai_model_instance.reasoning_effort = "auto"
+    openai_model_instance.reasoning_capability = {
+        "wire_format": "reasoning_effort",
+    }
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {}
+
+
 def test_reasoning_toggle_uses_thinking_object(openai_model_instance):
     openai_model_instance.reasoning_effort = "none"
     openai_model_instance.reasoning_capability = {

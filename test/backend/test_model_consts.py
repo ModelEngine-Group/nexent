@@ -193,13 +193,13 @@ def test_filter_extra_params_accepts_reasoning_effort_for_llm_only():
 
 def test_filter_extra_params_validates_reasoning_switch():
     assert model_consts.filter_extra_params(
-        "llm", {"reasoning_enabled": True, "reasoning_effort": "medium"}
-    ) == {"reasoning_enabled": True, "reasoning_effort": "medium"}
+        "llm", {"enable_thinking": True, "reasoning_effort": "medium"}
+    ) == {"enable_thinking": True, "reasoning_effort": "medium"}
     assert model_consts.filter_extra_params(
-        "llm", {"reasoning_enabled": False, "reasoning_effort": "high"}
-    ) == {"reasoning_enabled": False, "reasoning_effort": "high"}
+        "llm", {"enable_thinking": False, "reasoning_effort": "high"}
+    ) == {"enable_thinking": False, "reasoning_effort": "high"}
     assert model_consts.filter_extra_params(
-        "llm", {"reasoning_enabled": "true"}
+        "llm", {"enable_thinking": "true"}
     ) is None
 
 

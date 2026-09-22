@@ -1109,7 +1109,7 @@ class OpenAIModel(OpenAIServerModel):
         ``thinking`` object, so the catalog declares that translation instead
         of making the runtime guess from a model name.
         """
-        if self.reasoning_effort is None:
+        if self.reasoning_effort is None or self.reasoning_effort == "auto":
             return
 
         capability = self.reasoning_capability or {}

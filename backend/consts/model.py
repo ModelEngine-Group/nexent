@@ -836,7 +836,7 @@ class AgentRequest(BaseModel):
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
     model_id: Optional[int] = None
-    reasoning_effort: Optional[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(
+    reasoning_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(
         default=None,
         description=(
             "Optional per-run reasoning effort. None inherits the selected model "
@@ -2301,7 +2301,7 @@ class ReasoningCapability(BaseModel):
 # Canonical values accepted by the model-level reasoning default.  The
 # provider catalog still decides which values are valid for a specific model.
 REASONING_EFFORT_VALUES = frozenset(
-    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+    {"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
 
 
@@ -2465,7 +2465,6 @@ def get_extra_param_keys_for_type(model_type: str) -> List[str]:
     if model_type in {"llm", "chat"}:
         # Stored in the existing JSONB column so this feature remains
         # backwards-compatible with installations that have no migration.
-        keys.append("reasoning_enabled")
         keys.append("reasoning_effort")
     return keys
 
@@ -2538,11 +2537,11 @@ def _clean_custom_params(value: Any, logger) -> Optional[Dict[str, Any]]:
 
 
 def _validate_reasoning_extra_param(key: str, value: Any, logger) -> bool:
-    if key == "reasoning_enabled":
+    if key == "enable_thinking":
         if isinstance(value, bool):
             return True
         logger.warning(
-            "Dropped invalid reasoning_enabled value %r; expected a boolean",
+            "Dropped invalid enable_thinking value %r; expected a boolean",
             value,
         )
         return False

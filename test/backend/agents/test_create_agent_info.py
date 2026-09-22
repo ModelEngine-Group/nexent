@@ -3831,33 +3831,40 @@ class TestCreateModelConfigList:
     def test_reasoning_helpers_filter_model_fields_and_resolve_effort(self):
         module = create_agent_info_module
 
-        assert module._is_reasoning_enabled(None) is False
-        assert module._is_reasoning_enabled({"reasoning_enabled": True}) is True
-        assert module._is_reasoning_enabled({"reasoning_enabled": False}) is False
-        assert module._is_reasoning_enabled({"reasoning_effort": "high"}) is True
+        assert module._is_thinking_enabled(None) is False
+        assert module._is_thinking_enabled({"enable_thinking": True}) is True
+        assert module._is_thinking_enabled({"enable_thinking": False}) is False
+        assert module._is_thinking_enabled({"reasoning_effort": "high"}) is True
 
         assert module._build_extra_body({
-            "reasoning_enabled": True,
+            "enable_thinking": True,
             "reasoning_effort": "high",
             "temperature": 0.2,
             "__custom__": {"top_k": 4},
-        }) == {"temperature": 0.2, "top_k": 4}
+        }) == {"enable_thinking": True, "temperature": 0.2, "top_k": 4}
 
         supported = {"status": "supported", "levels": ["low", "high"], "default": "high"}
         assert module._resolve_model_reasoning_effort(
-            {"reasoning_enabled": True, "reasoning_effort": "low"}, supported
+            {"enable_thinking": True, "reasoning_effort": "low"}, supported
         ) == "low"
         assert module._resolve_model_reasoning_effort(
-            {"reasoning_enabled": True, "reasoning_effort": "medium"}, supported
+            {"enable_thinking": True, "reasoning_effort": "medium"}, supported
         ) == "high"
         assert module._resolve_model_reasoning_effort(
-            {"reasoning_enabled": True}, {"status": "supported", "levels": [], "default": None}
-        ) == "low"
+            {"enable_thinking": True}, {"status": "supported", "levels": [], "default": None}
+        ) is None
         assert module._resolve_model_reasoning_effort(
-            {"reasoning_enabled": True}, {"status": "unsupported"}
-        ) == "medium"
+            {"enable_thinking": True}, {"status": "unsupported"}
+        ) is None
         assert module._resolve_model_reasoning_effort(
-            {"reasoning_enabled": False, "reasoning_effort": "high"}, supported
+            {"enable_thinking": True, "reasoning_effort": "high"},
+            {"status": "unsupported"},
+        ) == "high"
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "auto"}, supported
+        ) is None
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": False, "reasoning_effort": "high"}, supported
         ) is None
 
     def test_reasoning_capability_resolver_delegates_to_catalog(self):
@@ -3980,7 +3987,7 @@ class TestCreateModelConfigList:
                 "model_name": "o3",
                 "base_url": "https://api.openai.com/v1",
                 "model_factory": "openai",
-                "extra_params": {"reasoning_enabled": True, "reasoning_effort": "low"},
+                "extra_params": {"enable_thinking": True, "reasoning_effort": "low"},
             }]
             manager.get_model_config.return_value = {
                 "api_key": "key",
@@ -3991,7 +3998,7 @@ class TestCreateModelConfigList:
             await create_model_config_list("tenant-1")
 
         first_call = mock_model_config.call_args_list[0].kwargs
-        assert first_call["reasoning_enabled"] is True
+        assert first_call["enable_thinking"] is True
         assert first_call["reasoning_effort"] == "low"
         assert first_call["reasoning_capability"] == capability
 
@@ -4172,7 +4179,7 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_applies_reasoning_overrides(self):
         selected = types.SimpleNamespace(
             cite_name="selected",
-            reasoning_enabled=True,
+            enable_thinking=True,
             reasoning_effort="high",
             reasoning_capability={"status": "supported", "levels": ["low", "high"]},
             extra_body={"keep": True, "remove": True},
@@ -4195,7 +4202,7 @@ class TestCreateAgentRunInfo:
                 "model_params_override": {
                     "7": {
                         "extra_params": {
-                            "reasoning_enabled": False,
+                            "enable_thinking": False,
                             "reasoning_effort": "high",
                             "__custom__": {"remove": None, "added": "yes"},
                         },
@@ -4231,13 +4238,13 @@ class TestCreateAgentRunInfo:
                 is_debug=True,
             )
 
-        assert selected.reasoning_enabled is False
+        assert selected.enable_thinking is False
         assert selected.reasoning_effort == "low"
         assert selected.extra_body == {"keep": True, "added": "yes"}
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("reasoning_enabled", "extra_effort", "override_effort", "expected_enabled", "expected_effort"),
+        ("enable_thinking", "extra_effort", "override_effort", "expected_enabled", "expected_effort"),
         [
             (True, "medium", None, True, "medium"),
             (False, "high", None, False, "high"),
@@ -4246,11 +4253,11 @@ class TestCreateAgentRunInfo:
         ],
     )
     async def test_create_agent_run_info_covers_reasoning_override_boundaries(
-        self, reasoning_enabled, extra_effort, override_effort, expected_enabled, expected_effort
+        self, enable_thinking, extra_effort, override_effort, expected_enabled, expected_effort
     ):
         selected = types.SimpleNamespace(
             cite_name="selected",
-            reasoning_enabled=True,
+            enable_thinking=True,
             reasoning_effort="high",
             reasoning_capability={"status": "supported", "levels": ["low", "medium", "high"]},
             extra_body={"keep": True},
@@ -4273,7 +4280,7 @@ class TestCreateAgentRunInfo:
                 "model_params_override": {
                     "7": {
                         "extra_params": {
-                            "reasoning_enabled": reasoning_enabled,
+                            "enable_thinking": enable_thinking,
                             "reasoning_effort": extra_effort,
                         },
                         "reasoning_effort": override_effort,
@@ -4308,7 +4315,7 @@ class TestCreateAgentRunInfo:
                 is_debug=True,
             )
 
-        assert selected.reasoning_enabled is expected_enabled
+        assert selected.enable_thinking is expected_enabled
         assert selected.reasoning_effort == expected_effort
 
     @pytest.mark.asyncio
@@ -4318,12 +4325,12 @@ class TestCreateAgentRunInfo:
             None,
             types.SimpleNamespace(
                 cite_name="selected",
-                reasoning_enabled=False,
+                enable_thinking=False,
                 reasoning_capability={"status": "supported", "levels": ["low", "high"]},
             ),
             types.SimpleNamespace(
                 cite_name="selected",
-                reasoning_enabled=True,
+                enable_thinking=True,
                 reasoning_capability={"status": "supported", "levels": ["low"]},
             ),
         ],
@@ -4362,7 +4369,7 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_accepts_valid_reasoning_effort(self):
         selected = types.SimpleNamespace(
             cite_name="selected",
-            reasoning_enabled=True,
+            enable_thinking=True,
             reasoning_effort=None,
             reasoning_capability={"status": "supported", "levels": ["low", "high"]},
             extra_body=None,

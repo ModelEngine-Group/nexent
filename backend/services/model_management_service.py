@@ -77,7 +77,7 @@ logger = logging.getLogger("model_management_service")
 INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3", "vlm4"}
 CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
 COMMON_REASONING_LEVELS = ("low", "medium", "high")
-COMMON_REASONING_DEFAULT = "medium"
+COMMON_REASONING_DEFAULT = "auto"
 
 
 def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
@@ -104,12 +104,12 @@ def _apply_model_reasoning_default(
     The value is kept in the existing ``extra_params`` JSONB column, so this
     also upgrades old/custom model IDs without requiring a schema migration.
     New models keep the switch disabled unless the caller explicitly enables
-    it. Legacy rows that already contain a reasoning effort remain compatible.
+    it.
     """
     if model_data.get("model_type") not in {"llm", "chat"}:
         return
     extra_params = dict(model_data.get("extra_params") or {})
-    enabled = extra_params.get("reasoning_enabled")
+    enabled = extra_params.get("enable_thinking")
     if enabled is not True:
         if enabled is False:
             extra_params.pop("reasoning_effort", None)
@@ -124,17 +124,16 @@ def _apply_model_reasoning_default(
         provider_hint=provider_hint or model_data.get("model_factory"),
     )
     if isinstance(capability, dict) and capability.get("status") == "supported":
-        levels = capability.get("levels") or []
-        default = capability.get("default")
+        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
     else:
+        # Keep a provider-agnostic profile for unknown/custom model IDs. The
+        # provider remains the source of truth if it rejects a concrete value.
         levels = list(COMMON_REASONING_LEVELS)
-        default = COMMON_REASONING_DEFAULT
-    if not levels or default not in levels:
-        levels = list(COMMON_REASONING_LEVELS)
-        default = COMMON_REASONING_DEFAULT
+    if extra_params.get("reasoning_effort") == "auto":
+        return
     if extra_params.get("reasoning_effort") in levels:
         return
-    extra_params["reasoning_effort"] = default
+    extra_params["reasoning_effort"] = COMMON_REASONING_DEFAULT
     model_data["extra_params"] = extra_params
 
 

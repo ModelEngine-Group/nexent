@@ -40,7 +40,14 @@ export type ModelType =
   | "multi_embedding";
 
 export type ReasoningEffort =
-  "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  | "auto"
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
 
 export interface ReasoningCapability {
   status: "supported" | "unsupported" | "unknown";
@@ -84,8 +91,8 @@ export interface ModelOption {
   topP?: number;
   extraParams?: Record<string, unknown>;
   reasoningCapability?: ReasoningCapability;
-  /** Whether the model-level reasoning effort switch is enabled. */
-  reasoningEnabled?: boolean;
+  /** Whether the model-level thinking switch is enabled. */
+  enableThinking?: boolean;
   /** Persisted model-level default, stored in extra_params.reasoning_effort. */
   defaultReasoningEffort?: ReasoningEffort;
 }

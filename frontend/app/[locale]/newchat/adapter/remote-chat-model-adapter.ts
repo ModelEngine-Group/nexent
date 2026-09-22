@@ -1528,7 +1528,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
     }
-    if (!isResume && typeof reasoningEffort === "string" && reasoningEffort) {
+    if (
+      !isResume &&
+      typeof reasoningEffort === "string" &&
+      reasoningEffort &&
+      reasoningEffort !== "auto"
+    ) {
       requestBody.reasoning_effort = reasoningEffort;
     }
 

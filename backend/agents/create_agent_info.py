@@ -56,7 +56,7 @@ from database.agent_db import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
 )
-from database.agent_version_db import query_current_version_no
+from database.agent_version_db import query_current_version_no, update_agent_snapshot
 from database import skill_db
 from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
@@ -112,6 +112,45 @@ def _select_agent_model_id(
         if is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)):
             return model_id
     return agent_model_ids[0] if agent_model_ids else None
+
+
+def _ensure_agent_reasoning_snapshot(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+) -> None:
+    """Backfill reasoning ownership for agents created before Scheme B."""
+    from services.agent_reasoning_service import snapshot_agent_reasoning_config
+
+    try:
+        agent_info = search_agent_info_by_agent_id(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        if not agent_info:
+            return
+        current_overrides = agent_info.get("model_params_override")
+        updated_overrides = snapshot_agent_reasoning_config(
+            model_ids=agent_info.get("model_ids"),
+            requested_overrides=current_overrides,
+            existing_overrides=current_overrides,
+            tenant_id=agent_info.get("tenant_id") or tenant_id,
+        )
+        if updated_overrides == current_overrides:
+            return
+        update_agent_snapshot(
+            agent_id=agent_id,
+            tenant_id=agent_info.get("tenant_id") or tenant_id,
+            version_no=version_no,
+            agent_data={"model_params_override": updated_overrides},
+        )
+    except Exception as exc:  # pragma: no cover - defensive migration fallback
+        logger.warning(
+            "Failed to backfill agent reasoning snapshot for agent %s: %s",
+            agent_id,
+            exc,
+        )
 
 
 def _get_external_provider_service_for_search():
@@ -200,18 +239,15 @@ _OPERATOR_OVERRIDE_FIELDS = (
 )
 
 COMMON_REASONING_LEVELS = ("low", "medium", "high")
-COMMON_REASONING_DEFAULT = "medium"
+COMMON_REASONING_DEFAULT = "auto"
 
-
-def _is_reasoning_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
-    """Return whether the model explicitly or legacy implicitly enables reasoning."""
+def _is_thinking_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
+    """Return whether the model explicitly or implicitly enables reasoning."""
     if not isinstance(extra_params, dict):
         return False
-    if extra_params.get("reasoning_enabled") is True:
-        return True
-    return "reasoning_enabled" not in extra_params and isinstance(
-        extra_params.get("reasoning_effort"), str
-    )
+    if isinstance(extra_params.get("enable_thinking"), bool):
+        return extra_params["enable_thinking"]
+    return isinstance(extra_params.get("reasoning_effort"), str)
 
 
 def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -224,8 +260,7 @@ def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[s
     if not extra_params or not isinstance(extra_params, dict):
         return None
     extra_body = dict(extra_params)
-    # This is a dedicated ModelConfig field, not a provider request-body key.
-    extra_body.pop("reasoning_enabled", None)
+    # These are dedicated ModelConfig fields, not provider request-body keys.
     extra_body.pop("reasoning_effort", None)
     custom = extra_body.pop("__custom__", None)
     if custom and isinstance(custom, dict):
@@ -254,23 +289,27 @@ def _resolve_model_reasoning_effort(
     extra_params: Optional[Dict[str, Any]],
     capability: Optional[Dict[str, Any]],
 ) -> Optional[str]:
-    """Resolve the enabled model's effort from its profile or common defaults."""
-    if not isinstance(extra_params, dict) or not _is_reasoning_enabled(extra_params):
+    """Resolve the enabled model's effort from its supported profile."""
+    if not isinstance(extra_params, dict) or not _is_thinking_enabled(extra_params):
+        return None
+    if extra_params.get("reasoning_effort") == "auto":
         return None
     if isinstance(capability, dict) and capability.get("status") == "supported":
-        levels = capability.get("levels") or []
+        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
         default = capability.get("default")
+        if default not in levels:
+            default = COMMON_REASONING_DEFAULT
     else:
+        # Unknown/custom model IDs still use the common generic profile. The
+        # provider remains the source of truth when a concrete value is sent.
         levels = list(COMMON_REASONING_LEVELS)
         default = COMMON_REASONING_DEFAULT
-    if not levels:
-        levels = list(COMMON_REASONING_LEVELS)
-    if default not in levels:
-        default = levels[0]
     saved = extra_params.get("reasoning_effort")
     if saved in levels:
         return saved
-    return default
+    # Auto is the universal fallback: omit the provider-specific effort so the
+    # model can choose its own reasoning depth.
+    return None if saved is None or default == COMMON_REASONING_DEFAULT else default
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -1046,7 +1085,7 @@ async def create_model_config_list(tenant_id):
                         # temperature/top_p/extra_params flow into SDK.
                         temperature=record.get("temperature"),
                         top_p=record.get("top_p"),
-                        reasoning_enabled=_is_reasoning_enabled(record.get("extra_params")),
+                        enable_thinking=_is_thinking_enabled(record.get("extra_params")),
                         reasoning_capability=reasoning_capability,
                         reasoning_effort=_resolve_model_reasoning_effort(
                             record.get("extra_params"), reasoning_capability
@@ -2353,6 +2392,12 @@ async def create_agent_run_info(
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
 
+    _ensure_agent_reasoning_snapshot(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+    )
+
     final_query = await join_minio_file_description_to_query(
         minio_files=minio_files,
         query=query,
@@ -2428,9 +2473,9 @@ async def create_agent_run_info(
                     if override_extra and isinstance(override_extra, dict):
                         merged = dict(mc.extra_body or {})
                         for k, v in override_extra.items():
-                            if k == "reasoning_enabled":
+                            if k == "enable_thinking":
                                 if isinstance(v, bool):
-                                    mc.reasoning_enabled = v
+                                    mc.enable_thinking = v
                                     if not v:
                                         mc.reasoning_effort = None
                                 continue
@@ -2456,24 +2501,28 @@ async def create_agent_run_info(
                     break
 
     # A request-level effort is valid only when the selected model's switch is
-    # enabled. Known capabilities use their declared levels; unknown/custom
-    # models use the common low/medium/high range and let the provider reject
-    # an unsupported wire parameter with a user-safe configuration error.
+    # enabled. Known capabilities use their declared levels. Unknown/custom
+    # models use the common generic profile and let the provider reject an
+    # unsupported concrete value through the normal reasoning error path.
+    # ``auto`` is represented by an omitted per-request effort. The selected
+    # model keeps reasoning enabled, but the provider chooses the depth.
+    if reasoning_effort == "auto":
+        reasoning_effort = None
     if reasoning_effort is not None:
         selected_config = next(
             (mc for mc in model_list if mc.cite_name == agent_config.model_name),
             None,
         )
         capability = selected_config.reasoning_capability if selected_config else None
+        if not selected_config or not selected_config.enable_thinking:
+            raise ValidationError(
+                "The selected model does not support the requested reasoning effort"
+            )
         if isinstance(capability, dict) and capability.get("status") == "supported":
-            supported_levels = capability.get("levels") or []
+            supported_levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
         else:
             supported_levels = list(COMMON_REASONING_LEVELS)
-        if (
-            not selected_config
-            or not selected_config.reasoning_enabled
-            or reasoning_effort not in supported_levels
-        ):
+        if reasoning_effort not in supported_levels:
             raise ValidationError(
                 "The selected model does not support the requested reasoning effort"
             )

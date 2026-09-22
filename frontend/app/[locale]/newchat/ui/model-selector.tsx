@@ -39,10 +39,36 @@ export type ModelSelectorEffortOption = {
 };
 
 export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
+  { id: "auto", name: "Auto" },
   { id: "low", name: "Low" },
   { id: "medium", name: "Medium" },
   { id: "high", name: "High" },
 ];
+
+const REASONING_EFFORT_LABELS: Record<
+  string,
+  { key: string; defaultValue: string }
+> = {
+  auto: { key: "model.advanced.reasoningAuto", defaultValue: "Auto" },
+  none: { key: "model.advanced.reasoningOff", defaultValue: "Off" },
+  minimal: {
+    key: "model.advanced.reasoningMinimal",
+    defaultValue: "Minimal",
+  },
+  low: { key: "model.advanced.reasoningLow", defaultValue: "Low" },
+  medium: { key: "model.advanced.reasoningMedium", defaultValue: "Medium" },
+  high: { key: "model.advanced.reasoningHigh", defaultValue: "High" },
+  xhigh: { key: "model.advanced.reasoningXHigh", defaultValue: "Very high" },
+  max: { key: "model.advanced.reasoningMax", defaultValue: "Maximum" },
+};
+
+const localizeReasoningEffortName = (
+  option: ModelSelectorEffortOption,
+  translate: (key: string, options?: { defaultValue: string }) => string
+): string => {
+  const label = REASONING_EFFORT_LABELS[option.id];
+  return label ? translate(label.key, label) : option.name;
+};
 
 export type ModelOption = {
   id: string;
@@ -364,7 +390,10 @@ function ModelSelectorValue({
 
   const effortName =
     showEffort && effort !== undefined
-      ? efforts?.find((e) => e.id === effort)?.name
+      ? (() => {
+          const option = efforts?.find((e) => e.id === effort);
+          return option ? localizeReasoningEffortName(option, t) : undefined;
+        })()
       : undefined;
 
   return (
@@ -615,7 +644,7 @@ function ModelSelectorEffort({
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {option.name}
+              {localizeReasoningEffortName(option, t)}
             </button>
           );
         })}

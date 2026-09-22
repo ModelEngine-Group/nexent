@@ -119,6 +119,7 @@ const resolveDefaultReasoningEffort = (
   levels: readonly ReasoningEffort[]
 ): ReasoningEffort | undefined => {
   if (modelDefault && levels.includes(modelDefault)) return modelDefault;
+  if (levels.includes("auto")) return "auto";
   if (capability?.default && levels.includes(capability.default)) {
     return capability.default;
   }
@@ -129,6 +130,7 @@ const resolveDefaultReasoningEffort = (
 };
 
 const formatReasoningEffortName = (level: ReasoningEffort): string => {
+  if (level === "auto") return "Auto";
   if (level === "none") return "Off";
   return level[0].toUpperCase() + level.slice(1);
 };
@@ -246,19 +248,40 @@ const useAgentModels = (
           item.name === id ||
           item.displayName === id
       );
+      const agentOverride = typedAgent.model_params_override?.[id];
+      const overrideExtra = agentOverride?.extra_params;
+      const hasAgentReasoningSnapshot =
+        typeof overrideExtra?.enable_thinking === "boolean" ||
+        typeof overrideExtra?.reasoning_effort === "string";
       const capability = model?.reasoningCapability;
-      const reasoningEnabled = model?.reasoningEnabled === true;
-      const supportsEffort =
-        reasoningEnabled;
-      const effortLevels =
+      const reasoningEnabled = hasAgentReasoningSnapshot
+        ? overrideExtra?.enable_thinking === true ||
+          (overrideExtra?.enable_thinking === undefined &&
+            typeof overrideExtra?.reasoning_effort === "string")
+        : model?.enableThinking === true;
+      // Every enabled LLM keeps the generic effort selector available. Models
+      // with catalog metadata use their declared levels below; unknown models
+      // fall back to the common auto/low/medium/high profile.
+      const supportsEffort = reasoningEnabled;
+      const capabilityLevels =
         capability?.status === "supported" && capability.levels.length > 0
           ? capability.levels
           : [...DEFAULT_REASONING_EFFORTS];
-      const defaultEffort = resolveDefaultReasoningEffort(
-        model?.defaultReasoningEffort,
-        capability,
-        effortLevels
-      );
+      const effortLevels = [
+        "auto",
+        ...capabilityLevels.filter((level) => level !== "auto"),
+      ] as ReasoningEffort[];
+      const snapshotEffort =
+        typeof overrideExtra?.reasoning_effort === "string"
+          ? (overrideExtra.reasoning_effort as ReasoningEffort)
+          : undefined;
+      const defaultEffort = hasAgentReasoningSnapshot
+        ? snapshotEffort ?? "auto"
+        : resolveDefaultReasoningEffort(
+            model?.defaultReasoningEffort,
+            capability,
+            effortLevels
+          );
       return {
         id,
         name: fallbackName,

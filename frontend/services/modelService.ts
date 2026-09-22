@@ -132,13 +132,13 @@ const mapInferenceParamsFromApi = (model: any) => ({
   temperature: model.temperature,
   topP: model.top_p,
   extraParams: model.extra_params,
-  reasoningEnabled:
-    model.extra_params?.reasoning_enabled === true ||
-    (model.extra_params?.reasoning_enabled === undefined &&
+  enableThinking:
+    model.extra_params?.enable_thinking === true ||
+    (model.extra_params?.enable_thinking === undefined &&
       typeof model.extra_params?.reasoning_effort === "string"),
   defaultReasoningEffort:
     typeof model.extra_params?.reasoning_effort === "string" &&
-    ["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
+    ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
       model.extra_params.reasoning_effort
     )
       ? (model.extra_params.reasoning_effort as ReasoningEffort)

@@ -525,16 +525,16 @@ def test_apply_model_reasoning_default_handles_disabled_and_supported_profiles()
 
     disabled = {
         "model_type": "llm",
-        "extra_params": {"reasoning_enabled": False, "reasoning_effort": "high", "custom": 1},
+        "extra_params": {"enable_thinking": False, "reasoning_effort": "high", "custom": 1},
     }
     svc._apply_model_reasoning_default(disabled, "openai")
-    assert disabled["extra_params"] == {"reasoning_enabled": False, "custom": 1}
+    assert disabled["extra_params"] == {"enable_thinking": False, "custom": 1}
 
     supported = {
         "model_type": "llm",
         "model_repo": "openai",
         "model_name": "o3",
-        "extra_params": {"reasoning_enabled": True, "reasoning_effort": "low"},
+        "extra_params": {"enable_thinking": True, "reasoning_effort": "low"},
     }
     with mock.patch.object(
         svc,
@@ -543,6 +543,18 @@ def test_apply_model_reasoning_default_handles_disabled_and_supported_profiles()
     ):
         svc._apply_model_reasoning_default(supported, "openai")
     assert supported["extra_params"]["reasoning_effort"] == "low"
+
+    unsupported = {
+        "model_type": "llm",
+        "model_repo": "custom",
+        "model_name": "reasoner",
+        "extra_params": {"enable_thinking": True, "reasoning_effort": "high"},
+    }
+    with mock.patch.object(
+        svc, "resolve_reasoning_capability", return_value={"status": "unsupported"}
+    ):
+        svc._apply_model_reasoning_default(unsupported, "custom")
+    assert unsupported["extra_params"]["reasoning_effort"] == "high"
 
 
 @pytest.mark.parametrize(
@@ -560,12 +572,12 @@ def test_apply_model_reasoning_default_uses_a_safe_default_for_unknown_profiles(
         "model_type": "llm",
         "model_repo": "custom",
         "model_name": "custom-reasoner",
-        "extra_params": {"reasoning_enabled": True},
+        "extra_params": {"enable_thinking": True},
     }
     with mock.patch.object(svc, "resolve_reasoning_capability", return_value=capability):
         svc._apply_model_reasoning_default(model, "custom")
 
-    assert model["extra_params"]["reasoning_effort"] == "medium"
+    assert model["extra_params"]["reasoning_effort"] == "auto"
 
 
 @pytest.mark.asyncio

@@ -734,7 +734,7 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
 def test_create_model_passes_enabled_reasoning_configuration(
     nexent_agent_with_models, mock_model_config, monkeypatch
 ):
-    mock_model_config.reasoning_enabled = True
+    mock_model_config.enable_thinking = True
     mock_model_config.reasoning_effort = "high"
     mock_model_config.reasoning_capability = {
         "status": "supported",

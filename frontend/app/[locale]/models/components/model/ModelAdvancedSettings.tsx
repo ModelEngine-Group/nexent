@@ -160,6 +160,7 @@ const REASONING_LABELS: Record<
   ReasoningEffort,
   { key: string; defaultValue: string }
 > = {
+  auto: { key: "model.advanced.reasoningAuto", defaultValue: "自动" },
   none: { key: "model.advanced.reasoningOff", defaultValue: "关闭" },
   minimal: { key: "model.advanced.reasoningMinimal", defaultValue: "最低" },
   low: { key: "model.advanced.reasoningLow", defaultValue: "低" },
@@ -175,6 +176,7 @@ const resolveReasoningDefault = (
   levels: readonly ReasoningEffort[]
 ): ReasoningEffort | undefined => {
   if (currentEffort && levels.includes(currentEffort)) return currentEffort;
+  if (levels.includes("auto")) return "auto";
   if (capability?.default && levels.includes(capability.default)) {
     return capability.default;
   }
@@ -187,11 +189,11 @@ const resolveReasoningDefault = (
 const shouldSkipInferenceParam = (
   key: string,
   raw: unknown,
-  reasoningEnabled: boolean
+  thinkingEnabled: boolean
 ): boolean => {
   if (raw === undefined || raw === null || raw === "") return true;
   if (REMOVED_ADVANCED_PARAM_KEYS.has(key)) return true;
-  return key === "reasoning_effort" && !reasoningEnabled;
+  return key === "reasoning_effort" && !thinkingEnabled;
 };
 
 const assignInferenceParam = (
@@ -218,16 +220,15 @@ const applyReasoningValues = (
   value: ModelAdvancedSettingsValue,
   extra: Record<string, unknown>
 ): void => {
-  const hasReasoningFlag = typeof extra.reasoning_enabled === "boolean";
-  if (hasReasoningFlag) {
-    value.reasoning_enabled = extra.reasoning_enabled;
+  if (typeof extra.enable_thinking === "boolean") {
+    value.enable_thinking = extra.enable_thinking;
   }
   if (typeof extra.reasoning_effort === "string") {
-    if (!hasReasoningFlag || extra.reasoning_enabled === true) {
+    if (value.enable_thinking !== false) {
       value.reasoning_effort = extra.reasoning_effort;
     }
-    if (!hasReasoningFlag) {
-      value.reasoning_enabled = true;
+    if (typeof value.enable_thinking !== "boolean") {
+      value.enable_thinking = true;
     }
   }
 };
@@ -242,6 +243,8 @@ const getVisibleAdvancedSpecs = (
   const specList = specs[modelType] || [];
   return specList.filter((spec) => {
     if (REMOVED_ADVANCED_PARAM_KEYS.has(spec.key)) return false;
+    // Thinking has a dedicated two-row control below the generic fields.
+    if (spec.key === "enable_thinking") return false;
     if (mode === "default" && CAPACITY_FIELD_KEYS.has(spec.key)) return false;
     if (mode === "default" && EMBEDDING_FIELD_KEYS.has(spec.key)) return false;
     if (mode === "override" && spec.key === "display_name") return false;
@@ -400,14 +403,14 @@ export const buildInferenceParamsPayload = (
 } => {
   const result: Record<string, unknown> = {};
   const extraParams: Record<string, unknown> = {};
-  const reasoningEnabled = value.reasoning_enabled === true;
+  const thinkingEnabled = value.enable_thinking === true;
 
   for (const [key, raw] of Object.entries(value)) {
-    if (shouldSkipInferenceParam(key, raw, reasoningEnabled)) continue;
+    if (shouldSkipInferenceParam(key, raw, thinkingEnabled)) continue;
     assignInferenceParam(key, raw, result, extraParams);
   }
 
-  if (!reasoningEnabled) {
+  if (!thinkingEnabled) {
     delete extraParams.reasoning_effort;
   }
 
@@ -847,13 +850,17 @@ export const ModelAdvancedSettings = ({
     ([k], i) => k !== "" && customEntries.findIndex(([k2]) => k2 === k) !== i
   );
 
-  const reasoningControlVisible = mode === "default" && modelType === "llm";
-  const reasoningEnabled = value.reasoning_enabled === true;
-  const reasoningLevels =
+  const reasoningControlVisible = modelType === "llm";
+  const thinkingEnabled = value.enable_thinking === true;
+  const configuredReasoningLevels =
     reasoningCapability?.status === "supported" &&
     reasoningCapability.levels.length > 0
       ? reasoningCapability.levels
       : [...DEFAULT_REASONING_EFFORTS];
+  const reasoningLevels = [
+    "auto",
+    ...configuredReasoningLevels.filter((level) => level !== "auto"),
+  ] as ReasoningEffort[];
   const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
   const reasoningDefault = resolveReasoningDefault(
     reasoningEffort,
@@ -865,51 +872,47 @@ export const ModelAdvancedSettings = ({
     return t(label.key, { defaultValue: label.defaultValue });
   };
 
-  const renderReasoningEffort = reasoningControlVisible && (
-    <div>
-      <div className="flex items-center justify-start gap-2 mb-1">
+  const renderReasoningControls = reasoningControlVisible && (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
         <label className="text-sm font-medium text-gray-700">
           {t("model.advanced.reasoningEnabled", {
-            defaultValue: "思考挡位",
+            defaultValue: "深度思考",
           })}
         </label>
         <Switch
           size="small"
-          checked={reasoningEnabled}
+          checked={thinkingEnabled}
           disabled={disabled}
           onChange={(checked) =>
             onChange({
               ...value,
-              reasoning_enabled: checked,
+              enable_thinking: checked,
               reasoning_effort: checked ? reasoningDefault : undefined,
             })
           }
         />
       </div>
-      {reasoningEnabled && (
-        <>
-          <Select
-            className="w-full"
-            value={
-              reasoningEffort && reasoningLevels.includes(reasoningEffort)
-                ? reasoningEffort
-                : reasoningDefault
-            }
-            disabled={disabled}
-            options={reasoningLevels.map((level) => ({
-              value: level,
-              label: reasoningLabel(level),
-            }))}
-            onChange={(next: ReasoningEffort | undefined) =>
-              onChange({ ...value, reasoning_effort: next })
-            }
-          />
-          <div className="mt-1 text-xs text-gray-500">
-            {t("model.advanced.defaultReasoningEffortHint", {
-              defaultValue: "聊天界面可在此模型的挡位范围内临时切换。",
-            })}
-          </div>
-        </>
+      {thinkingEnabled && (
+        <Select
+          className="w-full"
+          aria-label={t("model.advanced.reasoningEffort", {
+            defaultValue: "思考挡位",
+          })}
+          value={
+            reasoningEffort && reasoningLevels.includes(reasoningEffort)
+              ? reasoningEffort
+              : reasoningDefault
+          }
+          disabled={disabled}
+          options={reasoningLevels.map((level) => ({
+            value: level,
+            label: reasoningLabel(level),
+          }))}
+          onChange={(next: ReasoningEffort | undefined) =>
+            onChange({ ...value, reasoning_effort: next })
+          }
+        />
       )}
     </div>
   );
@@ -1013,13 +1016,13 @@ export const ModelAdvancedSettings = ({
                     : undefined
                 )}
               </div>
-              {spec.key === "top_p" && renderReasoningEffort}
+              {spec.key === "top_p" && renderReasoningControls}
             </Fragment>
           );
         })}
         {reasoningControlVisible &&
           !specList.some((spec) => spec.key === "top_p") &&
-          renderReasoningEffort}
+          renderReasoningControls}
       </div>
       {renderCustomParamsSection({
         t,
