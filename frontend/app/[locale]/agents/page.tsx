@@ -202,7 +202,7 @@ export default function AgentsPage() {
               setSearch(event.target.value);
               setPage(1);
             }}
-            className="h-10 max-w-md"
+            className="h-10"
           />
 
           <div className="min-h-0 flex-1 overflow-hidden">
