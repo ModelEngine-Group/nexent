@@ -184,13 +184,23 @@ copy_profiles() {
     mkdir -p "$target"
     cp -R "$source/." "$target/"
     if [ -n "$NEXENT_USER_DIR_EXPLICIT" ] || [ "${DEPLOY_OFFICIAL_K8S:-false}" = true ]; then
+      # Replace the selected profile as a unit so stale nested directories from
+      # an earlier docker cp/kubectl cp invocation cannot create duplicate
+      # bundles during the recursive scan.
+      rm -rf "$TARGET_DIR/$profile"
       mkdir -p "$TARGET_DIR/$profile"
       cp -R "$target/." "$TARGET_DIR/$profile/"
     else
       command -v docker >/dev/null 2>&1 || die "docker is required for Docker deployment"
       docker inspect "$TARGET_CONTAINER" >/dev/null 2>&1 || die "container not found: $TARGET_CONTAINER"
-      docker exec "$TARGET_CONTAINER" mkdir -p "$TARGET_CONTAINER_DIR/$profile"
-      docker cp "$target/." "$TARGET_CONTAINER:$TARGET_CONTAINER_DIR/$profile/"
+      # Prevent Git Bash/MSYS from rewriting the container-side /mnt path into
+      # a Windows host path before Docker receives it.
+      MSYS_NO_PATHCONV=1 docker exec "$TARGET_CONTAINER" \
+        rm -rf "$TARGET_CONTAINER_DIR/$profile"
+      MSYS_NO_PATHCONV=1 docker exec "$TARGET_CONTAINER" \
+        mkdir -p "$TARGET_CONTAINER_DIR/$profile"
+      MSYS_NO_PATHCONV=1 docker cp "$target/." \
+        "$TARGET_CONTAINER:$TARGET_CONTAINER_DIR/$profile/"
     fi
   done
 }
