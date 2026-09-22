@@ -322,13 +322,15 @@ export default function AgentsPage() {
                         <ResourceCard
                           className="h-full min-h-0"
                           title={getAgentTitle(agent)}
-                          subtitle={t("agentRepository.mine.currentVersion", {
-                            version:
-                              agent.version_name ||
-                              (agent.current_version_no
-                                ? `V${agent.current_version_no}`
-                                : "-"),
-                          })}
+                          subtitle={
+                            agent.current_version_no
+                              ? t("agentRepository.mine.currentVersion", {
+                                  version:
+                                    agent.version_name ||
+                                    `V${agent.current_version_no}`,
+                                })
+                              : undefined
+                          }
                           icon={
                             <span className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
                               <Bot className="size-5" aria-hidden />

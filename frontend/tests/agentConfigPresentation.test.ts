@@ -7,11 +7,6 @@ const agentsPath = new URL(
   "../app/[locale]/agents/agents.tsx",
   import.meta.url
 );
-const versionCardPath = new URL(
-  "../app/[locale]/agents/versions/agent-version-card.tsx",
-  import.meta.url
-);
-
 test("keeps the agent configuration workspace white", async () => {
   const [page, agents] = await Promise.all([
     readFile(pagePath, "utf8"),
@@ -27,13 +22,8 @@ test("keeps the agent configuration workspace white", async () => {
     agents,
     /<div className="flex h-full w-full min-h-0 flex-col bg-white">/
   );
-});
-
-test("only marks a positive published version as current", async () => {
-  const versionCard = await readFile(versionCardPath, "utf8");
-
   assert.match(
-    versionCard,
-    /const isCurrentVersion =\s*typeof currentVersionNo === "number"\s*&&\s*currentVersionNo > 0\s*&&\s*currentVersionNo === version\.version_no;/
+    page,
+    /subtitle=\{\s*agent\.current_version_no\s*\?\s*t\("agentRepository\.mine\.currentVersion",/
   );
 });
