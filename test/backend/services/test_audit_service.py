@@ -3,7 +3,7 @@ Unit tests for the auth audit service.
 
 Tests backend/services/audit_service.py: single-line entry formatting,
 client IP resolution priority, and the best-effort (never-raise) contract
-of record_auth_event.
+of record_security_event.
 """
 import logging
 import re
@@ -15,7 +15,7 @@ from backend.services.audit_service import (
     AUDIT_RESULT_SUCCESS,
     format_audit_entry,
     get_client_ip,
-    record_auth_event,
+    record_security_event,
 )
 
 
@@ -126,8 +126,8 @@ class TestFormatAuditEntry:
 
 class TestRecordAuthEvent:
     def test_emits_prefixed_line(self, caplog):
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
-            record_auth_event("user_signin", AUDIT_RESULT_SUCCESS,
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            record_security_event("user_signin", AUDIT_RESULT_SUCCESS,
                               request=_FakeRequest(headers={"user-agent": "pytest/1"}),
                               user_id="u-1", user_email="a@b.com")
         message = caplog.records[-1].getMessage()
@@ -138,22 +138,22 @@ class TestRecordAuthEvent:
         assert 'ua="pytest/1"' in message
 
     def test_none_request_still_records(self, caplog):
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
-            record_auth_event("user_logout", AUDIT_RESULT_SUCCESS, request=None)
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            record_security_event("user_logout", AUDIT_RESULT_SUCCESS, request=None)
         message = caplog.records[-1].getMessage()
         assert "ip=-" in message
         assert "ua=-" in message
 
     def test_never_raises_on_broken_request(self, caplog):
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
-            record_auth_event("user_signin", AUDIT_RESULT_FAILURE,
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            record_security_event("user_signin", AUDIT_RESULT_FAILURE,
                               request=_BrokenRequest(), reason="invalid_credentials")
         assert caplog.records[-1].levelno == logging.ERROR
-        assert "Failed to record auth audit entry" in caplog.records[-1].getMessage()
+        assert "Failed to record security audit entry" in caplog.records[-1].getMessage()
 
     def test_failure_result_recorded(self, caplog):
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
-            record_auth_event("password_update", AUDIT_RESULT_FAILURE, request=None,
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            record_security_event("password_update", AUDIT_RESULT_FAILURE, request=None,
                               user_id="u-2", reason="invalid_old_password")
         message = caplog.records[-1].getMessage()
         assert "result=failure" in message

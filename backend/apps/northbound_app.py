@@ -39,7 +39,7 @@ from services.audit_service import (
     AUDIT_RESULT_FAILURE,
     AUDIT_RESULT_SUCCESS,
     reason_from_exception,
-    record_auth_event,
+    record_security_event,
 )
 from services.northbound_service import (
     NorthboundContext,
@@ -219,7 +219,7 @@ async def create_api_users_batch_endpoint(
             group_id=payload.group_id,
             count=payload.count,
         )
-        record_auth_event("northbound_api_users_batch_create", AUDIT_RESULT_SUCCESS,
+        record_security_event("northbound_api_users_batch_create", AUDIT_RESULT_SUCCESS,
                           request=request, user_id=ctx.user_id, tenant_id=ctx.tenant_id,
                           details={"request_id": ctx.request_id,
                                    "role": payload.role,
@@ -230,7 +230,7 @@ async def create_api_users_batch_endpoint(
             content={"message": "success", "requestId": ctx.request_id, "data": data},
         )
     except Exception as exc:
-        record_auth_event("northbound_api_users_batch_create", AUDIT_RESULT_FAILURE,
+        record_security_event("northbound_api_users_batch_create", AUDIT_RESULT_FAILURE,
                           request=request, user_id=ctx.user_id, tenant_id=ctx.tenant_id,
                           reason=reason_from_exception(exc),
                           details={"request_id": ctx.request_id,
@@ -253,7 +253,7 @@ async def refresh_api_key_endpoint(
             user_id=payload.user_id,
             email=str(payload.email) if payload.email else None,
         )
-        record_auth_event("northbound_api_key_refresh", AUDIT_RESULT_SUCCESS, request=request,
+        record_security_event("northbound_api_key_refresh", AUDIT_RESULT_SUCCESS, request=request,
                           user_id=ctx.user_id, tenant_id=ctx.tenant_id,
                           details={"request_id": ctx.request_id,
                                    "target_user_id": payload.user_id,
@@ -263,7 +263,7 @@ async def refresh_api_key_endpoint(
             content={"message": "success", "requestId": ctx.request_id, "data": data},
         )
     except Exception as exc:
-        record_auth_event("northbound_api_key_refresh", AUDIT_RESULT_FAILURE, request=request,
+        record_security_event("northbound_api_key_refresh", AUDIT_RESULT_FAILURE, request=request,
                           user_id=ctx.user_id, tenant_id=ctx.tenant_id,
                           reason=reason_from_exception(exc),
                           details={"request_id": ctx.request_id,
@@ -289,7 +289,7 @@ async def revoke_api_key_endpoint(
             user_id=target.user_id,
             email=str(target.email) if target.email else None,
         )
-        record_auth_event("northbound_api_key_revoke", AUDIT_RESULT_SUCCESS, request=request,
+        record_security_event("northbound_api_key_revoke", AUDIT_RESULT_SUCCESS, request=request,
                           user_id=ctx.user_id, tenant_id=ctx.tenant_id,
                           details={"request_id": ctx.request_id,
                                    "target_user_id": target.user_id,
@@ -299,7 +299,7 @@ async def revoke_api_key_endpoint(
             content={"message": "success", "requestId": ctx.request_id, "data": data},
         )
     except Exception as exc:
-        record_auth_event("northbound_api_key_revoke", AUDIT_RESULT_FAILURE, request=request,
+        record_security_event("northbound_api_key_revoke", AUDIT_RESULT_FAILURE, request=request,
                           user_id=ctx.user_id, tenant_id=ctx.tenant_id,
                           reason=reason_from_exception(exc),
                           details={"request_id": ctx.request_id,

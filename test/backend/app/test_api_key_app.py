@@ -152,7 +152,7 @@ class TestApiKeyAuditEntries:
         mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
         mock_refresh.return_value = {"api_key": "nexent-new-key"}
 
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
+        with caplog.at_level(logging.INFO, logger="audit.security"):
             response = client.post(
                 "/api-keys/refresh",
                 headers={"Authorization": "Bearer token"},
@@ -161,7 +161,7 @@ class TestApiKeyAuditEntries:
 
         assert response.status_code == HTTPStatus.OK
         message = caplog.records[-1].getMessage()
-        assert "[AUTH_AUDIT]" in message
+        assert "[SEC_AUDIT]" in message
         assert "event=api_key_refresh" in message
         assert "result=success" in message
         assert "user_id=admin-1" in message
@@ -174,7 +174,7 @@ class TestApiKeyAuditEntries:
 
         mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
 
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
+        with caplog.at_level(logging.INFO, logger="audit.security"):
             response = client.post(
                 "/api-keys/refresh",
                 headers={"Authorization": "Bearer token"},
@@ -196,7 +196,7 @@ class TestApiKeyAuditEntries:
         mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
         mock_revoke.return_value = {"revoked_count": 2}
 
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
+        with caplog.at_level(logging.INFO, logger="audit.security"):
             response = client.delete(
                 "/api-keys?user_id=user-1",
                 headers={"Authorization": "Bearer token"},

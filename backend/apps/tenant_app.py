@@ -18,7 +18,7 @@ from services.audit_service import (
     AUDIT_RESULT_FAILURE,
     AUDIT_RESULT_SUCCESS,
     reason_from_exception,
-    record_auth_event,
+    record_security_event,
 )
 from services.tenant_service import (
     create_tenant,
@@ -65,7 +65,7 @@ async def create_tenant_endpoint(
         )
 
         logger.info(f"Created tenant {tenant_info['tenant_id']} by user {user_id}")
-        record_auth_event("tenant_create", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("tenant_create", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id,
                           details={"target_tenant_id": (tenant_info or {}).get("tenant_id"),
                                    "tenant_name": request.tenant_name})
@@ -80,7 +80,7 @@ async def create_tenant_endpoint(
 
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized tenant creation attempt: {str(exc)}")
-        record_auth_event("tenant_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
@@ -88,7 +88,7 @@ async def create_tenant_endpoint(
         )
     except ValidationError as exc:
         logger.warning(f"Tenant creation validation error: {str(exc)}")
-        record_auth_event("tenant_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -96,7 +96,7 @@ async def create_tenant_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error during tenant creation: {str(exc)}")
-        record_auth_event("tenant_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -230,7 +230,7 @@ async def update_tenant_endpoint(
         )
 
         logger.info(f"Updated tenant {tenant_id} by user {user_id}")
-        record_auth_event("tenant_update", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("tenant_update", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id, details={"target_tenant_id": tenant_id})
 
         return JSONResponse(
@@ -243,7 +243,7 @@ async def update_tenant_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Tenant not found for update: {tenant_id}")
-        record_auth_event("tenant_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"target_tenant_id": tenant_id})
         raise HTTPException(
@@ -252,7 +252,7 @@ async def update_tenant_endpoint(
         )
     except ValidationError as exc:
         logger.warning(f"Tenant update validation error: {str(exc)}")
-        record_auth_event("tenant_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"target_tenant_id": tenant_id})
         raise HTTPException(
@@ -261,7 +261,7 @@ async def update_tenant_endpoint(
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized tenant update attempt: {str(exc)}")
-        record_auth_event("tenant_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"target_tenant_id": tenant_id})
         raise HTTPException(
@@ -270,7 +270,7 @@ async def update_tenant_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error during tenant update: {str(exc)}")
-        record_auth_event("tenant_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"target_tenant_id": tenant_id})
         raise HTTPException(
@@ -315,7 +315,7 @@ async def delete_tenant_endpoint(
         await delete_tenant(tenant_id, deleted_by=user_id)
 
         logger.info(f"Deleted tenant {tenant_id} and all associated resources by user {user_id}")
-        record_auth_event("tenant_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("tenant_delete", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id, details={"target_tenant_id": tenant_id})
 
         return JSONResponse(
@@ -328,7 +328,7 @@ async def delete_tenant_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Tenant not found for deletion: {tenant_id}")
-        record_auth_event("tenant_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"target_tenant_id": tenant_id})
         raise HTTPException(
@@ -337,7 +337,7 @@ async def delete_tenant_endpoint(
         )
     except ValidationError as exc:
         logger.warning(f"Tenant deletion validation error: {str(exc)}")
-        record_auth_event("tenant_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"target_tenant_id": tenant_id})
         raise HTTPException(
@@ -346,7 +346,7 @@ async def delete_tenant_endpoint(
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized tenant deletion attempt: {str(exc)}")
-        record_auth_event("tenant_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"target_tenant_id": tenant_id})
         raise HTTPException(
@@ -355,7 +355,7 @@ async def delete_tenant_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error during tenant deletion: {str(exc)}")
-        record_auth_event("tenant_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"target_tenant_id": tenant_id})
         raise HTTPException(

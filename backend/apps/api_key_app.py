@@ -23,7 +23,7 @@ from services.audit_service import (
     AUDIT_RESULT_FAILURE,
     AUDIT_RESULT_SUCCESS,
     reason_from_exception,
-    record_auth_event,
+    record_security_event,
 )
 from utils.auth_utils import get_current_user_context
 
@@ -85,7 +85,7 @@ async def refresh_api_key_endpoint(
             user_id=payload.user_id,
             email=str(payload.email) if payload.email else None,
         )
-        record_auth_event("api_key_refresh", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("api_key_refresh", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=actor_user_id, tenant_id=tenant_id,
                           details={"target_user_id": payload.user_id,
                                    "target_email": str(payload.email) if payload.email else None})
@@ -94,7 +94,7 @@ async def refresh_api_key_endpoint(
         )
     except Exception as exc:
         logger.warning("Failed to refresh API key: %s", exc)
-        record_auth_event("api_key_refresh", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("api_key_refresh", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=actor_user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(exc),
                           details={"target_user_id": payload.user_id,
@@ -121,7 +121,7 @@ async def revoke_api_key_endpoint(
             user_id=target.user_id,
             email=str(target.email) if target.email else None,
         )
-        record_auth_event("api_key_revoke", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("api_key_revoke", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=actor_user_id, tenant_id=tenant_id,
                           details={"target_user_id": target.user_id,
                                    "target_email": str(target.email) if target.email else None})
@@ -130,7 +130,7 @@ async def revoke_api_key_endpoint(
         )
     except Exception as exc:
         logger.warning("Failed to revoke API key: %s", exc)
-        record_auth_event("api_key_revoke", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("api_key_revoke", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=actor_user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(exc),
                           details={"target_user_id": getattr(target, "user_id", None),

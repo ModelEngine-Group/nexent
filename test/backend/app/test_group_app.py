@@ -918,7 +918,7 @@ class TestGroupMemberAuditEntries:
             mock_get_user.return_value = ("admin-1", "tenant-1")
             mock_add.return_value = {"added": True}
 
-            with caplog.at_level(logging.INFO, logger="audit.auth"):
+            with caplog.at_level(logging.INFO, logger="audit.security"):
                 response = client.post(
                     "/groups/7/members",
                     headers={"Authorization": "Bearer token"},
@@ -927,7 +927,7 @@ class TestGroupMemberAuditEntries:
 
         assert response.status_code == HTTPStatus.OK
         message = caplog.records[-1].getMessage()
-        assert "[AUTH_AUDIT]" in message
+        assert "[SEC_AUDIT]" in message
         assert "event=group_member_add" in message
         assert "result=success" in message
         assert "user_id=admin-1" in message
@@ -939,7 +939,7 @@ class TestGroupMemberAuditEntries:
         with patch('apps.group_app.get_current_user_id') as mock_get_user:
             mock_get_user.side_effect = UnauthorizedError("invalid token")
 
-            with caplog.at_level(logging.INFO, logger="audit.auth"):
+            with caplog.at_level(logging.INFO, logger="audit.security"):
                 response = client.post(
                     "/groups/7/members",
                     headers={"Authorization": "Bearer token"},

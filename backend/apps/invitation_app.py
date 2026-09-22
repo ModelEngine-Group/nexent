@@ -16,7 +16,7 @@ from services.audit_service import (
     AUDIT_RESULT_FAILURE,
     AUDIT_RESULT_SUCCESS,
     reason_from_exception,
-    record_auth_event,
+    record_security_event,
 )
 from services.invitation_service import (
     create_invitation_code, update_invitation_code, get_invitation_by_code,
@@ -131,7 +131,7 @@ async def create_invitation_endpoint(
         )
 
         logger.info(f"Created invitation code {invitation_info['invitation_code']} (type: {request.code_type}) for tenant {tenant_id} by user {user_id}")
-        record_auth_event("invitation_create", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("invitation_create", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id,
                           details={"target_tenant_id": tenant_id,
                                    "code_type": request.code_type,
@@ -148,7 +148,7 @@ async def create_invitation_endpoint(
 
     except ValueError as exc:
         logger.warning(f"Invalid invitation creation parameters: {str(exc)}")
-        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -156,7 +156,7 @@ async def create_invitation_endpoint(
         )
     except ValidationError as exc:
         logger.warning(f"Invitation creation rejected by feature flag: {str(exc)}")
-        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -164,7 +164,7 @@ async def create_invitation_endpoint(
         )
     except DuplicateError as exc:
         logger.warning(f"Duplicate invitation code: {str(exc)}")
-        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,
@@ -172,7 +172,7 @@ async def create_invitation_endpoint(
         )
     except NotFoundException as exc:
         logger.warning(f"User not found during invitation creation: {str(exc)}")
-        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
@@ -180,7 +180,7 @@ async def create_invitation_endpoint(
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation creation attempt: {str(exc)}")
-        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
@@ -188,7 +188,7 @@ async def create_invitation_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error during invitation creation: {str(exc)}")
-        record_auth_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc))
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -250,7 +250,7 @@ async def update_invitation_endpoint(
             raise ValidationError("Failed to update invitation code")
 
         logger.info(f"Updated invitation code {invitation_code} by user {user_id}")
-        record_auth_event("invitation_update", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("invitation_update", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id,
                           details={"invitation_code": invitation_code,
                                    "updated_fields": sorted(updates.keys())})
@@ -264,7 +264,7 @@ async def update_invitation_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Invitation not found for update: {str(exc)}")
-        record_auth_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -273,7 +273,7 @@ async def update_invitation_endpoint(
         )
     except ValidationError as exc:
         logger.warning(f"Invitation update validation error: {str(exc)}")
-        record_auth_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -282,7 +282,7 @@ async def update_invitation_endpoint(
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation update attempt: {str(exc)}")
-        record_auth_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -294,7 +294,7 @@ async def update_invitation_endpoint(
         logger.error(f"Unexpected error during invitation update: {str(exc)}")
         logger.error(f"Exception type: {type(exc).__name__}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
-        record_auth_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -416,7 +416,7 @@ async def delete_invitation_endpoint(
             raise ValidationError("Failed to delete invitation code")
 
         logger.info(f"Deleted invitation code {invitation_code} by user {user_id}")
-        record_auth_event("invitation_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("invitation_delete", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id, details={"invitation_code": invitation_code})
 
         return JSONResponse(
@@ -428,7 +428,7 @@ async def delete_invitation_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Invitation not found for deletion: {str(exc)}")
-        record_auth_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -437,7 +437,7 @@ async def delete_invitation_endpoint(
         )
     except ValidationError as exc:
         logger.warning(f"Invitation deletion validation error: {str(exc)}")
-        record_auth_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -446,7 +446,7 @@ async def delete_invitation_endpoint(
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation deletion attempt: {str(exc)}")
-        record_auth_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -455,7 +455,7 @@ async def delete_invitation_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error during invitation deletion: {str(exc)}")
-        record_auth_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -529,7 +529,7 @@ async def use_invitation_endpoint(
         )
 
         logger.info(f"User {current_user_id} used invitation code {invitation_code}")
-        record_auth_event("invitation_use", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("invitation_use", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=current_user_id,
                           details={"invitation_code": invitation_code})
 
@@ -543,7 +543,7 @@ async def use_invitation_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Invitation code not available: {str(exc)}")
-        record_auth_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -552,7 +552,7 @@ async def use_invitation_endpoint(
         )
     except UnauthorizedError as exc:
         logger.warning(f"Unauthorized invitation usage attempt: {str(exc)}")
-        record_auth_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -561,7 +561,7 @@ async def use_invitation_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error using invitation code: {str(exc)}")
-        record_auth_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_use", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -598,7 +598,7 @@ async def update_invitation_status_endpoint(
 
         message = "Invitation status updated" if status_updated else "Invitation status unchanged"
 
-        record_auth_event("invitation_status_update", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("invitation_status_update", AUDIT_RESULT_SUCCESS, request=http_request,
                           details={"invitation_code": invitation_code,
                                    "status_updated": bool(status_updated)})
 
@@ -615,7 +615,7 @@ async def update_invitation_status_endpoint(
 
     except NotFoundException as exc:
         logger.warning(f"Invitation not found for status update: {str(exc)}")
-        record_auth_event("invitation_status_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_status_update", AUDIT_RESULT_FAILURE, request=http_request,
                           reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(
@@ -624,7 +624,7 @@ async def update_invitation_status_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error updating invitation status: {str(exc)}")
-        record_auth_event("invitation_status_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("invitation_status_update", AUDIT_RESULT_FAILURE, request=http_request,
                           reason=reason_from_exception(exc),
                           details={"invitation_code": invitation_code})
         raise HTTPException(

@@ -56,7 +56,7 @@ services_module.tenant_service = tenant_service_module
 audit_service_module = types.ModuleType("services.audit_service")
 audit_service_module.AUDIT_RESULT_SUCCESS = "success"
 audit_service_module.AUDIT_RESULT_FAILURE = "failure"
-audit_service_module.record_auth_event = MagicMock()
+audit_service_module.record_security_event = MagicMock()
 audit_service_module.reason_from_exception = MagicMock(return_value="internal_error")
 services_module.audit_service = audit_service_module
 

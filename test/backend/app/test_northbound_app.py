@@ -1764,7 +1764,7 @@ def test_batch_create_api_users_emits_audit_entry(caplog):
             patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
             patch("apps.northbound_app.create_api_users_batch", return_value={"users": []}):
         mock_ctx.return_value = ctx
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
+        with caplog.at_level(logging.INFO, logger="audit.security"):
             response = client.post(
                 "/nb/v1/api-users/batch",
                 headers=_build_headers(),
@@ -1787,7 +1787,7 @@ def test_batch_create_api_users_emits_failure_reason(caplog):
             patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
             patch("apps.northbound_app.create_api_users_batch", side_effect=ForbiddenError("not allowed")):
         mock_ctx.return_value = ctx
-        with caplog.at_level(logging.INFO, logger="audit.auth"):
+        with caplog.at_level(logging.INFO, logger="audit.security"):
             response = client.post(
                 "/nb/v1/api-users/batch",
                 headers=_build_headers(),

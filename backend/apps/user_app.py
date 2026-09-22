@@ -16,7 +16,7 @@ from services.audit_service import (
     AUDIT_RESULT_FAILURE,
     AUDIT_RESULT_SUCCESS,
     reason_from_exception,
-    record_auth_event,
+    record_security_event,
 )
 from services.user_service import (
     delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
@@ -132,7 +132,7 @@ async def update_user_endpoint(
         changes = {key: value for key, value in request.model_dump().items() if value is not None}
         if changes.get("email"):
             changes["email"] = str(changes["email"])
-        record_auth_event("user_update", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("user_update", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=current_user_id, tenant_id=requester_tenant_id,
                           details={"target_user_id": user_id, "changes": changes})
 
@@ -145,26 +145,26 @@ async def update_user_endpoint(
         )
 
     except UnauthorizedError as exc:
-        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, tenant_id=requester_tenant_id,
                           reason=reason_from_exception(exc),
                           details={"target_user_id": user_id})
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except ForbiddenError as exc:
-        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, tenant_id=requester_tenant_id,
                           reason=reason_from_exception(exc),
                           details={"target_user_id": user_id})
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except NotFoundException as exc:
-        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, tenant_id=requester_tenant_id,
                           reason=reason_from_exception(exc),
                           details={"target_user_id": user_id})
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
     except ValueError as exc:
         logger.warning(f"User update validation error for user {user_id}: {str(exc)}")
-        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, tenant_id=requester_tenant_id,
                           reason=reason_from_exception(exc),
                           details={"target_user_id": user_id})
@@ -174,7 +174,7 @@ async def update_user_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error updating user {user_id}: {str(exc)}")
-        record_auth_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("user_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, tenant_id=requester_tenant_id,
                           reason=reason_from_exception(exc),
                           details={"target_user_id": user_id})
@@ -224,7 +224,7 @@ async def delete_user_endpoint(
         await delete_user_and_cleanup(user_id, tenant_id)
 
         logger.info(f"Permanently deleted user {user_id} by admin {current_user_id}")
-        record_auth_event("user_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("user_delete", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=current_user_id,
                           details={"target_user_id": user_id, "target_tenant_id": tenant_id})
 
@@ -237,7 +237,7 @@ async def delete_user_endpoint(
 
     except ValueError as exc:
         logger.warning(f"User deletion validation error for user {user_id}: {str(exc)}")
-        record_auth_event("user_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("user_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, reason=reason_from_exception(exc),
                           details={"target_user_id": user_id})
         raise HTTPException(
@@ -246,7 +246,7 @@ async def delete_user_endpoint(
         )
     except Exception as exc:
         logger.error(f"Unexpected error deleting user {user_id}: {str(exc)}")
-        record_auth_event("user_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("user_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=current_user_id, reason=reason_from_exception(exc),
                           details={"target_user_id": user_id})
         # Include the actual error message for debugging

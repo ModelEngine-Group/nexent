@@ -1,15 +1,15 @@
-"""Security audit logging for authentication and account lifecycle events.
+"""Security audit logging for sensitive user operations.
 
-Entries go through the standard logging pipeline (logger name ``audit.auth``
+Entries go through the standard logging pipeline (logger name ``audit.security``
 propagates to the root logger), so they land in the existing per-category log
 files of the serving process (e.g. ``logs/config/nexent_config.log``) without
 introducing a new log category. Every entry is a single line prefixed with
-``[AUTH_AUDIT]`` for easy grep/filtering::
+``[SEC_AUDIT]`` for easy grep/filtering::
 
-    [AUTH_AUDIT] event=user_signin result=failure reason=invalid_credentials user_id=- tenant_id=- email=a@b.com ip=1.2.3.4 ua="Mozilla/5.0 ..." session_id=- details=-
+    [SEC_AUDIT] event=user_signin result=failure reason=invalid_credentials user_id=- tenant_id=- email=a@b.com ip=1.2.3.4 ua="Mozilla/5.0 ..." session_id=- details=-
 
-Recording is best-effort: ``record_auth_event`` never raises, so an audit
-failure can never break the underlying authentication flow. Secrets
+Recording is best-effort: ``record_security_event`` never raises, so an audit
+failure can never break the underlying business flow. Secrets
 (passwords, access keys) must never be passed in; call sites only provide
 identifiers and non-sensitive context.
 """
@@ -29,9 +29,9 @@ from consts.exceptions import (
     ValidationError,
 )
 
-logger = logging.getLogger("audit.auth")
+logger = logging.getLogger("audit.security")
 
-AUDIT_LOG_PREFIX = "[AUTH_AUDIT]"
+AUDIT_LOG_PREFIX = "[SEC_AUDIT]"
 USER_AGENT_MAX_LENGTH = 200
 
 AUDIT_RESULT_SUCCESS = "success"
@@ -125,7 +125,7 @@ def reason_from_exception(exc: Exception) -> str:
     return "internal_error"
 
 
-def record_auth_event(
+def record_security_event(
     event_type: str,
     result: str,
     request: Optional[Request] = None,
@@ -136,7 +136,7 @@ def record_auth_event(
     reason: str = "",
     details: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Record one authentication audit entry. Best-effort: never raises."""
+    """Record one security audit entry. Best-effort: never raises."""
     try:
         entry = format_audit_entry(
             event_type=event_type,
@@ -153,6 +153,6 @@ def record_auth_event(
         logger.info("%s %s", AUDIT_LOG_PREFIX, entry)
     except Exception:
         try:
-            logger.error("Failed to record auth audit entry, event=%s", event_type)
+            logger.error("Failed to record security audit entry, event=%s", event_type)
         except Exception:
             pass
