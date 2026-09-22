@@ -133,6 +133,9 @@ prepare_hub_checkout() {
 
   GIT_LFS_SKIP_SMUDGE=1 git -C "$SOURCE_PATH" sparse-checkout init --cone
   GIT_LFS_SKIP_SMUDGE=1 git -C "$SOURCE_PATH" sparse-checkout set "${sparse_paths[@]}"
+  # A no-checkout clone may leave the worktree empty after sparse rules are
+  # written. Materialize the selected paths explicitly before scanning them.
+  GIT_LFS_SKIP_SMUDGE=1 git -C "$SOURCE_PATH" read-tree -mu HEAD
 
   # Fetch LFS objects only when the selected paths actually contain them.
   # Unrelated profiles remain neither checked out nor downloaded.
