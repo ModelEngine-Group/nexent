@@ -359,6 +359,17 @@ def _install_sys_modules_stubs() -> None:
         get_evaluator=MagicMock(),
     )
     _db_pkg.evaluator_db = _evdb_mod
+    # The service resolves the deleter's role via user_tenant_db (delete
+    # tenant-admin fallback); without this stub the reload pulls the real
+    # module, whose `from database.db_models import TenantGroupInfo` hits the
+    # two-class db_models stub above and raises ImportError at collection.
+    _utdb_mod = _mk_mod(
+        "database.user_tenant_db",
+        get_user_tenant_by_user_id=MagicMock(
+            return_value={"user_role": "USER"}
+        ),
+    )
+    _db_pkg.user_tenant_db = _utdb_mod
 
     # ---- services / utils --------------------------------------------------
     _services_pkg = _register_package("services")
