@@ -2,21 +2,35 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { App, Button, Input, Modal, Spin, Tag } from "antd";
+import {
+  App,
+  Button,
+  Col,
+  Dropdown,
+  Grid,
+  Input,
+  Modal,
+  Pagination,
+  Row,
+  Spin,
+  Tag,
+} from "antd";
 import {
   ArrowLeft,
   Bot,
   FileInput,
   GitBranch,
-  Plus,
+  MoreHorizontal,
+  Pencil,
   Search,
+  Clock,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal from "@/components/agent/CreateAgentModal";
+import CreateResourceCard from "@/components/resource/CreateResourceCard";
 import ResourceCard from "@/components/resource/ResourceCard";
-import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
@@ -33,8 +47,20 @@ import AgentDetail from "./agent-detail";
 import Agents from "./agents";
 import AgentVersion from "./agent-version";
 
-function getAgentTitle(agent: Agent) {
+interface AgentCardItem extends Agent {
+  create_time?: string;
+  update_time?: string;
+}
+
+function getAgentTitle(agent: AgentCardItem) {
   return agent.display_name || agent.name;
+}
+
+function formatAgentDate(agent: AgentCardItem) {
+  const source = agent.update_time || agent.create_time;
+  if (!source) return null;
+  const date = new Date(source);
+  return Number.isNaN(date.getTime()) ? source : date.toLocaleDateString();
 }
 
 export default function AgentsPage() {
@@ -46,6 +72,7 @@ export default function AgentsPage() {
   const requestedAgentId = Number(searchParams.get("agent_id"));
   const isEditing = Number.isInteger(requestedAgentId) && requestedAgentId > 0;
   const { agents, isLoading, isError, refetch } = useAgentList("");
+  const screens = Grid.useBreakpoint();
   const initialize = useAgentStore((state) => state.initialize);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
   const reset = useAgentStore((state) => state.reset);
@@ -81,10 +108,10 @@ export default function AgentsPage() {
     void loadAgent(requestedAgentId);
   }, [currentAgentId, isEditing, loadAgent, requestedAgentId]);
 
-  const visibleAgents = useMemo(() => {
+  const visibleAgents = useMemo((): AgentCardItem[] => {
     const query = search.trim().toLowerCase();
-    if (!query) return agents as Agent[];
-    return (agents as Agent[]).filter((agent) =>
+    if (!query) return agents as AgentCardItem[];
+    return (agents as AgentCardItem[]).filter((agent) =>
       [agent.display_name, agent.name, agent.description, agent.author].some(
         (value) =>
           String(value || "")
@@ -93,6 +120,16 @@ export default function AgentsPage() {
       )
     );
   }, [agents, search]);
+  const columns = screens.xxl ? 4 : screens.xl ? 3 : screens.md ? 2 : 1;
+  const rows = screens.xs ? 2 : 3;
+  const itemsPerPage = Math.max(1, columns * rows - 1);
+  const pageCount = Math.max(1, Math.ceil(visibleAgents.length / itemsPerPage));
+  const currentPage = Math.min(page, pageCount);
+  const pageItems = visibleAgents.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+  const cardHeight = `calc((100% - ${(rows - 1) * 20}px) / ${rows})`;
 
   const updateUrl = useCallback(
     (agentId?: number) => {
@@ -185,8 +222,8 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="min-h-0 overflow-y-auto bg-gray-50 px-4 py-8 sm:px-6 xl:px-16">
-      <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-gray-50 px-4 py-6 sm:px-6 xl:px-16">
+      <div className="flex h-full min-h-0 w-full flex-col gap-5">
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-4">
             <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
@@ -211,13 +248,6 @@ export default function AgentsPage() {
             >
               {t("agentConfig.button.import")}
             </Button>
-            <Button
-              type="primary"
-              icon={<Plus className="size-4" />}
-              onClick={() => setIsCreateOpen(true)}
-            >
-              {t("agentConfig.button.new")}
-            </Button>
           </div>
         </section>
 
@@ -233,54 +263,146 @@ export default function AgentsPage() {
           className="h-10 max-w-md"
         />
 
-        {isLoading ? (
-          <div className="flex justify-center py-20">
-            <Spin size="large" />
-          </div>
-        ) : isError ? (
-          <div className="flex flex-col items-center gap-3 py-20">
-            <p className="text-sm text-slate-500">
-              {t("agentRepository.mine.loadError")}
-            </p>
-            <Button onClick={() => refetch()}>
-              {t("repository.common.retry")}
-            </Button>
-          </div>
-        ) : (
-          <ResourceCardGrid
-            items={visibleAgents}
-            page={page}
-            onPageChange={setPage}
-            search={search}
-            showToolbar={false}
-            renderItem={(agent) => (
-              <ResourceCard
-                key={agent.id}
-                title={getAgentTitle(agent)}
-                subtitle={agent.author}
-                description={
-                  agent.description || t("agentRepository.card.noDescription")
-                }
-                badge={
-                  <Tag color={agent.current_version_no ? "green" : "orange"}>
-                    {agent.current_version_no
-                      ? t("agentRepository.mine.lifecycle.published")
-                      : t("agentRepository.mine.lifecycle.draft")}
-                  </Tag>
-                }
-                meta={
-                  <span>
-                    {agent.version_name ||
-                      (agent.current_version_no
-                        ? `V${agent.current_version_no}`
-                        : "-")}
-                  </span>
-                }
-                onClick={() => void handleOpenDetail(agent)}
-              />
-            )}
-          />
-        )}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {isLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <Spin size="large" />
+            </div>
+          ) : isError ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3">
+              <p className="text-sm text-slate-500">
+                {t("agentRepository.mine.loadError")}
+              </p>
+              <Button onClick={() => refetch()}>
+                {t("repository.common.retry")}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex h-full min-h-0 flex-col">
+              <Row
+                gutter={[20, 20]}
+                className="min-h-0 flex-1 content-stretch overflow-hidden"
+              >
+                <Col
+                  xs={24}
+                  sm={12}
+                  xl={8}
+                  xxl={6}
+                  className="flex"
+                  style={{ height: cardHeight }}
+                >
+                  <CreateResourceCard
+                    title={t("agentConfig.button.new")}
+                    onClick={() => setIsCreateOpen(true)}
+                    className="min-h-0"
+                  />
+                </Col>
+                {pageItems.map((agent) => {
+                  const date = formatAgentDate(agent);
+                  return (
+                    <Col
+                      key={agent.id}
+                      xs={24}
+                      sm={12}
+                      xl={8}
+                      xxl={6}
+                      className="flex"
+                      style={{ height: cardHeight }}
+                    >
+                      <ResourceCard
+                        className="h-full min-h-0"
+                        title={getAgentTitle(agent)}
+                        subtitle={
+                          agent.version_name ||
+                          (agent.current_version_no
+                            ? `V${agent.current_version_no}`
+                            : undefined)
+                        }
+                        icon={
+                          <span className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                            <Bot className="size-5" aria-hidden />
+                          </span>
+                        }
+                        description={
+                          agent.description ||
+                          t("agentRepository.card.noDescription")
+                        }
+                        descriptionLines={2}
+                        actions={
+                          <div className="flex flex-col items-end gap-1.5">
+                            <Dropdown
+                              menu={{
+                                items: [
+                                  {
+                                    key: "detail",
+                                    label: t("agentRepository.mine.view"),
+                                    onClick: () => void handleOpenDetail(agent),
+                                  },
+                                ],
+                              }}
+                              trigger={["click"]}
+                            >
+                              <Button
+                                type="text"
+                                size="small"
+                                className="size-8 text-slate-400 hover:text-slate-600"
+                                icon={
+                                  <MoreHorizontal
+                                    className="size-4"
+                                    aria-hidden
+                                  />
+                                }
+                                aria-label={t("agentRepository.mine.menu.more")}
+                              />
+                            </Dropdown>
+                            <Tag
+                              color={
+                                agent.current_version_no ? "green" : "orange"
+                              }
+                            >
+                              {agent.current_version_no
+                                ? t("agentRepository.mine.lifecycle.published")
+                                : t("agentRepository.mine.lifecycle.draft")}
+                            </Tag>
+                          </div>
+                        }
+                        meta={
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="size-3.5" aria-hidden />
+                            {date || "-"}
+                          </span>
+                        }
+                        footerLayout="inline"
+                        footer={
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<Pencil className="size-3.5" aria-hidden />}
+                            onClick={() => updateUrl(Number(agent.id))}
+                          >
+                            {t("agentRepository.mine.edit")}
+                          </Button>
+                        }
+                        onClick={() => void handleOpenDetail(agent)}
+                      />
+                    </Col>
+                  );
+                })}
+              </Row>
+              {visibleAgents.length > itemsPerPage ? (
+                <div className="flex shrink-0 justify-end pt-5">
+                  <Pagination
+                    current={currentPage}
+                    pageSize={itemsPerPage}
+                    total={visibleAgents.length}
+                    showSizeChanger={false}
+                    onChange={setPage}
+                  />
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
       </div>
 
       <AgentDetail

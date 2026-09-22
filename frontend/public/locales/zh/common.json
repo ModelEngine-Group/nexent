@@ -1987,7 +1987,7 @@
   "agentRepository.page.title": "Agent 仓库",
   "agentRepository.page.subtitle": "浏览同租户共享仓库、管理你有权限的智能体，并发布与审核。",
   "agentRepository.page.tab.repository": "仓库",
-  "agentRepository.page.tab.mine": "我的 Agent",
+  "agentRepository.page.tab.mine": "我的智能体",
   "agentRepository.page.tab.review": "审核中心",
   "agentRepository.page.searchPlaceholder": "搜索 Agent 名称、描述或标签",
   "agentRepository.page.categoryAll": "全部",
