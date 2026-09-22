@@ -278,6 +278,7 @@ export default function MineMcpServiceCard({
           <Button
             type="text"
             size="small"
+            className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
             loading={toggling}
             icon={<Power className="size-3.5" />}
             onClick={() => onToggle(localService)}
