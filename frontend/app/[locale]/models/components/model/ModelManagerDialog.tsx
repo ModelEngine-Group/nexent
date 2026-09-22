@@ -71,6 +71,21 @@ export function groupByConnection(models: ModelOption[]): ConnectionGroup[] {
   return Array.from(map.values());
 }
 
+// Raw type ids -> the semantic i18n keys used across the app (same mapping
+// as ModelLibraryList).
+const TYPE_LABEL_KEY_MAP: Record<string, string> = {
+  llm: "llm",
+  embedding: "embedding",
+  multi_embedding: "multiEmbedding",
+  vlm: "imageUnderstanding",
+  vlm2: "imageGeneration",
+  vlm3: "videoUnderstanding",
+  vlm4: "audioUnderstanding",
+  rerank: "rerank",
+  stt: "stt",
+  tts: "tts",
+};
+
 function maskKey(key: string) {
   if (!key) return "未设置";
   if (key.length <= 8) return `${key.slice(0, 2)}••••${key.slice(-2)}`;
@@ -495,7 +510,12 @@ function DeleteGroupContent({
                           </span>
                         </span>
                         <span className="shrink-0 text-xs text-muted-foreground">
-                          {m.type}
+                          {t(
+                            `model.type.${TYPE_LABEL_KEY_MAP[m.type] ?? m.type}`,
+                            {
+                              defaultValue: m.type,
+                            }
+                          )}
                         </span>
                       </button>
                     </li>
