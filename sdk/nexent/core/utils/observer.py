@@ -130,8 +130,9 @@ class TokenCountTransformer(MessageTransformer):
 
 
 class MessageObserver:
-    # set the maximum buffer size, can be adjusted according to needs
+    # Retained for callers that inspect the legacy buffer limit.
     MAX_TOKEN_BUFFER_SIZE = 10
+    MAX_PROTOCOL_LOOKAHEAD_CHARS = 32
 
     def __init__(self, lang="zh", enable_nl2a_wrapper=False):
         # Unified output queue consumed by the agent streaming bridge.
@@ -222,6 +223,14 @@ class MessageObserver:
     @in_think_mode.setter
     def in_think_mode(self, value: bool) -> None:
         self._stream_state.in_think_mode = value
+
+    @property
+    def legacy_code_fence_pending(self) -> bool:
+        return getattr(self._stream_state, "legacy_code_fence_pending", False)
+
+    @legacy_code_fence_pending.setter
+    def legacy_code_fence_pending(self, value: bool) -> None:
+        self._stream_state.legacy_code_fence_pending = value
 
     def _init_message_transformers(self):
         """initialize the mapping of message type to transformer"""
@@ -331,6 +340,7 @@ class MessageObserver:
         self.think_buffer.clear()
         self.current_mode = ProcessType.MODEL_OUTPUT_THINKING
         self.in_think_mode = False
+        self.legacy_code_fence_pending = False
 
     def begin_model_attempt(self, attempt_id: str, attempt: int) -> None:
         self._reset_model_stream_state()
@@ -359,131 +369,113 @@ class MessageObserver:
         self._model_attempt_id.set(None)
 
     def add_model_new_token(self, new_token):
-        """
-        Process streaming tokens with real-time think tag detection and content classification
-        """
-        # Add token to think buffer
-        self.think_buffer.append(new_token)
+        """Stream safe text immediately while retaining only incomplete protocol tags."""
+        if not new_token:
+            return
+        pending = "".join(self.think_buffer) + str(new_token)
+        self.think_buffer.clear()
+        while pending:
+            marker = "</think>" if self.in_think_mode else "<think>"
+            marker_index = pending.find(marker)
+            if marker_index >= 0:
+                before, pending = pending[:marker_index], pending[marker_index + len(marker):]
+                if before:
+                    if self.in_think_mode:
+                        self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, before)
+                    else:
+                        self._process_normal_content(before)
+                self.in_think_mode = not self.in_think_mode
+                continue
 
-        # Check for think tag patterns in the buffer
-        buffer_text = ''.join(self.think_buffer)
-
-        # Check for think start tag
-        if not self.in_think_mode:
-            start_match = self.think_start_pattern.search(buffer_text)
-            if start_match:
-                # Found <think> tag, switch to think mode
-                self.in_think_mode = True
-                # Clear buffer and keep only content after <think>
-                self.think_buffer.clear()
-                think_content = buffer_text[start_match.end():]
-                if think_content:
-                    self.think_buffer.append(think_content)
-
-        # Check for think end tag
-        if self.in_think_mode:
-            end_match = self.think_end_pattern.search(buffer_text)
-            if end_match:
-                # Found </think> tag, exit think mode
-                self.in_think_mode = False
-                # Process think content before </think>
-                think_content = buffer_text[:end_match.start()]
-                if think_content:
-                    self._emit(
-                        ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_content)
-
-                # Process content after </think> as normal content
-                after_think = buffer_text[end_match.end():]
-                if after_think:
-                    self._process_normal_content(after_think)
-                self.think_buffer.clear()
-
-        while len(self.think_buffer) > self.MAX_TOKEN_BUFFER_SIZE:
-            # Flush ALL tokens that exceed buffer size at once to avoid fragmentation
-            # Each flush is a single message_query.append with multiple tokens concatenated
-            accumulated_content = ''.join(list(self.think_buffer)[:-self.MAX_TOKEN_BUFFER_SIZE])
-            # Remove the flushed tokens from buffer
-            for _ in range(len(self.think_buffer) - self.MAX_TOKEN_BUFFER_SIZE):
-                self.think_buffer.popleft()
-            # Send accumulated content
-            if accumulated_content:
+            suffix_length = self._marker_suffix_length(pending, marker)
+            safe_text = pending[:-suffix_length] if suffix_length else pending
+            if safe_text:
                 if self.in_think_mode:
-                    self._emit(
-                        ProcessType.MODEL_OUTPUT_DEEP_THINKING, accumulated_content)
+                    self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, safe_text)
                 else:
-                    self._process_normal_content(accumulated_content)
+                    self._process_normal_content(safe_text)
+            if suffix_length:
+                self.think_buffer.append(pending[-suffix_length:])
+            break
 
+    @staticmethod
+    def _marker_suffix_length(content: str, marker: str) -> int:
+        """Length of the suffix that may complete a split protocol marker."""
+        for length in range(min(len(content), len(marker) - 1), 0, -1):
+            if content.endswith(marker[:length]):
+                return length
+        return 0
+
+    @staticmethod
+    def _legacy_code_suffix_length(content: str) -> int:
+        candidate = re.search(r"(?:代码|Code)[：:]\s*`{0,2}$", content)
+        if candidate:
+            return len(content) - candidate.start()
+        for marker in ("代码", "Code"):
+            for length in range(min(len(content), len(marker)), 0, -1):
+                if content.endswith(marker[:length]):
+                    return length
+        return 0
 
     def _process_normal_content(self, content):
-        """
-        Process normal content (non-deep-think content) for code block detection
-        """
-        self.token_buffer.append(content)
+        """Classify legacy code fences without delaying unrelated model content."""
+        if not content:
+            return
+        pending = "".join(self.token_buffer) + content
+        self.token_buffer.clear()
+        if self.current_mode == ProcessType.MODEL_OUTPUT_CODE:
+            self._emit(ProcessType.MODEL_OUTPUT_CODE, pending)
+            return
 
-        # concatenate the buffer into text for checking code blocks
-        buffer_text = ''.join(self.token_buffer)
-
-        # find the code block marker
-        match = self.code_pattern.search(buffer_text)
-
-        if match:
-            # found the code block marker
-            match_start = match.start()
-
-            # only switch mode when in thinking mode
-            if self.current_mode == ProcessType.MODEL_OUTPUT_THINKING:
-                # send the content before the matching position as thinking
-                prefix_text = buffer_text[:match_start]
-                if prefix_text:
-                    self._emit(
-                        ProcessType.MODEL_OUTPUT_THINKING, prefix_text)
-
-                # send the content after the matching part as code
-                code_text = buffer_text[match_start:]
-                if code_text:
-                    self._emit(
-                        ProcessType.MODEL_OUTPUT_CODE, code_text)
-
-                # switch mode
+        if self.legacy_code_fence_pending:
+            fence = re.match(r"\s*```", pending)
+            if fence:
+                self.legacy_code_fence_pending = False
                 self.current_mode = ProcessType.MODEL_OUTPUT_CODE
-            else:
-                # already in code mode, send the entire buffer content as code
-                self._emit(
-                    ProcessType.MODEL_OUTPUT_CODE, buffer_text)
+                self._emit(ProcessType.MODEL_OUTPUT_CODE, pending)
+                return
+            whitespace = re.match(r"\s*", pending).end()
+            if whitespace == len(pending):
+                self._emit(ProcessType.MODEL_OUTPUT_THINKING, pending)
+                return
+            if pending[whitespace:] in ("`", "``"):
+                if whitespace:
+                    self._emit(ProcessType.MODEL_OUTPUT_THINKING, pending[:whitespace])
+                self.token_buffer.append(pending[whitespace:])
+                return
+            self.legacy_code_fence_pending = False
 
-            # clear the buffer
-            self.token_buffer.clear()
+        match = self.code_pattern.search(pending)
+        if match:
+            if match.start():
+                self._emit(ProcessType.MODEL_OUTPUT_THINKING, pending[:match.start()])
+            self.current_mode = ProcessType.MODEL_OUTPUT_CODE
+            self._emit(ProcessType.MODEL_OUTPUT_CODE, pending[match.start():])
+            return
+
+        suffix_length = self._legacy_code_suffix_length(pending)
+        if suffix_length > self.MAX_PROTOCOL_LOOKAHEAD_CHARS:
+            safe_text = pending
+            self.legacy_code_fence_pending = True
+            suffix_length = 0
         else:
-            # not found the code block marker, pop the first token from the queue (if the buffer length exceeds a certain size)
-            max_buffer_size = self.MAX_TOKEN_BUFFER_SIZE
-            if len(self.token_buffer) > max_buffer_size:
-                # Flush ALL tokens that exceed buffer size at once to avoid fragmentation
-                accumulated_content = ''.join(list(self.token_buffer)[:-max_buffer_size])
-                # Remove the flushed tokens from buffer
-                for _ in range(len(self.token_buffer) - max_buffer_size):
-                    self.token_buffer.popleft()
-                # Send accumulated content
-                self._emit(self.current_mode, accumulated_content)
+            safe_text = pending[:-suffix_length] if suffix_length else pending
+        if safe_text:
+            self._emit(ProcessType.MODEL_OUTPUT_THINKING, safe_text)
+        if suffix_length:
+            self.token_buffer.append(pending[-suffix_length:])
 
     def flush_remaining_tokens(self):
         """
         send the remaining tokens in the double-ended queue
         """
-        # Process remaining think buffer content
+        # Process the incomplete think marker as literal content at EOF.
         if self.think_buffer:
             think_buffer_text = ''.join(self.think_buffer)
             if self.in_think_mode:
-                # Still in think mode, remove any think tags and process as deep thinking
-                think_buffer_text = re.sub(r"<think>|</think>", "", think_buffer_text)
-                if think_buffer_text:
-                    self._emit(
-                        ProcessType.MODEL_OUTPUT_DEEP_THINKING,
-                        think_buffer_text,
-                    )
+                self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_buffer_text)
             else:
-                # Not in think mode, process as normal content
-                if think_buffer_text:
-                    self._process_normal_content(think_buffer_text)
+                self._process_normal_content(think_buffer_text)
             self.think_buffer.clear()
 
         # Process remaining normal buffer content
@@ -491,6 +483,7 @@ class MessageObserver:
             buffer_text = ''.join(self.token_buffer)
             self._emit(self.current_mode, buffer_text)
             self.token_buffer.clear()
+        self.legacy_code_fence_pending = False
 
     @staticmethod
     def _extract_nl2a_wrapper(content):
