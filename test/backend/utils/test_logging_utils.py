@@ -324,6 +324,18 @@ def _read(tmp_path, category: str) -> str:
     return (tmp_path / category / f"nexent_{category}.log").read_text(encoding="utf-8")
 
 
+def _apply_dictconfig(monkeypatch, tmp_path):
+    """Wire logging through the dictConfig path used by the service entrypoints."""
+    monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+    logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime", "model_call"]))
+
+
+def _apply_configure_logging(monkeypatch, tmp_path):
+    """Wire logging through the programmatic configure_logging path."""
+    monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+    configure_logging(categories=["runtime", "model_call"])
+
+
 class TestModelCallRouting:
     """When model_call is among the categories, whitelisted model-layer loggers
     write to the dedicated model_call file and stop propagating."""
@@ -366,12 +378,7 @@ class TestModelCallRouting:
         logging.config.dictConfig(cfg)  # must not raise
         _cleanup_routing_state()
 
-    def test_dictconfig_routes_model_records_to_dedicated_file(
-        self, reset_root_logger, tmp_path, monkeypatch
-    ):
-        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
-        cfg = get_uvicorn_logging_config(categories=["runtime", "model_call"])
-        logging.config.dictConfig(cfg)
+    def _log_and_assert_routing(self, tmp_path):
         try:
             logging.getLogger("openai_llm").info("llm event")
             logging.getLogger("context_evidence").info("context evidence event")
@@ -389,27 +396,16 @@ class TestModelCallRouting:
         finally:
             _cleanup_routing_state()
 
-    def test_configure_logging_routes_model_records_to_dedicated_file(
-        self, reset_root_logger, tmp_path, monkeypatch
+    @pytest.mark.parametrize(
+        "apply_config",
+        [_apply_dictconfig, _apply_configure_logging],
+        ids=["dictconfig", "configure_logging"],
+    )
+    def test_routes_model_records_to_dedicated_file(
+        self, reset_root_logger, tmp_path, monkeypatch, apply_config
     ):
-        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
-        configure_logging(categories=["runtime", "model_call"])
-        try:
-            logging.getLogger("openai_llm").info("llm event")
-            logging.getLogger("context_evidence").info("context evidence event")
-            logging.getLogger("runtime_service").info("system event")
-            for h in logging.getLogger().handlers:
-                h.flush()
-            model_log = _read(tmp_path, "model_call")
-            runtime_log = _read(tmp_path, "runtime")
-            assert "llm event" in model_log
-            assert "context evidence event" in model_log
-            assert "system event" not in model_log
-            assert "system event" in runtime_log
-            assert "llm event" not in runtime_log
-            assert "context evidence event" not in runtime_log
-        finally:
-            _cleanup_routing_state()
+        apply_config(monkeypatch, tmp_path)
+        self._log_and_assert_routing(tmp_path)
 
     def test_named_loggers_do_not_accumulate_handlers(
         self, reset_root_logger, tmp_path, monkeypatch
