@@ -221,7 +221,7 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-gray-50 px-4 py-6 sm:px-6 xl:px-16">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white px-4 py-6 sm:px-6 xl:px-16">
       <Card
         className="flex h-full min-h-0 w-full flex-col"
         styles={{

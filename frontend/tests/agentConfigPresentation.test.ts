@@ -20,6 +20,10 @@ test("keeps the agent configuration workspace white", async () => {
 
   assert.match(page, /<div className="flex h-full min-h-0 flex-col bg-white">/);
   assert.match(
+    page,
+    /<div className="flex h-full min-h-0 flex-col overflow-hidden bg-white px-4 py-6 sm:px-6 xl:px-16">/
+  );
+  assert.match(
     agents,
     /<div className="flex h-full w-full min-h-0 flex-col bg-white">/
   );
