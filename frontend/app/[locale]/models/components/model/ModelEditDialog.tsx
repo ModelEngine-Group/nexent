@@ -60,6 +60,20 @@ const TYPE_LABEL_KEY_MAP: Record<string, string> = {
   tts: "tts",
 };
 
+/** Filter the tokenizer_family field out of the specs — internal implementation
+ *  detail, not something operators should configure. */
+function filterOutTokenizer(
+  specs: InferenceFieldSpecsByType,
+  modelType: string
+): InferenceFieldSpecsByType {
+  const list = specs[modelType];
+  if (!Array.isArray(list)) return specs;
+  return {
+    ...specs,
+    [modelType]: list.filter((s: any) => s.key !== "tokenizer_family"),
+  };
+}
+
 const TYPE_BADGE_CLASS: Record<string, string> = {
   [MODEL_TYPES.LLM]: "bg-blue-100 text-blue-700",
   [MODEL_TYPES.EMBEDDING]: "bg-indigo-100 text-indigo-700",
@@ -257,7 +271,7 @@ export const ModelEditDialog = ({
               <div className="mt-4 border-t pt-4">
                 <ModelAdvancedSettings
                   modelType={model.type}
-                  specs={inferenceSpecs}
+                  specs={filterOutTokenizer(inferenceSpecs, model.type)}
                   value={advanced}
                   onChange={setAdvanced}
                   mode="override"
