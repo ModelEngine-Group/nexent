@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   PackageX,
   Search,
+  ShieldCheck,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -210,6 +211,7 @@ export function AgentSpace({ active }: { active: boolean }) {
     const toolCount = listing.tool_count ?? 0;
     const downloads = listing.downloads ?? 0;
     const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
+    const isOfficialListing = listing.is_official === true;
     // Official templates are managed from the super-admin resource page.
     // The ordinary repository status menu must not expose take-down actions
     // for official listings to tenant administrators.
@@ -247,16 +249,26 @@ export function AgentSpace({ active }: { active: boolean }) {
           listing.description?.trim() || t("agentRepository.card.noDescription")
         }
         badge={
-          listing.version_label ? (
-            <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-              <span
-                className="size-1.5 shrink-0 rounded-full bg-primary"
-                aria-hidden
-              />
-              {t("agentRepository.mine.currentVersion", {
-                version: listing.version_label,
-              })}
-            </span>
+          isOfficialListing || listing.version_label ? (
+            <>
+              {isOfficialListing ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                  <ShieldCheck className="size-3" aria-hidden />
+                  {t("agentRepository.card.official")}
+                </span>
+              ) : null}
+              {listing.version_label ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  <span
+                    className="size-1.5 shrink-0 rounded-full bg-primary"
+                    aria-hidden
+                  />
+                  {t("agentRepository.mine.currentVersion", {
+                    version: listing.version_label,
+                  })}
+                </span>
+              ) : null}
+            </>
           ) : undefined
         }
         tags={
