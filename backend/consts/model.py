@@ -843,6 +843,14 @@ class AgentRequest(BaseModel):
             "or Agent default."
         ),
     )
+    reasoning_budget_tokens: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Optional per-run reasoning token budget. None inherits the selected "
+            "model or Agent default."
+        ),
+    )
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
@@ -2262,22 +2270,43 @@ class DeleteMcpServiceRequest(BaseModel):
 # =============================================================================
 
 
+class ReasoningControl(BaseModel):
+    """One reasoning control exposed by the provider catalog."""
+
+    type: Literal["toggle", "effort", "budget_tokens"]
+    values: List[str] = Field(default_factory=list)
+    min: Optional[int] = Field(default=None, ge=0)
+    max: Optional[int] = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_control(self) -> "ReasoningControl":
+        if self.type == "effort" and not self.values:
+            raise ValueError("Effort reasoning control must declare values")
+        if self.type == "budget_tokens":
+            if self.min is None or self.max is None or self.min > self.max:
+                raise ValueError("Budget-token reasoning control must declare a valid min/max range")
+        return self
+
+
 class ReasoningCapability(BaseModel):
     """Explicit reasoning control capability declared by the model catalog."""
 
     status: Literal["supported", "unsupported", "unknown"] = "unknown"
-    control: Literal["toggle", "effort"] = "effort"
+    control: Literal["toggle", "effort", "budget_tokens"] = "effort"
     levels: List[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(default_factory=list)
-    default: Optional[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]] = None
+    default: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = None
     wire_format: Literal["reasoning_effort", "thinking_toggle", "thinking_budget"] = "reasoning_effort"
     effort_budgets: Dict[str, int] = Field(default_factory=dict)
-    source: Literal["catalog", "operator", "unknown"] = "unknown"
+    controls: List[ReasoningControl] = Field(default_factory=list)
+    matched_api: Optional[str] = None
+    matched_model_id: Optional[str] = None
+    source: Literal["catalog", "models_dev", "operator", "unknown"] = "unknown"
 
     @model_validator(mode="after")
     def validate_levels(self) -> "ReasoningCapability":
         if self.status == "supported" and self.control == "effort" and not self.levels:
             raise ValueError("Effort reasoning capability must declare at least one level")
-        if self.default is not None and self.default not in self.levels:
+        if self.default is not None and self.default != "auto" and self.default not in self.levels:
             raise ValueError("Reasoning default must be included in reasoning levels")
         if any(level not in self.levels for level in self.effort_budgets):
             raise ValueError("Reasoning budget keys must be included in reasoning levels")
@@ -2295,6 +2324,7 @@ class ReasoningCapability(BaseModel):
             self.levels = []
             self.default = None
             self.effort_budgets = {}
+            self.controls = []
         return self
 
 
@@ -2466,6 +2496,7 @@ def get_extra_param_keys_for_type(model_type: str) -> List[str]:
         # Stored in the existing JSONB column so this feature remains
         # backwards-compatible with installations that have no migration.
         keys.append("reasoning_effort")
+        keys.append("reasoning_budget_tokens")
     return keys
 
 
@@ -2550,6 +2581,14 @@ def _validate_reasoning_extra_param(key: str, value: Any, logger) -> bool:
             "Dropped invalid reasoning_effort value %r; expected one of %s",
             value,
             sorted(REASONING_EFFORT_VALUES),
+        )
+        return False
+    if key == "reasoning_budget_tokens":
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return True
+        logger.warning(
+            "Dropped invalid reasoning_budget_tokens value %r; expected a positive integer",
+            value,
         )
         return False
     return True

@@ -1147,6 +1147,7 @@ async def prepare_agent_run(
         "override_version_no": agent_request.version_no,
         "override_model_id": agent_request.model_id,
         "reasoning_effort": agent_request.reasoning_effort,
+        "reasoning_budget_tokens": agent_request.reasoning_budget_tokens,
         "requested_output_tokens": agent_request.requested_output_tokens,
         "tool_params": agent_request.tool_params,
         "conversation_id": agent_request.conversation_id,

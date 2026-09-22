@@ -135,7 +135,8 @@ const mapInferenceParamsFromApi = (model: any) => ({
   enableThinking:
     model.extra_params?.enable_thinking === true ||
     (model.extra_params?.enable_thinking === undefined &&
-      typeof model.extra_params?.reasoning_effort === "string"),
+      (typeof model.extra_params?.reasoning_effort === "string" ||
+        typeof model.extra_params?.reasoning_budget_tokens === "number")),
   defaultReasoningEffort:
     typeof model.extra_params?.reasoning_effort === "string" &&
     ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(

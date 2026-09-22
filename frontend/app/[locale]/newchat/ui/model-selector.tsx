@@ -45,30 +45,8 @@ export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
   { id: "high", name: "High" },
 ];
 
-const REASONING_EFFORT_LABELS: Record<
-  string,
-  { key: string; defaultValue: string }
-> = {
-  auto: { key: "model.advanced.reasoningAuto", defaultValue: "Auto" },
-  none: { key: "model.advanced.reasoningOff", defaultValue: "Off" },
-  minimal: {
-    key: "model.advanced.reasoningMinimal",
-    defaultValue: "Minimal",
-  },
-  low: { key: "model.advanced.reasoningLow", defaultValue: "Low" },
-  medium: { key: "model.advanced.reasoningMedium", defaultValue: "Medium" },
-  high: { key: "model.advanced.reasoningHigh", defaultValue: "High" },
-  xhigh: { key: "model.advanced.reasoningXHigh", defaultValue: "Very high" },
-  max: { key: "model.advanced.reasoningMax", defaultValue: "Maximum" },
-};
-
-const localizeReasoningEffortName = (
-  option: ModelSelectorEffortOption,
-  translate: (key: string, options?: { defaultValue: string }) => string
-): string => {
-  const label = REASONING_EFFORT_LABELS[option.id];
-  return label ? translate(label.key, label) : option.name;
-};
+const getReasoningEffortName = (option: ModelSelectorEffortOption): string =>
+  option.id;
 
 export type ModelOption = {
   id: string;
@@ -86,6 +64,10 @@ export type ModelOption = {
   efforts?: boolean | readonly ModelSelectorEffortOption[];
   /** Default effort from the model capability profile. */
   defaultEffort?: string;
+  /** Token budget range for models whose reasoning control is numeric. */
+  budgetTokens?: { min: number; max: number };
+  /** Persisted model/agent budget, when one was explicitly configured. */
+  defaultBudgetTokens?: number;
 };
 
 function getModelEfforts(
@@ -158,6 +140,8 @@ type ModelSelectorContextValue = {
   /** Effort resolved against the selected model's supported levels. */
   effort: string | undefined;
   setEffort: (effort: string) => void;
+  budgetTokens: number | undefined;
+  setBudgetTokens: (budget: number) => void;
   setOpen: (open: boolean) => void;
 };
 
@@ -198,6 +182,9 @@ export type ModelSelectorRootProps = {
   effort?: string;
   defaultEffort?: string;
   onEffortChange?: (effort: string) => void;
+  budgetTokens?: number;
+  defaultBudgetTokens?: number;
+  onBudgetTokensChange?: (budget: number) => void;
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -212,6 +199,9 @@ function ModelSelectorRoot({
   effort: effortProp,
   defaultEffort,
   onEffortChange,
+  budgetTokens: budgetTokensProp,
+  defaultBudgetTokens,
+  onBudgetTokensChange,
   open: openProp,
   defaultOpen,
   onOpenChange,
@@ -230,6 +220,15 @@ function ModelSelectorRoot({
         (model) => model.id === (valueProp ?? defaultValue ?? models[0]?.id)
       )?.defaultEffort,
     onChange: onEffortChange,
+  });
+  const [budgetTokens, setBudgetTokens] = useControllableState({
+    prop: budgetTokensProp,
+    defaultProp:
+      defaultBudgetTokens ??
+      models.find(
+        (model) => model.id === (valueProp ?? defaultValue ?? models[0]?.id)
+      )?.defaultBudgetTokens,
+    onChange: onBudgetTokensChange,
   });
   const [open, setOpen] = useControllableState({
     prop: openProp,
@@ -268,6 +267,11 @@ function ModelSelectorRoot({
       ? selectedModel.defaultEffort
       : undefined;
   const activeEffort = resolveEffort(efforts, effort) ?? resolvedDefaultEffort;
+  const budgetRange = selectedModel?.budgetTokens;
+  const activeBudgetTokens =
+    budgetRange && budgetTokens !== undefined
+      ? Math.min(budgetRange.max, Math.max(budgetRange.min, budgetTokens))
+      : selectedModel?.defaultBudgetTokens;
   const contextValue = useMemo(
     () => ({
       models,
@@ -277,6 +281,8 @@ function ModelSelectorRoot({
       efforts,
       effort: activeEffort,
       setEffort,
+      budgetTokens: activeBudgetTokens,
+      setBudgetTokens,
       setOpen,
     }),
     [
@@ -287,6 +293,8 @@ function ModelSelectorRoot({
       efforts,
       activeEffort,
       setEffort,
+      activeBudgetTokens,
+      setBudgetTokens,
       setOpen,
     ]
   );
@@ -392,7 +400,7 @@ function ModelSelectorValue({
     showEffort && effort !== undefined
       ? (() => {
           const option = efforts?.find((e) => e.id === effort);
-          return option ? localizeReasoningEffortName(option, t) : undefined;
+          return option ? getReasoningEffortName(option) : undefined;
         })()
       : undefined;
 
@@ -598,10 +606,12 @@ function ModelSelectorEffort({
   ...props
 }: ModelSelectorEffortProps) {
   const { t } = useTranslation();
-  const { efforts, effort, setEffort } = useModelSelectorEfforts();
+  const { selectedModel, efforts, effort, setEffort, budgetTokens, setBudgetTokens } =
+    useModelSelectorContext();
   const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
+  const budgetRange = selectedModel?.budgetTokens;
 
-  if (!efforts?.length) return null;
+  if (!efforts?.length && !budgetRange) return null;
 
   return (
     <div
@@ -618,7 +628,29 @@ function ModelSelectorEffort({
       }}
       {...props}
     >
-      <span className="text-muted-foreground text-xs">{resolvedLabel}</span>
+      <span className="text-muted-foreground text-xs">
+        {budgetRange
+          ? t("model.advanced.reasoningBudget", { defaultValue: "Budget tokens" })
+          : resolvedLabel}
+      </span>
+      {budgetRange ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <input
+            type="range"
+            min={budgetRange.min}
+            max={budgetRange.max}
+            value={budgetTokens ?? budgetRange.min}
+            aria-label={t("model.advanced.reasoningBudget", {
+              defaultValue: "Budget tokens",
+            })}
+            onChange={(event) => setBudgetTokens(Number(event.target.value))}
+            className="min-w-0 flex-1"
+          />
+          <span className="w-14 text-right text-xs text-muted-foreground">
+            {budgetTokens ?? "auto"}
+          </span>
+        </div>
+      ) : (
       <div
         role="group"
         aria-label={
@@ -628,7 +660,7 @@ function ModelSelectorEffort({
         }
         className="flex items-center gap-0.5"
       >
-        {efforts.map((option) => {
+        {efforts?.map((option) => {
           const isActive = option.id === effort;
           return (
             <button
@@ -644,11 +676,12 @@ function ModelSelectorEffort({
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {localizeReasoningEffortName(option, t)}
+              {getReasoningEffortName(option)}
             </button>
           );
         })}
       </div>
+      )}
     </div>
   );
 }
@@ -664,7 +697,7 @@ export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
 /** Registers the selection with assistant-ui's ModelContext system. The
  * context's effort is already resolved against the selected model. */
 function ModelSelectorModelContext() {
-  const { value, effort } = useModelSelectorContext();
+  const { value, effort, budgetTokens } = useModelSelectorContext();
   const api = useAui();
 
   useEffect(() => {
@@ -673,12 +706,15 @@ function ModelSelectorModelContext() {
       config: {
         modelName: value,
         ...(effort !== undefined ? { reasoningEffort: effort } : undefined),
+        ...(budgetTokens !== undefined
+          ? { reasoningBudgetTokens: budgetTokens }
+          : undefined),
       },
     };
     return api.modelContext().register({
       getModelContext: () => config,
     });
-  }, [api, value, effort]);
+  }, [api, value, effort, budgetTokens]);
 
   return null;
 }

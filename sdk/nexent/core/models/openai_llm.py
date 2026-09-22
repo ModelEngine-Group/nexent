@@ -173,6 +173,7 @@ class OpenAIModel(OpenAIServerModel):
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
                  ssl_verify=True, reasoning_effort: Optional[str] = None,
+                 reasoning_budget_tokens: Optional[int] = None,
                  reasoning_capability: Optional[Dict[str, Any]] = None,
                  model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
@@ -238,6 +239,7 @@ class OpenAIModel(OpenAIServerModel):
         self.temperature = temperature
         self.top_p = top_p
         self.reasoning_effort = reasoning_effort
+        self.reasoning_budget_tokens = reasoning_budget_tokens
         self.reasoning_capability = reasoning_capability or None
         self.stop_event = (
             cancellation_scope.stop_event if cancellation_scope else threading.Event()
@@ -1109,7 +1111,10 @@ class OpenAIModel(OpenAIServerModel):
         ``thinking`` object, so the catalog declares that translation instead
         of making the runtime guess from a model name.
         """
-        if self.reasoning_effort is None or self.reasoning_effort == "auto":
+        if (
+            (self.reasoning_effort is None or self.reasoning_effort == "auto")
+            and self.reasoning_budget_tokens is None
+        ):
             return
 
         capability = self.reasoning_capability or {}
@@ -1118,14 +1123,20 @@ class OpenAIModel(OpenAIServerModel):
             wire_format = "reasoning_effort"
 
         if wire_format == "reasoning_effort":
-            completion_kwargs["reasoning_effort"] = self.reasoning_effort
+            if self.reasoning_effort is not None and self.reasoning_effort != "auto":
+                completion_kwargs["reasoning_effort"] = self.reasoning_effort
+            elif self.reasoning_budget_tokens is not None:
+                completion_kwargs["reasoning_budget_tokens"] = self.reasoning_budget_tokens
             return
 
         extra_body = dict(completion_kwargs.get("extra_body") or {})
         thinking = extra_body.get("thinking")
         thinking = dict(thinking) if isinstance(thinking, dict) else {}
 
-        if self.reasoning_effort == "none":
+        if self.reasoning_budget_tokens is not None:
+            thinking["type"] = "enabled"
+            thinking["budget_tokens"] = self.reasoning_budget_tokens
+        elif self.reasoning_effort == "none":
             thinking["type"] = "disabled"
             thinking.pop("budget_tokens", None)
         else:

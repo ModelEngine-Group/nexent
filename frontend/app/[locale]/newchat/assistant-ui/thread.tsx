@@ -73,7 +73,6 @@ import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
 import {
   DEFAULT_REASONING_EFFORT,
-  DEFAULT_REASONING_EFFORTS,
 } from "@/const/modelConfig";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
@@ -130,9 +129,7 @@ const resolveDefaultReasoningEffort = (
 };
 
 const formatReasoningEffortName = (level: ReasoningEffort): string => {
-  if (level === "auto") return "Auto";
-  if (level === "none") return "Off";
-  return level[0].toUpperCase() + level.slice(1);
+  return level;
 };
 
 const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {
@@ -252,21 +249,31 @@ const useAgentModels = (
       const overrideExtra = agentOverride?.extra_params;
       const hasAgentReasoningSnapshot =
         typeof overrideExtra?.enable_thinking === "boolean" ||
-        typeof overrideExtra?.reasoning_effort === "string";
+        typeof overrideExtra?.reasoning_effort === "string" ||
+        typeof overrideExtra?.reasoning_budget_tokens === "number";
       const capability = model?.reasoningCapability;
       const reasoningEnabled = hasAgentReasoningSnapshot
         ? overrideExtra?.enable_thinking === true ||
           (overrideExtra?.enable_thinking === undefined &&
-            typeof overrideExtra?.reasoning_effort === "string")
+            (typeof overrideExtra?.reasoning_effort === "string" ||
+              typeof overrideExtra?.reasoning_budget_tokens === "number"))
         : model?.enableThinking === true;
-      // Every enabled LLM keeps the generic effort selector available. Models
-      // with catalog metadata use their declared levels below; unknown models
-      // fall back to the common auto/low/medium/high profile.
-      const supportsEffort = reasoningEnabled;
+      const effortControl =
+        capability?.status === "supported"
+          ? capability.controls?.find((control) => control.type === "effort")
+          : undefined;
       const capabilityLevels =
-        capability?.status === "supported" && capability.levels.length > 0
-          ? capability.levels
-          : [...DEFAULT_REASONING_EFFORTS];
+        effortControl?.type === "effort"
+          ? (effortControl.values as ReasoningEffort[])
+          : capability?.status === "supported" && capability.levels.length > 0
+            ? capability.levels
+            : [];
+      const budgetControl =
+        capability?.status === "supported"
+          ? capability.controls?.find((control) => control.type === "budget_tokens")
+          : undefined;
+      const supportsEffort = reasoningEnabled && capabilityLevels.length > 0;
+      const supportsBudget = reasoningEnabled && budgetControl?.type === "budget_tokens";
       const effortLevels = [
         "auto",
         ...capabilityLevels.filter((level) => level !== "auto"),
@@ -282,6 +289,10 @@ const useAgentModels = (
             capability,
             effortLevels
           );
+      const snapshotBudget =
+        typeof overrideExtra?.reasoning_budget_tokens === "number"
+          ? overrideExtra.reasoning_budget_tokens
+          : undefined;
       return {
         id,
         name: fallbackName,
@@ -292,6 +303,15 @@ const useAgentModels = (
                 name: formatReasoningEffortName(level),
               })),
               defaultEffort: defaultEffort ?? undefined,
+          }
+          : {}),
+        ...(supportsBudget
+          ? {
+              budgetTokens: {
+                min: budgetControl.min,
+                max: budgetControl.max,
+              },
+              defaultBudgetTokens: snapshotBudget,
             }
           : {}),
       };

@@ -302,6 +302,8 @@ class NexentAgent:
             prompt_cache=model_config.prompt_cache,
             reasoning_capability=model_config.reasoning_capability,
         )
+        if model_config.reasoning_budget_tokens is not None:
+            model_kwargs["reasoning_budget_tokens"] = model_config.reasoning_budget_tokens
         if (
             model_config.enable_thinking
             and model_config.reasoning_effort is not None

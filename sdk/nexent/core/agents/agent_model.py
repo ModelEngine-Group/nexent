@@ -34,6 +34,10 @@ class ModelConfig(BaseModel):
         description="Canonical per-request reasoning effort, when supported",
         default=None,
     )
+    reasoning_budget_tokens: Optional[int] = Field(
+        description="Canonical numeric reasoning budget, when supported",
+        default=None,
+    )
     reasoning_capability: Optional[Dict[str, Any]] = Field(
         description="Resolved model reasoning capability metadata",
         default=None,

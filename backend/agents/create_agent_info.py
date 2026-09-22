@@ -247,7 +247,10 @@ def _is_thinking_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
         return False
     if isinstance(extra_params.get("enable_thinking"), bool):
         return extra_params["enable_thinking"]
-    return isinstance(extra_params.get("reasoning_effort"), str)
+    return (
+        isinstance(extra_params.get("reasoning_effort"), str)
+        or isinstance(extra_params.get("reasoning_budget_tokens"), int)
+    )
 
 
 def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -262,6 +265,7 @@ def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[s
     extra_body = dict(extra_params)
     # These are dedicated ModelConfig fields, not provider request-body keys.
     extra_body.pop("reasoning_effort", None)
+    extra_body.pop("reasoning_budget_tokens", None)
     custom = extra_body.pop("__custom__", None)
     if custom and isinstance(custom, dict):
         extra_body.update(custom)
@@ -310,6 +314,30 @@ def _resolve_model_reasoning_effort(
     # Auto is the universal fallback: omit the provider-specific effort so the
     # model can choose its own reasoning depth.
     return None if saved is None or default == COMMON_REASONING_DEFAULT else default
+
+
+def _resolve_model_reasoning_budget(
+    extra_params: Optional[Dict[str, Any]],
+    capability: Optional[Dict[str, Any]],
+) -> Optional[int]:
+    """Resolve a persisted numeric reasoning budget within the source range."""
+    if not isinstance(extra_params, dict) or not _is_thinking_enabled(extra_params):
+        return None
+    value = extra_params.get("reasoning_budget_tokens")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    controls = capability.get("controls") if isinstance(capability, dict) else None
+    budget_control = next(
+        (control for control in controls or []
+         if isinstance(control, dict) and control.get("type") == "budget_tokens"),
+        None,
+    )
+    if isinstance(budget_control, dict):
+        minimum = budget_control.get("min")
+        maximum = budget_control.get("max")
+        if isinstance(minimum, int) and isinstance(maximum, int):
+            return min(maximum, max(minimum, value))
+    return value
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -1088,6 +1116,9 @@ async def create_model_config_list(tenant_id):
                         enable_thinking=_is_thinking_enabled(record.get("extra_params")),
                         reasoning_capability=reasoning_capability,
                         reasoning_effort=_resolve_model_reasoning_effort(
+                            record.get("extra_params"), reasoning_capability
+                        ),
+                        reasoning_budget_tokens=_resolve_model_reasoning_budget(
                             record.get("extra_params"), reasoning_capability
                         ),
                         extra_body=_build_extra_body(record.get("extra_params"))))
@@ -2359,6 +2390,7 @@ async def create_agent_run_info(
     override_version_no: int | None = None,
     override_model_id: int | None = None,
     reasoning_effort: str | None = None,
+    reasoning_budget_tokens: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     conversation_id: Optional[int] = None,
@@ -2478,10 +2510,15 @@ async def create_agent_run_info(
                                     mc.enable_thinking = v
                                     if not v:
                                         mc.reasoning_effort = None
+                                        mc.reasoning_budget_tokens = None
                                 continue
                             if k == "reasoning_effort":
                                 if isinstance(v, str):
                                     mc.reasoning_effort = v
+                                continue
+                            if k == "reasoning_budget_tokens":
+                                if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                                    mc.reasoning_budget_tokens = v
                                 continue
                             if k == "__custom__" and isinstance(v, dict):
                                 for custom_key, custom_value in v.items():
@@ -2498,6 +2535,10 @@ async def create_agent_run_info(
                         mc.extra_body = merged if merged else None
                     if override_entry.get("reasoning_effort") is not None:
                         mc.reasoning_effort = override_entry["reasoning_effort"]
+                    if override_entry.get("reasoning_budget_tokens") is not None:
+                        budget = override_entry["reasoning_budget_tokens"]
+                        if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
+                            mc.reasoning_budget_tokens = budget
                     break
 
     # A request-level effort is valid only when the selected model's switch is
@@ -2527,6 +2568,34 @@ async def create_agent_run_info(
                 "The selected model does not support the requested reasoning effort"
             )
         selected_config.reasoning_effort = reasoning_effort
+
+    if reasoning_budget_tokens is not None:
+        selected_config = next(
+            (mc for mc in model_list if mc.cite_name == agent_config.model_name),
+            None,
+        )
+        capability = selected_config.reasoning_capability if selected_config else None
+        if not selected_config or not selected_config.enable_thinking:
+            raise ValidationError(
+                "The selected model does not support the requested reasoning budget"
+            )
+        controls = capability.get("controls") if isinstance(capability, dict) else None
+        budget_control = next(
+            (control for control in controls or []
+             if isinstance(control, dict) and control.get("type") == "budget_tokens"),
+            None,
+        )
+        minimum = budget_control.get("min") if isinstance(budget_control, dict) else None
+        maximum = budget_control.get("max") if isinstance(budget_control, dict) else None
+        if not isinstance(minimum, int) or not isinstance(maximum, int):
+            raise ValidationError(
+                "The selected model does not support the requested reasoning budget"
+            )
+        if reasoning_budget_tokens < minimum or reasoning_budget_tokens > maximum:
+            raise ValidationError(
+                f"Reasoning budget must be between {minimum} and {maximum} tokens"
+            )
+        selected_config.reasoning_budget_tokens = reasoning_budget_tokens
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")

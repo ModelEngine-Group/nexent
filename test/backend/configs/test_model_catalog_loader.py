@@ -384,3 +384,169 @@ class TestForcedTemperature:
         loader.apply_catalog_defaults(user_data, "prov")
         # A temperature the user explicitly set is never overridden.
         assert user_data["temperature"] == 0.3
+
+
+class TestModelsDevReasoningResolution:
+    """models.dev matching is scoped by API before model ID."""
+
+    @staticmethod
+    def _write_catalog(tmp_path: Path) -> Path:
+        catalog = {
+            "providers": {
+                "deepseek": {
+                    "api": "https://api.deepseek.com",
+                    "models": {
+                        "deepseek-v4-pro": {
+                            "reasoning": True,
+                            "reasoning_options": [
+                                {"type": "toggle"},
+                                {"type": "effort", "values": ["low", "high", "max"]},
+                            ],
+                        },
+                    },
+                },
+                "siliconflow": {
+                    "api": "https://api.siliconflow.com/v1",
+                    "models": {
+                        "deepseek-v4-pro": {
+                            "reasoning": True,
+                            "reasoning_options": [
+                                {"type": "budget_tokens", "min": 128, "max": 32768},
+                            ],
+                        },
+                    },
+                },
+                "alibaba-cn": {
+                    "api": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "models": {
+                        "qwen3.8-max": {
+                            "reasoning": True,
+                            "reasoning_options": [
+                                {"type": "toggle"},
+                                {"type": "effort", "values": ["low", "medium", "xhigh"]},
+                                {"type": "budget_tokens", "min": 0, "max": 262144},
+                            ],
+                        },
+                        "qwen3.7-plus": {
+                            "reasoning": True,
+                            "reasoning_options": [{"type": "budget_tokens", "max": 262144}],
+                        },
+                    },
+                },
+            }
+        }
+        path = tmp_path / "models-dev.json"
+        path.write_text(json.dumps(catalog), encoding="utf-8")
+        return path
+
+    def test_api_and_model_id_select_provider_specific_control(self, tmp_path: Path):
+        import configs.model_catalog_loader as loader
+
+        path = self._write_catalog(tmp_path)
+        with mock.patch.object(loader, "MODELS_DEV_CATALOG_JSON_PATH", str(path)), mock.patch.object(
+            loader, "_models_dev_cache", None
+        ):
+            deepseek = loader.resolve_reasoning_capability(
+                "deepseek-v4-pro", "https://api.deepseek.com/", "OpenAI-API-Compatible"
+            )
+            silicon = loader.resolve_reasoning_capability(
+                "deepseek-v4-pro", "https://api.siliconflow.com/v1", "OpenAI-API-Compatible"
+            )
+            qwen = loader.resolve_reasoning_capability(
+                "qwen3.8-max", "https://dashscope.aliyuncs.com/compatible-mode/v1/", "alibaba-cn"
+            )
+            qwen_without_min = loader.resolve_reasoning_capability(
+                "qwen3.7-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1", "alibaba-cn"
+            )
+
+        assert deepseek is not None
+        assert deepseek["source"] == "models_dev"
+        assert {control["type"] for control in deepseek["controls"]} == {"toggle", "effort"}
+        assert silicon is not None
+        assert silicon["control"] == "budget_tokens"
+        assert silicon["controls"] == [{"type": "budget_tokens", "min": 128, "max": 32768}]
+        assert qwen is not None
+        assert qwen["controls"] == [
+            {"type": "toggle"},
+            {"type": "effort", "values": ["low", "medium", "xhigh"]},
+            {"type": "budget_tokens", "min": 0, "max": 262144},
+        ]
+        assert qwen_without_min is not None
+        assert qwen_without_min["controls"] == [{"type": "budget_tokens", "min": 0, "max": 262144}]
+
+    def test_budget_control_accepts_zero_minimum(self):
+        from consts.model import ReasoningControl
+
+        control = ReasoningControl(type="budget_tokens", min=0, max=262144)
+        assert control.min == 0
+
+    def test_existing_source_does_not_fall_back_to_model_name_heuristic(self, tmp_path: Path):
+        import configs.model_catalog_loader as loader
+
+        path = self._write_catalog(tmp_path)
+        with mock.patch.object(loader, "MODELS_DEV_CATALOG_JSON_PATH", str(path)), mock.patch.object(
+            loader, "_models_dev_cache", None
+        ):
+            capability = loader.resolve_reasoning_capability(
+                "deepseek-reasoner", "https://api.deepseek.com", "OpenAI-API-Compatible"
+            )
+
+        assert capability is None
+
+    def test_static_profile_uses_models_dev_provider_reasoning_controls(self, tmp_path: Path):
+        import configs.model_catalog_loader as loader
+
+        static_catalog = {
+            "version": "1.0.0",
+            "providers": {
+                "zhipu": {
+                    "display_name": "智谱",
+                    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+                    "model_factory": "zhipu",
+                    "models": {
+                        "glm-5.3": {
+                            "model_type": "llm",
+                            "reasoning_capability": {
+                                "status": "supported",
+                                "control": "toggle",
+                                "levels": ["high"],
+                                "default": "high",
+                                "wire_format": "thinking_toggle",
+                                "source": "catalog",
+                            },
+                        }
+                    },
+                }
+            },
+        }
+        models_dev_catalog = {
+            "providers": {
+                "zhipuai": {
+                    "api": "https://open.bigmodel.cn/api/paas/v4",
+                    "models": {
+                        "glm-5.3": {
+                            "reasoning": True,
+                            "reasoning_options": [
+                                {"type": "effort", "values": ["low", "high", "max"]}
+                            ],
+                        }
+                    },
+                }
+            }
+        }
+        static_path = tmp_path / "model-catalog.json"
+        dev_path = tmp_path / "models-dev.json"
+        static_path.write_text(json.dumps(static_catalog), encoding="utf-8")
+        dev_path.write_text(json.dumps(models_dev_catalog), encoding="utf-8")
+
+        with mock.patch.object(loader, "MODEL_CATALOG_JSON_PATH", str(static_path)), \
+                mock.patch.object(loader, "MODELS_DEV_CATALOG_JSON_PATH", str(dev_path)), \
+                mock.patch.object(loader, "_catalog_cache", None), \
+                mock.patch.object(loader, "_models_dev_cache", None):
+            profile = loader.get_model_profile("zhipu", "glm-5.3")
+
+        assert profile is not None
+        assert profile.reasoning_capability is not None
+        assert profile.reasoning_capability.control == "effort"
+        assert profile.reasoning_capability.levels == ["low", "high", "max"]
+        assert profile.reasoning_capability.source == "models_dev"

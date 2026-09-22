@@ -874,6 +874,32 @@ async def test_create_provider_models_for_tenant_success():
 
 
 @pytest.mark.asyncio
+async def test_create_provider_models_attaches_models_dev_reasoning_capability():
+    svc = import_svc()
+
+    req = {
+        "provider": "zhipu",
+        "model_type": "llm",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    }
+    models = [{"id": "glm-5.3"}]
+    capability = {
+        "status": "supported",
+        "control": "effort",
+        "levels": ["low", "high", "max"],
+        "source": "models_dev",
+    }
+
+    with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(return_value=models)), \
+            mock.patch.object(svc, "merge_existing_model_attributes", return_value=models), \
+            mock.patch.object(svc, "resolve_reasoning_capability", return_value=capability), \
+            mock.patch.object(svc, "sort_models_by_id", side_effect=lambda m: m):
+        out = await svc.create_provider_models_for_tenant("t1", req)
+
+    assert out[0]["reasoning_capability"] == capability
+
+
+@pytest.mark.asyncio
 async def test_create_provider_models_for_tenant_exception():
     svc = import_svc()
 

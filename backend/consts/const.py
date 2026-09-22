@@ -854,5 +854,11 @@ MODEL_CATALOG_JSON_PATH = os.getenv(
 )
 """Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
 
+MODELS_DEV_CATALOG_JSON_PATH = os.getenv(
+    "MODELS_DEV_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "models_dev_catalog.json")
+)
+"""models.dev capability catalog downloaded during the backend image build."""
+
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

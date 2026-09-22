@@ -96,6 +96,24 @@ def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
         model["reasoning_capability"] = capability
 
 
+def _enrich_discovered_model_reasoning_capability(
+    model: Dict[str, Any],
+    base_url: Optional[str],
+    provider_hint: Optional[str],
+) -> None:
+    """Attach build-time models.dev capability to a provider discovery row."""
+    # OpenAI-compatible discovery rows may omit model_type when the request
+    # already filters to LLMs; treat that legacy shape as an LLM row.
+    if model.get("model_type") not in {None, "llm", "chat"}:
+        return
+    model_name = str(model.get("id") or model.get("model_name") or "").strip()
+    if not model_name:
+        return
+    capability = resolve_reasoning_capability(model_name, base_url, provider_hint)
+    if capability is not None:
+        model["reasoning_capability"] = capability
+
+
 def _apply_model_reasoning_default(
     model_data: Dict[str, Any], provider_hint: Optional[str]
 ) -> None:
@@ -113,6 +131,7 @@ def _apply_model_reasoning_default(
     if enabled is not True:
         if enabled is False:
             extra_params.pop("reasoning_effort", None)
+            extra_params.pop("reasoning_budget_tokens", None)
             model_data["extra_params"] = extra_params or None
         return
     model_name = add_repo_to_name(
@@ -544,6 +563,16 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
             # Only merge when model_type is specified; skip for multi-type discovery
             model_list = merge_existing_model_attributes(
                 model_list, tenant_id, provider_request["provider"], model_type)
+
+        # The provider /models response only identifies model IDs. Resolve
+        # reasoning controls from the build-time models.dev snapshot using the
+        # exact API URL supplied for this discovery request.
+        for model in model_list:
+            _enrich_discovered_model_reasoning_capability(
+                model,
+                provider_request.get("base_url"),
+                provider_request.get("provider"),
+            )
 
         # Sort model list by ID
         model_list = sort_models_by_id(model_list)

@@ -1024,6 +1024,7 @@ export const conversationService = {
         | "high"
         | "xhigh"
         | "max";
+      reasoning_budget_tokens?: number;
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
@@ -1085,6 +1086,13 @@ export const conversationService = {
         params.reasoning_effort !== "auto"
       ) {
         requestParams.reasoning_effort = params.reasoning_effort;
+      }
+      if (
+        params.reasoning_budget_tokens !== undefined &&
+        Number.isInteger(params.reasoning_budget_tokens) &&
+        params.reasoning_budget_tokens > 0
+      ) {
+        requestParams.reasoning_budget_tokens = params.reasoning_budget_tokens;
       }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;

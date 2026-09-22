@@ -51,12 +51,19 @@ export type ReasoningEffort =
 
 export interface ReasoningCapability {
   status: "supported" | "unsupported" | "unknown";
-  control: "toggle" | "effort";
+  control: "toggle" | "effort" | "budget_tokens";
   levels: ReasoningEffort[];
   default?: ReasoningEffort | null;
   wire_format?: "reasoning_effort" | "thinking_toggle" | "thinking_budget";
   effort_budgets?: Record<string, number>;
-  source: "catalog" | "operator" | "unknown";
+  controls?: Array<
+    | { type: "toggle" }
+    | { type: "effort"; values: string[] }
+    | { type: "budget_tokens"; min: number; max: number }
+  >;
+  matched_api?: string | null;
+  matched_model_id?: string | null;
+  source: "catalog" | "models_dev" | "operator" | "unknown";
 }
 
 // Model option interface

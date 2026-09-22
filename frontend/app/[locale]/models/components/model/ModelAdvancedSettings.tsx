@@ -2,7 +2,16 @@
 
 import { Fragment, useEffect } from "react";
 
-import { Input, InputNumber, Select, Switch, Tooltip, Empty, Button } from "antd";
+import {
+  Input,
+  InputNumber,
+  Select,
+  Slider,
+  Switch,
+  Tooltip,
+  Empty,
+  Button,
+} from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
@@ -15,7 +24,6 @@ import type {
 } from "@/types/modelConfig";
 import {
   DEFAULT_REASONING_EFFORT,
-  DEFAULT_REASONING_EFFORTS,
 } from "@/const/modelConfig";
 
 // =============================================================================
@@ -156,20 +164,6 @@ const REMOVED_ADVANCED_PARAM_KEYS = new Set<string>([
   "speed",
 ]);
 
-const REASONING_LABELS: Record<
-  ReasoningEffort,
-  { key: string; defaultValue: string }
-> = {
-  auto: { key: "model.advanced.reasoningAuto", defaultValue: "自动" },
-  none: { key: "model.advanced.reasoningOff", defaultValue: "关闭" },
-  minimal: { key: "model.advanced.reasoningMinimal", defaultValue: "最低" },
-  low: { key: "model.advanced.reasoningLow", defaultValue: "低" },
-  medium: { key: "model.advanced.reasoningMedium", defaultValue: "中" },
-  high: { key: "model.advanced.reasoningHigh", defaultValue: "高" },
-  xhigh: { key: "model.advanced.reasoningXHigh", defaultValue: "超高" },
-  max: { key: "model.advanced.reasoningMax", defaultValue: "最大" },
-};
-
 const resolveReasoningDefault = (
   currentEffort: ReasoningEffort | undefined,
   capability: ReasoningCapability | undefined,
@@ -193,7 +187,10 @@ const shouldSkipInferenceParam = (
 ): boolean => {
   if (raw === undefined || raw === null || raw === "") return true;
   if (REMOVED_ADVANCED_PARAM_KEYS.has(key)) return true;
-  return key === "reasoning_effort" && !thinkingEnabled;
+  return (
+    (key === "reasoning_effort" || key === "reasoning_budget_tokens") &&
+    !thinkingEnabled
+  );
 };
 
 const assignInferenceParam = (
@@ -226,6 +223,17 @@ const applyReasoningValues = (
   if (typeof extra.reasoning_effort === "string") {
     if (value.enable_thinking !== false) {
       value.reasoning_effort = extra.reasoning_effort;
+    }
+    if (typeof value.enable_thinking !== "boolean") {
+      value.enable_thinking = true;
+    }
+  }
+  if (
+    typeof extra.reasoning_budget_tokens === "number" &&
+    Number.isFinite(extra.reasoning_budget_tokens)
+  ) {
+    if (value.enable_thinking !== false) {
+      value.reasoning_budget_tokens = extra.reasoning_budget_tokens;
     }
     if (typeof value.enable_thinking !== "boolean") {
       value.enable_thinking = true;
@@ -412,6 +420,7 @@ export const buildInferenceParamsPayload = (
 
   if (!thinkingEnabled) {
     delete extraParams.reasoning_effort;
+    delete extraParams.reasoning_budget_tokens;
   }
 
   if (Object.keys(extraParams).length > 0) {
@@ -818,6 +827,15 @@ export const ModelAdvancedSettings = ({
     }
   }, [isVoiceType, mode, value, onChange]);
 
+  // LLMs expose the thinking switch regardless of whether the catalog has
+  // declared a provider-specific reasoning control. Keep the default enabled
+  // so an empty legacy/new form is saved with the same visible state.
+  useEffect(() => {
+    if (modelType === "llm" && value.enable_thinking === undefined) {
+      onChange({ ...value, enable_thinking: true });
+    }
+  }, [modelType, value, onChange]);
+
   // Filter out:
   //  - capacity fields in default mode: rendered by the dedicated
   //    `ModelCapacityFields` panel, so showing them here would duplicate the
@@ -850,13 +868,28 @@ export const ModelAdvancedSettings = ({
     ([k], i) => k !== "" && customEntries.findIndex(([k2]) => k2 === k) !== i
   );
 
+  const declaredReasoningControls =
+    reasoningCapability?.status === "supported"
+      ? reasoningCapability.controls?.length
+        ? reasoningCapability.controls
+        : reasoningCapability.levels.length > 0
+          ? [{ type: "effort" as const, values: reasoningCapability.levels }]
+          : reasoningCapability.control === "toggle"
+            ? [{ type: "toggle" as const }]
+            : []
+      : [];
+  const effortControl = declaredReasoningControls.find(
+    (control) => control.type === "effort"
+  );
+  const budgetControl = declaredReasoningControls.find(
+    (control) => control.type === "budget_tokens"
+  );
   const reasoningControlVisible = modelType === "llm";
-  const thinkingEnabled = value.enable_thinking === true;
+  const thinkingEnabled = modelType === "llm" && value.enable_thinking !== false;
   const configuredReasoningLevels =
-    reasoningCapability?.status === "supported" &&
-    reasoningCapability.levels.length > 0
-      ? reasoningCapability.levels
-      : [...DEFAULT_REASONING_EFFORTS];
+    effortControl?.type === "effort"
+      ? (effortControl.values as ReasoningEffort[])
+      : reasoningCapability?.levels || [];
   const reasoningLevels = [
     "auto",
     ...configuredReasoningLevels.filter((level) => level !== "auto"),
@@ -867,10 +900,15 @@ export const ModelAdvancedSettings = ({
     reasoningCapability,
     reasoningLevels
   );
-  const reasoningLabel = (level: ReasoningEffort) => {
-    const label = REASONING_LABELS[level];
-    return t(label.key, { defaultValue: label.defaultValue });
-  };
+  const reasoningBudget =
+    budgetControl?.type === "budget_tokens"
+      ? typeof value.reasoning_budget_tokens === "number"
+        ? Math.min(
+            budgetControl.max,
+            Math.max(budgetControl.min, value.reasoning_budget_tokens)
+          )
+        : undefined
+      : undefined;
 
   const renderReasoningControls = reasoningControlVisible && (
     <div className="space-y-2">
@@ -888,12 +926,18 @@ export const ModelAdvancedSettings = ({
             onChange({
               ...value,
               enable_thinking: checked,
-              reasoning_effort: checked ? reasoningDefault : undefined,
+              reasoning_effort:
+                checked && effortControl?.type === "effort"
+                  ? reasoningDefault
+                  : undefined,
+              reasoning_budget_tokens: checked
+                ? value.reasoning_budget_tokens
+                : undefined,
             })
           }
         />
       </div>
-      {thinkingEnabled && (
+      {thinkingEnabled && effortControl?.type === "effort" && (
         <Select
           className="w-full"
           aria-label={t("model.advanced.reasoningEffort", {
@@ -907,12 +951,38 @@ export const ModelAdvancedSettings = ({
           disabled={disabled}
           options={reasoningLevels.map((level) => ({
             value: level,
-            label: reasoningLabel(level),
+            // models.dev values are protocol enums; keep them unchanged.
+            label: level,
           }))}
           onChange={(next: ReasoningEffort | undefined) =>
             onChange({ ...value, reasoning_effort: next })
           }
         />
+      )}
+      {thinkingEnabled && budgetControl?.type === "budget_tokens" && (
+        <div className="flex items-center gap-3">
+          <span className="shrink-0 text-sm text-gray-500">
+            {t("model.advanced.reasoningBudget", {
+              defaultValue: "预算 tokens",
+            })}
+          </span>
+          <Slider
+            className="flex-1"
+            min={budgetControl.min}
+            max={budgetControl.max}
+            value={reasoningBudget ?? budgetControl.min}
+            disabled={disabled}
+            onChange={(next: number | number[]) =>
+              onChange({
+                ...value,
+                reasoning_budget_tokens: Array.isArray(next) ? next[0] : next,
+              })
+            }
+          />
+          <span className="w-16 text-right text-xs text-gray-500">
+            {reasoningBudget ?? "auto"}
+          </span>
+        </div>
       )}
     </div>
   );

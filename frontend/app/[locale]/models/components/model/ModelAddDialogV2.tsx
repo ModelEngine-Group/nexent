@@ -292,7 +292,8 @@ const buildBatchRowParams = (opts: {
 
 const makeInitialRowState = (
   modelType: ModelType,
-  catalogProfile?: any
+  catalogProfile?: any,
+  discoveredReasoningCapability?: ReasoningCapability
 ): BatchRowState => {
   const advanced = advancedSettingsValueFromRecord(catalogProfile, {}, modelType);
   // STT/TTS default provider to DashScope (阿里灵积) when not provided by the
@@ -322,7 +323,10 @@ const makeInitialRowState = (
     checking: false,
     isMultimodal: false,
     chunkSizeRange: [DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE],
-    reasoningCapability: catalogProfile?.reasoning_capability ?? undefined,
+    // Provider discovery is authoritative when available. The static profile
+    // remains a fallback for older endpoints and catalog-only rows.
+    reasoningCapability:
+      discoveredReasoningCapability ?? catalogProfile?.reasoning_capability ?? undefined,
   };
 };
 
@@ -588,7 +592,11 @@ export const ModelAddDialogV2 = ({
     await Promise.all(
       rows.map(async (row) => {
         const catalogProfile = findCatalogProfile(row.model_name);
-        const initialState = makeInitialRowState(row.model_type, catalogProfile);
+        const initialState = makeInitialRowState(
+          row.model_type,
+          catalogProfile,
+          row.reasoning_capability
+        );
         // Default display_name to model name + 5-char random suffix
         initialState.advanced.display_name = defaultDisplayName(row.model_name);
         // Unified capacity source: query capability_profiles.py / bundled
@@ -655,6 +663,7 @@ export const ModelAddDialogV2 = ({
           model_name: m.id || m.model_name,
           model_type: (m.model_type || MODEL_TYPES.LLM) as ModelType,
           max_tokens: m.max_tokens,
+          reasoning_capability: m.reasoning_capability,
         }));
       await applyRows(rows);
     } catch (error: any) {

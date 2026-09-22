@@ -16,8 +16,9 @@ import os
 import re
 import threading
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
-from consts.const import MODEL_CATALOG_JSON_PATH
+from consts.const import MODEL_CATALOG_JSON_PATH, MODELS_DEV_CATALOG_JSON_PATH
 from consts.model import ModelCatalogProfile, ModelCatalogProviderInfo
 
 logger = logging.getLogger("model_catalog")
@@ -33,6 +34,11 @@ _load_lock = threading.Lock()
 #: In-memory normalized catalog.  ``None`` means "not loaded yet"; an empty
 #: dict means "loaded but empty / file was missing".
 _catalog_cache: Optional[Dict[str, Any]] = None
+
+# Raw models.dev data is kept separate from the operator-maintained Nexent
+# catalog.  A missing downloaded file intentionally falls back to the legacy
+# resolver; an existing file is authoritative and prevents stale heuristics.
+_models_dev_cache: Optional[Dict[str, Any]] = None
 
 
 # =============================================================================
@@ -76,6 +82,26 @@ def _safe_load_json(path: str) -> Dict[str, Any]:
         )
         return {}
 
+    return data
+
+
+def _load_models_dev_catalog(force_reload: bool = False) -> Optional[Dict[str, Any]]:
+    """Load the build-time models.dev snapshot, returning None when unavailable."""
+    global _models_dev_cache
+    if _models_dev_cache is not None and not force_reload:
+        return _models_dev_cache
+    if not MODELS_DEV_CATALOG_JSON_PATH or not os.path.isfile(MODELS_DEV_CATALOG_JSON_PATH):
+        return None
+    try:
+        with open(MODELS_DEV_CATALOG_JSON_PATH, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load models.dev catalog: %s", exc)
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("providers"), dict):
+        logger.warning("Ignoring malformed models.dev catalog: providers must be a mapping")
+        return None
+    _models_dev_cache = data
     return data
 
 
@@ -374,7 +400,39 @@ def get_model_profile(
     if not provider:
         return None
     models = provider.get("models") or {}
-    return models.get(str(model_name).strip())
+    profile = models.get(str(model_name).strip())
+    if profile is None:
+        return None
+    return _enrich_catalog_profile_reasoning(provider_id, str(model_name).strip(), profile)
+
+
+def _enrich_catalog_profile_reasoning(
+    provider_id: str,
+    model_name: str,
+    profile: ModelCatalogProfile,
+) -> ModelCatalogProfile:
+    """Overlay build-time models.dev reasoning metadata on a static profile.
+
+    The operator-maintained catalog remains the source for capacity and other
+    defaults.  Reasoning controls are resolved from the provider API and model
+    ID in the build-time snapshot so newly released models do not depend on a
+    second, stale static capability declaration.
+    """
+    models_dev_catalog = _load_models_dev_catalog()
+    if models_dev_catalog is None:
+        return profile
+
+    capability = _resolve_models_dev_reasoning_capability(
+        models_dev_catalog,
+        model_name,
+        profile.base_url,
+        profile.model_factory or provider_id,
+    )
+    if capability is None:
+        return profile
+    profile_data = profile.model_dump(mode="python")
+    profile_data["reasoning_capability"] = capability
+    return ModelCatalogProfile.model_validate(profile_data)
 
 
 def list_models_by_provider(
@@ -404,6 +462,7 @@ def list_models_by_provider(
     for model_name, profile in models.items():
         if model_type and profile.model_type != str(model_type).strip():
             continue
+        profile = _enrich_catalog_profile_reasoning(provider_id, model_name, profile)
         results.append(
             {
                 "provider_key": provider_id,
@@ -464,6 +523,181 @@ def dump_full_catalog() -> Dict[str, Any]:
 # Provider inference heuristics (used when user picks "OpenAI-API-Compatible")
 # ---------------------------------------------------------------------------
 
+
+def _canonical_api_url(value: Any) -> str:
+    """Normalize an API URL for exact provider matching."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+        if parsed.scheme and parsed.netloc:
+            return urlunsplit(
+                (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/"), "", "")
+            )
+    except ValueError:
+        pass
+    return raw.rstrip("/").lower()
+
+
+def _model_id_candidates(model_key: Any, model_raw: Dict[str, Any]) -> List[str]:
+    """Return model IDs exposed by one models.dev model record."""
+    candidates = [model_key, model_raw.get("id"), model_raw.get("model")]
+    result: List[str] = []
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value and value.lower() not in {item.lower() for item in result}:
+            result.append(value)
+    return result
+
+
+def _normalize_reasoning_options(raw_options: Any) -> List[Dict[str, Any]]:
+    """Normalize models.dev reasoning_options object/array variants."""
+    if isinstance(raw_options, dict):
+        if isinstance(raw_options.get("type"), str):
+            raw_options = [raw_options]
+        else:
+            expanded: List[Dict[str, Any]] = []
+            for option_type, option_value in raw_options.items():
+                if isinstance(option_value, dict):
+                    expanded.append({"type": option_type, **option_value})
+                elif isinstance(option_value, list):
+                    expanded.append({"type": option_type, "values": option_value})
+            raw_options = expanded
+    elif isinstance(raw_options, list):
+        if all(isinstance(item, str) for item in raw_options):
+            raw_options = [{"type": "effort", "values": raw_options}]
+    else:
+        raw_options = []
+
+    return [item for item in raw_options if isinstance(item, dict)]
+
+
+def _resolve_models_dev_reasoning_capability(
+    catalog: Dict[str, Any],
+    model_name: str,
+    base_url: Optional[str],
+    provider_hint: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Resolve one model by API first and model ID second."""
+    requested_api = _canonical_api_url(base_url)
+    requested_id = str(model_name or "").strip().lower()
+    requested_leaf = requested_id.rsplit("/", 1)[-1]
+    requested_provider = str(provider_hint or "").strip().lower()
+
+    provider_candidates: List[tuple[str, Dict[str, Any]]] = []
+    for provider_id, provider_raw in (catalog.get("providers") or {}).items():
+        if not isinstance(provider_raw, dict):
+            continue
+        provider_api = _canonical_api_url(provider_raw.get("api") or provider_raw.get("base_url"))
+        if requested_api:
+            if provider_api == requested_api:
+                provider_candidates.append((str(provider_id), provider_raw))
+        elif requested_provider and str(provider_id).lower() == requested_provider:
+            provider_candidates.append((str(provider_id), provider_raw))
+
+    # API is the trust boundary. Do not search another provider when an API was
+    # supplied but its model ID is absent from the source snapshot.
+    if not provider_candidates:
+        return None
+
+    selected: Optional[tuple[str, str, Dict[str, Any]]] = None
+    for provider_id, provider_raw in provider_candidates:
+        raw_models = provider_raw.get("models")
+        if not isinstance(raw_models, dict):
+            continue
+        for model_key, model_raw in raw_models.items():
+            if not isinstance(model_raw, dict):
+                continue
+            ids = _model_id_candidates(model_key, model_raw)
+            lowered_ids = {item.lower() for item in ids}
+            if requested_id in lowered_ids:
+                selected = (provider_id, ids[0], model_raw)
+                break
+            if requested_leaf and requested_leaf in {item.rsplit("/", 1)[-1].lower() for item in ids}:
+                selected = (provider_id, ids[0], model_raw)
+                break
+        if selected:
+            break
+
+    if selected is None:
+        return None
+
+    provider_id, matched_model_id, model_raw = selected
+    if model_raw.get("reasoning") is not True:
+        return None
+    options = _normalize_reasoning_options(model_raw.get("reasoning_options"))
+    controls: List[Dict[str, Any]] = []
+    effort_values: List[str] = []
+    budget_range: Optional[Dict[str, int]] = None
+    has_toggle = False
+    for option in options:
+        option_type = str(option.get("type") or "").strip().lower()
+        if option_type == "toggle":
+            has_toggle = True
+        elif option_type == "effort":
+            values = option.get("values") or option.get("options") or []
+            if isinstance(values, str):
+                values = [values]
+            effort_values.extend(
+                str(value).strip() for value in values
+                if str(value).strip() and str(value).strip() not in effort_values
+            )
+        elif option_type == "budget_tokens":
+            min_value = option.get("min", option.get("min_tokens", option.get("minimum")))
+            max_value = option.get("max", option.get("max_tokens", option.get("maximum")))
+            try:
+                # models.dev uses zero as the lower bound for some providers.
+                min_value = 0 if min_value is None else int(min_value)
+                max_value = int(max_value)
+            except (TypeError, ValueError):
+                continue
+            if min_value >= 0 and max_value >= min_value:
+                budget_range = {"min": min_value, "max": max_value}
+
+    if has_toggle:
+        controls.append({"type": "toggle"})
+    if effort_values:
+        controls.append({"type": "effort", "values": effort_values})
+    if budget_range:
+        controls.append({"type": "budget_tokens", **budget_range})
+    if not controls:
+        return None
+
+    if effort_values:
+        legacy_levels = [value for value in effort_values if value in {
+            "none", "minimal", "low", "medium", "high", "xhigh", "max"
+        }]
+        control = "effort"
+        wire_format = "reasoning_effort"
+    elif budget_range:
+        legacy_levels = []
+        control = "budget_tokens"
+        wire_format = "thinking_budget"
+    else:
+        legacy_levels = []
+        control = "toggle"
+        wire_format = "thinking_toggle"
+
+    return {
+        "status": "supported",
+        "control": control,
+        "levels": legacy_levels,
+        "default": "auto",
+        "wire_format": wire_format,
+        "effort_budgets": {},
+        "controls": controls,
+        "matched_api": _canonical_api_url(
+            next(
+                provider.get("api") or provider.get("base_url")
+                for pid, provider in provider_candidates
+                if pid == provider_id
+            )
+        ),
+        "matched_model_id": matched_model_id,
+        "source": "models_dev",
+    }
+
 #: Ordered candidates; first match wins.  The tuple is (provider_id, url_keyword).
 _PROVIDER_URL_HINTS: Iterable[tuple[str, str]] = (
     ("silicon", "siliconflow"),
@@ -514,6 +748,15 @@ def resolve_reasoning_capability(
     """
     if not model_name:
         return None
+
+    models_dev_catalog = _load_models_dev_catalog()
+    if models_dev_catalog is not None:
+        return _resolve_models_dev_reasoning_capability(
+            models_dev_catalog,
+            model_name,
+            base_url,
+            provider_hint,
+        )
 
     provider_id = str(provider_hint or "").strip()
     if not get_provider_info(provider_id):

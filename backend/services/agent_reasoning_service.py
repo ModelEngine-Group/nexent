@@ -46,7 +46,10 @@ def reasoning_snapshot_from_model(model_info: Optional[dict]) -> dict:
     model_extra = model_extra if isinstance(model_extra, dict) else {}
     enabled = model_extra.get("enable_thinking")
     if not isinstance(enabled, bool):
-        enabled = isinstance(model_extra.get("reasoning_effort"), str)
+        enabled = (
+            isinstance(model_extra.get("reasoning_effort"), str)
+            or isinstance(model_extra.get("reasoning_budget_tokens"), int)
+        )
 
     snapshot = {"enable_thinking": enabled}
     if enabled:
@@ -62,6 +65,18 @@ def reasoning_snapshot_from_model(model_info: Optional[dict]) -> dict:
             or (effort in REASONING_EFFORT_VALUES and effort in levels)
             else "auto"
         )
+        budget = model_extra.get("reasoning_budget_tokens")
+        if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
+            controls = capability.get("controls") if isinstance(capability, dict) else None
+            budget_control = next(
+                (control for control in controls or []
+                 if isinstance(control, dict) and control.get("type") == "budget_tokens"),
+                None,
+            )
+            minimum = budget_control.get("min") if isinstance(budget_control, dict) else None
+            maximum = budget_control.get("max") if isinstance(budget_control, dict) else None
+            if isinstance(minimum, int) and isinstance(maximum, int):
+                snapshot["reasoning_budget_tokens"] = min(maximum, max(minimum, budget))
     return snapshot
 
 
@@ -101,6 +116,7 @@ def snapshot_agent_reasoning_config(
         has_reasoning_override = (
             "enable_thinking" in extra_params
             or "reasoning_effort" in extra_params
+            or "reasoning_budget_tokens" in extra_params
             or "reasoning_effort" in entry
         )
         if not has_reasoning_override:
@@ -112,6 +128,7 @@ def snapshot_agent_reasoning_config(
             extra_params["reasoning_effort"] = "auto"
         elif extra_params.get("enable_thinking") is False:
             extra_params.pop("reasoning_effort", None)
+            extra_params.pop("reasoning_budget_tokens", None)
 
         entry["extra_params"] = extra_params
         override_map[model_key] = entry

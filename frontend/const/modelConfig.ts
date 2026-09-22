@@ -55,8 +55,6 @@ export const MODEL_STATUS = {
   UNCHECKED: "not_detected",
 } as const;
 
-// Common fallback used when a provider/model has no declared effort range.
-export const DEFAULT_REASONING_EFFORTS = ["auto", "low", "medium", "high"] as const;
 export const DEFAULT_REASONING_EFFORT = "auto" as const;
 
 // Icon type constants

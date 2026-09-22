@@ -1519,6 +1519,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
     const reasoningEffort = context.config?.reasoningEffort;
+    const reasoningBudgetTokens = (
+      context.config as { reasoningBudgetTokens?: number } | undefined
+    )?.reasoningBudgetTokens;
     const modelIdFromCustom = custom?.modelId;
 
     if (isAgentDebug && modelIdFromCustom) {
@@ -1535,6 +1538,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       reasoningEffort !== "auto"
     ) {
       requestBody.reasoning_effort = reasoningEffort;
+    }
+    if (
+      !isResume &&
+      typeof reasoningBudgetTokens === "number" &&
+      Number.isInteger(reasoningBudgetTokens) &&
+      reasoningBudgetTokens > 0
+    ) {
+      requestBody.reasoning_budget_tokens = reasoningBudgetTokens;
     }
 
     log.log(
