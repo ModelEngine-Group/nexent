@@ -775,7 +775,6 @@
   "nl2agent.optimization.conversation.title": "生成会话引导",
   "nl2agent.optimization.conversation.description": "生成开场白与示例问题",
   "nl2agent.optimization.conversation.input": "请根据当前智能体的角色、职责和目标，生成合适的会话引导，包括开场白和示例问题。其他配置保持不变。",
-  "nl2agent.unavailable": "请先新建或选择可编辑的智能体。",
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",
   "tool.error.configFetchFailed": "获取工具配置失败",

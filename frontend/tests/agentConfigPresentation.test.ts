@@ -39,3 +39,13 @@ test("keeps the agent configuration workspace white", async () => {
     /className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"/
   );
 });
+
+test("reinitializes NL2Agent for the loaded Agent without an unavailable banner", async () => {
+  const agents = await readFile(agentsPath, "utf8");
+
+  assert.match(
+    agents,
+    /key=\{`\$\{currentAgentId \?\? "unselected"\}-\$\{sessionGeneration\}`\}/
+  );
+  assert.doesNotMatch(agents, /nl2agent\.unavailable/);
+});

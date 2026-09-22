@@ -295,17 +295,6 @@ function AgentSetupContent() {
             }
           >
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              {isNl2AgentUnavailable ? (
-                <div
-                  className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                  role="status"
-                >
-                  {t(
-                    "nl2agent.unavailable",
-                    "Create or select an editable Agent first."
-                  )}
-                </div>
-              ) : null}
               {completionSyncFailed ? (
                 <div
                   className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
@@ -328,7 +317,7 @@ function AgentSetupContent() {
               ) : null}
               <Nl2AgentChatPanel
                 ref={nl2AgentChatPanelRef}
-                key={sessionGeneration}
+                key={`${currentAgentId ?? "unselected"}-${sessionGeneration}`}
                 agentId={currentAgentId}
                 showOptimizationSuggestions={showOptimizationSuggestions}
                 disabled={
