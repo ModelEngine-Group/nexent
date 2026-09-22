@@ -304,7 +304,7 @@ export const ModelEditDialog = ({
                   <AdvField
                     label="上下文窗口"
                     placeholder="如 131072"
-                    hint="模型可处理的总 Token 数"
+                   
                     value={advanced.context_window_tokens?.toString() ?? ""}
                     onChange={(v) =>
                       setAdvanced((a) => ({
@@ -338,7 +338,7 @@ export const ModelEditDialog = ({
                   <AdvField
                     label="输出预留Token数"
                     placeholder="如 1024"
-                    hint="为输出预留的 Token 空间"
+                   
                     value={
                       advanced.default_output_reserve_tokens?.toString() ?? ""
                     }
@@ -354,7 +354,7 @@ export const ModelEditDialog = ({
                   <AdvField
                     label="温度"
                     placeholder="如 0.7"
-                    hint="0 - 2，越高越随机"
+                   
                     value={advanced.temperature?.toString() ?? ""}
                     onChange={(v) =>
                       setAdvanced((a) => ({
@@ -366,7 +366,7 @@ export const ModelEditDialog = ({
                   <AdvField
                     label="Top P"
                     placeholder="如 0.9"
-                    hint="0 - 1，核采样阈值"
+                   
                     value={advanced.top_p?.toString() ?? ""}
                     onChange={(v) =>
                       setAdvanced((a) => ({
