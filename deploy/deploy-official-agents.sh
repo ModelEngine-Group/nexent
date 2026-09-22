@@ -17,6 +17,7 @@ TARGET_CONTAINER_DIR="/mnt/nexent/official-agents"
 SOURCE_MODE=""
 SOURCE_PATH=""
 PROFILES=""
+PROFILE_ROOT=""
 REF="$DEFAULT_REF"
 NAMESPACE="nexent"
 
@@ -27,6 +28,7 @@ Usage: deploy-official-agents.sh [options]
 Options:
   --source hub|local        Resource source (default: interactive)
   --path PATH               Local directory/archive or Git checkout path
+  --profile-root PATH       Directory under the source that contains profiles
   --profiles LIST           Comma-separated profiles (default: interactive)
   --ref REF                 Git ref when using Agent Hub
   --kubernetes               Sync through kubectl instead of Docker
@@ -36,6 +38,13 @@ EOF
 }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+validate_directory_name() {
+  local name="$1"
+  case "$name" in
+    ""|"."|".."|*"/"*|*"\\"*) die "invalid directory name: $name" ;;
+  esac
+}
 
 validate_archive_paths() {
   local archive="$1" entry
@@ -52,6 +61,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --source) SOURCE_MODE="${2:?missing value for --source}"; shift 2 ;;
     --path) SOURCE_PATH="${2:?missing value for --path}"; shift 2 ;;
+    --profile-root) PROFILE_ROOT="${2:?missing value for --profile-root}"; shift 2 ;;
     --profiles) PROFILES="${2:?missing value for --profiles}"; shift 2 ;;
     --ref) REF="${2:?missing value for --ref}"; shift 2 ;;
     --kubernetes) DEPLOY_OFFICIAL_K8S=true; shift ;;
@@ -97,6 +107,10 @@ prepare_source() {
       ;;
   esac
   SOURCE_ROOT="$SOURCE_PATH"
+  if [ -n "$PROFILE_ROOT" ]; then
+    validate_directory_name "$PROFILE_ROOT"
+    SOURCE_ROOT="$SOURCE_PATH/$PROFILE_ROOT"
+  fi
 }
 
 select_profiles() {
@@ -120,9 +134,7 @@ copy_profiles() {
     # Profile names may contain Unicode characters (for example, Chinese).
     # Keep only the path-safety restrictions here: a profile must be a single
     # directory name and must not escape SOURCE_ROOT.
-    case "$profile" in
-      ""|"."|".."|*"/"*|*"\\"*) die "invalid profile name: $profile" ;;
-    esac
+    validate_directory_name "$profile"
     source="$SOURCE_ROOT/$profile"
     [ -d "$source" ] || die "profile not found: $profile"
     find "$source" -type f -name agent.json -print -quit | grep -q . || die "profile has no agent.json: $profile"
