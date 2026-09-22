@@ -210,7 +210,11 @@ export function AgentSpace({ active }: { active: boolean }) {
     const toolCount = listing.tool_count ?? 0;
     const downloads = listing.downloads ?? 0;
     const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
-    const menuItems: MenuProps["items"] = showAdminMenu
+    // Official templates are managed from the super-admin resource page.
+    // The ordinary repository status menu must not expose take-down actions
+    // for official listings to tenant administrators.
+    const canManageListing = showAdminMenu && !listing.is_official;
+    const menuItems: MenuProps["items"] = canManageListing
       ? [
           {
             key: "takeDown",
@@ -287,7 +291,7 @@ export function AgentSpace({ active }: { active: boolean }) {
               <Download className="size-3.5" aria-hidden />
               {downloads.toLocaleString()}
             </span>
-            {showAdminMenu ? (
+            {canManageListing ? (
               <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
                 <Button
                   type="text"
