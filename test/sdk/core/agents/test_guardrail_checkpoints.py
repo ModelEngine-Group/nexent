@@ -10,8 +10,11 @@ import types
 from unittest.mock import MagicMock
 
 import pytest
-
-from nexent.core.agents.agent_model import AgentVerificationConfig, GuardrailConfig, GuardrailRule
+from nexent.core.agents.agent_model import (
+    AgentVerificationConfig,
+    GuardrailConfig,
+    GuardrailRule,
+)
 from nexent.core.agents.core_agent import CoreAgent, ToolInputBlockedError
 from nexent.core.agents.verification import VerificationController
 
@@ -182,7 +185,12 @@ def test_guardrail_wrap_tools_no_engine_is_noop():
 # ---------------------------------------------------------------------------
 
 import threading as _threading
-from nexent.core.agents.core_agent import FinalAnswerError, InvalidActionFormatError
+
+from nexent.core.agents.output_protocol import (
+    ModelOutputProtocolError,
+    ProtocolErrorReason,
+    RuntimeFinalAnswer,
+)
 
 
 def _make_step_agent(rule, messages, model_output="ok"):
@@ -214,6 +222,8 @@ def _make_step_agent(rule, messages, model_output="ok"):
     agent._last_uncompressed_est = 0
     agent._context_tools = MagicMock(return_value=[])
     agent._use_structured_outputs_internally = False
+    agent.output_protocol = "code_action"
+    agent._consecutive_protocol_errors = 0
     agent._ephemeral_system_messages = None
     agent.verification_controller = controller
     agent.verification_config = controller.config
@@ -237,7 +247,7 @@ def _msg(role, content):
 
 
 def test_step_stream_checkpoint1_terminate():
-    """Checkpoint ①: block rule on new_input → terminate → FinalAnswerError with refusal."""
+    """Checkpoint ①: blocked input terminates through the trusted runtime path."""
     rule = GuardrailRule(
         name="destructive_rm",
         pattern=r"(?<![A-Za-z])rm\s+(-[A-Za-z]*[rfRF]|--recursive|--force)",
@@ -245,8 +255,9 @@ def test_step_stream_checkpoint1_terminate():
     )
     agent = _make_step_agent(rule, messages=[_msg("user", "rm -rf /tmp")])
     action_step = MagicMock()
-    with pytest.raises(FinalAnswerError):
+    with pytest.raises(RuntimeFinalAnswer) as exc_info:
         next(agent._step_stream(action_step))
+    assert exc_info.value.source == "guardrail_input"
     assert agent.model.call_count == 0  # model never called (terminated before)
     assert action_step.model_output  # refusal text was set
 
@@ -256,8 +267,9 @@ def test_step_stream_checkpoint1_mask():
     rule = GuardrailRule(name="pii", pattern="机密信息", severity="mask")
     agent = _make_step_agent(rule, messages=[_msg("user", "这是机密信息内容")])
     action_step = MagicMock()
-    with pytest.raises(FinalAnswerError):  # parse("ok") fails → FinalAnswerError
+    with pytest.raises(ModelOutputProtocolError) as exc_info:
         next(agent._step_stream(action_step))
+    assert exc_info.value.reason is ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION
     assert agent.model.call_count == 1  # model was called (with masked input)
     called_messages = agent.model.call_args[0][0]
     masked_text = "".join(
@@ -273,8 +285,9 @@ def test_step_stream_checkpoint1_pass():
     rule = GuardrailRule(name="pii", pattern="机密信息", severity="block")
     agent = _make_step_agent(rule, messages=[_msg("user", "hello world")])
     action_step = MagicMock()
-    with pytest.raises(FinalAnswerError):
+    with pytest.raises(ModelOutputProtocolError) as exc_info:
         next(agent._step_stream(action_step))
+    assert exc_info.value.reason is ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION
     assert agent.model.call_count == 1  # model called
 
 
@@ -292,15 +305,15 @@ def test_step_stream_rejects_non_executable_action_record(model_output):
     action_step = MagicMock()
     action_step.is_final_answer = False
 
-    with pytest.raises(InvalidActionFormatError):
+    with pytest.raises(ModelOutputProtocolError):
         next(agent._step_stream(action_step))
 
     assert action_step.model_output == model_output
     assert not action_step.is_final_answer
 
 
-def test_run_stream_retries_invalid_action_then_returns_real_final_answer():
-    """A malformed action consumes a step, and the loop continues to a semantic final answer."""
+def test_run_stream_silently_retries_invalid_action_then_returns_real_final_answer():
+    """A malformed draft stays hidden while the logical step is regenerated."""
     from types import SimpleNamespace
 
     from smolagents.agents import ActionOutput
@@ -325,7 +338,11 @@ def test_run_stream_retries_invalid_action_then_returns_real_final_answer():
         calls += 1
         if calls == 1:
             action_step.model_output = "Step 2:\nCalled tool 'python_interpreter'()"
-            raise InvalidActionFormatError("retry with executable action", agent.logger)
+            raise ModelOutputProtocolError(
+                ProtocolErrorReason.MALFORMED_ACTION,
+                "code_action",
+                logger=agent.logger,
+            )
         yield ActionOutput(output="The verified answer is 42.", is_final_answer=True)
 
     agent._step_stream = fake_step_stream
@@ -333,12 +350,54 @@ def test_run_stream_retries_invalid_action_then_returns_real_final_answer():
     results = list(agent._run_stream("solve this", max_steps=3))
 
     assert calls == 2
-    assert len(agent.memory.steps) == 2
-    assert isinstance(agent.memory.steps[0].error, InvalidActionFormatError)
-    assert agent.memory.steps[0].is_final_answer is False
-    assert agent.memory.steps[1].is_final_answer is True
+    assert len(agent.memory.steps) == 1
+    assert agent.memory.steps[0].error is None
+    assert agent.memory.steps[0].step_number == 1
+    assert agent.memory.steps[0].is_final_answer is True
     assert isinstance(results[-1], FinalAnswerStep)
     assert "42" in str(results[-1].output)
+
+
+def test_fault_injected_model_outputs_silently_repair_then_execute_explicit_final():
+    """Invalid drafts add model-only repairs without becoming visible Agent steps."""
+    from smolagents.memory import FinalAnswerStep
+
+    rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
+    agent = _make_step_agent(rule, messages=[_msg("user", "solve this")])
+    responses = []
+    for content in ("<UNKNOWN/>", "bare answer", "<code>final_answer('42')</code>"):
+        response = MagicMock()
+        response.content = content
+        response.token_usage = None
+        responses.append(response)
+    agent.model.side_effect = responses
+    agent.model.last_finish_reason = "stop"
+    agent.enable_planning = False
+    agent.final_answer_checks = None
+    agent.verification_config = AgentVerificationConfig(enabled=False)
+    agent.verification_controller.config.step_verification_enabled = False
+    agent.verification_controller.config.final_verification_enabled = False
+    agent._finalize_step = MagicMock()
+    agent._collect_step_metrics = MagicMock()
+    code_output = MagicMock(output="42", logs="", is_final_answer=True)
+    agent.python_executor.return_value = code_output
+
+    results = list(agent._run_stream("solve this", max_steps=4))
+
+    assert agent.model.call_count == 3
+    assert len(agent.memory.steps) == 1
+    assert agent.memory.steps[0].error is None
+    assert agent.memory.steps[0].step_number == 1
+    assert agent.memory.steps[0].is_final_answer is True
+    final_model_messages = agent.model.call_args_list[-1].args[0]
+    repair_text = "\n".join(
+        str(message.get("content") if isinstance(message, dict) else message.content)
+        for message in final_model_messages
+    )
+    assert "unsupported_or_tag_only_output" in repair_text
+    assert "missing_explicit_termination" in repair_text
+    assert isinstance(results[-1], FinalAnswerStep)
+    assert results[-1].output == "42"
 
 
 def test_step_stream_checkpoint2_mask():
@@ -359,15 +418,73 @@ def test_step_stream_checkpoint2_mask():
     action_step = MagicMock()
     try:
         next(agent._step_stream(action_step))
-    except (FinalAnswerError, StopIteration):
+    except StopIteration:
         pass
     obs = str(action_step.observations)
     assert "机密信息" not in obs
     assert "***" in obs
 
 
+def test_valid_action_resets_consecutive_protocol_errors():
+    """Any syntactically valid action resets the consecutive protocol-error counter."""
+    rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
+    agent = _make_step_agent(
+        rule,
+        messages=[_msg("user", "hello")],
+        model_output="<code>print(1)</code>",
+    )
+    agent._consecutive_protocol_errors = 2
+    code_output = MagicMock(output="ok", logs="", is_final_answer=False)
+    agent.python_executor.return_value = code_output
+    agent.verification_controller.config.step_verification_enabled = False
+    action_step = MagicMock()
+
+    list(agent._step_stream(action_step))
+
+    assert agent._consecutive_protocol_errors == 0
+
+
+def test_ac_018_ac_019_reasoning_and_multiple_code_blocks_execute_as_one_action():
+    """A mainstream reasoning prefix and adjacent blocks form one logical Action."""
+    rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
+    agent = _make_step_agent(
+        rule,
+        messages=[_msg("user", "hello")],
+        model_output=(
+            "<think>Use two dependent tools.</think>\n"
+            "<code>a = tool_a()</code>\n"
+            "<code>b = tool_b(a)\nprint(b)</code>"
+        ),
+    )
+    agent._consecutive_protocol_errors = 2
+    agent._protocol_repair_messages = []
+    agent.model.supports_deferred_attempt_commit = True
+    agent.model.return_value.model_attempt_id = "accepted-mainstream-output"
+    agent.model.return_value.model_attempt_number = 1
+    agent.model.return_value.model_attempt_commit_deferred = True
+    code_output = MagicMock(output="ok", logs="", is_final_answer=False)
+    agent.python_executor.return_value = code_output
+    agent.verification_controller.config.step_verification_enabled = False
+    action_step = MagicMock()
+
+    results = list(agent._step_stream(action_step))
+
+    expected_code = "a = tool_a()\n\nb = tool_b(a)\nprint(b)"
+    agent.python_executor.assert_called_once_with(expected_code)
+    assert action_step.code_action == expected_code
+    assert len(action_step.tool_calls) == 1
+    assert action_step.tool_calls[0].arguments == expected_code
+    assert agent._consecutive_protocol_errors == 0
+    assert agent._protocol_repair_messages == []
+    agent.observer.commit_model_attempt.assert_called_once_with(
+        "accepted-mainstream-output", 1
+    )
+    agent.observer.rollback_model_attempt.assert_not_called()
+    assert len(results) == 1
+
+
 def test_step_stream_checkpoint3_except_block():
-    """Checkpoint ③: pending_refusal + python_executor raises → FinalAnswerError."""
+    """Checkpoint ③: a stashed refusal raises a trusted runtime final."""
     rule = GuardrailRule(
         name="destructive_rm",
         pattern=r"(?<![A-Za-z])rm\s+(-[A-Za-z]*[rfRF]|--recursive|--force)",
@@ -382,15 +499,16 @@ def test_step_stream_checkpoint3_except_block():
     agent.verification_controller.pending_tool_block_refusal = "blocked refusal text"
     agent.verification_controller.config.step_verification_enabled = False
     action_step = MagicMock()
-    with pytest.raises(FinalAnswerError):
+    with pytest.raises(RuntimeFinalAnswer) as exc_info:
         next(agent._step_stream(action_step))
+    assert exc_info.value.source == "guardrail_tool_input"
     assert "blocked refusal text" in str(action_step.model_output)
 
 
 def test_step_stream_checkpoint3_tool_input_blocked_error_isinstance_branch():
     """Checkpoint ③: python_executor raises ToolInputBlockedError directly (no stashed
     pending_refusal) → the isinstance(e, ToolInputBlockedError) branch picks up e.refusal
-    → FinalAnswerError ends the run (no retry loop)."""
+    → trusted runtime final ends the run (no retry loop)."""
     rule = GuardrailRule(
         name="destructive_rm",
         pattern=r"(?<![A-Za-z])rm\s+(-[A-Za-z]*[rfRF]|--recursive|--force)",
@@ -407,14 +525,15 @@ def test_step_stream_checkpoint3_tool_input_blocked_error_isinstance_branch():
     agent.python_executor.side_effect = ToolInputBlockedError(refusal_text, agent.logger)
     agent.verification_controller.config.step_verification_enabled = False
     action_step = MagicMock()
-    with pytest.raises(FinalAnswerError):
+    with pytest.raises(RuntimeFinalAnswer) as exc_info:
         next(agent._step_stream(action_step))
+    assert exc_info.value.source == "guardrail_tool_input"
     assert action_step.model_output == refusal_text
 
 
 def test_step_stream_generic_exec_error_raises_agent_execution_error():
     """Checkpoint ③: a non-block exec error (no pending_refusal, not ToolInputBlockedError)
-    falls through the refusal guard and raises AgentExecutionError (not FinalAnswerError)."""
+    falls through the refusal guard and raises AgentExecutionError."""
     from nexent.core.agents.core_agent import AgentExecutionError
     rule = GuardrailRule(name="pii", pattern="机密信息", severity="block")
     agent = _make_step_agent(

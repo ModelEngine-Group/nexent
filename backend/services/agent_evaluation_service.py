@@ -2177,13 +2177,13 @@ def get_agent_evaluation_run_impl(
 
 
 def list_agent_evaluations_by_agent_impl(
-    agent_id: int,
+    agent_ids: list[int],
     tenant_id: str,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     return list_agent_evaluations_by_agent(
-        agent_id=agent_id, tenant_id=tenant_id, limit=limit, offset=offset
+        agent_ids=agent_ids, tenant_id=tenant_id, limit=limit, offset=offset
     )
 
 

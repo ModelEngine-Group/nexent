@@ -742,6 +742,32 @@ def test_get_supabase_admin_client_failure(monkeypatch):
     assert result is None
 
 
+def test_delete_supabase_user_returns_false_for_empty_id():
+    assert au.delete_supabase_user("") is False
+
+
+def test_delete_supabase_user_returns_false_without_admin_client(monkeypatch):
+    monkeypatch.setattr(au, "get_supabase_admin_client", lambda: None)
+
+    assert au.delete_supabase_user("user-1") is False
+
+
+def test_delete_supabase_user_deletes_user(monkeypatch):
+    admin_client = MagicMock()
+    monkeypatch.setattr(au, "get_supabase_admin_client", lambda: admin_client)
+
+    assert au.delete_supabase_user("user-1") is True
+    admin_client.auth.admin.delete_user.assert_called_once_with("user-1")
+
+
+def test_delete_supabase_user_returns_false_when_delete_fails(monkeypatch):
+    admin_client = MagicMock()
+    admin_client.auth.admin.delete_user.side_effect = RuntimeError("delete failed")
+    monkeypatch.setattr(au, "get_supabase_admin_client", lambda: admin_client)
+
+    assert au.delete_supabase_user("user-1") is False
+
+
 def test_validate_aksk_authentication_unexpected_error(monkeypatch):
     """Test unexpected error during AK/SK authentication"""
     def mock_verify_aksk_signature(*args):

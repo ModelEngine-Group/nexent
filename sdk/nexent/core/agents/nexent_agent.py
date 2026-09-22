@@ -21,6 +21,7 @@ from smolagents.tools import Tool
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 from ..models.openai_llm import OpenAIModel
+from ..model_errors import ModelInvocationTerminalError
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
@@ -911,6 +912,7 @@ class NexentAgent:
                 user_id=self.user_id,
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
+                output_protocol=getattr(agent_config, "output_protocol", "code_action"),
                 workspace_path=self.workspace_path,
             )
             agent.stop_event = self.stop_event
@@ -1142,7 +1144,11 @@ class NexentAgent:
                             })
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
-                        if hasattr(step_log, "error") and step_log.error is not None:
+                        if (
+                            hasattr(step_log, "error")
+                            and step_log.error is not None
+                            and not getattr(step_log, "_suppress_user_error", False)
+                        ):
                             # Action-step failures are observations in the ReAct loop:
                             # the model receives them and can repair/retry on the next
                             # step. Surface them as warnings so the UI does not imply
@@ -1177,6 +1183,15 @@ class NexentAgent:
                     if self.agent.stop_event.is_set():
                         observer.add_message(self.agent.agent_name, ProcessType.WARNING,
                                              "Agent execution interrupted by external stop signal")
+                except ModelInvocationTerminalError as e:
+                    observer.add_message(
+                        agent_name=self.agent.agent_name,
+                        process_type=ProcessType.ERROR,
+                        content=e.safe_message(getattr(observer, "lang", "en")),
+                        error_code=e.error_code.value,
+                        retryable=False,
+                    )
+                    raise
                 except Exception as e:
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
@@ -1380,7 +1395,7 @@ class NexentAgent:
 
     @staticmethod
     def _grant_sandbox_output_access(container: Any, workspace: Path) -> None:
-        """Allow the sandbox user to read and write the exact run workspace."""
+        """Allow sandbox traversal of the user directory and writes in the run workspace."""
         gid_result = container.exec_run(["id", "-g"])
         gid_exit_code = getattr(gid_result, "exit_code", None)
         gid_output = getattr(gid_result, "output", b"")
@@ -1394,7 +1409,10 @@ class NexentAgent:
             raise RuntimeError("Sandbox user returned an invalid group ID")
 
         workspace_dir = str(workspace)
+        workspace_parent_dir = str(workspace.parent)
         commands = (
+            ["chgrp", sandbox_gid, workspace_parent_dir],
+            ["chmod", "g+xs", workspace_parent_dir],
             ["chgrp", "-R", sandbox_gid, workspace_dir],
             ["chmod", "-R", "g+rwX", workspace_dir],
             ["find", workspace_dir, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"],

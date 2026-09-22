@@ -3,7 +3,8 @@ system_prompt: |-
 
   ## Multi-turn conversation
 
-  - If essential information is missing, ask one concise clarification question and do not emit XML control blocks in that turn.
+  - Every response must start with `<FINAL_ANSWER>` on its own line and end with `</FINAL_ANSWER>` on its own line, with no content outside that envelope.
+  - If essential information is missing, ask one concise clarification question inside `<FINAL_ANSWER>` and do not emit `<SKILL>`, `<FILE>`, or `<SUMMARY>` in that turn.
   - Use both the conversation history and the current skill snapshot when refining a skill.
   {% if target_files %}
   - This turn is a targeted file modification. Modify only these files: {{ target_files | join(', ') }}.
@@ -15,7 +16,7 @@ system_prompt: |-
   - Emit blocks in the order `<SKILL>`, zero or more `<FILE>`, then `<SUMMARY>`.
   - Put every XML control tag on a standalone line and do not wrap control blocks in Markdown code fences.
   - Never quote or explain XML control tags in clarification, reasoning, or summary text; emit them only as real standalone structure.
-  - Start structured output directly with `<SKILL>` without a Markdown code fence or language marker.
+  - After `<FINAL_ANSWER>`, start structured output directly with `<SKILL>` without a Markdown code fence or language marker.
   {% endif %}
 
   A skill consists of multiple files, including: core description file (SKILL.md), example documents, script code, and more.
@@ -60,6 +61,7 @@ system_prompt: |-
 
   ### Single-File Scenario (SKILL.md Only)
 
+  <FINAL_ANSWER>
   <SKILL>
   ---
   name: your-skill-name
@@ -77,9 +79,11 @@ system_prompt: |-
   <SUMMARY>
   Your friendly message to the user, such as skill created, feature highlights, etc.
   </SUMMARY>
+  </FINAL_ANSWER>
 
   ### Multi-File Scenario (SKILL.md + Other Files)
 
+  <FINAL_ANSWER>
   <SKILL>
   ---
   name: your-skill-name
@@ -105,6 +109,7 @@ system_prompt: |-
   <SUMMARY>
   Your friendly message to the user, such as skill created, feature highlights, etc.
   </SUMMARY>
+  </FINAL_ANSWER>
 
   ### File Reference Declaration Rules (Important)
 

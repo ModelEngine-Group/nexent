@@ -17,6 +17,7 @@ from ..concurrency.helpers import (
     shutdown_fallback_thread_manager,
 )
 from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated
+from ..model_errors import ModelInvocationTerminalError
 from .agent_model import AgentRunInfo
 from .managed_mcp import ManagedMCPToolCollection
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
@@ -362,6 +363,9 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             "Please start a new task."
         )
         agent_run_info.observer.add_message("", ProcessType.ERROR, message)
+    except ModelInvocationTerminalError:
+        agent_run_info.attempt_outcome = "failed"
+        raise
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
         if "Couldn't connect to the MCP server" in str(e):
