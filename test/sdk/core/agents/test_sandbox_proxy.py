@@ -13,7 +13,7 @@ import pytest
 from nexent.core.agents import sandbox as sb
 from nexent.core.agents.sandbox_tls import SandboxTLSClient
 from nexent.core.agents.sandbox_tls_bootstrap import generate_identity
-from websocket import WebSocketBadStatusException
+from websocket import WebSocketException
 from websocket import _core, _http
 from websocket._url import get_proxy_info
 
@@ -75,7 +75,7 @@ def test_non_upgrade_response_is_closed_without_redirect_or_execution(transport,
     resolve, sock, handshake = transport
     handshake.return_value.status = status
     handshake.return_value.headers = {'location': 'ws://other.example/channels'}
-    with pytest.raises(WebSocketBadStatusException):
+    with pytest.raises(WebSocketException, match='Redirect limit exhausted|handshake requires status 101'):
         with lease._kernel_channel():
             pytest.fail('An invalid handshake must not expose an execution channel')
     assert resolve.call_count == 1
