@@ -1144,7 +1144,12 @@ async def test_install_bundle_creates_kb_and_remaps_refs():
         )
 
     mock_kb.assert_awaited_once_with(
-        bundle, "tenant-1", "u", 5, authorization="auth"
+        bundle,
+        "tenant-1",
+        "u",
+        5,
+        authorization="auth",
+        knowledge_base_resolutions=None,
     )
     # tool references were remapped to the tenant-generated index name
     assert bundle.agent_info["1"].tools[0].params["index_names"] == ["42-abc"]
@@ -1185,7 +1190,12 @@ async def test_install_bundle_derives_embedding_model_when_not_given():
         await official_agent_service._install_bundle(bundle, "tenant-1", "u", "auth")
 
     mock_kb.assert_awaited_once_with(
-        bundle, "tenant-1", "u", 7, authorization="auth"
+        bundle,
+        "tenant-1",
+        "u",
+        7,
+        authorization="auth",
+        knowledge_base_resolutions=None,
     )
 
 

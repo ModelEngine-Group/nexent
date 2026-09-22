@@ -2366,6 +2366,7 @@ async def test_import_agent_from_repository_installs_official_bundle_from_fallba
         model_ids={"language": 1},
         embedding_model_ids={"embedding": 2},
         skill_resolutions=[{"skill_name": "skill", "action": "reuse"}],
+        knowledge_base_resolutions=None,
     )
     increment.assert_called_once_with(42)
 
