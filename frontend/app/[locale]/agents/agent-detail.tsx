@@ -4,8 +4,8 @@ import { Button, Tag } from "antd";
 import {
   Bot,
   BookOpen,
+  Calendar,
   Cpu,
-  FileText,
   Pencil,
   Tag as TagIcon,
   User,
@@ -30,7 +30,6 @@ export default function AgentDetail({
   open,
   onClose,
   onEdit,
-  onManageVersions,
 }: AgentDetailProps) {
   const { t } = useTranslation("common");
   const title =
@@ -46,6 +45,9 @@ export default function AgentDetail({
   const knowledgeBases = Array.from(
     new Set(tools.flatMap((tool) => tool.display_names ?? []).filter(Boolean))
   );
+  const createdAt = agent?.create_time
+    ? new Date(agent.create_time).toLocaleDateString()
+    : "-";
 
   return (
     <ResourceDetail open={open} onClose={onClose} bodyStyle={{ padding: 0 }}>
@@ -74,35 +76,32 @@ export default function AgentDetail({
               <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
                 {agent.description || t("agentRepository.card.noDescription")}
               </p>
-              <div className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2 dark:bg-slate-900/50">
-                <span className="inline-flex items-center gap-2 text-slate-600 dark:text-slate-300">
+              <div className="grid grid-cols-1 gap-x-8 gap-y-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2 dark:bg-slate-900/50">
+                <div className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 text-slate-600 dark:text-slate-300">
                   <User className="size-4 text-slate-500" aria-hidden />
                   <span className="text-slate-500">
                     {t("agentRepository.review.column.submitter")}
                   </span>
-                  <span className="ml-auto font-medium text-slate-900 dark:text-slate-100">
+                  <span className="truncate text-right font-medium text-slate-900 dark:text-slate-100">
                     {agent.author || "-"}
                   </span>
-                </span>
-                <span className="inline-flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                </div>
+                <div className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 text-slate-600 dark:text-slate-300">
                   <Cpu className="size-4 text-slate-500" aria-hidden />
                   <span className="text-slate-500">
                     {t("agentRepository.copy.type.model")}
                   </span>
-                  <span className="ml-auto truncate font-medium text-slate-900 dark:text-slate-100">
+                  <span className="truncate text-right font-medium text-slate-900 dark:text-slate-100">
                     {agent.model_names?.join(", ") || "-"}
                   </span>
-                </span>
-                <Button
-                  type="text"
-                  className="h-auto justify-start gap-2 px-0 text-slate-600 dark:text-slate-300"
-                  icon={
-                    <FileText className="size-4 text-slate-500" aria-hidden />
-                  }
-                  onClick={onManageVersions}
-                >
-                  {t("agentRepository.mine.currentVersion", { version })}
-                </Button>
+                </div>
+                <div className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 text-slate-600 dark:text-slate-300">
+                  <Calendar className="size-4 text-slate-500" aria-hidden />
+                  <span className="text-slate-500">{t("common.created")}</span>
+                  <span className="truncate text-right font-medium text-slate-900 dark:text-slate-100">
+                    {createdAt}
+                  </span>
+                </div>
               </div>
               <section className="space-y-2">
                 <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100">
