@@ -561,8 +561,9 @@ interface FetchedRow {
 
 /** Per-row settings override — a single ModelAdvancedSettingsValue that
  *  includes both capacity and inference params (the component renders them
- *  all in override mode; no manual capacity grid needed). */
+ *  all in override mode), plus an optional custom display name. */
 interface RowOverride {
+  displayName?: string;
   settings?: ModelAdvancedSettingsValue;
 }
 
@@ -788,7 +789,8 @@ function BatchAddForm({
           type: row.model_type,
           url: baseUrl.trim(),
           apiKey: apiKey.trim(),
-          displayName: defaultDisplayName(row.model_name),
+          displayName:
+            override?.displayName?.trim() || defaultDisplayName(row.model_name),
           maxTokens: row.model_type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
           modelFactory:
             provider === CUSTOM_PROVIDER_KEY
@@ -1158,11 +1160,13 @@ function RowSettingsDialog({
   const [settings, setSettings] = useState<ModelAdvancedSettingsValue>(
     override?.settings ?? {}
   );
+  const [displayName, setDisplayName] = useState(override?.displayName ?? "");
 
   if (!row) return null;
 
   function handleSave() {
     onSave({
+      displayName: displayName.trim() || undefined,
       settings: Object.keys(settings).length > 0 ? settings : undefined,
     });
   }
@@ -1181,6 +1185,25 @@ function RowSettingsDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="mb-5 space-y-2">
+            <Label>
+              {t("modelConfig.addDialog.displayName", {
+                defaultValue: "展示名称",
+              })}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {t("modelConfig.addDialog.displayNameHint", {
+                  defaultValue: "选填，留空自动生成",
+                })}
+              </span>
+            </Label>
+            <Input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder={t("modelConfig.addDialog.displayNameDefault", {
+                defaultValue: "默认自动生成",
+              })}
+            />
+          </div>
           <ModelAdvancedSettings
             modelType={row.model_type}
             specs={filterOutTokenizer(specs, row.model_type)}
