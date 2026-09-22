@@ -35,6 +35,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout, message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
+import { resolveAgentDeepLinkAction } from "@/lib/agentUsageGuide";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
@@ -77,6 +78,10 @@ const PersistentChatHome: FC = () => {
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
+  const [deepLinkedAgentId, setDeepLinkedAgentId] = useState<number | null>(
+    null
+  );
+  const consumedDeepLinkRef = useRef(false);
   const { modelConfig } = useConfig();
   const dictationAdapter = useMemo(
     () => new ServerDictationAdapter(() => modelConfig?.stt),
@@ -88,6 +93,12 @@ const PersistentChatHome: FC = () => {
     const threadId =
       searchParams.get("thread_id") ?? searchParams.get("conversation_id");
     setRequestedThreadId(threadId || undefined);
+    const agentId = searchParams.get("agent_id");
+    setDeepLinkedAgentId(
+      agentId && Number.isInteger(Number(agentId)) && Number(agentId) > 0
+        ? Number(agentId)
+        : null
+    );
   }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
@@ -102,6 +113,21 @@ const PersistentChatHome: FC = () => {
     setSelectedAgent(agent);
     log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
   }, []);
+
+  useEffect(() => {
+    const action = resolveAgentDeepLinkAction({
+      agentId: deepLinkedAgentId,
+      agents,
+      consumed: consumedDeepLinkRef.current,
+      isLoading: isLoadingAgents,
+      getAgentId: (agent) => Number(agent.id),
+    });
+    if (action.action === "wait") return;
+    consumedDeepLinkRef.current = true;
+    if (action.action === "select") {
+      handleAgentSelected(action.agent);
+    }
+  }, [agents, deepLinkedAgentId, handleAgentSelected, isLoadingAgents]);
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);

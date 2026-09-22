@@ -16,6 +16,7 @@ import {
   getAgentPublishCompletion,
   getA2AGuideState,
   reduceAgentShareGuideState,
+  resolveAgentDeepLinkAction,
   resolveAgentUsageGuideTarget,
   parseAgentUsageGuideTargetParams,
   parseAgentUsageGuideParams,
@@ -160,6 +161,52 @@ test("opens a repository guide target only once", () => {
   );
 });
 
+test("resolves an Agent chat deep link only once", () => {
+  const agents = [{ id: 41 }, { id: 42 }];
+  const getAgentId = (agent: { id: number }) => agent.id;
+
+  assert.deepEqual(
+    resolveAgentDeepLinkAction({
+      agentId: 41,
+      agents,
+      consumed: false,
+      isLoading: true,
+      getAgentId,
+    }),
+    { action: "wait" }
+  );
+  assert.deepEqual(
+    resolveAgentDeepLinkAction({
+      agentId: 41,
+      agents,
+      consumed: false,
+      isLoading: false,
+      getAgentId,
+    }),
+    { action: "select", agent: { id: 41 } }
+  );
+  assert.deepEqual(
+    resolveAgentDeepLinkAction({
+      agentId: 41,
+      agents,
+      consumed: true,
+      isLoading: false,
+      getAgentId,
+    }),
+    { action: "ignore" }
+  );
+  assert.deepEqual(
+    resolveAgentDeepLinkAction({
+      agentId: 404,
+      agents,
+      consumed: false,
+      isLoading: false,
+      getAgentId,
+    }),
+    { action: "dismiss" }
+  );
+});
+
 test("shows usage guidance only for published Agents and protects share management", () => {
   assert.deepEqual(
     getAgentUsageGuideAccess({ currentVersionNo: null, permission: "OWNER" }),
@@ -187,8 +234,8 @@ test("replaces rotated share links and removes revoked links immediately", () =>
 
 test("builds safe share and northbound API examples", () => {
   assert.equal(
-    buildAgentShareUrl("https://nexent.example/", "zh", "share-token"),
-    "https://nexent.example/zh/share/agent/share-token"
+    buildAgentShareUrl("https://nexent.example/", "zh", 41),
+    "https://nexent.example/zh/newchat?agent_id=41"
   );
   assert.equal(
     buildNorthboundRunUrl("https://api.example.com/root/"),

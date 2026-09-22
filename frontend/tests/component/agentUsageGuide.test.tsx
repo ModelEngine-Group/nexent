@@ -1,13 +1,12 @@
 import React from "react";
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentUsageGuideModal } from "../../app/[locale]/agent-space/components/AgentUsageGuideModal";
 import { MyAgentCard } from "../../app/[locale]/agent-space/components/MyAgentCard";
-import { agentShareService } from "@/services/agentShareService";
 import { a2aClientService } from "@/services/a2aService";
 import { configService } from "@/services/configService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
@@ -17,14 +16,6 @@ vi.mock("react-i18next", () => ({
     t: (key: string, options?: { name?: string }) =>
       options?.name ? `${key}:${options.name}` : key,
   }),
-}));
-vi.mock("@/services/agentShareService", () => ({
-  agentShareService: {
-    get: vi.fn(),
-    enable: vi.fn(),
-    rotate: vi.fn(),
-    revoke: vi.fn(),
-  },
 }));
 vi.mock("@/services/a2aService", () => ({
   a2aClientService: { getServerSettings: vi.fn() },
@@ -48,13 +39,6 @@ const editableAgent: MyEditableAgentItem = {
   permission: "EDIT",
   repository_info: [],
 };
-const activeShare = {
-  agent_id: 41,
-  share_token: "old-token",
-  generation: 1,
-  status: "active" as const,
-};
-
 function renderWithProviders(node: React.ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -94,20 +78,7 @@ async function openTab(user: ReturnType<typeof userEvent.setup>, key: string) {
   await user.click(await screen.findByRole("tab", { name: key }));
 }
 
-async function getConfirmationDialog() {
-  const dialogs = await screen.findAllByRole("dialog");
-  return dialogs.at(-1)!;
-}
-
 beforeEach(() => {
-  vi.mocked(agentShareService.get).mockResolvedValue(activeShare);
-  vi.mocked(agentShareService.enable).mockResolvedValue(activeShare);
-  vi.mocked(agentShareService.rotate).mockResolvedValue({
-    ...activeShare,
-    share_token: "new-token",
-    generation: 2,
-  });
-  vi.mocked(agentShareService.revoke).mockResolvedValue(undefined);
   vi.mocked(configService.fetchRuntimeFrontendConfig).mockResolvedValue({});
   vi.mocked(a2aClientService.getServerSettings).mockResolvedValue({
     success: true,
@@ -168,9 +139,8 @@ describe("Agent usage guide component coverage", () => {
       />
     );
     expect(
-      await screen.findByText("agentUsageGuide.share.readOnly")
+      await screen.findByText(/\/en\/newchat\?agent_id=41/)
     ).toBeInTheDocument();
-    expect(agentShareService.get).not.toHaveBeenCalled();
     await openTab(user, "agentUsageGuide.tabs.northbound");
     expect(
       await screen.findByText("agentUsageGuide.northbound.docs")
@@ -191,7 +161,9 @@ describe("Agent usage guide component coverage", () => {
         onClose={vi.fn()}
       />
     );
-    expect(await screen.findByText(/old-token/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/\/en\/newchat\?agent_id=41/)
+    ).toBeInTheDocument();
     const shareTab = screen.getByRole("tab", {
       name: "agentUsageGuide.tabs.share",
     });
@@ -206,11 +178,8 @@ describe("Agent usage guide component coverage", () => {
     expect(window.location.pathname).toBe("/");
   });
 
-  it("UT-FE-AGUG-008 isolates a share query error and supports local retry", async () => {
+  it("UT-FE-AGUG-008 renders the share link without a share-state request", async () => {
     const user = userEvent.setup();
-    vi.mocked(agentShareService.get)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce(activeShare);
     renderWithProviders(
       <AgentUsageGuideModal
         agent={editableAgent}
@@ -219,19 +188,37 @@ describe("Agent usage guide component coverage", () => {
         onClose={vi.fn()}
       />
     );
-    await user.click(
-      await screen.findByRole("button", { name: "common.retry" })
-    );
-    expect(await screen.findByText(/old-token/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/\/en\/newchat\?agent_id=41/)
+    ).toBeInTheDocument();
     await openTab(user, "agentUsageGuide.tabs.northbound");
     expect(
       screen.getByText("agentUsageGuide.northbound.docs")
     ).toBeInTheDocument();
   });
 
-  it("UT-FE-AGUG-009 creates one link only after risk confirmation", async () => {
+  it("does not expose the legacy standalone Agent share path from the guide", async () => {
+    renderWithProviders(
+      <AgentUsageGuideModal
+        agent={editableAgent}
+        locale="en"
+        open
+        onClose={vi.fn()}
+      />
+    );
+    expect(
+      await screen.findByText(/\/en\/newchat\?agent_id=41/)
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("/share/agent/");
+  });
+
+  it("UT-FE-AGUG-009 copies the deterministic Agent deep link", async () => {
     const user = userEvent.setup();
-    vi.mocked(agentShareService.get).mockResolvedValue(null);
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     renderWithProviders(
       <AgentUsageGuideModal
         agent={editableAgent}
@@ -241,22 +228,14 @@ describe("Agent usage guide component coverage", () => {
       />
     );
     await user.click(
-      await screen.findByRole("button", {
-        name: "agentUsageGuide.share.enable",
-      })
+      await screen.findByRole("button", { name: "common.copy" })
     );
-    expect(agentShareService.enable).not.toHaveBeenCalled();
-    const dialog = await getConfirmationDialog();
-    expect(
-      within(dialog).getByText("agentUsageGuide.share.enableContent")
-    ).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "OK" }));
-    await waitFor(() =>
-      expect(agentShareService.enable).toHaveBeenCalledOnce()
+    expect(writeText).toHaveBeenCalledWith(
+      `${window.location.origin}/en/newchat?agent_id=41`
     );
   });
 
-  it("UT-FE-AGUG-010 reopening reads the same link without creating or rotating", async () => {
+  it("UT-FE-AGUG-010 reopening reads the same deterministic link", async () => {
     const { rerender } = renderWithProviders(
       <AgentUsageGuideModal
         agent={editableAgent}
@@ -265,7 +244,9 @@ describe("Agent usage guide component coverage", () => {
         onClose={vi.fn()}
       />
     );
-    expect(await screen.findByText(/old-token/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/\/en\/newchat\?agent_id=41/)
+    ).toBeInTheDocument();
     rerender(
       <QueryClientProvider client={new QueryClient()}>
         <App>
@@ -278,92 +259,27 @@ describe("Agent usage guide component coverage", () => {
         </App>
       </QueryClientProvider>
     );
-    expect(await screen.findByText(/old-token/)).toBeInTheDocument();
-    expect(agentShareService.enable).not.toHaveBeenCalled();
-    expect(agentShareService.rotate).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/\/en\/newchat\?agent_id=41/)
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/\/en\/newchat\?agent_id=41/)).toHaveLength(1);
   });
 
-  it("UT-FE-AGUG-011 rotates only after confirmation and removes the old link", async () => {
-    const user = userEvent.setup();
-    vi.mocked(agentShareService.get)
-      .mockResolvedValueOnce(activeShare)
-      .mockResolvedValue({
-        ...activeShare,
-        share_token: "new-token",
-        generation: 2,
-      });
+  it("UT-FE-AGUG-013 shows an unavailable state for draft Agents", async () => {
     renderWithProviders(
       <AgentUsageGuideModal
-        agent={editableAgent}
+        agent={{ ...editableAgent, current_version_no: null }}
         locale="en"
         open
         onClose={vi.fn()}
       />
-    );
-    await user.click(
-      await screen.findByRole("button", {
-        name: "agentUsageGuide.share.rotate",
-      })
-    );
-    expect(agentShareService.rotate).not.toHaveBeenCalled();
-    await user.click(
-      within(await getConfirmationDialog()).getByRole("button", { name: "OK" })
-    );
-    expect(await screen.findByText(/new-token/)).toBeInTheDocument();
-    expect(screen.queryByText(/old-token/)).not.toBeInTheDocument();
-  });
-
-  it("UT-FE-AGUG-012 revokes after confirmation and removes every copyable old link", async () => {
-    const user = userEvent.setup();
-    vi.mocked(agentShareService.get)
-      .mockResolvedValueOnce(activeShare)
-      .mockResolvedValue(null);
-    renderWithProviders(
-      <AgentUsageGuideModal
-        agent={editableAgent}
-        locale="en"
-        open
-        onClose={vi.fn()}
-      />
-    );
-    await user.click(
-      await screen.findByRole("button", {
-        name: "agentUsageGuide.share.revoke",
-      })
-    );
-    await user.click(
-      within(await getConfirmationDialog()).getByRole("button", { name: "OK" })
     );
     expect(
-      await screen.findByRole("button", {
-        name: "agentUsageGuide.share.enable",
-      })
+      await screen.findByText("agentUsageGuide.share.unavailable")
     ).toBeInTheDocument();
-    expect(screen.queryByText(/old-token/)).not.toBeInTheDocument();
-  });
-
-  it("UT-FE-AGUG-013 cancellation leaves sharing disabled and makes no write request", async () => {
-    const user = userEvent.setup();
-    vi.mocked(agentShareService.get).mockResolvedValue(null);
-    renderWithProviders(
-      <AgentUsageGuideModal
-        agent={editableAgent}
-        locale="en"
-        open
-        onClose={vi.fn()}
-      />
-    );
-    await user.click(
-      await screen.findByRole("button", {
-        name: "agentUsageGuide.share.enable",
-      })
-    );
-    const dialog = await getConfirmationDialog();
     expect(
-      within(dialog).getByText("agentUsageGuide.share.enableContent")
-    ).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(agentShareService.enable).not.toHaveBeenCalled();
+      screen.queryByText(/\/en\/newchat\?agent_id=41/)
+    ).not.toBeInTheDocument();
   });
 
   it("UT-FE-AGUG-017 renders and copies a safe northbound curl example", async () => {

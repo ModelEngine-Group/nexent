@@ -2218,6 +2218,7 @@
   "agentUsageGuide.tabs.a2a": "A2A",
   "agentUsageGuide.copyFailed": "Unable to copy. Please copy the text manually.",
   "agentUsageGuide.share.notice": "Anyone with this link must sign in before they can use this Agent. Sharing may consume your tenant resources.",
+  "agentUsageGuide.share.unavailable": "This Agent is not published yet, so no chat link is available.",
   "agentUsageGuide.share.readOnly": "You can view the integration guidance, but only an Agent manager can create or manage a sharing link.",
   "agentUsageGuide.share.enable": "Enable sharing",
   "agentUsageGuide.share.enableTitle": "Enable Agent sharing?",

@@ -2201,6 +2201,7 @@
   "agentUsageGuide.tabs.a2a": "A2A",
   "agentUsageGuide.copyFailed": "复制失败，请手动复制文本。",
   "agentUsageGuide.share.notice": "持有链接的用户仍需登录后才能使用此智能体；分享可能消耗当前租户的资源额度。",
+  "agentUsageGuide.share.unavailable": "当前智能体尚未发布，暂无法生成问答链接。",
   "agentUsageGuide.share.readOnly": "你可以查看集成指引，但只有智能体管理者可以创建或管理分享链接。",
   "agentUsageGuide.share.enable": "启用分享",
   "agentUsageGuide.share.enableTitle": "启用智能体分享？",

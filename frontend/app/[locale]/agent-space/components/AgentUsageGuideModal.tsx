@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Modal, Spin, Tabs, Typography } from "antd";
-import { Copy, ExternalLink, RefreshCw, SquareX } from "lucide-react";
+import { Copy, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import A2AServerSettingsPanel from "../../agents/components/a2a/A2AServerSettingsPanel";
 import {
@@ -14,10 +14,8 @@ import {
   buildUserApiKeyPath,
   getAgentUsageGuideAccess,
   getA2AGuideState,
-  reduceAgentShareGuideState,
 } from "@/lib/agentUsageGuide";
 import { a2aClientService } from "@/services/a2aService";
-import { agentShareService } from "@/services/agentShareService";
 import { configService } from "@/services/configService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 
@@ -35,15 +33,13 @@ export function AgentUsageGuideModal({
   onClose,
 }: AgentUsageGuideModalProps) {
   const { t } = useTranslation("common");
-  const { message, modal } = App.useApp();
-  const queryClient = useQueryClient();
+  const { message } = App.useApp();
   const [activeTab, setActiveTab] = useState("share");
   const agentId = agent?.agent_id;
   const agentName = agent?.name?.trim() || "agent";
   const agentInternalName = agent?.internal_name?.trim() || agentName;
-  const { canManageShare } = getAgentUsageGuideAccess({
+  const { canOpen } = getAgentUsageGuideAccess({
     currentVersionNo: agent?.current_version_no,
-    permission: agent?.permission,
   });
 
   useEffect(() => {
@@ -52,11 +48,6 @@ export function AgentUsageGuideModal({
     }
   }, [agentId, open]);
 
-  const shareQuery = useQuery({
-    queryKey: ["agent-share", agentId],
-    queryFn: () => agentShareService.get(agentId!),
-    enabled: open && activeTab === "share" && canManageShare && agentId != null,
-  });
   const frontendConfigQuery = useQuery({
     queryKey: ["frontend-config"],
     queryFn: () => configService.fetchRuntimeFrontendConfig(),
@@ -68,61 +59,12 @@ export function AgentUsageGuideModal({
     enabled: open && activeTab === "a2a" && agentId != null,
   });
 
-  const refreshShare = () =>
-    queryClient.invalidateQueries({ queryKey: ["agent-share", agentId] });
-  const enableShare = useMutation({
-    mutationFn: () => agentShareService.enable(agentId!),
-    onSuccess: (share) => {
-      queryClient.setQueryData(
-        ["agent-share", agentId],
-        reduceAgentShareGuideState(shareQuery.data ?? null, {
-          type: "saved",
-          share,
-        })
-      );
-      void refreshShare();
-      message.success(t("agentUsageGuide.share.enabled"));
-    },
-    onError: () => message.error(t("agentUsageGuide.share.error")),
-  });
-  const rotateShare = useMutation({
-    mutationFn: () => agentShareService.rotate(agentId!),
-    onSuccess: (share) => {
-      queryClient.setQueryData(
-        ["agent-share", agentId],
-        reduceAgentShareGuideState(shareQuery.data ?? null, {
-          type: "saved",
-          share,
-        })
-      );
-      void refreshShare();
-      message.success(t("agentUsageGuide.share.rotated"));
-    },
-    onError: () => message.error(t("agentUsageGuide.share.error")),
-  });
-  const revokeShare = useMutation({
-    mutationFn: () => agentShareService.revoke(agentId!),
-    onSuccess: () => {
-      queryClient.setQueryData(
-        ["agent-share", agentId],
-        reduceAgentShareGuideState(shareQuery.data ?? null, {
-          type: "revoked",
-        })
-      );
-      void refreshShare();
-      message.success(t("agentUsageGuide.share.revoked"));
-    },
-    onError: () => message.error(t("agentUsageGuide.share.error")),
-  });
-
   const shareUrl = useMemo(() => {
-    if (!shareQuery.data || typeof window === "undefined") return "";
-    return buildAgentShareUrl(
-      window.location.origin,
-      locale,
-      shareQuery.data.share_token
-    );
-  }, [locale, shareQuery.data]);
+    if (!open || !canOpen || agentId == null || typeof window === "undefined") {
+      return "";
+    }
+    return buildAgentShareUrl(window.location.origin, locale, agentId);
+  }, [agentId, canOpen, locale, open]);
   const northboundUrl = buildNorthboundRunUrl(
     frontendConfigQuery.data?.northboundBaseUrl,
     typeof window === "undefined" ? undefined : window.location.origin
@@ -142,14 +84,6 @@ export function AgentUsageGuideModal({
     } catch {
       message.error(t("agentUsageGuide.copyFailed"));
     }
-  };
-
-  const confirm = (
-    title: string,
-    content: string,
-    action: () => Promise<unknown>
-  ) => {
-    modal.confirm({ title, content, onOk: action });
   };
 
   return (
@@ -174,100 +108,50 @@ export function AgentUsageGuideModal({
             {
               key: "share",
               label: t("agentUsageGuide.tabs.share"),
-              children: canManageShare ? (
-                <div className="space-y-4">
+              children:
+                canOpen && shareUrl ? (
+                  <div className="space-y-4">
+                    <Alert
+                      type="info"
+                      showIcon
+                      message={t("agentUsageGuide.share.notice")}
+                    />
+                    <div className="pt-2">
+                      <Typography.Paragraph
+                        copyable={{ text: shareUrl }}
+                        className="mb-0 break-all rounded bg-slate-50 p-3"
+                      >
+                        {shareUrl}
+                      </Typography.Paragraph>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          icon={<Copy className="size-4" aria-hidden />}
+                          onClick={() => copy(shareUrl)}
+                        >
+                          {t("common.copy")}
+                        </Button>
+                        <Button
+                          icon={<ExternalLink className="size-4" aria-hidden />}
+                          onClick={() =>
+                            window.open(
+                              shareUrl,
+                              "_blank",
+                              "noopener,noreferrer"
+                            )
+                          }
+                        >
+                          {t("agentUsageGuide.share.open")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                   <Alert
                     type="info"
                     showIcon
-                    message={t("agentUsageGuide.share.notice")}
+                    message={t("agentUsageGuide.share.unavailable")}
                   />
-                  <div className="pt-2">
-                    {shareQuery.isLoading ? (
-                      <Spin />
-                    ) : shareQuery.isError ? (
-                      <Button onClick={() => shareQuery.refetch()}>
-                        {t("common.retry")}
-                      </Button>
-                    ) : shareUrl ? (
-                      <div className="space-y-3">
-                        <Typography.Paragraph
-                          copyable={{ text: shareUrl }}
-                          className="mb-0 break-all rounded bg-slate-50 p-3"
-                        >
-                          {shareUrl}
-                        </Typography.Paragraph>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            icon={<Copy className="size-4" aria-hidden />}
-                            onClick={() => copy(shareUrl)}
-                          >
-                            {t("common.copy")}
-                          </Button>
-                          <Button
-                            icon={
-                              <ExternalLink className="size-4" aria-hidden />
-                            }
-                            onClick={() =>
-                              window.open(
-                                shareUrl,
-                                "_blank",
-                                "noopener,noreferrer"
-                              )
-                            }
-                          >
-                            {t("agentUsageGuide.share.open")}
-                          </Button>
-                          <Button
-                            icon={<RefreshCw className="size-4" aria-hidden />}
-                            onClick={() =>
-                              confirm(
-                                t("agentUsageGuide.share.rotateTitle"),
-                                t("agentUsageGuide.share.rotateContent"),
-                                () => rotateShare.mutateAsync()
-                              )
-                            }
-                          >
-                            {t("agentUsageGuide.share.rotate")}
-                          </Button>
-                          <Button
-                            danger
-                            icon={<SquareX className="size-4" aria-hidden />}
-                            onClick={() =>
-                              confirm(
-                                t("agentUsageGuide.share.revokeTitle"),
-                                t("agentUsageGuide.share.revokeContent"),
-                                () => revokeShare.mutateAsync()
-                              )
-                            }
-                          >
-                            {t("agentUsageGuide.share.revoke")}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <Button
-                        type="primary"
-                        loading={enableShare.isPending}
-                        onClick={() =>
-                          confirm(
-                            t("agentUsageGuide.share.enableTitle"),
-                            t("agentUsageGuide.share.enableContent"),
-                            () => enableShare.mutateAsync()
-                          )
-                        }
-                      >
-                        {t("agentUsageGuide.share.enable")}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <Alert
-                  type="info"
-                  showIcon
-                  message={t("agentUsageGuide.share.readOnly")}
-                />
-              ),
+                ),
             },
             {
               key: "northbound",

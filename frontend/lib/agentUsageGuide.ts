@@ -96,6 +96,35 @@ export function getAgentUsageGuideOpenAction<T>({
   return { action: "open", agent: target.agent };
 }
 
+export type AgentDeepLinkAction<T> =
+  | { action: "ignore" }
+  | { action: "wait" }
+  | { action: "select"; agent: T }
+  | { action: "dismiss" };
+
+export function resolveAgentDeepLinkAction<T>({
+  agentId,
+  agents,
+  consumed,
+  isLoading,
+  getAgentId,
+}: {
+  agentId: number | null;
+  agents: readonly T[];
+  consumed: boolean;
+  isLoading: boolean;
+  getAgentId: (agent: T) => number | null;
+}): AgentDeepLinkAction<T> {
+  if (agentId == null || consumed) {
+    return { action: "ignore" };
+  }
+  if (isLoading) {
+    return { action: "wait" };
+  }
+  const agent = agents.find((candidate) => getAgentId(candidate) === agentId);
+  return agent ? { action: "select", agent } : { action: "dismiss" };
+}
+
 export function getAgentUsageGuideAccess({
   currentVersionNo,
   permission,
@@ -122,9 +151,9 @@ export function reduceAgentShareGuideState<T>(
 export function buildAgentShareUrl(
   origin: string,
   locale: string,
-  shareToken: string
+  agentId: number
 ): string {
-  return `${origin.replace(/\/+$/, "")}/${locale}/share/agent/${encodeURIComponent(shareToken)}`;
+  return `${origin.replace(/\/+$/, "")}/${locale}/newchat?agent_id=${encodeURIComponent(agentId)}`;
 }
 
 export function buildAuthenticationReturnPath(
