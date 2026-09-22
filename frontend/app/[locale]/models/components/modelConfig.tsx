@@ -40,7 +40,7 @@ import {
 import log from "@/lib/logger";
 
 import { ModelAddDialog } from "./model/ModelAddDialog";
-import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
+import { ModelEditDialog } from "./model/ModelEditDialog";
 import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
 import { ModelLibraryList } from "./model/ModelLibraryList";
 import {
@@ -1183,27 +1183,18 @@ export const ModelConfigSection = forwardRef<
             deleting={batchDeleting}
           />
 
-          <ModelAddDialogV2
-            isOpen={!!editingCardModel}
-            model={editingCardModel}
-            onClose={() => setEditingCardModel(null)}
-            onConnectivityChange={(displayName, modelType, status) => {
-              // Refresh the list row's connect_status in place when the edit
-              // dialog's connectivity probe finishes, so the list doesn't show
-              // a stale status from the last loadModelLists.
-              setModels((prev) =>
-                prev.map((m) =>
-                  m.displayName === displayName && m.type === modelType
-                    ? { ...m, connect_status: status }
-                    : m
-                )
-              );
-            }}
-            onSuccess={async () => {
-              setEditingCardModel(null);
-              await loadModelLists(true);
-            }}
-          />
+          {/* v2.6.1: per-model edit dialog (v0 design, single-page form) */}
+          {editingCardModel && (
+            <ModelEditDialog
+              key={editingCardModel.id}
+              model={editingCardModel}
+              onClose={() => setEditingCardModel(null)}
+              onSuccess={async () => {
+                setEditingCardModel(null);
+                await loadModelLists(true);
+              }}
+            />
+          )}
         </div>
       </TooltipProvider>
     </>
