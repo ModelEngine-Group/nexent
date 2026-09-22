@@ -106,3 +106,13 @@ async def test_cancelling_hitl_stream_closes_blocked_resource_once(execution_fix
     assert info.stop_event.is_set()
     assert info.attempt_outcome == "stopped"
     cleanup.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_legacy_run_info_without_user_context_is_supported(execution_fixture):
+    """The new optional field must not break legacy runtime-info stand-ins."""
+    manager, info, _, _, _, _ = execution_fixture
+
+    assert not hasattr(info, "user_context")
+    assert [chunk async for chunk in run_module.agent_run(info, thread_manager=manager)] == []
+    assert run_module.NexentAgent.call_args.kwargs["user_context"] is None
