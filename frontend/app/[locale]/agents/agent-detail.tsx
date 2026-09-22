@@ -119,7 +119,7 @@ export default function AgentDetail({
                           {tool.origin_name || tool.name}
                         </div>
                         {tool.description ? (
-                          <div className="mt-1 text-xs leading-5 text-slate-500">
+                          <div className="mt-1 truncate text-xs leading-5 text-slate-500">
                             {tool.description}
                           </div>
                         ) : null}
