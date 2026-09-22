@@ -79,7 +79,9 @@ prepare_source() {
     hub)
       command -v git >/dev/null 2>&1 || die "git is required for Agent Hub deployment"
       SOURCE_PATH="$TMP_ROOT/source"
-      git clone --depth 1 --branch "$REF" "$DEFAULT_REPO" "$SOURCE_PATH"
+      # Do not checkout the whole Hub: unrelated profiles may contain Git LFS
+      # objects that are unavailable or are not needed for this deployment.
+      GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --no-checkout --branch "$REF" "$DEFAULT_REPO" "$SOURCE_PATH"
       ;;
     local)
       [ -n "$SOURCE_PATH" ] || read -r -p "Local directory/archive path: " SOURCE_PATH
@@ -113,9 +115,45 @@ prepare_source() {
   fi
 }
 
+prepare_hub_checkout() {
+  [ "$SOURCE_MODE" = "hub" ] || return 0
+
+  local profile path include_paths lfs_files
+  local -a sparse_paths=()
+  IFS=',' read -r -a selected <<< "$PROFILES"
+  for profile in "${selected[@]}"; do
+    profile="$(printf '%s' "$profile" | xargs)"
+    [ -n "$profile" ] || continue
+    validate_directory_name "$profile"
+    path="$profile"
+    [ -n "$PROFILE_ROOT" ] && path="$PROFILE_ROOT/$profile"
+    sparse_paths+=("$path")
+  done
+  [ "${#sparse_paths[@]}" -gt 0 ] || die "no profiles selected"
+
+  GIT_LFS_SKIP_SMUDGE=1 git -C "$SOURCE_PATH" sparse-checkout init --cone
+  GIT_LFS_SKIP_SMUDGE=1 git -C "$SOURCE_PATH" sparse-checkout set "${sparse_paths[@]}"
+
+  # Fetch LFS objects only when the selected paths actually contain them.
+  # Unrelated profiles remain neither checked out nor downloaded.
+  if lfs_files="$(git -C "$SOURCE_PATH" lfs ls-files -n 2>/dev/null)" && [ -n "$lfs_files" ]; then
+    include_paths="$(IFS=,; printf '%s' "${sparse_paths[*]}")"
+    git -C "$SOURCE_PATH" lfs pull --include="$include_paths" \
+      || die "failed to download Git LFS objects for selected official agent profiles"
+  fi
+}
+
 select_profiles() {
   if [ -z "$PROFILES" ]; then
-    mapfile -t available < <(find "$SOURCE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+    if [ "$SOURCE_MODE" = "hub" ]; then
+      if [ -n "$PROFILE_ROOT" ]; then
+        mapfile -t available < <(git -C "$SOURCE_PATH" ls-tree -d --name-only "HEAD:$PROFILE_ROOT" | sort)
+      else
+        mapfile -t available < <(git -C "$SOURCE_PATH" ls-tree -d --name-only HEAD | sort)
+      fi
+    else
+      mapfile -t available < <(find "$SOURCE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+    fi
     [ "${#available[@]}" -gt 0 ] || die "no official Agent profiles found in $SOURCE_ROOT"
     printf 'Available profiles: %s\n' "${available[*]}"
     read -r -p "Select profiles (comma-separated): " PROFILES
@@ -168,6 +206,7 @@ sync_repository() {
 
 prepare_source
 select_profiles
+prepare_hub_checkout
 copy_profiles
 sync_repository
 printf 'Official Agent deployment completed for profiles: %s\n' "$PROFILES"
