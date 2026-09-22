@@ -109,10 +109,22 @@ const PersistentChatHome: FC = () => {
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
 
+  const switchToNewAgentThread = useCallback(async () => {
+    await runtime.threads.switchToNewThread();
+  }, [runtime]);
+
   const handleAgentSelected = useCallback((agent: Agent) => {
     setSelectedAgent(agent);
     log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
   }, []);
+
+  const handleDeepLinkAgentSelected = useCallback(
+    async (agent: Agent) => {
+      await switchToNewAgentThread();
+      handleAgentSelected(agent);
+    },
+    [handleAgentSelected, switchToNewAgentThread]
+  );
 
   useEffect(() => {
     const action = resolveAgentDeepLinkAction({
@@ -120,14 +132,14 @@ const PersistentChatHome: FC = () => {
       agents,
       consumed: consumedDeepLinkRef.current,
       isLoading: isLoadingAgents,
-      getAgentId: (agent) => Number(agent.id),
+      getAgentId: (agent) => Number((agent as { agent_id?: number }).agent_id),
     });
     if (action.action === "wait") return;
     consumedDeepLinkRef.current = true;
     if (action.action === "select") {
-      handleAgentSelected(action.agent);
+      void handleDeepLinkAgentSelected(action.agent);
     }
-  }, [agents, deepLinkedAgentId, handleAgentSelected, isLoadingAgents]);
+  }, [agents, deepLinkedAgentId, handleDeepLinkAgentSelected, isLoadingAgents]);
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
@@ -725,10 +737,9 @@ const HomeContent: FC<{
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
-      await runtime.threads.switchToNewThread();
-      onAgentSelected(agent);
+      await onAgentSelected(agent);
     },
-    [runtime, onAgentSelected]
+    [onAgentSelected]
   );
 
   // Conditional rendering must happen after all hooks

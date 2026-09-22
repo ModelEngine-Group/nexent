@@ -9,7 +9,10 @@ const { TextArea } = Input;
 
 import { publishVersion, updateVersion } from "@/services/agentVersionService";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { getAgentPublishCompletion } from "@/lib/agentUsageGuide";
+import {
+  buildDefaultAgentVersionName,
+  getAgentPublishCompletion,
+} from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
 
 export interface AgentVersionPubulishModalProps {
@@ -18,6 +21,7 @@ export interface AgentVersionPubulishModalProps {
   agentId?: number | null;
   versionNo?: number | null;
   isEdit?: boolean;
+  defaultVersionName?: string;
   initialValues?: {
     version_name?: string;
     release_note?: string;
@@ -32,6 +36,7 @@ export default function AgentVersionPubulishModal({
   agentId,
   versionNo,
   isEdit = false,
+  defaultVersionName,
   initialValues,
   onPublished,
   onUpdated,
@@ -52,10 +57,13 @@ export default function AgentVersionPubulishModal({
       if (isEdit && initialValues) {
         publishForm.setFieldsValue(initialValues);
       } else if (!isEdit) {
-        publishForm.resetFields();
+        publishForm.setFieldsValue({
+          version_name:
+            defaultVersionName || buildDefaultAgentVersionName(undefined),
+        });
       }
     }
-  }, [open, isEdit, initialValues, publishForm]);
+  }, [open, isEdit, initialValues, defaultVersionName, publishForm]);
 
   // Custom validator for duplicate version name
   const validateVersionName = {
@@ -72,14 +80,19 @@ export default function AgentVersionPubulishModal({
       );
 
       if (duplicate) {
-        return Promise.reject(new Error(t("agent.version.versionNameDuplicate")));
+        return Promise.reject(
+          new Error(t("agent.version.versionNameDuplicate"))
+        );
       }
 
       return Promise.resolve();
     },
   };
 
-  const handleSubmit = async (values: { version_name?: string; release_note?: string }) => {
+  const handleSubmit = async (values: {
+    version_name?: string;
+    release_note?: string;
+  }) => {
     if (isEdit) {
       await handleUpdate(values);
     } else {
@@ -87,7 +100,10 @@ export default function AgentVersionPubulishModal({
     }
   };
 
-  const handlePublish = async (values: { version_name?: string; release_note?: string }) => {
+  const handlePublish = async (values: {
+    version_name?: string;
+    release_note?: string;
+  }) => {
     if (!agentId) {
       message.error(t("agent.error.agentNotFound"));
       return;
@@ -119,7 +135,10 @@ export default function AgentVersionPubulishModal({
     }
   };
 
-  const handleUpdate = async (values: { version_name?: string; release_note?: string }) => {
+  const handleUpdate = async (values: {
+    version_name?: string;
+    release_note?: string;
+  }) => {
     if (!agentId || !versionNo) {
       message.error(t("agent.error.agentNotFound"));
       return;
@@ -161,25 +180,21 @@ export default function AgentVersionPubulishModal({
         footer={null}
         destroyOnHidden
       >
-        <Form
-          form={publishForm}
-          layout="vertical"
-          onFinish={handleSubmit}
-        >
+        <Form form={publishForm} layout="vertical" onFinish={handleSubmit}>
           <Form.Item
             label={t("agent.version.versionName")}
             name="version_name"
             rules={[
-              { required: true, message: t("agent.version.versionNameRequired") },
+              {
+                required: true,
+                message: t("agent.version.versionNameRequired"),
+              },
               validateVersionName,
             ]}
           >
             <Input placeholder={t("agent.version.versionNamePlaceholder")} />
           </Form.Item>
-          <Form.Item
-            label={t("agent.version.releaseNote")}
-            name="release_note"
-          >
+          <Form.Item label={t("agent.version.releaseNote")} name="release_note">
             <TextArea
               rows={4}
               placeholder={t("agent.version.releaseNotePlaceholder")}

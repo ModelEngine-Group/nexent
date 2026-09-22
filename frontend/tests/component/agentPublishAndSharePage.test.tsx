@@ -153,6 +153,24 @@ describe("publish navigation component contract", () => {
   });
 });
 
+describe("Agent publish version name default", () => {
+  it("prefills an editable version name when the publish modal opens", () => {
+    renderApp(
+      <AgentVersionPubulishModal
+        open
+        onClose={vi.fn()}
+        agentId={41}
+        defaultVersionName="Medic 2-2609220930"
+      />
+    );
+
+    expect(
+      (screen.getByLabelText("agent.version.versionName") as HTMLInputElement)
+        .value
+    ).toBe("Medic 2-2609220930");
+  });
+});
+
 describe("minimal authenticated Agent share page", () => {
   it("uses the dedicated localized placeholder for shared Agent input", async () => {
     renderApp(<AgentSharePage />);

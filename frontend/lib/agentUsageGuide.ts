@@ -156,6 +156,21 @@ export function buildAgentShareUrl(
   return `${origin.replace(/\/+$/, "")}/${locale}/newchat?agent_id=${encodeURIComponent(agentId)}`;
 }
 
+export function buildDefaultAgentVersionName(
+  agentDisplayName: string | null | undefined,
+  now: Date = new Date()
+): string {
+  const trimmedName = (agentDisplayName || "").trim();
+  const timestamp = [
+    String(now.getFullYear()).slice(-2),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+  ].join("");
+  return trimmedName ? `${trimmedName}-${timestamp}` : timestamp;
+}
+
 export function buildAuthenticationReturnPath(
   pathname: string,
   search: string

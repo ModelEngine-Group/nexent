@@ -16,6 +16,7 @@ import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { buildDefaultAgentVersionName } from "@/lib/agentUsageGuide";
 
 import AgentInfo from "./components/agent-info";
 import AgentPrmopt from "./components/agent-prompt";
@@ -167,7 +168,8 @@ export default function AgentConfig({
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
-  const [isRefreshingAvailability, setIsRefreshingAvailability] = useState(false);
+  const [isRefreshingAvailability, setIsRefreshingAvailability] =
+    useState(false);
   const [activeConfigTab, setActiveConfigTab] =
     useState<AgentConfigTab>("basic");
   const [openSections, setOpenSections] = useState<
@@ -203,7 +205,9 @@ export default function AgentConfig({
   const { message } = App.useApp();
   const saveError = useAgentStore((state) => state.saveError);
   const clearSaveError = useAgentStore((state) => state.clearSaveError);
-  const replaceServerSnapshot = useAgentStore((state) => state.replaceServerSnapshot);
+  const replaceServerSnapshot = useAgentStore(
+    (state) => state.replaceServerSnapshot
+  );
 
   const handleRefreshAvailability = useCallback(async () => {
     if (!agentId || isRefreshingAvailability) return;
@@ -213,7 +217,9 @@ export default function AgentConfig({
       if (result.success && result.data) {
         replaceServerSnapshot(agentId, result.data);
       } else {
-        message.error(result.message || t("agent.config.refreshAvailabilityFailed"));
+        message.error(
+          result.message || t("agent.config.refreshAvailabilityFailed")
+        );
       }
     } catch {
       message.error(t("agent.config.refreshAvailabilityFailed"));
@@ -254,7 +260,10 @@ export default function AgentConfig({
 
     lastScrolledRequestRef.current = requestKey;
     const frameId = window.requestAnimationFrame(() => {
-      const sectionRefs: Record<ConfigSectionKey, React.RefObject<HTMLDivElement | null>> = {
+      const sectionRefs: Record<
+        ConfigSectionKey,
+        React.RefObject<HTMLDivElement | null>
+      > = {
         display_info: displayInfoSectionRef,
         role_model: roleModelSectionRef,
         tools: toolsSectionRef,
@@ -403,7 +412,14 @@ export default function AgentConfig({
                     <Button
                       type="link"
                       size="small"
-                      icon={<RefreshCw size={12} className={isRefreshingAvailability ? "animate-spin" : ""} />}
+                      icon={
+                        <RefreshCw
+                          size={12}
+                          className={
+                            isRefreshingAvailability ? "animate-spin" : ""
+                          }
+                        />
+                      }
                       onClick={handleRefreshAvailability}
                       disabled={isRefreshingAvailability}
                       loading={isRefreshingAvailability}
@@ -610,6 +626,9 @@ export default function AgentConfig({
         open={isPublishModalOpen}
         onClose={() => setIsPublishModalOpen(false)}
         agentId={agentId}
+        defaultVersionName={buildDefaultAgentVersionName(
+          editedAgent?.display_name || editedAgent?.name
+        )}
         onPublished={onPublished}
       />
     </Form>

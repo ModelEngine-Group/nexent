@@ -235,6 +235,29 @@ describe("Agent usage guide component coverage", () => {
     );
   });
 
+  it("opens the Agent chat link in the current tab", async () => {
+    const user = userEvent.setup();
+    const locationAssign = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, assign: locationAssign },
+    });
+    renderWithProviders(
+      <AgentUsageGuideModal
+        agent={editableAgent}
+        locale="en"
+        open
+        onClose={vi.fn()}
+      />
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "agentUsageGuide.share.open" })
+    );
+    expect(locationAssign).toHaveBeenCalledWith(
+      `${window.location.origin}/en/newchat?agent_id=41`
+    );
+  });
+
   it("UT-FE-AGUG-010 reopening reads the same deterministic link", async () => {
     const { rerender } = renderWithProviders(
       <AgentUsageGuideModal

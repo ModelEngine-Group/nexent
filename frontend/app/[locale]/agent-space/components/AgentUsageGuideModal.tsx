@@ -132,13 +132,9 @@ export function AgentUsageGuideModal({
                         </Button>
                         <Button
                           icon={<ExternalLink className="size-4" aria-hidden />}
-                          onClick={() =>
-                            window.open(
-                              shareUrl,
-                              "_blank",
-                              "noopener,noreferrer"
-                            )
-                          }
+                          onClick={() => {
+                            window.location.assign(shareUrl);
+                          }}
                         >
                           {t("agentUsageGuide.share.open")}
                         </Button>

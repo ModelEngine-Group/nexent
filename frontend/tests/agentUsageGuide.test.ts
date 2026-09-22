@@ -17,6 +17,7 @@ import {
   getA2AGuideState,
   reduceAgentShareGuideState,
   resolveAgentDeepLinkAction,
+  buildDefaultAgentVersionName,
   resolveAgentUsageGuideTarget,
   parseAgentUsageGuideTargetParams,
   parseAgentUsageGuideParams,
@@ -257,6 +258,17 @@ test("builds safe share and northbound API examples", () => {
   assert.equal(
     buildNorthboundDocsUrl("en"),
     "https://modelengine-group.github.io/nexent/en/integration/integration-out/northbound-api.html"
+  );
+});
+
+test("builds an editable default Agent version name from name and timestamp", () => {
+  assert.equal(
+    buildDefaultAgentVersionName(" Medic_2 ", new Date(2026, 8, 22, 9, 5)),
+    "Medic_2-2609220905"
+  );
+  assert.equal(
+    buildDefaultAgentVersionName(null, new Date(2026, 8, 22, 9, 5)),
+    "2609220905"
   );
 });
 

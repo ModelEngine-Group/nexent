@@ -13,15 +13,20 @@ function DeepLinkChatHarness() {
   useEffect(() => {
     const action = resolveAgentDeepLinkAction({
       agentId: 41,
-      agents: loaded ? [{ id: 41 }, { id: 42 }] : [],
+      agents: loaded
+        ? [
+            { id: "41", agent_id: 41 },
+            { id: "42", agent_id: 42 },
+          ]
+        : [],
       consumed: consumed.current,
       isLoading: !loaded,
-      getAgentId: (agent) => agent.id,
+      getAgentId: (agent) => agent.agent_id,
     });
     if (action.action === "wait") return;
     consumed.current = true;
     if (action.action === "select") {
-      setSelectedId(action.agent.id);
+      setSelectedId(action.agent.agent_id);
     }
   }, [loaded]);
 
@@ -49,10 +54,10 @@ describe("Agent deep link chat state", () => {
     expect(
       resolveAgentDeepLinkAction({
         agentId: 41,
-        agents: [{ id: 42 }],
+        agents: [{ id: "42", agent_id: 42 }],
         consumed: false,
         isLoading: false,
-        getAgentId: (agent) => agent.id,
+        getAgentId: (agent) => agent.agent_id,
       })
     ).toEqual({ action: "dismiss" });
   });
