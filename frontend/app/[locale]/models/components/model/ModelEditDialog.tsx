@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "antd";
-import { Loader2, ChevronDown, ChevronRight, Eye } from "lucide-react";
+import { Loader2, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 import { MODEL_TYPES } from "@/const/modelConfig";
@@ -374,6 +375,110 @@ export const ModelEditDialog = ({
                       }))
                     }
                   />
+                </div>
+
+                {/* Deep thinking toggle */}
+                <div className="mt-4 flex items-center justify-between rounded-lg border px-4 py-3">
+                  <div>
+                    <Label className="text-sm">深度思考</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      允许模型在回答前进行显式推理
+                    </p>
+                  </div>
+                  <Switch
+                    checked={advanced.enable_thinking === true}
+                    onCheckedChange={(checked) =>
+                      setAdvanced((a) => ({
+                        ...a,
+                        enable_thinking: checked,
+                      }))
+                    }
+                  />
+                </div>
+
+                {/* Custom params */}
+                <div className="mt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm">自定义参数</Label>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        附加到请求体的额外参数
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAdvanced((a) => {
+                          const customs = Array.isArray(a.__custom__)
+                            ? [...a.__custom__]
+                            : [];
+                          customs.push(["", ""]);
+                          return { ...a, __custom__: customs };
+                        });
+                      }}
+                    >
+                      <Plus className="size-4" />
+                      添加参数
+                    </Button>
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    {(Array.isArray(advanced.__custom__)
+                      ? (advanced.__custom__ as [string, string][])
+                      : []
+                    ).map(([k, v], idx) => (
+                      <div
+                        key={`custom-param-${idx}`}
+                        className="flex items-center gap-2"
+                      >
+                        <Input
+                          className="flex-1"
+                          placeholder="参数名"
+                          value={k}
+                          onChange={(e) => {
+                            setAdvanced((a) => {
+                              const customs = Array.isArray(a.__custom__)
+                                ? [...(a.__custom__ as [string, string][])]
+                                : [];
+                              customs[idx] = [e.target.value, v];
+                              return { ...a, __custom__: customs };
+                            });
+                          }}
+                        />
+                        <Input
+                          className="flex-1"
+                          placeholder="JSON 或字符串"
+                          value={v}
+                          onChange={(e) => {
+                            setAdvanced((a) => {
+                              const customs = Array.isArray(a.__custom__)
+                                ? [...(a.__custom__ as [string, string][])]
+                                : [];
+                              customs[idx] = [k, e.target.value];
+                              return { ...a, __custom__: customs };
+                            });
+                          }}
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-8 shrink-0 text-destructive hover:text-destructive"
+                          onClick={() => {
+                            setAdvanced((a) => {
+                              const customs = Array.isArray(a.__custom__)
+                                ? (a.__custom__ as [string, string][]).filter(
+                                    (_, i) => i !== idx
+                                  )
+                                : [];
+                              return { ...a, __custom__: customs };
+                            });
+                          }}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
