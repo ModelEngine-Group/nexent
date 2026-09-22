@@ -19,9 +19,9 @@ from services.agent_evaluation_service import (
     get_evaluation_stats_impl,
     list_agent_evaluation_cases_impl,
     list_agent_evaluations_by_agent_impl,
-    trial_run_evaluator_impl,
 )
 from services.evaluation_report_service import generate_agent_evaluation_report_impl
+from services.runtime_proxy_service import forward_agent_evaluation_trial_run
 from utils.auth_utils import get_current_user_id, get_current_user_info
 
 
@@ -568,15 +568,15 @@ async def trial_run_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        result = await trial_run_evaluator_impl(
-            tenant_id=tenant_id,
-            user_id=user_id,
+        result = await forward_agent_evaluation_trial_run(
             agent_id=payload.agent_id,
             agent_version_no=payload.agent_version_no,
             query=payload.query,
             judge_model_id=payload.judge_model_id,
             evaluator_ids=payload.evaluator_ids,
             language=payload.language,
+            user_id=user_id,
+            tenant_id=tenant_id,
         )
         logger.info(
             "trial_run_api OK: tenant=%s user=%s agent_id=%s version=%s "

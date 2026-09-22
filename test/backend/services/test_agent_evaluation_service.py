@@ -448,6 +448,7 @@ _thread_lifecycle_service_module = types.ModuleType(
     "services.thread_lifecycle_service"
 )
 _thread_lifecycle_service_module.runtime_thread_manager = MagicMock()
+_thread_lifecycle_service_module.config_thread_manager = MagicMock()
 sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_service_module
 _services_pkg.thread_lifecycle_service = _thread_lifecycle_service_module
 
@@ -1150,7 +1151,7 @@ def test_create_agent_evaluation_run_happy_path(service_module):
     pool_mock = MagicMock()
     future = MagicMock()
     pool_mock.submit.return_value = types.SimpleNamespace(future=future)
-    service_module.runtime_thread_manager = pool_mock
+    service_module.config_thread_manager = pool_mock
 
     run = service_module.create_agent_evaluation_run_impl(
         tenant_id="t1",
@@ -1179,6 +1180,7 @@ def test_create_agent_evaluation_run_happy_path(service_module):
     assert len(kwargs["set_cases"]) == 3
 
     pool_mock.submit.assert_called_once()
+    service_module.runtime_thread_manager.submit.assert_not_called()
     future.add_done_callback.assert_called_once()
     # Done-callback signature should be a callable wrapping the run id + tenant.
     callback = future.add_done_callback.call_args.args[0]
@@ -1207,8 +1209,8 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
     """The published version number flows from ``resolve_latest_published_version_no``."""
     create_mock = _wire_full_db_module(service_module)
     service_module.resolve_latest_published_version_no.return_value = 13
-    service_module.runtime_thread_manager = MagicMock()
-    service_module.runtime_thread_manager.submit.return_value = types.SimpleNamespace(
+    service_module.config_thread_manager = MagicMock()
+    service_module.config_thread_manager.submit.return_value = types.SimpleNamespace(
         future=MagicMock()
     )
 

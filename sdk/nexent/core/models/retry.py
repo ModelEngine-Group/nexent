@@ -36,6 +36,7 @@ __all__ = [
 ]
 
 
+
 @dataclass
 class ModelRetryConfig:
     """Configuration for exponential backoff retries on transient model errors.
@@ -134,6 +135,7 @@ def _retryable_error_code(marker: str) -> ModelErrorCode:
     return ModelErrorCode.CONNECTION_ERROR
 
 
+
 def classify_model_error(exc: BaseException) -> ModelErrorClassification:
     """Classify an exception raised by a model invocation.
 
@@ -156,6 +158,7 @@ def classify_model_error(exc: BaseException) -> ModelErrorClassification:
     if message_classification is not None:
         return message_classification
 
+
     if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
         return ModelErrorClassification(True, ModelErrorCode.TIMEOUT)
     if isinstance(exc, ConnectionError):
@@ -174,6 +177,7 @@ def classify_model_error(exc: BaseException) -> ModelErrorClassification:
     for marker in retryable_markers:
         if marker in msg:
             return ModelErrorClassification(True, _retryable_error_code(marker))
+
 
     # Unknown error: prefer failing fast over retrying blindly.
     return ModelErrorClassification(False, ModelErrorCode.UNKNOWN_ERROR)

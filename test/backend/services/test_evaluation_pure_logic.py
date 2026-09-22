@@ -371,6 +371,7 @@ def _install_sys_modules_stubs() -> None:
     _services_pkg.evaluation_set_service = _ess_mod
     _tls_mod = _mk_mod(
         "services.thread_lifecycle_service",
+        config_thread_manager=MagicMock(),
         runtime_thread_manager=MagicMock(),
     )
     _services_pkg.thread_lifecycle_service = _tls_mod
