@@ -35,7 +35,6 @@ import {
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import { useAgentList } from "@/hooks/agent/useAgentList";
-import AgentConfigActions from "./components/agent-config-actions";
 
 interface AgentSelectorHeaderProps {
   onToggleVersionManage: () => void;
@@ -480,8 +479,7 @@ export default function AgentSelectorHeader({
               className="w-full mr-6"
             >
               <Flex align="center" gap={12} wrap="wrap">
-                <AgentConfigActions />
-                <Flex align="center" gap={8} wrap="wrap" className="ml-4">
+                <Flex align="center" gap={8} wrap="wrap">
                   <Button
                     size="middle"
                     onClick={handleCreateAgent}
