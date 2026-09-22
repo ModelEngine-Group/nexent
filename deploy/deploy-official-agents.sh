@@ -117,7 +117,12 @@ copy_profiles() {
   for profile in "${selected[@]}"; do
     profile="$(printf '%s' "$profile" | xargs)"
     [ -n "$profile" ] || continue
-    case "$profile" in *[!a-zA-Z0-9_.-]*) die "invalid profile name: $profile" ;; esac
+    # Profile names may contain Unicode characters (for example, Chinese).
+    # Keep only the path-safety restrictions here: a profile must be a single
+    # directory name and must not escape SOURCE_ROOT.
+    case "$profile" in
+      ""|"."|".."|*"/"*|*"\\"*) die "invalid profile name: $profile" ;;
+    esac
     source="$SOURCE_ROOT/$profile"
     [ -d "$source" ] || die "profile not found: $profile"
     find "$source" -type f -name agent.json -print -quit | grep -q . || die "profile has no agent.json: $profile"

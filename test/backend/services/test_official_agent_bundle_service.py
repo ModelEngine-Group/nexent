@@ -59,6 +59,13 @@ def test_parse_profiles_supports_multiple_profiles_and_deduplicates():
     ]
 
 
+def test_parse_profiles_supports_unicode_names():
+    assert parse_official_agent_profiles(" 通用智能体,医疗 ") == [
+        "通用智能体",
+        "医疗",
+    ]
+
+
 @pytest.mark.parametrize("value", [["../medical"], ["medical/extra"], ["medical\\extra"], ["."]])
 def test_parse_profiles_rejects_paths(value):
     with pytest.raises(ValueError, match="invalid official agent profile"):
