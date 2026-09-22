@@ -1732,18 +1732,25 @@ def list_aidp_doc_history_impl(
     dir_path: str,
     kds_id: str,
     tenant_id: str | None = None,
+    page: int = 1,
 ) -> Dict[str, Any]:
-    """List every file in a channel directory regardless of processing status.
+    """List a page of a channel directory regardless of processing status.
 
     Endpoint: ``POST /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{kds_id}/KnowledgeFiles/History``
-    Body: ``{"fs_id": <str>, "dir_path": <str>}``
+    Body: ``{"fs_id": <str>, "dir_path": <str>, "page": <int>}``
     Response: ``{"value": [<document with status>, ...]}``
 
     Unlike ``list_aidp_docs_impl`` this returns files that are still being
     chunked/embedded (``PROCESSING``) or that failed (``FAILED``), which is what
     lets the UI show an upload immediately instead of only after ingestion.
+
+    The endpoint is paginated (``page`` is one-based) and sorts files that are
+    still being processed to the front, so a burst of simultaneous uploads can
+    spill past the first page: callers must walk the pages instead of reading
+    only the first one.
     """
     normalized_url = _validate_params(server_url, api_key)
+    normalized_page = page if isinstance(page, int) and page > 0 else 1
 
     if not isinstance(kds_id, str) or not kds_id.strip():
         raise AppException(
@@ -1782,7 +1789,11 @@ def list_aidp_doc_history_impl(
             lambda: client.post(
                 history_url,
                 headers=headers,
-                json={"fs_id": normalized_fs_id, "dir_path": normalized_dir_path},
+                json={
+                    "fs_id": normalized_fs_id,
+                    "dir_path": normalized_dir_path,
+                    "page": normalized_page,
+                },
             ),
             context=f"list-doc-history:{normalized_fs_id}",
         )

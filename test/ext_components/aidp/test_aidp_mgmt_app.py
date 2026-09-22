@@ -1626,13 +1626,15 @@ class TestListDocumentsHistory:
         assert body["has_more"] is False
         assert body["total_reliable"] is True
         assert body["processing_count"] == 1
-        # The history payload decides the statuses, but the knowledge-base
-        # scoped listing is still read: the history only covers the resolved
-        # channel directory, so it cannot decide membership on its own.
-        mock_history.assert_called_once()
-        # The call carries the resolved channel plus the KB the path is scoped to.
-        assert mock_history.call_args.args[2:] == (
-            "fs-1", "/aidp/knowledge/kb-1", "kb-1",
+        # The history decides the statuses, but the knowledge-base scoped
+        # listing is still read: the history only covers the resolved channel
+        # directory, so it cannot decide membership on its own.
+        # The history is walked page by page; this stub answers every page with
+        # the same file set, so the walk stops at the page that adds nothing new
+        # instead of looping over it.
+        assert [entry.args[6] for entry in mock_history.call_args_list] == [1, 2]
+        assert mock_history.call_args_list[0].args[2:] == (
+            "fs-1", "/aidp/knowledge/kb-1", "kb-1", None, 1,
         )
         mock_completed.assert_called_once()
         assert mock_completed.call_args.args[2:] == ("kb-1", 1, 100)
@@ -1771,6 +1773,93 @@ class TestListDocumentsHistory:
         body = response.json()
         assert [item["file_ino_no"] for item in body["value"]] == ["f-1"]
         assert body["total_count"] == 1
+
+    def test_in_progress_files_beyond_the_first_history_page_stay_visible(self):
+        """More simultaneous uploads than a history page must not lose files.
+
+        The endpoint sorts files that are still being processed to the front, so
+        a burst of uploads spills past the first page; reading one page would
+        hide exactly the files this listing exists to show.
+        """
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        pages = {
+            1: {"value": [
+                {"file_ino_no": "f-up-1", "file_name": "u1.txt",
+                 "first_upload_time": 1718000900, "status": "UPLOADING"},
+                {"file_ino_no": "f-up-2", "file_name": "u2.txt",
+                 "first_upload_time": 1718000800, "status": "UPLOADING"},
+            ]},
+            2: {"value": [
+                {"file_ino_no": "f-up-3", "file_name": "u3.txt",
+                 "first_upload_time": 1718000700, "status": "PROCESSING"},
+                {"file_ino_no": "f-up-4", "file_name": "u4.txt",
+                 "first_upload_time": 1718000600, "status": "EXTRACTING"},
+            ]},
+            3: {"value": []},
+        }
+
+        def history_side_effect(
+            server_url, api_key, fs_id, dir_path, kds_id, tenant_id=None, page=1
+        ):
+            return pages.get(page, {"value": []})
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          side_effect=history_side_effect) as mock_history, \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        # Every uploading file is present, not only the ones on the first page.
+        assert sorted(item["file_ino_no"] for item in body["value"]) == [
+            "f-up-1", "f-up-2", "f-up-3", "f-up-4",
+        ]
+        assert body["total_count"] == 4
+        assert body["processing_count"] == 4
+        # Pages are walked in order until one comes back empty.
+        assert [entry.args[6] for entry in mock_history.call_args_list] == [1, 2, 3]
+
+    def test_history_walk_stops_at_an_explicit_last_page(self):
+        """An explicit `no next page` signal avoids asking for another page."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_ino_no": "f-1", "file_name": "a.txt",
+                 "first_upload_time": 1718000000, "status": "PROCESSING"},
+            ],
+            "next_link": None,
+        }
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history) as mock_history, \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["total_count"] == 1
+        assert mock_history.call_count == 1
 
     @pytest.mark.parametrize("page,expected_count,expected_has_more", [
         (1, 10, True),
