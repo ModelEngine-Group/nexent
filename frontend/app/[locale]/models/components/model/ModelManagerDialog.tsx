@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import {
   Pencil,
   Trash2,
-  KeyRound,
   Link2,
   ChevronDown,
   ChevronRight,
@@ -92,15 +91,6 @@ const TYPE_LABEL_KEY_MAP: Record<string, string> = {
   stt: "stt",
   tts: "tts",
 };
-
-function maskKey(key: string) {
-  // The model list API doesn't return the actual key value (security), so an
-  // empty key means "configured but not visible to the client" — show
-  // 已配置 rather than the misleading 未设置.
-  if (!key) return "已配置";
-  if (key.length <= 8) return `${key.slice(0, 2)}••••${key.slice(-2)}`;
-  return `${key.slice(0, 5)}••••${key.slice(-4)}`;
-}
 
 export function ModelManagerDialog({
   open,
@@ -212,13 +202,6 @@ function EditGroupContent({
                     </span>
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span
-                      title={g.apiKey}
-                      className="inline-flex items-center gap-1 font-mono"
-                    >
-                      <KeyRound className="size-3" />
-                      {maskKey(g.apiKey)}
-                    </span>
                     <span className="inline-flex items-center gap-1 truncate font-mono">
                       <Link2 className="size-3" />
                       {g.apiUrl || "—"}
@@ -474,7 +457,6 @@ function DeleteGroupContent({
                       </span>
                     </span>
                     <span className="mt-1.5 flex items-center gap-x-4 text-xs text-muted-foreground">
-                      <span className="font-mono">{maskKey(g.apiKey)}</span>
                       <span className="truncate font-mono">{g.apiUrl}</span>
                     </span>
                   </span>
