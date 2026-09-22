@@ -357,6 +357,7 @@ class TestModelCallRouting:
             "volc_stt_model",
             "volc_tts_model",
             "model_call",
+            "context_evidence",
         }
 
     def test_config_is_dictconfig_instantiable(self, reset_root_logger, tmp_path, monkeypatch):
@@ -373,15 +374,18 @@ class TestModelCallRouting:
         logging.config.dictConfig(cfg)
         try:
             logging.getLogger("openai_llm").info("llm event")
+            logging.getLogger("context_evidence").info("context evidence event")
             logging.getLogger("runtime_service").info("system event")
             for h in logging.getLogger().handlers:
                 h.flush()
             model_log = _read(tmp_path, "model_call")
             runtime_log = _read(tmp_path, "runtime")
             assert "llm event" in model_log
+            assert "context evidence event" in model_log
             assert "system event" not in model_log
             assert "system event" in runtime_log
             assert "llm event" not in runtime_log
+            assert "context evidence event" not in runtime_log
         finally:
             _cleanup_routing_state()
 
@@ -392,15 +396,18 @@ class TestModelCallRouting:
         configure_logging(categories=["runtime", "model_call"])
         try:
             logging.getLogger("openai_llm").info("llm event")
+            logging.getLogger("context_evidence").info("context evidence event")
             logging.getLogger("runtime_service").info("system event")
             for h in logging.getLogger().handlers:
                 h.flush()
             model_log = _read(tmp_path, "model_call")
             runtime_log = _read(tmp_path, "runtime")
             assert "llm event" in model_log
+            assert "context evidence event" in model_log
             assert "system event" not in model_log
             assert "system event" in runtime_log
             assert "llm event" not in runtime_log
+            assert "context evidence event" not in runtime_log
         finally:
             _cleanup_routing_state()
 
