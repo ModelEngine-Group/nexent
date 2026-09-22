@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   App,
@@ -58,7 +58,6 @@ export default function AgentsPage() {
   const { message } = App.useApp();
   const pathname = usePathname();
   const router = useRouter();
-  const { agents, isLoading, isError, refetch } = useAgentList("");
   const screens = Grid.useBreakpoint();
   const initialize = useAgentStore((state) => state.initialize);
   const [search, setSearch] = useState("");
@@ -88,27 +87,14 @@ export default function AgentsPage() {
     [initialize, message, t]
   );
 
-  const visibleAgents = useMemo((): AgentCardItem[] => {
-    const query = search.trim().toLowerCase();
-    if (!query) return agents as AgentCardItem[];
-    return (agents as AgentCardItem[]).filter((agent) =>
-      [agent.display_name, agent.name, agent.description, agent.author].some(
-        (value) =>
-          String(value || "")
-            .toLowerCase()
-            .includes(query)
-      )
-    );
-  }, [agents, search]);
   const columns = screens.xxl ? 4 : screens.xl ? 3 : screens.md ? 2 : 1;
   const rows = screens.xs ? 2 : 3;
   const itemsPerPage = Math.max(1, columns * rows - 1);
-  const pageCount = Math.max(1, Math.ceil(visibleAgents.length / itemsPerPage));
-  const currentPage = Math.min(page, pageCount);
-  const pageItems = visibleAgents.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
+  const { agents, pagination, isLoading, isError, refetch } = useAgentList({
+    search,
+    page,
+    pageSize: itemsPerPage,
+  });
   const cardHeight = `calc((100% - ${(rows - 1) * 20}px) / ${rows})`;
 
   const updateUrl = useCallback(
@@ -240,7 +226,7 @@ export default function AgentsPage() {
                       className="min-h-0"
                     />
                   </Col>
-                  {pageItems.map((agent) => {
+                  {(agents as AgentCardItem[]).map((agent) => {
                     const date = formatAgentDate(agent);
                     return (
                       <Col
@@ -318,12 +304,12 @@ export default function AgentsPage() {
                     );
                   })}
                 </Row>
-                {visibleAgents.length > itemsPerPage ? (
+                {(pagination?.total ?? 0) > itemsPerPage ? (
                   <div className="flex shrink-0 justify-end pt-5">
                     <Pagination
-                      current={currentPage}
+                      current={pagination?.page ?? page}
                       pageSize={itemsPerPage}
-                      total={visibleAgents.length}
+                      total={pagination?.total ?? 0}
                       showSizeChanger={false}
                       onChange={setPage}
                     />
