@@ -1155,7 +1155,7 @@ export const ModelConfigSection = forwardRef<
                       (m) => m.suggestionAvailable
                     ).length,
                     defaultValue:
-                      "其中 {{suggestionCount}} 个有容量建议。在下方模型列表中找到上下文/最大输出为"—"的模型，点击"编辑"→高级设置即可填入。",
+                      "其中 {{suggestionCount}} 个有容量建议。在下方模型列表中找到容量为空的模型，点击编辑填入即可。",
                   }
                 )}
               />
