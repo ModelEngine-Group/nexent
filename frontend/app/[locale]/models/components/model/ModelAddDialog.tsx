@@ -794,6 +794,11 @@ function BatchAddForm({
             provider === CUSTOM_PROVIDER_KEY
               ? "OpenAI-API-Compatible"
               : provider,
+          // The batch gate requires every selected model to have passed the
+          // connectivity probe (rowCheck === "available") before submit, so
+          // carry the verified result into the created record instead of
+          // resetting to not_detected.
+          connectStatus: "available",
         };
         if (override?.settings) {
           Object.assign(params, buildInferenceParamsPayload(override.settings));
