@@ -53,7 +53,7 @@ export default function AgentConfigActions({
   const isReadOnly = readOnly ?? storeIsReadOnly;
   const reset = useAgentStore((state) => state.reset);
   const agentName = editedAgent?.display_name || editedAgent?.name || "agent";
-  const { agentInfo } = useAgentInfo(agentId);
+  const { agentInfo } = useAgentInfo(variant === "buttons" ? agentId : null);
   const [isRelationshipVisible, setIsRelationshipVisible] = useState(false);
   const [isA2ASettingsVisible, setIsA2ASettingsVisible] = useState(false);
   const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
