@@ -13,12 +13,7 @@ import {
 } from "lucide-react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  useParams,
-  usePathname,
-  useRouter,
-  useSearchParams,
-} from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import {
   searchAgentInfo,
   clearAgentNewMark,
@@ -51,9 +46,10 @@ export default function AgentSelectorHeader({
   const { message } = App.useApp();
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const params = useParams<{ locale: string }>();
+  const params = useParams<{ locale: string; agentId: string }>();
   const locale = params.locale || "en";
+  const requestedAgentId = Number(params.agentId);
+  const agentsPath = pathname.replace(/\/[^/]+$/, "");
   const showBackFromRepository = true;
   const queryClient = useQueryClient();
   const waitForAutosave = useAgentStore((state) => state.waitForIdle);
@@ -162,37 +158,19 @@ export default function AgentSelectorHeader({
       const agent = agents.find((a: Agent) => String(a.id) === String(agentId));
       if (!agent || currentAgentId === Number(agent.id)) return;
 
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      nextSearchParams.set("agent_id", String(agent.id));
-      router.replace(`${pathname}?${nextSearchParams.toString()}`);
+      router.replace(`${agentsPath}/${agent.id}`);
     },
-    [agents, currentAgentId, pathname, router, searchParams]
+    [agents, agentsPath, currentAgentId, router]
   );
 
   useEffect(() => {
-    const rawAgentId = searchParams.get("agent_id");
-    const parsedAgentId = rawAgentId ? Number(rawAgentId) : null;
-
     // Keep the selected Agent in sync with the URL and the current user's list.
     // This also prevents an Agent loaded under a previous account from remaining
-    // in the store after the account switch clears or invalidates agent_id.
-    if (parsedAgentId === null) {
+    // in the store after the account switch clears or invalidates the route id.
+    if (!Number.isInteger(requestedAgentId) || requestedAgentId <= 0) {
       requestedAgentIdRef.current = null;
       if (currentAgentId !== null) reset();
-      return;
-    }
-
-    if (!Number.isInteger(parsedAgentId) || parsedAgentId <= 0) {
-      requestedAgentIdRef.current = null;
-      if (currentAgentId !== null) reset();
-
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      nextSearchParams.delete("agent_id");
-      router.replace(
-        nextSearchParams.size > 0
-          ? `${pathname}?${nextSearchParams.toString()}`
-          : pathname
-      );
+      router.replace(agentsPath);
       return;
     }
 
@@ -200,37 +178,30 @@ export default function AgentSelectorHeader({
     // response before treating an Agent as unavailable to the current user.
     if (!hasLoadedAgents) return;
 
-    if (!agents.some((agent: Agent) => Number(agent.id) === parsedAgentId)) {
+    if (!agents.some((agent: Agent) => Number(agent.id) === requestedAgentId)) {
       requestedAgentIdRef.current = null;
       if (currentAgentId !== null) reset();
-
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      nextSearchParams.delete("agent_id");
-      router.replace(
-        nextSearchParams.size > 0
-          ? `${pathname}?${nextSearchParams.toString()}`
-          : pathname
-      );
+      router.replace(agentsPath);
       return;
     }
 
-    if (requestedAgentIdRef.current === parsedAgentId) {
+    if (requestedAgentIdRef.current === requestedAgentId) {
       return;
     }
 
-    requestedAgentIdRef.current = parsedAgentId;
-    if (currentAgentId !== parsedAgentId) {
-      void loadAgent(parsedAgentId);
+    requestedAgentIdRef.current = requestedAgentId;
+    if (currentAgentId !== requestedAgentId) {
+      void loadAgent(requestedAgentId);
     }
   }, [
     agents,
     currentAgentId,
     hasLoadedAgents,
     loadAgent,
-    pathname,
+    agentsPath,
     reset,
     router,
-    searchParams,
+    requestedAgentId,
   ]);
 
   const filteredAgents = useMemo(() => {
@@ -349,9 +320,7 @@ export default function AgentSelectorHeader({
     }
 
     initialize({ ...result.data, permission: "EDIT" });
-    const nextSearchParams = new URLSearchParams(searchParams.toString());
-    nextSearchParams.set("agent_id", String(agentId));
-    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+    router.replace(`${agentsPath}/${agentId}`);
   };
 
   const handleAgentCreated = async ({ agentId }: { agentId: number }) => {
@@ -363,7 +332,7 @@ export default function AgentSelectorHeader({
       return;
     }
     initialize({ ...result.data, permission: "EDIT" });
-    router.replace(`${pathname}?agent_id=${agentId}`);
+    router.replace(`${agentsPath}/${agentId}`);
     message.success(t("subAgentPool.button.create"));
     onAgentCreated();
   };

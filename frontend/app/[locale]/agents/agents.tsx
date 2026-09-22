@@ -20,7 +20,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 
 import AgentConfig from "./agent-config";
 import AgentVersion from "./agent-version";
@@ -108,7 +108,7 @@ function PanelCard({
 
 function AgentSetupContent() {
   const { t } = useTranslation("common");
-  const searchParams = useSearchParams();
+  const { agentId } = useParams<{ agentId: string }>();
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
@@ -120,7 +120,7 @@ function AgentSetupContent() {
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const requestedAgentId = Number(searchParams.get("agent_id"));
+  const requestedAgentId = Number(agentId);
   const isRequestedAgentLoading =
     Number.isInteger(requestedAgentId) &&
     requestedAgentId > 0 &&

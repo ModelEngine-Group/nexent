@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { App, Button, Dropdown, Modal, Tooltip } from "antd";
 import type { MenuProps } from "antd";
@@ -45,7 +45,7 @@ export default function AgentConfigActions({
   const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const { agentId: routeAgentId } = useParams<{ agentId?: string }>();
   const storeAgentId = useAgentStore((state) => state.agentId);
   const agentId = agentIdProp ?? storeAgentId;
   const editedAgent = useAgentStore((state) => state.editedAgent);
@@ -221,10 +221,12 @@ export default function AgentConfigActions({
             name: agentName,
           })
         );
-        const nextSearchParams = new URLSearchParams(searchParams.toString());
-        nextSearchParams.delete("agent_id");
-        const query = nextSearchParams.toString();
-        router.replace(query ? `${pathname}?${query}` : pathname);
+        const routeAgentIdNumber = Number(routeAgentId);
+        const agentsPath =
+          Number.isInteger(routeAgentIdNumber) && routeAgentIdNumber > 0
+            ? pathname.replace(/\/[^/]+$/, "")
+            : pathname;
+        router.replace(agentsPath);
         reset();
         queryClient.invalidateQueries({ queryKey: ["agents"] });
         queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });

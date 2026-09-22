@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   App,
   Button,
@@ -15,15 +15,7 @@ import {
   Spin,
   Tag,
 } from "antd";
-import {
-  ArrowLeft,
-  Bot,
-  FileInput,
-  GitBranch,
-  Pencil,
-  Search,
-  Clock,
-} from "lucide-react";
+import { Bot, FileInput, Pencil, Search, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
@@ -43,7 +35,6 @@ import type { Agent } from "@/types/agentConfig";
 
 import AgentConfigActions from "./components/agent-config-actions";
 import AgentDetail from "./agent-detail";
-import Agents from "./agents";
 import AgentVersion from "./agent-version";
 
 interface AgentCardItem extends Agent {
@@ -67,14 +58,9 @@ export default function AgentsPage() {
   const { message } = App.useApp();
   const pathname = usePathname();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const requestedAgentId = Number(searchParams.get("agent_id"));
-  const isEditing = Number.isInteger(requestedAgentId) && requestedAgentId > 0;
   const { agents, isLoading, isError, refetch } = useAgentList("");
   const screens = Grid.useBreakpoint();
   const initialize = useAgentStore((state) => state.initialize);
-  const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const reset = useAgentStore((state) => state.reset);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
@@ -102,11 +88,6 @@ export default function AgentsPage() {
     [initialize, message, t]
   );
 
-  useEffect(() => {
-    if (!isEditing || currentAgentId === requestedAgentId) return;
-    void loadAgent(requestedAgentId);
-  }, [currentAgentId, isEditing, loadAgent, requestedAgentId]);
-
   const visibleAgents = useMemo((): AgentCardItem[] => {
     const query = search.trim().toLowerCase();
     if (!query) return agents as AgentCardItem[];
@@ -131,14 +112,10 @@ export default function AgentsPage() {
   const cardHeight = `calc((100% - ${(rows - 1) * 20}px) / ${rows})`;
 
   const updateUrl = useCallback(
-    (agentId?: number) => {
-      const nextParams = new URLSearchParams(searchParams.toString());
-      if (agentId) nextParams.set("agent_id", String(agentId));
-      else nextParams.delete("agent_id");
-      const query = nextParams.toString();
-      router.push(query ? `${pathname}?${query}` : pathname);
+    (agentId: number) => {
+      router.push(`${pathname}/${agentId}`);
     },
-    [pathname, router, searchParams]
+    [pathname, router]
   );
 
   const handleOpenDetail = useCallback(
@@ -175,50 +152,6 @@ export default function AgentsPage() {
     void refetch();
     updateUrl(agentId);
   };
-
-  if (isEditing) {
-    return (
-      <div className="flex h-full min-h-0 flex-col bg-white">
-        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-2">
-          <Button
-            icon={<ArrowLeft className="size-4" />}
-            type="text"
-            onClick={() => {
-              reset();
-              updateUrl();
-            }}
-          >
-            {t("agentRepository.mine.backToRepository")}
-          </Button>
-          <div className="flex items-center gap-2">
-            <AgentConfigActions />
-            <Button
-              icon={<GitBranch className="size-4" />}
-              onClick={() => setIsVersionManageOpen(true)}
-            >
-              {t("agent.version.manage")}
-            </Button>
-          </div>
-        </div>
-        <div className="min-h-0 flex-1">
-          <Agents />
-        </div>
-        <Modal
-          centered
-          width={900}
-          open={isVersionManageOpen}
-          title={t("agent.version.manage")}
-          onCancel={() => setIsVersionManageOpen(false)}
-          footer={null}
-        >
-          <AgentVersion
-            currentVersionNo={agentInfo?.current_version_no}
-            onRefreshAgentInfo={refetchAgentInfo}
-          />
-        </Modal>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white px-4 py-6 sm:px-6 xl:px-16">
