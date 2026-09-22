@@ -2051,7 +2051,7 @@
   "agentRepository.mine.status.updateReviewing": "Update under review",
   "agentRepository.mine.status.listed": "Listed",
   "agentRepository.mine.status.rejected": "Review rejected",
-  "agentRepository.mine.currentVersion": "Current {{version}}",
+  "agentRepository.mine.currentVersion": "Current Version {{version}}",
   "agentRepository.mine.onlineVersionShort": "Live {{version}}",
   "agentRepository.mine.edit": "Edit",
   "agentRepository.mine.backToRepository": "Back to Agent Repository",
