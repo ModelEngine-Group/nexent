@@ -200,8 +200,13 @@ const formatCustomValueForEditing = (raw: unknown): string => {
 
 /** Convert the editing-state __custom__ entries array into a clean wire dict.
  * Empty keys are dropped and duplicates collapse (last-wins).
+ * A plain object passes through as-is: the override save path builds the
+ * final dict directly and uses null values as explicit removal markers.
  */
 const buildCustomDict = (raw: unknown): Record<string, unknown> => {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return { ...(raw as Record<string, unknown>) };
+  }
   const entries = Array.isArray(raw) ? (raw as [string, string][]) : [];
   const dict: Record<string, unknown> = {};
   for (const [k, v] of entries) {
@@ -211,6 +216,73 @@ const buildCustomDict = (raw: unknown): Record<string, unknown> => {
     dict[k] = parsed;
   }
   return dict;
+};
+
+/**
+ * Merge model-level and override custom params into the editing entries
+ * shown in the override dialog. Model-level params render as plain editable
+ * rows (pre-2.6.0 merged display); override values win; null override values
+ * are explicit removal markers and hide the key entirely.
+ */
+export const mergeCustomParamsForEditing = (
+  overrideCustoms: Record<string, unknown> | null | undefined,
+  modelCustoms: Record<string, unknown> | null | undefined
+): [string, string][] => {
+  const merged: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(modelCustoms ?? {})) {
+    merged[k] = v;
+  }
+  for (const [k, v] of Object.entries(overrideCustoms ?? {})) {
+    if (v === null || v === undefined) {
+      delete merged[k];
+    } else {
+      merged[k] = v;
+    }
+  }
+  return Object.entries(merged).map(
+    ([k, v]) => [k, formatCustomValueForEditing(v)] as [string, string]
+  );
+};
+
+/**
+ * Diff the editing entries against model-level custom params for saving.
+ * Returns the wire dict stored in the override entry:
+ *   - explicit values for keys that differ from the model level
+ *   - null for keys whose inherited row the user deleted (the runtime pops
+ *     null-marked keys from the merged request params)
+ *   - keys equal to the model level are dropped (pure inherit, no override)
+ */
+export const diffCustomParamsForSave = (
+  editingEntries: unknown,
+  modelCustoms: Record<string, unknown> | null | undefined
+): Record<string, unknown> => {
+  const entries = Array.isArray(editingEntries)
+    ? (editingEntries as [string, string][])
+    : [];
+  const editingDict: Record<string, unknown> = {};
+  for (const [k, v] of entries) {
+    if (k === "") continue;
+    const parsed = parseCustomValue(String(v ?? ""));
+    if (parsed === undefined) continue;
+    editingDict[k] = parsed;
+  }
+  const modelDict = modelCustoms ?? {};
+  const result: Record<string, unknown> = {};
+  const keys = new Set([...Object.keys(modelDict), ...Object.keys(editingDict)]);
+  for (const k of keys) {
+    if (k in editingDict) {
+      if (
+        !(k in modelDict) ||
+        JSON.stringify(editingDict[k]) !== JSON.stringify(modelDict[k])
+      ) {
+        result[k] = editingDict[k];
+      }
+    } else if (k in modelDict) {
+      // Inherited row deleted by the user: persist an explicit removal.
+      result[k] = null;
+    }
+  }
+  return result;
 };
 
 export const buildInferenceParamsPayload = (

@@ -224,7 +224,14 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         """
         if self._model is None:
             self._build_model()
-        module_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # Anchor on the nexent package root: the probe asset lives in
+        # nexent/assets/. A relative dirname chain silently broke when this
+        # module moved deeper into the package (3 levels up resolved to
+        # .../core/gateway instead of the package root), so the local probe
+        # image was never found and every check fell back to the public URL -
+        # which fails in offline deployments.
+        import nexent
+        module_dir = os.path.dirname(os.path.abspath(nexent.__file__))
         test_image_path = os.path.join(module_dir, "assets", "git-flow.png")
         if os.path.exists(test_image_path):
             base64_image = self.encode_image(test_image_path)

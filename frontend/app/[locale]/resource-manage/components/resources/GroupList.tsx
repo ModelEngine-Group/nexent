@@ -31,6 +31,7 @@ import {
   type UpdateGroupRequest,
 } from "@/services/groupService";
 import { type User } from "@/services/userService";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const { confirm } = useConfirmModal();
@@ -140,8 +141,11 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         queryClient.invalidateQueries({ queryKey: ["users"] }),
       ]);
     } catch (err: any) {
-      if (err.response?.data?.message) {
-        message.error(err.response.data.message);
+      const limitMessage = getTenantResourceLimitMessage(err, t);
+      if (limitMessage) {
+        message.error(limitMessage);
+      } else if (err?.message) {
+        message.error(err.message);
       } else {
         message.error(t("tenantResources.groups.deleteFailed"));
       }
@@ -174,12 +178,15 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
+      const limitMessage = getTenantResourceLimitMessage(err, t);
       const nameConflictMatch =
         errorMessage.match(/Group with name '(.*)' already exists/i) ||
         errorMessage.match(/Group name '(.*)' already exists/i);
 
       if (nameConflictMatch && nameConflictMatch[1]) {
         message.error(t("tenantResources.groups.duplicateName"));
+      } else if (limitMessage) {
+        message.error(limitMessage);
       } else {
         message.error(errorMessage || t("common.unknownError"));
       }
@@ -211,14 +218,17 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       await refetchUsers();
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
+      const limitMessage = getTenantResourceLimitMessage(err, t);
       const nameConflictMatch =
         errorMessage.match(/Group with name '(.*)' already exists/i) ||
         errorMessage.match(/Group name '(.*)' already exists/i);
 
       if (nameConflictMatch && nameConflictMatch[1]) {
         message.error(t("tenantResources.groups.duplicateName"));
-      } else if (err.response?.data?.message) {
-        message.error(err.response.data.message);
+      } else if (limitMessage) {
+        message.error(limitMessage);
+      } else if (errorMessage) {
+        message.error(errorMessage);
       } else {
         message.error(t("tenantResources.groups.updateFailed"));
       }

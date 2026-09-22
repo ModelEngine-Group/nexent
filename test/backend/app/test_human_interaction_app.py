@@ -19,7 +19,7 @@ CARD = "01a09fce-3a28-7860-8646-b0eec69d5f47"
 @pytest.fixture
 def boundary(monkeypatch):
     service = MagicMock()
-    service.snapshot.return_value = {"run_id": RUN, "status": "WAITING_HUMAN"}
+    service.light_snapshot.return_value = {"run_id": RUN, "status": "WAITING_HUMAN"}
     service.repository.latest.return_value = RUN
     service.decide.return_value = {"accepted": True}
     service.control.return_value = {"run_id": RUN}
@@ -39,7 +39,16 @@ def test_snapshot_and_conversation_use_signed_tenant_and_user(boundary):
     assert response.status_code == 200
     verify.assert_called_once_with("Bearer internal-token")
     service.repository.latest.assert_called_once_with("tenant-a", "owner", 7)
-    service.snapshot.assert_called_once_with(RUN, "tenant-a", "owner")
+    service.light_snapshot.assert_called_once_with(RUN, "tenant-a", "owner")
+
+
+def test_run_snapshot_uses_signed_tenant_and_user(boundary):
+    client, service, verify = boundary
+    response = client.get(BASE + f"/{RUN}", headers={"Authorization": "Bearer internal-token"})
+    assert response.status_code == 200
+    assert response.json() == {"run_id": RUN, "status": "WAITING_HUMAN"}
+    verify.assert_called_once_with("Bearer internal-token")
+    service.light_snapshot.assert_called_once_with(RUN, "tenant-a", "owner")
 
 
 @pytest.mark.parametrize("path", ["/capabilities", f"/{RUN}", "/conversation/7", f"/{RUN}/events"])
@@ -47,7 +56,7 @@ def test_invalid_internal_token_is_rejected(boundary, path):
     client, service, verify = boundary
     verify.side_effect = UnauthorizedError("Invalid internal runtime token")
     assert client.get(BASE + path).status_code == 401
-    service.snapshot.assert_not_called()
+    service.light_snapshot.assert_not_called()
 
 
 @pytest.mark.parametrize("status", [404, 409, 410, 422, 503])

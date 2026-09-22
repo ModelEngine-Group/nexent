@@ -1,5 +1,6 @@
 """Fenced tool dispatch adapter. Approval and STARTED are consumed under one run lock."""
 
+import threading
 import time
 from contextlib import contextmanager
 from datetime import timezone
@@ -16,7 +17,19 @@ from .models import digest, redact
 
 
 class RuntimeInteractionPort:
-    def __init__(self, service, identity, owner_id, authorize, allowed_tools=(), *, live_resume=False, stop_event=None):
+    def __init__(self, service, identity, owner_id, authorize, allowed_tools=(), *, live_resume=False, stop_event=None,
+                 wait_reporter=None):
+        """Bind the port and set up async-worker chunk coordination.
+
+        ``_chunk_buffer`` stages processed observer chunks: the async consumer
+        appends via add_chunk and the worker flushes before each HITL event so
+        chunk rows precede human_interaction rows in DB event order.
+        ``_emit_lock`` serializes every take_chunks + emit_chunks critical
+        section (async drain_and_emit and the worker's own flush), so a held
+        lock also means "a drain is in flight and its chunks are uncommitted".
+        ``wait_reporter`` relays enter/exit of human-input waits to the
+        scheduler so parked runs stop consuming execution concurrency slots.
+        """
         self.service = service
         self.repository = service.repository
         self.cipher = service.cipher
@@ -29,9 +42,84 @@ class RuntimeInteractionPort:
         self.allowed_tools = frozenset(allowed_tools)
         self.live_resume = live_resume
         self.stop_event = stop_event
+        self.wait_reporter = wait_reporter
+        self._chunk_buffer: list[str] = []
+        self._chunk_buffer_lock = threading.Lock()
+        self._emit_lock = threading.Lock()
         with self.transaction() as tx:
             self.checkpoint = self.cipher.open(tx.run.checkpoint)
             self.request_payload = self.cipher.open(tx.run.request_payload)
+
+    def add_chunk(self, chunk: str) -> None:
+        """Append a processed chunk from the async consumer to the shared buffer."""
+        with self._chunk_buffer_lock:
+            self._chunk_buffer.append(chunk)
+
+    def take_chunks(self) -> list[str]:
+        """Atomically drain the shared buffer for persistence."""
+        with self._chunk_buffer_lock:
+            chunks = self._chunk_buffer
+            self._chunk_buffer = []
+        return chunks
+
+    def peek_chunks(self) -> int:
+        """Return the number of buffered chunks without draining them."""
+        with self._chunk_buffer_lock:
+            return len(self._chunk_buffer)
+
+    def drain_and_emit(self) -> None:
+        """Atomically drain and persist buffered chunks. Lane-thread only.
+
+        take_chunks and emit_chunks share one critical section under the emit
+        lock so a concurrent flush can never interleave DB seq assignment —
+        the seq order then always matches the chunk production order.
+        """
+        with self._emit_lock:
+            chunks = self.take_chunks()
+            if not chunks:
+                return
+            try:
+                self.emit_chunks(chunks)
+            except Exception:
+                # Never lose drained chunks; put them back for retry.
+                for chunk in chunks:
+                    self.add_chunk(chunk)
+                raise
+
+    def flush_chunks_until_idle(self, *, max_wait_ms: int = 500, settle_ms: int = 20) -> None:
+        """Wait for the async consumer to drain the observer queue, then persist.
+
+        Worker-thread only. take_chunks and emit_chunks run inside the same
+        emit-lock critical section as the async drain_and_emit, so concurrent
+        flushes cannot reorder seq assignment. ``max_wait_ms`` bounds how long
+        we wait for NEW chunks — it must NOT fire while another drain holds
+        the lock, because its chunks are produced before this HITL event but
+        still uncommitted; returning early would order HITL rows ahead of
+        them. The deadline may therefore only fire once the lock is free.
+        """
+        hard_deadline = time.monotonic() + max_wait_ms / 1000.0
+        idle_since: float | None = None
+
+        while True:
+            now = time.monotonic()
+            if now >= hard_deadline and not self._emit_lock.locked():
+                break
+            with self._emit_lock:
+                chunks = self.take_chunks()
+                if chunks:
+                    try:
+                        self.emit_chunks(chunks)
+                    except Exception:
+                        # Never lose drained chunks; put them back for retry.
+                        for chunk in chunks:
+                            self.add_chunk(chunk)
+                        raise
+                    idle_since = None
+                elif idle_since is None:
+                    idle_since = now
+                elif now - idle_since >= settle_ms / 1000.0:
+                    break
+            time.sleep(min(settle_ms / 1000.0, max(hard_deadline - now, 0.0)))
 
     @contextmanager
     def transaction(self, *, receipt=False):
@@ -75,6 +163,8 @@ class RuntimeInteractionPort:
         self.authorize()
         suspended = False
         feedback = None
+        # Flush so buffered chunks precede the human_run status row in DB order.
+        self.flush_chunks_until_idle()
         with self.transaction() as tx:
             tx.run.checkpoint = self.cipher.seal(checkpoint)
             if tx.run.pause_requested:
@@ -125,37 +215,48 @@ class RuntimeInteractionPort:
 
     def _wait_until_ready(self):
         """Park this worker while retaining the current Python continuation."""
-        next_authorization_check = 0.0
-        while True:
-            if self.stop_event is not None and self.stop_event.is_set():
-                raise RunTerminated("The managed execution was cancelled")
-            now = time.monotonic()
-            if now >= next_authorization_check:
-                self.authorize()
-                next_authorization_check = now + 5.0
-            with self.repository.transaction(self.run_id, self.tenant_id, self.user_id) as tx:
-                if (tx is None or tx.run.fence != self.fence or tx.run.lock_owner != self.owner_id
-                        or tx.run.lock_until is None or tx.run.lock_until <= utcnow()):
-                    raise RunTerminated("Execution lease is no longer valid")
-                self.service._expire(tx)
-                if tx.run.status == "READY":
-                    tx.run.status = "RUNNING"
-                    tx.emit({"type": "human_run", "content": {
-                        "run_id": self.run_id, "status": "RUNNING",
-                    }})
-                    return
-                if tx.run.status != "WAITING_HUMAN":
-                    raise RunTerminated("Run no longer permits live continuation")
-            if self.stop_event is not None:
-                self.stop_event.wait(0.2)
-            else:
-                time.sleep(0.2)
+        if self.wait_reporter is not None:
+            self.wait_reporter(True)
+        try:
+            next_authorization_check = 0.0
+            while True:
+                if self.stop_event is not None and self.stop_event.is_set():
+                    raise RunTerminated("The managed execution was cancelled")
+                now = time.monotonic()
+                if now >= next_authorization_check:
+                    self.authorize()
+                    next_authorization_check = now + 5.0
+                with self.repository.transaction(self.run_id, self.tenant_id, self.user_id) as tx:
+                    if (tx is None or tx.run.fence != self.fence or tx.run.lock_owner != self.owner_id
+                            or tx.run.lock_until is None or tx.run.lock_until <= utcnow()):
+                        raise RunTerminated("Execution lease is no longer valid")
+                    self.service._expire(tx)
+                    if tx.run.status == "READY":
+                        # Flush so lingering chunks precede the human_run row.
+                        self.flush_chunks_until_idle()
+                        tx.run.status = "RUNNING"
+                        tx.emit({"type": "human_run", "content": {
+                            "run_id": self.run_id, "status": "RUNNING",
+                        }})
+                        return
+                    if tx.run.status != "WAITING_HUMAN":
+                        raise RunTerminated("Run no longer permits live continuation")
+                if self.stop_event is not None:
+                    self.stop_event.wait(0.2)
+                else:
+                    time.sleep(0.2)
+        finally:
+            if self.wait_reporter is not None:
+                self.wait_reporter(False)
 
     def dispatch(self, slot, tool, arguments, *, interaction=None):
         self.authorize()
         suspended = False
         steering_requested = False
         outcome = None
+        # Flush before the transaction so chunk rows get lower seq numbers
+        # than any subsequent human_interaction row.
+        self.flush_chunks_until_idle()
         with self.transaction() as tx:
             if tx.run.pause_requested:
                 self.service._request_steering(tx)
@@ -234,6 +335,8 @@ class RuntimeInteractionPort:
         return outcome
 
     def receipt(self, slot, result, *, uncertain=False):
+        # Flush so the DB event order is chunks → human_execution.
+        self.flush_chunks_until_idle()
         with self.transaction(receipt=True) as tx:
             execution = tx.execution(slot)
             if execution is None or execution.status != "STARTED":
@@ -274,6 +377,14 @@ class RuntimeInteractionPort:
             ]
 
     def finish(self, outcome):
+        """Write the terminal run status, flushing buffered chunks first.
+
+        A flush failure must not prevent the terminal status row.
+        """
+        try:
+            self.flush_chunks_until_idle()
+        except Exception:
+            pass
         with self.transaction(receipt=True) as tx:
             if tx.run.status in {"STOPPED", "EXPIRED"}:
                 return

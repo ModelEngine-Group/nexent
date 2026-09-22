@@ -169,6 +169,16 @@ class HumanInteractionRepository:
                 tx.flush()
 
     @contextmanager
+    def read_only(self, run_id, tenant_id=None, user_id=None):
+        """Snapshot reads must not contend with write paths. No lock, no writes."""
+        with self.session_factory() as session:
+            conditions = [HumanRun.run_id == run_id, HumanRun.delete_flag == "N"]
+            if tenant_id is not None:
+                conditions.extend([HumanRun.tenant_id == tenant_id, HumanRun.user_id == user_id])
+            run = session.scalar(select(HumanRun).where(*conditions))
+            yield RunTransaction(session, run, self.validator, user_id) if run else None
+
+    @contextmanager
     def creation(self, run):
         with self.session_factory() as session, session.no_autoflush:
             _lock(session, ["human-run-id", run.run_id])
