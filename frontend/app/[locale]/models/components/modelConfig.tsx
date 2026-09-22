@@ -1148,11 +1148,16 @@ export const ModelConfigSection = forwardRef<
                   bareCount: capacityCoverage.bareCount,
                   total: capacityCoverage.totalLlmVlm,
                 })}
-                description={t("modelConfig.capacityCoverage.description", {
-                  suggestionCount: capacityCoverage.bareModels.filter(
-                    (m) => m.suggestionAvailable
-                  ).length,
-                })}
+                description={t(
+                  "modelConfig.capacityCoverage.descriptionV2",
+                  {
+                    suggestionCount: capacityCoverage.bareModels.filter(
+                      (m) => m.suggestionAvailable
+                    ).length,
+                    defaultValue:
+                      "其中 {{suggestionCount}} 个有容量建议。在下方模型列表中找到上下文/最大输出为"—"的模型，点击"编辑"→高级设置即可填入。",
+                  }
+                )}
               />
             )}
 
