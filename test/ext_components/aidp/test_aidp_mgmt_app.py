@@ -1605,7 +1605,8 @@ class TestListDocumentsHistory:
                           return_value=self._CHANNELS), \
              patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
                           return_value=history) as mock_history, \
-             patch.object(aidp_mgmt_app, "list_aidp_docs_impl") as mock_completed, \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}) as mock_completed, \
              patch.object(aidp_mgmt_app, "count_aidp_docs_impl") as mock_count:
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents",
@@ -1625,15 +1626,151 @@ class TestListDocumentsHistory:
         assert body["has_more"] is False
         assert body["total_reliable"] is True
         assert body["processing_count"] == 1
-        # The history payload is authoritative: the completed-files listing and
-        # its Count endpoint must not be hit at all.
+        # The history payload decides the statuses, but the knowledge-base
+        # scoped listing is still read: the history only covers the resolved
+        # channel directory, so it cannot decide membership on its own.
         mock_history.assert_called_once()
         # The call carries the resolved channel plus the KB the path is scoped to.
         assert mock_history.call_args.args[2:] == (
             "fs-1", "/aidp/knowledge/kb-1", "kb-1",
         )
-        mock_completed.assert_not_called()
+        mock_completed.assert_called_once()
+        assert mock_completed.call_args.args[2:] == ("kb-1", 1, 100)
+        # The merged set is complete in one pass, so Count is never needed.
         mock_count.assert_not_called()
+
+    def test_files_ingested_outside_the_channel_directory_stay_visible(self):
+        """A directory-scoped history must not hide files ingested elsewhere.
+
+        The regression this guards: while the resolved channel directory is
+        empty the list is served from the knowledge-base scoped listing, and as
+        soon as one upload lands in that directory the history takes over and
+        every file from another directory disappears.
+        """
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_uuid": "uuid-new", "file_ino_no": "f-new",
+                 "file_name": "new.pdf", "first_upload_time": 1718000900,
+                 "status": "UPLOADING"},
+            ]
+        }
+        listing = {
+            "value": [
+                {"file_ino_no": "f-legacy-a", "file_name": "legacy-a.txt",
+                 "create_time": 1718000000},
+                {"file_ino_no": "f-legacy-b", "file_name": "legacy-b.txt",
+                 "create_time": 1718000100},
+                {"file_ino_no": "f-new", "file_name": "new.pdf",
+                 "create_time": 1718000900},
+            ]
+        }
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value=listing):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        # Everything is visible, newest first.
+        assert [item["file_ino_no"] for item in body["value"]] == [
+            "f-new", "f-legacy-b", "f-legacy-a",
+        ]
+        assert body["total_count"] == 3
+        # The upload carries the live status, the ingested files are done.
+        statuses = {item["file_ino_no"]: item["status"] for item in body["value"]}
+        assert statuses == {
+            "f-new": "UPLOADING",
+            "f-legacy-b": "COMPLETED",
+            "f-legacy-a": "COMPLETED",
+        }
+        # A file both sources know about stays a single row, even though only one
+        # of them reports its uuid.
+        assert len(body["value"]) == 3
+        assert body["processing_count"] == 1
+
+    def test_upload_not_yet_ingested_is_kept_alongside_ingested_files(self):
+        """The history-only upload survives a listing that does not know it yet."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_ino_no": "f-uploading", "file_name": "uploading.pdf",
+                 "first_upload_time": 1718000900, "status": "PROCESSING"},
+            ]
+        }
+        listing = {
+            "value": [
+                {"file_ino_no": "f-legacy", "file_name": "legacy.txt",
+                 "create_time": 1718000000},
+            ]
+        }
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value=listing):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert [item["file_ino_no"] for item in body["value"]] == [
+            "f-uploading", "f-legacy",
+        ]
+        assert body["total_count"] == 2
+        assert body["processing_count"] == 1
+
+    def test_listing_failure_keeps_the_history_visible(self):
+        """A failing listing degrades to the history instead of failing the list."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_ino_no": "f-1", "file_name": "ok.txt",
+                 "first_upload_time": 1718000000, "status": "COMPLETED"},
+            ]
+        }
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "listing down")):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert [item["file_ino_no"] for item in body["value"]] == ["f-1"]
+        assert body["total_count"] == 1
 
     @pytest.mark.parametrize("page,expected_count,expected_has_more", [
         (1, 10, True),
@@ -1657,7 +1794,9 @@ class TestListDocumentsHistory:
              patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
                           return_value=self._CHANNELS), \
              patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
-                          return_value=history):
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
             response = client.get(
                 f"/aidp-mgmt/knowledge-bases/kb-1/documents?page={page}&page_size=10",
                 headers=_bearer(),
@@ -1689,7 +1828,9 @@ class TestListDocumentsHistory:
              patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
                           return_value=self._CHANNELS), \
              patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
-                          return_value=history):
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents",
                 headers=_bearer(),
@@ -1718,7 +1859,9 @@ class TestListDocumentsHistory:
              patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
                           return_value=self._CHANNELS), \
              patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
-                          return_value=history):
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents",
                 headers=_bearer(),
@@ -1804,7 +1947,9 @@ class TestListDocumentsHistory:
              patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
                           return_value=self._CHANNELS), \
              patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
-                          return_value=history):
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents",
                 headers=_bearer(),
