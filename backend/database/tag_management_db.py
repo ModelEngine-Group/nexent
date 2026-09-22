@@ -892,6 +892,17 @@ class TagManagementDB:
                 if value_id not in target_value_ids:
                     session.delete(assignment)
 
+            # Flush the deletes BEFORE adding new rows: SQLAlchemy's unit of
+            # work emits INSERTs before DELETEs, and the DB trigger counts
+            # active rows at INSERT time. Without this flush a full
+            # replacement (e.g. 100 rows -> 1 row) trips the assignment
+            # capacity trigger even though the final state is within limits.
+            if any(
+                value_id not in target_value_ids
+                for value_id in existing_by_value_id
+            ):
+                session.flush()
+
             assignments = [
                 ResourceTagAssignment(
                     tenant_id=tenant_id,

@@ -426,6 +426,10 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
         # Auto-configure default-model slots that the tenant never set.
         auto_configured = _backfill_default_model_slots(user_id, tenant_id)
         return {"auto_configured_defaults": auto_configured}
+    except ValueError:
+        # Display-name conflicts must reach the API layer so the endpoint can
+        # map them to 409 instead of a generic 500.
+        raise
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise Exception(f"Failed to create model: {str(e)}")
@@ -719,6 +723,10 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
         # Auto-configure default-model slots that the tenant never set.
         auto_configured = _backfill_default_model_slots(user_id, tenant_id)
         return {"auto_configured_defaults": auto_configured}
+    except ValueError:
+        # Invalid batch entries (blank display names, unknown types, ...) are
+        # client errors and must reach the API layer for a 4xx mapping.
+        raise
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise Exception(f"Failed to batch create models: {str(e)}")
@@ -974,6 +982,7 @@ async def list_llm_models_for_tenant(tenant_id: str):
                     model_repo=record["model_repo"],
                     model_name=record["model_name"],
                 ),
+                "model_type": record.get("model_type", "llm"),
                 "connect_status": ModelConnectStatusEnum.get_value(record.get("connect_status")),
                 "display_name": record["display_name"],
                 "api_key": record.get("api_key", ""),

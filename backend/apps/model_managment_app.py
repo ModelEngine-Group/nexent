@@ -361,6 +361,11 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ValueError as e:
+        # Malformed batch entries are client errors, not server faults.
+        logging.error(f"Failed to batch create models: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
