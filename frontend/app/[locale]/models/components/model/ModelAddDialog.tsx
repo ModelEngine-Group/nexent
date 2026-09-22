@@ -580,7 +580,7 @@ function BatchAddForm({
   const presets = useProviderPresets(true);
   const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
 
-  const [provider, setProvider] = useState<string>("");
+  const [provider, setProvider] = useState<string>(CUSTOM_PROVIDER_KEY);
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -605,14 +605,6 @@ function BatchAddForm({
     Record<string, "checking" | "available" | "unavailable">
   >({});
   const [batchChecking, setBatchChecking] = useState(false);
-
-  // Default to the first preset once loaded.
-  useEffect(() => {
-    if (!provider && presets.length > 0) {
-      setProvider(presets[0].key);
-      setBaseUrl(presets[0].baseUrl);
-    }
-  }, [presets, provider]);
 
   function changeProvider(next: string) {
     setProvider(next);
@@ -652,6 +644,14 @@ function BatchAddForm({
       message.warning(
         t("model.dialog.v2.warn.apiKeyRequired", {
           defaultValue: "请先输入 API Key",
+        })
+      );
+      return;
+    }
+    if (provider === CUSTOM_PROVIDER_KEY && !baseUrl.trim()) {
+      message.warning(
+        t("modelConfig.addDialog.baseUrlRequired", {
+          defaultValue: "自定义服务商需要填写 Base URL",
         })
       );
       return;
@@ -778,7 +778,10 @@ function BatchAddForm({
           apiKey: apiKey.trim(),
           displayName: defaultDisplayName(row.model_name),
           maxTokens: row.model_type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
-          modelFactory: provider,
+          modelFactory:
+            provider === CUSTOM_PROVIDER_KEY
+              ? "OpenAI-API-Compatible"
+              : provider,
         };
         if (override?.settings) {
           Object.assign(params, buildInferenceParamsPayload(override.settings));
@@ -835,6 +838,11 @@ function BatchAddForm({
                     {p.label}
                   </SelectItem>
                 ))}
+                <SelectItem value={CUSTOM_PROVIDER_KEY}>
+                  {t("modelConfig.addDialog.customProvider", {
+                    defaultValue: "自定义",
+                  })}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
