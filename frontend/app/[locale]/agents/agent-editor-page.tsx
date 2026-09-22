@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { App, Button, Modal } from "antd";
 import { ArrowLeft, GitBranch } from "lucide-react";
@@ -25,9 +25,12 @@ export default function AgentEditorPage() {
   const initialize = useAgentStore((state) => state.initialize);
   const reset = useAgentStore((state) => state.reset);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
+  const isReturningRef = useRef(false);
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(currentAgentId);
 
   useEffect(() => {
+    if (isReturningRef.current) return;
+
     if (!isValidAgentId) {
       router.replace("/agents");
       return;
@@ -64,6 +67,7 @@ export default function AgentEditorPage() {
           icon={<ArrowLeft className="size-4" />}
           type="text"
           onClick={() => {
+            isReturningRef.current = true;
             reset();
             router.push("/agents");
           }}
