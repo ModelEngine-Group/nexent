@@ -6,32 +6,16 @@ import { CircleHelp, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type ClarificationQuestionType =
-  | "single_choice"
-  | "multiple_choice"
-  | "text";
-
-export interface ClarificationOption {
-  id: string;
-  label: string;
-}
-
-export interface ClarificationQuestion {
-  id: string;
-  type: ClarificationQuestionType;
-  title: string;
-  required?: boolean;
-  options?: ClarificationOption[];
-  allowOther?: boolean;
-  otherInputExpanded?: boolean;
-  placeholder?: string;
-}
-
-export interface ClarificationAnswer {
-  questionId: string;
-  value: string | string[];
-  otherText: string | null;
-}
+import type {
+  ClarificationAnswer,
+  ClarificationQuestion,
+} from "@/types/clarification";
+export type {
+  ClarificationAnswer,
+  ClarificationOption,
+  ClarificationQuestion,
+  ClarificationQuestionType,
+} from "@/types/clarification";
 
 const supportsOtherAnswer = (question: ClarificationQuestion) =>
   question.type !== "text" &&
@@ -85,6 +69,8 @@ export function ClarificationCard({
   description,
   questions,
   disabled = false,
+  readOnly = false,
+  submitDisabled = false,
   submitLabel,
   submittedLabel,
   otherLabel,
@@ -96,6 +82,8 @@ export function ClarificationCard({
   description: string;
   questions: ClarificationQuestion[];
   disabled?: boolean;
+  readOnly?: boolean;
+  submitDisabled?: boolean;
   submitLabel: string;
   submittedLabel: string;
   otherLabel: string;
@@ -109,7 +97,7 @@ export function ClarificationCard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [error, setError] = useState("");
-  const isLocked = disabled || isSubmitting || isSubmitted;
+  const isLocked = disabled || readOnly || isSubmitting || isSubmitted;
 
   const isComplete = useMemo(
     () =>
@@ -141,7 +129,7 @@ export function ClarificationCard({
   };
 
   const submit = async () => {
-    if (isLocked || !isComplete) return;
+    if (isLocked || submitDisabled || !isComplete) return;
     setIsSubmitting(true);
     setError("");
     try {
@@ -176,14 +164,14 @@ export function ClarificationCard({
               {error}
             </p>
           ) : null}
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0 flex-1 basis-40 text-xs text-muted-foreground">
               {footerHint}
             </div>
             <Button
               type="button"
               size="sm"
-              disabled={isLocked || !isComplete}
+              disabled={isLocked || submitDisabled || !isComplete}
               onClick={() => void submit()}
             >
               <Send />

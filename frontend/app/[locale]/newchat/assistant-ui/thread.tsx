@@ -13,7 +13,7 @@ import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
-import { UserGuidanceMessage } from "@/features/humanInteraction/UserGuidanceMessage";
+import { ClarificationMessageCard } from "../components/clarification-message-card";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
@@ -1545,8 +1545,16 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
-                if ((part as typeof part & { name?: string }).name === "user-steering") {
-                  return <UserGuidanceMessage data={(part as typeof part & { data?: unknown }).data} />;
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "clarification"
+                ) {
+                  return (
+                    <ClarificationMessageCard
+                      readOnly={readOnly}
+                      data={(part as typeof part & { data?: unknown }).data}
+                    />
+                  );
                 }
                 if (
                   (part as typeof part & { name?: string }).name ===
