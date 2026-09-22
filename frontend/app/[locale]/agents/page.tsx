@@ -5,8 +5,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   App,
   Button,
+  Card,
   Col,
-  Dropdown,
   Grid,
   Input,
   Modal,
@@ -20,7 +20,6 @@ import {
   Bot,
   FileInput,
   GitBranch,
-  MoreHorizontal,
   Pencil,
   Search,
   Clock,
@@ -95,10 +94,10 @@ export default function AgentsPage() {
         message.error(
           result.message || t("agentConfig.agents.detailsLoadFailed")
         );
-        return false;
+        return null;
       }
       initialize(result.data);
-      return true;
+      return result.data;
     },
     [initialize, message, t]
   );
@@ -144,9 +143,9 @@ export default function AgentsPage() {
 
   const handleOpenDetail = useCallback(
     async (agent: Agent) => {
-      const loaded = await loadAgent(Number(agent.id));
-      if (!loaded) return;
-      setSelectedAgent(agent);
+      const loadedAgent = await loadAgent(Number(agent.id));
+      if (!loadedAgent) return;
+      setSelectedAgent(loadedAgent);
       setDetailOpen(true);
     },
     [loadAgent]
@@ -223,187 +222,181 @@ export default function AgentsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-gray-50 px-4 py-6 sm:px-6 xl:px-16">
-      <div className="flex h-full min-h-0 w-full flex-col gap-5">
-        <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-4">
-            <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
-              <Bot className="size-7" aria-hidden />
-            </span>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-                {t("agentRepository.page.tab.mine")}
-              </h1>
-              <p className="mt-1 text-sm text-slate-600">
-                {t(
-                  "agentRepository.mine.description",
-                  "选择一个智能体以查看详情或进入编辑。"
-                )}
-              </p>
+      <Card
+        className="flex h-full min-h-0 w-full flex-col"
+        styles={{
+          body: {
+            display: "flex",
+            minHeight: 0,
+            flex: 1,
+            flexDirection: "column",
+          },
+        }}
+      >
+        <div className="flex h-full min-h-0 w-full flex-col gap-5">
+          <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-4">
+              <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                <Bot className="size-7" aria-hidden />
+              </span>
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                  {t("agentRepository.page.tab.mine")}
+                </h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  {t(
+                    "agentRepository.mine.description",
+                    "选择一个智能体以查看详情或进入编辑。"
+                  )}
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              icon={<FileInput className="size-4" />}
-              onClick={handleImport}
-            >
-              {t("agentConfig.button.import")}
-            </Button>
-          </div>
-        </section>
-
-        <Input
-          allowClear
-          prefix={<Search className="size-4 text-slate-400" />}
-          placeholder={t("agentSelector.searchPlaceholder")}
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setPage(1);
-          }}
-          className="h-10 max-w-md"
-        />
-
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {isLoading ? (
-            <div className="flex h-full items-center justify-center">
-              <Spin size="large" />
-            </div>
-          ) : isError ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3">
-              <p className="text-sm text-slate-500">
-                {t("agentRepository.mine.loadError")}
-              </p>
-              <Button onClick={() => refetch()}>
-                {t("repository.common.retry")}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                icon={<FileInput className="size-4" />}
+                onClick={handleImport}
+              >
+                {t("agentConfig.button.import")}
               </Button>
             </div>
-          ) : (
-            <div className="flex h-full min-h-0 flex-col">
-              <Row
-                gutter={[20, 20]}
-                className="min-h-0 flex-1 content-stretch overflow-hidden"
-              >
-                <Col
-                  xs={24}
-                  sm={12}
-                  xl={8}
-                  xxl={6}
-                  className="flex"
-                  style={{ height: cardHeight }}
+          </section>
+
+          <Input
+            allowClear
+            prefix={<Search className="size-4 text-slate-400" />}
+            placeholder={t("agentSelector.searchPlaceholder")}
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            className="h-10 max-w-md"
+          />
+
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {isLoading ? (
+              <div className="flex h-full items-center justify-center">
+                <Spin size="large" />
+              </div>
+            ) : isError ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3">
+                <p className="text-sm text-slate-500">
+                  {t("agentRepository.mine.loadError")}
+                </p>
+                <Button onClick={() => refetch()}>
+                  {t("repository.common.retry")}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-0 flex-col">
+                <Row
+                  gutter={[20, 20]}
+                  className="min-h-0 flex-1 content-stretch overflow-hidden"
                 >
-                  <CreateResourceCard
-                    title={t("agentConfig.button.new")}
-                    onClick={() => setIsCreateOpen(true)}
-                    className="min-h-0"
-                  />
-                </Col>
-                {pageItems.map((agent) => {
-                  const date = formatAgentDate(agent);
-                  return (
-                    <Col
-                      key={agent.id}
-                      xs={24}
-                      sm={12}
-                      xl={8}
-                      xxl={6}
-                      className="flex"
-                      style={{ height: cardHeight }}
-                    >
-                      <ResourceCard
-                        className="h-full min-h-0"
-                        title={getAgentTitle(agent)}
-                        subtitle={
-                          agent.version_name ||
-                          (agent.current_version_no
-                            ? `V${agent.current_version_no}`
-                            : undefined)
-                        }
-                        icon={
-                          <span className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                            <Bot className="size-5" aria-hidden />
-                          </span>
-                        }
-                        description={
-                          agent.description ||
-                          t("agentRepository.card.noDescription")
-                        }
-                        descriptionLines={2}
-                        actions={
-                          <div className="flex flex-col items-end gap-1.5">
-                            <Dropdown
-                              menu={{
-                                items: [
-                                  {
-                                    key: "detail",
-                                    label: t("agentRepository.mine.view"),
-                                    onClick: () => void handleOpenDetail(agent),
-                                  },
-                                ],
-                              }}
-                              trigger={["click"]}
-                            >
-                              <Button
-                                type="text"
-                                size="small"
-                                className="size-8 text-slate-400 hover:text-slate-600"
-                                icon={
-                                  <MoreHorizontal
-                                    className="size-4"
-                                    aria-hidden
-                                  />
-                                }
-                                aria-label={t("agentRepository.mine.menu.more")}
+                  <Col
+                    xs={24}
+                    sm={12}
+                    xl={8}
+                    xxl={6}
+                    className="flex"
+                    style={{ height: cardHeight }}
+                  >
+                    <CreateResourceCard
+                      title={t("agentConfig.button.new")}
+                      onClick={() => setIsCreateOpen(true)}
+                      className="min-h-0"
+                    />
+                  </Col>
+                  {pageItems.map((agent) => {
+                    const date = formatAgentDate(agent);
+                    return (
+                      <Col
+                        key={agent.id}
+                        xs={24}
+                        sm={12}
+                        xl={8}
+                        xxl={6}
+                        className="flex"
+                        style={{ height: cardHeight }}
+                      >
+                        <ResourceCard
+                          className="h-full min-h-0"
+                          title={getAgentTitle(agent)}
+                          subtitle={t("agentRepository.mine.currentVersion", {
+                            version:
+                              agent.version_name ||
+                              (agent.current_version_no
+                                ? `V${agent.current_version_no}`
+                                : "-"),
+                          })}
+                          icon={
+                            <span className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                              <Bot className="size-5" aria-hidden />
+                            </span>
+                          }
+                          description={
+                            agent.description ||
+                            t("agentRepository.card.noDescription")
+                          }
+                          descriptionLines={2}
+                          actions={
+                            <div className="flex flex-col items-end gap-1.5">
+                              <AgentConfigActions
+                                agentId={Number(agent.id)}
+                                variant="menu"
                               />
-                            </Dropdown>
-                            <Tag
-                              color={
-                                agent.current_version_no ? "green" : "orange"
-                              }
+                              <Tag
+                                color={
+                                  agent.current_version_no ? "green" : "orange"
+                                }
+                              >
+                                {agent.current_version_no
+                                  ? t(
+                                      "agentRepository.mine.lifecycle.published"
+                                    )
+                                  : t("agentRepository.mine.lifecycle.draft")}
+                              </Tag>
+                            </div>
+                          }
+                          meta={
+                            <span className="inline-flex items-center gap-1">
+                              <Clock className="size-3.5" aria-hidden />
+                              {date || "-"}
+                            </span>
+                          }
+                          footerLayout="inline"
+                          footer={
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<Pencil className="size-3.5" aria-hidden />}
+                              onClick={() => updateUrl(Number(agent.id))}
                             >
-                              {agent.current_version_no
-                                ? t("agentRepository.mine.lifecycle.published")
-                                : t("agentRepository.mine.lifecycle.draft")}
-                            </Tag>
-                          </div>
-                        }
-                        meta={
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="size-3.5" aria-hidden />
-                            {date || "-"}
-                          </span>
-                        }
-                        footerLayout="inline"
-                        footer={
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<Pencil className="size-3.5" aria-hidden />}
-                            onClick={() => updateUrl(Number(agent.id))}
-                          >
-                            {t("agentRepository.mine.edit")}
-                          </Button>
-                        }
-                        onClick={() => void handleOpenDetail(agent)}
-                      />
-                    </Col>
-                  );
-                })}
-              </Row>
-              {visibleAgents.length > itemsPerPage ? (
-                <div className="flex shrink-0 justify-end pt-5">
-                  <Pagination
-                    current={currentPage}
-                    pageSize={itemsPerPage}
-                    total={visibleAgents.length}
-                    showSizeChanger={false}
-                    onChange={setPage}
-                  />
-                </div>
-              ) : null}
-            </div>
-          )}
+                              {t("agentRepository.mine.edit")}
+                            </Button>
+                          }
+                          onClick={() => void handleOpenDetail(agent)}
+                        />
+                      </Col>
+                    );
+                  })}
+                </Row>
+                {visibleAgents.length > itemsPerPage ? (
+                  <div className="flex shrink-0 justify-end pt-5">
+                    <Pagination
+                      current={currentPage}
+                      pageSize={itemsPerPage}
+                      total={visibleAgents.length}
+                      showSizeChanger={false}
+                      onChange={setPage}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </Card>
 
       <AgentDetail
         agent={selectedAgent}

@@ -10,9 +10,15 @@ const agentsPagePath = new URL(
 test("renders the Agents picker with responsive rows and a create card", async () => {
   const page = await readFile(agentsPagePath, "utf8");
 
-  assert.match(page, /import \{[^}]*Col[^}]*Grid[^}]*Row[^}]*\} from "antd"/s);
+  assert.match(
+    page,
+    /import \{[\s\S]*Col[\s\S]*Grid[\s\S]*Row[\s\S]*\} from "antd"/
+  );
   assert.match(page, /CreateResourceCard/);
-  assert.match(page, /xs=\{24\}\s+sm=\{12\}\s+xl=\{8\}\s+xxl=\{6\}/s);
+  assert.match(
+    page,
+    /xs=\{24\}[\s\S]*sm=\{12\}[\s\S]*xl=\{8\}[\s\S]*xxl=\{6\}/
+  );
   assert.match(page, /agentRepository\.page\.tab\.mine/);
   assert.match(
     page,

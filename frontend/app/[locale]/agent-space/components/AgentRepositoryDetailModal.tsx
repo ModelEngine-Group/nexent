@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Modal, Spin, Tag } from "antd";
+import { Button, Spin, Tag } from "antd";
 import {
   Bot,
   Calendar,
@@ -16,6 +16,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type { AgentDetailModalData } from "@/lib/agentRepositoryDetail";
 import type { AgentRepositoryListingStatus } from "@/types/agentRepository";
+import ResourceDetail from "@/components/resource/ResourceDetail";
 
 interface AgentRepositoryDetailModalProps {
   open: boolean;
@@ -174,7 +175,11 @@ function AgentRepositoryDetailMeta({
   );
 }
 
-function AgentRepositoryDetailHeader({ detail }: { detail: AgentDetailModalData }) {
+function AgentRepositoryDetailHeader({
+  detail,
+}: {
+  detail: AgentDetailModalData;
+}) {
   const { t } = useTranslation("common");
   const title = resolveDetailTitle(detail, t("agentRepository.card.untitled"));
   const downloads = detail.downloads ?? 0;
@@ -252,7 +257,11 @@ function AgentRepositoryDetailDutyPrompt({
   );
 }
 
-function AgentRepositoryDetailContent({ detail }: { detail: AgentDetailModalData }) {
+function AgentRepositoryDetailContent({
+  detail,
+}: {
+  detail: AgentDetailModalData;
+}) {
   const { t } = useTranslation("common");
   const tools = detail.tools?.filter((tool) => tool.trim()) ?? [];
 
@@ -310,16 +319,12 @@ export function AgentRepositoryDetailModal({
   onRetry,
 }: AgentRepositoryDetailModalProps) {
   return (
-    <Modal
+    <ResourceDetail
       open={open}
-      onCancel={onClose}
-      footer={null}
+      onClose={onClose}
       width={720}
-      centered
-      destroyOnHidden
-      title={null}
       className="agent-repository-detail-modal"
-      styles={{ body: { padding: 0 } }}
+      bodyStyle={{ padding: 0 }}
     >
       {resolveDetailModalBody({
         isLoading,
@@ -328,6 +333,6 @@ export function AgentRepositoryDetailModal({
         detail,
         onRetry,
       })}
-    </Modal>
+    </ResourceDetail>
   );
 }
