@@ -699,8 +699,7 @@ function RequirementTypeGroup({
           ) : (
             <span className="flex items-center gap-1 text-xs text-amber-600">
               <AlertCircle className="size-3.5" />
-              {getRepositoryRequirementReasonLabel(items[0]?.reason_code, t) ||
-                t("agentRepository.copy.unavailable")}
+              {reasonLabel || t("agentRepository.copy.unavailable")}
             </span>
           )
         ) : (
