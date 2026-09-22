@@ -41,7 +41,7 @@ from services.audit_service import (
     AUDIT_RESULT_FAILURE,
     AUDIT_RESULT_SUCCESS,
     reason_from_exception,
-    record_auth_event,
+    record_security_event,
 )
 
 from fastapi import APIRouter, Header, Query, HTTPException, Request
@@ -244,7 +244,7 @@ async def create_model(request: ModelRequest, http_request: Request, authorizati
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
-        record_auth_event("model_create", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("model_create", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           details=_audit_safe_model_fields(model_data))
         return JSONResponse(status_code=HTTPStatus.OK, content={
@@ -253,7 +253,7 @@ async def create_model(request: ModelRequest, http_request: Request, authorizati
         })
     except ValueError as e:
         logging.error(f"Failed to create model: {str(e)}")
-        record_auth_event("model_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e),
                           details=_audit_safe_model_fields(model_data))
@@ -261,13 +261,13 @@ async def create_model(request: ModelRequest, http_request: Request, authorizati
                             detail=str(e))
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("model_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id, reason="unauthorized",
                           details=_audit_safe_model_fields(model_data))
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
-        record_auth_event("model_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e),
                           details=_audit_safe_model_fields(model_data))
@@ -394,7 +394,7 @@ async def batch_create_models(request: BatchCreateModelsRequest, http_request: R
         audit_models = [
             _audit_safe_model_fields(model) for model in batch_model_config.get("models", [])
         ]
-        record_auth_event("model_batch_import", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("model_batch_import", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           details={"provider": provider,
                                    "model_type": batch_model_config.get("type"),
@@ -406,7 +406,7 @@ async def batch_create_models(request: BatchCreateModelsRequest, http_request: R
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("model_batch_import", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_batch_import", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id, reason="unauthorized",
                           details={"provider": getattr(request, "provider", None),
                                    "model_type": getattr(request, "type", None),
@@ -414,7 +414,7 @@ async def batch_create_models(request: BatchCreateModelsRequest, http_request: R
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
-        record_auth_event("model_batch_import", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_batch_import", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e),
                           details={"provider": getattr(request, "provider", None),
@@ -484,34 +484,34 @@ async def update_single_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.get("model_factory")
             )
-        record_auth_event("model_update", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("model_update", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id, tenant_id=tenant_id, details=audit_details)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model updated successfully"
         })
     except LookupError as e:
         logging.error(f"Failed to update model: {str(e)}")
-        record_auth_event("model_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e), details=audit_details)
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                             detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to update model: {str(e)}")
-        record_auth_event("model_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e), details=audit_details)
         raise HTTPException(status_code=HTTPStatus.CONFLICT,
                             detail=str(e))
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("model_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id, reason="unauthorized",
                           details=audit_details)
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to update model: {str(e)}")
-        record_auth_event("model_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e), details=audit_details)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -531,7 +531,7 @@ async def batch_update_models(request: List[dict], http_request: Request, author
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         await batch_update_models_for_tenant(user_id, tenant_id, request)
-        record_auth_event("model_batch_update", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("model_batch_update", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           details={"models_count": len(request),
                                    "model_ids": [item.get("model_id") for item in request
@@ -541,13 +541,13 @@ async def batch_update_models(request: List[dict], http_request: Request, author
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("model_batch_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_batch_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id, reason="unauthorized",
                           details={"models_count": len(request) if request else 0})
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch update models: {str(e)}")
-        record_auth_event("model_batch_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_batch_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e),
                           details={"models_count": len(request) if request else 0})
@@ -574,7 +574,7 @@ async def delete_model(http_request: Request, display_name: str = Query(..., emb
         logger.info(
             f"Start to delete model, user_id: {user_id}, tenant_id: {tenant_id}")
         model_name = await delete_model_for_tenant(user_id, tenant_id, display_name)
-        record_auth_event("model_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("model_delete", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           details={"display_name": display_name})
         return JSONResponse(status_code=HTTPStatus.OK, content={
@@ -583,7 +583,7 @@ async def delete_model(http_request: Request, display_name: str = Query(..., emb
         })
     except LookupError as e:
         logging.error(f"Failed to delete model: {str(e)}")
-        record_auth_event("model_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e),
                           details={"display_name": display_name})
@@ -591,13 +591,13 @@ async def delete_model(http_request: Request, display_name: str = Query(..., emb
                             detail=str(e))
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("model_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id, reason="unauthorized",
                           details={"display_name": display_name})
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to delete model: {str(e)}")
-        record_auth_event("model_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("model_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, tenant_id=tenant_id,
                           reason=reason_from_exception(e),
                           details={"display_name": display_name})
@@ -818,7 +818,7 @@ async def manage_create_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
-        record_auth_event("tenant_model_create", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("tenant_model_create", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id,
                           details={"target_tenant_id": request.tenant_id,
                                    **_audit_safe_model_fields(model_data)})
@@ -829,19 +829,19 @@ async def manage_create_model(
         })
     except ValueError as e:
         logging.error(f"Failed to create model for tenant: {str(e)}")
-        record_auth_event("tenant_model_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(e),
                           details={"target_tenant_id": getattr(request, "tenant_id", None)})
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("tenant_model_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason="unauthorized",
                           details={"target_tenant_id": getattr(request, "tenant_id", None)})
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create model for tenant: {str(e)}")
-        record_auth_event("tenant_model_create", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_create", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(e),
                           details={"target_tenant_id": getattr(request, "tenant_id", None)})
         raise HTTPException(
@@ -884,7 +884,7 @@ async def manage_update_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
-        record_auth_event("tenant_model_update", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("tenant_model_update", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id,
                           details={"target_tenant_id": request.tenant_id,
                                    "current_display_name": request.current_display_name,
@@ -895,28 +895,28 @@ async def manage_update_model(
         })
     except LookupError as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
-        record_auth_event("tenant_model_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(e),
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "current_display_name": getattr(request, "current_display_name", None)})
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
-        record_auth_event("tenant_model_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(e),
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "current_display_name": getattr(request, "current_display_name", None)})
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("tenant_model_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason="unauthorized",
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "current_display_name": getattr(request, "current_display_name", None)})
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
-        record_auth_event("tenant_model_update", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_update", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(e),
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "current_display_name": getattr(request, "current_display_name", None)})
@@ -952,7 +952,7 @@ async def manage_delete_model(
         model_name = await delete_model_for_tenant(
             user_id, request.tenant_id, request.display_name
         )
-        record_auth_event("tenant_model_delete", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("tenant_model_delete", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id,
                           details={"target_tenant_id": request.tenant_id,
                                    "display_name": request.display_name})
@@ -965,21 +965,21 @@ async def manage_delete_model(
         })
     except LookupError as e:
         logging.error(f"Failed to delete model for tenant: {str(e)}")
-        record_auth_event("tenant_model_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(e),
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "display_name": getattr(request, "display_name", None)})
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("tenant_model_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason="unauthorized",
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "display_name": getattr(request, "display_name", None)})
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to delete model for tenant: {str(e)}")
-        record_auth_event("tenant_model_delete", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_delete", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(e),
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "display_name": getattr(request, "display_name", None)})
@@ -1028,7 +1028,7 @@ async def manage_batch_create_models(
         audit_models = [
             _audit_safe_model_fields(model) for model in batch_model_config.get("models", [])
         ]
-        record_auth_event("tenant_model_batch_import", AUDIT_RESULT_SUCCESS, request=http_request,
+        record_security_event("tenant_model_batch_import", AUDIT_RESULT_SUCCESS, request=http_request,
                           user_id=user_id,
                           details={"target_tenant_id": request.tenant_id,
                                    "provider": request.provider,
@@ -1047,7 +1047,7 @@ async def manage_batch_create_models(
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
-        record_auth_event("tenant_model_batch_import", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_batch_import", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason="unauthorized",
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "provider": getattr(request, "provider", None),
@@ -1055,7 +1055,7 @@ async def manage_batch_create_models(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models for tenant: {str(e)}")
-        record_auth_event("tenant_model_batch_import", AUDIT_RESULT_FAILURE, request=http_request,
+        record_security_event("tenant_model_batch_import", AUDIT_RESULT_FAILURE, request=http_request,
                           user_id=user_id, reason=reason_from_exception(e),
                           details={"target_tenant_id": getattr(request, "tenant_id", None),
                                    "provider": getattr(request, "provider", None),

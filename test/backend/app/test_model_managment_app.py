@@ -1906,7 +1906,7 @@ class TestModelAuditEntries:
             mock_user.return_value = ("user-1", "tenant-1")
             mock_create.return_value = {"auto_configured_defaults": []}
 
-            with caplog.at_level(logging.INFO, logger="audit.auth"):
+            with caplog.at_level(logging.INFO, logger="audit.security"):
                 response = client.post(
                     "/model/create",
                     headers={"Authorization": "Bearer token"},
@@ -1933,7 +1933,7 @@ class TestModelAuditEntries:
             mock_user.return_value = ("admin-1", "admin-tenant")
             mock_batch.return_value = {"auto_configured_defaults": []}
 
-            with caplog.at_level(logging.INFO, logger="audit.auth"):
+            with caplog.at_level(logging.INFO, logger="audit.security"):
                 response = client.post(
                     "/model/manage/batch_create",
                     headers={"Authorization": "Bearer token"},
