@@ -51,10 +51,17 @@ export interface ConnectionGroup {
   models: ModelOption[];
 }
 
+/** Strip the /embeddings suffix that embedding models carry in their base
+ *  URL — it's a protocol detail, not a different endpoint, so models that
+ *  share provider + key + root URL belong to the same connection group. */
+function normalizeUrlForGrouping(url: string): string {
+  return url.replace(/\/embeddings\/?$/, "");
+}
+
 export function groupByConnection(models: ModelOption[]): ConnectionGroup[] {
   const map = new Map<string, ConnectionGroup>();
   for (const m of models) {
-    const key = `${m.source}|${m.apiKey}|${m.apiUrl}`;
+    const key = `${m.source}|${m.apiKey}|${normalizeUrlForGrouping(m.apiUrl ?? "")}`;
     let group = map.get(key);
     if (!group) {
       group = {
