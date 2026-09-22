@@ -4479,7 +4479,7 @@
   "errorCode.160205": "Query count must be between 1 and 50.",
   "errorCode.160206": "Agent not found.",
   "errorCode.160207": "Judge model ID is required.",
-  "errorCode.160208": "Only the creator can delete this evaluation run.",
+  "errorCode.160208": "Only the creator or a tenant administrator can delete this evaluation run.",
   "errorCode.160301": "Failed to generate test queries.",
   "errorCode.160302": "AI returned invalid format for test queries.",
   "errorCode.160303": "AI generated no valid test queries.",
