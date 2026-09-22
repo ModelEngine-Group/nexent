@@ -471,7 +471,7 @@ function DeleteGroupContent({
                 >
                   <Trash2 className="size-4" />
                   {t("modelConfig.batchDelete.selectGroup", {
-                    defaultValue: "选整条",
+                    defaultValue: "全选",
                   })}
                 </Button>
               </div>
