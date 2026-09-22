@@ -268,7 +268,7 @@ function AgentSetupContent() {
   }, [currentAgentId, queryClient, refetchAgentInfo]);
 
   return (
-    <div className="flex h-full w-full min-h-0 flex-col bg-gray-50">
+    <div className="flex h-full w-full min-h-0 flex-col bg-white">
       <main className="relative flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
         <div
           className="flex min-w-0 min-h-0 flex-1 flex-row gap-4"

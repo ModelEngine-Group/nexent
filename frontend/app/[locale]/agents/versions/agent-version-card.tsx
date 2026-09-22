@@ -129,7 +129,10 @@ export function VersionCardItem({
   onRefreshAgentInfo?: () => Promise<Agent | null>;
 }) {
   // Calculate isCurrentVersion based on version.version_no and currentVersionNo
-  const isCurrentVersion = currentVersionNo === version.version_no;
+  const isCurrentVersion =
+    typeof currentVersionNo === "number" &&
+    currentVersionNo > 0 &&
+    currentVersionNo === version.version_no;
   const statusConfig = getStatusConfig(isCurrentVersion);
   const { t } = useTranslation("common");
 
