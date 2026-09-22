@@ -370,3 +370,25 @@ def test_accessible_row_missing_kb_id_is_skipped():
 
     assert snapshot.accessible_ids == []
     assert snapshot.name_to_id == {}
+
+
+def test_channels_cache_is_keyed_per_knowledge_base():
+    """Channels are KB-scoped, so another KB must not reuse the cached answer."""
+    loader = MagicMock(return_value={"value": [{"fs_id": "fs-1", "src_dir": "/dir/1"}]})
+
+    first = service.get_cached_aidp_channels(
+        "https://channels.example", "key", "kb-1", loader=loader
+    )
+    second = service.get_cached_aidp_channels(
+        "https://channels.example", "key", "kb-1", loader=loader
+    )
+    other = service.get_cached_aidp_channels(
+        "https://channels.example", "key", "kb-2", loader=loader
+    )
+
+    assert first == [{"fs_id": "fs-1", "src_dir": "/dir/1"}]
+    assert second == first
+    assert other == first
+    # One upstream load per KB: the repeat call is served from the cache, and the
+    # second KB gets its own entry instead of the first KB's channel.
+    assert loader.call_count == 2

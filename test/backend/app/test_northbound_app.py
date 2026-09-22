@@ -1774,18 +1774,14 @@ def test_get_agent_knowledge_bases_http_exception_passthrough():
         assert resp.json()["detail"] == "forbidden"
 
 
-@pytest.mark.parametrize("enable_hitl", [False, True])
-def test_run_chat_passes_hitl_flag(enable_hitl):
-    from fastapi.responses import StreamingResponse
-
-    async def chunks():
-        yield b'data: {"type":"human_run","content":{}}\n\n'
-
-    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock), \
-            patch("apps.northbound_app.start_streaming_chat", new_callable=AsyncMock) as start:
-        start.return_value = StreamingResponse(chunks())
-        response = client.post("/nb/v1/chat/run", json={
-            "agent_name": "assistant", "query": "help", "enable_hitl": enable_hitl,
+@pytest.mark.parametrize("field,value", [
+    ("enable_hitl", True), ("enable_hitl", False), ("hitl_run_id", None),
+    ("hitl_run_id", "old-run"), ("hitl_after_event", 0),
+])
+def test_retired_control_fields_rejected_before_northbound_execution(field, value):
+    with patch("apps.northbound_app.start_streaming_chat", new_callable=AsyncMock) as run:
+        response = client.post("/nb/v1/chat/run", headers=_build_headers(), json={
+            "query": "Continue", "agent_name": "Analyst", field: value,
         })
-    assert response.status_code == 200
-    assert start.call_args.kwargs["enable_hitl"] is enable_hitl
+        assert response.status_code == 400
+        run.assert_not_awaited()

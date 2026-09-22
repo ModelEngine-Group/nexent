@@ -71,6 +71,7 @@ def _agent_run_info(outcome: str = "completed"):
         cancellation_scope=None,
         stop_event=asyncio.Event(),
         human_interaction=None,
+
         attempt_outcome=outcome,
         thread_future=None,
     )
@@ -170,3 +171,4 @@ async def test_cmsr_004_terminal_error_is_persisted_once_with_failed_status(monk
     assert '"retryable": false' in error_chunks[0]
     assert persisted_batches[0]["terminal_status"] == "failed"
     assert [unit["type"] for unit in persisted_batches[0]["message_units"]] == ["error"]
+

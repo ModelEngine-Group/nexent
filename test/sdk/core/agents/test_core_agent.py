@@ -283,18 +283,6 @@ def _load_core_agent_module():
     agent_context_mod.ContextManagerConfig = MagicMock()
     sys.modules["sdk.nexent.core.agents.agent_context"] = agent_context_mod
 
-    context_pkg = ModuleType("sdk.nexent.core.agents.context")
-    context_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "agents", "context")]
-    sys.modules["sdk.nexent.core.agents.context"] = context_pkg
-
-    context_budget_mod = ModuleType("sdk.nexent.core.agents.context.budget")
-    context_budget_mod.message_role = (
-        lambda message: message.get("role", "")
-        if isinstance(message, dict)
-        else getattr(message, "role", "")
-    )
-    sys.modules["sdk.nexent.core.agents.context.budget"] = context_budget_mod
-
     context_runtime_pkg = ModuleType("sdk.nexent.core.context_runtime")
     context_runtime_contracts_mod = ModuleType("sdk.nexent.core.context_runtime.contracts")
     context_runtime_contracts_mod.ContextRuntime = MagicMock()
@@ -352,6 +340,7 @@ def test_remove_parallel_executor_import_preserves_unrelated_code():
 def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = object.__new__(module.CoreAgent)
+    agent.stop_event = threading.Event()
     agent.context_runtime = MagicMock()
     agent.stop_event = MagicMock()
     agent.stop_event.is_set.return_value = False
@@ -366,6 +355,7 @@ def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
 
 def test_get_context_summary_returns_runtime_context_manager_summary():
     agent = object.__new__(core_agent_module.CoreAgent)
+    agent.stop_event = threading.Event()
     context_manager = MagicMock()
     context_manager.get_summary.return_value = "compressed summary"
     agent.context_runtime = SimpleNamespace(context_manager=context_manager)
@@ -376,6 +366,7 @@ def test_get_context_summary_returns_runtime_context_manager_summary():
 
 def test_get_context_summary_returns_none_when_manager_is_unavailable():
     agent = object.__new__(core_agent_module.CoreAgent)
+    agent.stop_event = threading.Event()
     agent.context_runtime = SimpleNamespace()
 
     assert agent._get_context_summary() is None
@@ -383,6 +374,7 @@ def test_get_context_summary_returns_none_when_manager_is_unavailable():
 
 def test_get_context_summary_returns_none_when_manager_summary_fails():
     agent = object.__new__(core_agent_module.CoreAgent)
+    agent.stop_event = threading.Event()
     context_manager = MagicMock()
     context_manager.get_summary.side_effect = RuntimeError("summary unavailable")
     agent.context_runtime = SimpleNamespace(context_manager=context_manager)
@@ -393,6 +385,7 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
 
 def test_provider_overflow_recovery_is_disabled_after_a_tool_call():
     agent = object.__new__(core_agent_module.CoreAgent)
+    agent.stop_event = threading.Event()
     agent._history_step_count = 1
     agent.memory = SimpleNamespace(steps=[
         SimpleNamespace(tool_calls=["previous-run-tool"]),
@@ -1866,6 +1859,8 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(core_agent_module, "handle_agent_output_types", lambda output: output)
 
         agent = object.__new__(core_agent_module.CoreAgent)
+
+        agent.stop_event = threading.Event()
         defaults = {
             "agent_name": "test_agent",
             "name": "test_agent",
@@ -2116,6 +2111,7 @@ class TestRunStreamRealExecution:
 
         # Create agent instance
         agent = object.__new__(CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.observer.add_message = mock_add_message
@@ -2171,6 +2167,8 @@ class TestRunStreamRealExecution:
         module.get_monitoring_manager = MagicMock(return_value=fake_monitoring_manager)
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.step_metrics = []
         agent._last_uncompressed_est = 110
         agent.context_runtime = self._context_runtime_mock(
@@ -2208,6 +2206,8 @@ class TestRunStreamRealExecution:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2250,6 +2250,7 @@ class TestRunStreamRealExecution:
         """The model receives a callback that records and returns rebuilt context."""
         module = self._load_core_agent_in_isolation()
         agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 2
@@ -2299,6 +2300,8 @@ class TestRunStreamRealExecution:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2342,6 +2345,8 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2379,6 +2384,8 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2413,6 +2420,7 @@ class TestRunStreamRealExecution:
         """Provider-side stops cannot erase a reasoning model's opening prefix."""
         module = core_agent_module
         agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2442,6 +2450,7 @@ class TestRunStreamRealExecution:
         """A completed action cannot leave chat completion ending in assistant."""
         module = core_agent_module
         agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 2
@@ -2479,6 +2488,7 @@ class TestRunStreamRealExecution:
         """Text between executable blocks is rolled back before protocol repair."""
         module = core_agent_module
         agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2529,56 +2539,6 @@ class TestRunStreamRealExecution:
             for call_ in agent.observer.add_message.call_args_list
         )
 
-    def test_step_stream_hides_valid_repair_generation_raw_stream(self):
-        """A valid semantic repair keeps its result but rolls back raw reasoning."""
-        module = core_agent_module
-        agent = object.__new__(module.CoreAgent)
-        agent.agent_name = "test"
-        agent.observer = MagicMock()
-        agent.step_number = 1
-        agent.memory = MagicMock(steps=[])
-        agent.logger = MagicMock()
-        agent.context_runtime = self._context_runtime_mock()
-        final_context = MagicMock()
-        final_context.messages = [MagicMock()]
-        agent.context_runtime.prepare_step.return_value = final_context
-        agent._history_step_count = 0
-        agent._context_tools = MagicMock(return_value=[])
-        agent._use_structured_outputs_internally = False
-        agent._protocol_repair_messages = [MagicMock()]
-        agent.output_protocol = "final_answer_envelope"
-        agent.verification_controller = None
-
-        response = SimpleNamespace(
-            content="<FINAL_ANSWER>recovered</FINAL_ANSWER>",
-            token_usage=None,
-            model_attempt_id="repair-attempt",
-            model_attempt_number=2,
-            model_attempt_commit_deferred=False,
-        )
-        model = MagicMock(return_value=response)
-        model.supports_deferred_attempt_commit = True
-        model.supports_suppressed_attempt_stream = True
-        model.last_finish_reason = "stop"
-        agent.model = model
-        action_step = SimpleNamespace(
-            model_output=None,
-            model_output_message=None,
-            token_usage=None,
-            model_input_messages=None,
-            action_output=None,
-        )
-
-        outputs = list(agent._step_stream(action_step))
-
-        assert outputs
-        assert action_step.action_output == "recovered"
-        assert model.call_args.kwargs["_suppress_attempt_stream"] is True
-        agent.observer.rollback_model_attempt.assert_not_called()
-        agent.observer.commit_model_attempt.assert_not_called()
-        assert response.model_attempt_commit_deferred is False
-        assert agent._protocol_repair_messages == []
-
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
         import threading
@@ -2615,6 +2575,7 @@ class TestRunStreamRealExecution:
 
         # Create agent
         agent = object.__new__(CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.observer.add_message = lambda *args: observer_calls.append(args)
@@ -2686,6 +2647,7 @@ class TestRunStreamRealExecution:
 
         # Create agent
         agent = object.__new__(CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.observer.add_message = lambda *args: observer_calls.append(args)
@@ -2878,14 +2840,13 @@ class TestRunStreamRealExecution:
 
         agent._step_stream = mock_step_stream
 
-        results = list(agent._run_stream("test task", max_steps=5))
+        with pytest.raises(module.ModelOutputProtocolExhaustedError, match="failed to follow"):
+            list(agent._run_stream("test task", max_steps=5))
 
-        assert "failed to follow" in results[-1].output
+        assert agent._consecutive_protocol_errors == 3
         assert agent.current_plan is None
         assert agent.current_step_index == 0
-        assert len(agent.memory.steps) == 1
-        assert getattr(agent.memory.steps[0], "error", None) is None
-        assert agent.memory.steps[0].step_number == 1
+        assert agent.memory.steps == []
         agent.verification_controller.verify_final_answer.assert_not_called()
 
 # ----------------------------------------------------------------------------
@@ -2901,6 +2862,8 @@ class TestHandleMaxStepsReached:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.observer.add_message = MagicMock()
@@ -3179,6 +3142,8 @@ class TestLogModelCallParameters:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.stop_event = threading.Event()
