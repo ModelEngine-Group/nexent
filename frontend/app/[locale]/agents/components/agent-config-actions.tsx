@@ -32,9 +32,11 @@ import { useAgentStore } from "@/stores/agentStore";
 
 export default function AgentConfigActions({
   agentId: agentIdProp,
+  readOnly,
   variant = "buttons",
 }: {
   agentId?: number | null;
+  readOnly?: boolean;
   variant?: "buttons" | "menu";
 }) {
   const { t } = useTranslation("common");
@@ -47,7 +49,8 @@ export default function AgentConfigActions({
   const storeAgentId = useAgentStore((state) => state.agentId);
   const agentId = agentIdProp ?? storeAgentId;
   const editedAgent = useAgentStore((state) => state.editedAgent);
-  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const storeIsReadOnly = useAgentStore((state) => state.isReadOnly);
+  const isReadOnly = readOnly ?? storeIsReadOnly;
   const reset = useAgentStore((state) => state.reset);
   const agentName = editedAgent?.display_name || editedAgent?.name || "agent";
   const { agentInfo } = useAgentInfo(agentId);

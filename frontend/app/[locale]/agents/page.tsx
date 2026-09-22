@@ -345,6 +345,7 @@ export default function AgentsPage() {
                             <div className="flex flex-col items-end gap-1.5">
                               <AgentConfigActions
                                 agentId={Number(agent.id)}
+                                readOnly={agent.permission === "READ_ONLY"}
                                 variant="menu"
                               />
                               <Tag
