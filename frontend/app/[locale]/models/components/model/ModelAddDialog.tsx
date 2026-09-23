@@ -565,6 +565,10 @@ function SingleAddForm({
               onChange={(e) => {
                 setName(e.target.value);
                 setProbe("idle");
+                // The name is the model identity: manual gear settings saved
+                // for a previous name must not silently apply to the new
+                // model. Catalog suggestions re-run automatically.
+                setOverride(undefined);
               }}
               placeholder="Qwen/Qwen3-8B"
               autoComplete="off"
