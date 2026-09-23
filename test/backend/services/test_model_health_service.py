@@ -344,6 +344,63 @@ async def test_perform_connectivity_check_dashscope_multimodal_uses_provider_cat
     mock_build.assert_not_called()
 
 
+def _mock_httpx_image_client(status_code: int):
+    """Build an httpx.AsyncClient double whose POST returns the given status."""
+    response = mock.MagicMock()
+    response.status_code = status_code
+
+    client_instance = mock.MagicMock()
+    client_instance.post = mock.AsyncMock(return_value=response)
+
+    client_cls = mock.MagicMock()
+    client_cls.return_value.__aenter__ = mock.AsyncMock(return_value=client_instance)
+    client_cls.return_value.__aexit__ = mock.AsyncMock(return_value=False)
+    return client_cls, client_instance
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_vlm2_probes_images_endpoint():
+    """vlm2 (image generation) must probe /images/generations, not the chat VLM adapter."""
+    client_cls, client_instance = _mock_httpx_image_client(200)
+
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build, \
+            mock.patch("backend.services.model_health_service.httpx.AsyncClient", client_cls):
+        result = await _perform_connectivity_check(
+            "baidu/ERNIE-Image-Turbo",
+            "vlm2",
+            "https://api.siliconflow.cn/v1/",
+            "test-key",
+        )
+
+    assert result is True
+    mock_build.assert_not_called()
+    client_instance.post.assert_awaited_once_with(
+        "https://api.siliconflow.cn/v1/images/generations",
+        json={"model": "baidu/ERNIE-Image-Turbo", "prompt": "connectivity check"},
+        headers={"Authorization": "Bearer test-key"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_vlm2_images_endpoint_error():
+    """A non-200 response from /images/generations means unavailable."""
+    client_cls, client_instance = _mock_httpx_image_client(400)
+
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build, \
+            mock.patch("backend.services.model_health_service.httpx.AsyncClient", client_cls):
+        result = await _perform_connectivity_check(
+            "baidu/ERNIE-Image-Turbo",
+            "vlm2",
+            "https://api.siliconflow.cn/v1/images/generations",
+            "test-key",
+        )
+
+    assert result is False
+    mock_build.assert_not_called()
+    # The URL is already normalized, no second /images/generations is appended.
+    client_instance.post.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_tokenpony_multimodal_catalog_error_falls_back_to_probe():
     model_provider_service = types.ModuleType("services.model_provider_service")
