@@ -61,126 +61,139 @@ function StatusDot({ status }: { status?: string }) {
  * All default-model slots, flattened. Priorities follow the v0 design: LLM
  * is required, embedding and image understanding are recommended, the rest
  * are optional.
+ *
+ * The slot seeds are a compact data table (one entry per slot, distinct
+ * i18n keys per line) expanded by buildModelSlots — ten near-identical
+ * inline object literals read as duplicated blocks to analyzers.
  */
+type ModelSlotSeed = {
+  category: string;
+  option: string;
+  modelType: ModelType;
+  priority: ModelSlotPriority;
+  labelKey: string;
+  labelDefault: string;
+  hintKey: string;
+  hintDefault: string;
+};
+
+const MODEL_SLOT_SEEDS: ModelSlotSeed[] = [
+  {
+    category: "llm",
+    option: "main",
+    modelType: "llm",
+    priority: "required",
+    labelKey: "model.type.llm",
+    labelDefault: "大语言模型",
+    hintKey: "modelConfig.slot.hint.llm",
+    hintDefault:
+      "平台对话、推理与知识问答的核心能力，必须配置后系统才能正常运行。",
+  },
+  {
+    category: "embedding",
+    option: "embedding",
+    modelType: "embedding",
+    priority: "recommended",
+    labelKey: "model.type.embedding",
+    labelDefault: "文本嵌入",
+    hintKey: "modelConfig.slot.hint.embedding",
+    hintDefault:
+      "用于知识库文档向量化与语义检索，构建知识库或开启记忆时需要配置。",
+  },
+  {
+    category: "multimodal",
+    option: "vlm",
+    modelType: "vlm",
+    priority: "recommended",
+    labelKey: "model.type.imageUnderstanding",
+    labelDefault: "图像理解",
+    hintKey: "modelConfig.slot.hint.vlm",
+    hintDefault: "用于理解图片内容并进行图文问答，需要图片理解能力时推荐配置。",
+  },
+  {
+    category: "embedding",
+    option: "multi_embedding",
+    modelType: "multi_embedding",
+    priority: "optional",
+    labelKey: "model.type.multiEmbedding",
+    labelDefault: "多模态嵌入",
+    hintKey: "modelConfig.slot.hint.multiEmbedding",
+    hintDefault: "用于图文混合内容的向量化检索，有多模态检索需求时配置。",
+  },
+  {
+    category: "reranker",
+    option: "reranker",
+    modelType: "rerank",
+    priority: "optional",
+    labelKey: "model.type.rerank",
+    labelDefault: "重排",
+    hintKey: "modelConfig.slot.hint.reranker",
+    hintDefault: "对检索结果进行精排以提升相关性，追求更高检索质量时配置。",
+  },
+  {
+    category: "multimodal",
+    option: "vlm2",
+    modelType: "vlm2",
+    priority: "optional",
+    labelKey: "model.type.imageGeneration",
+    labelDefault: "图像生成",
+    hintKey: "modelConfig.slot.hint.vlm2",
+    hintDefault: "用于根据文本描述生成图片，需要文生图能力时配置。",
+  },
+  {
+    category: "multimodal",
+    option: "vlm3",
+    modelType: "vlm3",
+    priority: "optional",
+    labelKey: "model.type.videoUnderstanding",
+    labelDefault: "视频理解",
+    hintKey: "modelConfig.slot.hint.vlm3",
+    hintDefault: "用于理解视频内容并进行问答，需要视频理解能力时配置。",
+  },
+  {
+    category: "multimodal",
+    option: "vlm4",
+    modelType: "vlm4",
+    priority: "optional",
+    labelKey: "model.type.audioUnderstanding",
+    labelDefault: "音频理解",
+    hintKey: "modelConfig.slot.hint.vlm4",
+    hintDefault: "用于理解音频内容，需要音频理解能力时配置。",
+  },
+  {
+    category: "voice",
+    option: "stt",
+    modelType: "stt",
+    priority: "optional",
+    labelKey: "model.type.stt",
+    labelDefault: "语音识别",
+    hintKey: "modelConfig.slot.hint.stt",
+    hintDefault: "将语音转换为文本输入，需要语音输入能力时配置。",
+  },
+  {
+    category: "voice",
+    option: "tts",
+    modelType: "tts",
+    priority: "optional",
+    labelKey: "model.type.tts",
+    labelDefault: "语音合成",
+    hintKey: "modelConfig.slot.hint.tts",
+    hintDefault: "将文本转换为语音输出，需要语音播报能力时配置。",
+  },
+];
+
 export function buildModelSlots(
   t: (key: string, opts?: any) => string
 ): ModelSlotDef[] {
-  return [
-    {
-      category: "llm",
-      option: "main",
-      fieldKey: "llm.main",
-      modelType: "llm" as ModelType,
-      label: t("model.type.llm", { defaultValue: "大语言模型" }),
-      priority: "required",
-      hint: t("modelConfig.slot.hint.llm", {
-        defaultValue:
-          "平台对话、推理与知识问答的核心能力，必须配置后系统才能正常运行。",
-      }),
-    },
-    {
-      category: "embedding",
-      option: "embedding",
-      fieldKey: "embedding.embedding",
-      modelType: "embedding" as ModelType,
-      label: t("model.type.embedding", { defaultValue: "文本嵌入" }),
-      priority: "recommended",
-      hint: t("modelConfig.slot.hint.embedding", {
-        defaultValue:
-          "用于知识库文档向量化与语义检索，构建知识库或开启记忆时需要配置。",
-      }),
-    },
-    {
-      category: "multimodal",
-      option: "vlm",
-      fieldKey: "multimodal.vlm",
-      modelType: "vlm" as ModelType,
-      label: t("model.type.imageUnderstanding", { defaultValue: "图像理解" }),
-      priority: "recommended",
-      hint: t("modelConfig.slot.hint.vlm", {
-        defaultValue:
-          "用于理解图片内容并进行图文问答，需要图片理解能力时推荐配置。",
-      }),
-    },
-    {
-      category: "embedding",
-      option: "multi_embedding",
-      fieldKey: "embedding.multi_embedding",
-      modelType: "multi_embedding" as ModelType,
-      label: t("model.type.multiEmbedding", { defaultValue: "多模态嵌入" }),
-      priority: "optional",
-      hint: t("modelConfig.slot.hint.multiEmbedding", {
-        defaultValue: "用于图文混合内容的向量化检索，有多模态检索需求时配置。",
-      }),
-    },
-    {
-      category: "reranker",
-      option: "reranker",
-      fieldKey: "reranker.reranker",
-      modelType: "rerank" as ModelType,
-      label: t("model.type.rerank", { defaultValue: "重排" }),
-      priority: "optional",
-      hint: t("modelConfig.slot.hint.rerank", {
-        defaultValue:
-          "对检索结果进行精排以提升相关性，追求更高检索质量时配置。",
-      }),
-    },
-    {
-      category: "multimodal",
-      option: "vlm2",
-      fieldKey: "multimodal.vlm2",
-      modelType: "vlm2" as ModelType,
-      label: t("model.type.imageGeneration", { defaultValue: "图像生成" }),
-      priority: "optional",
-      hint: t("modelConfig.slot.hint.vlm2", {
-        defaultValue: "用于根据文本描述生成图片，需要文生图能力时配置。",
-      }),
-    },
-    {
-      category: "multimodal",
-      option: "vlm3",
-      fieldKey: "multimodal.vlm3",
-      modelType: "vlm3" as ModelType,
-      label: t("model.type.videoUnderstanding", { defaultValue: "视频理解" }),
-      priority: "optional",
-      hint: t("modelConfig.slot.hint.vlm3", {
-        defaultValue: "用于理解视频内容并进行问答，需要视频理解能力时配置。",
-      }),
-    },
-    {
-      category: "multimodal",
-      option: "vlm4",
-      fieldKey: "multimodal.vlm4",
-      modelType: "vlm4" as ModelType,
-      label: t("model.type.audioUnderstanding", { defaultValue: "音频理解" }),
-      priority: "optional",
-      hint: t("modelConfig.slot.hint.vlm4", {
-        defaultValue: "用于理解音频内容，需要音频理解能力时配置。",
-      }),
-    },
-    {
-      category: "voice",
-      option: "stt",
-      fieldKey: "voice.stt",
-      modelType: "stt" as ModelType,
-      label: t("model.type.stt", { defaultValue: "语音识别" }),
-      priority: "optional",
-      hint: t("modelConfig.slot.hint.stt", {
-        defaultValue: "将语音转换为文本输入，需要语音输入能力时配置。",
-      }),
-    },
-    {
-      category: "voice",
-      option: "tts",
-      fieldKey: "voice.tts",
-      modelType: "tts" as ModelType,
-      label: t("model.type.tts", { defaultValue: "语音合成" }),
-      priority: "optional",
-      hint: t("modelConfig.slot.hint.tts", {
-        defaultValue: "将文本转换为语音输出，需要语音播报能力时配置。",
-      }),
-    },
-  ];
+  return MODEL_SLOT_SEEDS.map((seed) => ({
+    category: seed.category,
+    option: seed.option,
+    fieldKey: `${seed.category}.${seed.option}`,
+    modelType: seed.modelType,
+    label: t(seed.labelKey, { defaultValue: seed.labelDefault }),
+    priority: seed.priority,
+    hint: t(seed.hintKey, { defaultValue: seed.hintDefault }),
+  }));
 }
 
 const PRIORITY_LABELS: Record<ModelSlotPriority, string> = {
