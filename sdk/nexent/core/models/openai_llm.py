@@ -96,7 +96,10 @@ _REASONING_ERROR_MARKERS = (
 
 def _has_reasoning_parameters(completion_kwargs: Dict[str, Any]) -> bool:
     """Return whether the request contains a reasoning-related wire field."""
-    if "reasoning_effort" in completion_kwargs:
+    if any(
+        key in completion_kwargs
+        for key in ("reasoning_effort", "thinking_budget", "reasoning_budget_tokens")
+    ):
         return True
     extra_body = completion_kwargs.get("extra_body")
     return isinstance(extra_body, dict) and any(
@@ -242,6 +245,7 @@ class OpenAIModel(OpenAIServerModel):
         self.reasoning_effort = reasoning_effort
         self.reasoning_budget_tokens = reasoning_budget_tokens
         self.reasoning_capability = reasoning_capability or None
+        self.api_base_url = kwargs.get("api_base")
         self.stop_event = (
             cancellation_scope.stop_event if cancellation_scope else threading.Event()
         )
@@ -1083,24 +1087,105 @@ class OpenAIModel(OpenAIServerModel):
             )
             return self.client.chat.completions.create(**retry_kwargs)
 
+    def _reasoning_wire_profile(self) -> Optional[Dict[str, Optional[str]]]:
+        """Return only an explicitly known provider wire mapping.
+
+        models.dev declares that a model has reasoning controls, but it does
+        not define a universal request field for every OpenAI-compatible
+        provider. Confirmed providers use their own adapter. For an unknown
+        provider, an enum effort falls back to OpenAI's public
+        ``reasoning_effort`` field; numeric budgets and toggles still require
+        an explicit provider adapter and are not guessed.
+        """
+        capability = self.reasoning_capability or {}
+        provider_id = str(
+            capability.get("provider_id") or self.model_factory or ""
+        ).lower()
+        api_url = str(
+            capability.get("matched_api") or self.api_base_url or ""
+        ).lower()
+        if "aliyuncs.com" in api_url:
+            provider_id = "dashscope"
+        elif "api.deepseek.com" in api_url:
+            provider_id = "deepseek"
+
+        if capability.get("source") == "models_dev":
+            if provider_id in {"alibaba", "alibaba-cn", "dashscope"}:
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": "thinking_budget",
+                    "toggle": "enable_thinking",
+                }
+            if provider_id == "deepseek":
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": "thinking_object",
+                }
+            if provider_id in {"openai", "google"}:
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": None,
+                }
+            if capability.get("wire_format") == "reasoning_effort":
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": None,
+                }
+            return {
+                "effort": "reasoning_effort",
+                "budget": None,
+                "toggle": None,
+            }
+
+        effort = capability.get("wire_format") or "reasoning_effort"
+        if effort not in {"reasoning_effort", "thinking_toggle", "thinking_budget"}:
+            # OpenAI-compatible endpoints have one public effort field. Use
+            # it as the conservative fallback for an unconfirmed provider;
+            # provider-specific budget/toggle fields are never inferred.
+            effort = "reasoning_effort"
+        budget = capability.get("budget_wire_format")
+        if budget is None and effort == "thinking_budget":
+            # Existing operator/catalog profiles explicitly using the
+            # thinking-budget wire format use the nested thinking object.
+            budget = "thinking_object"
+        toggle = capability.get("toggle_wire_format")
+        if toggle is None and provider_id == "deepseek":
+            toggle = "thinking_object"
+        if toggle is None and provider_id in {"alibaba", "alibaba-cn", "dashscope"}:
+            toggle = "enable_thinking"
+        return {"effort": effort, "budget": budget, "toggle": toggle}
+
     def _translate_thinking_flag(
         self, extra_body: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Translate the enable_thinking flag to the provider's wire format.
 
-        Qwen-family models (vLLM/SGLang deployments and DashScope alike) only
-        read it from ``chat_template_kwargs.enable_thinking``; a top-level
-        flag is silently ignored there. Other providers (DashScope
-        non-Qwen, DeepSeek, SiliconFlow DeepSeek-V3.x) read the top-level
-        ``enable_thinking``. An explicit False must therefore be wrapped for
-        Qwen and kept top-level for everyone else; an absent flag is passed
-        through untouched (model default applies).
+        Qwen-family self-hosted deployments read the flag from
+        ``chat_template_kwargs.enable_thinking``. DashScope's OpenAI-compatible
+        endpoint accepts the top-level ``enable_thinking`` extra field, so the
+        translation is selected by provider/API rather than model name alone.
         """
         if "enable_thinking" not in extra_body:
             return extra_body
         translated = dict(extra_body)
         thinking = translated.pop("enable_thinking")
-        if "qwen" in (self.model_id or "").lower():
+        wire_profile = self._reasoning_wire_profile()
+        toggle_format = wire_profile.get("toggle") if wire_profile else None
+        if toggle_format == "thinking_object":
+            translated["thinking"] = {
+                "type": "enabled" if thinking else "disabled"
+            }
+        elif toggle_format == "enable_thinking":
+            translated["enable_thinking"] = thinking
+        elif toggle_format == "chat_template" or (
+            toggle_format is None
+            and wire_profile is not None
+            and (self.reasoning_capability or {}).get("source") != "models_dev"
+            and "qwen" in (self.model_id or "").lower()
+        ):
             chat_kwargs = translated.get("chat_template_kwargs")
             if isinstance(chat_kwargs, dict):
                 translated["chat_template_kwargs"] = {
@@ -1108,8 +1193,8 @@ class OpenAIModel(OpenAIServerModel):
                 }
             else:
                 translated["chat_template_kwargs"] = {"enable_thinking": thinking}
-        else:
-            translated["enable_thinking"] = thinking
+        # No confirmed adapter means the canonical toggle is deliberately
+        # omitted instead of being guessed as a top-level provider field.
         return translated
 
     def _apply_reasoning_control(self, completion_kwargs: Dict[str, Any]) -> None:
@@ -1127,25 +1212,62 @@ class OpenAIModel(OpenAIServerModel):
             return
 
         capability = self.reasoning_capability or {}
-        wire_format = capability.get("wire_format", "reasoning_effort")
-        if wire_format not in {"reasoning_effort", "thinking_toggle", "thinking_budget"}:
-            wire_format = "reasoning_effort"
+        if capability.get("status") == "unsupported":
+            return
+        wire_profile = self._reasoning_wire_profile()
+        if wire_profile is None:
+            logger.warning(
+                "event=reasoning_wire_adapter_missing model_id=%s provider=%s",
+                self.model_id,
+                capability.get("provider_id") or self.model_factory or "unknown",
+            )
+            return
+        wire_format = wire_profile.get("effort")
 
         controls = capability.get("controls")
         budget_control_declared = any(
             isinstance(control, dict) and control.get("type") == "budget_tokens"
             for control in controls or []
         )
+        budget_wire_format = wire_profile.get("budget")
 
-        if wire_format == "reasoning_effort":
-            if self.reasoning_budget_tokens is not None:
-                completion_kwargs["reasoning_budget_tokens"] = self.reasoning_budget_tokens
-            elif budget_control_declared:
-                # Budget and effort are alternative controls. A catalog entry
-                # with both uses the budget control; auto means no parameter.
+        # Numeric budget and enum effort are alternative controls. If both are
+        # present in a historical/configured value, numeric budget wins.
+        has_budget = (
+            budget_control_declared
+            and isinstance(self.reasoning_budget_tokens, int)
+            and not isinstance(self.reasoning_budget_tokens, bool)
+            and self.reasoning_budget_tokens > 0
+        )
+        if has_budget:
+            completion_kwargs.pop("reasoning_effort", None)
+            if budget_wire_format == "thinking_budget":
+                extra_body = dict(completion_kwargs.get("extra_body") or {})
+                extra_body["thinking_budget"] = self.reasoning_budget_tokens
+                completion_kwargs["extra_body"] = self._translate_thinking_flag(extra_body)
                 return
-            elif self.reasoning_effort is not None and self.reasoning_effort != "auto":
+            if budget_wire_format is None:
+                logger.warning(
+                    "event=reasoning_budget_adapter_missing model_id=%s provider=%s",
+                    self.model_id,
+                    capability.get("provider_id") or self.model_factory or "unknown",
+                )
+                return
+        elif budget_control_declared:
+            # Auto means no provider reasoning parameter.
+            return
+
+        if wire_format == "reasoning_effort" and not has_budget:
+            if self.reasoning_effort is not None and self.reasoning_effort != "auto":
                 completion_kwargs["reasoning_effort"] = self.reasoning_effort
+            return
+
+        if wire_format is None:
+            logger.warning(
+                "event=reasoning_effort_adapter_missing model_id=%s provider=%s",
+                self.model_id,
+                capability.get("provider_id") or self.model_factory or "unknown",
+            )
             return
 
         if budget_control_declared and self.reasoning_budget_tokens is None:

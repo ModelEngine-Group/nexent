@@ -703,6 +703,10 @@ def _resolve_models_dev_reasoning_capability(
     if not controls:
         return None
 
+    provider_key = provider_id.lower()
+    is_dashscope = provider_key in {"alibaba", "alibaba-cn", "dashscope"}
+    is_deepseek = provider_key == "deepseek"
+
     if effort_values:
         legacy_levels = [value for value in effort_values if value in {
             "none", "minimal", "low", "medium", "high", "xhigh", "max"
@@ -726,6 +730,14 @@ def _resolve_models_dev_reasoning_capability(
         "wire_format": wire_format,
         "effort_budgets": {},
         "controls": controls,
+        "provider_id": provider_id,
+        # DashScope's OpenAI-compatible endpoint accepts Qwen's numeric
+        # control as the top-level ``thinking_budget`` field. Other provider
+        # profiles keep the existing nested thinking-object translation.
+        "budget_wire_format": "thinking_budget" if is_dashscope else None,
+        "toggle_wire_format": (
+            "enable_thinking" if is_dashscope else "thinking_object" if is_deepseek else None
+        ),
         "matched_api": _canonical_api_url(
             next(
                 provider.get("api") or provider.get("base_url")
