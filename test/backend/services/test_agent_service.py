@@ -3079,6 +3079,7 @@ async def test_list_all_agent_info_impl_success(
             "created_by": "user1",
             "create_time": 1,
             "current_version_no": None,  # Not published
+            "icon_url": "/api/agent/1/icon",
         },
         {
             "agent_id": 2,
@@ -3118,6 +3119,7 @@ async def test_list_all_agent_info_impl_success(
     assert result[0]["group_ids"] == []
     assert result[0]["permission"] == "EDIT"  # Admin can edit all
     assert result[0]["is_published"] == False  # current_version_no is None
+    assert result[0]["icon_url"] == "/api/agent/1/icon"
     assert result[1]["agent_id"] == 2
     assert result[1]["name"] == "Agent 2"
     assert result[1]["display_name"] == "Display Agent 2"
@@ -3126,6 +3128,7 @@ async def test_list_all_agent_info_impl_success(
     assert result[1]["group_ids"] == [1, 2, 3]
     assert result[1]["permission"] == "EDIT"  # Admin can edit all
     assert result[1]["is_published"] == True  # current_version_no is not None
+    assert result[1]["icon_url"] is None
 
     # Verify mock calls
     mock_query_agents.assert_called_once_with(tenant_id="test_tenant")

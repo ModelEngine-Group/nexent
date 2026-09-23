@@ -877,6 +877,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "name": agent["name"] if agent["name"] else agent["display_name"],
                 "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
                 "description": agent["description"],
+                "icon_url": agent.get("icon_url"),
                 "author": agent.get("author"),
                 "created_by": agent.get("created_by"),
                 "create_time": agent.get("create_time"),
