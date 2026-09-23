@@ -54,6 +54,17 @@ Docker 卸载入口为 `bash uninstall.sh docker`，默认交互确认是否删�
 
 离线镜像包可通过 `bash build.sh --package --target docker --compress true` 或 `bash deploy/offline/build_offline_package.sh --target docker --compress true` 构建。包内包含镜像 tar、`load-images.sh`、`push-images.sh`、根目录部署/卸载入口、部署脚本、SQL 文件、`manifest.yaml` 和 `checksums.txt`。包内部署会复用已保存的 `deploy.options` 或内置默认值，默认不进入 TUI；添加 `--config` 可交互配置。在目标机器上使用 `bash deploy.sh --load-images docker ...` 加载镜像并部署，或使用 `bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker ...` 推送到内部仓库并使用该镜像前缀部署。启用 `--push-images` 且未传前缀时，`deploy.sh` 会先询问镜像仓库前缀，随后 `push-images.sh` 询问仓库账号和密码。
 
+需要单独交付可选的 full sandbox 时，添加 `--include-sandbox-full true`：
+
+```bash
+bash build.sh --package --version v2.6.0 --platform amd64 --target all \
+  --include-sandbox-full true --compress true --output-dir ./offline-output
+```
+
+主包保留 lightweight sandbox，并在输出目录旁额外生成 `nexent-sandbox-full-v2.6.0-amd64.zip`。附件只包含 full 镜像、镜像清单、校验文件、加载／推送脚本和使用说明，不再把 full 镜像打进主包。即使 `--compress false`，附件仍为 ZIP；`--package-name` 只影响主包名称。版本 tag 发布会分别上传 amd64、arm64 附件到 GitHub artifacts 和 OBS；手动构建需勾选 full 选项。
+
+将附件解压到独立目录，执行 `sha256sum -c checksums.txt`（macOS 使用 `shasum -a 256 -c checksums.txt`）后，运行 `bash load-images.sh docker`。Kubernetes 环境在每个相关节点执行 `bash load-images.sh k8s`，或在附件目录执行 `bash push-images.sh --load-images --image-registry-prefix registry.example.com/nexent` 推送到内网仓库。主包镜像仍需单独加载或推送，再从主包目录添加 `--sandbox-mode full` 部署，并保持版本、镜像源和仓库前缀一致。仅导入附件不会自动切换 sandbox 模式。
+
 详细部署指南请参考 [Docker 安装部署](https://modelengine-group.github.io/nexent/zh/quick-start/installation.html)。
 
 ### Kubernetes 部署（适合企业级生产环境）

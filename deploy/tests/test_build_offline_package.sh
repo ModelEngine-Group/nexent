@@ -30,6 +30,9 @@ case "$1" in
       for local_image in ${FAKE_DOCKER_LOCAL_IMAGES:-}; do
         if [ "$local_image" = "$3" ]; then
           IFS="$old_ifs"
+          if [ "${4:-}" = "--format" ]; then
+            printf '%s\n' "${FAKE_DOCKER_LOCAL_PLATFORM:-linux/amd64}"
+          fi
           exit 0
         fi
       done
@@ -53,6 +56,9 @@ case "$1" in
     ;;
   save)
     [ -n "${FAKE_DOCKER_LOG:-}" ] && printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+    case "$*" in
+      *nexent-sandbox-full*) [ "${FAKE_FULL_SAVE_FAIL:-false}" != "true" ] || exit 42 ;;
+    esac
     out=""
     while [ "$#" -gt 0 ]; do
       if [ "$1" = "-o" ]; then
@@ -76,6 +82,9 @@ SH
 create_fake_zip() {
   cat > "$BIN_DIR/zip" <<'SH'
 #!/bin/sh
+if [ "${FAKE_FULL_ZIP_FAIL:-false}" = "true" ] && grep -q '^includeFullSandbox: "true"$' manifest.yaml; then
+  exit 43
+fi
 if [ "${FAKE_ZIP_REAL:-false}" = "true" ]; then
   exec "$REAL_ZIP" "$@"
 fi
@@ -172,7 +181,12 @@ echo "$WORKFLOW_CONTENT" | grep -A2 -- '- name: Upload to Huawei Cloud OBS' | gr
 echo "$WORKFLOW_CONTENT" | grep -q "region: 'ap-southeast-1'" || fail "offline package workflow should use the Huawei Cloud Hong Kong region"
 echo "$WORKFLOW_CONTENT" | grep -q "bucket_name: 'modelengine-software'" || fail "offline package workflow should upload to the modelengine-software bucket"
 echo "$WORKFLOW_CONTENT" | grep -q 'SOURCE_SUFFIX="-with-source"' || fail "offline package workflow should append with-source when source is included"
-echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}${FULL_SANDBOX_SUFFIX}' || fail "offline package workflow package name should include selected feature suffixes"
+echo "$WORKFLOW_CONTENT" | grep -Fq 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}' || fail "main package name should not depend on the optional attachment"
+! echo "$WORKFLOW_CONTENT" | grep -q 'FULL_SANDBOX_SUFFIX' || fail "full sandbox must not rename the main package"
+echo "$WORKFLOW_CONTENT" | grep -A25 '^  workflow_call:$' | grep -q 'include_full_sandbox:' || fail "reusable workflow must expose the full attachment input"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -A12 '^  build-offline-package:$' | grep -q 'include_full_sandbox: true' || fail "release builds must publish the optional attachment"
+echo "$WORKFLOW_CONTENT" | grep -Fq "local_file_path: './\${{ steps.set-vars.outputs.full-sandbox-package-name }}.zip'" || fail "OBS must receive the independent attachment"
+echo "$WORKFLOW_CONTENT" | grep -Fq "path: './\${{ steps.set-vars.outputs.full-sandbox-package-name }}.zip'" || fail "GitHub must receive the independent attachment"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--package-name "${{ steps.set-vars.outputs.package-name }}"' || fail "offline package workflow should pass the final package name to the build script"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--compress true' || fail "offline package workflow should create the named final zip"
 echo "$WORKFLOW_CONTENT" | grep -q "local_file_path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip to OBS"
@@ -195,7 +209,7 @@ echo "$SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox:v2.2.0' || fail "offlin
 ! echo "$SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox-full:v2.2.0' || fail "offline packages should exclude the full Sandbox image by default"
 
 FULL_SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --include-sandbox-full true --dry-run)"
-echo "$FULL_SANDBOX_DRY_RUN" | grep -q 'Include full Sandbox image: true' || fail "offline dry-run should show the full Sandbox selection"
+echo "$FULL_SANDBOX_DRY_RUN" | grep -q 'Separate full Sandbox attachment: true' || fail "offline dry-run should show separate full delivery"
 echo "$FULL_SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox:v2.2.0' || fail "full Sandbox packages should retain the default lightweight image"
 echo "$FULL_SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox-full:v2.2.0' || fail "the full Sandbox switch should add the full image"
 
@@ -269,6 +283,8 @@ for target in docker k8s all; do
   fi
 done
 
+[ ! -f "$OUT_DIR/nexent-sandbox-full-v2.2.0-amd64.zip" ] || fail "disabled full option must not generate an attachment"
+
 sandbox_package_dir="$OUT_DIR/without-sandbox"
 PATH="$BIN_DIR:$PATH" \
   bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
@@ -286,7 +302,8 @@ grep -q 'includeSandbox: "false"' "$sandbox_package_dir/manifest.yaml" || fail "
 [ ! -f "$sandbox_package_dir/images/nexent-sandbox-v2-2-0.tar" ] || fail "--include-sandbox false should not save the Sandbox image tar"
 
 full_sandbox_package_dir="$OUT_DIR/with-full-sandbox"
-PATH="$BIN_DIR:$PATH" \
+PATH="$BIN_DIR:$PATH" FAKE_ZIP_REAL=true FAKE_DOCKER_LOG="$TMP_DIR/full-build.log" \
+  FAKE_DOCKER_LOCAL_IMAGES=nexent/nexent-sandbox-full:v2.2.0 \
   bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
     --version v2.2.0 \
     --platform amd64 \
@@ -297,10 +314,82 @@ PATH="$BIN_DIR:$PATH" \
     --output-dir "$full_sandbox_package_dir" >"$TMP_DIR/with-full-sandbox.log"
 
 assert_common_package_files "$full_sandbox_package_dir"
-grep -q 'includeFullSandbox: "true"' "$full_sandbox_package_dir/manifest.yaml" || fail "manifest should record the full Sandbox selection"
+grep -q 'includeFullSandbox: "false"' "$full_sandbox_package_dir/manifest.yaml" || fail "main manifest must describe only bundled images"
 grep -q 'nexent/nexent-sandbox:v2.2.0' "$full_sandbox_package_dir/manifest.yaml" || fail "full Sandbox packages should retain the lightweight image"
-grep -q 'nexent/nexent-sandbox-full:v2.2.0' "$full_sandbox_package_dir/manifest.yaml" || fail "manifest should include the full Sandbox image"
-[ -f "$full_sandbox_package_dir/images/nexent-sandbox-full-v2-2-0.tar" ] || fail "the full Sandbox image should be saved in the offline package"
+! grep -q 'nexent-sandbox-full' "$full_sandbox_package_dir/manifest.yaml" || fail "main manifest must exclude full Sandbox"
+[ ! -f "$full_sandbox_package_dir/images/nexent-sandbox-full-v2-2-0.tar" ] || fail "full Sandbox must not be saved in the main package"
+! grep -q '^pull .*nexent/nexent-sandbox-full:v2.2.0$' "$TMP_DIR/full-build.log" || fail "matching cached full image should not be pulled"
+
+# DEPLOY-FULL-001/004: real ZIP round trip, manifest and reused image helpers.
+attachment_dir="$TMP_DIR/full-attachment"
+mkdir -p "$attachment_dir"
+attachment_dir="$(cd "$attachment_dir" && pwd)"
+unzip -q "$OUT_DIR/nexent-sandbox-full-v2.2.0-amd64.zip" -d "$attachment_dir"
+[ "$(find "$attachment_dir/images" -type f | wc -l | tr -d ' ')" = 1 ] || fail "attachment must contain exactly one image"
+[ -f "$attachment_dir/images/nexent-sandbox-full-v2-2-0.tar" ] || fail "attachment must contain the full image"
+[ ! -e "$attachment_dir/deploy" ] || fail "attachment must not duplicate deployment assets"
+[ -f "$attachment_dir/README.md" ] || fail "attachment must include usage instructions"
+grep -q '^includeFullSandbox: "true"$' "$attachment_dir/manifest.yaml" || fail "attachment must identify full content"
+grep -q '^includeSandbox: "false"$' "$attachment_dir/manifest.yaml" || fail "attachment must exclude lightweight"
+[ "$(grep -c '^  - ' "$attachment_dir/manifest.yaml")" = 1 ] || fail "attachment manifest must list exactly one image"
+grep -Fq 'nexent/nexent-sandbox-full:v2.2.0' "$attachment_dir/manifest.yaml" || fail "attachment tag must match the package version"
+(cd "$attachment_dir" && shasum -a 256 -c checksums.txt >/dev/null) || fail "attachment checksums must pass"
+attachment_log="$TMP_DIR/attachment-docker.log"
+PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$attachment_log" bash "$attachment_dir/load-images.sh" docker >/dev/null
+grep -Fq "load -i $attachment_dir/images/nexent-sandbox-full-v2-2-0.tar" "$attachment_log" || fail "Docker must load the attachment"
+cat > "$BIN_DIR/ctr" <<'SH'
+#!/bin/sh
+printf 'ctr:%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+SH
+chmod +x "$BIN_DIR/ctr"
+PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$attachment_log" bash "$attachment_dir/load-images.sh" k8s >/dev/null
+grep -Fq "ctr:-n k8s.io images import $attachment_dir/images/nexent-sandbox-full-v2-2-0.tar" "$attachment_log" || fail "containerd must import the attachment"
+PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$attachment_log" REGISTRY_USERNAME=test REGISTRY_PASSWORD=test \
+  FAKE_DOCKER_LOCAL_IMAGES=nexent/nexent-sandbox-full:v2.2.0 \
+  bash "$attachment_dir/push-images.sh" --image-registry-prefix registry.test/nexent --no-prompt >/dev/null
+grep -Fqx 'push registry.test/nexent/nexent/nexent-sandbox-full:v2.2.0' "$attachment_log" || fail "registry push must use the attachment manifest"
+
+# DEPLOY-FULL-002: saved full mode cannot put full into the main package.
+printf 'sandboxMode: "full"\n' > "$TMP_DIR/full-config.yaml"
+prefixed_package_dir="$OUT_DIR/prefixed/package"
+prefixed_log="$TMP_DIR/prefixed.log"
+PATH="$BIN_DIR:$PATH" FAKE_ZIP_REAL=true FAKE_DOCKER_LOG="$prefixed_log" \
+  FAKE_DOCKER_LOCAL_IMAGES=registry.test/mirror/ccr.ccs.tencentyun.com/nexent-hub/nexent-sandbox-full:v2.2.0 \
+  FAKE_DOCKER_LOCAL_PLATFORM=linux/amd64 \
+  bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
+    --version v2.2.0 --platform arm64 --components infrastructure,application \
+    --image-source mainland --image-registry-prefix registry.test/mirror \
+    --local-config "$TMP_DIR/full-config.yaml" --defaults --target k8s \
+    --include-sandbox-full true --compress true --package-name custom-main \
+    --output-dir "$prefixed_package_dir" > "$TMP_DIR/prefixed-build.log"
+[ -f "$OUT_DIR/prefixed/custom-main.zip" ] || fail "main package must keep its custom name"
+prefixed_attachment="$TMP_DIR/prefixed-attachment"
+unzip -q "$OUT_DIR/prefixed/nexent-sandbox-full-v2.2.0-arm64.zip" -d "$prefixed_attachment"
+grep -q '^platform: "arm64"$' "$prefixed_attachment/manifest.yaml" || fail "attachment must record architecture"
+grep -Fq 'registry.test/mirror/ccr.ccs.tencentyun.com/nexent-hub/nexent-sandbox-full:v2.2.0' "$prefixed_attachment/manifest.yaml" || fail "attachment must preserve mainland source and prefix"
+grep -Fq 'pull --platform linux/arm64 registry.test/mirror/ccr.ccs.tencentyun.com/nexent-hub/nexent-sandbox-full:v2.2.0' "$prefixed_log" || fail "full pull must select the requested architecture"
+! grep -q 'nexent-sandbox-full' "$prefixed_package_dir/manifest.yaml" || fail "saved full mode must not leak into main"
+grep -q 'nexent-sandbox:v2.2.0' "$prefixed_package_dir/manifest.yaml" || fail "main must retain lightweight despite saved full mode"
+
+# DEPLOY-FULL-003: failed export/compression must fail the build without publishing a partial attachment.
+for failure in SAVE ZIP; do
+  failed_parent="$OUT_DIR/fail-$failure"
+  if env PATH="$BIN_DIR:$PATH" "FAKE_FULL_${failure}_FAIL=true" \
+    bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
+      --version v2.2.0 --platform amd64 --components infrastructure,application \
+      --image-source general --target docker --include-sandbox-full true \
+      --output-dir "$failed_parent/package" > "$TMP_DIR/fail-$failure.log" 2>&1; then
+    fail "full attachment $failure failure must fail the build"
+  fi
+  [ ! -f "$failed_parent/nexent-sandbox-full-v2.2.0-amd64.zip" ] || fail "failed attachment must not be published"
+done
+
+if PATH="$BIN_DIR:$PATH" bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
+  --version v2.2.0 --platform amd64 --include-sandbox-full true --compress true \
+  --package-name nexent-sandbox-full-v2.2.0-amd64 --dry-run > "$TMP_DIR/collision.log" 2>&1; then
+  fail "main package name must not overwrite the full attachment"
+fi
+grep -q 'must have different names' "$TMP_DIR/collision.log" || fail "name collision must explain how to fix it"
 
 deploy_wrapper_dir="$OUT_DIR/deploy-wrapper"
 mkdir -p "$deploy_wrapper_dir/deploy/common" "$deploy_wrapper_dir/deploy/env"

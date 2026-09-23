@@ -78,5 +78,6 @@ jobs:
       version: ${{ github.ref_name }}
       image_source: general
       include_source: false
+      include_full_sandbox: true
       upload_to_obs: true
     secrets: inherit

@@ -54,6 +54,17 @@ Docker uninstall is handled by `bash uninstall.sh docker`. It can preserve or de
 
 Offline image packages can be built with `bash build.sh --package --target docker --compress true` or `bash deploy/offline/build_offline_package.sh --target docker --compress true`. The package includes image tar files, `load-images.sh`, `push-images.sh`, root deploy/uninstall entrypoints, deployment scripts, SQL files, `manifest.yaml`, and `checksums.txt`. Package deploys use saved `deploy.options` or built-in defaults without opening the TUI; add `--config` to configure interactively. Deploy with `bash deploy.sh --load-images docker ...` on the target host, or use `bash deploy.sh --push-images --image-registry-prefix registry.example.com/nexent docker ...` to push loaded images to an internal registry and deploy with that image prefix. When `--push-images` is used without a prefix, `deploy.sh` asks for it before `push-images.sh` prompts for the registry username and password.
 
+To deliver the optional full sandbox separately, add `--include-sandbox-full true`:
+
+```bash
+bash build.sh --package --version v2.6.0 --platform amd64 --target all \
+  --include-sandbox-full true --compress true --output-dir ./offline-output
+```
+
+The main package keeps the lightweight sandbox. The additional `nexent-sandbox-full-v2.6.0-amd64.zip` is written beside the output directory and contains only the full image, its manifest/checksums, loading/pushing scripts and instructions. This replaces the previous behavior of bundling the full image into the main package. The attachment is always a ZIP, even with `--compress false`; `--package-name` changes only the main package name. Release-tag builds publish separate amd64 and arm64 attachments to GitHub artifacts and OBS. Manual builds publish an attachment only when selected.
+
+Extract the attachment into its own directory. Run `sha256sum -c checksums.txt` (macOS: `shasum -a 256 -c checksums.txt`), then `bash load-images.sh docker`. For Kubernetes, run `bash load-images.sh k8s` on every relevant node, or run `bash push-images.sh --load-images --image-registry-prefix registry.example.com/nexent` from the attachment to push to an internal registry. Load or push the main package images separately. Deploy from the main package with `--sandbox-mode full`, using the same version, image source and registry prefix. Importing the attachment alone does not change the selected sandbox mode.
+
 For detailed deployment instructions, see [Docker Installation](https://modelengine-group.github.io/nexent/en/quick-start/installation.html).
 
 ### Kubernetes Deployment (For Enterprise Production)

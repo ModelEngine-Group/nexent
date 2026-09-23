@@ -60,7 +60,8 @@ show_help() {
     echo "  --include-sandbox BOOL  是否包含 Sandbox 镜像（true 或 false）"
     echo "                           默认：$DEFAULT_INCLUDE_SANDBOX"
     echo "  --include-sandbox-full BOOL"
-    echo "                           是否包含可选的完整 Sandbox 镜像（true 或 false）"
+    echo "                           是否额外生成独立的完整 Sandbox ZIP 附件（true 或 false）"
+    echo "                           即使 --compress 为 false，附件仍生成 ZIP"
     echo "                           默认：$DEFAULT_INCLUDE_SANDBOX_FULL"
     echo "  --target TARGET         docker、k8s 或 all"
     echo "                           默认：$DEFAULT_TARGET"
@@ -101,7 +102,8 @@ show_help() {
   echo "  --include-sandbox BOOL  Include the Sandbox image (true or false)"
   echo "                           Default: $DEFAULT_INCLUDE_SANDBOX"
   echo "  --include-sandbox-full BOOL"
-  echo "                           Include the optional full Sandbox image (true or false)"
+  echo "                           Create a separate full Sandbox ZIP attachment (true or false)"
+  echo "                           The attachment is zipped even when --compress is false"
   echo "                           Default: $DEFAULT_INCLUDE_SANDBOX_FULL"
   echo "  --target TARGET         docker, k8s, or all"
   echo "                           Default: $DEFAULT_TARGET"
@@ -256,6 +258,11 @@ parse_args() {
     fi
     exit 1
   fi
+  if [ "$INCLUDE_SANDBOX_FULL" = "true" ] && [ "$COMPRESS" = "true" ] &&
+    [ "$(offline_package_name)" = "$(full_sandbox_package_name)" ]; then
+    echo "Error: main package and full Sandbox attachment must have different names"
+    exit 1
+  fi
 }
 
 prepare_deployment_image_config() {
@@ -271,6 +278,8 @@ prepare_deployment_image_config() {
       ;;
   esac
 
+  # Package selection is independent of a saved runtime Sandbox preference.
+  DEPLOYMENT_SANDBOX_MODE="lightweight"
   deployment_apply_image_source
 }
 
@@ -282,7 +291,7 @@ show_dry_run_plan() {
     echo "输出目录：$OUTPUT_DIR"
     echo "包含源码：$INCLUDE_SOURCE"
     echo "包含 Sandbox 镜像：$INCLUDE_SANDBOX"
-    echo "包含完整 Sandbox 镜像：$INCLUDE_SANDBOX_FULL"
+    echo "独立完整 Sandbox 附件：$INCLUDE_SANDBOX_FULL"
     echo "目标：$TARGET"
     echo "压缩：$COMPRESS"
     echo "最终包名称：$(offline_package_name).zip"
@@ -293,6 +302,7 @@ show_dry_run_plan() {
     echo "将拉取的镜像："
     get_nexent_images
     get_third_party_images
+    show_full_sandbox_attachment_plan
     echo ""
     echo "不会执行实际操作。"
     exit 0
@@ -304,7 +314,7 @@ show_dry_run_plan() {
     echo "Output directory: $OUTPUT_DIR"
     echo "Include source: $INCLUDE_SOURCE"
     echo "Include Sandbox image: $INCLUDE_SANDBOX"
-    echo "Include full Sandbox image: $INCLUDE_SANDBOX_FULL"
+    echo "Separate full Sandbox attachment: $INCLUDE_SANDBOX_FULL"
     echo "Target: $TARGET"
     echo "Compress: $COMPRESS"
     echo "Package name: $(offline_package_name).zip"
@@ -315,6 +325,7 @@ show_dry_run_plan() {
     echo "Images to pull:"
     get_nexent_images
     get_third_party_images
+    show_full_sandbox_attachment_plan
     echo ""
     echo "No actual operations will be performed."
     exit 0
@@ -327,8 +338,20 @@ get_nexent_images() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && echo "$NEXENT_DATA_PROCESS_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && echo "$OPENSSH_SERVER_IMAGE"
   [ "$INCLUDE_SANDBOX" = "true" ] && echo "$NEXENT_SANDBOX_IMAGE"
-  [ "$INCLUDE_SANDBOX_FULL" = "true" ] && full_sandbox_image
   true
+}
+
+full_sandbox_package_name() {
+  local safe_version="${VERSION//\//-}"
+  echo "nexent-sandbox-full-${safe_version}-${PLATFORM}"
+}
+
+show_full_sandbox_attachment_plan() {
+  if [ "$INCLUDE_SANDBOX_FULL" = "true" ]; then
+    echo ""
+    echo "Separate attachment: $(full_sandbox_package_name).zip"
+    full_sandbox_image
+  fi
 }
 
 full_sandbox_image() {
@@ -436,6 +459,7 @@ pull_all_images() {
   nexent_images_str=$(get_nexent_images)
 
   while IFS= read -r image; do
+    [ -n "$image" ] || continue
     if should_skip_pull "$image"; then
       continue
     fi
@@ -455,6 +479,7 @@ pull_all_images() {
   third_party_images_str=$(get_third_party_images)
 
   while IFS= read -r image; do
+    [ -n "$image" ] || continue
     if should_skip_pull "$image"; then
       continue
     fi
@@ -498,6 +523,7 @@ save_all_images() {
   nexent_images_str=$(get_nexent_images)
 
   while IFS= read -r image; do
+    [ -n "$image" ] || continue
     local image_name
     image_name=$(echo "$image" | sed 's/.*\///' | sed 's/:.*//')
     local image_tag
@@ -511,6 +537,7 @@ save_all_images() {
   third_party_images_str=$(get_third_party_images)
 
   while IFS= read -r image; do
+    [ -n "$image" ] || continue
     local image_name
     image_name=$(echo "$image" | sed 's/.*\///' | sed 's/:.*//')
     local image_tag
@@ -621,8 +648,8 @@ copy_load_script() {
     return 1
   fi
 
-  cp "$template_script" "$load_script"
-  chmod +x "$load_script"
+  cp "$template_script" "$load_script" || return 1
+  chmod +x "$load_script" || return 1
 
   echo "✅ Created: $load_script"
 }
@@ -641,8 +668,8 @@ copy_push_script() {
     return 1
   fi
 
-  cp "$template_script" "$push_script"
-  chmod +x "$push_script"
+  cp "$template_script" "$push_script" || return 1
+  chmod +x "$push_script" || return 1
 
   echo "✅ Created: $push_script"
 }
@@ -735,7 +762,7 @@ create_manifest() {
     echo "target: \"$TARGET\""
     echo "components: \"$DEPLOYMENT_COMPONENTS\""
     echo "includeSandbox: \"$INCLUDE_SANDBOX\""
-    echo "includeFullSandbox: \"$INCLUDE_SANDBOX_FULL\""
+    echo 'includeFullSandbox: "false"'
     echo "imageSource: \"$DEPLOYMENT_IMAGE_SOURCE\""
     echo "imageRegistryPrefix: \"$DEPLOYMENT_IMAGE_REGISTRY_PREFIX\""
     echo "images:"
@@ -756,18 +783,20 @@ create_checksums() {
 
   if command -v sha256sum >/dev/null 2>&1; then
     (
-      cd "$OUTPUT_DIR"
+      set -o pipefail
+      cd "$OUTPUT_DIR" || exit 1
       find . -type f ! -name checksums.txt -print | LC_ALL=C sort | while IFS= read -r file; do
-        sha256sum "$file"
+        sha256sum "$file" || exit 1
       done
-    ) > "$checksum_file"
+    ) > "$checksum_file" || return 1
   elif command -v shasum >/dev/null 2>&1; then
     (
-      cd "$OUTPUT_DIR"
+      set -o pipefail
+      cd "$OUTPUT_DIR" || exit 1
       find . -type f ! -name checksums.txt -print | LC_ALL=C sort | while IFS= read -r file; do
-        shasum -a 256 "$file"
+        shasum -a 256 "$file" || exit 1
       done
-    ) > "$checksum_file"
+    ) > "$checksum_file" || return 1
   else
     echo "❌ sha256sum or shasum is required to create checksums"
     return 1
@@ -809,11 +838,75 @@ create_zip_package() {
   echo "========================================"
 
   rm -f "$archive_file"
-  (cd "$OUTPUT_DIR" && zip -r "$archive_file" .)
+  (cd "$OUTPUT_DIR" && zip -r "$archive_file" .) || return 1
 
   echo "✅ Created: $archive_file"
   ls -lh "$archive_file"
 }
+
+create_full_sandbox_attachment() (
+  [ "$INCLUDE_SANDBOX_FULL" = "true" ] || return 0
+  if ! command -v zip >/dev/null 2>&1; then
+    echo "Error: zip is required for the full Sandbox attachment"
+    return 1
+  fi
+
+  # Isolate temporary output and publish the ZIP only after every step succeeds.
+  local output_parent staging_dir archive_file image image_tag local_platform
+  output_parent="$(cd "$(dirname "$OUTPUT_DIR")" && pwd)" || return 1
+  archive_file="$output_parent/$(full_sandbox_package_name).zip"
+  staging_dir="$(mktemp -d "$output_parent/.nexent-full-sandbox.XXXXXX")" || return 1
+  trap 'rm -rf "$staging_dir"' EXIT
+  image="$(full_sandbox_image)"
+  image_tag="${image##*:}"
+  local_platform="$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}' 2>/dev/null || true)"
+  if [ "$local_platform" != "linux/$PLATFORM" ]; then
+    pull_with_retry "$image" "$PLATFORM" || return 1
+  else
+    echo "Using existing local image for linux/$PLATFORM: $image"
+  fi
+
+  OUTPUT_DIR="$staging_dir/package"
+  mkdir -p "$OUTPUT_DIR/images" || return 1
+  save_image_to_tar "$image" "$OUTPUT_DIR/images/nexent-sandbox-full-${image_tag//./-}.tar" || return 1
+  copy_load_script || return 1
+  copy_push_script || return 1
+  {
+    echo "version: \"$VERSION\""
+    echo "platform: \"$PLATFORM\""
+    echo 'target: "all"'
+    echo 'components: "sandbox-full"'
+    echo 'includeSandbox: "false"'
+    echo 'includeFullSandbox: "true"'
+    echo "imageSource: \"$DEPLOYMENT_IMAGE_SOURCE\""
+    echo "imageRegistryPrefix: \"$DEPLOYMENT_IMAGE_REGISTRY_PREFIX\""
+    echo 'images:'
+    echo "  - \"$image\""
+  } > "$OUTPUT_DIR/manifest.yaml" || return 1
+  cat > "$OUTPUT_DIR/README.md" <<'README' || return 1
+# Full Sandbox offline attachment
+
+Extract this ZIP into its own directory, separately from the main offline package.
+Match its version, architecture and image source to the main package.
+
+1. Verify integrity: `sha256sum -c checksums.txt` (macOS: `shasum -a 256 -c checksums.txt`).
+2. Load with `bash load-images.sh docker`, or `bash load-images.sh k8s` on every
+   relevant Kubernetes node. The latter uses containerd's `k8s.io` namespace.
+3. Alternatively, push to an internal registry with
+   `bash push-images.sh --load-images --image-registry-prefix registry.example.com/nexent`.
+   Use the same prefix when deploying the main package.
+4. From the main package, deploy with `bash deploy.sh docker --sandbox-mode full`
+   or `bash deploy.sh k8s --sandbox-mode full`, using the matching application version
+   and image source. Load the main package images separately as usual.
+
+The main package keeps the lightweight sandbox. Loading this attachment does not
+switch the runtime sandbox mode. No deployment scripts or service data are included.
+README
+  create_checksums || return 1
+  (cd "$OUTPUT_DIR" && zip -r "$staging_dir/attachment.zip" .) || return 1
+  mv "$staging_dir/attachment.zip" "$archive_file" || return 1
+  echo "Full Sandbox attachment available at: $archive_file"
+)
 
 main() {
   parse_args "$@"
@@ -832,7 +925,7 @@ main() {
   echo "Output directory: $OUTPUT_DIR"
   echo "Include source: $INCLUDE_SOURCE"
   echo "Include Sandbox image: $INCLUDE_SANDBOX"
-  echo "Include full Sandbox image: $INCLUDE_SANDBOX_FULL"
+  echo "Separate full Sandbox attachment: $INCLUDE_SANDBOX_FULL"
   echo "Target: $TARGET"
   echo "Compress: $COMPRESS"
   echo "Package name: $(offline_package_name).zip"
@@ -886,6 +979,11 @@ main() {
 
   create_zip_package || {
     echo "❌ Zip package creation failed, aborting"
+    exit 1
+  }
+
+  create_full_sandbox_attachment || {
+    echo "❌ Full Sandbox attachment creation failed, aborting"
     exit 1
   }
 
