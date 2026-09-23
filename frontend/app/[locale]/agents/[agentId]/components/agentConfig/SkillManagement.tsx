@@ -14,8 +14,8 @@ import {
   fetchSkillInstances,
 } from "@/services/agentConfigService";
 import log from "@/lib/logger";
-import SkillDetailModal from "./SkillDetailModal";
-import SkillConfigModal from "./skill/SkillConfigModal";
+import SkillDetailModal from "../../../components/agentConfig/SkillDetailModal";
+import SkillConfigModal from "../../../components/agentConfig/skill/SkillConfigModal";
 import SkillRowContent from "./skill/SkillRowContent";
 import {
   hasMissingRequiredSkillConfig,

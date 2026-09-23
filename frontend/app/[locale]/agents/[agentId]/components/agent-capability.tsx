@@ -14,7 +14,7 @@ import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Skill } from "@/types/agentConfig";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
 import ToolManagement from "./agentConfig/ToolManagement";
-import SkillBuildModal from "./agentConfig/SkillBuildModal";
+import SkillBuildModal from "../../components/agentConfig/SkillBuildModal";
 import SelectedSkillManagement from "./agentConfig/SelectedSkillManagement";
 import McpConfigModal from "./agentConfig/McpConfigModal";
 import SelectToolsDialog from "./agentConfig/tool/SelectToolsDialog";

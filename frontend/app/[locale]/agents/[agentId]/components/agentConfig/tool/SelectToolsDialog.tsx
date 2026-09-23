@@ -24,7 +24,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import type { Tool, ToolParam } from "@/types/agentConfig";
-import ToolConfigModal from "./ToolConfigModal";
+import ToolConfigModal from "../../../../components/agentConfig/tool/ToolConfigModal";
 import { useMergedToolParams } from "./useMergedToolParams";
 import {
   TOOLS_REQUIRING_KB_SELECTION,
@@ -34,7 +34,7 @@ import {
   TOOLS_REQUIRING_VIDEO_UNDERSTANDING,
   getToolKbType,
   getToolLabels,
-} from "./utils";
+} from "../../../../components/agentConfig/tool/utils";
 
 function isToolDisabled(
   name: string,

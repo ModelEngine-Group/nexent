@@ -4,7 +4,8 @@ import { test } from "node:test";
 
 const agentsPagePath = "./app/[locale]/agents/page.tsx";
 const editorPagePath = "./app/[locale]/agents/[agentId]/page.tsx";
-const selectorPath = "./app/[locale]/agents/agent-selector-header.tsx";
+const editorPath = "./app/[locale]/agents/[agentId]/agent-editor.tsx";
+const selectorPath = "./app/[locale]/agents/[agentId]/agent-selector-header.tsx";
 
 test("keeps the agents index as a card list without an edit query branch", () => {
   const source = readFileSync(agentsPagePath, "utf8");
@@ -12,13 +13,21 @@ test("keeps the agents index as a card list without an edit query branch", () =>
   assert.doesNotMatch(source, /\bisEditing\b/);
   assert.doesNotMatch(source, /agent_id/);
   assert.match(source, /router\.push\(`\$\{pathname\}\/\$\{agentId\}`\)/);
+  assert.match(source, /onClick=\{\(\) => void handleOpenDetail\(agent\)\}/);
+  assert.match(source, /onClick=\{\(\) => updateUrl\(Number\(agent\.id\)\)\}/);
 });
 
 test("provides a dedicated dynamic route for agent configuration", () => {
   assert.equal(existsSync(editorPagePath), true);
+  assert.equal(existsSync(editorPath), true);
+  assert.equal(existsSync("./app/[locale]/agents/agent-editor-page.tsx"), false);
 
   const source = readFileSync(editorPagePath, "utf8");
-  assert.match(source, /AgentEditorPage/);
+  assert.match(source, /AgentEditor/);
+
+  const editor = readFileSync(editorPath, "utf8");
+  assert.match(editor, /searchAgentInfo\(requestedAgentId\)/);
+  assert.match(editor, /<Nl2AgentFlowProvider>\s*<AgentSetupContent \/>/);
 });
 
 test("navigates agent selection using the path parameter instead of agent_id", () => {

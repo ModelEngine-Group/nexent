@@ -10,8 +10,8 @@ import log from "@/lib/logger";
 import { fetchSkillInstances } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
-import SkillDetailModal from "../SkillDetailModal";
-import SkillConfigModal from "./SkillConfigModal";
+import SkillDetailModal from "../../../../components/agentConfig/SkillDetailModal";
+import SkillConfigModal from "../../../../components/agentConfig/skill/SkillConfigModal";
 import SkillRowContent from "./SkillRowContent";
 import {
   hasMissingRequiredSkillConfig,

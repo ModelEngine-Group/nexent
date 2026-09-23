@@ -31,9 +31,9 @@ import { safeUUID } from "@/lib/utils";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import DebugMessageList from "./DebugMessageList";
+import DebugMessageList from "../../../components/agentInfo/DebugMessageList";
 import DebugOptimizeModal from "./DebugOptimizeModal";
-import { useCompareStream } from "./useCompareStream";
+import { useCompareStream } from "../../../components/agentInfo/useCompareStream";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 
 // Check if a file type is supported

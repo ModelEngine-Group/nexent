@@ -6,7 +6,7 @@ import { searchToolConfig } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import log from "@/lib/logger";
-import { mergeToolParamValues } from "./utils";
+import { mergeToolParamValues } from "../../../../components/agentConfig/tool/utils";
 
 export function useMergedToolParams(currentAgentId?: number) {
   const { t } = useTranslation("common");

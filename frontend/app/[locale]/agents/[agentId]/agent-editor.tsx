@@ -10,8 +10,10 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Spin, Switch, Tag } from "antd";
+import { App, Button, Modal, Spin, Switch, Tag } from "antd";
 import {
+  ArrowLeft,
+  GitBranch,
   History,
   Maximize2,
   Minimize2,
@@ -20,15 +22,15 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import AgentConfig from "./agent-config";
-import AgentVersion from "./agent-version";
+import AgentVersion from "../agent-version";
 import AgentDebugPanel from "./agent-debug";
 import {
   Nl2AgentChatPanel,
   type Nl2AgentChatPanelHandle,
-} from "../newchat/assistant-ui/nl2agent-chat-panel";
+} from "../../newchat/assistant-ui/nl2agent-chat-panel";
 import {
   Nl2AgentFlowProvider,
   useNl2AgentFlow,
@@ -43,7 +45,7 @@ import log from "@/lib/logger";
 import type {
   Nl2AgentDraftField,
   Nl2AgentStateEvent,
-} from "../newchat/adapter/remote-chat-model-adapter";
+} from "../../newchat/adapter/remote-chat-model-adapter";
 
 function resolveDraftFocusTarget(
   updatedFields: readonly Nl2AgentDraftField[]
@@ -492,10 +494,92 @@ function AgentSetupContent() {
   );
 }
 
-export default function AgentSetupOrchestrator() {
+export default function AgentEditor() {
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
+  const router = useRouter();
+  const { agentId } = useParams<{ agentId: string }>();
+  const requestedAgentId = Number(agentId);
+  const isValidAgentId =
+    Number.isInteger(requestedAgentId) && requestedAgentId > 0;
+  const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const initialize = useAgentStore((state) => state.initialize);
+  const reset = useAgentStore((state) => state.reset);
+  const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
+  const isReturningRef = useRef(false);
+  const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(currentAgentId);
+
+  useEffect(() => {
+    if (isReturningRef.current) return;
+
+    if (!isValidAgentId) {
+      router.replace("/agents");
+      return;
+    }
+    if (currentAgentId === requestedAgentId) return;
+
+    void (async () => {
+      const result = await searchAgentInfo(requestedAgentId);
+      if (!result.success || !result.data) {
+        message.error(
+          result.message || t("agentConfig.agents.detailsLoadFailed")
+        );
+        router.replace("/agents");
+        return;
+      }
+      initialize(result.data);
+    })();
+  }, [
+    currentAgentId,
+    initialize,
+    isValidAgentId,
+    message,
+    requestedAgentId,
+    router,
+    t,
+  ]);
+
+  if (!isValidAgentId) return null;
+
   return (
-    <Nl2AgentFlowProvider>
-      <AgentSetupContent />
-    </Nl2AgentFlowProvider>
+    <div className="flex h-full min-h-0 flex-col bg-white">
+      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-2">
+        <Button
+          icon={<ArrowLeft className="size-4" />}
+          type="text"
+          onClick={() => {
+            isReturningRef.current = true;
+            reset();
+            router.push("/agents");
+          }}
+        >
+          {t("common.back")}
+        </Button>
+        <Button
+          icon={<GitBranch className="size-4" />}
+          onClick={() => setIsVersionManageOpen(true)}
+        >
+          {t("agent.version.manage")}
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1">
+        <Nl2AgentFlowProvider>
+          <AgentSetupContent />
+        </Nl2AgentFlowProvider>
+      </div>
+      <Modal
+        centered
+        width={900}
+        open={isVersionManageOpen}
+        title={t("agent.version.manage")}
+        onCancel={() => setIsVersionManageOpen(false)}
+        footer={null}
+      >
+        <AgentVersion
+          currentVersionNo={agentInfo?.current_version_no}
+          onRefreshAgentInfo={refetchAgentInfo}
+        />
+      </Modal>
+    </div>
   );
 }

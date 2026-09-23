@@ -1,5 +1,5 @@
-import AgentEditorPage from "../agent-editor-page";
+import AgentEditor from "./agent-editor";
 
 export default function AgentEditorRoute() {
-  return <AgentEditorPage />;
+  return <AgentEditor />;
 }
