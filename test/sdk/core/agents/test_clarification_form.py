@@ -2,11 +2,7 @@ import json
 from copy import deepcopy
 
 import pytest
-from nexent.core.human_interaction.clarification import (
-    ClarificationAnswer,
-    ClarificationForm,
-    format_clarification_answers,
-)
+from nexent.core.agents.clarification import ClarificationForm
 
 
 @pytest.fixture
@@ -38,74 +34,6 @@ def form():
     }
 
 
-@pytest.fixture
-def answers():
-    return [
-        {"question_id": "goal", "value": "Meeting notice"},
-        {"question_id": "audience", "value": "a", "other_text": "Partners"},
-        {
-            "question_id": "constraints",
-            "value": ["short", "formal"],
-            "other_text": "Due tomorrow",
-        },
-    ]
-
-
-def submit(form, answers):
-    return json.loads(
-        format_clarification_answers(
-            form, [ClarificationAnswer.model_validate(a) for a in answers]
-        )
-    )
-
-
-def test_all_answers_and_other_fields_are_preserved_with_labels(form, answers):
-    result = submit(form, list(reversed(answers)))["answers"]
-    assert [item["question_id"] for item in result] == [
-        "goal",
-        "audience",
-        "constraints",
-    ]
-    assert result[1]["answer"] == "Team"
-    assert result[1]["other_text"] == "Partners"
-    assert result[2]["answer"] == ["Brief", "Formal"]
-    assert result[2]["value"] == ["short", "formal"]
-    assert result[2]["other_text"] == "Due tomorrow"
-
-
-@pytest.mark.parametrize(
-    "change",
-    [
-        lambda a: a.pop(),
-        lambda a: a.append(deepcopy(a[0])),
-        lambda a: a[0].update(question_id="unknown"),
-        lambda a: a[0].update(value="  "),
-        lambda a: a[0].update(other_text="forged"),
-        lambda a: a[1].update(value="forged"),
-        lambda a: a[1].update(value=["a"]),
-        lambda a: a[2].update(value="short"),
-        lambda a: a[2].update(value=["short", "short"]),
-        lambda a: a[2].update(value=["forged"]),
-    ],
-)
-def test_answers_are_checked_against_the_frozen_form(form, answers, change):
-    change(answers)
-    with pytest.raises(ValueError):
-        submit(form, answers)
-
-
-def test_optional_question_can_be_omitted_and_other_can_be_the_only_choice(
-    form, answers
-):
-    form["questions"][0]["required"] = False
-    answers.pop(0)
-    answers[0]["value"] = ""
-    answers[1]["value"] = []
-    result = submit(form, answers)["answers"]
-    assert len(result) == 2
-    assert result[0]["other_text"] == "Partners"
-
-
 @pytest.mark.parametrize(
     "change",
     [
@@ -125,18 +53,18 @@ def test_invalid_or_executable_form_definitions_are_rejected(form, change):
         ClarificationForm.model_validate(form)
 
 
-def test_nested_declarative_choices_are_normalized(form, answers):
+def test_nested_declarative_choices_are_normalized(form):
     for item in form["questions"][1:]:
         item["choices"] = {"options": item.pop("options"), "allow_other": item.pop("allow_other")}
     normalized = ClarificationForm.model_validate(form).model_dump(mode="json")
     assert "choices" not in normalized["questions"][1]
     assert normalized["questions"][1]["allow_other"] is True
-    assert submit(form, answers)["answers"][1]["answer"] == "Team"
+    assert ClarificationForm.model_validate(form).questions[1].options[0].label == "Team"
 
 
-def test_choices_array_alias_preserves_option_labels(form, answers):
+def test_choices_array_alias_preserves_option_labels(form):
     form["questions"][1]["choices"] = form["questions"][1].pop("options")
-    assert submit(form, answers)["answers"][1]["answer"] == "Team"
+    assert ClarificationForm.model_validate(form).questions[1].options[0].label == "Team"
 
 
 @pytest.mark.parametrize("choices", [

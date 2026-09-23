@@ -81,7 +81,7 @@ def test_ut_sdk_trace_002_worker_span_includes_setup_and_cleanup(
         mcp_host=["http://mcp.invalid/mcp"] if with_mcp else [],
         stop_event=threading.Event(), cancellation_scope=RunCancellationScope(),
         redis_client=None, conversation_id=42, user_id="user", tenant_id="tenant",
-        workspace_path=None, workspace_run_id=None, human_interaction=None,
+        workspace_path=None, workspace_run_id=None,
         history=[], runtime_metadata={}, thread_manager=threads,
         mcp_tool_timeout_seconds=1, mcp_close_timeout_seconds=1,
     )

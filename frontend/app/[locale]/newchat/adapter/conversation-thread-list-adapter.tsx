@@ -25,9 +25,12 @@ import {
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
+import {
+  appendClarificationPart,
+  isClarificationFallback,
+} from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
-import { appendGuidanceMessage } from "@/features/humanInteraction/guidanceMessage";
 
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
@@ -440,7 +443,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                   (item.image_key as string | undefined) ||
                   (isImage ? derivedImageKey : undefined),
                 retrievalHighlightTerms: getRetrievalHighlightTerms(
-                  item.score_details,
+                  item.score_details
                 ),
               });
             }
@@ -585,10 +588,6 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
-          if (part.type === "user_steering") {
-            appendGuidanceMessage(content, part.content);
-            continue;
-          }
           // Note: do NOT early-return on `!part.content` at the top level —
           // `tool` items stored in the database have an empty `content` field
           // and only carry `tool_name` + `tool_arguments` (see the
@@ -920,6 +919,20 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
+          if (
+            part.type === "human_interaction" ||
+            part.type === "clarification"
+          ) {
+            flushReasoning();
+            appendClarificationPart(
+              content,
+              part.content,
+              part.unit_index,
+              msg.status === "completed"
+            );
+            continue;
+          }
+
           if (part.type === "automation_proposal") {
             flushReasoning();
             const proposal = parseAutomationProposal(part.content);
@@ -952,7 +965,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
-          if (part.type === "final_answer") {
+          if (
+            part.type === "final_answer" &&
+            !isClarificationFallback(content, part.content)
+          ) {
             flushReasoning(part.invocation_id);
             if (part.content) {
               const textPart: any = { type: "text", text: part.content };
@@ -1039,7 +1055,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 citeIndex,
                 toolSign: item.tool_sign as string | undefined,
                 retrievalHighlightTerms: getRetrievalHighlightTerms(
-                  item.score_details,
+                  item.score_details
                 ),
                 messageId,
               });
