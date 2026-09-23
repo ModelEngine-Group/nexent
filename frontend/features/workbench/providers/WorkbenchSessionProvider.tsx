@@ -7,7 +7,6 @@ import {
   useEffect,
   useMemo,
   useReducer,
-  useRef,
   useState,
   type Dispatch,
   type ReactNode,
@@ -19,7 +18,7 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
-import { conversationThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
+import { workbenchConversationThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import { createNewChatAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
 import { ServerDictationAdapter } from "@/app/newchat/adapter/server-dictation-adapter";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -33,15 +32,15 @@ import {
   workbenchReducer,
   type WorkbenchState,
 } from "../state";
-import { fetchWorkbenchBootstrap, previewWorkbenchAgent } from "../api";
+import { fetchWorkbenchBootstrap } from "../api";
 import type { WorkbenchBootstrap } from "../types";
+import { useConversationRouteGuard } from "../hooks/useConversationRouteGuard";
 
 export type WorkbenchSession = {
   runtime: AssistantRuntime;
   selectedAgent: Agent | null;
   isLoadingAgents: boolean;
   agents: Agent[];
-  onAgentSelected: (agent: Agent) => Promise<void>;
   onRestoreAgent: (agent: Agent | null) => void;
   onBack: () => void;
   isDictationConfigured: boolean;
@@ -87,8 +86,8 @@ export function WorkbenchSessionProvider({
 }: {
   children: ReactNode;
 }) {
+  useConversationRouteGuard("workbench");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const selectionRequest = useRef(0);
   const [workbenchState, dispatchWorkbench] = useReducer(
     workbenchReducer,
     initialWorkbenchState
@@ -129,55 +128,14 @@ export function WorkbenchSessionProvider({
     runtimeHook: function useWorkbenchRuntime() {
       return useLocalChatRuntime(dictationAdapter);
     },
-    adapter: conversationThreadListAdapter,
+    adapter: workbenchConversationThreadListAdapter,
     threadId: requestedThreadId,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
 
-  const handleAgentSelected = useCallback(
-    async (agent: Agent) => {
-      const requestId = ++selectionRequest.current;
-      const threadId = runtime.threads.getState().mainThreadId;
-      const agentId = Number(
-        (agent as Agent & { agent_id?: number }).agent_id ?? agent.id
-      );
-      dispatchWorkbench({ type: "resolve-agent-start", agentId });
-      try {
-        const preview = await previewWorkbenchAgent(
-          agentId,
-          agent.current_version_no
-        );
-        if (
-          requestId !== selectionRequest.current ||
-          runtime.threads.getState().mainThreadId !== threadId
-        )
-          return;
-        dispatchWorkbench({
-          type: "resolve-agent-success",
-          preview,
-          modelIds: agent.model_ids ?? [],
-          append: workbenchBootstrap?.modes.multi_agent_chat.enabled === true,
-        });
-        setSelectedAgent(agent);
-        log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
-      } catch (error) {
-        if (
-          requestId !== selectionRequest.current ||
-          runtime.threads.getState().mainThreadId !== threadId
-        )
-          return;
-        const text = error instanceof Error ? error.message : "智能体不可用";
-        dispatchWorkbench({ type: "resolve-agent-error", message: text });
-        throw error;
-      }
-    },
-    [workbenchBootstrap, runtime]
-  );
-
   const handleWorkbenchModeChange = useCallback(
     (mode: "agent_create" | "skill_create" | "generic_chat") => {
-      selectionRequest.current += 1;
       setSelectedAgent(null);
       dispatchWorkbench({ type: "select-mode", mode });
     },
@@ -185,14 +143,12 @@ export function WorkbenchSessionProvider({
   );
 
   const handleBack = useCallback(() => {
-    selectionRequest.current += 1;
     setSelectedAgent(null);
     dispatchWorkbench({ type: "select-mode", mode: "generic_chat" });
     log.log(`[Home] Back to agent list`);
   }, []);
 
   const handleRestoreAgent = useCallback((agent: Agent | null) => {
-    selectionRequest.current += 1;
     setSelectedAgent(agent);
   }, []);
 
@@ -201,7 +157,6 @@ export function WorkbenchSessionProvider({
     selectedAgent,
     isLoadingAgents,
     agents,
-    onAgentSelected: handleAgentSelected,
     onRestoreAgent: handleRestoreAgent,
     onBack: handleBack,
     workbenchState,

@@ -166,6 +166,18 @@ export function useRunMessageQueue({
       sendNext();
   }, [controller.run, controller.streaming, runtime, sendNext, state.entry]);
 
+  const stop = useCallback(async () => {
+    // Cancelling the local stream also invokes the model adapter's abort
+    // handler, which stops the backend conversation (including durable HITL
+    // runs). A control-only request leaves assistant-ui running until the
+    // stream eventually closes, making the user press Stop a second time.
+    if (runtime.thread.getState().isRunning) {
+      runtime.thread.cancelRun();
+      return;
+    }
+    if (controller.active) await controller.control("terminate");
+  }, [controller, runtime]);
+
   return {
     ...state,
     scope,
@@ -184,7 +196,7 @@ export function useRunMessageQueue({
         ))
     ),
     canStop: controller.active,
-    stop: () => controller.control("terminate"),
+    stop,
   };
 }
 

@@ -23,6 +23,7 @@ export interface WorkbenchSessionConfig {
   model_id?: number;
   generation_config: {
     deep_thinking: boolean;
+    thinking_effort?: "low" | "medium" | "high";
     temperature?: number;
     top_p?: number;
     requested_output_tokens?: number;

@@ -45,6 +45,9 @@ export const conversationService = {
       today_start_ms: String(params.todayStartMs),
       week_start_ms: String(params.weekStartMs),
     });
+    if (params.conversationType) {
+      query.set("conversation_type", params.conversationType);
+    }
     const response = await fetch(
       `${API_ENDPOINTS.conversation.list}?${query.toString()}`
     );
@@ -1043,6 +1046,10 @@ export const conversationService = {
       }>;
       agent_id?: number; // Add agent_id parameter
       model_id?: number; // Optional model override
+      generation_config?: {
+        deep_thinking: boolean;
+        thinking_effort?: "low" | "medium" | "high";
+      };
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
@@ -1116,6 +1123,9 @@ export const conversationService = {
       }
       if (params.model_id !== undefined && params.model_id !== null) {
         requestParams.model_id = params.model_id;
+      }
+      if (params.generation_config !== undefined) {
+        requestParams.generation_config = params.generation_config;
       }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;

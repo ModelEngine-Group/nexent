@@ -871,6 +871,7 @@ class WorkbenchGenerationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     deep_thinking: bool = False
+    thinking_effort: Literal["low", "medium", "high"] = "high"
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     top_p: Optional[float] = Field(default=None, gt=0, le=1)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
@@ -941,6 +942,7 @@ class AgentRequest(BaseModel):
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
     model_id: Optional[int] = None
+    generation_config: Optional[WorkbenchGenerationConfig] = None
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False

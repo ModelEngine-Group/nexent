@@ -71,6 +71,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     navigationPath: "/newchat",
   },
   {
+    path: "/workbench",
+    Icon: Zap,
+    labelKey: "sidebar.agentWorkbench",
+    order: 1.5,
+    parentKey: null,
+  },
+  {
     path: "/agent-tasks",
     Icon: CalendarClock,
     labelKey: "sidebar.agentTasks",
@@ -249,7 +256,10 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     }
 
     const filtered = ROUTE_CONFIG.filter((route) => {
-      return accessibleRoutes.includes(route.path);
+      return (
+        accessibleRoutes.includes(route.path) ||
+        (route.path === "/workbench" && accessibleRoutes.includes("/chat"))
+      );
     });
 
     // Separate root items and children

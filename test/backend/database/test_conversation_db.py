@@ -104,6 +104,7 @@ class ConversationRecord:
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
     agent_id = MagicMock(name="ConversationRecord.agent_id")
     chat_mode = MagicMock(name="ConversationRecord.chat_mode")
+    workbench_config = MagicMock(name="ConversationRecord.workbench_config")
     knowledge_scope = MagicMock(name="ConversationRecord.knowledge_scope")
     runtime_metadata = MagicMock(name="ConversationRecord.runtime_metadata")
     runtime_metadata_version = MagicMock(name="ConversationRecord.runtime_metadata_version")
@@ -367,31 +368,81 @@ def test_ut_be_wb_027_unchanged_config_is_checked_without_increment(monkeypatch,
 
 
 @pytest.mark.parametrize("joint", [False, True])
-def test_workbench_topology_is_locked_with_no_partial_write(monkeypatch, mock_session_ctx, joint):
+def test_workbench_topology_can_change_without_leaving_its_conversation(monkeypatch, mock_session_ctx, joint):
     from copy import deepcopy
     from types import SimpleNamespace
     from backend.database.conversation_db import (
         replace_conversation_workbench_config, replace_conversation_workbench_and_metadata,
     )
-    from backend.database.conversation_db import WorkbenchError
-
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
         workbench_config={"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]},
         workbench_config_version=2, runtime_metadata={"department": "sales"}, runtime_metadata_version=9,
         agent_id=7, knowledge_scope=None,
     )
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    config = {
+        **deepcopy(record.workbench_config),
+        "mode": "multi_agent_chat",
+        "agent_mounts": [{"agent_id": 7, "version_no": 3}, {"agent_id": 8, "version_no": 3}],
+    }
+    if joint:
+        result = replace_conversation_workbench_and_metadata(1, "user", config, 2, {"department": "finance"}, 9)
+    else:
+        result = replace_conversation_workbench_config(1, "user", config, 2)
+    assert result["workbench_config_version"] == 3
+    assert result["workbench_config"]["agent_mounts"] == config["agent_mounts"]
+    assert record.agent_id == 7
+    session.flush.assert_called_once()
+
+
+@pytest.mark.parametrize("joint", [False, True])
+def test_ordinary_chat_cannot_be_converted_into_workbench(monkeypatch, mock_session_ctx, joint):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from backend.database.conversation_db import (
+        replace_conversation_workbench_config, replace_conversation_workbench_and_metadata,
+        WorkbenchError,
+    )
+
+    session, ctx = mock_session_ctx
+    record = SimpleNamespace(
+        workbench_config=None, workbench_config_version=0,
+        runtime_metadata={}, runtime_metadata_version=0,
+        agent_id=7, knowledge_scope=None,
+    )
     before = deepcopy(vars(record))
     session.scalars.return_value.first.return_value = record
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    config = {**record.workbench_config, "agent_mounts": [{"agent_id": 8, "version_no": 3}]}
+    config = {"schema_version": 3, "mode": "generic_chat", "agent_mounts": []}
     with pytest.raises(WorkbenchError) as raised:
         if joint:
-            replace_conversation_workbench_and_metadata(1, "user", config, 2, {"department": "finance"}, 9)
+            replace_conversation_workbench_and_metadata(1, "user", config, 0, {}, 0)
         else:
-            replace_conversation_workbench_config(1, "user", config, 2)
-    assert raised.value.code == "WORKBENCH_TOPOLOGY_LOCKED"
+            replace_conversation_workbench_config(1, "user", config, 0)
+    assert raised.value.code == "WORKBENCH_CONVERSATION_REQUIRED"
     assert vars(record) == before
+    session.flush.assert_not_called()
+
+
+def test_creation_workflow_cannot_switch_to_chat_in_place(monkeypatch, mock_session_ctx):
+    from types import SimpleNamespace
+    from backend.database.conversation_db import replace_conversation_workbench_config, WorkbenchError
+
+    session, ctx = mock_session_ctx
+    record = SimpleNamespace(
+        workbench_config={"schema_version": 3, "mode": "skill_create", "agent_mounts": []},
+        workbench_config_version=1, agent_id=None,
+    )
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(WorkbenchError) as raised:
+        replace_conversation_workbench_config(
+            1, "user", {"schema_version": 3, "mode": "generic_chat", "agent_mounts": []}, 1
+        )
+    assert raised.value.code == "WORKBENCH_TOPOLOGY_LOCKED"
     session.flush.assert_not_called()
 
 
@@ -1864,6 +1915,48 @@ def test_get_conversation_list_page_supports_unpaginated_empty_result(
         "metadata": {"total": 0, "today": 0, "last_7_days": 0, "older": 0},
     }
     session.execute.assert_called_once()
+
+
+@pytest.mark.parametrize("conversation_type, predicate", [
+    ("agent_chat", "is_"),
+    ("workbench", "is_not"),
+])
+def test_conversation_page_filters_origin_before_pagination(
+    monkeypatch, mock_session_ctx, conversation_type, predicate
+):
+    """The source predicate is applied in SQL so counts and pages stay scoped."""
+    from backend.database import conversation_db
+
+    class ComparableTimestamp:
+        def label(self, _name):
+            return self
+
+        def __ge__(self, _value):
+            return MagicMock()
+
+        def __lt__(self, _value):
+            return MagicMock()
+
+    monkeypatch.setattr(
+        conversation_db.func.extract.return_value.__mul__,
+        "return_value",
+        ComparableTimestamp(),
+    )
+
+    session, ctx = mock_session_ctx
+    session.execute.return_value = []
+    monkeypatch.setattr(conversation_db, "get_db_session", lambda: ctx)
+    column = conversation_db.ConversationRecord.workbench_config
+    column.reset_mock()
+
+    result = conversation_db.get_conversation_list_page(
+        "user-1", today_start_ms=2000, week_start_ms=1000,
+        limit=10, offset=5, conversation_type=conversation_type,
+    )
+
+    getattr(column, predicate).assert_called_once_with(None)
+    session.execute.assert_called_once()
+    assert result["items"] == []
 
 
 def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):

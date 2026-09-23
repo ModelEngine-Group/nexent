@@ -29,8 +29,11 @@ vi.mock("@assistant-ui/react", () => {
         <textarea aria-label="正文" defaultValue={runtime.composer.text} />
       ),
       Send: Wrapper,
-      Cancel: ({ children }: { children: ReactElement<{ onClick?: () => void }> }) =>
-        cloneElement(children, { onClick: runtime.cancel }),
+      Cancel: ({
+        children,
+      }: {
+        children: ReactElement<{ onClick?: () => void }>;
+      }) => cloneElement(children, { onClick: runtime.cancel }),
       Dictate: Wrapper,
       StopDictation: Wrapper,
     },
@@ -86,6 +89,34 @@ const base = {
   chatMode: "execution" as const,
   onChatModeChange: vi.fn(),
 };
+
+it.each(["skill_create", "agent_create"] as const)(
+  "%s examples appear below the Workbench composer",
+  (mode) => {
+    runtime.composer.text = "";
+    const { container } = render(
+      <Composer
+        {...base}
+        workbenchPresentation={{
+          mode,
+          onExitCreation: vi.fn(),
+          actions: null,
+        }}
+      />
+    );
+    const input = container.querySelector("fieldset");
+    const examples = screen.getByRole("region", {
+      name: mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例",
+    });
+    expect(input).not.toBeNull();
+    expect(
+      input!.compareDocumentPosition(examples) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(examples.parentElement).toHaveClass("absolute", "top-full");
+    runtime.composer.text = "question";
+  }
+);
 it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () => {
   runtime.thread.isRunning = false;
   render(

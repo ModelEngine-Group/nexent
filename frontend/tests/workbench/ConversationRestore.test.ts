@@ -39,17 +39,11 @@ it("UT-FE-WB-032 restores canonical declarations and display names without defau
     config_values: { region: "published" },
   });
 });
-it("UT-FE-WB-033 legacy restoration uses published defaults and retains version zero", async () => {
-  const result = await resolveRestoredWorkbench({ agent_id: 8 });
-  expect(previewWorkbenchAgent).toHaveBeenCalledExactlyOnceWith(8);
-  expect(result.version).toBe(0);
-  expect(result.config.agent_mounts).toEqual([{ agent_id: 8, version_no: 3 }]);
-  expect(result.config.skill_mounts).toEqual([
-    { skill_id: 1, config_values: { region: "published" } },
-  ]);
-  const empty = await resolveRestoredWorkbench({});
-  expect(empty.config.mode).toBe("generic_chat");
-  expect(empty.version).toBe(0);
+it("does not silently import an ordinary Agent conversation into Workbench", async () => {
+  await expect(resolveRestoredWorkbench({ agent_id: 8 })).rejects.toThrow(
+    "does not belong to Workbench"
+  );
+  expect(previewWorkbenchAgent).not.toHaveBeenCalled();
 });
 it("restoration stays pending until display resources finish loading", async () => {
   let finish!: (items: SkillListItem[]) => void;
@@ -60,7 +54,12 @@ it("restoration stays pending until display resources finish loading", async () 
       })
   );
   const ready = vi.fn();
-  const pending = resolveRestoredWorkbench({ agent_id: 8 }).then(ready);
+  const pending = resolveRestoredWorkbench({
+    workbench_config: {
+      ...initialWorkbenchState.config,
+      skill_mounts: [{ skill_id: 1, config_values: {} }],
+    },
+  }).then(ready);
   await vi.waitFor(() => expect(fetchSkillsList).toHaveBeenCalledOnce());
   expect(ready).not.toHaveBeenCalled();
   finish([{ skill_id: "1", name: "Default" }] as SkillListItem[]);

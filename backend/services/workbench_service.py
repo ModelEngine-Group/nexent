@@ -377,12 +377,8 @@ def resolve_workbench_config(
 
     if config.mode in {"skill_create", "agent_create"}:
         raise WorkbenchError("WORKBENCH_MODE_RESOURCE_CONFLICT")
-    if config.generation_config.deep_thinking:
-        raise WorkbenchError("GENERATION_CONFIG_RESOLVER_UNAVAILABLE")
-
     canonical_payload = config.model_dump(mode="json")
     child_identities: list[RuntimeAgentIdentity] = []
-    selected_snapshots: list[Mapping[str, Any]] = []
     for index, mount in enumerate(config.agent_mounts):
         resolved_version = resolve_root_version(
             mount.agent_id,
@@ -407,7 +403,6 @@ def resolve_workbench_config(
         if selected_snapshot.get("system_key") is not None:
             raise WorkbenchError("AGENT_NOT_RUNNABLE", status_code=403)
         canonical_payload["agent_mounts"][index]["version_no"] = resolved_version
-        selected_snapshots.append(selected_snapshot)
         child_identities.append(
             RuntimeAgentIdentity(
                 runtime_ref=f"agent:{mount.agent_id}:v{resolved_version}",
@@ -424,52 +419,38 @@ def resolve_workbench_config(
         )
 
     canonical = WorkbenchSessionConfig.model_validate(canonical_payload)
-    if canonical.mode == "single_agent_chat":
-        root_identity = child_identities[0]
-        snapshot = deepcopy(selected_snapshots[0])
-        child_mounts: tuple[RuntimeAgentIdentity, ...] = ()
-        if (
-            canonical.model_id is not None
-            and canonical.model_id not in (snapshot.get("model_ids") or [])
-        ):
+    try:
+        system_ref = system_agent_provider.get_workbench_main_ref(tenant_id)
+        snapshot = deepcopy(
+            search_agent_info_by_agent_id(
+                system_ref.agent_id,
+                tenant_id,
+                system_ref.version_no,
+            )
+        )
+    except Exception as exc:
+        raise WorkbenchError("WORKBENCH_SYSTEM_AGENT_UNAVAILABLE", status_code=503) from exc
+    if snapshot.get("enabled") is False:
+        raise WorkbenchError("WORKBENCH_SYSTEM_AGENT_UNAVAILABLE", status_code=503)
+    root_identity = RuntimeAgentIdentity(
+        runtime_ref=f"agent:{system_ref.agent_id}:v{system_ref.version_no}",
+        agent_id=system_ref.agent_id,
+        version_no=system_ref.version_no,
+        invocation_name="workbench_main",
+        display_name=str(
+            snapshot.get("display_name")
+            or snapshot.get("name")
+            or "Nexent Workbench"
+        ),
+        origin="SYSTEM",
+    )
+    child_mounts = tuple(child_identities)
+    if canonical.model_id is not None:
+        model_info = get_model_by_model_id(
+            canonical.model_id, tenant_id=tenant_id
+        )
+        if not is_model_available(model_info):
             raise WorkbenchError("WORKBENCH_MODEL_NOT_ALLOWED")
-    else:
-        try:
-            system_ref = system_agent_provider.get_workbench_main_ref(tenant_id)
-            snapshot = deepcopy(
-                search_agent_info_by_agent_id(
-                    system_ref.agent_id,
-                    tenant_id,
-                    system_ref.version_no,
-                )
-            )
-        except Exception as exc:
-            raise WorkbenchError("WORKBENCH_SYSTEM_AGENT_UNAVAILABLE", status_code=503) from exc
-        if snapshot.get("enabled") is False:
-            raise WorkbenchError("WORKBENCH_SYSTEM_AGENT_UNAVAILABLE", status_code=503)
-        root_identity = RuntimeAgentIdentity(
-            runtime_ref=f"agent:{system_ref.agent_id}:v{system_ref.version_no}",
-            agent_id=system_ref.agent_id,
-            version_no=system_ref.version_no,
-            invocation_name="workbench_main",
-            display_name=str(
-                snapshot.get("display_name")
-                or snapshot.get("name")
-                or "Nexent Workbench"
-            ),
-            origin="SYSTEM",
-        )
-        child_mounts = (
-            tuple(child_identities)
-            if canonical.mode == "multi_agent_chat"
-            else ()
-        )
-        if canonical.model_id is not None:
-            model_info = get_model_by_model_id(
-                canonical.model_id, tenant_id=tenant_id
-            )
-            if not is_model_available(model_info):
-                raise WorkbenchError("WORKBENCH_MODEL_NOT_ALLOWED")
 
     snapshot["skill_instances"] = skill_db.search_skills_for_agent(
         agent_id=int(root_identity.agent_id),

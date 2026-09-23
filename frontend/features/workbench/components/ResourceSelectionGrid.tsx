@@ -20,7 +20,8 @@ export function ResourceSelectionGrid({
     >
       <ResourceCardGrid
         items={Children.toArray(children)}
-        columns={2}
+        columns={3}
+        rows={2}
         paginateItems={false}
         showToolbar={false}
         showCreateCard={false}

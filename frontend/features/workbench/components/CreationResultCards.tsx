@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { buildSkillSavePayload } from "../creationRuntime";
 import { searchAgentInfo } from "@/services/agentConfigService";
+import { fetchMyEditableSkills } from "@/services/skillRepositoryService";
 
 type SkillPayload = NonNullable<ReturnType<typeof buildSkillSavePayload>>;
 
@@ -110,6 +111,48 @@ export function SkillCreationResultCard({
 }) {
   const { t } = useTranslation("common");
   const [saving, setSaving] = useState(false);
+  const [lookup, setLookup] = useState<{
+    name: string;
+    status: "checking" | "saved" | "unsaved" | "error";
+  }>({ name: payload?.name ?? "", status: "checking" });
+  const [lookupVersion, setLookupVersion] = useState(0);
+  const skillName = payload?.name;
+
+  useEffect(() => {
+    if (!skillName || saved) return;
+    let cancelled = false;
+    const name = skillName;
+    void (async () => {
+      try {
+        for (let page = 1; ; page += 1) {
+          const result = await fetchMyEditableSkills({
+            ownership: "created",
+            search: name,
+            page,
+            page_size: 100,
+            new_skill_padding: false,
+          });
+          if (cancelled) return;
+          if (
+            result.items.some(
+              (item) => "skill_id" in item && item.name === name
+            )
+          ) {
+            setLookup({ name, status: "saved" });
+            return;
+          }
+          if (page >= result.pagination.total_pages) break;
+        }
+        setLookup({ name, status: "unsaved" });
+      } catch {
+        if (!cancelled) setLookup({ name, status: "error" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [skillName, saved, lookupVersion]);
+
   if (!payload) {
     return (
       <p className="my-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
@@ -120,11 +163,13 @@ export function SkillCreationResultCard({
       </p>
     );
   }
+  const status = lookup.name === payload.name ? lookup.status : "checking";
+  const isSaved = saved || status === "saved";
   return (
     <div className="my-4 rounded-xl border border-primary/25 bg-primary/5 p-4">
       <div className="flex items-center gap-2 text-sm font-semibold">
         <FileCode2 className="size-4" />
-        {saved
+        {isSaved
           ? t("workbench.creation.skillCreated", "Skill 已保存")
           : t("workbench.creation.skillReady", "Skill 草稿已生成")}
       </div>
@@ -132,16 +177,27 @@ export function SkillCreationResultCard({
       <p className="mb-3 text-xs text-muted-foreground">
         {payload.description} · {payload.files.length + 1} files
       </p>
-      {saved ? (
+      {isSaved ? (
         <Button asChild size="sm" variant="outline">
           <Link href="/skill-space?tab=mine">
             {t("workbench.creation.openSkills", "查看我的 Skills")}
           </Link>
         </Button>
+      ) : status === "error" ? (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setLookup({ name: payload.name, status: "checking" });
+            setLookupVersion((version) => version + 1);
+          }}
+        >
+          {t("workbench.creation.retrySkillLookup", "重新查询 Skill 状态")}
+        </Button>
       ) : (
         <Button
           size="sm"
-          disabled={saving}
+          disabled={saving || status === "checking"}
           onClick={async () => {
             setSaving(true);
             try {
@@ -151,7 +207,9 @@ export function SkillCreationResultCard({
             }
           }}
         >
-          {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+          {saving || status === "checking" ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : null}
           {t("workbench.creation.saveSkill", "保存 Skill")}
         </Button>
       )}

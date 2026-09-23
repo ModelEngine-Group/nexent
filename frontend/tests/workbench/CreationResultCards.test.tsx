@@ -1,5 +1,5 @@
-import { expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   AgentCreationResultCard,
@@ -7,7 +7,16 @@ import {
 } from "@/features/workbench/components/CreationResultCards";
 
 const searchAgentInfo = vi.hoisted(() => vi.fn());
+const fetchMyEditableSkills = vi.hoisted(() => vi.fn());
 vi.mock("@/services/agentConfigService", () => ({ searchAgentInfo }));
+vi.mock("@/services/skillRepositoryService", () => ({ fetchMyEditableSkills }));
+
+beforeEach(() => {
+  fetchMyEditableSkills.mockReset().mockResolvedValue({
+    items: [],
+    pagination: { page: 1, page_size: 100, total: 0, total_pages: 0 },
+  });
+});
 
 it("shows the completed Agent's summary and links to its development page", () => {
   render(
@@ -71,6 +80,119 @@ it("saves the generated Skill only when the user confirms", async () => {
     <SkillCreationResultCard payload={payload} saved={false} onSave={onSave} />
   );
   expect(onSave).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "保存 Skill" })).toBeEnabled()
+  );
   await userEvent.click(screen.getByRole("button", { name: "保存 Skill" }));
   expect(onSave).toHaveBeenCalledWith(payload);
+});
+
+it("restores a saved Skill card from the user's Skills after reopening history", async () => {
+  fetchMyEditableSkills.mockResolvedValueOnce({
+    items: [{ skill_id: 28, name: "invoice-helper" }],
+    pagination: { page: 1, page_size: 100, total: 1, total_pages: 1 },
+  });
+  const onSave = vi.fn();
+  render(
+    <SkillCreationResultCard
+      payload={{
+        name: "invoice-helper",
+        description: "Extract invoices",
+        source: "custom",
+        tags: [],
+        content: "# Instructions",
+        files: [],
+      }}
+      saved={false}
+      onSave={onSave}
+    />
+  );
+  expect(
+    await screen.findByRole("link", { name: "查看我的 Skills" })
+  ).toHaveAttribute("href", "/skill-space?tab=mine");
+  expect(screen.queryByRole("button", { name: "保存 Skill" })).toBeNull();
+  expect(onSave).not.toHaveBeenCalled();
+  expect(fetchMyEditableSkills).toHaveBeenCalledWith(
+    expect.objectContaining({ ownership: "created", search: "invoice-helper" })
+  );
+});
+
+it("does not mistake a different named Skill for the saved draft", async () => {
+  fetchMyEditableSkills.mockResolvedValueOnce({
+    items: [{ skill_id: 29, name: "invoice-helper-v2" }],
+    pagination: { page: 1, page_size: 100, total: 1, total_pages: 1 },
+  });
+  render(
+    <SkillCreationResultCard
+      payload={{
+        name: "invoice-helper",
+        description: "Extract invoices",
+        source: "custom",
+        tags: [],
+        content: "# Instructions",
+        files: [],
+      }}
+      saved={false}
+      onSave={vi.fn()}
+    />
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "保存 Skill" })).toBeEnabled()
+  );
+  expect(screen.queryByRole("link", { name: "查看我的 Skills" })).toBeNull();
+});
+
+it("prevents duplicate saving while the saved status is still being checked", async () => {
+  let resolveLookup!: (value: unknown) => void;
+  fetchMyEditableSkills.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveLookup = resolve;
+    })
+  );
+  const onSave = vi.fn();
+  render(
+    <SkillCreationResultCard
+      payload={{
+        name: "invoice-helper",
+        description: "Extract invoices",
+        source: "custom",
+        tags: [],
+        content: "# Instructions",
+        files: [],
+      }}
+      saved={false}
+      onSave={onSave}
+    />
+  );
+  expect(screen.getByRole("button", { name: "保存 Skill" })).toBeDisabled();
+  resolveLookup({
+    items: [{ skill_id: 28, name: "invoice-helper" }],
+    pagination: { page: 1, page_size: 100, total: 1, total_pages: 1 },
+  });
+  expect(
+    await screen.findByRole("link", { name: "查看我的 Skills" })
+  ).toBeInTheDocument();
+  expect(onSave).not.toHaveBeenCalled();
+});
+
+it("does not offer Save when the Skill status lookup fails", async () => {
+  fetchMyEditableSkills.mockRejectedValueOnce(new Error("network unavailable"));
+  render(
+    <SkillCreationResultCard
+      payload={{
+        name: "invoice-helper",
+        description: "Extract invoices",
+        source: "custom",
+        tags: [],
+        content: "# Instructions",
+        files: [],
+      }}
+      saved={false}
+      onSave={vi.fn()}
+    />
+  );
+  expect(
+    await screen.findByRole("button", { name: "重新查询 Skill 状态" })
+  ).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "保存 Skill" })).toBeNull();
 });

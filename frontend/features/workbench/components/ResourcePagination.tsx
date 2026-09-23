@@ -2,7 +2,7 @@
 
 import { Pagination } from "antd";
 
-export const RESOURCE_PAGE_SIZE = 4;
+export const RESOURCE_PAGE_SIZE = 6;
 
 export function resourcePage<T>(items: T[], page: number): T[] {
   const current = Math.min(

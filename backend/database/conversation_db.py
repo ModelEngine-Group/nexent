@@ -752,14 +752,13 @@ def resolve_conversation_runtime_metadata(
 
 
 def _assert_workbench_topology(record, config: Dict[str, Any]) -> None:
-    """Reject topology changes while holding the same lock used for the update."""
+    """Keep entrypoint and creation workflows stable while allowing chat mounts to change."""
     current = record.workbench_config
-    if isinstance(current, dict) and current.get("schema_version") == 3:
-        if current.get("mode") != config.get("mode") or current.get("agent_mounts", []) != config.get("agent_mounts", []):
-            raise WorkbenchError("WORKBENCH_TOPOLOGY_LOCKED")
-    elif isinstance(record.agent_id, int):
-        mounts = config.get("agent_mounts", [])
-        if len(mounts) != 1 or mounts[0].get("agent_id") != record.agent_id:
+    if not isinstance(current, dict) or current.get("schema_version") != 3:
+        raise WorkbenchError("WORKBENCH_CONVERSATION_REQUIRED", status_code=409)
+    creation_modes = {"skill_create", "agent_create"}
+    if current.get("mode") in creation_modes or config.get("mode") in creation_modes:
+        if current.get("mode") != config.get("mode"):
             raise WorkbenchError("WORKBENCH_TOPOLOGY_LOCKED")
 
 
@@ -802,13 +801,10 @@ def replace_conversation_workbench_config(
                 "agent_id": record.agent_id,
                 "knowledge_scope": deepcopy(record.knowledge_scope),
             }
-        mounts = normalized.get("agent_mounts") or []
-        projected_agent_id = mounts[0].get("agent_id") if len(mounts) == 1 else None
         projected_scope = deepcopy(normalized.get("knowledge_scope"))
 
         record.workbench_config = normalized
         record.workbench_config_version = current_version + 1
-        record.agent_id = projected_agent_id
         record.knowledge_scope = projected_scope
         record.updated_by = user_id
         record.update_time = func.current_timestamp()
@@ -861,11 +857,9 @@ def replace_conversation_workbench_and_metadata(
 
         _assert_workbench_topology(record, config)
         normalized = deepcopy(config)
-        mounts = normalized.get("agent_mounts") or []
         config_changed = normalized != record.workbench_config
         record.workbench_config = normalized
         record.workbench_config_version = current_config_version + int(config_changed)
-        record.agent_id = mounts[0].get("agent_id") if len(mounts) == 1 else None
         record.knowledge_scope = deepcopy(normalized.get("knowledge_scope"))
         record.runtime_metadata = deepcopy(metadata)
         record.runtime_metadata_version = current_metadata_version + 1
@@ -1037,8 +1031,11 @@ def get_conversation_list_page(
     week_start_ms: int,
     limit: Optional[int] = None,
     offset: int = 0,
+    conversation_type: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Return one conversation page and its bucket counts in one query."""
+    """Return a conversation page and bucket counts, optionally scoped by origin."""
+    if conversation_type not in (None, "agent_chat", "workbench"):
+        raise ValueError("Invalid conversation type")
     with get_db_session() as session:
         created_ms = func.extract('epoch', ConversationRecord.create_time) * 1000
         stmt = select(
@@ -1062,6 +1059,10 @@ def get_conversation_list_page(
             desc(ConversationRecord.create_time),
             desc(ConversationRecord.conversation_id),
         )
+        if conversation_type == "workbench":
+            stmt = stmt.where(ConversationRecord.workbench_config.is_not(None))
+        elif conversation_type == "agent_chat":
+            stmt = stmt.where(ConversationRecord.workbench_config.is_(None))
         if limit is not None:
             stmt = stmt.limit(limit)
         if offset:

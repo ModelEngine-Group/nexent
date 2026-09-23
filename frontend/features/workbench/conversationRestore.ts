@@ -1,5 +1,4 @@
 import { previewWorkbenchAgent } from "./api";
-import { initialWorkbenchState, workbenchReducer } from "./state";
 import { fetchSkillsList } from "@/services/skillService";
 import type { WorkbenchSessionConfig } from "./types";
 import type { ConversationKnowledgeScope } from "@/types/knowledgeScope";
@@ -11,28 +10,15 @@ export async function resolveRestoredWorkbench(conversation: {
   agent_id?: number | string | null;
   knowledge_scope?: ConversationKnowledgeScope | null;
 }) {
-  let config = conversation.workbench_config;
-  const version = config ? (conversation.workbench_config_version ?? 0) : 0;
-  if (config) {
-    await Promise.all(
-      config.agent_mounts.map((mount) =>
-        previewWorkbenchAgent(mount.agent_id, mount.version_no)
-      )
-    );
-  } else if (conversation.agent_id != null) {
-    const preview = await previewWorkbenchAgent(Number(conversation.agent_id));
-    config = workbenchReducer(initialWorkbenchState, {
-      type: "resolve-agent-success",
-      preview,
-    }).config;
-  } else {
-    config = structuredClone(initialWorkbenchState.config);
-  }
-  if (!conversation.workbench_config)
-    config = {
-      ...config,
-      knowledge_scope: conversation.knowledge_scope ?? undefined,
-    };
+  const config = conversation.workbench_config;
+  if (!config)
+    throw new Error("This conversation does not belong to Workbench");
+  const version = conversation.workbench_config_version ?? 0;
+  await Promise.all(
+    config.agent_mounts.map((mount) =>
+      previewWorkbenchAgent(mount.agent_id, mount.version_no)
+    )
+  );
   const skillNames: Record<number, string> = {};
   if (config.skill_mounts.length) {
     const skills = await fetchSkillsList();

@@ -164,7 +164,7 @@ it("bulk selection respects the twenty-skill limit", async () => {
     <SkillPicker open selected={[]} onCancel={vi.fn()} onConfirm={vi.fn()} />
   );
   await screen.findByRole("option", { name: /Skill 1/ });
-  expect(screen.getAllByRole("option")).toHaveLength(4);
+  expect(screen.getAllByRole("option")).toHaveLength(6);
   await userEvent.click(screen.getByRole("button", { name: /^全选$/ }));
   expect(
     screen
@@ -175,17 +175,17 @@ it("bulk selection respects the twenty-skill limit", async () => {
     await screen.findByText("最多选择 20 个 Skills，请缩小搜索范围后重试")
   ).toBeInTheDocument();
 });
-it("paginates four skills and preserves selections across pages", async () => {
-  vi.mocked(fetchSkillsList).mockResolvedValue(Array.from({ length: 5 }, (_, index) => ({
+it("paginates six skills and preserves selections across pages", async () => {
+  vi.mocked(fetchSkillsList).mockResolvedValue(Array.from({ length: 7 }, (_, index) => ({
     ...base, skill_id: String(index + 1), name: `Paged Skill ${index + 1}`,
   })));
   render(<SkillPicker open selected={[]} onCancel={vi.fn()} onConfirm={vi.fn()} />);
   await screen.findByRole("option", { name: /Paged Skill 1/ });
-  expect(screen.getAllByRole("option")).toHaveLength(4);
+  expect(screen.getAllByRole("option")).toHaveLength(6);
   await userEvent.click(screen.getByRole("option", { name: /Paged Skill 1/ }));
   await userEvent.click(screen.getByTitle("2"));
   expect(screen.getAllByRole("option")).toHaveLength(1);
-  expect(screen.getByRole("option", { name: /Paged Skill 5/ })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /Paged Skill 7/ })).toBeInTheDocument();
   await userEvent.click(screen.getByTitle("1"));
   expect(screen.getByRole("option", { name: /Paged Skill 1/ })).toHaveAttribute("aria-selected", "true");
 });

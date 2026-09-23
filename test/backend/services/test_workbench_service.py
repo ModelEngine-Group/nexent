@@ -32,6 +32,11 @@ def test_runtime_copy_preserves_live_clients_and_isolates_nested_configuration()
 @pytest.fixture(autouse=True)
 def published_instances(mocker):
     mocker.patch.object(
+        workbench_service.system_agent_provider,
+        "get_workbench_main_ref",
+        return_value=SimpleNamespace(agent_id=99, version_no=4),
+    )
+    mocker.patch.object(
         workbench_service,
         "_capture_skill_file_snapshot",
         return_value=(("SKILL.md", b"# Test"),),
@@ -60,7 +65,8 @@ def test_ut_be_wb_003_resolver_locks_current_published_version(mocker):
         _config(), tenant_id="tenant"
     )
     assert canonical.agent_mounts[0].version_no == 5
-    assert tree.root.identity.invocation_name == "agent_7_v5"
+    assert tree.root.identity.invocation_name == "workbench_main"
+    assert [child.invocation_name for child in tree.child_mounts] == ["agent_7_v5"]
 
 
 def test_ut_be_wb_006_resolution_is_deep_copy_and_relation_write_free(mocker):
@@ -228,7 +234,8 @@ def test_ut_be_wb_001_persisted_plan_compiles_the_effective_root_only(mocker):
     root = AgentConfig(name="Root", description="", tools=[], model_name="root-model", managed_agents=[child])
     tree = workbench_service.compile_runtime_mount_plan(plan, root)
     assert tree.root.agent_config is not root
-    assert tree.root.agent_config.runtime_ref == "agent:7:v3"
+    assert tree.root.agent_config.runtime_ref == "agent:99:v4"
+    assert [child.runtime_ref for child in plan.child_mounts] == ["agent:7:v3"]
     assert tree.root.agent_config.managed_agents[0].model_name == "child-model"
     assert tree.root.agent_config.managed_agents[0] is not child
     assert root.runtime_ref is None
@@ -351,7 +358,8 @@ def test_ut_be_wb_004_locked_version_does_not_query_latest(mocker):
     lookup = mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", return_value={"name": "Root"})
     canonical, _ = workbench_service.resolve_workbench_config(_config(3), tenant_id="tenant")
     latest.assert_not_called()
-    lookup.assert_called_once_with(7, "tenant", 3)
+    assert lookup.call_args_list[0].args == (7, "tenant", 3)
+    assert lookup.call_args_list[1].args == (99, "tenant", 4)
     assert canonical.agent_mounts[0].version_no == 3
 
 
@@ -470,7 +478,7 @@ def test_multi_agent_chat_mounts_locked_agents_under_system_root(mocker):
     ]
 
 
-def test_single_agent_rejects_model_outside_published_configuration(mocker):
+def test_single_agent_uses_tenant_model_on_workbench_root(mocker):
     mocker.patch.object(workbench_service, "resolve_root_version", return_value=3)
     mocker.patch.object(
         workbench_service,
@@ -483,17 +491,22 @@ def test_single_agent_rejects_model_outside_published_configuration(mocker):
         },
     )
 
-    with pytest.raises(workbench_service.WorkbenchError) as error:
-        workbench_service.resolve_workbench_config(
-            WorkbenchSessionConfig(
-                mode="single_agent_chat",
-                model_id=13,
-                agent_mounts=[{"agent_id": 7, "version_no": 3}],
-            ),
-            tenant_id="tenant",
-        )
+    get_model = mocker.patch.object(workbench_service, "get_model_by_model_id", return_value={"model_id": 13})
+    mocker.patch.object(workbench_service, "is_model_available", return_value=True)
+    canonical, plan = workbench_service.resolve_workbench_config(
+        WorkbenchSessionConfig(
+            mode="single_agent_chat",
+            model_id=13,
+            agent_mounts=[{"agent_id": 7, "version_no": 3}],
+        ),
+        tenant_id="tenant",
+    )
 
-    assert error.value.code == "WORKBENCH_MODEL_NOT_ALLOWED"
+    assert canonical.model_id == 13
+    assert plan.root.identity.agent_id == 99
+    assert [child.agent_id for child in plan.child_mounts] == [7]
+    assert plan.overlay.model_id == 13
+    get_model.assert_called_once_with(13, tenant_id="tenant")
 
 
 @pytest.mark.parametrize("definitions", [[], [{"tool_id": 4, "author": "tenant", "is_available": False}], [{"tool_id": 4, "author": "other", "is_available": True}]])

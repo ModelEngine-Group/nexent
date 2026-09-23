@@ -1571,6 +1571,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const workbenchConfig = custom?.workbenchConfig;
     if (workbenchConfig)
       requestBody.model_id = workbenchConfig.model_id ?? undefined;
+    if (!workbenchConfig && !isEphemeralRuntime) {
+      const modelContext = context.config as
+        | { deepThinking?: boolean; reasoningEffort?: string }
+        | undefined;
+      if (modelContext?.deepThinking !== undefined) {
+        requestBody.generation_config = {
+          deep_thinking: modelContext.deepThinking,
+          ...(modelContext.deepThinking &&
+          ["low", "medium", "high"].includes(
+            modelContext.reasoningEffort ?? ""
+          )
+            ? { thinking_effort: modelContext.reasoningEffort }
+            : {}),
+        };
+      }
+    }
 
     let backendConversationId = hasServerConversationId
       ? numericServerThreadId
@@ -1677,6 +1693,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           model_id: isNl2Skill
             ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
             : (requestBody.model_id as number | undefined),
+          generation_config: requestBody.generation_config as
+            | {
+                deep_thinking: boolean;
+                thinking_effort?: "low" | "medium" | "high";
+              }
+            | undefined,
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
           entrypoint: workbenchConfig ? "workbench" : undefined,

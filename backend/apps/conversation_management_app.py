@@ -76,6 +76,7 @@ async def list_conversations_endpoint(
     authorization: Optional[str] = Header(None),
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
+    conversation_type: Annotated[Optional[str], Query(pattern="^(agent_chat|workbench)$")] = None,
 ):
     """
     Get all conversation list
@@ -96,6 +97,7 @@ async def list_conversations_endpoint(
             week_start_ms=week_start_ms,
             limit=limit,
             offset=offset,
+            **({"conversation_type": conversation_type} if conversation_type is not None else {}),
         )
         return ConversationResponse(code=0, message="success", data=conversations)
     except TokenExpiredError as e:

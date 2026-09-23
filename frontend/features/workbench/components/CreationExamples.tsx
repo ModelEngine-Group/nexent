@@ -43,22 +43,22 @@ export function CreationExamples({
   return (
     <section
       aria-label={mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例"}
-      className="mb-3 max-h-[40vh] overflow-y-auto rounded-2xl border border-border bg-card p-3 shadow-sm sm:max-h-none"
+      className="mt-12 max-h-[min(40vh,320px)] overflow-y-auto px-1"
     >
       <div className="mb-3 flex items-center gap-2">
         <button
           type="button"
           aria-label="返回普通对话"
           onClick={onBack}
-          className="rounded-lg p-2 hover:bg-muted focus-visible:ring-2"
+          className="rounded-lg p-1.5 hover:bg-muted focus-visible:ring-2"
         >
           <ChevronLeft className="size-4" />
         </button>
         <h2 className="text-sm font-semibold">
-          {mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例"}
+          {t("workbench.recommendedPrompts", "推荐提示词")}
         </h2>
       </div>
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="flex flex-col gap-2">
         {examples[mode].map(({ key, title, icon: Icon }, index) => {
           const prompt = t(
             `workbench.creationExamples.${mode === "skill_create" ? "skill" : "agent"}.${key}`,
@@ -78,16 +78,18 @@ export function CreationExamples({
                     ?.focus()
                 );
               }}
-              className="min-w-0 rounded-xl border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/30 focus-visible:ring-2"
+              className="flex w-full min-w-0 items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent/50 focus-visible:ring-2"
             >
-              <span className="mb-3 flex items-center gap-2">
-                <span className="rounded-xl bg-primary/10 p-2 text-primary">
-                  <Icon className="size-5" />
-                </span>
-                <span className="text-sm font-semibold">{title}</span>
+              <span className="mt-0.5 shrink-0 text-muted-foreground">
+                <Icon className="size-4" />
               </span>
-              <span className="line-clamp-3 text-xs leading-6 text-muted-foreground">
-                {prompt}
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-foreground">
+                  {title}
+                </span>
+                <span className="mt-1 block line-clamp-2 text-xs leading-5 text-muted-foreground">
+                  {prompt}
+                </span>
               </span>
             </button>
           );

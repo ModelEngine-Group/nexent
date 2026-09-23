@@ -45,7 +45,7 @@ test("UT-FE-WB-009 creation actions clear incompatible resources", () => {
   assert.equal(creation.config.model_id, undefined);
 });
 
-test("UT-FE-WB-006 locks version and initializes published Skill defaults", () => {
+test("UT-FE-WB-006 locks Agent version without mounting its Skill defaults on the Workbench root", () => {
   const state = workbenchReducer(initialWorkbenchState, {
     type: "resolve-agent-success",
     preview: {
@@ -58,9 +58,7 @@ test("UT-FE-WB-006 locks version and initializes published Skill defaults", () =
     },
   });
   assert.deepEqual(state.config.agent_mounts, [{ agent_id: 8, version_no: 3 }]);
-  assert.deepEqual(state.config.skill_mounts, [
-    { skill_id: 4, config_values: { language: "zh" } },
-  ]);
+  assert.deepEqual(state.config.skill_mounts, []);
 });
 
 test("UT-FE-WB-007 replaces the selected Agent when multi-Agent is disabled", () => {

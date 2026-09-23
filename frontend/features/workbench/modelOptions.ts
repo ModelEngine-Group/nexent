@@ -1,22 +1,32 @@
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import type { ModelOption as CatalogModelOption } from "@/types/modelConfig";
+import type { WorkbenchSessionConfig } from "./types";
 
 export type ModelSelectionScope = "agent" | "tenant";
+
+/** Keep the model displayed in Workbench identical to the model sent at run time. */
+export function withDefaultWorkbenchModel(
+  config: WorkbenchSessionConfig,
+  availableLlmModels: readonly Pick<CatalogModelOption, "id">[]
+): WorkbenchSessionConfig {
+  if (config.model_id != null || availableLlmModels.length === 0) return config;
+  return { ...config, model_id: availableLlmModels[0].id };
+}
 
 export const deriveModelOptions = (
   agent: Agent | PublishedAgent,
   availableModels: readonly CatalogModelOption[],
   scope: ModelSelectionScope = "agent"
-): readonly { id: string; name: string }[] => {
+): readonly { id: string; name: string; efforts: boolean }[] => {
   if (scope === "tenant") {
     return availableModels
       .filter(
-        (model) =>
-          model.type === "llm" && model.connect_status === "available"
+        (model) => model.type === "llm" && model.connect_status === "available"
       )
       .map((model) => ({
         id: String(model.id),
         name: model.displayName || model.name,
+        efforts: true,
       }));
   }
 
@@ -32,6 +42,7 @@ export const deriveModelOptions = (
     const configuredModels = model_ids.map((id, index) => ({
       id: String(id),
       name: model_names[index] || `Model ${id}`,
+      efforts: true,
     }));
     const availableModelIds = new Set(
       availableModels
@@ -49,7 +60,7 @@ export const deriveModelOptions = (
       (model.displayName === modelName || model.name === modelName)
   );
   if (modelName && modelIsAvailable) {
-    return [{ id: modelName, name: modelName }];
+    return [{ id: modelName, name: modelName, efforts: true }];
   }
 
   const singleModel = (typedAgent as unknown as { model?: string }).model;
@@ -59,7 +70,7 @@ export const deriveModelOptions = (
       (model.displayName === singleModel || model.name === singleModel)
   );
   if (singleModel && singleModelIsAvailable) {
-    return [{ id: singleModel, name: singleModel }];
+    return [{ id: singleModel, name: singleModel, efforts: true }];
   }
 
   return [];

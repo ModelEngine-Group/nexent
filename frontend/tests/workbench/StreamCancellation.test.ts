@@ -131,3 +131,23 @@ it("UT-FE-WB-003 returning to a running conversation uses resume instead of star
   });
   expect(service.stop).not.toHaveBeenCalled();
 });
+
+it("passes Start Chat thinking settings to the normal agent run", async () => {
+  service.runAgent.mockResolvedValue({
+    type: "json",
+    data: { status: "completed" },
+  });
+  const runOptions = {
+    ...options(new AbortController(), { agentId: 7 }),
+    context: {
+      config: { modelName: "12", deepThinking: true, reasoningEffort: "medium" },
+    },
+  } as unknown as ChatModelRunOptions;
+
+  await consume(runOptions);
+
+  expect(service.runAgent.mock.calls[0][0]).toMatchObject({
+    model_id: 12,
+    generation_config: { deep_thinking: true, thinking_effort: "medium" },
+  });
+});

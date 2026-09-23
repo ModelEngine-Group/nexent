@@ -19,7 +19,7 @@ export async function changeCreationThread(
   }
 }
 
-/** Preserve the user's unsent input across a topology change. */
+/** Change Workbench mounts in place after the current run has settled. */
 export async function changeAgentTopology(
   runtime: AssistantRuntime,
   applyTopology: () => Promise<void> | void
@@ -30,10 +30,6 @@ export async function changeAgentTopology(
   try {
     const state = runtime.thread.getState();
     if (state.isRunning) throw new Error("请等待当前回复完成后再切换智能体");
-    if (state.messages.length === 0) {
-      await applyTopology();
-      return;
-    }
     const draft = runtime.thread.composer.getState();
     if (
       draft.attachments.some(
@@ -42,23 +38,7 @@ export async function changeAgentTopology(
     ) {
       throw new Error("请等待附件上传完成后再切换智能体");
     }
-    await runtime.threads.switchToNewThread();
-    const destinationComposer = runtime.thread.composer;
-    try {
-      await applyTopology();
-    } finally {
-      destinationComposer.setText(draft.text);
-      for (const attachment of draft.attachments) {
-        if (attachment.status.type === "complete") {
-          await destinationComposer.addAttachment({
-            ...attachment,
-            content: attachment.content ?? [],
-          });
-        } else if (attachment.file) {
-          await destinationComposer.addAttachment(attachment.file);
-        }
-      }
-    }
+    await applyTopology();
   } finally {
     pendingTransitions.delete(runtime);
   }

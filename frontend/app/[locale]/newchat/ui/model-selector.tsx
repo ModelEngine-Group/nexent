@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Select } from "antd";
 import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
@@ -61,7 +62,7 @@ export type ModelOption = {
 };
 
 function getModelEfforts(
-  model: ModelOption | undefined,
+  model: ModelOption | undefined
 ): readonly ModelSelectorEffortOption[] | undefined {
   if (!model?.efforts) return undefined;
   return model.efforts === true ? DEFAULT_EFFORT_OPTIONS : model.efforts;
@@ -69,7 +70,7 @@ function getModelEfforts(
 
 function resolveEffort(
   efforts: readonly ModelSelectorEffortOption[] | undefined,
-  effort: string | undefined,
+  effort: string | undefined
 ): string | undefined {
   if (effort === undefined) return undefined;
   return efforts?.some((e) => e.id === effort) ? effort : undefined;
@@ -83,11 +84,11 @@ function resolveEffort(
 export function resolveModelEffort(
   models: readonly ModelOption[],
   modelId: string | undefined,
-  effort: string | undefined,
+  effort: string | undefined
 ): string | undefined {
   return resolveEffort(
     getModelEfforts(models.find((m) => m.id === modelId)),
-    effort,
+    effort
   );
 }
 
@@ -114,7 +115,7 @@ function useControllableState<T>({
       if (!isControlled) setInternal(next);
       onChangeRef.current?.(next);
     },
-    [isControlled],
+    [isControlled]
   );
   return [value, setValue] as const;
 }
@@ -130,18 +131,20 @@ type ModelSelectorContextValue = {
   /** Effort resolved against the selected model's supported levels. */
   effort: string | undefined;
   setEffort: (effort: string) => void;
+  deepThinking: boolean;
+  setDeepThinking: (enabled: boolean) => void;
   setOpen: (open: boolean) => void;
 };
 
 const ModelSelectorContext = createContext<ModelSelectorContextValue | null>(
-  null,
+  null
 );
 
 function useModelSelectorContext() {
   const ctx = useContext(ModelSelectorContext);
   if (!ctx) {
     throw new Error(
-      "ModelSelector sub-components must be used within ModelSelector.Root",
+      "ModelSelector sub-components must be used within ModelSelector.Root"
     );
   }
   return ctx;
@@ -170,6 +173,9 @@ export type ModelSelectorRootProps = {
   effort?: string;
   defaultEffort?: string;
   onEffortChange?: (effort: string) => void;
+  deepThinking?: boolean;
+  defaultDeepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -184,6 +190,9 @@ function ModelSelectorRoot({
   effort: effortProp,
   defaultEffort,
   onEffortChange,
+  deepThinking: deepThinkingProp,
+  defaultDeepThinking = false,
+  onDeepThinkingChange,
   open: openProp,
   defaultOpen,
   onOpenChange,
@@ -196,8 +205,13 @@ function ModelSelectorRoot({
   });
   const [effort, setEffort] = useControllableState({
     prop: effortProp,
-    defaultProp: defaultEffort,
+    defaultProp: defaultEffort ?? "high",
     onChange: onEffortChange,
+  });
+  const [deepThinking, setDeepThinking] = useControllableState({
+    prop: deepThinkingProp,
+    defaultProp: defaultDeepThinking,
+    onChange: onDeepThinkingChange,
   });
   const [open, setOpen] = useControllableState({
     prop: openProp,
@@ -207,7 +221,10 @@ function ModelSelectorRoot({
 
   const selectedModel = models.find((m) => m.id === value);
   const efforts = getModelEfforts(selectedModel);
-  const activeEffort = resolveEffort(efforts, effort);
+  const activeEffort = resolveEffort(
+    selectedModel ? efforts : DEFAULT_EFFORT_OPTIONS,
+    effort
+  );
   const contextValue = useMemo(
     () => ({
       models,
@@ -217,6 +234,8 @@ function ModelSelectorRoot({
       efforts,
       effort: activeEffort,
       setEffort,
+      deepThinking: deepThinking ?? false,
+      setDeepThinking,
       setOpen,
     }),
     [
@@ -227,8 +246,10 @@ function ModelSelectorRoot({
       efforts,
       activeEffort,
       setEffort,
+      deepThinking,
+      setDeepThinking,
       setOpen,
-    ],
+    ]
   );
 
   return (
@@ -261,7 +282,7 @@ export const modelSelectorTriggerVariants = cva(
       variant: "outline",
       size: "default",
     },
-  },
+  }
 );
 
 export type ModelSelectorTriggerProps = ComponentPropsWithoutRef<
@@ -309,12 +330,13 @@ function ModelIcon({ children }: { children: ReactNode }) {
 
 function ModelSelectorValue({
   placeholder,
-  showEffort = true,
+  showEffort = false,
   className,
 }: ModelSelectorValueProps) {
   const { t } = useTranslation();
   const { selectedModel, efforts, effort } = useModelSelectorContext();
-  const resolvedPlaceholder = placeholder ?? t("chat.modelSelector.selectModel");
+  const resolvedPlaceholder =
+    placeholder ?? t("chat.modelSelector.selectModel");
 
   if (!selectedModel) {
     return (
@@ -366,7 +388,7 @@ function ModelSelectorContent({
       sideOffset={sideOffset}
       className={cn(
         "bg-popover/95 w-72 min-w-(--radix-popover-trigger-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
-        className,
+        className
       )}
       {...props}
     >
@@ -422,7 +444,7 @@ function ModelSelectorList({
       data-slot="model-selector-list"
       className={cn(
         "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-        className,
+        className
       )}
       {...props}
     >
@@ -534,18 +556,16 @@ function ModelSelectorEffort({
   ...props
 }: ModelSelectorEffortProps) {
   const { t } = useTranslation();
-  const { efforts, effort, setEffort } = useModelSelectorEfforts();
+  const { efforts, effort, setEffort, deepThinking, setDeepThinking } =
+    useModelSelectorContext();
   const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
 
-  if (!efforts?.length) return null;
+  const displayedEfforts = efforts?.length ? efforts : DEFAULT_EFFORT_OPTIONS;
 
   return (
     <div
       data-slot="model-selector-effort"
-      className={cn(
-        "flex items-center justify-between gap-3 border-t px-3 py-2",
-        className,
-      )}
+      className={cn("border-b px-3 py-2", className)}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
         // cmdk's root keydown handler claims Enter to select the highlighted
         // model; stop it from seeing Enter so the focused toggle activates.
@@ -554,32 +574,51 @@ function ModelSelectorEffort({
       }}
       {...props}
     >
-      <span className="text-muted-foreground text-xs">{resolvedLabel}</span>
-      <div
-        role="group"
-        aria-label={typeof resolvedLabel === "string" ? resolvedLabel : t("chat.modelSelector.reasoningEffort")}
-        className="flex items-center gap-0.5"
-      >
-        {efforts.map((option) => {
-          const isActive = option.id === effort;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={isActive}
-              data-state={isActive ? "on" : "off"}
-              onClick={() => setEffort(option.id)}
-              className={cn(
-                "focus-visible:ring-ring/50 cursor-pointer rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
-                isActive
-                  ? "bg-accent text-accent-foreground font-medium"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {option.name}
-            </button>
-          );
-        })}
+      <div className="flex items-center justify-between gap-3 py-1">
+        <span className="text-sm">{t("chat.modelSelector.deepThinking")}</span>
+        <button
+          type="button"
+          role="switch"
+          aria-label={t("chat.modelSelector.deepThinking")}
+          aria-checked={deepThinking}
+          onClick={() => setDeepThinking(!deepThinking)}
+          className={cn(
+            "relative h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            deepThinking ? "bg-primary" : "bg-muted-foreground/40"
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform",
+              deepThinking ? "left-[18px]" : "left-0.5"
+            )}
+          />
+        </button>
+      </div>
+      <div className="flex items-center justify-between gap-3 py-1">
+        <span className="text-sm">{resolvedLabel}</span>
+        <Select
+          aria-label={t("chat.modelSelector.reasoningEffort")}
+          value={effort ?? displayedEfforts[0].id}
+          disabled={!deepThinking}
+          onChange={setEffort}
+          onKeyDown={(event) => event.stopPropagation()}
+          getPopupContainer={(trigger) =>
+            (trigger.closest(
+              '[data-slot="model-selector-content"]'
+            ) as HTMLElement | null) ??
+            trigger.parentElement ??
+            document.body
+          }
+          popupMatchSelectWidth={false}
+          size="small"
+          variant="borderless"
+          className="min-w-16 text-sm"
+          options={displayedEfforts.map((option) => ({
+            value: option.id,
+            label: t(`chat.modelSelector.effort.${option.id}`, option.name),
+          }))}
+        />
       </div>
     </div>
   );
@@ -596,21 +635,24 @@ export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
 /** Registers the selection with assistant-ui's ModelContext system. The
  * context's effort is already resolved against the selected model. */
 function ModelSelectorModelContext() {
-  const { value, effort } = useModelSelectorContext();
+  const { value, effort, deepThinking } = useModelSelectorContext();
   const api = useAui();
 
   useEffect(() => {
-    if (value === undefined) return;
+    if (!value) return;
     const config = {
       config: {
         modelName: value,
-        ...(effort !== undefined ? { reasoningEffort: effort } : undefined),
+        deepThinking,
+        ...(deepThinking && effort !== undefined
+          ? { reasoningEffort: effort }
+          : undefined),
       },
     };
     return api.modelContext().register({
       getModelContext: () => config,
     });
-  }, [api, value, effort]);
+  }, [api, value, effort, deepThinking]);
 
   return null;
 }
@@ -633,8 +675,8 @@ const ModelSelectorImpl = ({
       />
       <ModelSelectorContent className={contentClassName}>
         {searchable && <ModelSelectorSearch />}
-        <ModelSelectorList />
         <ModelSelectorEffort />
+        <ModelSelectorList />
       </ModelSelectorContent>
     </ModelSelectorRoot>
   );
@@ -656,7 +698,7 @@ type ModelSelectorComponent = typeof ModelSelectorImpl & {
 };
 
 const ModelSelector = memo(
-  ModelSelectorImpl,
+  ModelSelectorImpl
 ) as unknown as ModelSelectorComponent;
 
 ModelSelector.displayName = "ModelSelector";

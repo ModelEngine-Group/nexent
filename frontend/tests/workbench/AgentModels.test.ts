@@ -3,7 +3,10 @@ import {
   initialWorkbenchState,
   workbenchReducer,
 } from "@/features/workbench/state";
-import { deriveModelOptions } from "@/features/workbench/modelOptions";
+import {
+  deriveModelOptions,
+  withDefaultWorkbenchModel,
+} from "@/features/workbench/modelOptions";
 import type { Agent } from "@/types/agentConfig";
 import type { ModelOption } from "@/types/modelConfig";
 
@@ -13,15 +16,27 @@ const preview = {
   default_skill_mounts: [],
   knowledge: {},
 };
-it("injects the first configured model when selecting a single agent", () => {
+
+it("uses the first available tenant model as Workbench default without replacing an explicit choice", () => {
+  const available = [{ id: 11 }, { id: 12 }];
+  expect(
+    withDefaultWorkbenchModel(initialWorkbenchState.config, available).model_id
+  ).toBe(11);
+  const explicit = { ...initialWorkbenchState.config, model_id: 12 };
+  expect(withDefaultWorkbenchModel(explicit, available)).toBe(explicit);
+  expect(withDefaultWorkbenchModel(initialWorkbenchState.config, [])).toBe(
+    initialWorkbenchState.config
+  );
+});
+it("does not replace the Workbench model with the mounted Agent model", () => {
   const next = workbenchReducer(initialWorkbenchState, {
     type: "resolve-agent-success",
     preview,
     modelIds: [8, 9],
   });
-  expect(next.config.model_id).toBe(8);
+  expect(next.config.model_id).toBeUndefined();
 });
-it("preserves a valid choice and replaces a model outside the new agent list", () => {
+it("preserves a tenant model across changes to mounted Agents", () => {
   const state = {
     ...initialWorkbenchState,
     config: { ...initialWorkbenchState.config, model_id: 9 },
@@ -39,14 +54,14 @@ it("preserves a valid choice and replaces a model outside the new agent list", (
       preview,
       modelIds: [3],
     }).config.model_id
-  ).toBe(3);
+  ).toBe(9);
   expect(
     workbenchReducer(state, {
       type: "resolve-agent-success",
       preview,
       modelIds: [],
     }).config.model_id
-  ).toBeUndefined();
+  ).toBe(9);
 });
 
 it("lists every available tenant LLM for the generic workbench agent", () => {
@@ -83,8 +98,8 @@ it("lists every available tenant LLM for the generic workbench agent", () => {
   ] as ModelOption[];
 
   expect(deriveModelOptions(agent, catalog, "tenant")).toEqual([
-    { id: "11", name: "Model A" },
-    { id: "12", name: "Model B" },
+    { id: "11", name: "Model A", efforts: true },
+    { id: "12", name: "Model B", efforts: true },
   ]);
 });
 
@@ -112,6 +127,6 @@ it("keeps single-agent model selection restricted to configured models", () => {
   ] as ModelOption[];
 
   expect(deriveModelOptions(agent, catalog, "agent")).toEqual([
-    { id: "11", name: "Configured Model" },
+    { id: "11", name: "Configured Model", efforts: true },
   ]);
 });

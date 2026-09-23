@@ -1,8 +1,9 @@
 "use client";
 import { restoreKnowledgeDisplay } from "./knowledgeDisplay";
 
-import { useCallback, useEffect, useRef, useState, type FC } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useAuiState } from "@assistant-ui/react";
+import { Sparkles } from "lucide-react";
 import { Chat } from "@/app/newchat/assistant-ui/chat";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type {
@@ -23,6 +24,8 @@ import { useConversationResume } from "./hooks/useConversationResume";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
+import { useModelList } from "@/hooks/model/useModelList";
+import { withDefaultWorkbenchModel } from "./modelOptions";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import { ApiError } from "@/services/api";
@@ -44,9 +47,7 @@ import {
   changeCreationThread,
 } from "./conversationTransitions";
 import { CreationActions } from "./components/CreationActions";
-import {
-  SkillCreationResultCard,
-} from "./components/CreationResultCards";
+import { SkillCreationResultCard } from "./components/CreationResultCards";
 import {
   applySkillCreationEvent,
   buildSkillSavePayload,
@@ -69,6 +70,7 @@ import type {
 } from "@/types/knowledgeScope";
 import {
   getWorkbenchSendability,
+  deriveConversationMode,
   previewWorkbenchAgent,
   SkillPicker,
 } from "@/features/workbench";
@@ -99,7 +101,6 @@ const HomeContent: FC = () => {
     selectedAgent,
     isLoadingAgents,
     agents,
-    onAgentSelected,
     onRestoreAgent,
     onBack,
     isDictationConfigured,
@@ -108,6 +109,14 @@ const HomeContent: FC = () => {
     onWorkbenchModeChange,
     dispatchWorkbench,
   } = useWorkbenchSession();
+  const {
+    availableLlmModels,
+    isLoading: isLoadingModels,
+  } = useModelList();
+  const effectiveWorkbenchConfig = useMemo(
+    () => withDefaultWorkbenchModel(workbenchState.config, availableLlmModels),
+    [workbenchState.config, availableLlmModels]
+  );
   const { t, i18n } = useTranslation();
   const { canAccessRoute, user } = useAuthorizationContext();
   const {
@@ -131,6 +140,7 @@ const HomeContent: FC = () => {
   const [runtimeMetadataDirty, setRuntimeMetadataDirty] = useState(false);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [isSavingModel, setIsSavingModel] = useState(false);
   const [creationAgentsByThread, setCreationAgentsByThread] = useState<
     Record<string, CreatedAgentResult>
   >({});
@@ -312,23 +322,20 @@ const HomeContent: FC = () => {
           markCompletionSynced(event.agent_id);
         });
     },
-    [
-      markCompletionSynced,
-      markGenerationCompleted,
-      markPromptGenerationFailed,
-    ]
+    [markCompletionSynced, markGenerationCompleted, markPromptGenerationFailed]
   );
 
   useEffect(() => {
-    if (!selectedAgent?.id) {
+    const agentId = workbenchBootstrap?.generic_agent?.agent_id;
+    if (!agentId) {
       setKnowledgeCapabilities(null);
       return;
     }
 
     let cancelled = false;
-    const versionNo = selectedAgent.current_version_no;
+    const versionNo = workbenchBootstrap?.generic_agent?.version_no;
     void conversationService
-      .getKnowledgeCapabilities(Number(selectedAgent.id), versionNo)
+      .getKnowledgeCapabilities(agentId, versionNo)
       .then((capabilities) => {
         if (!cancelled) setKnowledgeCapabilities(capabilities);
       })
@@ -343,7 +350,10 @@ const HomeContent: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedAgent]);
+  }, [
+    workbenchBootstrap?.generic_agent?.agent_id,
+    workbenchBootstrap?.generic_agent?.version_no,
+  ]);
 
   useEffect(() => {
     if (!activeThreadId) {
@@ -709,17 +719,15 @@ const HomeContent: FC = () => {
   const handleModelChange = async (modelId: string) => {
     const id = Number(modelId);
     if (!Number.isInteger(id) || id <= 0) return;
-    if (
-      workbenchState.config.agent_mounts.length === 1 &&
-      !selectedAgent?.model_ids?.includes(id)
-    ) {
-      message.warning("请选择当前智能体配置的模型");
-      return;
-    }
+    if (workbenchState.config.model_id === id) return;
     const config = { ...workbenchState.config, model_id: id };
+    const conversationId = Number(activeConversationId);
+    const isExistingConversation =
+      Number.isInteger(conversationId) && conversationId > 0;
+    if (isExistingConversation) setIsSavingModel(true);
     try {
-      if (Number(activeConversationId) > 0) {
-        await saveWorkbenchConfig(Number(activeConversationId), config);
+      if (isExistingConversation) {
+        await saveWorkbenchConfig(conversationId, config);
       } else {
         dispatchWorkbench({
           type: "restore",
@@ -731,6 +739,32 @@ const HomeContent: FC = () => {
       message.error(
         error instanceof Error ? error.message : "模型配置保存失败"
       );
+    } finally {
+      if (isExistingConversation) setIsSavingModel(false);
+    }
+  };
+
+  const handleThinkingChange = async (
+    patch: Partial<
+      import("@/features/workbench").WorkbenchSessionConfig["generation_config"]
+    >
+  ) => {
+    const config = {
+      ...effectiveWorkbenchConfig,
+      generation_config: { ...effectiveWorkbenchConfig.generation_config, ...patch },
+    };
+    try {
+      if (Number(activeConversationId) > 0) {
+        await saveWorkbenchConfig(Number(activeConversationId), config);
+      } else {
+        dispatchWorkbench({
+          type: "restore",
+          config,
+          version: workbenchState.configVersion,
+        });
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "思考配置保存失败");
     }
   };
 
@@ -837,12 +871,6 @@ const HomeContent: FC = () => {
         ...(workbenchState.config.mode === "agent_create" && creationAgent
           ? { agentId: creationAgent.agentId }
           : {}),
-        ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
-        ...(selectedAgent?.current_version_no
-          ? {
-              agentVersionNo: selectedAgent.current_version_no,
-            }
-          : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
         ...(knowledgeScope ? { knowledgeScope } : {}),
         ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
@@ -924,7 +952,7 @@ const HomeContent: FC = () => {
           workbenchState.config.mode
         )
           ? {
-              workbenchConfig: workbenchState.config,
+              workbenchConfig: effectiveWorkbenchConfig,
               workbenchConfigVersion: workbenchState.configVersion,
             }
           : {}),
@@ -965,6 +993,7 @@ const HomeContent: FC = () => {
     handleGenerationStopped,
     handleServerConversationId,
     workbenchState,
+    effectiveWorkbenchConfig,
     dispatchWorkbench,
     refreshHitl,
     enableHitl,
@@ -994,7 +1023,7 @@ const HomeContent: FC = () => {
     activeThreadId,
     ready,
     isThreadRunning,
-    selectedAgent,
+    selectedAgent: null,
     chatMode,
     resumedConversationIdsRef,
     handleGenerationStopped,
@@ -1025,18 +1054,60 @@ const HomeContent: FC = () => {
     await runtime.threads.switchToNewThread();
   }, [handlePrepareNewConversation, runtime]);
 
+  const applyAgentMounts = useCallback(
+    async (mounts: import("@/features/workbench").WorkbenchAgentMount[]) => {
+      const nextConfig = {
+        ...workbenchState.config,
+        mode: deriveConversationMode(mounts),
+        agent_mounts: mounts,
+      };
+      const conversationId = Number(activeConversationId);
+      if (Number.isInteger(conversationId) && conversationId > 0) {
+        await saveWorkbenchConfig(conversationId, nextConfig);
+      } else {
+        dispatchWorkbench({
+          type: "restore",
+          config: nextConfig,
+          version: workbenchState.configVersion,
+        });
+      }
+      const first = mounts[0];
+      const agent =
+        first && agents.find((item) => Number(item.id) === first.agent_id);
+      onRestoreAgent(
+        agent ? { ...agent, current_version_no: first.version_no } : null
+      );
+    },
+    [
+      activeConversationId,
+      agents,
+      dispatchWorkbench,
+      onRestoreAgent,
+      saveWorkbenchConfig,
+      workbenchState.config,
+      workbenchState.configVersion,
+    ]
+  );
+
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
-      shouldRestoreAgentRef.current = true;
       try {
-        await changeAgentTopology(runtime, () => onAgentSelected(agent));
+        const preview = await previewWorkbenchAgent(
+          Number(agent.id),
+          agent.current_version_no
+        );
+        await changeAgentTopology(runtime, () =>
+          applyAgentMounts([
+            { agent_id: preview.agent_id, version_no: preview.version_no },
+          ])
+        );
       } catch (error) {
         message.error(
           error instanceof Error ? error.message : "智能体切换失败"
         );
       }
     },
-    [runtime, onAgentSelected]
+    [applyAgentMounts, runtime]
   );
 
   const workbenchSendability = getWorkbenchSendability(
@@ -1048,21 +1119,7 @@ const HomeContent: FC = () => {
       (mount) => mount.agent_id !== agentId
     );
     try {
-      await changeAgentTopology(runtime, async () => {
-        if (mounts.length === 0) {
-          onBack();
-          return;
-        }
-        if (mounts.length === 1) {
-          const preview = await previewWorkbenchAgent(
-            mounts[0].agent_id,
-            mounts[0].version_no
-          );
-          dispatchWorkbench({ type: "resolve-agent-success", preview });
-        } else {
-          dispatchWorkbench({ type: "replace-agents", mounts });
-        }
-      });
+      await changeAgentTopology(runtime, () => applyAgentMounts(mounts));
     } catch (error) {
       message.error(error instanceof Error ? error.message : "智能体移除失败");
     }
@@ -1121,6 +1178,7 @@ const HomeContent: FC = () => {
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar
+            showLegacySwitch={false}
             generatedTitles={generatedTitles}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
@@ -1158,21 +1216,34 @@ const HomeContent: FC = () => {
                     )}
                 </>
               }
-              selectedAgent={
-                workbenchState.config.agent_mounts.length === 1
-                  ? selectedAgent
-                  : null
-              }
-              modelSelectionScope={
-                workbenchState.config.agent_mounts.length === 1
-                  ? "agent"
-                  : "tenant"
-              }
+              selectedAgent={null}
+              modelSelectionScope="tenant"
               fallbackAgentName={t(
                 "workbench.genericAgentName",
                 "智能体工作台"
               )}
-              selectedModelId={workbenchState.config.model_id?.toString()}
+              landingContent={
+                <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-6 text-center">
+                  <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/10">
+                    <Sparkles className="size-8 text-primary" />
+                  </div>
+                  <h1 className="text-balance text-2xl font-semibold text-foreground md:text-3xl">
+                    {t(
+                      "workbench.landingGreeting",
+                      "你好，我是 Nexent，需要我帮你做什么？"
+                    )}
+                  </h1>
+                </div>
+              }
+              selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
+              deepThinking={workbenchState.config.generation_config.deep_thinking}
+              onDeepThinkingChange={(enabled) =>
+                void handleThinkingChange({ deep_thinking: enabled })
+              }
+              thinkingEffort={workbenchState.config.generation_config.thinking_effort}
+              onThinkingEffortChange={(effort) =>
+                void handleThinkingChange({ thinking_effort: effort })
+              }
               showModelSelector={!isCreating}
               onModelChange={(id) => void handleModelChange(id)}
               onAgentSelected={handleAgentSelectedFromLanding}
@@ -1189,6 +1260,8 @@ const HomeContent: FC = () => {
               onRuntimeMetadataChange={handleRuntimeMetadataChange}
               readOnly={
                 !workbenchSendability.canSend ||
+                (!isCreating && effectiveWorkbenchConfig.model_id == null) ||
+                isSavingModel ||
                 (workbenchState.config.mode === "agent_create" &&
                   Number.isInteger(Number(activeThread?.remoteId)) &&
                   Number(activeThread?.remoteId) > 0 &&
@@ -1196,7 +1269,15 @@ const HomeContent: FC = () => {
                 (workbenchState.config.mode === "agent_create" &&
                   nl2AgentComposerDisabled)
               }
-              readOnlyReason={workbenchSendability.reason}
+              readOnlyReason={
+                isSavingModel
+                  ? "正在保存模型配置"
+                  : !isCreating && effectiveWorkbenchConfig.model_id == null
+                    ? isLoadingModels
+                      ? "正在加载模型"
+                      : "暂无可用模型"
+                    : workbenchSendability.reason
+              }
               skillFiles={
                 workbenchState.config.mode === "skill_create" &&
                 Object.keys(skillDraft.files).length > 0
@@ -1230,9 +1311,9 @@ const HomeContent: FC = () => {
                       ),
                       onSelectAgent: () => setAgentPickerOpen(true),
                       onRemoveAgent: () =>
-                        void changeAgentTopology(runtime, onBack).catch(
-                          (error) => message.error(error.message)
-                        ),
+                        void changeAgentTopology(runtime, () =>
+                          applyAgentMounts([])
+                        ).catch((error) => message.error(error.message)),
                       skills: workbenchState.config.skill_mounts.map(
                         (mount) => ({
                           id: mount.skill_id,
@@ -1263,17 +1344,10 @@ const HomeContent: FC = () => {
         <SkillPicker
           open={skillPickerOpen}
           selected={workbenchState.config.skill_mounts}
-          loadDefaults={
-            workbenchState.config.agent_mounts.length === 1
-              ? async () => {
-                  const mount = workbenchState.config.agent_mounts[0];
-                  const preview = await previewWorkbenchAgent(
-                    mount.agent_id,
-                    mount.version_no
-                  );
-                  return preview.default_skill_mounts;
-                }
-              : undefined
+          loadDefaults={async () =>
+            (
+              workbenchBootstrap?.generic_agent?.default_skill_resources ?? []
+            ).map((skill) => ({ skill_id: skill.skill_id, config_values: {} }))
           }
           onCancel={() => setSkillPickerOpen(false)}
           onConfirm={handleReplaceWorkbenchSkills}
@@ -1286,7 +1360,7 @@ const HomeContent: FC = () => {
             String(mount.agent_id)
           )}
           onCancel={() => setAgentPickerOpen(false)}
-          multiple={workbenchBootstrap?.modes.multi_agent_chat.enabled === true}
+          multiple={true}
           onConfirm={async (selected) => {
             const current = workbenchState.config.agent_mounts;
             if (
@@ -1300,11 +1374,7 @@ const HomeContent: FC = () => {
               )
             )
               return;
-            if (
-              selected.length > 1 &&
-              !workbenchBootstrap?.modes.multi_agent_chat.enabled
-            )
-              throw new Error("当前环境未启用多智能体模式");
+            if (selected.length > 8) throw new Error("最多选择 8 个智能体");
             const previews = await Promise.all(
               selected.map((agent) =>
                 previewWorkbenchAgent(
@@ -1313,27 +1383,16 @@ const HomeContent: FC = () => {
                 )
               )
             );
-            await changeAgentTopology(runtime, async () => {
-              if (!selected.length) {
-                onBack();
-                return;
-              }
-              previews.forEach((preview, index) =>
-                dispatchWorkbench({
-                  type: "resolve-agent-success",
-                  preview,
-                  modelIds: selected[index].model_ids ?? [],
-                  append: index > 0,
-                })
-              );
-              onRestoreAgent(selected[0]);
-            });
+            await changeAgentTopology(runtime, () =>
+              applyAgentMounts(
+                previews.map((preview) => ({
+                  agent_id: preview.agent_id,
+                  version_no: preview.version_no,
+                }))
+              )
+            );
           }}
-          onSelect={(agent) => {
-            if (!workbenchBootstrap?.modes.multi_agent_chat.enabled)
-              setAgentPickerOpen(false);
-            void handleAgentSelectedFromLanding(agent);
-          }}
+          onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
         />
       </div>
     </div>

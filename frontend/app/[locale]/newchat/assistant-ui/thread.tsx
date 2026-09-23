@@ -186,6 +186,10 @@ export interface ThreadProps {
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
@@ -240,6 +244,10 @@ export const Thread: FC<ThreadProps> = ({
   onBack,
   selectedModelId,
   onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
@@ -273,20 +281,22 @@ export const Thread: FC<ThreadProps> = ({
   const fallbackModelId = models[0]?.id;
   const effectiveSelectedModelId = selectedModelIsValid
     ? selectedModelId
-    : localSelectedModelId &&
-        models.some((model) => model.id === localSelectedModelId)
-      ? localSelectedModelId
-      : fallbackModelId;
+    : onModelChange
+      ? ""
+      : localSelectedModelId &&
+          models.some((model) => model.id === localSelectedModelId)
+        ? localSelectedModelId
+        : fallbackModelId;
   const handleModelChange = useCallback(
     (modelId: string) => {
       if (!models.some((model) => model.id === modelId)) return;
-      if (selectedModelId !== undefined) {
-        onModelChange?.(modelId);
+      if (onModelChange) {
+        onModelChange(modelId);
       } else {
         setLocalSelectedModelId(modelId);
       }
     },
-    [models, onModelChange, selectedModelId]
+    [models, onModelChange]
   );
 
   const messages = useAuiState((s) => s.thread.messages);
@@ -491,6 +501,10 @@ export const Thread: FC<ThreadProps> = ({
         models={models}
         selectedModelId={effectiveSelectedModelId}
         onModelChange={handleModelChange}
+        deepThinking={deepThinking}
+        onDeepThinkingChange={onDeepThinkingChange}
+        thinkingEffort={thinkingEffort}
+        onThinkingEffortChange={onThinkingEffortChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
@@ -595,6 +609,10 @@ interface ThreadViewProps {
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
@@ -647,6 +665,10 @@ const ThreadView: FC<ThreadViewProps> = ({
   models,
   selectedModelId,
   onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
@@ -687,6 +709,9 @@ const ThreadView: FC<ThreadViewProps> = ({
   onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
+  const workbenchLanding = Boolean(
+    workbenchPresentation && !hasMessages && !isShareMode
+  );
 
   return (
     <ThreadPrimitive.Root
@@ -696,7 +721,12 @@ const ThreadView: FC<ThreadViewProps> = ({
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
     >
-      <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div
+        className={cn(
+          "flex h-full min-w-0 flex-1 flex-col",
+          workbenchLanding && "overflow-y-auto"
+        )}
+      >
         {showConversationTitle && (
           <header className="flex items-center gap-2 border-b px-3 py-2">
             {isShareMode ? (
@@ -803,7 +833,9 @@ const ThreadView: FC<ThreadViewProps> = ({
         <ThreadPrimitive.Viewport
           className={cn(
             "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
-            variant === "embedded" ? "px-4 py-4" : "px-8 py-6"
+            variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
+            workbenchLanding &&
+              "mt-auto flex-none overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
           {hasMessages ? (
@@ -833,7 +865,8 @@ const ThreadView: FC<ThreadViewProps> = ({
           <ThreadPrimitive.ViewportFooter
             className={cn(
               "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
-              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
+              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8",
+              workbenchLanding && "static mb-auto gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
             <ThreadScrollToBottom />
@@ -841,6 +874,10 @@ const ThreadView: FC<ThreadViewProps> = ({
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
+              deepThinking={deepThinking}
+              onDeepThinkingChange={onDeepThinkingChange}
+              thinkingEffort={thinkingEffort}
+              onThinkingEffortChange={onThinkingEffortChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
@@ -1687,20 +1724,24 @@ const AssistantActionBar: FC = () => {
   const aui = useAui();
   const creationMode = useAuiState((s) => {
     const custom = s.thread.composer.runConfig.custom as
-      | { runtimeMode?: string }
-      | undefined;
-    return custom?.runtimeMode === "nl2skill" || custom?.runtimeMode === "nl2agent";
+      { runtimeMode?: string } | undefined;
+    return (
+      custom?.runtimeMode === "nl2skill" || custom?.runtimeMode === "nl2agent"
+    );
   });
   const creationRetryDisabled = useAuiState(
-    (s) => s.thread.isRunning || s.thread.isDisabled || !s.thread.capabilities.reload
+    (s) =>
+      s.thread.isRunning || s.thread.isDisabled || !s.thread.capabilities.reload
   );
 
   const reloadMessage = () => {
     const runConfig = aui.thread.composer().getState().runConfig;
     const custom = runConfig.custom as
-      | { runtimeMode?: string; [key: string]: unknown }
-      | undefined;
-    if (custom?.runtimeMode !== "nl2skill" && custom?.runtimeMode !== "nl2agent") {
+      { runtimeMode?: string; [key: string]: unknown } | undefined;
+    if (
+      custom?.runtimeMode !== "nl2skill" &&
+      custom?.runtimeMode !== "nl2agent"
+    ) {
       aui.message.reload();
       return;
     }
@@ -1735,7 +1776,11 @@ const AssistantActionBar: FC = () => {
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
         {creationMode ? (
-          <TooltipIconButton tooltip={t("chat.thread.refresh")} onClick={reloadMessage} disabled={creationRetryDisabled}>
+          <TooltipIconButton
+            tooltip={t("chat.thread.refresh")}
+            onClick={reloadMessage}
+            disabled={creationRetryDisabled}
+          >
             <RefreshCwIcon />
           </TooltipIconButton>
         ) : (

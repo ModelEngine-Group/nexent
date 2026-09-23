@@ -77,17 +77,12 @@ test("UT-FE-WB-031 Agent change in an empty conversation stays local", async () 
   assert.deepEqual(events, ["apply"]);
 });
 
-test("UT-FE-WB-030 Agent change after messages creates one preserved thread", async () => {
-  const { runtime, events, attachment } = fixture();
+test("UT-FE-WB-030 Agent change after messages stays in the same thread", async () => {
+  const { runtime, events } = fixture();
   await changeAgentTopology(runtime, () => {
     events.push("apply");
   });
-  assert.deepEqual(events, [
-    "new-thread",
-    "apply",
-    ["text", "unsent draft"],
-    ["attachment", attachment],
-  ]);
+  assert.deepEqual(events, ["apply"]);
 });
 
 for (const options of [{ running: true }, { uploading: true }]) {
@@ -102,23 +97,19 @@ for (const options of [{ running: true }, { uploading: true }]) {
   });
 }
 
-test("A failed topology application still restores the unsent input", async () => {
-  const { runtime, events, attachment } = fixture();
+test("A failed topology application leaves the unsent input untouched", async () => {
+  const { runtime, events } = fixture();
   await assert.rejects(
     changeAgentTopology(runtime, () => {
       throw new Error("preview failed");
     }),
     /preview failed/
   );
-  assert.deepEqual(events, [
-    "new-thread",
-    ["text", "unsent draft"],
-    ["attachment", attachment],
-  ]);
+  assert.deepEqual(events, []);
   await changeAgentTopology(runtime, () => {});
 });
 
-test("Overlapping changes cannot create multiple new threads", async () => {
+test("Overlapping changes cannot mutate the same conversation concurrently", async () => {
   const { runtime, events } = fixture();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -131,5 +122,5 @@ test("Overlapping changes cannot create multiple new threads", async () => {
   );
   release();
   await first;
-  assert.equal(events.filter((event) => event === "new-thread").length, 1);
+  assert.equal(events.filter((event) => event === "new-thread").length, 0);
 });

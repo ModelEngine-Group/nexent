@@ -47,7 +47,7 @@ from consts.exceptions import (
     RuntimeMetadataVersionConflict,
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
-    WorkbenchConfigVersionConflict,
+    ValidationError,
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from nexent.core.utils.observer import ProcessType
@@ -55,7 +55,6 @@ from consts.model import (
     AgentRequest,
     MessageRequest,
     ConversationKnowledgeScopeRequest,
-    WorkbenchSessionConfig,
 )
 from database.agent_db import search_agent_info_by_agent_id
 from database.conversation_db import (
@@ -1123,6 +1122,53 @@ def _agent_run_identifier(agent_request: AgentRequest) -> int | str | None:
     return agent_request.conversation_id
 
 
+def apply_workbench_runtime_plan(
+    agent_request: AgentRequest, canonical_workbench, resolved_plan, tenant_id: str
+) -> None:
+    """Attach a validated Workbench plan to one in-memory run request."""
+    from services.knowledge_scope_service import snapshot_runtime_knowledge_tree
+    from services.workbench_service import attach_runtime_knowledge_tree, runtime_skill_snapshot
+
+    knowledge_tree = snapshot_runtime_knowledge_tree(
+        int(resolved_plan.root.identity.agent_id),
+        tenant_id,
+        int(resolved_plan.root.identity.version_no),
+    )
+    if canonical_workbench.knowledge_scope is not None:
+        from services.runtime_knowledge_mount import mount_knowledge_records
+
+        knowledge_tree = knowledge_tree[:1]
+        knowledge_tree[0]["tools"] = mount_knowledge_records(
+            knowledge_tree[0]["tools"], canonical_workbench.knowledge_scope, tenant_id
+        )
+        agent_request.__dict__["_runtime_knowledge_tools"] = knowledge_tree[0]["tools"]
+    resolved_plan = attach_runtime_knowledge_tree(resolved_plan, knowledge_tree)
+    root_identity = resolved_plan.root.identity
+    agent_request.workbench = canonical_workbench
+    agent_request.agent_id = root_identity.agent_id
+    agent_request.version_no = root_identity.version_no
+    if resolved_plan.overlay.model_id is not None:
+        agent_request.model_id = resolved_plan.overlay.model_id
+    if resolved_plan.overlay.requested_output_tokens is not None:
+        agent_request.requested_output_tokens = (
+            resolved_plan.overlay.requested_output_tokens
+        )
+    agent_request.knowledge_scope = canonical_workbench.knowledge_scope
+    agent_request.__dict__["_runtime_skill_snapshot"] = runtime_skill_snapshot(resolved_plan)
+    agent_request.__dict__["_runtime_mount_plan"] = resolved_plan
+    agent_request.__dict__["_runtime_root_identity"] = {
+        "agent_id": root_identity.agent_id,
+        "version_no": root_identity.version_no,
+        "runtime_ref": root_identity.runtime_ref,
+        "invocation_name": root_identity.invocation_name,
+        "display_name": root_identity.display_name,
+        "origin": root_identity.origin,
+    }
+    agent_request.__dict__["_runtime_generation_config"] = (
+        canonical_workbench.generation_config.model_dump(mode="json")
+    )
+
+
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -1170,6 +1216,8 @@ async def prepare_agent_run(
     if runtime_skill_snapshot is not None:
         create_run_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
     runtime_generation_config = getattr(agent_request, "_runtime_generation_config", None)
+    if runtime_generation_config is None and agent_request.generation_config is not None:
+        runtime_generation_config = agent_request.generation_config.model_dump(mode="json")
     if runtime_generation_config is not None:
         create_run_kwargs["runtime_generation_config"] = runtime_generation_config
     runtime_mount_plan = getattr(agent_request, "_runtime_mount_plan", None)
@@ -1598,16 +1646,14 @@ async def run_agent_stream(
             raise ForbiddenError(
                 "Conversation is not accessible to the current identity"
             )
+        if not resume:
+            is_workbench_conversation = isinstance(conversation.get("workbench_config"), dict)
+            if is_workbench_conversation != (agent_request.entrypoint == "workbench"):
+                raise ForbiddenError("Conversation belongs to a different chat entrypoint")
 
     canonical_workbench = None
     if agent_request.entrypoint == "workbench" and not resume:
-        from services.workbench_service import (
-            attach_runtime_knowledge_tree,
-            assert_workbench_version,
-            resolve_workbench_config,
-            runtime_skill_snapshot as build_runtime_skill_snapshot,
-        )
-        from services.knowledge_scope_service import snapshot_runtime_knowledge_tree
+        from services.workbench_service import assert_workbench_version, resolve_workbench_config
 
         requested_workbench = agent_request.workbench
         if conversation is not None:
@@ -1631,43 +1677,8 @@ async def run_agent_stream(
             is_debug=bool(agent_request.is_debug),
             user_id=resolved_user_id,
         )
-        knowledge_tree = snapshot_runtime_knowledge_tree(
-            int(resolved_tree.root.identity.agent_id), resolved_tenant_id,
-            int(resolved_tree.root.identity.version_no),
-        )
-        if canonical_workbench.knowledge_scope is not None:
-            from services.runtime_knowledge_mount import mount_knowledge_records
-
-            knowledge_tree = knowledge_tree[:1]
-            knowledge_tree[0]["tools"] = mount_knowledge_records(
-                knowledge_tree[0]["tools"], canonical_workbench.knowledge_scope, resolved_tenant_id,
-            )
-            agent_request.__dict__["_runtime_knowledge_tools"] = knowledge_tree[0]["tools"]
-        resolved_tree = attach_runtime_knowledge_tree(resolved_tree, knowledge_tree)
-        root_identity = resolved_tree.root.identity
-        agent_request.agent_id = root_identity.agent_id
-        agent_request.version_no = root_identity.version_no
-        if resolved_tree.overlay.model_id is not None:
-            agent_request.model_id = resolved_tree.overlay.model_id
-        if resolved_tree.overlay.requested_output_tokens is not None:
-            agent_request.requested_output_tokens = (
-                resolved_tree.overlay.requested_output_tokens
-            )
-        agent_request.knowledge_scope = canonical_workbench.knowledge_scope
-        agent_request.__dict__["_runtime_skill_snapshot"] = (
-            build_runtime_skill_snapshot(resolved_tree)
-        )
-        agent_request.__dict__["_runtime_mount_plan"] = resolved_tree
-        agent_request.__dict__["_runtime_root_identity"] = {
-            "agent_id": root_identity.agent_id,
-            "version_no": root_identity.version_no,
-            "runtime_ref": root_identity.runtime_ref,
-            "invocation_name": root_identity.invocation_name,
-            "display_name": root_identity.display_name,
-            "origin": root_identity.origin,
-        }
-        agent_request.__dict__["_runtime_generation_config"] = (
-            canonical_workbench.generation_config.model_dump(mode="json")
+        apply_workbench_runtime_plan(
+            agent_request, canonical_workbench, resolved_tree, resolved_tenant_id
         )
         if conversation is not None:
             assert_workbench_version(

@@ -52,12 +52,12 @@ beforeEach(() => {
   });
   vi.mocked(importAgentFromRepository).mockResolvedValue({ agent_id: 99 });
 });
-it("paginates four agents and resets the page on search", async () => {
+it("paginates six agents and resets the page on search", async () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <AgentPicker
         open
-        agents={Array.from({ length: 5 }, (_, index) => ({
+        agents={Array.from({ length: 7 }, (_, index) => ({
           ...agent,
           id: String(index + 1),
           name: `Paged Agent ${index + 1}`,
@@ -69,7 +69,7 @@ it("paginates four agents and resets the page on search", async () => {
       />
     </QueryClientProvider>
   );
-  expect(screen.getAllByRole("option")).toHaveLength(4);
+  expect(screen.getAllByRole("option")).toHaveLength(6);
   await userEvent.click(screen.getByTitle("2"));
   expect(screen.getAllByRole("option")).toHaveLength(1);
   await userEvent.type(
@@ -87,12 +87,12 @@ it("shows bulk actions and selects all available agents across pages", async () 
       <AgentPicker
         open
         multiple
-        agents={Array.from({ length: 5 }, (_, index) => ({
+        agents={Array.from({ length: 7 }, (_, index) => ({
           ...agent,
           id: String(index + 1),
           name: `Bulk ${index + 1}`,
           display_name: `Bulk ${index + 1}`,
-          is_available: index !== 4,
+          is_available: index !== 6,
         }))}
         onSelect={vi.fn()}
         onCancel={vi.fn()}

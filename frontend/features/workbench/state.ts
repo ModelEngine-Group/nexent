@@ -42,7 +42,7 @@ export const initialWorkbenchState: WorkbenchState = {
   config: {
     schema_version: 3,
     mode: "generic_chat",
-    generation_config: { deep_thinking: false },
+    generation_config: { deep_thinking: false, thinking_effort: "high" },
     agent_mounts: [],
     skill_mounts: [],
   },
@@ -112,28 +112,12 @@ export function workbenchReducer(
       return {
         ...state,
         resolving: false,
-        configVersion: 0,
+        configVersion: state.configVersion,
         config: {
           ...state.config,
           mode: deriveConversationMode(mounts),
           agent_mounts: mounts,
-          model_id:
-            mounts.length === 1 && action.modelIds !== undefined
-              ? action.modelIds.includes(state.config.model_id ?? -1)
-                ? state.config.model_id
-                : action.modelIds[0]
-              : state.config.model_id,
-          skill_mounts:
-            mounts.length === 1
-              ? action.preview.default_skill_mounts
-              : state.config.skill_mounts,
         },
-        skillNames: Object.fromEntries(
-          (action.preview.default_skill_resources || []).map((skill) => [
-            skill.skill_id,
-            skill.name,
-          ])
-        ),
       };
     }
     case "resolve-agent-error":

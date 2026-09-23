@@ -3,6 +3,10 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { ResourceSelectionGrid } from "@/features/workbench/components/ResourceSelectionGrid";
+import {
+  RESOURCE_PAGE_SIZE,
+  resourcePage,
+} from "@/features/workbench/components/ResourcePagination";
 
 it("preserves the shared card's default button semantics and independent actions", async () => {
   const select = vi.fn();
@@ -40,4 +44,8 @@ it("renders all picker results without default grid pagination, filters or creat
   ).toBeInTheDocument();
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+  expect(RESOURCE_PAGE_SIZE).toBe(6);
+  expect(resourcePage(Array.from({ length: 12 }, (_, i) => i), 2)).toEqual([
+    6, 7, 8, 9, 10, 11,
+  ]);
 });

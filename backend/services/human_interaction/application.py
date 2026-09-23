@@ -87,6 +87,33 @@ def _resolve_authorized_workbench_root(payload, conversation, tenant_id, user_id
     return int(plan.root.identity.agent_id)
 
 
+def _restore_workbench_runtime(request, *, tenant_id: str, user_id: str) -> None:
+    """Rebuild non-serializable Workbench mounts for a durable HITL attempt."""
+    if request.entrypoint != "workbench":
+        return
+
+    from consts.model import WorkbenchSessionConfig
+    from management.services.agent.run import apply_workbench_runtime_plan
+    from services.conversation_management_service import get_conversation_service
+    from services.workbench_service import resolve_workbench_config
+
+    raw_config = request.workbench
+    if raw_config is None:
+        conversation = get_conversation_service(request.conversation_id, user_id, tenant_id)
+        raw_config = (conversation or {}).get("workbench_config")
+    if raw_config is None:
+        raise InteractionError("Workbench configuration is unavailable", 403)
+
+    canonical, plan = resolve_workbench_config(
+        WorkbenchSessionConfig.model_validate(raw_config),
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    if int(plan.root.identity.agent_id) != int(request.agent_id):
+        raise InteractionError("Agent is no longer accessible", 403)
+    apply_workbench_runtime_plan(request, canonical, plan, tenant_id)
+
+
 async def authorize_run(payload, tenant_id, user_id):
     from database.user_tenant_db import get_user_tenant_by_user_id
     from management.services.agent.management import list_all_agent_info_impl
@@ -178,6 +205,9 @@ async def execute_attempt(job, lease):
         request.__dict__["_runtime_metadata_version"] = saved["runtime_metadata_version"]
         request.__dict__["_runtime_knowledge_context"] = saved.get("runtime_knowledge_context")
         await authorize_run(saved["request"], identity["tenant_id"], identity["user_id"])
+        _restore_workbench_runtime(
+            request, tenant_id=identity["tenant_id"], user_id=identity["user_id"],
+        )
         run_info, memory_context = await prepare_agent_run(
             agent_request=request, user_id=identity["user_id"], tenant_id=identity["tenant_id"],
             language=saved["language"], allow_memory_search=True,

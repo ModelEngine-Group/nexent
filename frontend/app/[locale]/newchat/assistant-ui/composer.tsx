@@ -77,6 +77,10 @@ export interface ComposerProps {
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
@@ -214,6 +218,10 @@ export const Composer: FC<ComposerProps> = ({
   models,
   selectedModelId,
   onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
@@ -346,14 +354,11 @@ export const Composer: FC<ComposerProps> = ({
       <QueuedRunMessageStrip key={queue?.scope} />
       {workbenchPresentation &&
         !compact &&
-        (creationMode ? (
-          <CreationExamples
-            mode={creationMode}
-            onBack={workbenchPresentation.onExitCreation}
-          />
-        ) : (
-          workbenchPresentation.actions
-        ))}
+        !creationMode &&
+        workbenchPresentation.actions}
+      {workbenchPresentation && !compact && creationMode && (
+        <div className="mb-2 h-7" aria-hidden="true" />
+      )}
       <fieldset
         disabled={disabled && !disabledReason}
         aria-disabled={disabled && !disabledReason}
@@ -371,7 +376,7 @@ export const Composer: FC<ComposerProps> = ({
         ) : null}
         {!compact && !creationMode && <PlanView />}
         {creationMode && (
-          <div className="px-4 pt-4">
+          <div className="flex items-center border-b border-border px-3 py-2">
             <button
               type="button"
               onClick={workbenchPresentation?.onExitCreation}
@@ -537,6 +542,17 @@ export const Composer: FC<ComposerProps> = ({
                     models={models}
                     value={selectedModelId}
                     onValueChange={onModelChange}
+                    deepThinking={deepThinking}
+                    onDeepThinkingChange={onDeepThinkingChange}
+                    effort={thinkingEffort}
+                    onEffortChange={(value) => {
+                      if (
+                        value === "low" ||
+                        value === "medium" ||
+                        value === "high"
+                      )
+                        onThinkingEffortChange?.(value);
+                    }}
                     variant="ghost"
                     size="sm"
                     className="shrink-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground"
@@ -702,6 +718,14 @@ export const Composer: FC<ComposerProps> = ({
           )}
         </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       </fieldset>
+      {creationMode && !compact && workbenchPresentation && (
+        <div className="absolute inset-x-0 top-full z-10">
+          <CreationExamples
+            mode={creationMode}
+            onBack={workbenchPresentation.onExitCreation}
+          />
+        </div>
+      )}
       {queue?.error ? (
         <p role="alert" className="mt-2 px-3 text-xs text-destructive">
           {queue.error}

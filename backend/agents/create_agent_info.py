@@ -2421,11 +2421,15 @@ def apply_root_generation_overlay(
     """Add a root-only model alias without changing child Agent aliases."""
     if not generation_config:
         return
-    if generation_config.get("deep_thinking"):
-        raise WorkbenchError("GENERATION_CONFIG_RESOLVER_UNAVAILABLE")
     for model_config in model_list:
         if model_config.cite_name != agent_config.model_name:
             continue
+        extra_body = dict(model_config.extra_body or {})
+        extra_body["enable_thinking"] = bool(generation_config.get("deep_thinking"))
+        if generation_config.get("deep_thinking") and generation_config.get("thinking_effort"):
+            extra_body["reasoning_effort"] = generation_config["thinking_effort"]
+        else:
+            extra_body.pop("reasoning_effort", None)
         root_model = model_config.model_copy(
             deep=True,
             update={
@@ -2440,6 +2444,7 @@ def apply_root_generation_overlay(
                     if generation_config.get("top_p") is not None
                     else model_config.top_p
                 ),
+                "extra_body": extra_body,
             },
         )
         model_list.append(root_model)

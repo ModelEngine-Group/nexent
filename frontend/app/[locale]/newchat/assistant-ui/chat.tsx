@@ -30,6 +30,10 @@ export interface ChatProps {
   fallbackAgentName?: string;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -85,6 +89,10 @@ export const Chat: FC<ChatProps> = ({
   fallbackAgentName = "Nexent Workbench",
   selectedModelId,
   onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
   showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
@@ -134,6 +142,10 @@ export const Chat: FC<ChatProps> = ({
           welcomeContent={landingContent}
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
+          deepThinking={deepThinking}
+          onDeepThinkingChange={onDeepThinkingChange}
+          thinkingEffort={thinkingEffort}
+          onThinkingEffortChange={onThinkingEffortChange}
           showModelSelector={showModelSelector}
           modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
@@ -176,6 +188,10 @@ export const Chat: FC<ChatProps> = ({
       modelSelectionScope={modelSelectionScope}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
+      deepThinking={deepThinking}
+      onDeepThinkingChange={onDeepThinkingChange}
+      thinkingEffort={thinkingEffort}
+      onThinkingEffortChange={onThinkingEffortChange}
       showConversationTitle={showConversationTitle}
       isDictationConfigured={isDictationConfigured}
       knowledgeScope={knowledgeScope}

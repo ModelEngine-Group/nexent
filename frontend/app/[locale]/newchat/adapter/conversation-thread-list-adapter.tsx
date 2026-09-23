@@ -575,7 +575,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         const restoredImageUrls = new Set<string>();
         const restoredImages: any[] = [];
         const historicalSkillFiles = new Map<string, string>();
-        let historicalSkillSummaryPart: { type: "text"; text: string } | null = null;
+        let historicalSkillSummaryPart: { type: "text"; text: string } | null =
+          null;
         const historicalSkillAttemptCheckpoints = new Map<
           string,
           { files: Map<string, string>; summary: string | null }
@@ -1100,8 +1101,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               part.type === "final_answer" && Boolean(part.content?.trim())
           ) &&
           !content.some(
-            (part) =>
-              part.type === "data" && part.name === "nl2agent-created"
+            (part) => part.type === "data" && part.name === "nl2agent-created"
           )
         ) {
           content.push({
@@ -1598,7 +1598,9 @@ const waitForServerConversationId = async (
   }
 };
 
-export const conversationThreadListAdapter: RemoteThreadListAdapter = {
+export const createConversationThreadListAdapter = (
+  conversationType: "agent_chat" | "workbench"
+): RemoteThreadListAdapter => ({
   unstable_Provider: createHistoryProvider(),
 
   async list({ after } = {}): Promise<RemoteThreadListResponse> {
@@ -1611,6 +1613,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       limit,
       todayStartMs,
       weekStartMs,
+      conversationType,
     });
     const nextOffset = offset + data.items.length;
 
@@ -1711,4 +1714,10 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
     // real backend conversation ID. This avoids racing the first run.
     return createAssistantStream(() => {});
   },
-};
+});
+
+export const conversationThreadListAdapter =
+  createConversationThreadListAdapter("agent_chat");
+
+export const workbenchConversationThreadListAdapter =
+  createConversationThreadListAdapter("workbench");

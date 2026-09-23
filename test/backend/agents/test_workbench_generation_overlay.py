@@ -4,8 +4,6 @@ from agents.create_agent_info import (
     _materialize_runtime_skill_snapshot,
     apply_root_generation_overlay,
 )
-from agents.create_agent_info import WorkbenchError
-import pytest
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
 
@@ -44,14 +42,48 @@ def test_neutral_generation_overlay_changes_only_root_alias():
     assert shared.temperature == 0.1
     assert models[-1].temperature == 0.7
     assert models[-1].top_p == 0.8
-    assert models[-1].extra_body == shared.extra_body
+    assert models[-1].extra_body == {"enable_thinking": False}
 
 
-def test_provider_specific_thinking_requires_external_resolver():
+def test_thinking_settings_apply_to_root_without_mutating_child_model():
     root = AgentConfig(name="root", description="", tools=[], model_name="shared_model")
-    with pytest.raises(WorkbenchError, match="GENERATION_CONFIG_RESOLVER_UNAVAILABLE"):
-        apply_root_generation_overlay([], root, {"deep_thinking": True})
-    assert root.model_name == "shared_model"
+    shared = ModelConfig(
+        cite_name="shared_model",
+        model_name="provider/model",
+        url="https://example.invalid",
+        extra_body={"existing": "value"},
+    )
+    models = [shared]
+    apply_root_generation_overlay(
+        models,
+        root,
+        {"deep_thinking": True, "thinking_effort": "high"},
+    )
+    assert root.model_name == "workbench_root_model"
+    assert shared.extra_body == {"existing": "value"}
+    assert models[-1].extra_body == {
+        "existing": "value",
+        "enable_thinking": True,
+        "reasoning_effort": "high",
+    }
+
+
+def test_disabling_thinking_drops_stale_effort_from_root_only():
+    root = AgentConfig(name="root", description="", tools=[], model_name="shared_model")
+    shared = ModelConfig(
+        cite_name="shared_model",
+        model_name="provider/model",
+        url="https://example.invalid",
+        extra_body={"enable_thinking": True, "reasoning_effort": "high"},
+    )
+    models = [shared]
+    apply_root_generation_overlay(
+        models,
+        root,
+        {"deep_thinking": False, "thinking_effort": "medium"},
+    )
+    assert shared.extra_body == {"enable_thinking": True, "reasoning_effort": "high"}
+    assert models[-1].extra_body == {"enable_thinking": False}
 
 
 def test_ut_be_wb_011_materializes_an_immutable_run_skill_snapshot(tmp_path):
