@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { App, Button, Input, Modal, Spin, Upload } from "antd";
+import { createElement, useEffect, useMemo, useState } from "react";
+import {
+  App,
+  Avatar,
+  Button,
+  Input,
+  Modal,
+  Spin,
+  Upload as AntdUpload,
+} from "antd";
+import type { UploadProps } from "antd";
 import { Share2, Upload as UploadIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { API_ENDPOINTS } from "@/services/api";
@@ -11,7 +20,8 @@ import {
   getAgentRepositoryTagLabel,
   resolveAgentRepositoryTagForSubmit,
 } from "@/lib/agentRepositoryLabels";
-import { RepositoryAgentIcon } from "./RepositoryAgentIcon";
+import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { withBasePath } from "@/lib/basePath";
 import {
   useTagAssignments,
   useTagDefinitions,
@@ -71,6 +81,7 @@ export function MineApplyListingModal({
 
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [iconPreviewUrl, setIconPreviewUrl] = useState<string | null>(null);
+  const [iconLoadError, setIconLoadError] = useState(false);
   const [selectedIconFile, setSelectedIconFile] = useState<File | null>(null);
   const [uploadingIcon, setUploadingIcon] = useState(false);
   const [listingContent, setListingContent] = useState("");
@@ -160,6 +171,7 @@ export function MineApplyListingModal({
       setTagEditorOpen(false);
       setSavedAssignments(null);
       setIconPreviewUrl(null);
+      setIconLoadError(false);
       setSelectedIconFile(null);
       return;
     }
@@ -179,6 +191,7 @@ export function MineApplyListingModal({
     if (!prefill) {
       setIconUrl(null);
       setIconPreviewUrl(null);
+      setIconLoadError(false);
       setSelectedIconFile(null);
       setListingContent("");
       setFormInitialized(true);
@@ -187,6 +200,7 @@ export function MineApplyListingModal({
 
     setIconUrl(prefill.icon_url);
     setIconPreviewUrl(null);
+    setIconLoadError(false);
     setSelectedIconFile(null);
 
     setListingContent("");
@@ -208,8 +222,24 @@ export function MineApplyListingModal({
     }
     setSelectedIconFile(file);
     setIconPreviewUrl(URL.createObjectURL(file));
+    setIconLoadError(false);
     return false;
   };
+
+  const uploadProps: UploadProps = {
+    accept: "image/png,image/jpeg,image/gif,image/webp",
+    showUploadList: false,
+    disabled: uploadingIcon || isSubmitting,
+    beforeUpload: handleIconUpload,
+  };
+  const defaultIcon = createElement(getAgentIcon({ agent_id: agentId ?? 0 }), {
+    size: 28,
+  });
+  const selectedIconSource = iconPreviewUrl ?? iconUrl;
+  const iconSource =
+    selectedIconSource && !iconLoadError
+      ? withBasePath(selectedIconSource)
+      : undefined;
 
   const handleSubmit = async () => {
     if (uploadingIcon) {
@@ -311,35 +341,55 @@ export function MineApplyListingModal({
         <Spin spinning={isListingsFetching && open}>
           <div className="space-y-5">
             <section className="space-y-2">
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                {t("agentRepository.mine.applyModal.icon")}
-              </p>
-              <div className="flex items-center gap-3">
-                <RepositoryAgentIcon
-                  agentId={agentId}
-                  iconUrl={iconPreviewUrl ?? iconUrl}
-                  size={60}
-                  iconSize={28}
-                />
-                <Upload
-                  accept="image/png,image/jpeg,image/gif,image/webp"
-                  showUploadList={false}
-                  beforeUpload={handleIconUpload}
-                  disabled={uploadingIcon || isSubmitting}
-                >
-                  <Button
-                    icon={<UploadIcon className="size-4" />}
-                    loading={uploadingIcon}
+              <div className="mb-2 text-xs font-medium text-gray-500">
+                {t("agent.icon")}
+              </div>
+              <div className="flex flex-col items-start">
+                <AntdUpload {...uploadProps}>
+                  <div
+                    className="group relative cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t("agentRepository.mine.applyModal.uploadIcon")}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.currentTarget.click();
+                      }
+                    }}
                   >
-                    {t("agentRepository.mine.applyModal.uploadIcon")}
-                  </Button>
-                </Upload>
+                    <Avatar
+                      size={72}
+                      src={iconSource}
+                      icon={defaultIcon}
+                      onError={() => {
+                        setIconLoadError(true);
+                        return false;
+                      }}
+                      className={`border-2 border-dashed border-gray-300 ${iconSource ? "" : "!bg-primary/10 !text-primary"}`}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                      {uploadingIcon ? (
+                        <Spin size="small" />
+                      ) : (
+                        <UploadIcon size={18} className="text-white" />
+                      )}
+                    </div>
+                  </div>
+                </AntdUpload>
+                <div className="mt-2 text-center text-xs text-gray-400">
+                  {t("agent.iconHint")}
+                </div>
                 {(iconUrl || selectedIconFile) && (
                   <Button
+                    type="link"
+                    size="small"
+                    className="!px-0"
                     onClick={() => {
                       setIconUrl(null);
                       setIconPreviewUrl(null);
                       setSelectedIconFile(null);
+                      setIconLoadError(false);
                     }}
                     disabled={uploadingIcon || isSubmitting}
                   >
@@ -347,9 +397,6 @@ export function MineApplyListingModal({
                   </Button>
                 )}
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {t("agentRepository.mine.applyModal.iconUploadHint")}
-              </p>
             </section>
 
             <section className="space-y-2">
