@@ -3,6 +3,7 @@ import type {
   MyAgentRepositoryInfoItem,
   MyEditableAgentItem,
 } from "@/types/agentRepository";
+import type { TagAssignmentValue, TagDefinition } from "@/types/tagManagement";
 
 export type MineCardMenuAction = "apply" | "review" | "reviewUpdate";
 
@@ -255,6 +256,34 @@ export function pickApplyListingPrefillSource(
 export interface ApplyListingFormPrefill {
   icon_url: string | null;
   tags: string[];
+}
+
+export function getListingTagsFromAssignments(
+  assignments: Pick<
+    TagAssignmentValue,
+    "definition_id" | "value_id" | "display_value"
+  >[],
+  agentCategory: Pick<TagDefinition, "definition_id" | "values"> | null
+): string[] {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const assignment of assignments) {
+    const categoryValue =
+      assignment.definition_id === agentCategory?.definition_id
+        ? agentCategory.values?.find(
+            (value) => value.value_id === assignment.value_id
+          )
+        : null;
+    const tag = (
+      categoryValue?.normalized_value || assignment.display_value
+    ).trim();
+    const key = tag.toLocaleLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      tags.push(tag);
+    }
+  }
+  return tags;
 }
 
 function normalizeApplyListingTags(tags: string[], maxTags: number): string[] {

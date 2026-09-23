@@ -30,6 +30,7 @@ import {
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import {
   buildApplyListingFormPrefill,
+  getListingTagsFromAssignments,
   pickApplyListingPrefillSource,
 } from "@/lib/agentRepositoryMine";
 import type {
@@ -123,12 +124,9 @@ export function MineApplyListingModal({
     [agentCategory?.definition_id, assignmentValues]
   );
 
-  const selectedCategoryValues = useMemo(
-    () =>
-      categoryValues.filter((value) =>
-        categoryAssignmentValueIds.has(value.value_id)
-      ),
-    [categoryAssignmentValueIds, categoryValues]
+  const selectedListingTags = useMemo(
+    () => getListingTagsFromAssignments(assignmentValues, agentCategory),
+    [assignmentValues, agentCategory]
   );
 
   const legacyCategorySelection = useMemo(() => {
@@ -246,11 +244,11 @@ export function MineApplyListingModal({
       return;
     }
 
-    if (selectedCategoryValues.length === 0 || !agentCategory) {
+    if (selectedListingTags.length === 0) {
       message.warning(t("agentRepository.mine.applyModal.validation.tags"));
       return;
     }
-    if (selectedCategoryValues.length > MAX_TAGS) {
+    if (selectedListingTags.length > MAX_TAGS) {
       message.warning(
         t("agentRepository.mine.applyModal.validation.tagsMax", {
           count: MAX_TAGS,
@@ -258,8 +256,8 @@ export function MineApplyListingModal({
       );
       return;
     }
-    const tags = selectedCategoryValues.map((value) =>
-      resolveAgentRepositoryTagForSubmit(value.normalized_value, t)
+    const tags = selectedListingTags.map((tag) =>
+      resolveAgentRepositoryTagForSubmit(tag, t)
     );
     if (tags.some((tag) => tag.length > MAX_TAG_LENGTH)) {
       message.warning(
@@ -407,12 +405,10 @@ export function MineApplyListingModal({
                 <Button onClick={() => setTagEditorOpen(true)}>
                   {t("tagManagement.action.editTags")}
                 </Button>
-                {selectedCategoryValues.length > 0 ? (
+                {selectedListingTags.length > 0 ? (
                   <span className="text-sm text-slate-600 dark:text-slate-300">
-                    {selectedCategoryValues
-                      .map((value) =>
-                        getAgentRepositoryTagLabel(value.normalized_value, t)
-                      )
+                    {selectedListingTags
+                      .map((tag) => getAgentRepositoryTagLabel(tag, t))
                       .join(" · ")}
                   </span>
                 ) : null}
