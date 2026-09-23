@@ -323,6 +323,21 @@ function applyAdvancedSettingsToParams(
 
 /* ------------------------------ 单个添加 ------------------------------ */
 
+/** Map a suggestCapacity response into advanced-settings form values
+ *  (snake_case keys, same as the batch tab's per-row suggestions). */
+function capacitySuggestionToSettings(
+  sug: any
+): ModelAdvancedSettingsValue | undefined {
+  const val: ModelAdvancedSettingsValue = {};
+  if (sug?.contextWindowTokens != null)
+    val.context_window_tokens = sug.contextWindowTokens;
+  if (sug?.maxInputTokens != null) val.max_input_tokens = sug.maxInputTokens;
+  if (sug?.maxOutputTokens != null) val.max_output_tokens = sug.maxOutputTokens;
+  if (sug?.defaultOutputReserveTokens != null)
+    val.default_output_reserve_tokens = sug.defaultOutputReserveTokens;
+  return Object.keys(val).length > 0 ? val : undefined;
+}
+
 function SingleAddForm({
   onDone,
   onSuccess,
@@ -346,36 +361,53 @@ function SingleAddForm({
   const [submitting, setSubmitting] = useState(false);
   const [override, setOverride] = useState<RowOverride | undefined>(undefined);
   const [showSettings, setShowSettings] = useState(false);
+  // Auto-detected from the catalog (same lookup the batch tab runs per
+  // fetched row): capacity prefill + reasoning capability.
+  const [suggestion, setSuggestion] = useState<RowOverride | undefined>(
+    undefined
+  );
   const [capability, setCapability] = useState<ReasoningCapability | undefined>(
     undefined
   );
+  // Connectivity probe; the submit is gated on a passing result, matching
+  // the batch tab. Any form change resets it.
+  const [probe, setProbe] = useState<
+    "idle" | "checking" | "available" | "unavailable"
+  >("idle");
 
-  // Look up the reasoning capability while the advanced-settings dialog is
-  // open (needs name + URL) so the effort/budget controls can render.
+  // Auto-detect capacity + reasoning capability whenever name and URL are
+  // filled (debounced); user-saved overrides (the gear) win over suggestions.
   useEffect(() => {
-    if (!showSettings || !name.trim() || !baseUrl.trim()) {
+    if (!name.trim() || !baseUrl.trim()) {
+      setSuggestion(undefined);
       setCapability(undefined);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const suggestion = await modelService.suggestCapacity({
+        const s = await modelService.suggestCapacity({
           modelName: name.trim(),
           baseUrl: baseUrl.trim(),
           providerHint: provider,
           modelType: type,
         });
-        if (!cancelled) setCapability(suggestion?.reasoningCapability);
+        if (cancelled) return;
+        setCapability(s?.reasoningCapability);
+        const settings = capacitySuggestionToSettings(s?.suggestions);
+        setSuggestion(settings ? { settings } : undefined);
       } catch {
-        if (!cancelled) setCapability(undefined);
+        if (!cancelled) {
+          setSuggestion(undefined);
+          setCapability(undefined);
+        }
       }
     }, 400);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [showSettings, name, baseUrl, provider, type]);
+  }, [name, baseUrl, provider, type]);
 
   function changeProvider(next: string) {
     setProvider(next);
@@ -388,9 +420,62 @@ function SingleAddForm({
   const isCustom = provider === CUSTOM_PROVIDER_KEY;
   const canSubmit =
     name.trim().length > 0 && (!isCustom || baseUrl.trim().length > 0);
+  // User-saved gear overrides win; otherwise the catalog suggestion applies.
+  const effective = override ?? suggestion;
+  const suggestionSettings = suggestion?.settings ?? {};
+  // Compact reasoning summary for the auto-detect hint line.
+  const thinkingLabel = t("modelConfig.advancedConfig.enableThinking", {
+    defaultValue: "深度思考",
+  });
+  let reasoningBit: string | null = null;
+  if (capability?.status === "supported") {
+    if (capability.control === "budget_tokens") {
+      reasoningBit = `${thinkingLabel}（${t("model.advanced.reasoningBudget", {
+        defaultValue: "预算 tokens",
+      })}）`;
+    } else if (
+      capability.control === "effort" &&
+      capability.levels.length > 0
+    ) {
+      reasoningBit = `${thinkingLabel}（${t("model.advanced.reasoningEffort", {
+        defaultValue: "思考挡位",
+      })}: ${capability.levels.join(" / ")}）`;
+    } else {
+      reasoningBit = thinkingLabel;
+    }
+  }
+
+  async function handleCheck() {
+    if (probe === "checking" || !name.trim() || !baseUrl.trim()) return;
+    setProbe("checking");
+    try {
+      const result = await modelService.verifyModelConfigConnectivity({
+        modelName: name.trim(),
+        modelType: type,
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim(),
+        modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
+        ...(effective?.settings
+          ? buildInferenceParamsPayload(effective.settings)
+          : {}),
+      });
+      setProbe(result.connectivity ? "available" : "unavailable");
+    } catch {
+      setProbe("unavailable");
+    }
+  }
 
   async function submit() {
     if (!canSubmit || submitting) return;
+    // Same gate as the batch tab: the model must pass the probe first.
+    if (probe !== "available") {
+      message.warning(
+        t("modelConfig.addDialog.singleUntestedWarning", {
+          defaultValue: "请先通过连通性检测再添加模型",
+        })
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       const params: Record<string, any> = {
@@ -401,9 +486,11 @@ function SingleAddForm({
         displayName: displayName.trim() || name.trim(),
         maxTokens: type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
         modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
+        // The gate above guarantees a passing probe with these exact values.
+        connectStatus: "available",
       };
-      if (override?.settings) {
-        applyAdvancedSettingsToParams(params, override.settings);
+      if (effective?.settings) {
+        applyAdvancedSettingsToParams(params, effective.settings);
       }
       await createModel(tenantId, params);
       onSuccess({ name: name.trim(), type });
@@ -442,7 +529,13 @@ function SingleAddForm({
                 defaultValue: "模型类型",
               })}
             </Label>
-            <Select value={type} onValueChange={(v) => setType(v as ModelType)}>
+            <Select
+              value={type}
+              onValueChange={(v) => {
+                setType(v as ModelType);
+                setProbe("idle");
+              }}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -469,7 +562,10 @@ function SingleAddForm({
             </Label>
             <Input
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setProbe("idle");
+              }}
               placeholder="Qwen/Qwen3-8B"
             />
           </div>
@@ -504,7 +600,10 @@ function SingleAddForm({
             </Label>
             <Input
               value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
+              onChange={(e) => {
+                setBaseUrl(e.target.value);
+                setProbe("idle");
+              }}
               placeholder="https://api.example.com/v1"
             />
             <p className="text-xs text-muted-foreground">
@@ -524,26 +623,97 @@ function SingleAddForm({
             <Input
               type="password"
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                setProbe("idle");
+              }}
               placeholder="sk-..."
             />
           </div>
         </div>
+
+        {/* Auto-detected capacity / reasoning summary (catalog lookup) */}
+        {(suggestion?.settings || capability?.status === "supported") && (
+          <div className="mt-4 rounded-lg border bg-secondary/30 px-4 py-3 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {t("modelConfig.addDialog.detected", {
+                defaultValue: "已自动识别",
+              })}
+            </span>
+            {suggestionSettings.context_window_tokens != null && (
+              <span className="ml-2">
+                {t("model.dialog.capacity.contextWindowTokens")}{" "}
+                {Number(suggestionSettings.context_window_tokens)}
+              </span>
+            )}
+            {suggestionSettings.max_input_tokens != null && (
+              <span className="ml-2">
+                {t("model.dialog.capacity.maxInputTokens")}{" "}
+                {Number(suggestionSettings.max_input_tokens)}
+              </span>
+            )}
+            {suggestionSettings.max_output_tokens != null && (
+              <span className="ml-2">
+                {t("model.dialog.capacity.maxOutputTokens")}{" "}
+                {Number(suggestionSettings.max_output_tokens)}
+              </span>
+            )}
+            {reasoningBit && <span className="ml-2">{reasoningBit}</span>}
+            <span className="ml-2">
+              {t("modelConfig.addDialog.detectedHint", {
+                defaultValue: "可在高级设置中调整",
+              })}
+            </span>
+          </div>
+        )}
       </div>
       <div className="flex items-center justify-between border-t px-6 py-4">
-        <Button
-          variant="outline"
-          onClick={() => setShowSettings(true)}
-          className="gap-2"
-        >
-          <Settings2 className="size-4" />
-          {t("modelConfig.addDialog.advancedSettings", {
-            defaultValue: "高级设置",
-          })}
-          {override?.settings && (
-            <span className="size-1.5 rounded-full bg-primary" />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setShowSettings(true)}
+            className="gap-2"
+          >
+            <Settings2 className="size-4" />
+            {t("modelConfig.addDialog.advancedSettings", {
+              defaultValue: "高级设置",
+            })}
+            {effective?.settings && (
+              <span className="size-1.5 rounded-full bg-primary" />
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleCheck}
+            disabled={
+              probe === "checking" ||
+              submitting ||
+              !name.trim() ||
+              !baseUrl.trim()
+            }
+          >
+            {probe === "checking" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <ShieldCheck className="size-4" />
+            )}
+            {t("modelConfig.editDialog.checkConnectivity", {
+              defaultValue: "检测连通性",
+            })}
+          </Button>
+          {probe === "available" && (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-600">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              {t("model.status.available", { defaultValue: "可用" })}
+            </span>
           )}
-        </Button>
+          {probe === "unavailable" && (
+            <span className="flex items-center gap-1.5 text-xs text-red-500">
+              <span className="size-2 rounded-full bg-red-500" />
+              {t("model.status.unavailable", { defaultValue: "不可用" })}
+            </span>
+          )}
+        </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={onDone}>
             {t("common.cancel", { defaultValue: "取消" })}
@@ -564,10 +734,11 @@ function SingleAddForm({
             model_name: name.trim() || "model",
             model_type: type,
           }}
-          override={override}
+          override={effective}
           reasoningCapability={capability}
           onSave={(next) => {
             setOverride(next);
+            setProbe("idle");
             setShowSettings(false);
           }}
           onClose={() => setShowSettings(false)}
@@ -749,23 +920,9 @@ function BatchAddForm({
             if (s?.reasoningCapability) {
               capabilities[row.id] = s.reasoningCapability;
             }
-            const sug = s?.suggestions;
-            if (sug) {
-              // snake_case keys matching spec.key so ModelAdvancedSettings
-              // picks them up directly.
-              const val: ModelAdvancedSettingsValue = {};
-              if (sug.contextWindowTokens != null)
-                val.context_window_tokens = sug.contextWindowTokens;
-              if (sug.maxInputTokens != null)
-                val.max_input_tokens = sug.maxInputTokens;
-              if (sug.maxOutputTokens != null)
-                val.max_output_tokens = sug.maxOutputTokens;
-              if (sug.defaultOutputReserveTokens != null)
-                val.default_output_reserve_tokens =
-                  sug.defaultOutputReserveTokens;
-              if (Object.keys(val).length > 0) {
-                suggestions[row.id] = { settings: val };
-              }
+            const settings = capacitySuggestionToSettings(s?.suggestions);
+            if (settings) {
+              suggestions[row.id] = { settings };
             }
           } catch {
             // catalog miss — leave empty, user can fill manually
