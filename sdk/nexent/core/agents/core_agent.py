@@ -57,9 +57,10 @@ from .plan_repo import PlanRepo
 from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated, StepSteered
 
 
-logger = logging.getLogger(__name__)
-# Model-call scoped logger routed to nexent_model_call.log by the runtime service.
-model_logger = logging.getLogger("model_call.core_agent")
+# Model-call scoped logger routed to nexent_model_call.log by the runtime
+# service: the MODEL_CALL_LOGGERS whitelist binds the "model_call" namespace,
+# so every core-agent record lands in the model_call file, not runtime.
+logger = logging.getLogger("model_call.core_agent")
 
 RUNTIME_METADATA_BLOCK_RE = re.compile(
     r'<runtime_metadata\b.*</runtime_metadata>',
@@ -736,7 +737,7 @@ Stop Sequences: [{stop_seq_str}]
 Additional Args:
 {args_str}"""
 
-            model_logger.debug("MODEL INPUT PARAMETERS\n%s", log_content)
+            logger.debug("MODEL INPUT PARAMETERS\n%s", log_content)
             self.logger.log_markdown(
                 content=log_content,
                 title="MODEL INPUT PARAMETERS",
@@ -981,6 +982,10 @@ Additional Args:
                 f"(length={len(str(model_output or ''))}, "
                 f"unicode_categories={unicode_category_summary(model_output)})",
                 level=LogLevel.DEBUG,
+            )
+            logger.debug(
+                "MODEL OUTPUT\n%s",
+                truncate_content(str(model_output or ""), max_length=1000),
             )
 
             if hitl is not None:

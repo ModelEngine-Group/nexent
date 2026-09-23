@@ -307,7 +307,8 @@ def _cleanup_routing_state():
 
     The console instance is shared between root and the model_call loggers, so
     handlers attached to the named loggers are removed without closing (they
-    were already closed via root).
+    were already closed via root). Levels are reset too so the DEBUG pin does
+    not leak into unrelated tests.
     """
     root = logging.getLogger()
     for h in list(root.handlers):
@@ -318,6 +319,7 @@ def _cleanup_routing_state():
         for h in list(named.handlers):
             named.removeHandler(h)
         named.propagate = True
+        named.setLevel(logging.NOTSET)
 
 
 def _read(tmp_path, category: str) -> str:
@@ -355,6 +357,12 @@ class TestModelCallRouting:
             entry = cfg["loggers"][name]
             assert entry["handlers"] == ["console", "file_model_call"]
             assert entry["propagate"] is False
+            # DEBUG pin: model-layer debug records must be emitted even when
+            # the root logger stays at INFO.
+            assert entry["level"] == "DEBUG"
+        # file_model_call must pass DEBUG records through the handler gate;
+        # it is bound only to the whitelisted loggers, so nothing can leak in.
+        assert cfg["handlers"]["file_model_call"]["level"] == "DEBUG"
         # Console itself stays unfiltered (docker logs behaviour unchanged).
         assert "filters" not in cfg["handlers"]["console"]
         assert "filters" not in cfg["handlers"]["file_runtime"]
@@ -406,6 +414,58 @@ class TestModelCallRouting:
     ):
         apply_config(monkeypatch, tmp_path)
         self._log_and_assert_routing(tmp_path)
+
+    @pytest.mark.parametrize(
+        "apply_config",
+        [_apply_dictconfig, _apply_configure_logging],
+        ids=["dictconfig", "configure_logging"],
+    )
+    def test_debug_records_reach_model_call_file(
+        self, reset_root_logger, tmp_path, monkeypatch, apply_config
+    ):
+        """Regression: MODEL INPUT PARAMETERS is logged at DEBUG on
+        model_call.core_agent; with the whitelist left at NOTSET it inherited
+        the root INFO level and was silently dropped before reaching the file.
+        """
+        apply_config(monkeypatch, tmp_path)
+        try:
+            assert logging.getLogger("model_call.core_agent").isEnabledFor(logging.DEBUG)
+            logging.getLogger("model_call.core_agent").debug("MODEL INPUT PARAMETERS probe")
+            logging.getLogger("openai_llm").debug("debug probe from openai_llm")
+            for h in logging.getLogger().handlers:
+                h.flush()
+            model_log = _read(tmp_path, "model_call")
+            runtime_log = _read(tmp_path, "runtime")
+            assert "MODEL INPUT PARAMETERS probe" in model_log
+            assert "debug probe from openai_llm" in model_log
+            assert "MODEL INPUT PARAMETERS probe" not in runtime_log
+            assert "debug probe from openai_llm" not in runtime_log
+        finally:
+            _cleanup_routing_state()
+
+    def test_whitelist_pinned_to_debug_level(self, reset_root_logger, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        configure_logging(categories=["runtime", "model_call"])
+        try:
+            for name in MODEL_CALL_LOGGERS:
+                assert logging.getLogger(name).level == logging.DEBUG
+        finally:
+            _cleanup_routing_state()
+
+    def test_unbind_resets_whitelist_levels(self, reset_root_logger, tmp_path, monkeypatch):
+        """Without the model_call category the whitelist returns to its
+        pre-branch behaviour: no handlers, propagate on, level inherited."""
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        configure_logging(categories=["runtime", "model_call"])
+        configure_logging(categories=["runtime"])
+        try:
+            for name in MODEL_CALL_LOGGERS:
+                named = logging.getLogger(name)
+                assert named.level == logging.NOTSET
+                assert named.handlers == []
+                assert named.propagate is True
+        finally:
+            _cleanup_routing_state()
 
     def test_named_loggers_do_not_accumulate_handlers(
         self, reset_root_logger, tmp_path, monkeypatch
