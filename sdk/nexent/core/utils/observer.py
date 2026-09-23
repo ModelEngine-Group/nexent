@@ -47,6 +47,7 @@ class ProcessType(Enum):
     EXECUTION_LOGS = "execution_logs"  # code execution result
     AGENT_NEW_RUN = "agent_new_run"  # Agent basic information
     AGENT_FINISH = "agent_finish"  # sub-agent end of run mark, mainly used for front-end display
+    HUMAN_INTERACTION = "human_interaction"  # terminal question form in an ordinary assistant message
     FINAL_ANSWER = "final_answer"  # final summary
     ERROR = "error"  # error field
     WARNING = "warning"  # recoverable issue; execution can continue
@@ -241,6 +242,7 @@ class MessageObserver:
             ProcessType.PICTURE_WEB: default_transformer,
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
+            ProcessType.HUMAN_INTERACTION: default_transformer,
             ProcessType.TOOL: default_transformer,
             ProcessType.NL2A: default_transformer,
             ProcessType.NL2A_STATE: default_transformer,

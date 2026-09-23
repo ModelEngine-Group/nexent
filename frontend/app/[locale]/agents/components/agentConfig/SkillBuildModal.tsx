@@ -694,6 +694,7 @@ export default function SkillBuildModal({
         setIsStreaming(true);
       }
       if (handleAttemptRollback(event)) return;
+
       if (event.type === "skill_body" || event.type === "file_content") {
         beginDraftStream();
         setIsStreaming(true);

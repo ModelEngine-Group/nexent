@@ -12,7 +12,10 @@ const runtime = vi.hoisted(() => ({
 vi.mock("@assistant-ui/react", () => {
   const Wrapper = ({ children }: { children: ReactNode }) => <>{children}</>;
   return {
-    useAui: () => ({ composer: () => ({ setText: vi.fn() }) }),
+    useAui: () => ({
+      composer: () => ({ setText: vi.fn() }),
+      threads: () => ({ __internal_getAssistantRuntime: () => undefined }),
+    }),
     useAuiState: (select: (state: typeof runtime) => unknown) =>
       select(runtime),
     AuiIf: ({

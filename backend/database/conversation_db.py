@@ -325,7 +325,7 @@ def persist_assistant_run_batch(
     Returns:
         Mapping from unit_index to the generated unit_id.
     """
-    if terminal_status not in {"completed", "failed", "stopped", "waiting_human", "recovery_required"}:
+    if terminal_status not in {"completed", "failed", "stopped"}:
         raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
 
     message_id = int(message_id)
@@ -2294,11 +2294,58 @@ def save_history_summary(
             ConversationMessageUnit.unit_id)).scalar_one()
 
 
+_STOPPED_CONTEXT_NOTE = "上一轮已由用户停止，以下内容为已保存的部分结果。"
+_UNANSWERED_CONTEXT_NOTE = "该轮未生成有效回复。"
+_PARTIAL_CONTEXT_MAX_CHARS = 16000
+
+
+def _stopped_history_text(message, session, conversation_id: int) -> str:
+    """Project saved readable output only; never replay code or infer tool success."""
+    body = (message.message_content or "").replace("<user_break>", "").strip()
+    if body in {"已停止", "Stopped"}:
+        body = ""
+    if not body:
+        units = session.execute(select(
+            ConversationMessageUnit.unit_content,
+        ).where(
+            ConversationMessageUnit.conversation_id == conversation_id,
+            ConversationMessageUnit.message_id == message.message_id,
+            ConversationMessageUnit.unit_type == "execution_logs",
+            ConversationMessageUnit.unit_status == "completed",
+            ConversationMessageUnit.delete_flag == "N",
+        ).order_by(desc(ConversationMessageUnit.unit_index)).limit(16)).all()
+        body = "\n".join(unit.unit_content or "" for unit in reversed(units))
+    files = message.minio_files
+    if isinstance(files, str):
+        try:
+            files = json.loads(files)
+        except (ValueError, TypeError):
+            files = None
+    if isinstance(files, list):
+        references = [
+            str(item.get("url") or item.get("s3_url") or "")
+            for item in files if isinstance(item, dict)
+        ]
+        body += "\n" + "\n".join(ref for ref in references if ref)
+    body = body.strip()[:_PARTIAL_CONTEXT_MAX_CHARS]
+    return _STOPPED_CONTEXT_NOTE + ("\n" + body if body else "")
+
+
+def _history_turn(user, assistant_text: str, assistant_id=None) -> Dict[str, Any]:
+    return {
+        "user_message": user.message_content or "",
+        "assistant_final_answer": assistant_text,
+        "attachments": user.minio_files,
+        "user_message_id": user.message_id,
+        "assistant_message_id": assistant_id if assistant_id is not None else -user.message_id,
+    }
+
+
 def get_historical_context(
     conversation_id: int, current_user_message_id: int,
     user_id: str, tenant_id: str,
 ) -> Optional[Dict[str, Any]]:
-    """Load the authorized latest checkpoint and completed turns before a run."""
+    """Load authorized completed and stopped turns after the latest valid checkpoint."""
     if not user_id or not tenant_id:
         return None
     user_tenant = _get_user_tenant(user_id)
@@ -2366,11 +2413,12 @@ def get_historical_context(
             ConversationMessage.message_role,
             ConversationMessage.message_content,
             ConversationMessage.minio_files,
+            ConversationMessage.status,
         ).where(
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.message_index > boundary_index,
             ConversationMessage.message_index < current.message_index,
-            ConversationMessage.status == 'completed',
+            ConversationMessage.status.in_(['completed', 'stopped']),
             ConversationMessage.delete_flag == 'N',
             ConversationMessage.message_role.in_(['user', 'assistant']),
         ).order_by(asc(ConversationMessage.message_index))).all()
@@ -2379,16 +2427,18 @@ def get_historical_context(
         pending_user = None
         for message in messages:
             if message.message_role == 'user':
+                if pending_user is not None:
+                    turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
                 pending_user = message
             elif pending_user is not None:
-                turns.append({
-                    "user_message": pending_user.message_content or "",
-                    "assistant_final_answer": message.message_content or "",
-                    "attachments": pending_user.minio_files,
-                    "user_message_id": pending_user.message_id,
-                    "assistant_message_id": message.message_id,
-                })
+                answer = (
+                    _stopped_history_text(message, session, conversation_id)
+                    if message.status == 'stopped' else message.message_content or ""
+                )
+                turns.append(_history_turn(pending_user, answer, message.message_id))
                 pending_user = None
+        if pending_user is not None:
+            turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
 
         summary_result = None
         if summary_record and summary_payload:

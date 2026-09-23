@@ -30,14 +30,6 @@ import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import { ApiError } from "@/services/api";
 import {
-  HumanInteractionCards,
-  useHumanInteractionController,
-} from "@/features/humanInteraction";
-import {
-  RunMessageQueueContext,
-  useRunMessageQueue,
-} from "@/features/humanInteraction/useRunMessageQueue";
-import {
   WorkbenchSessionProvider,
   useWorkbenchSession,
 } from "./providers/WorkbenchSessionProvider";
@@ -820,46 +812,6 @@ const HomeContent: FC = () => {
     workbenchState.resolving,
   ]);
 
-  const [enableHitl, setEnableHitl] = useState(false);
-  const hitlIsRunning = useAuiState((state) => state.thread.isRunning);
-  const continueHitl = useCallback(
-    (runId: string, after: number) => {
-      if (!activeConversationId || runtime.thread.getState().isRunning) return;
-      const messages = runtime.thread.getState().messages;
-      runtime.thread.resumeRun({
-        parentId: messages.at(-1)?.id ?? null,
-        sourceId: null,
-        runConfig: {
-          custom: {
-            threadId: String(activeConversationId),
-            hitlRunId: runId,
-            hitlAfterEvent: after,
-            resume: true,
-            onGenerationStopped: handleGenerationStopped,
-          },
-        },
-        stream: async function* (options) {
-          const result = remoteChatModelAdapter.run(options);
-          if (Symbol.asyncIterator in result) yield* result;
-          else yield await result;
-        },
-      });
-    },
-    [activeConversationId, runtime, handleGenerationStopped]
-  );
-  const hitlController = useHumanInteractionController({
-    conversationId: Number(activeConversationId) || undefined,
-    onEnabledChange: setEnableHitl,
-    isRunning: hitlIsRunning,
-    onContinue: continueHitl,
-  });
-  const refreshHitl = hitlController.refresh;
-  const runMessageQueue = useRunMessageQueue({
-    scope: activeThreadId || runtimeMainThreadId || "new",
-    runtime,
-    controller: hitlController,
-  });
-
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
   // `onServerConversationId` lets the adapter report back the server-issued
@@ -901,11 +853,7 @@ const HomeContent: FC = () => {
         },
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         onGenerationStopped: handleGenerationStopped,
-        // HITL events must bypass snapshot throttling because the stream can
-        // become quiet immediately after an ask-user suspension.
-        onHumanInteractionEvent: () => refreshHitl(true),
         enablePlan: chatMode === "planning",
-        enableHitl,
         ...(workbenchState.config.mode === "agent_create"
           ? {
               runtimeMode: "nl2agent" as const,
@@ -995,8 +943,6 @@ const HomeContent: FC = () => {
     workbenchState,
     effectiveWorkbenchConfig,
     dispatchWorkbench,
-    refreshHitl,
-    enableHitl,
   ]);
 
   // Restore historical plan and chat mode from the same conversation detail
@@ -1188,7 +1134,6 @@ const HomeContent: FC = () => {
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">
         <div className="min-h-0 flex-1">
-          <RunMessageQueueContext.Provider value={runMessageQueue}>
             <Chat
               generatedTitle={
                 activeThreadId ? generatedTitles.get(activeThreadId) : undefined
@@ -1201,7 +1146,6 @@ const HomeContent: FC = () => {
               isLoadingAgents={isLoadingAgents}
               interactionContent={
                 <>
-                  <HumanInteractionCards controller={hitlController} />
                   {workbenchState.config.mode === "skill_create" &&
                     skillDraft.complete && (
                       <SkillCreationResultCard
@@ -1339,7 +1283,6 @@ const HomeContent: FC = () => {
                 ),
               }}
             />
-          </RunMessageQueueContext.Provider>
         </div>
         <SkillPicker
           open={skillPickerOpen}

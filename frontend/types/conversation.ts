@@ -49,6 +49,7 @@ export interface ApiMessageItem {
 }
 
 export interface ApiMessage {
+  status?: "pending" | "streaming" | "completed" | "failed" | "stopped";
   role: "user" | "assistant";
   message: ApiMessageItem[] | string;
   message_id?: number;
