@@ -26,6 +26,7 @@ import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 import type { HumanInteractionEvent } from "@/types/clarification";
+import { extractMinioFiles } from "../utils/history-attachments";
 
 // Backend SSE chunk format
 interface ImageMetadata {
@@ -501,28 +502,6 @@ function makeReasoningPart(
   return part;
 }
 
-/**
- * Metadata carried on attachments by `attachment-adapter.ts` after a successful
- * MinIO upload. Matches the shape needed for `minio_files` in the agent run
- * payload (see `MinioFileItem` in `types/chat.ts`).
- */
-interface UploadedAttachmentMeta {
-  object_name?: string;
-  url?: string;
-  presigned_url?: string;
-  type?: string;
-  size?: number;
-}
-
-type MinioFilePayload = UploadedAttachmentMeta & {
-  name: string;
-  object_name: string;
-  type: string;
-  size: number;
-  url: string;
-  presigned_url?: string;
-};
-
 interface FileUpload {
   file_name?: string;
   name?: string;
@@ -562,55 +541,6 @@ function extractTextContent(messages: readonly ThreadMessage[]): string {
         .join("");
     })
     .join("\n");
-}
-
-/**
- * Extracts `minio_files` payload from a user message's attachments. The
- * attachment adapter stashes upload metadata on each attachment after a
- * successful MinIO upload, so we can read it back here without an extra
- * upload round-trip.
- */
-function extractMinioFiles(
-  message: ThreadMessage | undefined
-): MinioFilePayload[] {
-  if (!message) return [];
-  // Attachments are attached by the AttachmentAdapter via the message content
-  // pipeline; the public ThreadMessage type does not declare them but they are
-  // present at runtime.
-  const attachments = message.attachments as
-    | Array<{
-        name: string;
-        contentType?: string;
-        type?: string;
-        object_name?: string;
-        url?: string;
-        presigned_url?: string;
-        size?: number;
-      }>
-    | undefined;
-  if (!attachments || attachments.length === 0) return [];
-
-  const files: MinioFilePayload[] = [];
-  for (const att of attachments) {
-    const objectName = att.object_name;
-    const url = att.url;
-    if (!objectName || !url) {
-      log.warn(
-        "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
-        att.name
-      );
-      continue;
-    }
-    files.push({
-      name: att.name,
-      object_name: objectName,
-      type: att.type ?? att.contentType ?? "file",
-      size: att.size ?? 0,
-      url,
-      presigned_url: att.presigned_url,
-    });
-  }
-  return files;
 }
 
 function parseFileAttachments(
@@ -1508,9 +1438,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       const text = customMetadata?.nl2agentCardAction
         ? JSON.stringify(customMetadata.nl2agentCardAction)
         : extractTextContent([msg]);
+      const historicalFiles = msg.role === "user" ? extractMinioFiles(msg) : [];
       return {
         role: msg.role === "user" ? ("user" as const) : ("assistant" as const),
         content: text,
+        ...(historicalFiles.length > 0 ? { minio_files: historicalFiles } : {}),
       };
     });
 
@@ -1519,7 +1451,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // is called (assistant-ui calls `send()` before `run()`).
     const minioFiles = isResume
       ? []
-      : extractMinioFiles(messages[lastUserIndex]);
+      : extractMinioFiles(messages[lastUserIndex], (name) =>
+          log.warn(
+            "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
+            name
+          )
+        );
 
     // Build request payload. Resume only needs the conversation identity; the
     // backend owns the original query and execution state.

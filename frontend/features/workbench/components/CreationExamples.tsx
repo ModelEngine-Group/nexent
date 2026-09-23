@@ -43,7 +43,7 @@ export function CreationExamples({
   return (
     <section
       aria-label={mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例"}
-      className="mt-12 max-h-[min(40vh,320px)] overflow-y-auto px-1"
+      className="mt-12 px-1"
     >
       <div className="mb-3 flex items-center gap-2">
         <button
@@ -87,7 +87,7 @@ export function CreationExamples({
                 <span className="block text-sm font-medium text-foreground">
                   {title}
                 </span>
-                <span className="mt-1 block line-clamp-2 text-xs leading-5 text-muted-foreground">
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   {prompt}
                 </span>
               </span>

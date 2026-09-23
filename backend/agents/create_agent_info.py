@@ -583,6 +583,39 @@ def _build_internal_s3_url(file: dict) -> str:
     return "s3:/" + url
 
 
+def _collect_run_minio_files(
+    minio_files: Optional[List[Dict[str, Any]]],
+    history: Optional[List[Any]],
+    max_files: int = 50,
+) -> List[Dict[str, Any]]:
+    """Collect current and historical attachments for one authorized Agent run."""
+    seen_urls: set[str] = set()
+    collected: List[Dict[str, Any]] = []
+    sources = [minio_files]
+    for message in history or []:
+        attachments = (
+            message.get("minio_files")
+            if isinstance(message, dict)
+            else getattr(message, "minio_files", None)
+        )
+        sources.append(attachments)
+
+    for attachments in sources:
+        if not isinstance(attachments, list):
+            continue
+        for file in attachments:
+            if not isinstance(file, dict) or not file.get("name"):
+                continue
+            s3_url = _build_internal_s3_url(file)
+            if not s3_url or s3_url in seen_urls:
+                continue
+            seen_urls.add(s3_url)
+            collected.append(file)
+            if len(collected) == max_files:
+                return collected
+    return collected
+
+
 def _safe_workspace_segment(value: Any, fallback: str) -> str:
     """Return a filesystem-safe user path segment."""
     normalized = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._")
@@ -2255,37 +2288,7 @@ async def join_minio_file_description_to_query(
         Modified query with file descriptions appended
     """
     final_query = query
-    seen_urls: set[str] = set()
-    all_files: list[dict] = []
-
-    # Collect files from current message first (higher priority)
-    if minio_files and isinstance(minio_files, list):
-        for file in minio_files:
-            if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
-                s3_url = _build_internal_s3_url(file)
-                if not s3_url:
-                    continue
-                if s3_url not in seen_urls:
-                    seen_urls.add(s3_url)
-                    all_files.append(file)
-
-    # Collect files from historical messages (lower priority, already-deduped)
-    if history and isinstance(history, list):
-        for msg in history:
-            if isinstance(msg, dict) and msg.get("minio_files"):
-                for file in msg["minio_files"]:
-                    if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
-                        s3_url = _build_internal_s3_url(file)
-                        if not s3_url:
-                            continue
-                        if s3_url not in seen_urls:
-                            seen_urls.add(s3_url)
-                            all_files.append(file)
-
-    # Enforce file count limit (keep most recent files by truncating from the end)
-    if len(all_files) > max_files:
-        all_files = all_files[:max_files]
-        logger.info(f"File list truncated from {len(all_files)} to {max_files} files")
+    all_files = _collect_run_minio_files(minio_files, history, max_files=max_files)
 
     if all_files:
         file_descriptions: list[str] = []
@@ -2484,7 +2487,8 @@ async def create_agent_run_info(
             workspace_path,
             tenant_id,
         )
-    _validate_run_minio_files(minio_files, user_id, tenant_id)
+    effective_minio_files = _collect_run_minio_files(minio_files, history)
+    _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
     runtime_file_context = {
         "workspace_path": workspace_path,
         "minio_client": minio_client,
@@ -2510,7 +2514,7 @@ async def create_agent_run_info(
     final_query = await join_minio_file_description_to_query(
         minio_files=minio_files,
         query=query,
-        history=history
+        history=history,
     )
     model_list = await create_model_config_list(tenant_id)
     create_config_kwargs = {
@@ -2708,7 +2712,7 @@ async def create_agent_run_info(
         workspace_path=workspace_path,
         workspace_run_id=workspace_run_id,
         tenant_id=tenant_id,
-        minio_files=minio_files,
+        minio_files=effective_minio_files,
         redis_client=get_redis_client(),
     )
     return agent_run_info

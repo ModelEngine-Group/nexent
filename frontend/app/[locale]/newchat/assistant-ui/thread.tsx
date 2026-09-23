@@ -724,7 +724,7 @@ const ThreadView: FC<ThreadViewProps> = ({
       <div
         className={cn(
           "flex h-full min-w-0 flex-1 flex-col",
-          workbenchLanding && "overflow-y-auto"
+          workbenchLanding && "overflow-y-auto pb-[10vh]"
         )}
       >
         {showConversationTitle && (
