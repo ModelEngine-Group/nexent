@@ -98,6 +98,15 @@ auth_utils_mock.get_supabase_admin_client = MagicMock()
 auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
 sys.modules["utils.auth_utils"] = auth_utils_mock
 
+from pydantic import BaseModel as _PydanticBaseModel
+
+
+class _OAuthCompleteProbe(_PydanticBaseModel):
+    """Real pydantic model used to produce a genuine ValidationError instance."""
+
+    required_field: str
+
+
 oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(
     return_value={"provider": "github", "token": "tok", "link_user_id": ""}
@@ -721,6 +730,22 @@ class TestDeleteAccount(unittest.TestCase):
 
         oauth_service_mock.unlink_account.side_effect = None
 
+    @patch("apps.oauth_app.get_current_user_id")
+    def test_returns_500_on_unexpected_error(self, mock_get_user):
+        mock_get_user.return_value = ("user-1", "t-1")
+        oauth_service_mock.unlink_account.side_effect = Exception("boom")
+
+        response = client.delete(
+            "/user/oauth/accounts/github",
+            headers={"Authorization": "Bearer valid"},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.INTERNAL_SERVER_ERROR)
+        args, kwargs = audit_service_mock.record_security_event.call_args
+        self.assertEqual(args[0], "oauth_unlink")
+        self.assertEqual(kwargs.get("reason"), "internal_error")
+        oauth_service_mock.unlink_account.side_effect = None
+
 
 class TestCallbackPagination(unittest.TestCase):
     def setUp(self):
@@ -893,6 +918,15 @@ class TestCompleteOAuth(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
+    def test_pending_error_branches_return_500(self):
+        for exc in [_OAuthProviderError("provider down"), Exception("boom")]:
+            with self.subTest(exc=type(exc).__name__):
+                with patch("apps.oauth_app.get_pending_oauth_info", side_effect=exc):
+                    response = client.get("/user/oauth/pending")
+
+                self.assertEqual(response.status_code, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
     def test_complete_returns_session_data(self):
         complete_mock = AsyncMock(
             return_value={
@@ -972,6 +1006,38 @@ class TestCompleteOAuth(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
         self.assertEqual(response.json()["details"]["limit"], 10000)
+
+    def test_complete_error_branches_return_status_and_audit_reason(self):
+        try:
+            _OAuthCompleteProbe()
+        except Exception as exc:  # a genuine pydantic ValidationError
+            probe_error = exc
+        else:
+            raise AssertionError("expected _OAuthCompleteProbe() to fail validation")
+
+        cases = [
+            (probe_error, HTTPStatus.UNPROCESSABLE_ENTITY, "validation_error"),
+            (_OAuthProviderError("provider down"), HTTPStatus.INTERNAL_SERVER_ERROR, "provider_error"),
+            (Exception("boom"), HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error"),
+        ]
+        for exc, expected_status, expected_reason in cases:
+            with self.subTest(reason=expected_reason):
+                complete_mock = AsyncMock(side_effect=exc)
+                with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+                    response = client.post(
+                        "/user/oauth/complete",
+                        headers={"X-OAuth-Pending-Token": "pending.jwt"},
+                        json={
+                            "email": "user@example.com",
+                            "password": "secret1",
+                            "invite_code": "ABC123",
+                        },
+                    )
+
+                self.assertEqual(response.status_code, expected_status)
+                args, kwargs = audit_service_mock.record_security_event.call_args
+                self.assertEqual(args[0], "oauth_signup")
+                self.assertEqual(kwargs.get("reason"), expected_reason)
 
 
 class TestGetAccounts(unittest.TestCase):

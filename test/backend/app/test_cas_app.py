@@ -77,6 +77,7 @@ class TestCasApp(unittest.TestCase):
         cas_service_mock.build_renew_url.side_effect = None
         cas_service_mock.build_renew_url.return_value = "https://cas.example.com/login?gateway=true"
         cas_service_mock.login_with_ticket.side_effect = None
+        cas_service_mock.renew_with_ticket.side_effect = None
         cas_service_mock.revoke_from_logout_request.reset_mock()
 
     def test_config_returns_public_cas_settings(self):
@@ -199,6 +200,29 @@ class TestCasApp(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.OK)
         self.assertEqual(response.json()["data"]["revoked"], 1)
         cas_service_mock.revoke_from_logout_request.assert_called_once_with(xml)
+
+
+    def test_callback_returns_500_on_unexpected_error(self):
+        cas_service_mock.login_with_ticket.side_effect = Exception("database exploded")
+
+        with self.assertLogs("audit.security", level="INFO") as captured:
+            response = client.get("/user/cas/callback?ticket=boom")
+
+        self.assertEqual(response.status_code, HTTPStatus.INTERNAL_SERVER_ERROR)
+        audit_lines = [m for m in captured.output if "[SEC_AUDIT]" in m]
+        self.assertTrue(
+            any("event=cas_login" in m and "reason=internal_error" in m for m in audit_lines),
+            f"expected cas_login/internal_error audit entry, got {audit_lines}",
+        )
+
+    def test_renew_callback_with_failed_renew_returns_failure_html(self):
+        cas_service_mock.renew_with_ticket.side_effect = Exception("renew backend down")
+
+        response = client.get("/user/cas/renew_callback?ticket=ST-1")
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertIn("cas-renew-failed", response.text)
+        self.assertNotIn("renew backend down", response.text)
 
 
 if __name__ == "__main__":

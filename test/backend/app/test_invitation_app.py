@@ -181,6 +181,20 @@ class TestInvitationListing:
             data = response.json()
             assert data["detail"] == "Failed to retrieve invitation codes"
 
+    def test_list_invitations_validation_error(self):
+        """Test invitation listing with validation error -> 400 (list is not audited)"""
+        request_data = {"tenant_id": "tenant-123", "page": 1, "page_size": 20}
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.get_invitations_list') as mock_list_invitations:
+            mock_get_user.return_value = ("user-123", "tenant-123")
+            mock_list_invitations.side_effect = ValidationError("Invalid pagination params")
+
+            response = client.post("/invitations/list", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.BAD_REQUEST
+            data = response.json()
+            assert "Invalid pagination params" in data["detail"]
+
 
 class TestInvitationCreation:
     """Test invitation creation endpoint"""
@@ -309,6 +323,26 @@ class TestInvitationCreation:
             data = response.json()
             assert "Invitation code 'ABC123' already exists" in data["detail"]
 
+    @pytest.mark.parametrize("side_effect,expected_status,expected_reason", [
+        (ValidationError("Invalid capacity"), HTTPStatus.BAD_REQUEST, "validation_error"),
+        (UnauthorizedError("Token expired"), HTTPStatus.UNAUTHORIZED, "unauthorized"),
+        (Exception("Database error"), HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error"),
+    ])
+    def test_create_invitation_error_branch(self, caplog, side_effect, expected_status, expected_reason):
+        """Test invitation creation error branches -> status code and audit entry"""
+        request_data = {"tenant_id": "tenant-123", "code_type": "ADMIN_INVITE", "capacity": 10}
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.create_invitation_code') as mock_create_invitation:
+            mock_get_user.return_value = ("user-123", "tenant-123")
+            mock_create_invitation.side_effect = side_effect
+            caplog.set_level("INFO", logger="audit.security")
+
+            response = client.post("/invitations", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == expected_status
+            message = caplog.records[-1].getMessage()
+            assert "event=invitation_create" in message and f"reason={expected_reason}" in message
+
 
 class TestInvitationUpdate:
     """Test invitation update endpoint"""
@@ -393,6 +427,22 @@ class TestInvitationUpdate:
             assert response.status_code == HTTPStatus.UNAUTHORIZED
             data = response.json()
             assert "Invalid token" in data["detail"]
+
+    def test_update_invitation_unexpected_error(self, caplog):
+        """Test invitation update with unexpected error -> 500 and audit entry"""
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
+             patch('apps.invitation_app.update_invitation_code') as mock_update_invitation:
+            mock_get_user.return_value = ("user-123", "tenant-123")
+            mock_get_invitation.return_value = {"invitation_id": 1, "invitation_code": "ABC123"}
+            mock_update_invitation.side_effect = Exception("Database error")
+            caplog.set_level("INFO", logger="audit.security")
+
+            response = client.put("/invitations/ABC123", json={"capacity": 20}, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+            message = caplog.records[-1].getMessage()
+            assert "event=invitation_update" in message and "reason=internal_error" in message
 
 
 class TestInvitationRetrieval:
@@ -585,6 +635,20 @@ class TestInvitationUsage:
             data = response.json()
             assert "Invalid token" in data["detail"]
 
+    def test_use_invitation_unexpected_error(self, caplog):
+        """Test invitation usage with unexpected error -> 500 and audit entry"""
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.use_invitation_code') as mock_use_invitation:
+            mock_get_user.return_value = ("user-456", "tenant-123")
+            mock_use_invitation.side_effect = Exception("Database error")
+            caplog.set_level("INFO", logger="audit.security")
+
+            response = client.post("/invitations/ABC123/use", headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+            message = caplog.records[-1].getMessage()
+            assert "event=invitation_use" in message and "reason=internal_error" in message
+
 
 class TestInvitationStatusUpdate:
     """Test invitation status update endpoint"""
@@ -744,3 +808,20 @@ class TestInvitationDeletion:
             assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
             assert "Failed to delete invitation code" in data["detail"]
+
+    def test_delete_invitation_unexpected_error(self, caplog):
+        """Test invitation deletion with unexpected error -> 500 and audit entry"""
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
+             patch('apps.invitation_app.delete_invitation_code') as mock_delete_invitation:
+            mock_get_user.return_value = ("user-123", "tenant-123")
+            mock_get_invitation.return_value = {"invitation_id": 1, "invitation_code": "ABC123"}
+            mock_delete_invitation.side_effect = Exception("Database error")
+            caplog.set_level("INFO", logger="audit.security")
+
+            response = client.delete("/invitations/ABC123", headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+            message = caplog.records[-1].getMessage()
+            assert "event=invitation_delete" in message and "reason=internal_error" in message
+
