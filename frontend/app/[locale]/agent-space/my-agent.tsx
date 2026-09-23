@@ -25,6 +25,7 @@ import { parseAgentUsageGuideParams } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
 import {
   getAgentUsageGuideOpenAction,
+  parseAgentUsageGuideTargetParams,
   resolveAgentUsageGuideTarget,
 } from "@/lib/agentUsageGuide";
 import {
