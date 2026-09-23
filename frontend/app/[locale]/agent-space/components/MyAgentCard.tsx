@@ -156,6 +156,7 @@ export function MyAgentCard({
     <ResourceCard
       title={title}
       className="h-full"
+      onClick={onView}
       subtitle={
         versionLabel != null ? (
           <span className="inline-flex items-center gap-1.5 truncate">
