@@ -26,6 +26,9 @@ on:
         default: false
         type: boolean
 
+env:
+  APP_VERSION: ${{ inputs.app_version }}
+
 jobs:
   build-main:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -108,28 +111,44 @@ jobs:
           rm -rf $HOME/nexent
           mkdir -p $HOME/nexent
           cp -r $GITHUB_WORKSPACE/* $HOME/nexent/
-      - name: Force APP_VERSION to latest in deploy.sh (CI only)
+      - name: Verify local application images
         run: |
-          sed -i 's/APP_VERSION="$(get_app_version)"/APP_VERSION="${{ github.event.inputs.app_version }}"/' $HOME/nexent/deploy/docker/deploy.sh
+          missing=0
+          for image in nexent nexent-web nexent-data-process nexent-mcp nexent-sandbox nexent-docs; do
+            if ! docker image inspect "nexent/${image}:${APP_VERSION}" >/dev/null 2>&1; then
+              echo "::error::Missing local image: nexent/${image}:${APP_VERSION}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
       - name: Start docs container
         run: |
           docker stop nexent-docs 2>/dev/null || true
           docker rm nexent-docs 2>/dev/null || true
-          docker run -d --name nexent-docs -p 4173:4173 nexent/nexent-docs
+          docker run -d --name nexent-docs -p 4173:4173 "nexent/nexent-docs:${APP_VERSION}"
       - name: Ensure deploy.sh is executable
         run: chmod +x $HOME/nexent/deploy.sh $HOME/nexent/deploy/docker/deploy.sh
       - name: Deploy with deploy.sh
         env:
           DEPLOYMENT_MODE: ${{ github.event.inputs.deployment_mode }}
         run: |
-          cd $HOME/nexent
+          cd "$HOME/nexent"
           cp deploy/env/.env.example deploy/env/.env
           
           sed -i "s/APPID=.*/APPID=${{ secrets.VOICE_APPID }}/" deploy/env/.env
           sed -i "s/TOKEN=.*/TOKEN=${{ secrets.VOICE_TOKEN }}/" deploy/env/.env
           
           if [ "$DEPLOYMENT_MODE" = "production" ]; then
-            ./deploy.sh docker --mode 3 --is-mainland N --enable-terminal N --version 2 --root-dir "$HOME/nexent-production-data"
+            DATA_ROOT="$HOME/nexent-production-data"
           else
-            ./deploy.sh docker --mode 1 --is-mainland N --enable-terminal N --version 2 --root-dir "$HOME/nexent-development-data"
+            DATA_ROOT="$HOME/nexent-development-data"
           fi
+          ./deploy.sh --defaults docker \
+            --app-version "$APP_VERSION" \
+            --components infrastructure,application,data-process,supabase \
+            --port-policy "$DEPLOYMENT_MODE" \
+            --image-source general \
+            --sandbox-mode lightweight \
+            --root-dir "$DATA_ROOT"
