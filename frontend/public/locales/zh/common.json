@@ -2056,7 +2056,6 @@
   "agentRepository.mine.applyModal.categoryPlaceholder": "请选择类别",
   "agentRepository.mine.applyModal.tags": "智能体标签",
   "agentRepository.mine.applyModal.tagsPlaceholder": "选择或输入标签",
-  "agentRepository.mine.applyModal.tagsHint": "最多选择 {{count}} 个标签，可输入自定义标签",
   "agentRepository.mine.applyModal.content": "上架说明",
   "agentRepository.mine.applyModal.contentPlaceholder": "请输入上架说明（选填）",
   "agentRepository.mine.applyModal.submit": "提交申请",

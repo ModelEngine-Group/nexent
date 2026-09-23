@@ -2091,7 +2091,6 @@
   "agentRepository.mine.applyModal.categoryPlaceholder": "Select a category",
   "agentRepository.mine.applyModal.tags": "Tags",
   "agentRepository.mine.applyModal.tagsPlaceholder": "Select or enter tags",
-  "agentRepository.mine.applyModal.tagsHint": "Choose up to {{count}} tags. Custom tags are allowed.",
   "agentRepository.mine.applyModal.content": "Listing note",
   "agentRepository.mine.applyModal.contentPlaceholder": "Enter a listing note (optional)",
   "agentRepository.mine.applyModal.submit": "Submit request",

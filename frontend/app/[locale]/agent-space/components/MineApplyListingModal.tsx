@@ -413,9 +413,6 @@ export function MineApplyListingModal({
                   </span>
                 ) : null}
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {t("agentRepository.mine.applyModal.tagsHint")}
-              </p>
             </section>
 
             <section className="space-y-2">
