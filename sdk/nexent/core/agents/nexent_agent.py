@@ -26,7 +26,9 @@ from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
+from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
+from .output_protocol import ModelOutputProtocolExhaustedError
 from .tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,
     apply_user_context_to_mcp_tool,
@@ -796,9 +798,26 @@ class NexentAgent:
             context_items = apply_model_visible_tool_schemas_to_context_items(
                 list(context_items_override)
                 if context_items_override is not None
-                else (getattr(agent_config, "context_items", None) or []),
+                else list(getattr(agent_config, "context_items", None) or []),
                 tool_list,
             )
+            from .context import ContextItemInput, ContextItemType
+
+            enable_clarification = (
+                not _managed_context
+                and getattr(self.observer, "enable_nl2a_wrapper", False) is not True
+                and getattr(agent_config, "output_protocol", "code_action") == "code_action"
+            )
+            if enable_clarification and any(item.type == ContextItemType.SYSTEM for item in context_items):
+                tool_name = choose_clarification_tool_name({tool.name for tool in [*tool_list, *managed_agents_list]})
+                context_items.append(ContextItemInput(
+                    id="system:clarification_protocol",
+                    type=ContextItemType.SYSTEM,
+                    content={"text": clarification_policy(tool_name)},
+                    source=("runtime:clarification_protocol",),
+                    priority=100,
+                    metadata={"authority": "platform"},
+                ))
             context_runtime = ManagedContextRuntime(
                 context_manager,
                 items=context_items,
@@ -924,6 +943,7 @@ class NexentAgent:
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
                 output_protocol=getattr(agent_config, "output_protocol", "code_action"),
+                enable_clarification=enable_clarification,
                 workspace_path=self.workspace_path,
             )
             agent.stop_event = self.stop_event
@@ -1194,6 +1214,15 @@ class NexentAgent:
                     if self.agent.stop_event.is_set():
                         observer.add_message(self.agent.agent_name, ProcessType.WARNING,
                                              "Agent execution interrupted by external stop signal")
+                except ModelOutputProtocolExhaustedError as e:
+                    observer.add_message(
+                        agent_name=self.agent.agent_name,
+                        process_type=ProcessType.ERROR,
+                        content=str(e),
+                        error_code="model_output_protocol_exhausted",
+                        retryable=False,
+                    )
+                    raise
                 except ModelInvocationTerminalError as e:
                     observer.add_message(
                         agent_name=self.agent.agent_name,

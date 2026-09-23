@@ -3370,9 +3370,9 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
     messages_result = MagicMock()
     messages_result.all.return_value = [
         SimpleNamespace(message_id=31, message_index=4, message_role="user",
-                        message_content="new question", minio_files=None),
+                        message_content="new question", minio_files=None, status="completed"),
         SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
-                        message_content="new answer", minio_files=None),
+                        message_content="new answer", minio_files=None, status="completed"),
     ]
     session.execute.side_effect = [
         current_result, candidates_result, boundary_result, messages_result]

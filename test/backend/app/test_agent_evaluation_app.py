@@ -92,6 +92,7 @@ for _name in (
     "services",
     "services.agent_evaluation_service",
     "services.evaluation_report_service",
+    "services.runtime_proxy_service",
     "database",
     "database.agent_evaluation_db",
     "utils",
@@ -100,6 +101,7 @@ for _name in (
     _register_package(_name)
 sys.modules["services.agent_evaluation_service"] = MagicMock(name="agent_eval_svc")
 sys.modules["services.evaluation_report_service"] = MagicMock(name="report_svc")
+sys.modules["services.runtime_proxy_service"] = MagicMock(name="runtime_proxy_svc")
 sys.modules["database.agent_evaluation_db"] = MagicMock(name="agent_eval_db")
 sys.modules["utils.auth_utils"] = MagicMock(name="auth_utils")
 
@@ -179,7 +181,7 @@ def _mock_impls(**overrides):
             return_value={"items": [], "total": 0}
         ),
         "list_agent_evaluations_by_agent_impl": MagicMock(return_value=[{"id": 1}]),
-        "trial_run_evaluator_impl": AsyncMock(return_value={"result": "ok"}),
+        "forward_agent_evaluation_trial_run": AsyncMock(return_value={"result": "ok"}),
         "generate_agent_evaluation_report_impl": MagicMock(
             return_value=(b"%PDF-1.4 fake", 0)
         ),
@@ -617,7 +619,7 @@ class TestTrialRun:
         )
         assert response.status_code == 200
         assert response.json()["data"] == {"result": "ok"}
-        assert app.trial_run_evaluator_impl.call_args.kwargs["query"] == "hello"
+        assert app.forward_agent_evaluation_trial_run.call_args.kwargs["query"] == "hello"
 
     def test_401_on_unauthorized(self, client):
         from consts.exceptions import UnauthorizedError
@@ -631,7 +633,7 @@ class TestTrialRun:
 
     def test_500_on_exception(self, client):
         _mock_impls(
-            trial_run_evaluator_impl=AsyncMock(side_effect=RuntimeError("boom"))
+            forward_agent_evaluation_trial_run=AsyncMock(side_effect=RuntimeError("boom"))
         )
         response = client.post(
             "/agent-evaluations/trial-run",
@@ -641,7 +643,7 @@ class TestTrialRun:
 
     def test_app_exception_propagates(self, client):
         _mock_impls(
-            trial_run_evaluator_impl=AsyncMock(
+            forward_agent_evaluation_trial_run=AsyncMock(
                 side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "missing")
             )
         )
