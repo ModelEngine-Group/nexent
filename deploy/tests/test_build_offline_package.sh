@@ -8,6 +8,7 @@ TMP_DIR="${TMPDIR:-/tmp}/nexent-offline-package-test-$$"
 BIN_DIR="$TMP_DIR/bin"
 OUT_DIR="$TMP_DIR/out"
 export DEPLOYMENT_LANG=en
+export REAL_ZIP="$(command -v zip)"
 
 mkdir -p "$BIN_DIR" "$OUT_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -75,6 +76,9 @@ SH
 create_fake_zip() {
   cat > "$BIN_DIR/zip" <<'SH'
 #!/bin/sh
+if [ "${FAKE_ZIP_REAL:-false}" = "true" ]; then
+  exec "$REAL_ZIP" "$@"
+fi
 archive=""
 for argument in "$@"; do
   case "$argument" in
@@ -120,6 +124,24 @@ assert_common_package_files() {
     [ ! -f "$package_dir/deploy/docker/assets/monitoring/monitoring.env.example" ] || fail "monitoring.env.example should live under deploy/env"
   fi
   [ ! -f "$package_dir/deploy/docker/deploy.options" ] || fail "deploy/docker/deploy.options should not be packaged"
+}
+
+assert_official_skill_archives() {
+  # DEPLOY-SKILLS-001: compare the complete archive set, contents and checksums.
+  local package_dir="$1"
+  local source_dir="$PROJECT_ROOT/deploy/docker/assets/official-skills-zip"
+  local packaged_dir="$package_dir/deploy/docker/assets/official-skills-zip"
+  local archive name
+  (cd "$source_dir" && find . -type f -name '*.zip' | LC_ALL=C sort) > "$TMP_DIR/source-skills.txt"
+  (cd "$packaged_dir" && find . -type f -name '*.zip' | LC_ALL=C sort) > "$TMP_DIR/packaged-skills.txt"
+  [ -s "$TMP_DIR/source-skills.txt" ] || fail "source official skills must not be empty"
+  diff -u "$TMP_DIR/source-skills.txt" "$TMP_DIR/packaged-skills.txt" || fail "all official archives must be preserved"
+  while IFS= read -r archive; do
+    name="${archive#./}"
+    cmp "$source_dir/$name" "$packaged_dir/$name" || fail "official archive content changed: $name"
+    grep -Fq "  ./deploy/docker/assets/official-skills-zip/$name" "$package_dir/checksums.txt" || fail "missing official archive checksum: $name"
+  done < "$TMP_DIR/source-skills.txt"
+  (cd "$package_dir" && shasum -a 256 -c checksums.txt >/dev/null) || fail "package checksums must validate"
 }
 
 create_fake_docker
@@ -198,7 +220,7 @@ grep -q "Package name may contain only" "$TMP_DIR/invalid-package-name.log" || f
 
 for target in docker k8s all; do
   package_dir="$OUT_DIR/$target"
-  PATH="$BIN_DIR:$PATH" \
+  PATH="$BIN_DIR:$PATH" FAKE_ZIP_REAL=true \
     bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
       --version v2.2.0 \
       --platform amd64 \
@@ -236,6 +258,15 @@ for target in docker k8s all; do
       [ -f "$package_dir/deploy/k8s/backup.sh" ] || fail "all package should include deploy/k8s/backup.sh"
       ;;
   esac
+  if [ "$target" = "k8s" ] || [ "$target" = "all" ]; then
+    extracted_dir="$TMP_DIR/extracted-$target"
+    mkdir -p "$extracted_dir"
+    unzip -q "$OUT_DIR/nexent-offline-${target}-amd64-v2.2.0.zip" -d "$extracted_dir"
+    assert_official_skill_archives "$extracted_dir"
+    if [ "$target" = "k8s" ]; then
+      [ ! -f "$extracted_dir/deploy/docker/deploy.sh" ] || fail "K8s archive must not regain Docker deployment scripts"
+    fi
+  fi
 done
 
 sandbox_package_dir="$OUT_DIR/without-sandbox"
