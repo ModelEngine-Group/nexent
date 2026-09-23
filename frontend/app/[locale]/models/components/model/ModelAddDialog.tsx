@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils";
 
 import { MODEL_TYPES } from "@/const/modelConfig";
 import { modelService, ModelError } from "@/services/modelService";
-import { ModelType } from "@/types/modelConfig";
+import { ModelType, ReasoningCapability } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
 import {
@@ -364,6 +364,36 @@ function SingleAddForm({
   const [submitting, setSubmitting] = useState(false);
   const [override, setOverride] = useState<RowOverride | undefined>(undefined);
   const [showSettings, setShowSettings] = useState(false);
+  const [capability, setCapability] = useState<ReasoningCapability | undefined>(
+    undefined
+  );
+
+  // Look up the reasoning capability while the advanced-settings dialog is
+  // open (needs name + URL) so the effort/budget controls can render.
+  useEffect(() => {
+    if (!showSettings || !name.trim() || !baseUrl.trim()) {
+      setCapability(undefined);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const suggestion = await modelService.suggestCapacity({
+          modelName: name.trim(),
+          baseUrl: baseUrl.trim(),
+          providerHint: provider,
+          modelType: type,
+        });
+        if (!cancelled) setCapability(suggestion?.reasoningCapability);
+      } catch {
+        if (!cancelled) setCapability(undefined);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [showSettings, name, baseUrl, provider, type]);
 
   function changeProvider(next: string) {
     setProvider(next);
@@ -565,6 +595,7 @@ function SingleAddForm({
             model_type: type,
           }}
           override={override}
+          reasoningCapability={capability}
           onSave={(next) => {
             setOverride(next);
             setShowSettings(false);
@@ -625,6 +656,11 @@ function BatchAddForm({
     Record<string, RowOverride>
   >({});
   const [settingsRowId, setSettingsRowId] = useState<string | null>(null);
+  // Per-row reasoning capability from the same suggestCapacity lookup —
+  // drives the effort/budget controls in the per-row settings dialog.
+  const [rowCapabilities, setRowCapabilities] = useState<
+    Record<string, ReasoningCapability | undefined>
+  >({});
 
   // Per-row connectivity check (optional, does not gate submit).
   const [rowCheck, setRowCheck] = useState<
@@ -725,10 +761,12 @@ function BatchAddForm({
       setSelected({});
       setRowOverrides({});
       setRowSuggestions({});
+      setRowCapabilities({});
       setRowCheck({});
       // Auto-fill capacity from the catalog (same as the old dialog):
       // suggestCapacity is a local lookup, fast enough to batch.
       const suggestions: Record<string, RowOverride> = {};
+      const capabilities: Record<string, ReasoningCapability | undefined> = {};
       await Promise.all(
         rows.map(async (row) => {
           try {
@@ -738,6 +776,9 @@ function BatchAddForm({
               providerHint: provider,
               modelType: row.model_type,
             });
+            if (s?.reasoningCapability) {
+              capabilities[row.id] = s.reasoningCapability;
+            }
             const sug = s?.suggestions;
             if (sug) {
               // snake_case keys matching spec.key so ModelAdvancedSettings
@@ -762,6 +803,7 @@ function BatchAddForm({
         })
       );
       setRowSuggestions(suggestions);
+      setRowCapabilities(capabilities);
     } catch (error: any) {
       log.error("fetch provider models failed", error);
       message.error(
@@ -1171,6 +1213,7 @@ function BatchAddForm({
           override={
             rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
           }
+          reasoningCapability={rowCapabilities[settingsRowId]}
           onSave={(next) => {
             setRowOverrides((prev) => ({
               ...prev,
@@ -1190,11 +1233,13 @@ function BatchAddForm({
 function RowSettingsDialog({
   row,
   override,
+  reasoningCapability,
   onSave,
   onClose,
 }: {
   row: FetchedRow | null;
   override?: RowOverride;
+  reasoningCapability?: ReasoningCapability;
   onSave: (next: RowOverride) => void;
   onClose: () => void;
 }) {
@@ -1248,7 +1293,12 @@ function RowSettingsDialog({
               })}
             />
           </div>
-          <ModelAdvancedConfig value={settings} onChange={setSettings} />
+          <ModelAdvancedConfig
+            value={settings}
+            onChange={setSettings}
+            modelType={row.model_type}
+            reasoningCapability={reasoningCapability}
+          />
         </div>
         <div className="flex justify-end gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose}>

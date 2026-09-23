@@ -162,7 +162,7 @@ const REMOVED_ADVANCED_PARAM_KEYS = new Set<string>([
   "speed",
 ]);
 
-const resolveReasoningDefault = (
+export const resolveReasoningDefault = (
   currentEffort: ReasoningEffort | undefined,
   capability: ReasoningCapability | undefined,
   levels: readonly ReasoningEffort[]

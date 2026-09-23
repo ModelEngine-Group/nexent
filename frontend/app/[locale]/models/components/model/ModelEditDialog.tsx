@@ -27,7 +27,11 @@ import { cn } from "@/lib/utils";
 
 import { MODEL_TYPES } from "@/const/modelConfig";
 import { modelService, ModelError } from "@/services/modelService";
-import { ModelOption, ModelType } from "@/types/modelConfig";
+import {
+  ModelOption,
+  ModelType,
+  ReasoningCapability,
+} from "@/types/modelConfig";
 import log from "@/lib/logger";
 
 import {
@@ -101,6 +105,11 @@ export const ModelEditDialog = ({
   const [probe, setProbe] = useState<
     "idle" | "checking" | "available" | "unavailable"
   >("idle");
+  // Catalog-driven reasoning capability; refreshed (debounced) when the URL
+  // or type changes so the effort/budget controls track the target model.
+  const [reasoningCapability, setReasoningCapability] = useState<
+    ReasoningCapability | undefined
+  >(undefined);
 
   // Re-initialize whenever a different model opens (key in the parent forces
   // remount, but this effect also handles the initial open).
@@ -111,6 +120,7 @@ export const ModelEditDialog = ({
     setBaseUrl(model.apiUrl || "");
     setType(model.type);
     setProbe("idle");
+    setReasoningCapability(model.reasoningCapability);
     const extra = (model.extraParams ?? {}) as Record<string, unknown>;
     const next: ModelAdvancedSettingsValue = {};
     if (model.temperature != null) next.temperature = model.temperature;
@@ -149,6 +159,33 @@ export const ModelEditDialog = ({
     }
     setAdvanced(next);
   }, [model]);
+
+  // Refresh the reasoning capability from the catalog when the URL or type
+  // changes (the model name is readonly here, so the record value is the
+  // right starting point). Mirrors the edit-dialog behaviour of #3953.
+  useEffect(() => {
+    if (!model || !baseUrl.trim()) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const suggestion = await modelService.suggestCapacity({
+          modelName: model.name,
+          baseUrl: baseUrl.trim(),
+          providerHint: model.source || undefined,
+          modelType: type,
+        });
+        if (!cancelled) {
+          setReasoningCapability(suggestion?.reasoningCapability);
+        }
+      } catch {
+        if (!cancelled) setReasoningCapability(undefined);
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [model, baseUrl, type]);
 
   const typeOptions = useMemo(
     () =>
@@ -392,6 +429,8 @@ export const ModelEditDialog = ({
                     // them invalidates a previous probe result.
                     setProbe("idle");
                   }}
+                  modelType={type}
+                  reasoningCapability={reasoningCapability}
                 />
               </div>
             )}

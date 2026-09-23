@@ -6,14 +6,26 @@ import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 
-import { ModelAdvancedSettingsValue } from "./ModelAdvancedSettings";
+import {
+  ModelAdvancedSettingsValue,
+  resolveReasoningDefault,
+} from "./ModelAdvancedSettings";
+import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 
 /**
  * v2.6.1 redesign (v0 design): the shared advanced-config section — capacity
  * fields, numeric inference params (temperature / top_p), the deep-thinking
- * toggle and custom key/value params, rendered as the fixed v0-style grid.
+ * toggle with reasoning effort / budget controls, and custom key/value
+ * params, rendered as the fixed v0-style grid.
  *
  * Used by the model edit dialog (高级配置) and the add-dialog advanced
  * settings (RowSettingsDialog) so the two stay visually identical. The value
@@ -47,9 +59,15 @@ function AdvField({
 export function ModelAdvancedConfig({
   value,
   onChange,
+  modelType,
+  reasoningCapability,
 }: {
   value: ModelAdvancedSettingsValue;
   onChange: (next: ModelAdvancedSettingsValue) => void;
+  /** Current model type — reasoning controls are LLM-only (develop parity). */
+  modelType?: string;
+  /** Catalog-driven capability metadata; without it only the toggle shows. */
+  reasoningCapability?: ReasoningCapability;
 }) {
   const { t } = useTranslation();
 
@@ -61,6 +79,51 @@ export function ModelAdvancedConfig({
     : [];
   const setCustoms = (next: [string, string][]) =>
     onChange({ ...value, __custom__: next });
+
+  // ---- Reasoning controls (mirrors ModelAdvancedSettings, #3953) ----
+  const reasoningControlVisible = modelType === "llm";
+  const thinkingEnabled = value.enable_thinking !== false;
+  const declaredReasoningControls =
+    reasoningCapability?.status === "supported"
+      ? reasoningCapability.controls?.length
+        ? reasoningCapability.controls
+        : reasoningCapability.levels.length > 0
+          ? [{ type: "effort" as const, values: reasoningCapability.levels }]
+          : reasoningCapability.control === "toggle"
+            ? [{ type: "toggle" as const }]
+            : []
+      : [];
+  const effortControl = declaredReasoningControls.find(
+    (control) => control.type === "effort"
+  );
+  const budgetControl = declaredReasoningControls.find(
+    (control) => control.type === "budget_tokens"
+  );
+  const budgetPreferred = budgetControl?.type === "budget_tokens";
+  const effectiveEffortControl = budgetPreferred ? undefined : effortControl;
+  const configuredReasoningLevels =
+    effectiveEffortControl?.type === "effort"
+      ? (effectiveEffortControl.values as ReasoningEffort[])
+      : reasoningCapability?.levels || [];
+  const reasoningLevels = [
+    "auto",
+    ...configuredReasoningLevels.filter((level) => level !== "auto"),
+  ] as ReasoningEffort[];
+  const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
+  const reasoningDefault = resolveReasoningDefault(
+    reasoningEffort,
+    reasoningCapability,
+    reasoningLevels
+  );
+  const reasoningBudget =
+    budgetControl?.type === "budget_tokens"
+      ? typeof value.reasoning_budget_tokens === "number"
+        ? Math.min(
+            budgetControl.max,
+            Math.max(budgetControl.min, value.reasoning_budget_tokens)
+          )
+        : undefined
+      : undefined;
 
   return (
     <>
@@ -102,26 +165,111 @@ export function ModelAdvancedConfig({
         />
       </div>
 
-      {/* Deep thinking toggle */}
-      <div className="mt-4 flex items-center justify-between rounded-lg border px-4 py-3">
-        <div>
-          <Label className="text-sm">
-            {t("modelConfig.advancedConfig.enableThinking", {
-              defaultValue: "深度思考",
-            })}
-          </Label>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t("modelConfig.advancedConfig.enableThinkingHint", {
-              defaultValue: "允许模型在回答前进行显式推理",
-            })}
-          </p>
+      {/* Deep thinking toggle + reasoning controls */}
+      <div className="mt-4 rounded-lg border px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-sm">
+              {t("modelConfig.advancedConfig.enableThinking", {
+                defaultValue: "深度思考",
+              })}
+            </Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("modelConfig.advancedConfig.enableThinkingHint", {
+                defaultValue: "允许模型在回答前进行显式推理",
+              })}
+            </p>
+          </div>
+          <Switch
+            checked={value.enable_thinking !== false}
+            onCheckedChange={(checked) =>
+              onChange({
+                ...value,
+                enable_thinking: checked,
+                // Same semantics as ModelAdvancedSettings: toggling on seeds
+                // the resolved default effort (preserves a valid stored one);
+                // toggling off clears both so the payload builder drops them.
+                reasoning_effort:
+                  checked && effectiveEffortControl?.type === "effort"
+                    ? reasoningDefault
+                    : undefined,
+                reasoning_budget_tokens: checked
+                  ? value.reasoning_budget_tokens
+                  : undefined,
+              })
+            }
+          />
         </div>
-        <Switch
-          checked={value.enable_thinking !== false}
-          onCheckedChange={(checked) =>
-            onChange({ ...value, enable_thinking: checked })
-          }
-        />
+        {reasoningControlVisible &&
+          thinkingEnabled &&
+          effectiveEffortControl?.type === "effort" && (
+            <div className="mt-3 space-y-1.5">
+              <Label className="text-sm">
+                {t("model.advanced.reasoningEffort", {
+                  defaultValue: "思考挡位",
+                })}
+              </Label>
+              <Select
+                value={
+                  reasoningEffort && reasoningLevels.includes(reasoningEffort)
+                    ? reasoningEffort
+                    : (reasoningDefault ?? "auto")
+                }
+                onValueChange={(next) =>
+                  onChange({
+                    ...value,
+                    reasoning_effort: next as ReasoningEffort,
+                  })
+                }
+              >
+                <SelectTrigger className="h-8 w-full bg-card text-sm font-normal">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {reasoningLevels.map((level) => (
+                    <SelectItem key={level} value={level} className="text-xs">
+                      {level}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        {reasoningControlVisible &&
+          thinkingEnabled &&
+          budgetControl?.type === "budget_tokens" && (
+            <div className="mt-3 space-y-1.5">
+              <Label className="text-sm">
+                {t("model.advanced.reasoningBudget", {
+                  defaultValue: "预算 tokens",
+                })}
+              </Label>
+              <Input
+                type="number"
+                value={reasoningBudget?.toString() ?? ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    onChange({ ...value, reasoning_budget_tokens: undefined });
+                    return;
+                  }
+                  const num = Number(raw);
+                  onChange({
+                    ...value,
+                    reasoning_budget_tokens: Math.min(
+                      budgetControl.max,
+                      Math.max(budgetControl.min, num)
+                    ),
+                  });
+                }}
+                placeholder="auto"
+                className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <p className="text-xs text-muted-foreground">
+                {`${budgetControl.min} ~ ${budgetControl.max}`}
+              </p>
+            </div>
+          )}
       </div>
 
       {/* Custom params */}
