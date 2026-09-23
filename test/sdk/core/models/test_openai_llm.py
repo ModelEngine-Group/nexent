@@ -2299,6 +2299,7 @@ def test_call_can_suppress_semantic_repair_stream(openai_model_instance):
     assert result.model_attempt_commit_deferred is False
 
 
+
 def test_call_token_estimation_with_list_content(openai_model_instance):
     """Test __call__ method extracts text from list-formatted content when usage info is None (line 220)."""
 

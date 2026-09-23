@@ -100,8 +100,10 @@ def extract_skill_file_upload_payloads(content: str) -> list[dict]:
     ]
 
 
-def serialize_stream_unit_content(data: Dict[str, Any], content: str) -> str:
-    """Preserve tool metadata in the existing message-unit content column."""
+def serialize_stream_unit_content(data: Dict[str, Any], content: Any) -> str:
+    """Preserve structured content and tool metadata in the text unit column."""
+    if data.get("type") == "human_interaction" and not isinstance(content, str):
+        return json.dumps(content, ensure_ascii=False)
     if data.get("type") not in {"tool", "tool-call"}:
         return content
 

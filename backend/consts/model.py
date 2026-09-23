@@ -825,11 +825,15 @@ class ConversationKnowledgeScopeUpdateRequest(BaseModel):
     scope: Optional[ConversationKnowledgeScopeRequest] = None
 
 
+def reject_legacy_agent_fields(value):
+    """Reject removed execution controls rather than silently starting a new run."""
+    if isinstance(value, dict) and {"enable_hitl", "hitl_run_id", "hitl_after_event"}.intersection(value):
+        raise ValueError("Legacy human interaction fields are no longer supported; send a normal query")
+    return value
+
+
 class AgentRequest(BaseModel):
     query: str
-    enable_hitl: bool = False
-    hitl_run_id: Optional[str] = Field(default=None, min_length=36, max_length=36)
-    hitl_after_event: int = Field(default=0, ge=0)
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
@@ -869,6 +873,11 @@ class AgentRequest(BaseModel):
         ge=0,
         description="Optional optimistic-lock version for runtime metadata updates",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_execution_controls(cls, value):
+        return reject_legacy_agent_fields(value)
 
     @field_validator("context_policy")
     @classmethod

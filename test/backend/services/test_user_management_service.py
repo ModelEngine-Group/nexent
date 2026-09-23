@@ -47,6 +47,7 @@ from consts.exceptions import (
     UserRegistrationException,
     UnauthorizedError,
     AppException,
+    TenantResourceLimitError,
     ValidationError,
 )
 from consts.error_code import ErrorCode
@@ -628,6 +629,33 @@ class TestCheckAuthServiceHealth(unittest.IsolatedAsyncioTestCase):
 
 class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
     """Test signup_user_with_invitation"""
+
+    async def test_signup_rolls_back_auth_user_when_tenant_limit_is_reached(self):
+        """A rejected tenant registration must not reserve the auth email."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.user.id = "user-limit"
+        mock_client.auth.sign_up.return_value = mock_response
+
+        with patch("backend.services.user_management_service.get_supabase_client", return_value=mock_client), \
+             patch("backend.services.user_management_service.check_invitation_available", return_value=True), \
+             patch(
+                 "backend.services.user_management_service.get_invitation_by_code",
+                 return_value={"code_type": "USER_INVITE", "tenant_id": "tenant-1"},
+             ), \
+             patch(
+                 "backend.services.user_management_service.insert_user_tenant",
+                 side_effect=TenantResourceLimitError(
+                     "Tenant user limit reached: maximum 1 users per tenant"
+                 ),
+             ), \
+             patch("backend.services.user_management_service.delete_supabase_user") as mock_delete:
+            with self.assertRaises(TenantResourceLimitError):
+                await signup_user_with_invitation(
+                    "limit@example.com", "Password123", invite_code="LIMIT1"
+                )
+
+        mock_delete.assert_called_once_with("user-limit")
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')

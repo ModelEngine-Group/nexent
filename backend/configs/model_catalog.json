@@ -518,7 +518,7 @@
     },
     "modelengine": {
       "display_name": "ModelEngine",
-      "base_url": "https://api.modelengine-ai.net/v1/",
+      "base_url": "https://<your-modelengine-host>/open/router/v1",
       "models": {
         "qwen3-8b": {
           "model_type": "llm",

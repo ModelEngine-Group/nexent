@@ -31,6 +31,7 @@ import { authEventUtils } from "@/lib/authEvents";
 import { oauthService } from "@/services/oauthService";
 import log from "@/lib/logger";
 import { getPasswordChecks, getStrengthLevel, validatePassword as validatePasswordUtil } from "@/lib/utils";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 const { Text } = Typography;
 
@@ -254,6 +255,16 @@ export function RegisterModal() {
 
       if (isOAuthCompletion) {
         handleOAuthCompleteError("auth.oauthCompleteFailed", values);
+        setIsLoading(false);
+        return;
+      }
+
+      const tenantResourceLimitMessage = getTenantResourceLimitMessage(
+        error,
+        t
+      );
+      if (tenantResourceLimitMessage) {
+        message.error(tenantResourceLimitMessage);
         setIsLoading(false);
         return;
       }

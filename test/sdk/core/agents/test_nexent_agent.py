@@ -199,6 +199,8 @@ mock_sdk_agent_context_domain_module.__path__ = [
 mock_sdk_agent_context_domain_module.ContextManager = _MockContextManager
 mock_sdk_agent_context_domain_module.ContextManagerConfig = _MockContextManagerConfig
 mock_sdk_agent_context_domain_module.ManagedContextRuntime = _MockManagedContextRuntime
+mock_sdk_agent_context_domain_module.ContextItemInput = MagicMock()
+mock_sdk_agent_context_domain_module.ContextItemType = types.SimpleNamespace(SYSTEM="system")
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]

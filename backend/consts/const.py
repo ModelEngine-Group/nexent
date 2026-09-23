@@ -9,6 +9,18 @@ from dotenv import load_dotenv
 # avoids silently replacing operator-provided service addresses.
 load_dotenv(override=False)
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    """Read a positive integer configuration value with a clear validation error."""
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
 TEST_VOICE_PATH = os.path.join(os.path.dirname(
@@ -34,12 +46,6 @@ ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
 RUNTIME_SERVICE_URL = os.getenv("RUNTIME_SERVICE_URL", "http://localhost:5014").rstrip("/")
-HITL_ENABLED = os.getenv("HITL_ENABLED", "false").lower() in ("true", "1", "yes")
-HITL_ACCEPT_NEW_RUNS = os.getenv("HITL_ACCEPT_NEW_RUNS", "true").lower() in ("true", "1", "yes")
-HITL_TOOL_APPROVAL_ENABLED = os.getenv("HITL_TOOL_APPROVAL_ENABLED", "false").lower() in ("true", "1", "yes")
-HITL_ENCRYPTION_KEY = os.getenv("HITL_ENCRYPTION_KEY", "")
-HITL_WAIT_SECONDS = int(os.getenv("HITL_WAIT_SECONDS", "86400"))
-HITL_MAX_CONCURRENCY = int(os.getenv("HITL_MAX_CONCURRENCY", "2"))
 CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv("TABLE_TRANSFORMER_MODEL_PATH")
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
@@ -205,12 +211,12 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
-# Tenant resource hard limits. These values are intentionally not configurable.
-MAX_TENANT_COUNT = 100
-MAX_USERS_PER_TENANT = 10_000
-MAX_GROUPS_PER_TENANT = 1_000
-MAX_SUPER_ADMIN_COUNT = 1
-MAX_ADMINS_PER_TENANT = 1_000
+# Tenant resource hard limits. Environment variables override these defaults.
+MAX_TENANT_COUNT = _positive_int_env("MAX_TENANT_COUNT", 100)
+MAX_USERS_PER_TENANT = _positive_int_env("MAX_USERS_PER_TENANT", 10_000)
+MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
+MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
+MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"

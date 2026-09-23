@@ -26,8 +26,12 @@ import type { TableProps } from "antd";
 import type { MenuProps } from "antd";
 import {
   CalendarClock,
-  LoaderCircle,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
   History,
+  LoaderCircle,
   MessageCirclePlus,
   MoreHorizontal,
   Pause,
@@ -40,9 +44,11 @@ import {
 } from "lucide-react";
 
 import { agentAutomationService } from "@/services/agentAutomationService";
+import { conversationService } from "@/services/conversationService";
 import AutomationDateTimePicker from "@/features/agentAutomation/components/AutomationDateTimePicker";
 import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
 import { formatDateTimeLocale } from "@/lib/date";
+import type { ApiMessage } from "@/types/conversation";
 import type {
   AgentAutomationRun,
   AgentAutomationTask,
@@ -230,6 +236,15 @@ export default function AgentTasksPage() {
   const [runLoading, setRunLoading] = useState(false);
   const [form] = Form.useForm();
   const loadRequestIdRef = useRef(0);
+  // Inline expand state for the "View Result" panel on each task row.
+  const [expandedTaskIds, setExpandedTaskIds] = useState<number[]>([]);
+  const [expandLoadingTaskIds, setExpandLoadingTaskIds] = useState<number[]>([]);
+  const [latestRunByTask, setLatestRunByTask] = useState<
+    Record<number, AgentAutomationRun | null>
+  >({});
+  const [conversationMessagesByTask, setConversationMessagesByTask] = useState<
+    Record<number, ApiMessage[]>
+  >({});
 
   const formatDateTime = (value?: string | null) =>
     formatDateTimeLocale(value, i18n.language);
@@ -462,12 +477,67 @@ export default function AgentTasksPage() {
     try {
       await agentAutomationService.run(task.task_id);
       message.success(t("agentAutomation.page.runSuccess"));
+      // Invalidate cached run result so the next expand refetches.
+      setLatestRunByTask((current) => {
+        const next = { ...current };
+        delete next[task.task_id];
+        return next;
+      });
+      setConversationMessagesByTask((current) => {
+        const next = { ...current };
+        delete next[task.task_id];
+        return next;
+      });
+      setExpandedTaskIds((current) =>
+        current.filter((id) => id !== task.task_id)
+      );
     } catch (error) {
       message.error(
         getAutomationErrorMessage(error, t, "agentAutomation.page.runFailed")
       );
     } finally {
       await loadTasks();
+    }
+  };
+
+  const handleToggleExpand = async (task: AgentAutomationTask) => {
+    const taskId = task.task_id;
+    const isExpanded = expandedTaskIds.includes(taskId);
+    if (isExpanded) {
+      setExpandedTaskIds((current) =>
+        current.filter((id) => id !== taskId)
+      );
+      return;
+    }
+    // Expand the row immediately; data will fill in after fetch.
+    setExpandedTaskIds((current) => [...current, taskId]);
+    // Skip refetch when cached data already exists.
+    if (latestRunByTask[taskId] !== undefined) return;
+    setExpandLoadingTaskIds((current) => [...current, taskId]);
+    try {
+      const [runsPage, conversationResponse] = await Promise.all([
+        agentAutomationService.runs(taskId, { page: 1, pageSize: 1 }),
+        conversationService.getDetail(task.conversation_id),
+      ]);
+      const latestRun = runsPage.items[0] || null;
+      const messages = conversationResponse.data?.[0]?.message || [];
+      setLatestRunByTask((current) => ({ ...current, [taskId]: latestRun }));
+      setConversationMessagesByTask((current) => ({
+        ...current,
+        [taskId]: messages,
+      }));
+    } catch (error: unknown) {
+      message.error(
+        getAutomationErrorMessage(
+          error,
+          t,
+          "agentAutomation.page.historyLoadFailed"
+        )
+      );
+    } finally {
+      setExpandLoadingTaskIds((current) =>
+        current.filter((id) => id !== taskId)
+      );
     }
   };
 
@@ -684,17 +754,59 @@ export default function AgentTasksPage() {
     },
     {
       title: t("agentAutomation.page.lastResult"),
-      width: 180,
-      render: (_, task) => (
-        <div className="text-sm">
-          <div>{formatRunStatus(task.last_run_status)}</div>
-          {task.last_error && (
-            <div className="text-xs text-red-500 truncate">
-              {task.last_error}
+      width: 220,
+      render: (_, task) => {
+        const isExpanded = expandedTaskIds.includes(task.task_id);
+        const isLoading = expandLoadingTaskIds.includes(task.task_id);
+        const canExpand = Boolean(task.last_run_status);
+        return (
+          <div className="text-sm">
+            <div className="flex items-center gap-1">
+              <span>{formatRunStatus(task.last_run_status)}</span>
+              {canExpand && (
+                <Tooltip
+                  title={
+                    isExpanded
+                      ? t("agentAutomation.page.collapseResult")
+                      : t("agentAutomation.page.viewResult")
+                  }
+                >
+                  <span className="inline-flex">
+                    <Button
+                      type="text"
+                      shape="circle"
+                      size="small"
+                      icon={
+                        isLoading ? (
+                          <LoaderCircle size={14} className="animate-spin" />
+                        ) : isExpanded ? (
+                          <EyeOff size={14} />
+                        ) : (
+                          <Eye size={14} />
+                        )
+                      }
+                      aria-label={
+                        isExpanded
+                          ? t("agentAutomation.page.collapseResult")
+                          : t("agentAutomation.page.viewResult")
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleToggleExpand(task);
+                      }}
+                    />
+                  </span>
+                </Tooltip>
+              )}
             </div>
-          )}
-        </div>
-      ),
+            {task.last_error && (
+              <div className="text-xs text-red-500 truncate">
+                {task.last_error}
+              </div>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: t("agentAutomation.page.actions"),
@@ -799,6 +911,25 @@ export default function AgentTasksPage() {
         columns={columns}
         dataSource={tasks}
         onChange={handleTableChange}
+        expandable={{
+          expandedRowKeys: expandedTaskIds,
+          onExpandedRowsChange: (keys) =>
+            setExpandedTaskIds(keys.map((key) => Number(key))),
+          rowExpandable: (task) => Boolean(task.last_run_status),
+          expandedRowRender: (task) => (
+            <RunResultPanel
+              task={task}
+              run={latestRunByTask[task.task_id]}
+              messages={conversationMessagesByTask[task.task_id]}
+              loading={expandLoadingTaskIds.includes(task.task_id)}
+              formatDateTime={formatDateTime}
+              formatRunStatus={formatRunStatus}
+              formatTriggerType={formatTriggerType}
+              t={t}
+              locale={params.locale}
+            />
+          ),
+        }}
         pagination={{
           current: taskPage,
           pageSize: taskPageSize,
@@ -1020,6 +1151,186 @@ export default function AgentTasksPage() {
           locale={{ emptyText: t("agentAutomation.page.noRuns") }}
         />
       </Drawer>
+    </div>
+  );
+}
+
+interface RunResultPanelProps {
+  task: AgentAutomationTask;
+  run?: AgentAutomationRun | null;
+  messages?: ApiMessage[];
+  loading: boolean;
+  formatDateTime: (value?: string | null) => string;
+  formatRunStatus: (status?: string | null) => string;
+  formatTriggerType: (triggerType: string) => string;
+  t: (key: string, options?: Record<string, unknown>) => string;
+  locale: string;
+}
+
+function RunResultPanel({
+  task,
+  run,
+  messages,
+  loading,
+  formatDateTime,
+  formatRunStatus,
+  formatTriggerType,
+  t,
+  locale,
+}: RunResultPanelProps) {
+  const [promptExpanded, setPromptExpanded] = useState(false);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
+        <LoaderCircle size={14} className="animate-spin" />
+        <span>{t("common.loading")}</span>
+      </div>
+    );
+  }
+
+  if (!run) {
+    return (
+      <div className="py-4 text-sm text-gray-500">
+        {t("agentAutomation.page.noRuns")}
+      </div>
+    );
+  }
+
+  // Match the assistant message by assistant_message_id to retrieve the
+  // agent's output content from the conversation history.
+  const assistantMessage = run.assistant_message_id
+    ? messages?.find((item) => item.message_id === run.assistant_message_id)
+    : undefined;
+
+  let agentOutput = "";
+  if (assistantMessage) {
+    const raw = assistantMessage.message;
+    if (typeof raw === "string") {
+      agentOutput = raw;
+    } else if (Array.isArray(raw)) {
+      agentOutput = raw.map((unit) => unit.content || "").join("");
+    }
+  }
+
+  const durationSeconds =
+    run.duration_ms != null ? (run.duration_ms / 1000).toFixed(2) : null;
+
+  const isFailed = run.status === "FAILED";
+
+  return (
+    <div className="px-2 py-3 space-y-3 text-sm">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-600">
+        <span>
+          <span className="text-gray-400">
+            {t("agentAutomation.page.status")}:
+          </span>{" "}
+          <Tag
+            color={isFailed ? "red" : "green"}
+            style={{ marginLeft: 0 }}
+          >
+            {formatRunStatus(run.status)}
+          </Tag>
+        </span>
+        <span>
+          <span className="text-gray-400">
+            {t("agentAutomation.page.trigger")}:
+          </span>{" "}
+          {formatTriggerType(run.trigger_type)}
+        </span>
+        {run.scheduled_fire_at && (
+          <span>
+            <span className="text-gray-400">
+              {t("agentAutomation.page.scheduledFireAt")}:
+            </span>{" "}
+            {formatDateTime(run.scheduled_fire_at)}
+          </span>
+        )}
+        {run.actual_fire_at && (
+          <span>
+            <span className="text-gray-400">
+              {t("agentAutomation.page.actualFireAt")}:
+            </span>{" "}
+            {formatDateTime(run.actual_fire_at)}
+          </span>
+        )}
+        {durationSeconds && (
+          <span>
+            <span className="text-gray-400">
+              {t("agentAutomation.page.duration")}:
+            </span>{" "}
+            {durationSeconds}s
+          </span>
+        )}
+      </div>
+
+      {run.generated_prompt && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setPromptExpanded((value) => !value)}
+            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+          >
+            {promptExpanded ? (
+              <ChevronDown size={12} />
+            ) : (
+              <ChevronRight size={12} />
+            )}
+            {promptExpanded
+              ? t("agentAutomation.page.collapsePrompt")
+              : t("agentAutomation.page.expandPrompt")}
+          </button>
+          {promptExpanded && (
+            <pre className="mt-1 p-2 bg-gray-50 rounded text-xs whitespace-pre-wrap break-words max-h-48 overflow-auto">
+              {run.generated_prompt}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {isFailed && (run.error_code || run.error_message) && (
+        <div className="p-2 bg-red-50 rounded text-xs">
+          <div className="font-medium text-red-600">
+            {t("agentAutomation.page.errorMessage")}
+          </div>
+          {run.error_code && (
+            <div className="text-red-500 mt-1">
+              {t("agentAutomation.page.errorCode")}: {run.error_code}
+            </div>
+          )}
+          {run.error_message && (
+            <div className="text-red-500 mt-1 break-words">
+              {run.error_message}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div>
+        <div className="text-xs text-gray-400 mb-1">
+          {t("agentAutomation.page.agentOutput")}
+        </div>
+        {agentOutput ? (
+          <pre className="p-2 bg-gray-50 rounded text-xs whitespace-pre-wrap break-words max-h-96 overflow-auto">
+            {agentOutput}
+          </pre>
+        ) : (
+          <div className="text-xs text-gray-400">
+            {messages && messages.length > 0
+              ? t("agentAutomation.page.noAgentOutput")
+              : t("agentAutomation.page.noConversationMessages")}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <Link
+          href={`/${locale}/newchat?conversation_id=${task.conversation_id}`}
+          className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
+        >
+          {t("agentAutomation.page.viewFullConversation")}
+        </Link>
+      </div>
     </div>
   );
 }

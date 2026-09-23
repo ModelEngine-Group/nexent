@@ -19,6 +19,7 @@ from consts.provider import (
     DASHSCOPE_BASE_URL,
     DASHSCOPE_REALTIME_BASE_URL,
     TOKENPONY_BASE_URL,
+    MODEL_ENGINE_URL_MARKER,
 )
 
 from database.model_management_db import (
@@ -428,16 +429,16 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
             )
         # Auto-set ssl_verify based on api_key:
         # - Empty api_key (local/LAN services) -> ssl_verify=False
-        # - "open/router" URL -> ssl_verify=False
+        # - ModelEngine URL (self-signed certs) -> ssl_verify=False
         # - Otherwise -> ssl_verify=True
         model_api_key = model_data.get("api_key", "")
-        if not model_api_key or "open/router" in model_base_url:
+        if not model_api_key or MODEL_ENGINE_URL_MARKER in model_base_url:
             model_data["ssl_verify"] = False
         else:
             model_data["ssl_verify"] = True
 
-        # Set model_factory to modelengine when using open/router URL
-        if "open/router" in model_base_url:
+        # Set model_factory to modelengine when using a ModelEngine URL
+        if MODEL_ENGINE_URL_MARKER in model_base_url:
             model_data["model_factory"] = "modelengine"
 
         if model_data.get("model_type") in ("vlm", "vlm2", "vlm3", "vlm4"):
@@ -516,6 +517,9 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
         # Auto-configure default-model slots that the tenant never set.
         auto_configured = _backfill_default_model_slots(user_id, tenant_id)
         return {"auto_configured_defaults": auto_configured}
+    except ValueError:
+        # Let the API layer map conflicts to 409 instead of 500.
+        raise
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise Exception(f"Failed to create model: {str(e)}")
@@ -820,6 +824,9 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
         # Auto-configure default-model slots that the tenant never set.
         auto_configured = _backfill_default_model_slots(user_id, tenant_id)
         return {"auto_configured_defaults": auto_configured}
+    except ValueError:
+        # Let the API layer map invalid entries to 422 instead of 500.
+        raise
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise Exception(f"Failed to batch create models: {str(e)}")
@@ -885,9 +892,21 @@ async def update_single_model_for_tenant(
 
         # Auto-set ssl_verify based on api_key if provided:
         # - Empty api_key -> ssl_verify=False
+        # - ModelEngine URL (self-signed certs) -> ssl_verify=False
         # - Otherwise -> ssl_verify=True
+        # The open/router exemption mirrors the create path
+        # (create_model_for_tenant): without it, editing a ModelEngine model
+        # submits the prefilled non-empty api_key and silently flips
+        # ssl_verify to True, breaking connectivity against its self-signed
+        # certificate. The URL is taken from the update payload when present
+        # and falls back to the stored record otherwise.
         if "api_key" in model_data:
-            if not model_data["api_key"]:
+            effective_base_url = (
+                model_data.get("base_url")
+                or (existing_models[0].get("base_url") if existing_models else "")
+                or ""
+            )
+            if not model_data["api_key"] or MODEL_ENGINE_URL_MARKER in effective_base_url:
                 model_data["ssl_verify"] = False
             else:
                 model_data["ssl_verify"] = True
@@ -1077,6 +1096,7 @@ async def list_llm_models_for_tenant(tenant_id: str):
                     model_repo=record["model_repo"],
                     model_name=record["model_name"],
                 ),
+                "model_type": record.get("model_type", "llm"),
                 "connect_status": ModelConnectStatusEnum.get_value(record.get("connect_status")),
                 "display_name": record["display_name"],
                 "api_key": record.get("api_key", ""),
