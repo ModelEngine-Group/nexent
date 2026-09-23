@@ -1,5 +1,10 @@
 import pytest
-from backend.utils.str_utils import remove_think_blocks, convert_list_to_string
+
+from backend.utils.str_utils import (
+    convert_list_to_string,
+    convert_string_to_list,
+    remove_think_blocks,
+)
 
 
 class TestStrUtils:
@@ -88,6 +93,23 @@ class TestStrUtils:
         """Zero and negative numbers should be handled correctly"""
         result = convert_list_to_string([0, -1, 5])
         assert result == "0,-1,5"
+
+    def test_convert_string_to_list_round_trips_signed_integers(self):
+        """Serialized signed integers should round-trip without data loss"""
+        serialized = convert_list_to_string([0, -1, 5])
+
+        assert convert_string_to_list(serialized) == [0, -1, 5]
+
+    def test_convert_string_to_list_accepts_whitespace_and_explicit_signs(self):
+        """Whitespace and explicit integer signs should be accepted"""
+        assert convert_string_to_list("  -2, +3, 0  ") == [-2, 3, 0]
+
+    def test_convert_string_to_list_warns_and_keeps_valid_entries(self, caplog):
+        """Malformed entries should be reported without discarding valid values"""
+        result = convert_string_to_list("invalid, 1, , -2")
+
+        assert result == [1, -2]
+        assert "dropping non-integer entry 'invalid'" in caplog.text
 
 
 if __name__ == "__main__":
