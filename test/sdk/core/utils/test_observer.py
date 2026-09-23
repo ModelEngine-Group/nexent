@@ -834,18 +834,16 @@ class TestMessageObserverTokenProcessing:
         observer.add_model_new_token(" ")
         observer.add_model_new_token("World")
 
-        # Check that tokens are accumulated in think buffer
-        assert len(observer.think_buffer) == 3
+        # Safe ordinary content must be visible before stream completion.
+        streamed_messages = observer.get_cached_message()
+        assert "".join(json.loads(item)["content"] for item in streamed_messages) == "Hello World"
+        assert not observer.think_buffer
 
-        # Flush to see the result
+        # Flushing must not duplicate already streamed content.
         observer.flush_remaining_tokens()
         cached_messages = observer.get_cached_message()
-
-        # Should have one message with accumulated content
-        assert len(cached_messages) == 1
-        message_data = json.loads(cached_messages[0])
-        assert message_data["type"] == ProcessType.MODEL_OUTPUT_THINKING.value
-        assert message_data["content"] == "Hello World"
+        assert cached_messages == []
+        assert all(json.loads(item)["type"] == ProcessType.MODEL_OUTPUT_THINKING.value for item in streamed_messages)
 
     def test_add_model_new_token_think_mode(self):
         """Test add_model_new_token with think tags"""

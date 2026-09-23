@@ -932,6 +932,7 @@ class NexentAgent:
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
                 output_protocol=getattr(agent_config, "output_protocol", "code_action"),
+                enable_protocol_repair_retry=agent_config.enable_protocol_repair_retry,
                 enable_clarification=enable_clarification,
                 workspace_path=self.workspace_path,
             )

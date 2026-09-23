@@ -134,19 +134,24 @@ export default function AgentConfigActions() {
         requested_output_tokens: detail.requested_output_tokens ?? null,
         is_main_agent: detail.is_main_agent ?? true,
         provide_run_summary: detail.provide_run_summary,
+        enable_protocol_repair_retry:
+          detail.enable_protocol_repair_retry ?? false,
         enabled: detail.enabled,
         business_description: detail.business_description,
         duty_prompt: detail.duty_prompt,
         constraint_prompt: detail.constraint_prompt,
         few_shots_prompt: detail.few_shots_prompt,
-        business_logic_model_name: detail.business_logic_model_name ?? undefined,
+        business_logic_model_name:
+          detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: subAgentIds,
       });
 
       if (!createResult.success || !createResult.data?.agent_id) {
-        message.error(createResult.message || t("agentConfig.agents.copyFailed"));
+        message.error(
+          createResult.message || t("agentConfig.agents.copyFailed")
+        );
         return;
       }
       const newAgentId = Number(createResult.data.agent_id);
@@ -196,7 +201,9 @@ export default function AgentConfigActions() {
     deleteAgentMutation.mutate(agentId, {
       onSuccess: () => {
         message.success(
-          t("businessLogic.config.error.agentDeleteSuccess", { name: agentName })
+          t("businessLogic.config.error.agentDeleteSuccess", {
+            name: agentName,
+          })
         );
         const nextSearchParams = new URLSearchParams(searchParams.toString());
         nextSearchParams.delete("agent_id");
@@ -316,7 +323,9 @@ export default function AgentConfigActions() {
             supportedInterfaces={a2aSettingsData.data.supported_interfaces}
           />
         ) : (
-          <div style={{ textAlign: "center", padding: "40px 0", color: "#999" }}>
+          <div
+            style={{ textAlign: "center", padding: "40px 0", color: "#999" }}
+          >
             {t(
               "a2a.service.getServerSettingsFailed",
               "Failed to load A2A settings"

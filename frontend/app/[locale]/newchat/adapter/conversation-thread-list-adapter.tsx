@@ -77,8 +77,7 @@ type HistoricalChatMode = "planning" | "execution";
 let activeHistoricalConversationId: string | undefined;
 let activeHistoricalChatModeConversationId: string | undefined;
 let historicalChatModeListener:
-  | ((mode: HistoricalChatMode) => void)
-  | undefined;
+  ((mode: HistoricalChatMode) => void) | undefined;
 const historicalChatModeCache = new Map<string, HistoricalChatMode>();
 
 export const restoreHistoricalPlan = (conversationId?: string): void => {
@@ -245,7 +244,7 @@ const buildBranchableHistory = (
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
 
-  for (let groupStart = 0; groupStart < messages.length; ) {
+  for (let groupStart = 0; groupStart < messages.length;) {
     const role = messages[groupStart].role;
     let groupEnd = groupStart + 1;
     while (groupEnd < messages.length && messages[groupEnd].role === role) {
@@ -486,6 +485,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           depth: number;
           invocationId: string;
           reasoningText: string;
+          stepLabel: string;
+          pendingStepLabel: string;
+          pendingWhitespace: string;
         };
         const activeSubAgents = new Map<string, ActiveSubAgent>();
         let historicalRunCounter = 0;
@@ -525,7 +527,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
         const flushReasoning = (invocationId?: string) => {
           const entry = invocationId ? activeSubAgents.get(invocationId) : null;
-          if (entry?.reasoningText) {
+          if (entry?.reasoningText && entry.reasoningText !== entry.stepLabel) {
             content.push({
               type: "reasoning",
               text: entry.reasoningText,
@@ -540,6 +542,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               },
             });
             entry.reasoningText = "";
+          }
+          if (entry) {
+            entry.reasoningText = "";
+            entry.stepLabel = "";
+            entry.pendingStepLabel = "";
+            entry.pendingWhitespace = "";
           }
           if (!invocationId) parentReasoning.close();
         };
@@ -754,6 +762,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               depth: activeSubAgents.size + 1,
               invocationId,
               reasoningText: "",
+              stepLabel: "",
+              pendingStepLabel: "",
+              pendingWhitespace: "",
             };
             activeSubAgents.set(invocationId, descriptor);
             const stampMeta = buildMetadata(invocationId);
@@ -830,11 +841,18 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
 
           if (part.type === "step_count") {
-            flushReasoning(part.invocation_id);
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
-              if (top) top.reasoningText += part.content;
-              else parentReasoning.append(part.content);
+              if (top) {
+                if (top.reasoningText && !top.stepLabel) {
+                  // Old persisted order: model text preceded step_count.
+                  top.reasoningText = part.content + top.reasoningText;
+                } else {
+                  flushReasoning(part.invocation_id);
+                  top.reasoningText = part.content;
+                }
+                top.stepLabel = part.content;
+              } else parentReasoning.queueStepLabel(part.content);
             }
             continue;
           }
@@ -842,8 +860,16 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (isReasoningChunkType(part.type)) {
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
-              if (top) top.reasoningText += part.content;
-              else parentReasoning.append(part.content);
+              if (top) {
+                if (!top.reasoningText && !part.content.trim()) {
+                  top.pendingWhitespace += part.content;
+                } else {
+                  top.reasoningText +=
+                    top.pendingStepLabel + top.pendingWhitespace + part.content;
+                  top.pendingStepLabel = "";
+                  top.pendingWhitespace = "";
+                }
+              } else parentReasoning.append(part.content);
             }
             continue;
           }
@@ -1029,8 +1055,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                | Record<string, unknown>
-                | undefined;
+                Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||

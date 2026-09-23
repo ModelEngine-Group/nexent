@@ -515,6 +515,7 @@ async def export_agent_by_agent_id(
                                           is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
+                                          enable_protocol_repair_retry=agent_info.get("enable_protocol_repair_retry") is True,
                                           verification_config=agent_info.get("verification_config"),
                                           context_policy=agent_info.get("context_policy"),
                                           model_params_override=agent_info.get("model_params_override"),
@@ -692,6 +693,7 @@ async def import_agent_by_agent_id(
                                          "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "allow_chat_metadata": import_agent_info.allow_chat_metadata,
+                                         "enable_protocol_repair_retry": getattr(import_agent_info, "enable_protocol_repair_retry", False),
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "model_params_override": getattr(import_agent_info, "model_params_override", None),
@@ -873,6 +875,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
+                "enable_protocol_repair_retry": agent.get("enable_protocol_repair_retry") is True,
             })
 
         return simple_agent_list

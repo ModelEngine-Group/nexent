@@ -1,0 +1,76 @@
+schema_version: '1.0'
+cases:
+  - case_id: CMSR-D1-001
+    stage: D1
+    status: implemented
+    contract_hash: sha256:625e8c8829b51b9cd91344555d05c5ebfdc7bd766d8485eab99b9f22773f3233
+    implementation_hash: sha256:242f1aaf8a5fe4427f503e5acb8db2cc6cb5096782c2e4fdf49fcb17ec471420
+    implementation:
+      - framework: pytest
+        file: test/automation/d1/test_model_attempt_stream.py
+        selector: test_cmsr_d1_001
+        profiles: [mock]
+  - case_id: CMSR-D1-002
+    stage: D1
+    status: implemented
+    contract_hash: sha256:b614502639e969ab0f3840d1381f1b12b01cb5b693a0b02d17387192b230b354
+    implementation_hash: sha256:03f5fae5200c76ca296c75ab0ebf225f190fb3fe6a7f52c7c8c7e0da2a97d07c
+    implementation:
+      - framework: custom
+        file: test/automation/d1/test_reasoning_card.ts
+        selector: CMSR-D1-002
+        profiles: [mock]
+  - case_id: CMSR-D2-001
+    stage: D2
+    status: implemented
+    contract_hash: sha256:9e5d436508638774329620f8bea1420eab531ad470095c935fac5fccc69e894c
+    implementation_hash: sha256:570d7db5b7480c6b3a3a3adcc953158f7c496e44a79e90ad1ca3a4df676d573f
+    implementation:
+      - framework: pytest
+        file: test/automation/d2/test_model_attempt_sse.py
+        selector: test_cmsr_d2_001
+        profiles: [mock]
+  - case_id: CMSR-D3-001
+    stage: D3
+    status: blocked
+    contract_hash: sha256:f6ba2ceeb76ca6051b3f305afac2f932ad4f1148a2201ea8471d0cbaae207b6e
+    implementation_hash: sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+    implementation: []
+    required_mock_services: [model-provider]
+    notes: Requires a disposable Nexent instance running this worktree; deployment is outside this change request.
+  - case_id: CMSR-D4-001
+    stage: D4
+    status: blocked
+    contract_hash: sha256:f110f582fe091286fdaa5301f8bdc22703bf583fc7c6c95214ae8c8187a612a1
+    implementation_hash: sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+    implementation: []
+    required_mock_services: [model-provider]
+    notes: Requires browser verification against a freshly deployed instance and a controlled paused provider.
+  - case_id: CMSR-D5-001
+    stage: D5
+    status: blocked
+    contract_hash: sha256:50b69a0b1ee496cbb14b84e51bb80e7f92f3aaecd2d694c095013d056f678861
+    implementation_hash: sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+    implementation: []
+    required_mock_services: [model-provider]
+    notes: Requires repeated physical provider failures and parallel sub-agent persistence verification in a deployed instance.
+  - case_id: CMSR-D1-003
+    stage: D1
+    status: implemented
+    contract_hash: sha256:7ef8664f2224d068d7deafecf80f09353d734bc10b35a1147b3cc58d1ae6eacd
+    implementation_hash: sha256:1dee7e7ce90f70c40d02907f11be7b55665495fdcaa3dfdec3ab478953c5c38c
+    implementation:
+      - framework: pytest
+        file: test/automation/d1/test_semantic_repair_stream.py
+        selector: test_cmsr_d1_003
+        profiles: [mock]
+  - case_id: CMSR-D1-004
+    stage: D1
+    status: implemented
+    contract_hash: sha256:9f06a6565fff8e542fdcb89725b5fc7f669ad52b07301bdc99aa3e2eba23552c
+    implementation_hash: sha256:a53056127d5f2efce4a9d98c92c9c97892451de0d1d353603584612c0a9ef1ba
+    implementation:
+      - framework: pytest
+        file: test/automation/d1/test_protocol_rejection_diagnostics.py
+        selector: test_cmsr_d1_004
+        profiles: [mock]

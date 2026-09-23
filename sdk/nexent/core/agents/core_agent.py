@@ -27,6 +27,10 @@ from ...monitor import get_monitoring_manager
 
 from ..model_errors import ModelErrorCode, ModelInvocationTerminalError
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.model_output_diagnostics import (
+    bounded_rejected_output_preview,
+    rejected_output_preview_enabled,
+)
 from jinja2 import Template, StrictUndefined
 
 from typing import TYPE_CHECKING
@@ -155,6 +159,61 @@ def parse_code_blobs(text: str) -> str:
             """
         ).strip()
     )
+
+
+_LEGACY_ACTION_RECORD_LINE_RE = re.compile(
+    r"(?im)^\s*(?:[-*#>]\s*)*(?:step\s+\d+\s*:|called\s+tool\b|observation\s*:|tool_calls?\s*:)"
+)
+_LEGACY_ACTION_JSON_KEYS = frozenset({"action", "tool_call", "tool_calls", "arguments"})
+_LEGACY_ACTION_INTENT_RE = re.compile(
+    r"(?is)(?:^|\n)\s*(?:(?:思考|分析|thoughts?|analysis)\s*[:：].{0,800}"
+    r"|(?:我(?:将|需要|先)|接下来|下一步|i\s+(?:will|need\s+to|should)\b|next\b).{0,240})"
+    r"(?:调用|使用|检索|搜索|call|use|search|invoke)"
+)
+_LEGACY_EXPLICIT_FINAL_ANSWER_RE = re.compile(
+    r"(?is)(?:^|\n)\s*(?:最终回答|final\s+answer)\s*[:：]\s*\S"
+)
+
+
+def _looks_like_incomplete_legacy_action(
+    text: Any,
+    available_tool_names: Any = (),
+    finish_reason: Optional[str] = None,
+) -> bool:
+    """Preserve the pre-whitelist guard against treating partial actions as answers."""
+    if not isinstance(text, str) or not text.strip():
+        return False
+    if finish_reason == "length":
+        return True
+    stripped = text.strip()
+    if _LEGACY_ACTION_RECORD_LINE_RE.search(stripped):
+        return True
+    if any(marker in stripped for marker in ("<code>", "</code>", "```<RUN>")):
+        return True
+    if stripped.startswith("```") and stripped.endswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:-3].strip()
+    if stripped.startswith(("{", "[")):
+        try:
+            payload = json.loads(stripped)
+        except (TypeError, ValueError):
+            payload = None
+        records = payload if isinstance(payload, list) else [payload]
+        if any(
+            isinstance(record, dict) and bool(_LEGACY_ACTION_JSON_KEYS.intersection(record))
+            for record in records
+        ):
+            return True
+    if _LEGACY_EXPLICIT_FINAL_ANSWER_RE.search(text):
+        return False
+    normalized = text.casefold()
+    mentioned_tool = any(
+        str(tool_name).casefold() in normalized
+        for tool_name in available_tool_names or ()
+        if tool_name
+    )
+    return mentioned_tool and bool(_LEGACY_ACTION_INTENT_RE.search(text))
 
 
 def convert_code_format(text):
@@ -441,6 +500,7 @@ class CoreAgent(CodeAgent):
         self.user_id = kwargs.pop("user_id", None)
         self.workspace_path = kwargs.pop("workspace_path", None)
         self.output_protocol = kwargs.pop("output_protocol", "code_action")
+        self.enable_protocol_repair_retry = kwargs.pop("enable_protocol_repair_retry", False)
         if self.output_protocol not in ("code_action", "final_answer_envelope"):
             raise ValueError(f"Unsupported output protocol: {self.output_protocol}")
         self._consecutive_protocol_errors = 0
@@ -813,8 +873,16 @@ Additional Args:
         monitoring_manager.set_span_attributes(**attributes)
         monitoring_manager.add_span_event("agent.output_protocol", attributes)
 
-    def _controlled_protocol_failure(self) -> str:
+    def _controlled_protocol_failure(self, *, repair_disabled: bool = False) -> str:
         lang = getattr(getattr(self, "observer", None), "lang", getattr(self, "lang", "en"))
+        if repair_disabled:
+            if str(lang).lower().startswith("zh"):
+                return "模型回复未遵循 Agent 输出协议；此 Agent 已关闭自动修复，本次运行已安全终止。请重试或更换模型。"
+            return (
+                "The model response did not follow the Agent output protocol. "
+                "Automatic repair is disabled for this Agent, so this run was stopped safely. "
+                "Please retry or use another model."
+            )
         if str(lang).lower().startswith("zh"):
             return "模型连续未遵循 Agent 输出协议，本次运行已安全终止。请重试或更换模型。"
         return (
@@ -840,7 +908,115 @@ Additional Args:
         resolve = getattr(self.observer, method_name, None)
         if callable(resolve):
             resolve(attempt_id, attempt_number)
+            logger.info(
+                "event=model_output_attempt_resolved phase=%s step_number=%s attempt_id=%s attempt=%s",
+                "commit" if accepted else "rollback",
+                self.step_number,
+                attempt_id,
+                attempt_number,
+            )
         message.model_attempt_commit_deferred = False
+
+    def _legacy_parse_fallback(
+        self, memory_step: ActionStep, model_output: Any, finish_reason: Optional[str]
+    ) -> ActionOutput:
+        """Keep the pre-whitelist CodeAgent response and ordinary step-error flow."""
+
+        self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+        if _looks_like_incomplete_legacy_action(
+            model_output,
+            available_tool_names=self._known_tool_names(),
+            finish_reason=finish_reason,
+        ):
+            raise AgentExecutionError(
+                "The previous response described an action but ended before producing an executable "
+                "tool call. Do not treat an action preamble as the final answer. Emit executable Python "
+                "inside <code>...</code>, or return a complete user-facing final answer.",
+                self.logger,
+            )
+        if not model_output or not str(model_output).strip():
+            raise AgentGenerationError(
+                "Model returned empty or whitespace-only output; "
+                "this is likely a transient API issue and the step will be retried.",
+                self.logger,
+            )
+        direct_answer = convert_code_format(model_output)
+        memory_step.action_output = direct_answer
+        memory_step._final_answer_source = "direct_model_output"
+        getattr(self, "_protocol_repair_messages", []).clear()
+        self._consecutive_protocol_errors = 0
+        return ActionOutput(output=direct_answer, is_final_answer=True)
+
+    def _log_protocol_repair_accepted(self, message: ChatMessage | None) -> None:
+        """Record a content-free success marker before clearing repair context."""
+
+        if not getattr(self, "_protocol_repair_messages", None):
+            return
+        logger.info(
+            "event=model_output_protocol_repair_accepted step_number=%s repair_ordinal=%s "
+            "attempt_id=%s attempt=%s",
+            self.step_number,
+            getattr(self, "_consecutive_protocol_errors", 0),
+            getattr(message, "model_attempt_id", None),
+            getattr(message, "model_attempt_number", None),
+        )
+
+    def _log_protocol_rejection(
+        self, protocol_error: ModelOutputProtocolError, action_step: ActionStep
+    ) -> None:
+        """Correlate a rejected response without exposing its content by default."""
+
+        model = getattr(self, "model", None)
+        diagnostics = getattr(model, "last_response_diagnostics", None)
+        if not isinstance(diagnostics, dict):
+            diagnostics = {}
+        message = getattr(action_step, "model_output_message", None)
+        attempt_id = getattr(message, "model_attempt_id", None)
+        attempt_number = getattr(message, "model_attempt_number", None)
+        if not isinstance(attempt_id, str):
+            attempt_id = getattr(model, "last_attempt_id", None)
+        if not isinstance(attempt_number, int):
+            attempt_number = getattr(model, "last_attempt_number", None)
+        finish_reason = diagnostics.get("finish_reason") or getattr(
+            model, "last_finish_reason", None
+        )
+        logger.warning(
+            "event=model_output_protocol_error protocol=%s reason=%s step_number=%s "
+            "consecutive_errors=%s model_id=%s provider=%s attempt_id=%s attempt=%s "
+            "finish_reason=%s requested_output_tokens=%s input_tokens=%s "
+            "output_tokens=%s reasoning_chunk_count=%s reasoning_char_count=%s "
+            "content_chunk_count=%s content_char_count=%s "
+            "reasoning_only_budget_exhausted=%s unicode_categories=%s",
+            getattr(self, "output_protocol", "code_action"),
+            protocol_error.reason.value,
+            self.step_number,
+            self._consecutive_protocol_errors,
+            getattr(model, "model_id", None),
+            getattr(model, "model_factory", None),
+            attempt_id,
+            attempt_number,
+            finish_reason,
+            diagnostics.get("requested_output_tokens"),
+            diagnostics.get("input_tokens"),
+            diagnostics.get("output_tokens"),
+            diagnostics.get("reasoning_chunk_count"),
+            diagnostics.get("reasoning_char_count"),
+            diagnostics.get("content_chunk_count"),
+            diagnostics.get("content_char_count"),
+            diagnostics.get("reasoning_only_budget_exhausted", False),
+            unicode_category_summary(getattr(action_step, "model_output", None)),
+        )
+        content = getattr(action_step, "model_output", None)
+        if rejected_output_preview_enabled() and content:
+            logger.warning(
+                "event=rejected_model_output_preview attempt_id=%s "
+                "content_preview=%s reasoning_preview=%s",
+                attempt_id,
+                bounded_rejected_output_preview(content),
+                bounded_rejected_output_preview(
+                    getattr(model, "last_reasoning_preview", None)
+                ),
+            )
 
     def _append_protocol_repair_context(self, protocol_error: ModelOutputProtocolError) -> None:
         """Add a safe model-only correction without persisting rejected output."""
@@ -858,6 +1034,16 @@ Additional Args:
                 }],
             )
         )
+
+    def _emit_step_count_before_model(self) -> None:
+        """Publish one label for the logical step, including all of its retries."""
+
+        if getattr(self, "_emitted_step_count", None) == self.step_number:
+            return
+        self.observer.add_message(
+            self.agent_name, ProcessType.STEP_COUNT, self.step_number
+        )
+        self._emitted_step_count = self.step_number
 
     def _ensure_open_model_turn(self, input_messages: list[Any]) -> list[Any]:
         """End the request with an explicit continuation turn when history ends in assistant."""
@@ -910,12 +1096,15 @@ Additional Args:
             self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
         # Add new step in logs
         memory_step.model_input_messages = input_messages
-        # Closed output protocols must receive the complete generation.
-        # Legacy CodeAgent stop strings can match a reasoning model's first
-        # tokens; providers then strip the match and return an apparently
-        # successful empty stream (finish_reason=stop). Strict classification
-        # below already rejects fabricated observations and protocol prefixes.
-        stop_sequences: list[str] | None = None
+        legacy_code_action = (
+            not getattr(self, "enable_protocol_repair_retry", False)
+            and getattr(self, "output_protocol", "code_action") == "code_action"
+        )
+        # Strict classification requires the complete response. The legacy
+        # CodeAgent used these provider-side stop strings before parsing.
+        stop_sequences: list[str] | None = (
+            ["Observation:", "Calling tools:"] if legacy_code_action else None
+        )
 
         # Prepare additional arguments
         additional_args: dict[str, Any] = {}
@@ -952,6 +1141,8 @@ Additional Args:
                 self._append_verification_feedback(memory_step, decision.verification_result)
 
         try:
+            self._emit_step_count_before_model()
+
             def rebuild_after_provider_overflow():
                 rebuilt = self.context_runtime.recover_step(
                     model=self.model,
@@ -982,7 +1173,7 @@ Additional Args:
         except ModelInvocationTerminalError as terminal_error:
             if self.stop_event.is_set():
                 raise RunTerminated() from terminal_error
-            if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED:
+            if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED and not legacy_code_action:
                 raise ModelOutputProtocolError(
                     reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
                     protocol=getattr(self, "output_protocol", "code_action"),
@@ -1007,7 +1198,24 @@ Additional Args:
 
         # Parse using the configured closed output protocol.
         try:
-            if self._use_structured_outputs_internally:
+            if legacy_code_action:
+                finish_reason = getattr(self.model, "last_finish_reason", None)
+                if finish_reason is None:
+                    diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
+                    finish_reason = diagnostics.get("finish_reason")
+                try:
+                    if self._use_structured_outputs_internally:
+                        code_action = json.loads(model_output)["code"]
+                        code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
+                    else:
+                        code_action = parse_code_blobs(model_output)
+                except Exception:
+                    # A legacy parse error is a completed, visible Agent step,
+                    # not a failed attempt requiring semantic protocol repair.
+                    yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
+                    return
+                classified_output = ExecutableAction(code=code_action)
+            elif self._use_structured_outputs_internally:
                 code_action = json.loads(model_output)["code"]
                 if not isinstance(code_action, str):
                     raise ValueError("Structured code must be a string")
@@ -1031,11 +1239,10 @@ Additional Args:
                 )
             if isinstance(classified_output, ExplicitFinalAnswer):
                 self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+                self._log_protocol_repair_accepted(memory_step.model_output_message)
                 getattr(self, "_protocol_repair_messages", []).clear()
                 self._consecutive_protocol_errors = 0
                 self._record_output_protocol("explicit_final_answer")
-                self.observer.add_message(
-                    self.agent_name, ProcessType.STEP_COUNT, self.step_number)
                 memory_step.action_output = classified_output.answer
                 yield ActionOutput(output=classified_output.answer, is_final_answer=True)
                 return
@@ -1049,9 +1256,9 @@ Additional Args:
                 if self.stop_event.is_set():
                     raise RunTerminated()
                 self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+                self._log_protocol_repair_accepted(memory_step.model_output_message)
                 getattr(self, "_protocol_repair_messages", []).clear()
                 self._consecutive_protocol_errors = 0
-                self.observer.add_message(self.agent_name, ProcessType.STEP_COUNT, self.step_number)
                 self.observer.add_message(
                     self.agent_name, ProcessType.HUMAN_INTERACTION,
                     {"schema_version": 1, **form.model_dump(mode="json")},
@@ -1061,14 +1268,13 @@ Additional Args:
             code_action = _remove_parallel_executor_import(code_action)
             memory_step.code_action = code_action
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+            self._log_protocol_repair_accepted(memory_step.model_output_message)
             getattr(self, "_protocol_repair_messages", []).clear()
             self._consecutive_protocol_errors = 0
             self._record_output_protocol(
                 "legacy_executable_action" if classified_output.legacy_format else "executable_action"
             )
             # Record parsing results
-            self.observer.add_message(
-                self.agent_name, ProcessType.STEP_COUNT, self.step_number)
             self.observer.add_message(
                 self.agent_name, ProcessType.PARSE, code_action)
             verification_controller = getattr(self, "verification_controller", None)
@@ -1093,9 +1299,12 @@ Additional Args:
         except ModelOutputProtocolError:
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
-        except AgentExecutionError:
+        except (AgentExecutionError, AgentGenerationError):
             raise
         except Exception:
+            if legacy_code_action:
+                yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
+                return
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise ModelOutputProtocolError(
                 reason=ProtocolErrorReason.MALFORMED_ACTION,
@@ -1468,6 +1677,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         final_answer = None
         action_step = None
         self.step_number = 1
+        self._emitted_step_count = None
         returned_final_answer = False
         self._consecutive_protocol_errors = 0
         self._protocol_repair_messages: list[ChatMessage] = []
@@ -1505,6 +1715,15 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
 
                 if isinstance(output, ActionOutput) and output.is_final_answer:
                     candidate_answer = output.output
+                    direct_answer_source = getattr(action_step, "_final_answer_source", None)
+                    final_answer_source = direct_answer_source or (
+                        "final_answer_envelope"
+                        if getattr(self, "output_protocol", "code_action") == "final_answer_envelope"
+                        else "final_answer_tool"
+                    )
+                    final_answer_classification = (
+                        "legacy_direct_final_answer" if direct_answer_source else "explicit_final_answer"
+                    )
                     if not has_meaningful_visible_content(candidate_answer):
                         diagnostics = getattr(self.model, "last_response_diagnostics", None)
                         logger.warning(
@@ -1513,6 +1732,15 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                             self.step_number,
                             diagnostics,
                         )
+                        if (
+                            not getattr(self, "enable_protocol_repair_retry", False)
+                            and getattr(self, "output_protocol", "code_action") == "code_action"
+                        ):
+                            raise AgentExecutionError(
+                                "The final_answer tool returned empty content. Call final_answer again "
+                                "with a non-empty user-facing response.",
+                                self.logger,
+                            )
                         raise ModelOutputProtocolError(
                             ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
                             getattr(self, "output_protocol", "code_action"),
@@ -1538,13 +1766,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                             returned_final_answer = True
                             action_step.is_final_answer = True
                             self._record_output_protocol(
-                                "explicit_final_answer",
-                                final_answer_source=(
-                                    "final_answer_envelope"
-                                    if getattr(self, "output_protocol", "code_action")
-                                    == "final_answer_envelope"
-                                    else "final_answer_tool"
-                                ),
+                                final_answer_classification,
+                                final_answer_source=final_answer_source,
                             )
                         else:
                             returned_final_answer, final_answer = self._finalize_failed_verification_candidate(
@@ -1561,13 +1784,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                         returned_final_answer = True
                         action_step.is_final_answer = True
                         self._record_output_protocol(
-                            "explicit_final_answer",
-                            final_answer_source=(
-                                "final_answer_envelope"
-                                if getattr(self, "output_protocol", "code_action")
-                                == "final_answer_envelope"
-                                else "final_answer_tool"
-                            ),
+                            final_answer_classification,
+                            final_answer_source=final_answer_source,
                         )
 
             except RuntimeFinalAnswer as terminal:
@@ -1588,17 +1806,37 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                     "protocol_error",
                     reason=protocol_error.reason.value,
                 )
-                logger.warning(
-                    "event=model_output_protocol_error protocol=%s reason=%s step_number=%s "
-                    "consecutive_errors=%s finish_reason=%s unicode_categories=%s",
-                    getattr(self, "output_protocol", "code_action"),
-                    protocol_error.reason.value,
-                    self.step_number,
-                    self._consecutive_protocol_errors,
-                    getattr(getattr(self, "model", None), "last_finish_reason", None),
-                    unicode_category_summary(getattr(action_step, "model_output", None)),
-                )
+                self._log_protocol_rejection(protocol_error, action_step)
                 action_has_executed = bool(getattr(action_step, "tool_calls", None))
+                if not getattr(self, "enable_protocol_repair_retry", False):
+                    self._protocol_repair_messages.clear()
+                    self._resolve_deferred_model_attempt(
+                        getattr(action_step, "model_output_message", None), accepted=False
+                    )
+                    action_step.model_output = None
+                    action_step.model_output_message = None
+                    action_step.token_usage = None
+                    interrupted = True
+                    self._record_output_protocol(
+                        "controlled_protocol_failure",
+                        reason=protocol_error.reason.value,
+                        final_answer_source="protocol_repair_disabled",
+                    )
+                    logger.info(
+                        "event=model_output_protocol_repair_disabled step_number=%s reason=%s",
+                        self.step_number,
+                        protocol_error.reason.value,
+                    )
+                    if action_has_executed:
+                        action_step.error = protocol_error
+                        action_step._suppress_user_error = True
+                        self._finalize_step(action_step)
+                        self._collect_step_metrics(action_step)
+                        self.memory.steps.append(action_step)
+                        yield action_step
+                    raise ModelOutputProtocolExhaustedError(
+                        self._controlled_protocol_failure(repair_disabled=True)
+                    ) from protocol_error
                 if action_has_executed:
                     # Preserve completed tool evidence so a repair generation cannot
                     # replay an external side effect. The model receives the error
@@ -1618,6 +1856,13 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                     raise ModelOutputProtocolExhaustedError(self._controlled_protocol_failure()) from protocol_error
                 else:
                     self._append_protocol_repair_context(protocol_error)
+                    logger.info(
+                        "event=model_output_protocol_repair_scheduled step_number=%s "
+                        "repair_ordinal=%s reason=%s",
+                        self.step_number,
+                        self._consecutive_protocol_errors,
+                        protocol_error.reason.value,
+                    )
                     action_step.model_output = None
                     action_step.model_output_message = None
                     action_step.token_usage = None

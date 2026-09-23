@@ -7,6 +7,10 @@ from ...monitor.monitoring import (
     OPENINFERENCE_INPUT_VALUE,
 )
 from ..utils.token_estimation import estimate_tokens_text
+from ..utils.model_output_diagnostics import (
+    bounded_rejected_output_preview,
+    rejected_output_preview_enabled,
+)
 from ..concurrency import RunCancellationScope, run_blocking
 import logging
 import threading
@@ -201,6 +205,9 @@ class OpenAIModel(OpenAIServerModel):
         self.last_prompt_cache_usage = None
         self.last_cached_input_token_count = 0
         self.last_response_diagnostics = None
+        self.last_attempt_id = None
+        self.last_attempt_number = None
+        self.last_reasoning_preview = None
         self.context_budget_snapshot = context_budget_snapshot
         self.capacity_snapshot = capacity_snapshot
         if max_output_tokens is None and max_tokens is not None:
@@ -331,6 +338,9 @@ class OpenAIModel(OpenAIServerModel):
         token_tracker = _token_tracker or self._monitoring.create_token_tracker(
             self.model_id)
         self.last_response_diagnostics = None
+        self.last_attempt_id = None
+        self.last_attempt_number = None
+        self.last_reasoning_preview = None
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.
@@ -464,6 +474,8 @@ class OpenAIModel(OpenAIServerModel):
                         "reason": "stop_event_set"})
                 raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
             attempt_id = uuid.uuid4().hex
+            self.last_attempt_id = attempt_id
+            self.last_attempt_number = attempt
             begin_attempt = getattr(self.observer, "begin_model_attempt", None)
             if callable(begin_attempt):
                 begin_attempt(attempt_id, attempt)
@@ -525,6 +537,8 @@ class OpenAIModel(OpenAIServerModel):
                 content_chunk_count = 0
                 reasoning_chunk_count = 0
                 reasoning_char_count = 0
+                reasoning_preview = ""
+                preview_enabled = rejected_output_preview_enabled()
                 empty_choices_chunk_count = 0
                 nonstandard_chunk_count = 0
 
@@ -566,8 +580,9 @@ class OpenAIModel(OpenAIServerModel):
                         if reasoning_content is not None:
                             reasoning_chunk_count += 1
                             reasoning_char_count += len(str(reasoning_content))
-                            self.observer.add_model_reasoning_content(
-                                reasoning_content)
+                            if preview_enabled and len(reasoning_preview) < 256:
+                                reasoning_preview += str(reasoning_content)[: 256 - len(reasoning_preview)]
+                            self.observer.add_model_reasoning_content(reasoning_content)
                             if token_tracker and not first_token_received:
                                 token_tracker.record_first_token()
                                 first_token_received = True
@@ -671,8 +686,21 @@ class OpenAIModel(OpenAIServerModel):
                         "nonstandard_chunk_count": nonstandard_chunk_count,
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
+                        "requested_output_tokens": (
+                            self._coerce_context_budget_snapshot(
+                                trusted_budget_snapshot
+                            ).requested_output_tokens
+                            if trusted_budget_snapshot is not None
+                            else dispatch_kwargs.get("max_tokens")
+                        ),
+                        "reasoning_only_budget_exhausted": (
+                            finish_reason == "length"
+                            and reasoning_char_count > 0
+                            and not model_output.strip()
+                        ),
                     }
                     self.last_response_diagnostics = response_diagnostics
+                    self.last_reasoning_preview = reasoning_preview if preview_enabled else None
                     self._monitoring.set_span_attributes(
                         **{f"llm.response.{key}": value for key, value in response_diagnostics.items()}
                     )
@@ -689,22 +717,37 @@ class OpenAIModel(OpenAIServerModel):
                     if not model_output.strip():
                         logger.warning(
                             "event=empty_model_response model_id=%s provider=%s "
+                            "attempt_id=%s attempt=%s requested_output_tokens=%s "
                             "finish_reason=%s chunk_count=%d content_chunk_count=%d "
-                            "reasoning_chunk_count=%d reasoning_char_count=%d "
+                            "content_char_count=%d reasoning_chunk_count=%d reasoning_char_count=%d "
                             "empty_choices_chunk_count=%d nonstandard_chunk_count=%d "
-                            "input_tokens=%d output_tokens=%d",
+                            "input_tokens=%d output_tokens=%d "
+                            "reasoning_only_budget_exhausted=%s",
                             self.model_id,
                             self.model_factory or "unknown",
+                            attempt_id,
+                            attempt,
+                            response_diagnostics["requested_output_tokens"],
                             finish_reason,
                             len(chunk_list),
                             content_chunk_count,
+                            len(model_output),
                             reasoning_chunk_count,
                             reasoning_char_count,
                             empty_choices_chunk_count,
                             nonstandard_chunk_count,
                             input_tokens,
                             output_tokens,
+                            response_diagnostics["reasoning_only_budget_exhausted"],
                         )
+                        if preview_enabled:
+                            logger.warning(
+                                "event=rejected_model_output_preview attempt_id=%s "
+                                "content_preview=%s reasoning_preview=%s",
+                                attempt_id,
+                                bounded_rejected_output_preview(model_output),
+                                bounded_rejected_output_preview(reasoning_preview),
+                            )
                         self._monitoring.add_span_event("empty_model_response", response_diagnostics)
                         raise EmptyModelResponseError(
                             "Model stream completed without user-visible content "

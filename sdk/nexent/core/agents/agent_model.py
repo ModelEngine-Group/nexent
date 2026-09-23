@@ -260,6 +260,10 @@ class AgentConfig(BaseModel):
         description="Closed model-output protocol used by the Agent runtime",
         default="code_action",
     )
+    enable_protocol_repair_retry: bool = Field(
+        description="Whether the Agent uses strict output validation and silent protocol repair",
+        default=False,
+    )
     provide_run_summary: Optional[bool] = Field(
         description="Whether to provide run summary to upper-level Agent", default=False
     )

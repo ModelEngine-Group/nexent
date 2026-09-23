@@ -739,6 +739,18 @@ async def update_agent_info_impl(
 
     # If agent_id is None, create a new agent; otherwise, update existing
     agent_id: Optional[int] = request.agent_id
+    if agent_id is not None and isinstance(getattr(request, "enable_protocol_repair_retry", None), bool):
+        agent_record = search_agent_info_by_agent_id(agent_id, tenant_id)
+        user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+        user_role = str(user_tenant_record.get("user_role") or "").upper()
+        permission = resolve_agent_list_permission(
+            user_role=user_role,
+            agent=agent_record,
+            user_id=user_id,
+            can_edit_all=user_role in CAN_EDIT_ALL_USER_ROLES,
+        )
+        if permission != "EDIT":
+            raise ForbiddenError("You do not have permission to edit this agent")
     try:
         if agent_id is None:
             # Create agent - automatically set group_ids to current user's groups
@@ -763,6 +775,9 @@ async def update_agent_info_impl(
                     "provide_run_summary": request.provide_run_summary,
                     "allow_chat_metadata": request.allow_chat_metadata
                     if request.allow_chat_metadata is not None
+                    else False,
+                    "enable_protocol_repair_retry": request.enable_protocol_repair_retry
+                    if request.enable_protocol_repair_retry is not None
                     else False,
                     "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                     "verification_config": request.verification_config,
