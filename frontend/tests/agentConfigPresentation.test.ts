@@ -4,7 +4,7 @@ import test from "node:test";
 
 const pagePath = new URL("../app/[locale]/agents/page.tsx", import.meta.url);
 const editorPath = new URL(
-  "../app/[locale]/agents/[agentId]/agent-editor.tsx",
+  "../app/[locale]/agents/[agentId]/page.tsx",
   import.meta.url
 );
 test("keeps the agent configuration workspace white", async () => {

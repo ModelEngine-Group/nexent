@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const pagePath = new URL("../app/[locale]/agents/[agentId]/agent-editor.tsx", import.meta.url);
+const pagePath = new URL("../app/[locale]/agents/[agentId]/page.tsx", import.meta.url);
 
 test("skips version detail loading while switching or when no version exists", async () => {
   const page = await readFile(pagePath, "utf8");
