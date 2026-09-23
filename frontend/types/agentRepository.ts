@@ -18,7 +18,7 @@ export interface AgentRepositoryListingItem {
   description?: string | null;
   author?: string | null;
   status: AgentRepositoryListingStatus;
-  icon?: string | null;
+  icon_url?: string | null;
   tags?: string[];
   tool_count?: number | null;
   version_label?: string | null;
@@ -59,7 +59,7 @@ export interface AgentRepositoryListingDetail {
   display_name?: string | null;
   description?: string | null;
   author?: string | null;
-  icon?: string | null;
+  icon_url?: string | null;
   status: AgentRepositoryListingStatus;
   version_label?: string | null;
   downloads?: number;
@@ -144,7 +144,7 @@ export interface MyEditableAgentListResponse {
 }
 
 export interface AgentRepositoryListingCreatePayload {
-  icon: string;
+  icon_url: string | null;
   tags: string[];
   content?: string;
 }

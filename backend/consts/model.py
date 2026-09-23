@@ -1347,7 +1347,7 @@ class RepositoryImportPrecheckResponse(BaseModel):
 
 class AgentRepositoryListingCreateRequest(BaseModel):
     """Request body for creating a marketplace listing from an agent version."""
-    icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
+    icon_url: Optional[str] = Field(None, description="Repository icon URL")
     downloads: int = Field(0, ge=0, description="Initial download/copy count for card display")
     tags: Optional[List[str]] = Field(None, description="Marketplace tags")
     tool_count: Optional[int] = Field(
@@ -1366,7 +1366,7 @@ class AgentRepositoryListingDetailResponse(BaseModel):
     display_name: Optional[str] = None
     description: Optional[str] = None
     author: Optional[str] = None
-    icon: Optional[str] = None
+    icon_url: Optional[str] = None
     status: str
     version_label: Optional[str] = None
     downloads: int = 0

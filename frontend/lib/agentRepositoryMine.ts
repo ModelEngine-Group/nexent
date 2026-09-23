@@ -3,7 +3,6 @@ import type {
   MyAgentRepositoryInfoItem,
   MyEditableAgentItem,
 } from "@/types/agentRepository";
-import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
 
 export type MineCardMenuAction = "apply" | "review" | "reviewUpdate";
 
@@ -254,7 +253,7 @@ export function pickApplyListingPrefillSource(
 }
 
 export interface ApplyListingFormPrefill {
-  icon: string | null;
+  icon_url: string | null;
   tags: string[];
 }
 
@@ -286,15 +285,10 @@ export function buildApplyListingFormPrefill(
   }
 
   const maxTags = options.maxTags ?? 5;
-  const trimmedIcon = item.icon?.trim();
-
-  const icon =
-    trimmedIcon && isSingleSimpleEmoji(trimmedIcon) ? trimmedIcon : null;
-
   const tags = normalizeApplyListingTags(item.tags ?? [], maxTags);
 
   return {
-    icon,
+    icon_url: item.icon_url?.trim() || null,
     tags,
   };
 }

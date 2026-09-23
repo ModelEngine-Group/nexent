@@ -1905,7 +1905,7 @@ class AgentRepository(TableBase):
     tags = Column(ARRAY(Text), doc="Marketplace tags")
     tool_count = Column(Integer,
                         doc="Total tool count across all agents in the bundle (display only)")
-    icon = Column(String(100), doc="Marketplace card icon (emoji or URL)")
+    icon_url = Column(String(1024), doc="Repository icon URL")
     downloads = Column(Integer, default=0,
                        doc="Marketplace download/copy count for card display")
     version_name = Column(String(100),

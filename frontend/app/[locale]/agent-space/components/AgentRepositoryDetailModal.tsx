@@ -2,7 +2,6 @@
 
 import { Button, Spin, Tag } from "antd";
 import {
-  Bot,
   Calendar,
   CheckCircle2,
   Clock,
@@ -17,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import type { AgentDetailModalData } from "@/lib/agentRepositoryDetail";
 import type { AgentRepositoryListingStatus } from "@/types/agentRepository";
 import ResourceDetail from "@/components/resource/ResourceDetail";
+import { RepositoryAgentIcon } from "./RepositoryAgentIcon";
 
 interface AgentRepositoryDetailModalProps {
   open: boolean;
@@ -117,14 +117,6 @@ function AgentRepositoryDetailError({
   );
 }
 
-function AgentRepositoryDetailIcon({ icon }: { icon?: string | null }) {
-  const trimmedIcon = icon?.trim();
-  if (trimmedIcon) {
-    return <span aria-hidden>{trimmedIcon}</span>;
-  }
-  return <Bot className="size-8 text-primary" aria-hidden />;
-}
-
 function AgentRepositoryDetailMeta({
   detail,
   downloads,
@@ -196,7 +188,12 @@ function AgentRepositoryDetailHeader({
     <div className="border-b border-slate-200 bg-slate-50 p-6 dark:border-slate-700 dark:bg-slate-900/40">
       <div className="flex items-start gap-4">
         <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-white text-3xl shadow-sm dark:bg-slate-800">
-          <AgentRepositoryDetailIcon icon={detail.icon} />
+          <RepositoryAgentIcon
+            agentId={detail.agent_id}
+            iconUrl={detail.icon_url}
+            size={64}
+            iconSize={32}
+          />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">

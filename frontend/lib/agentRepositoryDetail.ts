@@ -5,11 +5,12 @@ import type {
 } from "@/types/agentRepository";
 
 export interface AgentDetailModalData {
+  agent_id?: number | null;
   name: string;
   display_name?: string | null;
   description?: string | null;
   author?: string | null;
-  icon?: string | null;
+  icon_url?: string | null;
   status?: AgentRepositoryListingStatus;
   version_label?: string | null;
   downloads?: number;
@@ -39,11 +40,12 @@ export function mapRepositoryListingDetail(
   detail: AgentRepositoryListingDetail
 ): AgentDetailModalData {
   return {
+    agent_id: detail.agent_id,
     name: detail.name,
     display_name: detail.display_name,
     description: detail.description,
     author: detail.author,
-    icon: detail.icon,
+    icon_url: detail.icon_url,
     status: detail.status,
     version_label: detail.version_label,
     downloads: detail.downloads,

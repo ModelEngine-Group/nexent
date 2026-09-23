@@ -58,7 +58,7 @@ class _AgentRepositoryModel:
     submitted_by = MagicMock(name="submitted_by")
     tags = MagicMock(name="tags")
     tool_count = MagicMock(name="tool_count")
-    icon = MagicMock(name="icon")
+    icon_url = MagicMock(name="icon_url")
     downloads = MagicMock(name="downloads")
     version_name = MagicMock(name="version_name")
     agent_info_json = MagicMock(name="agent_info_json")
@@ -146,7 +146,7 @@ class MockAgentRepository:
             "tags": ["tag1"],
             "tool_count": 2,
             "version_name": "v1",
-            "icon": "icon",
+            "icon_url": "icon_url",
             "downloads": 0,
             "status": STATUS_NOT_SHARED,
             "delete_flag": "N",
@@ -172,7 +172,7 @@ class MockSummaryRow:
             "tags": ["tag1"],
             "tool_count": 2,
             "version_name": "v1",
-            "icon": "icon",
+            "icon_url": "icon_url",
             "downloads": 0,
             "content": None,
         }
@@ -520,7 +520,7 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
         "tags",
         "tool_count",
         "version_name",
-        "icon",
+        "icon_url",
         "downloads",
         "content",
     }

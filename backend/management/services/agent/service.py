@@ -1,6 +1,4 @@
 import asyncio
-import imghdr
-import io
 import logging
 from collections import deque
 from typing import Optional
@@ -58,10 +56,12 @@ from database.tool_db import (
     search_tools_for_sub_agent,
 )
 from database import skill_db
-from database.attachment_db import (
-    get_file_stream,
+from management.services.agent.icon_storage import (
+    ICON_MAX_BYTES,
+    read_icon_image,
+    upload_icon_image,
+    validate_icon_image,
 )
-from database.client import minio_client
 from management.services.skill.service import SkillService
 from database.agent_version_db import (
     query_current_version_no,
@@ -89,13 +89,7 @@ from utils.config_utils import tenant_config_manager
 # Import monitoring utilities
 
 logger = logging.getLogger(__name__)
-AGENT_ICON_MAX_BYTES = 2 * 1024 * 1024
-AGENT_ICON_CONTENT_TYPES = {
-    "gif": "image/gif",
-    "jpeg": "image/jpeg",
-    "png": "image/png",
-    "webp": "image/webp",
-}
+AGENT_ICON_MAX_BYTES = ICON_MAX_BYTES
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 
@@ -202,11 +196,6 @@ def _agent_icon_object_name(agent_id: int, tenant_id: str) -> str:
     return f"agent-icons/{tenant_id}/{agent_id}/icon"
 
 
-def _detect_agent_icon_content_type(content: bytes) -> str | None:
-    image_type = imghdr.what(None, content)
-    return AGENT_ICON_CONTENT_TYPES.get(image_type)
-
-
 async def upload_agent_icon_impl(
     agent_id: int,
     content: bytes,
@@ -214,24 +203,14 @@ async def upload_agent_icon_impl(
     user_id: str,
 ) -> dict:
     """Validate, store, and attach a user-supplied image to an editable agent."""
-    if not content:
-        raise ValueError("Agent icon file is empty")
-    if len(content) > AGENT_ICON_MAX_BYTES:
-        raise ValueError("Agent icon must not exceed 2 MB")
-
-    content_type = _detect_agent_icon_content_type(content)
-    if content_type is None:
-        raise ValueError("Agent icon must be a PNG, JPEG, GIF, or WebP image")
-
+    validate_icon_image(content)
     agent = await get_agent_info_impl(agent_id, tenant_id, user_id=user_id)
     if agent.get("permission") != "EDIT":
         raise ForbiddenError("You do not have permission to edit this agent")
 
     owner_tenant_id = agent.get("tenant_id") or tenant_id
     object_name = _agent_icon_object_name(agent_id, owner_tenant_id)
-    success, error = minio_client.upload_fileobj(io.BytesIO(content), object_name)
-    if not success:
-        raise ValueError(f"Failed to upload agent icon: {error}")
+    content_type = upload_icon_image(content, object_name)
 
     icon_url = f"/api/agent/{agent_id}/icon"
     update_agent_icon(
@@ -252,15 +231,7 @@ async def get_agent_icon_impl(
         raise FileNotFoundError("Agent icon not found")
 
     owner_tenant_id = agent.get("tenant_id") or tenant_id
-    stream = get_file_stream(_agent_icon_object_name(agent_id, owner_tenant_id))
-    if stream is None:
-        raise FileNotFoundError("Agent icon not found")
-
-    content = stream.read()
-    content_type = _detect_agent_icon_content_type(content)
-    if content_type is None:
-        raise FileNotFoundError("Agent icon is invalid")
-    return content, content_type
+    return read_icon_image(_agent_icon_object_name(agent_id, owner_tenant_id))
 
 
 async def check_agent_name_conflict_batch_impl(

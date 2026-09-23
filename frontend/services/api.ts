@@ -629,6 +629,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
+    icon: (agentId: number, versionNo: number) =>
+      `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}/icon`,
   },
   skillRepository: {
     listings: (params?: SkillRepositoryListingListParams) => {

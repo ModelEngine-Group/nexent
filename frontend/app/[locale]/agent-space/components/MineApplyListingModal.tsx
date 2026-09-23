@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Button, Dropdown, Input, Modal, Spin } from "antd";
-import { ChevronDown, Share2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Input, Modal, Spin, Upload } from "antd";
+import { Share2, Upload as UploadIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { AGENT_REPOSITORY_ICONS } from "@/const/agentRepository";
+import { API_ENDPOINTS } from "@/services/api";
+import { fetchWithAuth } from "@/lib/auth";
 import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
   getAgentRepositoryTagLabel,
   resolveAgentRepositoryTagForSubmit,
 } from "@/lib/agentRepositoryLabels";
-import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
+import { RepositoryAgentIcon } from "./RepositoryAgentIcon";
 import {
   useTagAssignments,
   useTagDefinitions,
@@ -29,7 +30,6 @@ import type { TagAssignmentValue } from "@/types/tagManagement";
 
 const MAX_TAGS = 5;
 const MAX_TAG_LENGTH = 20;
-const MAX_ICON_LENGTH = 32;
 
 interface MineApplyListingModalProps {
   open: boolean;
@@ -49,7 +49,6 @@ export function MineApplyListingModal({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
-  const icons = AGENT_REPOSITORY_ICONS;
   const { data: tagLibraries } = useTagLibraries();
   const defaultResourceLibrary = useMemo(
     () =>
@@ -70,10 +69,10 @@ export function MineApplyListingModal({
   );
   const categoryValues = agentCategory?.values ?? [];
 
-  const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
-  const [iconInput, setIconInput] = useState("");
-  const [iconError, setIconError] = useState<string | null>(null);
-  const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
+  const [iconUrl, setIconUrl] = useState<string | null>(null);
+  const [iconPreviewUrl, setIconPreviewUrl] = useState<string | null>(null);
+  const [selectedIconFile, setSelectedIconFile] = useState<File | null>(null);
+  const [uploadingIcon, setUploadingIcon] = useState(false);
   const [listingContent, setListingContent] = useState("");
   const [formInitialized, setFormInitialized] = useState(false);
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
@@ -138,10 +137,14 @@ export function MineApplyListingModal({
           value.normalized_value,
           value.display_value,
           getAgentRepositoryTagLabel(value.normalized_value, t),
-        ].some((candidate) => legacyTags.has(candidate.trim().toLocaleLowerCase()))
+        ].some((candidate) =>
+          legacyTags.has(candidate.trim().toLocaleLowerCase())
+        )
       )
       .map((value) => value.value_id);
-    return valueIds.length > 0 ? { [agentCategory.definition_id]: valueIds } : {};
+    return valueIds.length > 0
+      ? { [agentCategory.definition_id]: valueIds }
+      : {};
   }, [
     agent?.version_label,
     agentCategory,
@@ -151,44 +154,13 @@ export function MineApplyListingModal({
     t,
   ]);
 
-  const invalidIconMessage = t(
-    "agentRepository.mine.applyModal.validation.iconInvalid"
-  );
-
-  const applyIconInputFromValue = useCallback(
-    (value: string, showErrorWhenInvalid = true) => {
-      setIconInput(value);
-
-      const trimmedValue = value.trim();
-      if (!trimmedValue) {
-        setSelectedIcon(null);
-        setIconError(null);
-        return;
-      }
-
-      if (isSingleSimpleEmoji(trimmedValue)) {
-        setSelectedIcon(trimmedValue);
-        setIconError(null);
-        return;
-      }
-
-      setSelectedIcon(null);
-      setIconError(showErrorWhenInvalid ? invalidIconMessage : null);
-    },
-    [invalidIconMessage]
-  );
-
-  const clearIconState = useCallback(() => {
-    setIconInput("");
-    setSelectedIcon(null);
-    setIconError(null);
-  }, []);
-
   useEffect(() => {
     if (!open) {
       setFormInitialized(false);
       setTagEditorOpen(false);
       setSavedAssignments(null);
+      setIconPreviewUrl(null);
+      setSelectedIconFile(null);
       return;
     }
 
@@ -205,65 +177,42 @@ export function MineApplyListingModal({
     });
 
     if (!prefill) {
-      clearIconState();
+      setIconUrl(null);
+      setIconPreviewUrl(null);
+      setSelectedIconFile(null);
       setListingContent("");
       setFormInitialized(true);
       return;
     }
 
-    const trimmedIcon = prefill.icon?.trim();
-    if (trimmedIcon && isSingleSimpleEmoji(trimmedIcon)) {
-      applyIconInputFromValue(trimmedIcon, false);
-    } else {
-      clearIconState();
-    }
+    setIconUrl(prefill.icon_url);
+    setIconPreviewUrl(null);
+    setSelectedIconFile(null);
 
     setListingContent("");
     setFormInitialized(true);
-  }, [
-    open,
-    agent,
-    isListingsSuccess,
-    listingsData,
-    clearIconState,
-    applyIconInputFromValue,
-    formInitialized,
-  ]);
+  }, [open, agent, isListingsSuccess, listingsData, formInitialized]);
 
   const title = agent?.name?.trim() || t("agentRepository.card.untitled");
 
-  const handlePresetIconClick = (icon: string) => {
-    applyIconInputFromValue(icon, false);
-    setPresetDropdownOpen(false);
+  useEffect(() => {
+    return () => {
+      if (iconPreviewUrl) URL.revokeObjectURL(iconPreviewUrl);
+    };
+  }, [iconPreviewUrl]);
+
+  const handleIconUpload = (file: File) => {
+    if (file.size > 2 * 1024 * 1024) {
+      message.error(t("agentRepository.mine.applyModal.iconTooLarge"));
+      return false;
+    }
+    setSelectedIconFile(file);
+    setIconPreviewUrl(URL.createObjectURL(file));
+    return false;
   };
 
-  const presetDropdown = (
-    <div className="min-w-[280px] rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-      <div className="grid grid-cols-5 gap-2">
-        {icons.map((icon) => (
-          <button
-            key={icon}
-            type="button"
-            onClick={() => handlePresetIconClick(icon)}
-            className="flex size-10 items-center justify-center rounded-lg border border-slate-200 text-2xl transition-colors hover:border-primary hover:bg-primary/5 dark:border-slate-700 dark:hover:border-primary"
-            aria-label={icon}
-          >
-            <span aria-hidden>{icon}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
   const handleSubmit = async () => {
-    if (iconInput.trim() && !isSingleSimpleEmoji(iconInput)) {
-      setIconError(invalidIconMessage);
-      message.warning(invalidIconMessage);
-      return;
-    }
-
-    if (!selectedIcon) {
-      message.warning(t("agentRepository.mine.applyModal.validation.icon"));
+    if (uploadingIcon) {
       return;
     }
 
@@ -292,139 +241,153 @@ export function MineApplyListingModal({
     }
 
     try {
+      let submittedIconUrl = iconUrl;
+      if (selectedIconFile && agentId != null && agent) {
+        setUploadingIcon(true);
+        try {
+          const formData = new FormData();
+          formData.append("file", selectedIconFile);
+          const response = await fetchWithAuth(
+            API_ENDPOINTS.agentRepository.icon(
+              agentId,
+              agent.current_version_no ?? 0
+            ),
+            { method: "POST", body: formData }
+          );
+          if (!response.ok) throw new Error("Icon upload failed");
+          const data = (await response.json()) as { icon_url: string };
+          submittedIconUrl = data.icon_url;
+          setIconUrl(submittedIconUrl);
+          setSelectedIconFile(null);
+        } catch {
+          message.error(t("agentRepository.mine.applyModal.iconUploadFailed"));
+          return;
+        }
+      }
       await onSubmit({
-        icon: selectedIcon,
+        icon_url: submittedIconUrl,
         tags,
         content: listingContent.trim(),
       });
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUploadingIcon(false);
     }
   };
 
   return (
     <>
       <Modal
-      open={open && agent != null}
-      onCancel={onClose}
-      centered
-      destroyOnHidden
-      title={
-        <span className="inline-flex items-center gap-2">
-          <Share2 className="size-5 text-primary" aria-hidden />
-          {t("agentRepository.mine.applyModal.title")}
-        </span>
-      }
-      footer={
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button onClick={onClose} disabled={isSubmitting}>
-            {t("common.cancel")}
-          </Button>
-          <Button
-            type="primary"
-            loading={isSubmitting}
-            onClick={() => void handleSubmit()}
-          >
-            {t("agentRepository.mine.applyModal.submit")}
-          </Button>
-        </div>
-      }
-    >
-      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
-        {t("agentRepository.mine.applyModal.agentName", { name: title })}
-      </p>
+        open={open && agent != null}
+        onCancel={onClose}
+        centered
+        destroyOnHidden
+        title={
+          <span className="inline-flex items-center gap-2">
+            <Share2 className="size-5 text-primary" aria-hidden />
+            {t("agentRepository.mine.applyModal.title")}
+          </span>
+        }
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button onClick={onClose} disabled={isSubmitting || uploadingIcon}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="primary"
+              loading={isSubmitting || uploadingIcon}
+              onClick={() => void handleSubmit()}
+            >
+              {t("agentRepository.mine.applyModal.submit")}
+            </Button>
+          </div>
+        }
+      >
+        <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+          {t("agentRepository.mine.applyModal.agentName", { name: title })}
+        </p>
 
-      <Spin spinning={isListingsFetching && open}>
-        <div className="space-y-5">
-          <section className="space-y-2">
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-              {t("agentRepository.mine.applyModal.icon")}
-            </p>
-            <Input
-              value={iconInput}
-              onChange={(event) => applyIconInputFromValue(event.target.value)}
-              maxLength={MAX_ICON_LENGTH}
-              status={iconError ? "error" : undefined}
-              className="!h-[3.75rem] !w-[6.5rem] shrink-0 !text-4xl"
-              styles={{
-                root: {
-                  display: "inline-flex",
-                  alignItems: "center",
-                  paddingBlock: 0,
-                },
-                input: {
-                  paddingInline: 2,
-                  paddingBlock: 0,
-                  textAlign: "center",
-                  fontSize: "2.25rem",
-                  lineHeight: 1,
-                },
-              }}
-              suffix={
-                <Dropdown
-                  open={presetDropdownOpen}
-                  onOpenChange={setPresetDropdownOpen}
-                  trigger={["click"]}
-                  popupRender={() => presetDropdown}
-                >
-                  <button
-                    type="button"
-                    className="inline-flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                    aria-label={t(
-                      "agentRepository.mine.applyModal.iconPresetPicker"
-                    )}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <ChevronDown className="size-4" aria-hidden />
-                  </button>
-                </Dropdown>
-              }
-            />
-            {iconError ? (
-              <p className="text-xs text-red-500">{iconError}</p>
-            ) : (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {t("agentRepository.mine.applyModal.customIconHint")}
+        <Spin spinning={isListingsFetching && open}>
+          <div className="space-y-5">
+            <section className="space-y-2">
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                {t("agentRepository.mine.applyModal.icon")}
               </p>
-            )}
-          </section>
+              <div className="flex items-center gap-3">
+                <RepositoryAgentIcon
+                  agentId={agentId}
+                  iconUrl={iconPreviewUrl ?? iconUrl}
+                  size={60}
+                  iconSize={28}
+                />
+                <Upload
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  showUploadList={false}
+                  beforeUpload={handleIconUpload}
+                  disabled={uploadingIcon || isSubmitting}
+                >
+                  <Button
+                    icon={<UploadIcon className="size-4" />}
+                    loading={uploadingIcon}
+                  >
+                    {t("agentRepository.mine.applyModal.uploadIcon")}
+                  </Button>
+                </Upload>
+                {(iconUrl || selectedIconFile) && (
+                  <Button
+                    onClick={() => {
+                      setIconUrl(null);
+                      setIconPreviewUrl(null);
+                      setSelectedIconFile(null);
+                    }}
+                    disabled={uploadingIcon || isSubmitting}
+                  >
+                    {t("agentRepository.mine.applyModal.useDefaultIcon")}
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {t("agentRepository.mine.applyModal.iconUploadHint")}
+              </p>
+            </section>
 
-          <section className="space-y-2">
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-              {t("agentRepository.mine.applyModal.tags")}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={() => setTagEditorOpen(true)}>
-                {t("tagManagement.action.editTags")}
-              </Button>
-              {selectedCategoryValues.length > 0 ? (
-                <span className="text-sm text-slate-600 dark:text-slate-300">
-                  {selectedCategoryValues
-                    .map((value) =>
-                      getAgentRepositoryTagLabel(value.normalized_value, t)
-                    )
-                    .join(" · ")}
-                </span>
-              ) : null}
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {t("agentRepository.mine.applyModal.tagsHint")}
-            </p>
-          </section>
+            <section className="space-y-2">
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                {t("agentRepository.mine.applyModal.tags")}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button onClick={() => setTagEditorOpen(true)}>
+                  {t("tagManagement.action.editTags")}
+                </Button>
+                {selectedCategoryValues.length > 0 ? (
+                  <span className="text-sm text-slate-600 dark:text-slate-300">
+                    {selectedCategoryValues
+                      .map((value) =>
+                        getAgentRepositoryTagLabel(value.normalized_value, t)
+                      )
+                      .join(" · ")}
+                  </span>
+                ) : null}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {t("agentRepository.mine.applyModal.tagsHint")}
+              </p>
+            </section>
 
-          <section className="space-y-2">
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-              {t("repository.mine.applyModal.content")}
-            </p>
-            <Input.TextArea
-              value={listingContent}
-              onChange={(event) => setListingContent(event.target.value)}
-              rows={4}
-              placeholder={t("repository.mine.applyModal.contentPlaceholder")}
-            />
-          </section>
-        </div>
-      </Spin>
+            <section className="space-y-2">
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                {t("repository.mine.applyModal.content")}
+              </p>
+              <Input.TextArea
+                value={listingContent}
+                onChange={(event) => setListingContent(event.target.value)}
+                rows={4}
+                placeholder={t("repository.mine.applyModal.contentPlaceholder")}
+              />
+            </section>
+          </div>
+        </Spin>
       </Modal>
       <ResourceTagAssignmentModal
         open={tagEditorOpen && agentId != null}

@@ -3,8 +3,8 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
-from starlette.responses import JSONResponse
+from fastapi import APIRouter, Body, File, Header, HTTPException, Query, UploadFile
+from starlette.responses import JSONResponse, Response
 
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
 from consts.model import (
@@ -16,16 +16,56 @@ from services.agent_repository_service import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
     get_agent_repository_listing_detail_impl,
+    get_agent_repository_icon_impl,
     import_agent_from_repository_impl,
     list_agent_repository_listings_impl,
     list_agent_repository_tag_stats_impl,
     list_my_editable_agents_impl,
     update_agent_repository_status_impl,
+    upload_agent_repository_icon_impl,
 )
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
+
+
+@agent_repository_router.post("/{agent_id}/versions/{version_no}/icon")
+async def upload_agent_repository_icon_api(
+    agent_id: int,
+    version_no: int,
+    file: UploadFile = File(...),
+    authorization: str = Header(None),
+):
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = await upload_agent_repository_icon_impl(
+            agent_id, version_no, tenant_id, user_id, await file.read()
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+
+
+@agent_repository_router.get("/{agent_id}/versions/{version_no}/icon/{image_id}")
+async def get_agent_repository_icon_api(
+    agent_id: int,
+    version_no: int,
+    image_id: str,
+    authorization: str = Header(None),
+):
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        content, content_type = get_agent_repository_icon_impl(
+            agent_id, version_no, image_id, tenant_id
+        )
+        return Response(content=content, media_type=content_type)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
 
 
 def _parse_tag_predicates(raw: str | None) -> list[TagAssignmentFilter]:
@@ -257,7 +297,7 @@ async def create_agent_repository_listing_api(
     """Create or update a marketplace repository listing from an agent version snapshot."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        card_fields = payload.model_dump(exclude_none=True) if payload else None
+        card_fields = payload.model_dump(exclude_unset=True) if payload else None
         result = await create_agent_repository_listing_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,

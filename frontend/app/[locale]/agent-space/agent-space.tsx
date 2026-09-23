@@ -3,14 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MenuProps } from "antd";
 import { App, Button, Dropdown, Empty, Grid, Input, Modal, Spin } from "antd";
-import {
-  Bot,
-  Copy,
-  Download,
-  MoreHorizontal,
-  PackageX,
-  Search,
-} from "lucide-react";
+import { Copy, Download, MoreHorizontal, PackageX, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -25,6 +18,7 @@ import type { TagResourcePredicate } from "@/types/tagManagement";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
+import { RepositoryAgentIcon } from "./components/RepositoryAgentIcon";
 import {
   useAgentRepositoryListingDetail,
   useAgentRepositoryListings,
@@ -232,11 +226,12 @@ export function AgentSpace({ active }: { active: boolean }) {
         descriptionLines={descriptionLines}
         icon={
           <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
-            {listing.icon?.trim() ? (
-              <span aria-hidden>{listing.icon.trim()}</span>
-            ) : (
-              <Bot className="size-5" aria-hidden />
-            )}
+            <RepositoryAgentIcon
+              agentId={listing.agent_id}
+              iconUrl={listing.icon_url}
+              size={44}
+              iconSize={20}
+            />
           </div>
         }
         description={

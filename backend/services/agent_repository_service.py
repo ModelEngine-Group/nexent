@@ -1,4 +1,5 @@
 import logging
+import uuid
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
 from consts.agent_repository import (
@@ -42,6 +43,10 @@ from management.services.agent.service import (
     import_agent_with_skills_impl,
     list_all_agent_info_impl,
 )
+from management.services.agent.icon_storage import (
+    read_icon_image,
+    upload_icon_image,
+)
 from services.notification_service import (
     create_repository_pending_review_notification,
     create_repository_review_notification,
@@ -77,7 +82,64 @@ _ADMIN_REVIEW_STATUS_TRANSITIONS: FrozenSet[Tuple[str, str]] = frozenset({
 
 _MAX_LISTING_TAGS = 5
 _MAX_LISTING_TAG_LENGTH = 20
-_MAX_LISTING_ICON_LENGTH = 32
+_MAX_LISTING_ICON_LENGTH = 1024
+
+
+def _repository_icon_url(agent_id: int, version_no: int, image_id: str) -> str:
+    return f"/api/repository/agent/{agent_id}/versions/{version_no}/icon/{image_id}"
+
+
+def _repository_icon_object_name(
+    tenant_id: str, agent_id: int, version_no: int, image_id: str
+) -> str:
+    return f"agent-repository-icons/{tenant_id}/{agent_id}/{version_no}/{image_id}"
+
+
+def _repository_image_id(icon_url: str, agent_id: int, version_no: int) -> str:
+    prefix = f"/api/repository/agent/{agent_id}/versions/{version_no}/icon/"
+    if not icon_url.startswith(prefix):
+        raise ValueError("Invalid repository icon URL")
+    image_id = icon_url[len(prefix):]
+    try:
+        if str(uuid.UUID(image_id)) != image_id:
+            raise ValueError("Invalid repository icon URL")
+    except ValueError as exc:
+        raise ValueError("Invalid repository icon URL") from exc
+    return image_id
+
+
+async def upload_agent_repository_icon_impl(
+    agent_id: int, version_no: int, tenant_id: str, user_id: str, content: bytes
+) -> Dict[str, str]:
+    if version_no < 0:
+        raise ValueError("version_no must be >= 0")
+    agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+    if not agent_info:
+        raise ValueError("Agent version not found")
+    _validate_create_listing_permission(user_id=user_id, agent_info=agent_info)
+    image_id = str(uuid.uuid4())
+    content_type = upload_icon_image(
+        content, _repository_icon_object_name(tenant_id, agent_id, version_no, image_id)
+    )
+    return {
+        "icon_url": _repository_icon_url(agent_id, version_no, image_id),
+        "content_type": content_type,
+    }
+
+
+def get_agent_repository_icon_impl(
+    agent_id: int, version_no: int, image_id: str, tenant_id: str
+) -> tuple[bytes, str]:
+    listing = get_agent_repository_by_agent_id(
+        agent_id, version_no, publisher_tenant_id=tenant_id
+    )
+    if not listing or listing.get("icon_url") != _repository_icon_url(
+        agent_id, version_no, image_id
+    ):
+        raise FileNotFoundError("Repository icon not found")
+    return read_icon_image(
+        _repository_icon_object_name(tenant_id, agent_id, version_no, image_id)
+    )
 
 
 def _to_summary_item(
@@ -106,7 +168,7 @@ def _to_summary_item(
         "version_label": record.get("version_name"),
         "version_no": record.get("version_no"),
         "create_time": _serialize_created_at(record.get("create_time")),
-        "icon": record.get("icon"),
+        "icon_url": record.get("icon_url"),
         "downloads": downloads,
         "content": record.get("content"),
     }
@@ -319,12 +381,14 @@ def _normalize_listing_tags(tags: Any) -> List[str]:
 
 def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
     """Validate marketplace card fields required for listing submission."""
-    icon = repository_data.get("icon")
-    if not icon or not isinstance(icon, str) or not icon.strip():
-        raise ValueError("icon is required and must be a non-empty string")
-    if len(icon.strip()) > _MAX_LISTING_ICON_LENGTH:
+    icon_url = repository_data.get("icon_url")
+    if icon_url is not None and (
+        not isinstance(icon_url, str)
+        or not icon_url.strip()
+        or len(icon_url) > _MAX_LISTING_ICON_LENGTH
+    ):
         raise ValueError(
-            f"icon must be at most {_MAX_LISTING_ICON_LENGTH} characters"
+            f"icon_url must be a non-empty URL up to {_MAX_LISTING_ICON_LENGTH} characters"
         )
 
     tags = repository_data.get("tags")
@@ -765,7 +829,7 @@ def get_agent_repository_listing_detail_impl(
         "description": record.get("description"),
         "author": record.get("author"),
         "submitted_by": record.get("submitted_by"),
-        "icon": record.get("icon"),
+        "icon_url": record.get("icon_url"),
         "status": record.get("status"),
         "version_label": record.get("version_name"),
         "downloads": download_total,
@@ -996,7 +1060,7 @@ def _to_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count"),
         "version_label": record.get("version_name"),
-        "icon": record.get("icon"),
+        "icon_url": record.get("icon_url"),
         "downloads": record.get("downloads") or 0,
         "status": record.get("status"),
         "version_no": record.get("version_no"),
@@ -1115,8 +1179,10 @@ async def _build_repository_data_from_agent(
     }
 
     if card_fields:
-        for key in ("icon", "downloads", "tool_count", "content"):
-            if key in card_fields and card_fields[key] is not None:
+        for key in ("icon_url", "downloads", "tool_count", "content"):
+            if key in card_fields and (
+                key == "icon_url" or card_fields[key] is not None
+            ):
                 repository_data[key] = card_fields[key]
         if "tags" in card_fields and card_fields["tags"] is not None:
             repository_data["tags"] = _normalize_listing_tags(card_fields["tags"])
@@ -1138,7 +1204,7 @@ async def create_agent_repository_listing_impl(
     then inserts or updates the marketplace table.
 
     When a listing for the same agent version already exists, its status is
-    updated to pending_review along with icon and tags when provided.
+    updated to pending_review along with icon_url and tags when provided.
     """
     if version_no < 0:
         raise ValueError("version_no must be >= 0")
@@ -1152,6 +1218,15 @@ async def create_agent_repository_listing_impl(
     )
     repository_data["content"] = (card_fields or {}).get("content") or ""
     _validate_create_payload(repository_data)
+    icon_url = repository_data.get("icon_url")
+    if icon_url is not None:
+        image_id = _repository_image_id(icon_url, agent_id, version_no)
+        try:
+            read_icon_image(
+                _repository_icon_object_name(tenant_id, agent_id, version_no, image_id)
+            )
+        except FileNotFoundError as exc:
+            raise ValueError("Repository icon upload not found") from exc
 
     existing = get_agent_repository_by_agent_id(
         agent_id,
@@ -1171,7 +1246,7 @@ async def create_agent_repository_listing_impl(
             "status": STATUS_PENDING_REVIEW,
             "content": repository_data["content"],
         }
-        for key in ("icon", "tags", "tool_count"):
+        for key in ("icon_url", "tags", "tool_count"):
             if key in repository_data:
                 updates[key] = repository_data[key]
         affected = update_agent_repository_by_id(
