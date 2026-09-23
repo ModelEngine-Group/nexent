@@ -30,8 +30,13 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
+import { MODEL_SOURCES } from "@/const/modelConfig";
 import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
+import {
+  STATUS_DOT_CLASS,
+  TYPE_BADGE_CLASS,
+  TYPE_LABEL_KEY_MAP,
+} from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): the model library as a custom list built on
@@ -41,13 +46,6 @@ import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
  */
 
 const PAGE_SIZE = 8;
-
-const STATUS_DOT_CLASS: Record<string, string> = {
-  available: "bg-emerald-500",
-  unavailable: "bg-red-500",
-  detecting: "bg-amber-400 animate-pulse",
-  not_detected: "bg-slate-300",
-};
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
   available: "model.status.available",
@@ -61,35 +59,6 @@ const STATUS_FALLBACK_LABELS: Record<string, string> = {
   unavailable: "不可用",
   detecting: "检测中",
   not_detected: "未检测",
-};
-
-// Raw type ids -> the semantic i18n keys used across the app. Mirrors the
-// mapping the previous table column used (vlm2/vlm3/vlm4 have no direct
-// model.type.<id> keys).
-const TYPE_LABEL_KEY_MAP: Record<string, string> = {
-  llm: "llm",
-  embedding: "embedding",
-  multi_embedding: "multiEmbedding",
-  vlm: "imageUnderstanding",
-  vlm2: "imageGeneration",
-  vlm3: "videoUnderstanding",
-  vlm4: "audioUnderstanding",
-  rerank: "rerank",
-  stt: "stt",
-  tts: "tts",
-};
-
-const TYPE_BADGE_CLASS: Record<string, string> = {
-  [MODEL_TYPES.LLM]: "bg-blue-100 text-blue-700",
-  [MODEL_TYPES.EMBEDDING]: "bg-indigo-100 text-indigo-700",
-  [MODEL_TYPES.MULTI_EMBEDDING]: "bg-cyan-100 text-cyan-700",
-  [MODEL_TYPES.RERANK]: "bg-purple-100 text-purple-700",
-  [MODEL_TYPES.STT]: "bg-orange-100 text-orange-700",
-  [MODEL_TYPES.TTS]: "bg-pink-100 text-pink-700",
-  [MODEL_TYPES.VLM]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM2]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM3]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM4]: "bg-emerald-100 text-emerald-700",
 };
 
 export function ModelLibraryList({

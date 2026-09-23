@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 import { ModelOption, ModelSource } from "@/types/modelConfig";
+import { TYPE_LABEL_KEY_MAP } from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): batch manage models by connection.
@@ -56,7 +57,14 @@ export interface ConnectionGroup {
  *  2. Strip trailing slashes (v1/ and v1 are the same endpoint).
  */
 function normalizeUrlForGrouping(url: string): string {
-  return url.replace(/\/embeddings\/?$/, "").replace(/\/+$/, "");
+  // Strip trailing slashes first, then the /embeddings suffix without the
+  // backtracking regex Sonar flagged (handles both "/embeddings" and
+  // "/embeddings/").
+  let normalized = url.replace(/\/+$/, "");
+  if (normalized.endsWith("/embeddings")) {
+    normalized = normalized.slice(0, -"/embeddings".length);
+  }
+  return normalized;
 }
 
 export function groupByConnection(models: ModelOption[]): ConnectionGroup[] {
@@ -78,21 +86,6 @@ export function groupByConnection(models: ModelOption[]): ConnectionGroup[] {
   }
   return Array.from(map.values());
 }
-
-// Raw type ids -> the semantic i18n keys used across the app (same mapping
-// as ModelLibraryList).
-const TYPE_LABEL_KEY_MAP: Record<string, string> = {
-  llm: "llm",
-  embedding: "embedding",
-  multi_embedding: "multiEmbedding",
-  vlm: "imageUnderstanding",
-  vlm2: "imageGeneration",
-  vlm3: "videoUnderstanding",
-  vlm4: "audioUnderstanding",
-  rerank: "rerank",
-  stt: "stt",
-  tts: "tts",
-};
 
 export function ModelManagerDialog({
   open,

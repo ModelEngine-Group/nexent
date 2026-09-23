@@ -15,13 +15,11 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -46,6 +44,7 @@ import {
   buildInferenceParamsPayload,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
+import { TYPE_BADGE_CLASS, useTypeOptions } from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): the add-model dialog.
@@ -62,45 +61,6 @@ import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
  */
 
 const CUSTOM_PROVIDER_KEY = "__custom__";
-
-const TYPE_OPTIONS: ModelType[] = [
-  MODEL_TYPES.LLM,
-  MODEL_TYPES.EMBEDDING,
-  MODEL_TYPES.MULTI_EMBEDDING,
-  MODEL_TYPES.RERANK,
-  MODEL_TYPES.VLM,
-  MODEL_TYPES.VLM2,
-  MODEL_TYPES.VLM3,
-  MODEL_TYPES.VLM4,
-  MODEL_TYPES.STT,
-  MODEL_TYPES.TTS,
-];
-
-const TYPE_LABEL_KEY_MAP: Record<string, string> = {
-  llm: "llm",
-  embedding: "embedding",
-  multi_embedding: "multiEmbedding",
-  vlm: "imageUnderstanding",
-  vlm2: "imageGeneration",
-  vlm3: "videoUnderstanding",
-  vlm4: "audioUnderstanding",
-  rerank: "rerank",
-  stt: "stt",
-  tts: "tts",
-};
-
-const TYPE_BADGE_CLASS: Record<string, string> = {
-  [MODEL_TYPES.LLM]: "bg-blue-100 text-blue-700",
-  [MODEL_TYPES.EMBEDDING]: "bg-indigo-100 text-indigo-700",
-  [MODEL_TYPES.MULTI_EMBEDDING]: "bg-cyan-100 text-cyan-700",
-  [MODEL_TYPES.RERANK]: "bg-purple-100 text-purple-700",
-  [MODEL_TYPES.STT]: "bg-orange-100 text-orange-700",
-  [MODEL_TYPES.TTS]: "bg-pink-100 text-pink-700",
-  [MODEL_TYPES.VLM]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM2]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM3]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM4]: "bg-emerald-100 text-emerald-700",
-};
 
 function generateRandomSuffix(length: number): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -275,21 +235,43 @@ function useProviderPresets(open: boolean) {
   return presets;
 }
 
-/* ------------------------------ shared helpers ------------------------------ */
-
-function useTypeOptions() {
+/** Shared provider dropdown: catalog presets + the 自定义 option. */
+function ProviderSelect({
+  presets,
+  value,
+  onChange,
+}: {
+  presets: ProviderPreset[];
+  value: string;
+  onChange: (next: string) => void;
+}) {
   const { t } = useTranslation();
-  return useMemo(
-    () =>
-      TYPE_OPTIONS.map((v) => ({
-        value: v,
-        label: t(`model.type.${TYPE_LABEL_KEY_MAP[v] ?? v}`, {
-          defaultValue: v,
-        }),
-      })),
-    [t]
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="w-full">
+        <SelectValue
+          placeholder={t("modelConfig.addDialog.providerPlaceholder", {
+            defaultValue: "选择服务商",
+          })}
+        />
+      </SelectTrigger>
+      <SelectContent>
+        {presets.map((p) => (
+          <SelectItem key={p.key} value={p.key}>
+            {p.label}
+          </SelectItem>
+        ))}
+        <SelectItem value={CUSTOM_PROVIDER_KEY}>
+          {t("modelConfig.addDialog.customProvider", {
+            defaultValue: "自定义",
+          })}
+        </SelectItem>
+      </SelectContent>
+    </Select>
   );
 }
+
+/* ------------------------------ shared helpers ------------------------------ */
 
 async function createModel(
   tenantId: string | undefined,
@@ -448,23 +430,11 @@ function SingleAddForm({
             <Label>
               {t("modelConfig.addDialog.provider", { defaultValue: "服务商" })}
             </Label>
-            <Select value={provider} onValueChange={changeProvider}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {presets.map((p) => (
-                  <SelectItem key={p.key} value={p.key}>
-                    {p.label}
-                  </SelectItem>
-                ))}
-                <SelectItem value={CUSTOM_PROVIDER_KEY}>
-                  {t("modelConfig.addDialog.customProvider", {
-                    defaultValue: "自定义",
-                  })}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <ProviderSelect
+              presets={presets}
+              value={provider}
+              onChange={changeProvider}
+            />
           </div>
           <div className="space-y-2">
             <Label>
@@ -924,27 +894,11 @@ function BatchAddForm({
             <Label>
               {t("modelConfig.addDialog.provider", { defaultValue: "服务商" })}
             </Label>
-            <Select value={provider} onValueChange={changeProvider}>
-              <SelectTrigger className="w-full">
-                <SelectValue
-                  placeholder={t("modelConfig.addDialog.providerPlaceholder", {
-                    defaultValue: "选择服务商",
-                  })}
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {presets.map((p) => (
-                  <SelectItem key={p.key} value={p.key}>
-                    {p.label}
-                  </SelectItem>
-                ))}
-                <SelectItem value={CUSTOM_PROVIDER_KEY}>
-                  {t("modelConfig.addDialog.customProvider", {
-                    defaultValue: "自定义",
-                  })}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <ProviderSelect
+              presets={presets}
+              value={provider}
+              onChange={changeProvider}
+            />
           </div>
           <div className="space-y-2">
             <Label>
@@ -1082,8 +1036,14 @@ function BatchAddForm({
                         )}
                         {/* Per-row type editor — styled like the old badge.
                             stopPropagation keeps opening the dropdown from
-                            toggling the row's selection checkbox. */}
-                        <span onClick={(e) => e.stopPropagation()}>
+                            toggling the row's selection checkbox. The span is
+                            a propagation barrier only (role=presentation), so
+                            keyboard events are stopped the same way. */}
+                        <span
+                          role="presentation"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
                           <Select
                             value={row.model_type}
                             onValueChange={(v) =>

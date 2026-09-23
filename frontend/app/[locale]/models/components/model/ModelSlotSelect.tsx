@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { ModelOption, ModelType } from "@/types/modelConfig";
+import { STATUS_DOT_CLASS } from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): one default-model slot in the flat "默认配置"
@@ -48,13 +49,6 @@ export interface ModelSlotDef {
   /** tooltip explaining when this slot is needed. */
   hint: string;
 }
-
-const STATUS_DOT_CLASS: Record<string, string> = {
-  available: "bg-emerald-500",
-  unavailable: "bg-red-500",
-  detecting: "bg-amber-400 animate-pulse",
-  not_detected: "bg-slate-300",
-};
 
 function StatusDot({ status }: { status?: string }) {
   const cls = (status && STATUS_DOT_CLASS[status]) || "bg-slate-300";

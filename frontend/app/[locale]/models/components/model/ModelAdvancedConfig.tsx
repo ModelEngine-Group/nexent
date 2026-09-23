@@ -17,7 +17,9 @@ import { Switch } from "@/components/ui/switch";
 
 import {
   ModelAdvancedSettingsValue,
+  clampReasoningBudget,
   resolveReasoningDefault,
+  resolveReasoningControls,
 } from "./ModelAdvancedSettings";
 import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 
@@ -80,50 +82,21 @@ export function ModelAdvancedConfig({
   const setCustoms = (next: [string, string][]) =>
     onChange({ ...value, __custom__: next });
 
-  // ---- Reasoning controls (mirrors ModelAdvancedSettings, #3953) ----
+  // ---- Reasoning controls (shared resolution, see ModelAdvancedSettings) ----
   const reasoningControlVisible = modelType === "llm";
   const thinkingEnabled = value.enable_thinking !== false;
-  const declaredReasoningControls =
-    reasoningCapability?.status === "supported"
-      ? reasoningCapability.controls?.length
-        ? reasoningCapability.controls
-        : reasoningCapability.levels.length > 0
-          ? [{ type: "effort" as const, values: reasoningCapability.levels }]
-          : reasoningCapability.control === "toggle"
-            ? [{ type: "toggle" as const }]
-            : []
-      : [];
-  const effortControl = declaredReasoningControls.find(
-    (control) => control.type === "effort"
-  );
-  const budgetControl = declaredReasoningControls.find(
-    (control) => control.type === "budget_tokens"
-  );
-  const budgetPreferred = budgetControl?.type === "budget_tokens";
-  const effectiveEffortControl = budgetPreferred ? undefined : effortControl;
-  const configuredReasoningLevels =
-    effectiveEffortControl?.type === "effort"
-      ? (effectiveEffortControl.values as ReasoningEffort[])
-      : reasoningCapability?.levels || [];
-  const reasoningLevels = [
-    "auto",
-    ...configuredReasoningLevels.filter((level) => level !== "auto"),
-  ] as ReasoningEffort[];
+  const { budgetControl, effectiveEffortControl, reasoningLevels } =
+    resolveReasoningControls(reasoningCapability);
   const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
   const reasoningDefault = resolveReasoningDefault(
     reasoningEffort,
     reasoningCapability,
     reasoningLevels
   );
-  const reasoningBudget =
-    budgetControl?.type === "budget_tokens"
-      ? typeof value.reasoning_budget_tokens === "number"
-        ? Math.min(
-            budgetControl.max,
-            Math.max(budgetControl.min, value.reasoning_budget_tokens)
-          )
-        : undefined
-      : undefined;
+  const reasoningBudget = clampReasoningBudget(
+    budgetControl,
+    value.reasoning_budget_tokens
+  );
 
   return (
     <>
@@ -253,12 +226,11 @@ export function ModelAdvancedConfig({
                     onChange({ ...value, reasoning_budget_tokens: undefined });
                     return;
                   }
-                  const num = Number(raw);
                   onChange({
                     ...value,
-                    reasoning_budget_tokens: Math.min(
-                      budgetControl.max,
-                      Math.max(budgetControl.min, num)
+                    reasoning_budget_tokens: clampReasoningBudget(
+                      budgetControl,
+                      Number(raw)
                     ),
                   });
                 }}

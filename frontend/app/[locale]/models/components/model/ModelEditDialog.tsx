@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "antd";
 import { Loader2, ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
@@ -40,6 +40,7 @@ import {
   formatCustomValueForEditing,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
+import { TYPE_BADGE_CLASS, useTypeOptions } from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): the per-model edit dialog.
@@ -52,32 +53,6 @@ import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
  * models are checked from the library list (per-row button / one-click
  * verify). Edit is for configuration, not testing.
  */
-
-const TYPE_LABEL_KEY_MAP: Record<string, string> = {
-  llm: "llm",
-  embedding: "embedding",
-  multi_embedding: "multiEmbedding",
-  vlm: "imageUnderstanding",
-  vlm2: "imageGeneration",
-  vlm3: "videoUnderstanding",
-  vlm4: "audioUnderstanding",
-  rerank: "rerank",
-  stt: "stt",
-  tts: "tts",
-};
-
-const TYPE_BADGE_CLASS: Record<string, string> = {
-  [MODEL_TYPES.LLM]: "bg-blue-100 text-blue-700",
-  [MODEL_TYPES.EMBEDDING]: "bg-indigo-100 text-indigo-700",
-  [MODEL_TYPES.MULTI_EMBEDDING]: "bg-cyan-100 text-cyan-700",
-  [MODEL_TYPES.RERANK]: "bg-purple-100 text-purple-700",
-  [MODEL_TYPES.STT]: "bg-orange-100 text-orange-700",
-  [MODEL_TYPES.TTS]: "bg-pink-100 text-pink-700",
-  [MODEL_TYPES.VLM]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM2]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM3]: "bg-emerald-100 text-emerald-700",
-  [MODEL_TYPES.VLM4]: "bg-emerald-100 text-emerald-700",
-};
 
 export interface ModelEditDialogProps {
   model: ModelOption | null;
@@ -187,16 +162,7 @@ export const ModelEditDialog = ({
     };
   }, [model, baseUrl, type]);
 
-  const typeOptions = useMemo(
-    () =>
-      (Object.keys(TYPE_LABEL_KEY_MAP) as ModelType[]).map((v) => ({
-        value: v,
-        label: t(`model.type.${TYPE_LABEL_KEY_MAP[v]}`, {
-          defaultValue: v,
-        }),
-      })),
-    [t]
-  );
+  const typeOptions = useTypeOptions();
 
   if (!model) return null;
 

@@ -11,7 +11,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { Alert, App } from "antd";
+import { App } from "antd";
 import {
   Plus,
   ShieldCheck,
