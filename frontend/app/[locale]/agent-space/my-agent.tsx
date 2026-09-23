@@ -50,8 +50,8 @@ import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
-import { mapAgentVersionDetail } from "@/lib/agentRepositoryDetail";
-import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
+import { mapMyAgentDetail } from "@/lib/myAgentDetail";
+import { MyAgentDetailModal } from "./components/MyAgentDetailModal";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -241,6 +241,7 @@ export function MyAgent({
   const [detailTarget, setDetailTarget] = useState<{
     agentId: number;
     versionNo: number;
+    agent: MyEditableAgentItem;
   } | null>(null);
   const {
     data: versionDetail,
@@ -266,12 +267,13 @@ export function MyAgent({
     active && detailTarget != null
   );
   const detail = useMemo(() => {
-    if (!versionDetail) return detailTarget ? undefined : null;
+    if (!detailTarget) return null;
+    if (!versionDetail) return undefined;
     const repositoryInfo = pickReviewDisplayRepositoryInfo(
       toMineRepositoryInfo(detailListings?.items ?? [])
     );
     return {
-      ...mapAgentVersionDetail(versionDetail),
+      ...mapMyAgentDetail(versionDetail, detailTarget.agent),
       status: repositoryInfo?.status,
     };
   }, [detailTarget, detailListings, versionDetail]);
@@ -639,6 +641,7 @@ export function MyAgent({
                     setDetailTarget({
                       agentId: agent.agent_id,
                       versionNo: agent.current_version_no ?? 0,
+                      agent,
                     })
                   }
                   onApplyListing={() => handleApplyListing(agent)}
@@ -683,10 +686,23 @@ export function MyAgent({
         onCancel={() => setCreateAgentModalVisible(false)}
         onCreated={handleAgentCreated}
       />
-      <AgentRepositoryDetailModal
+      <MyAgentDetailModal
         open={active && detailTarget != null}
         onClose={() => setDetailTarget(null)}
+        onEdit={
+          detailTarget?.agent.permission === "READ_ONLY"
+            ? undefined
+            : detailTarget
+              ? () =>
+                  handleEdit(
+                    detailTarget.agentId,
+                    detailTarget.agent.permission
+                  )
+              : undefined
+        }
         detail={detail}
+        published={(detailTarget?.versionNo ?? 0) > 0}
+        status={detail?.status}
         isLoading={isDetailLoading || isDetailListingsLoading}
         isError={isDetailError || isDetailListingsError}
         isFetching={isDetailFetching || isDetailListingsFetching}
@@ -694,7 +710,6 @@ export function MyAgent({
           void refetchDetail();
           void refetchDetailListings();
         }}
-        showDownloads={false}
       />
     </div>
   );
