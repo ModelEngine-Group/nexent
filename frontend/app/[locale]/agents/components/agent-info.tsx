@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { createElement, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Form,
   Button,
@@ -35,6 +36,7 @@ import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 
 export default function AgentInfo() {
   const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
   const form = Form.useFormInstance();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
@@ -62,12 +64,15 @@ export default function AgentInfo() {
     ) ?? null;
   const { data: tagDefinitions, refresh: refreshTagDefinitions } =
     useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
-  const DefaultIcon = getAgentIcon({
-    id: String(agentId ?? 0),
-    agent_id: agentId ?? 0,
-    name: editedAgent.name,
-    description: editedAgent.description,
-  });
+  const defaultIcon = createElement(
+    getAgentIcon({
+      id: String(agentId ?? 0),
+      agent_id: agentId ?? 0,
+      name: editedAgent.name,
+      description: editedAgent.description,
+    }),
+    { size: 28 }
+  );
   const iconSource =
     agentId !== null && editedAgent.icon_url && !iconLoadError
       ? `${API_ENDPOINTS.agent.icon(agentId)}?v=${iconVersion}`
@@ -98,6 +103,7 @@ export default function AgentInfo() {
         setIconLoadError(false);
         setIconVersion(Date.now());
         updateDraft({ icon_url: data.icon_url });
+        void queryClient.invalidateQueries({ queryKey: ["agents"] });
         message.success(t("agent.iconUploadSuccess"));
       } catch {
         message.error(t("agent.iconUploadFailed"));
@@ -298,7 +304,7 @@ export default function AgentInfo() {
                 <Avatar
                   size={72}
                   src={iconSource}
-                  icon={<DefaultIcon size={28} />}
+                  icon={defaultIcon}
                   onError={() => {
                     setIconLoadError(true);
                     return false;
