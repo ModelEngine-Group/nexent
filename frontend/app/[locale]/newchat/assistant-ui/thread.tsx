@@ -71,9 +71,7 @@ import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
-import {
-  DEFAULT_REASONING_EFFORT,
-} from "@/const/modelConfig";
+import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
@@ -241,9 +239,7 @@ const useAgentModels = (
     const toSelectorModel = (id: string, fallbackName: string) => {
       const model = availableModels.find(
         (item) =>
-          String(item.id) === id ||
-          item.name === id ||
-          item.displayName === id
+          String(item.id) === id || item.name === id || item.displayName === id
       );
       const agentOverride = typedAgent.model_params_override?.[id];
       const overrideExtra = agentOverride?.extra_params;
@@ -270,10 +266,16 @@ const useAgentModels = (
             : [];
       const budgetControl =
         capability?.status === "supported"
-          ? capability.controls?.find((control) => control.type === "budget_tokens")
+          ? capability.controls?.find(
+              (control) => control.type === "budget_tokens"
+            )
           : undefined;
-      const supportsEffort = reasoningEnabled && capabilityLevels.length > 0;
-      const supportsBudget = reasoningEnabled && budgetControl?.type === "budget_tokens";
+      const supportsBudget =
+        reasoningEnabled && budgetControl?.type === "budget_tokens";
+      // A numeric budget is the preferred control when the catalog exposes
+      // both budget_tokens and effort for the same model.
+      const supportsEffort =
+        reasoningEnabled && !supportsBudget && capabilityLevels.length > 0;
       const effortLevels = [
         "auto",
         ...capabilityLevels.filter((level) => level !== "auto"),
@@ -283,7 +285,7 @@ const useAgentModels = (
           ? (overrideExtra.reasoning_effort as ReasoningEffort)
           : undefined;
       const defaultEffort = hasAgentReasoningSnapshot
-        ? snapshotEffort ?? "auto"
+        ? (snapshotEffort ?? "auto")
         : resolveDefaultReasoningEffort(
             model?.defaultReasoningEffort,
             capability,
@@ -303,7 +305,7 @@ const useAgentModels = (
                 name: formatReasoningEffortName(level),
               })),
               defaultEffort: defaultEffort ?? undefined,
-          }
+            }
           : {}),
         ...(supportsBudget
           ? {

@@ -15,6 +15,7 @@ import {
   ModelCatalogProfile,
   ModelCatalogFullPayload,
   InferenceFieldSpecsByType,
+  ReasoningCapability,
   ReasoningEffort,
 } from "@/types/modelConfig";
 
@@ -161,6 +162,9 @@ const mapCapacitySuggestionFromApi = (
           tokenizerFamily: suggestion.suggestions.tokenizer_family,
         }
       : null,
+    reasoningCapability: (suggestion.reasoning_capability ?? undefined) as
+      | ReasoningCapability
+      | undefined,
     matchKind: suggestion.match_kind,
     matchConfidence: suggestion.match_confidence,
     matchExplanation: suggestion.match_explanation || "",

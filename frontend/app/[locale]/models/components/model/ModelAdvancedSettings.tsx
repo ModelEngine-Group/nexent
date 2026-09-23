@@ -22,9 +22,7 @@ import type {
   ReasoningCapability,
   ReasoningEffort,
 } from "@/types/modelConfig";
-import {
-  DEFAULT_REASONING_EFFORT,
-} from "@/const/modelConfig";
+import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
 
 // =============================================================================
 // v2.6.0: ModelAdvancedSettings — per-type fixed-field form
@@ -384,7 +382,10 @@ export const diffCustomParamsForSave = (
   }
   const modelDict = modelCustoms ?? {};
   const result: Record<string, unknown> = {};
-  const keys = new Set([...Object.keys(modelDict), ...Object.keys(editingDict)]);
+  const keys = new Set([
+    ...Object.keys(modelDict),
+    ...Object.keys(editingDict),
+  ]);
   for (const k of keys) {
     if (k in editingDict) {
       if (
@@ -424,6 +425,14 @@ export const buildInferenceParamsPayload = (
   }
 
   if (Object.keys(extraParams).length > 0) {
+    // Numeric budgets and effort enums are alternative controls. When both
+    // exist in a legacy form value, the numeric budget takes precedence.
+    if (
+      typeof extraParams.reasoning_budget_tokens === "number" &&
+      Number.isFinite(extraParams.reasoning_budget_tokens)
+    ) {
+      delete extraParams.reasoning_effort;
+    }
     result.extra_params = extraParams;
   }
   return result;
@@ -460,12 +469,15 @@ export const buildModelOverrideEntry = (
  * back into a single snake_case-keyed object keyed by spec.key.
  */
 export const advancedSettingsValueFromRecord = (
-  record: {
-    temperature?: number | null;
-    top_p?: number | null;
-    extra_params?: Record<string, unknown> | null;
-    [key: string]: unknown;
-  } | null | undefined,
+  record:
+    | {
+        temperature?: number | null;
+        top_p?: number | null;
+        extra_params?: Record<string, unknown> | null;
+        [key: string]: unknown;
+      }
+    | null
+    | undefined,
   specs: InferenceFieldSpecsByType,
   modelType: string
 ): ModelAdvancedSettingsValue => {
@@ -496,7 +508,9 @@ export const advancedSettingsValueFromRecord = (
   const customRaw =
     "__custom__" in record ? record["__custom__"] : extra["__custom__"];
   if (customRaw && typeof customRaw === "object" && !Array.isArray(customRaw)) {
-    value["__custom__"] = Object.entries(customRaw as Record<string, unknown>).map(
+    value["__custom__"] = Object.entries(
+      customRaw as Record<string, unknown>
+    ).map(
       ([key, customValue]) =>
         [key, formatCustomValueForEditing(customValue)] as [string, string]
     );
@@ -736,10 +750,12 @@ const renderCustomParamsSection = ({
         <div className="space-y-2">
           {customEntries.map(([k, v], idx) => {
             const isDuplicate =
-              k !== "" &&
-              customEntries.filter(([ek]) => ek === k).length > 1;
+              k !== "" && customEntries.filter(([ek]) => ek === k).length > 1;
             return (
-              <div key={`custom-param-${idx}`} className="flex items-center gap-2">
+              <div
+                key={`custom-param-${idx}`}
+                className="flex items-center gap-2"
+              >
                 <Input
                   className="flex-1"
                   size="small"
@@ -809,7 +825,9 @@ export const ModelAdvancedSettings = ({
   // override mode all non-removed fields remain visible.
   const isVoiceType = modelType === "stt" || modelType === "tts";
   const isVolcengineVoice =
-    isVoiceType && mode === "default" && (value.model_factory as string) === "volcengine";
+    isVoiceType &&
+    mode === "default" &&
+    (value.model_factory as string) === "volcengine";
 
   // STT/TTS default provider to DashScope (阿里灵积) when empty, matching the
   // original ModelAddDialog (sttProvider/ttsProvider: "dashscope"). Applied
@@ -818,11 +836,7 @@ export const ModelAdvancedSettings = ({
   // dialog reopen). Only in default mode: override mode leaves empty as
   // "inherit model default".
   useEffect(() => {
-    if (
-      isVoiceType &&
-      mode === "default" &&
-      !value.model_factory
-    ) {
+    if (isVoiceType && mode === "default" && !value.model_factory) {
       onChange({ ...value, model_factory: "dashscope" });
     }
   }, [isVoiceType, mode, value, onChange]);
@@ -884,11 +898,14 @@ export const ModelAdvancedSettings = ({
   const budgetControl = declaredReasoningControls.find(
     (control) => control.type === "budget_tokens"
   );
+  const budgetPreferred = budgetControl?.type === "budget_tokens";
+  const effectiveEffortControl = budgetPreferred ? undefined : effortControl;
   const reasoningControlVisible = modelType === "llm";
-  const thinkingEnabled = modelType === "llm" && value.enable_thinking !== false;
+  const thinkingEnabled =
+    modelType === "llm" && value.enable_thinking !== false;
   const configuredReasoningLevels =
-    effortControl?.type === "effort"
-      ? (effortControl.values as ReasoningEffort[])
+    effectiveEffortControl?.type === "effort"
+      ? (effectiveEffortControl.values as ReasoningEffort[])
       : reasoningCapability?.levels || [];
   const reasoningLevels = [
     "auto",
@@ -910,6 +927,12 @@ export const ModelAdvancedSettings = ({
         : undefined
       : undefined;
 
+  useEffect(() => {
+    if (budgetPreferred && value.reasoning_effort !== undefined) {
+      onChange({ ...value, reasoning_effort: undefined });
+    }
+  }, [budgetPreferred, onChange, value]);
+
   const renderReasoningControls = reasoningControlVisible && (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -927,7 +950,7 @@ export const ModelAdvancedSettings = ({
               ...value,
               enable_thinking: checked,
               reasoning_effort:
-                checked && effortControl?.type === "effort"
+                checked && effectiveEffortControl?.type === "effort"
                   ? reasoningDefault
                   : undefined,
               reasoning_budget_tokens: checked
@@ -937,7 +960,7 @@ export const ModelAdvancedSettings = ({
           }
         />
       </div>
-      {thinkingEnabled && effortControl?.type === "effort" && (
+      {thinkingEnabled && effectiveEffortControl?.type === "effort" && (
         <Select
           className="w-full"
           aria-label={t("model.advanced.reasoningEffort", {
@@ -1058,9 +1081,7 @@ export const ModelAdvancedSettings = ({
                 <label className="block mb-1 text-sm font-medium text-gray-700">
                   <Tooltip
                     title={
-                      rangeHint
-                        ? `${spec.label} ${rangeHint}`
-                        : spec.label
+                      rangeHint ? `${spec.label} ${rangeHint}` : spec.label
                     }
                   >
                     <span>{spec.label}</span>
@@ -1078,7 +1099,9 @@ export const ModelAdvancedSettings = ({
                   disabled,
                   // Show what an empty field inherits (model-level defaults in
                   // override mode) so "empty" is an informed choice.
-                  fieldValue === undefined || fieldValue === null || fieldValue === ""
+                  fieldValue === undefined ||
+                    fieldValue === null ||
+                    fieldValue === ""
                     ? inheritedDefaults?.[spec.key] !== undefined &&
                       inheritedDefaults?.[spec.key] !== null
                       ? String(inheritedDefaults[spec.key])

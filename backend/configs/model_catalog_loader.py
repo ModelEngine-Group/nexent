@@ -540,6 +540,32 @@ def _canonical_api_url(value: Any) -> str:
     return raw.rstrip("/").lower()
 
 
+def _api_url_path_prefix_length(provider_url: Any, requested_url: Any) -> Optional[int]:
+    """Return the catalog path length when it prefixes the requested URL.
+
+    The provider API in models.dev is often a host-level root while a user
+    enters a versioned endpoint such as ``/v1``.  Matching only within the
+    same domain and requiring the catalog path to be a segment prefix keeps
+    different services on one host isolated.
+    """
+    provider_api = _canonical_api_url(provider_url)
+    requested_api = _canonical_api_url(requested_url)
+    if not provider_api or not requested_api:
+        return None
+    try:
+        provider = urlsplit(provider_api)
+        requested = urlsplit(requested_api)
+    except ValueError:
+        return None
+    if not provider.scheme or not provider.netloc or provider.netloc != requested.netloc:
+        return None
+    provider_parts = [part for part in provider.path.split("/") if part]
+    requested_parts = [part for part in requested.path.split("/") if part]
+    if requested_parts[: len(provider_parts)] != provider_parts:
+        return None
+    return len(provider_parts)
+
+
 def _model_id_candidates(model_key: Any, model_raw: Dict[str, Any]) -> List[str]:
     """Return model IDs exposed by one models.dev model record."""
     candidates = [model_key, model_raw.get("id"), model_raw.get("model")]
@@ -586,6 +612,7 @@ def _resolve_models_dev_reasoning_capability(
     requested_provider = str(provider_hint or "").strip().lower()
 
     provider_candidates: List[tuple[str, Dict[str, Any]]] = []
+    prefix_candidates: List[tuple[int, str, Dict[str, Any]]] = []
     for provider_id, provider_raw in (catalog.get("providers") or {}).items():
         if not isinstance(provider_raw, dict):
             continue
@@ -593,8 +620,20 @@ def _resolve_models_dev_reasoning_capability(
         if requested_api:
             if provider_api == requested_api:
                 provider_candidates.append((str(provider_id), provider_raw))
+            else:
+                prefix_length = _api_url_path_prefix_length(provider_api, requested_api)
+                if prefix_length is not None:
+                    prefix_candidates.append((prefix_length, str(provider_id), provider_raw))
         elif requested_provider and str(provider_id).lower() == requested_provider:
             provider_candidates.append((str(provider_id), provider_raw))
+
+    if not provider_candidates and requested_api:
+        best_prefix_length = max((item[0] for item in prefix_candidates), default=-1)
+        provider_candidates = [
+            (provider_id, provider_raw)
+            for prefix_length, provider_id, provider_raw in prefix_candidates
+            if prefix_length == best_prefix_length
+        ]
 
     # API is the trust boundary. Do not search another provider when an API was
     # supplied but its model ID is absent from the source snapshot.

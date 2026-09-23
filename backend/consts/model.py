@@ -615,6 +615,7 @@ class ModelCapacitySuggestionRequest(BaseModel):
 
 class ModelCapacitySuggestionResponse(BaseModel):
     suggestions: Optional[CapacitySuggestionFields] = None
+    reasoning_capability: Optional["ReasoningCapability"] = None
     match_kind: Literal["catalog_exact", "catalog_fuzzy", "provider_discovery", "litellm_lookup", "none"]
     match_confidence: Optional[Literal["high", "medium", "low"]] = None
     match_explanation: str

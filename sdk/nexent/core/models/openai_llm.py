@@ -1131,11 +1131,24 @@ class OpenAIModel(OpenAIServerModel):
         if wire_format not in {"reasoning_effort", "thinking_toggle", "thinking_budget"}:
             wire_format = "reasoning_effort"
 
+        controls = capability.get("controls")
+        budget_control_declared = any(
+            isinstance(control, dict) and control.get("type") == "budget_tokens"
+            for control in controls or []
+        )
+
         if wire_format == "reasoning_effort":
-            if self.reasoning_effort is not None and self.reasoning_effort != "auto":
-                completion_kwargs["reasoning_effort"] = self.reasoning_effort
-            elif self.reasoning_budget_tokens is not None:
+            if self.reasoning_budget_tokens is not None:
                 completion_kwargs["reasoning_budget_tokens"] = self.reasoning_budget_tokens
+            elif budget_control_declared:
+                # Budget and effort are alternative controls. A catalog entry
+                # with both uses the budget control; auto means no parameter.
+                return
+            elif self.reasoning_effort is not None and self.reasoning_effort != "auto":
+                completion_kwargs["reasoning_effort"] = self.reasoning_effort
+            return
+
+        if budget_control_declared and self.reasoning_budget_tokens is None:
             return
 
         extra_body = dict(completion_kwargs.get("extra_body") or {})

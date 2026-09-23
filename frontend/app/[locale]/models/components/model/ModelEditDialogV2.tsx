@@ -12,6 +12,7 @@ import {
   ModelOption,
   ModelType,
   InferenceFieldSpecsByType,
+  ReasoningCapability,
 } from "@/types/modelConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import log from "@/lib/logger";
@@ -105,6 +106,9 @@ export const ModelEditDialogV2 = ({
   // v2.6.0 inference params state (LLM only: temperature / top_p /
   // enable_thinking / __custom__ KV pairs)
   const [advanced, setAdvanced] = useState<ModelAdvancedSettingsValue>({});
+  const [reasoningCapability, setReasoningCapability] = useState<
+    ReasoningCapability | undefined
+  >(undefined);
   const [inferenceSpecs, setInferenceSpecs] =
     useState<InferenceFieldSpecsByType>({});
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -177,6 +181,7 @@ export const ModelEditDialogV2 = ({
       } else {
         setAdvanced({});
       }
+      setReasoningCapability(model.reasoningCapability);
       setCapacitySuggestionEnabled(true);
       resetCapacitySuggestion();
     }
@@ -203,6 +208,9 @@ export const ModelEditDialogV2 = ({
       if (["url", "apiKey", "modelFactory", "name"].includes(field)) {
         setCapacitySuggestion(null);
         setAcceptedCapacitySuggestion(null);
+      }
+      if (["url", "name"].includes(field)) {
+        setReasoningCapability(undefined);
       }
     }
   };
@@ -238,6 +246,46 @@ export const ModelEditDialogV2 = ({
 
   const canSuggestCapacity = () =>
     supportsCapacityFields && form.name.trim() !== "" && form.url.trim() !== "";
+
+  // Reasoning capability is resolved independently from capacity suggestions.
+  // This query must also run for existing models whose capacity is already
+  // complete, including when the edit dialog opens without user changes.
+  useEffect(() => {
+    if (!isOpen || !supportsInferenceParams || !form.name.trim() || !form.url.trim()) {
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const suggestion = await modelService.suggestCapacity({
+          modelName: form.name.trim(),
+          baseUrl: form.url.trim(),
+          providerHint: form.modelFactory || model?.source,
+          modelType: connectivityModelType,
+        });
+        if (!cancelled) {
+          setReasoningCapability(suggestion.reasoningCapability);
+        }
+      } catch {
+        if (!cancelled) {
+          setReasoningCapability(model?.reasoningCapability);
+        }
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    isOpen,
+    supportsInferenceParams,
+    form.name,
+    form.url,
+    form.modelFactory,
+    model?.source,
+    connectivityModelType,
+    model?.reasoningCapability,
+  ]);
 
   const applyCapacitySuggestion = (
     suggestion: typeof acceptedCapacitySuggestion
@@ -1006,7 +1054,7 @@ export const ModelEditDialogV2 = ({
             value={advanced}
             onChange={setAdvanced}
             mode="default"
-            reasoningCapability={model.reasoningCapability}
+            reasoningCapability={reasoningCapability}
           />
         </div>
       </Modal>

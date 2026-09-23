@@ -1531,6 +1531,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const reasoningBudgetTokens = (
       context.config as { reasoningBudgetTokens?: number } | undefined
     )?.reasoningBudgetTokens;
+    const hasBudgetSelection =
+      typeof reasoningBudgetTokens === "number" &&
+      Number.isInteger(reasoningBudgetTokens) &&
+      reasoningBudgetTokens >= 0;
     const modelIdFromCustom = custom?.modelId;
 
     if (isAgentDebug && modelIdFromCustom) {
@@ -1542,18 +1546,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
     if (
       !isResume &&
+      !hasBudgetSelection &&
       typeof reasoningEffort === "string" &&
       reasoningEffort &&
       reasoningEffort !== "auto"
     ) {
       requestBody.reasoning_effort = reasoningEffort;
     }
-    if (
-      !isResume &&
-      typeof reasoningBudgetTokens === "number" &&
-      Number.isInteger(reasoningBudgetTokens) &&
-      reasoningBudgetTokens > 0
-    ) {
+    if (!isResume && hasBudgetSelection && reasoningBudgetTokens > 0) {
       requestBody.reasoning_budget_tokens = reasoningBudgetTokens;
     }
 
@@ -1950,9 +1950,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             };
       nl2SkillAttemptCheckpoints.set(attemptId, { files, summary });
     };
-    const rollbackNl2SkillAttempt = (
-      checkpoint: Nl2SkillAttemptCheckpoint
-    ) => {
+    const rollbackNl2SkillAttempt = (checkpoint: Nl2SkillAttemptCheckpoint) => {
       const createdIndices = new Set<number>();
       for (const [path, index] of nl2SkillFilePartIndices) {
         if (!checkpoint.files.has(path)) createdIndices.add(index);

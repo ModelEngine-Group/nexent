@@ -474,6 +474,36 @@ class TestModelsDevReasoningResolution:
         assert qwen_without_min is not None
         assert qwen_without_min["controls"] == [{"type": "budget_tokens", "min": 0, "max": 262144}]
 
+    def test_api_version_suffix_matches_catalog_api_root(self, tmp_path: Path):
+        import configs.model_catalog_loader as loader
+
+        path = self._write_catalog(tmp_path)
+        with mock.patch.object(loader, "MODELS_DEV_CATALOG_JSON_PATH", str(path)), mock.patch.object(
+            loader, "_models_dev_cache", None
+        ):
+            capability = loader.resolve_reasoning_capability(
+                "deepseek-v4-pro", "https://api.deepseek.com/v1/", "OpenAI-API-Compatible"
+            )
+
+        assert capability is not None
+        assert capability["matched_api"] == "https://api.deepseek.com"
+        assert capability["controls"] == [
+            {"type": "toggle"},
+            {"type": "effort", "values": ["low", "high", "max"]},
+        ]
+
+    def test_api_path_prefix_matching_handles_invalid_and_nonmatching_urls(self):
+        import configs.model_catalog_loader as loader
+
+        assert loader._api_url_path_prefix_length("", "https://api.deepseek.com/v1") is None
+        assert loader._api_url_path_prefix_length("https://[invalid", "https://api.deepseek.com/v1") is None
+        assert loader._api_url_path_prefix_length(
+            "https://other.example.com", "https://api.deepseek.com/v1"
+        ) is None
+        assert loader._api_url_path_prefix_length(
+            "https://api.deepseek.com/other", "https://api.deepseek.com/v1"
+        ) is None
+
     def test_budget_control_accepts_zero_minimum(self):
         from consts.model import ReasoningControl
 

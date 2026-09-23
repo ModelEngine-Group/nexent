@@ -97,6 +97,15 @@ def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
         model["reasoning_capability"] = capability
 
 
+def get_model_reasoning_capability(
+    model_name: str,
+    base_url: Optional[str] = None,
+    provider_hint: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Resolve reasoning controls using the model ID and provider API URL."""
+    return resolve_reasoning_capability(model_name, base_url, provider_hint)
+
+
 def _enrich_discovered_model_reasoning_capability(
     model: Dict[str, Any],
     base_url: Optional[str],

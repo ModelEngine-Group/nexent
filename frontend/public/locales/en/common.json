@@ -4197,6 +4197,7 @@
   "model.advanced.reasoningHigh": "High",
   "model.advanced.reasoningXHigh": "Very high",
   "model.advanced.reasoningMax": "Maximum",
+  "model.advanced.reasoningBudget": "Budget tokens",
   "model.advanced.noFieldsForType": "No advanced settings available for this model type.",
   "model.advanced.customParams": "Custom Parameters",
   "model.advanced.customParamsHint": "Values are parsed as JSON first; invalid JSON is sent as a plain string. Verify parameter names and values with your provider.",

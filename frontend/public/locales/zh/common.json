@@ -4195,6 +4195,7 @@
   "model.advanced.reasoningHigh": "高",
   "model.advanced.reasoningXHigh": "超高",
   "model.advanced.reasoningMax": "最大",
+  "model.advanced.reasoningBudget": "预算 Token",
   "model.advanced.noFieldsForType": "该模型类型暂无可配置的高级设置。",
   "model.advanced.customParams": "自定义参数",
   "model.advanced.customParamsHint": "自定义参数值会先按 JSON 解析；解析失败时按普通字符串传给模型提供方。请确认参数名与取值是否正确。",

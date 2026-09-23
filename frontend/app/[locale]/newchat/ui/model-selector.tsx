@@ -397,7 +397,7 @@ function ModelSelectorValue({
   }
 
   const effortName =
-    showEffort && effort !== undefined
+    showEffort && selectedModel.budgetTokens === undefined && effort !== undefined
       ? (() => {
           const option = efforts?.find((e) => e.id === effort);
           return option ? getReasoningEffortName(option) : undefined;
@@ -606,8 +606,14 @@ function ModelSelectorEffort({
   ...props
 }: ModelSelectorEffortProps) {
   const { t } = useTranslation();
-  const { selectedModel, efforts, effort, setEffort, budgetTokens, setBudgetTokens } =
-    useModelSelectorContext();
+  const {
+    selectedModel,
+    efforts,
+    effort,
+    setEffort,
+    budgetTokens,
+    setBudgetTokens,
+  } = useModelSelectorContext();
   const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
   const budgetRange = selectedModel?.budgetTokens;
 
@@ -630,7 +636,9 @@ function ModelSelectorEffort({
     >
       <span className="text-muted-foreground text-xs">
         {budgetRange
-          ? t("model.advanced.reasoningBudget", { defaultValue: "Budget tokens" })
+          ? t("model.advanced.reasoningBudget", {
+              defaultValue: "Budget tokens",
+            })
           : resolvedLabel}
       </span>
       {budgetRange ? (
@@ -651,36 +659,36 @@ function ModelSelectorEffort({
           </span>
         </div>
       ) : (
-      <div
-        role="group"
-        aria-label={
-          typeof resolvedLabel === "string"
-            ? resolvedLabel
-            : t("chat.modelSelector.reasoningEffort")
-        }
-        className="flex items-center gap-0.5"
-      >
-        {efforts?.map((option) => {
-          const isActive = option.id === effort;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={isActive}
-              data-state={isActive ? "on" : "off"}
-              onClick={() => setEffort(option.id)}
-              className={cn(
-                "focus-visible:ring-ring/50 cursor-pointer rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
-                isActive
-                  ? "bg-accent text-accent-foreground font-medium"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {getReasoningEffortName(option)}
-            </button>
-          );
-        })}
-      </div>
+        <div
+          role="group"
+          aria-label={
+            typeof resolvedLabel === "string"
+              ? resolvedLabel
+              : t("chat.modelSelector.reasoningEffort")
+          }
+          className="flex items-center gap-0.5"
+        >
+          {efforts?.map((option) => {
+            const isActive = option.id === effort;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={isActive}
+                data-state={isActive ? "on" : "off"}
+                onClick={() => setEffort(option.id)}
+                className={cn(
+                  "focus-visible:ring-ring/50 cursor-pointer rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
+                  isActive
+                    ? "bg-accent text-accent-foreground font-medium"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {getReasoningEffortName(option)}
+              </button>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -697,24 +705,29 @@ export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
 /** Registers the selection with assistant-ui's ModelContext system. The
  * context's effort is already resolved against the selected model. */
 function ModelSelectorModelContext() {
-  const { value, effort, budgetTokens } = useModelSelectorContext();
+  const { selectedModel, value, effort, budgetTokens } =
+    useModelSelectorContext();
   const api = useAui();
 
   useEffect(() => {
     if (value === undefined) return;
+    const budgetPreferred = selectedModel?.budgetTokens !== undefined;
     const config = {
       config: {
         modelName: value,
-        ...(effort !== undefined ? { reasoningEffort: effort } : undefined),
-        ...(budgetTokens !== undefined
-          ? { reasoningBudgetTokens: budgetTokens }
-          : undefined),
+        ...(budgetPreferred
+          ? budgetTokens !== undefined
+            ? { reasoningBudgetTokens: budgetTokens }
+            : undefined
+          : effort !== undefined
+            ? { reasoningEffort: effort }
+            : undefined),
       },
     };
     return api.modelContext().register({
       getModelContext: () => config,
     });
-  }, [api, value, effort, budgetTokens]);
+  }, [api, budgetTokens, effort, selectedModel, value]);
 
   return null;
 }

@@ -379,6 +379,8 @@ export const ModelAddDialogV2 = ({
   const [customCapacity, setCustomCapacity] =
     useState<ModelCapacityFormState>(emptyCapacityForm);
   const [customAdvanced, setCustomAdvanced] = useState<ModelAdvancedSettingsValue>({});
+  const [customReasoningCapability, setCustomReasoningCapability] =
+    useState<ReasoningCapability | undefined>(undefined);
   // Suffix generated once per custom-access form lifecycle; reused while
   // the operator types the model name so display_name stays stable instead
   // of regenerating a new suffix on every keystroke. Regenerated on reset.
@@ -454,6 +456,7 @@ export const ModelAddDialogV2 = ({
     if (model.modelAppid) advancedValue.model_appid = model.modelAppid;
     if (model.accessToken) advancedValue.access_token = model.accessToken;
     setCustomAdvanced(advancedValue);
+    setCustomReasoningCapability(model.reasoningCapability);
     setCustomConnectivity({ status: null, message: "" });
     // Edit mode: if the existing model already carries capacity values, show
     // the "已配置" tag right away (the debounce lookup will also re-check and
@@ -477,14 +480,11 @@ export const ModelAddDialogV2 = ({
     [catalog, providerKey]
   );
 
-  const customReasoningCapability =
-    model?.reasoningCapability ??
-    findCatalogProfile(customForm.name)?.reasoning_capability ??
-    undefined;
+  const effectiveCustomReasoningCapability = customReasoningCapability;
 
-  // ---------- Tab B: debounced capacity auto-lookup on model name ----------
-  // When the operator types a model name in the custom-access form, wait for a
-  // pause (500ms) then query suggest_capacity (catalog → bundled LiteLLM).
+  // ---------- Tab B: debounced capability lookup on model name and Base URL ----------
+  // When the operator types a model name or Base URL in the custom-access form,
+  // wait for a pause (500ms) then query the shared capability endpoint.
   // Only fills EMPTY capacity fields — values the user already typed (or that
   // came from an edit-mode prefill) are never overwritten. Sets the
   // "已配置" tag when a suggestion was found.
@@ -493,8 +493,11 @@ export const ModelAddDialogV2 = ({
     const name = customForm.name.trim();
     if (!name || !supportsCapacityFields(customForm.type)) {
       setCapacityAutoFilled(false);
+      setCustomReasoningCapability(undefined);
       return;
     }
+    setCustomReasoningCapability(undefined);
+    let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         const suggestion = await modelService.suggestCapacity({
@@ -502,6 +505,8 @@ export const ModelAddDialogV2 = ({
           baseUrl: customForm.url || undefined,
           modelType: customForm.type,
         });
+        if (cancelled) return;
+        setCustomReasoningCapability(suggestion.reasoningCapability);
         const s = suggestion?.suggestions;
         if (!s) {
           setCapacityAutoFilled(false);
@@ -527,10 +532,14 @@ export const ModelAddDialogV2 = ({
             : {}),
         }));
       } catch {
+        if (cancelled) return;
         setCapacityAutoFilled(false);
       }
     }, 500);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [isOpen, customForm.name, customForm.url, customForm.type]);
 
   // ---------- derived: model type options (aligned with original ModelAddDialog) ----------
@@ -1206,6 +1215,7 @@ export const ModelAddDialogV2 = ({
     });
     setCustomCapacity(emptyCapacityForm);
     setCustomAdvanced({});
+    setCustomReasoningCapability(undefined);
     setCustomConnectivity({ status: null, message: "" });
     setCapacityAutoFilled(false);
     // Regenerate suffix so the next custom-access form gets a fresh one
@@ -1875,7 +1885,7 @@ export const ModelAddDialogV2 = ({
             mode="default"
             reasoningCapability={
               customForm.type === MODEL_TYPES.LLM
-                ? customReasoningCapability
+                ? effectiveCustomReasoningCapability
                 : undefined
             }
           />

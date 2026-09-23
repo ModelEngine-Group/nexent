@@ -165,6 +165,7 @@ export type CapacitySuggestionConfidence = "high" | "medium" | "low";
 
 export interface CapacitySuggestion {
   suggestions?: CapacitySuggestionFields | null;
+  reasoningCapability?: ReasoningCapability;
   matchKind: CapacitySuggestionMatchKind;
   matchConfidence?: CapacitySuggestionConfidence | null;
   matchExplanation: string;
