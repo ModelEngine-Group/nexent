@@ -4577,6 +4577,7 @@ async def test_prepare_agent_run(
         override_version_no=None,
         override_model_id=None,
         reasoning_effort=None,
+        reasoning_budget_tokens=None,
         requested_output_tokens=4096,
         tool_params=None,
         conversation_id=123,

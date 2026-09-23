@@ -801,7 +801,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     )
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -828,7 +828,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
     mock_suggest = mocker.patch('backend.apps.model_managment_app._capacity_suggestion_for_model_request')
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
