@@ -494,6 +494,127 @@ def import_svc():
     return svc
 
 
+def test_reasoning_capability_enrichment_only_applies_to_chat_models():
+    svc = import_svc()
+    assert svc.resolve_reasoning_capability("unknown-model") is None
+
+    embedding = {"model_type": "embedding", "model_name": "bge", "model_repo": ""}
+    svc._enrich_model_reasoning_capability(embedding)
+    assert "reasoning_capability" not in embedding
+
+    model = {
+        "model_type": "llm",
+        "model_name": "deepseek-reasoner",
+        "model_repo": "deepseek",
+        "base_url": "https://api.deepseek.com/v1",
+        "model_factory": "deepseek",
+    }
+    capability = {"status": "supported", "levels": ["low", "high"]}
+    with mock.patch.object(svc, "resolve_reasoning_capability", return_value=capability) as resolver:
+        svc._enrich_model_reasoning_capability(model)
+
+    resolver.assert_called_once_with(
+        model_name="deepseek/deepseek-reasoner",
+        base_url="https://api.deepseek.com/v1",
+        provider_hint="deepseek",
+    )
+    assert model["reasoning_capability"] == capability
+
+
+def test_discovered_model_reasoning_enrichment_skips_non_llm_and_empty_ids():
+    svc = import_svc()
+
+    embedding = {"model_type": "embedding", "id": "embed"}
+    svc._enrich_discovered_model_reasoning_capability(
+        embedding, "https://example.com/v1", "custom"
+    )
+    assert "reasoning_capability" not in embedding
+
+    empty = {"model_type": "llm", "id": ""}
+    svc._enrich_discovered_model_reasoning_capability(
+        empty, "https://example.com/v1", "custom"
+    )
+    assert "reasoning_capability" not in empty
+
+
+def test_apply_model_reasoning_default_handles_disabled_and_supported_profiles():
+    svc = import_svc()
+
+    disabled = {
+        "model_type": "llm",
+        "extra_params": {"enable_thinking": False, "reasoning_effort": "high", "custom": 1},
+    }
+    svc._apply_model_reasoning_default(disabled, "openai")
+    assert disabled["extra_params"] == {"enable_thinking": False, "custom": 1}
+
+    supported = {
+        "model_type": "llm",
+        "model_repo": "openai",
+        "model_name": "o3",
+        "extra_params": {"enable_thinking": True, "reasoning_effort": "low"},
+    }
+    with mock.patch.object(
+        svc,
+        "resolve_reasoning_capability",
+        return_value={"status": "supported", "levels": ["low", "high"], "default": "high"},
+    ):
+        svc._apply_model_reasoning_default(supported, "openai")
+    assert supported["extra_params"]["reasoning_effort"] == "low"
+
+    unsupported = {
+        "model_type": "llm",
+        "model_repo": "custom",
+        "model_name": "reasoner",
+        "extra_params": {"enable_thinking": True, "reasoning_effort": "high"},
+    }
+    with mock.patch.object(
+        svc, "resolve_reasoning_capability", return_value={"status": "unsupported"}
+    ):
+        svc._apply_model_reasoning_default(unsupported, "custom")
+    assert unsupported["extra_params"]["reasoning_effort"] == "high"
+
+
+def test_apply_model_reasoning_default_preserves_auto_effort():
+    svc = import_svc()
+    model = {
+        "model_type": "llm",
+        "model_repo": "openai",
+        "model_name": "o3",
+        "extra_params": {"enable_thinking": True, "reasoning_effort": "auto"},
+    }
+    with mock.patch.object(
+        svc,
+        "resolve_reasoning_capability",
+        return_value={"status": "supported", "levels": ["low", "high"]},
+    ):
+        svc._apply_model_reasoning_default(model, "openai")
+
+    assert model["extra_params"]["reasoning_effort"] == "auto"
+
+
+@pytest.mark.parametrize(
+    "capability",
+    [
+        None,
+        {"status": "unsupported", "levels": [], "default": None},
+        {"status": "supported", "levels": [], "default": None},
+        {"status": "supported", "levels": ["high"], "default": "low"},
+    ],
+)
+def test_apply_model_reasoning_default_uses_a_safe_default_for_unknown_profiles(capability):
+    svc = import_svc()
+    model = {
+        "model_type": "llm",
+        "model_repo": "custom",
+        "model_name": "custom-reasoner",
+        "extra_params": {"enable_thinking": True},
+    }
+    with mock.patch.object(svc, "resolve_reasoning_capability", return_value=capability):
+        svc._apply_model_reasoning_default(model, "custom")
+
+    assert model["extra_params"]["reasoning_effort"] == "auto"
+
+
 @pytest.mark.asyncio
 async def test_create_model_for_tenant_success_llm():
     svc = import_svc()
@@ -768,6 +889,32 @@ async def test_create_provider_models_for_tenant_success():
         mock_get.assert_awaited_once()
         mock_merge.assert_called_once()
         mock_sort.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_provider_models_attaches_models_dev_reasoning_capability():
+    svc = import_svc()
+
+    req = {
+        "provider": "zhipu",
+        "model_type": "llm",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    }
+    models = [{"id": "glm-5.3"}]
+    capability = {
+        "status": "supported",
+        "control": "effort",
+        "levels": ["low", "high", "max"],
+        "source": "models_dev",
+    }
+
+    with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(return_value=models)), \
+            mock.patch.object(svc, "merge_existing_model_attributes", return_value=models), \
+            mock.patch.object(svc, "resolve_reasoning_capability", return_value=capability), \
+            mock.patch.object(svc, "sort_models_by_id", side_effect=lambda m: m):
+        out = await svc.create_provider_models_for_tenant("t1", req)
+
+    assert out[0]["reasoning_capability"] == capability
 
 
 @pytest.mark.asyncio
@@ -1512,7 +1659,8 @@ async def test_list_models_for_tenant_type_mapping():
 
     with mock.patch.object(svc, "get_model_records", return_value=records), \
             mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
-            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
+            mock.patch.object(svc, "resolve_reasoning_capability", return_value=None):
 
         result = await svc.list_models_for_tenant("t1")
 

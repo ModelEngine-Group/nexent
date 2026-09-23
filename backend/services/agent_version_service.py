@@ -1001,6 +1001,7 @@ async def list_published_agents_impl(
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
+                "model_params_override": agent.get("model_params_override"),
             })
 
         return simple_agent_list

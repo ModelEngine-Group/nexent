@@ -55,7 +55,10 @@ from utils.model_name_utils import (
 )
 # Model Catalog - 预置模型目录，自动填充默认配置
 try:
-    from configs.model_catalog_loader import apply_catalog_defaults
+    from configs.model_catalog_loader import (
+        apply_catalog_defaults,
+        resolve_reasoning_capability,
+    )
 except Exception as _exc:  # noqa: BLE001
     logger_catalog_import = logging.getLogger("model_catalog")
     logger_catalog_import.warning("model_catalog_loader import failed: %s. Catalog auto-fill disabled.", _exc)
@@ -63,10 +66,104 @@ except Exception as _exc:  # noqa: BLE001
     def apply_catalog_defaults(_model_data: Dict[str, Any], _provider_hint: Optional[str]) -> bool:  # type: ignore[no-redef]
         return False
 
+    def resolve_reasoning_capability(  # type: ignore[no-redef]
+        _model_name: str,
+        _base_url: Optional[str] = None,
+        _provider_hint: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        return None
+
 logger = logging.getLogger("model_management_service")
 
 INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3", "vlm4"}
 CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
+COMMON_REASONING_LEVELS = ("low", "medium", "high")
+COMMON_REASONING_DEFAULT = "auto"
+
+
+def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
+    """Attach catalog-declared reasoning capability to an API model row."""
+    if model.get("model_type") not in {"llm", "chat"}:
+        return
+    model_name = add_repo_to_name(
+        model.get("model_repo", ""), model.get("model_name", "")
+    )
+    capability = resolve_reasoning_capability(
+        model_name=model_name,
+        base_url=model.get("base_url"),
+        provider_hint=model.get("model_factory"),
+    )
+    if capability is not None:
+        model["reasoning_capability"] = capability
+
+
+def get_model_reasoning_capability(
+    model_name: str,
+    base_url: Optional[str] = None,
+    provider_hint: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Resolve reasoning controls using the model ID and provider API URL."""
+    return resolve_reasoning_capability(model_name, base_url, provider_hint)
+
+
+def _enrich_discovered_model_reasoning_capability(
+    model: Dict[str, Any],
+    base_url: Optional[str],
+    provider_hint: Optional[str],
+) -> None:
+    """Attach build-time models.dev capability to a provider discovery row."""
+    # OpenAI-compatible discovery rows may omit model_type when the request
+    # already filters to LLMs; treat that legacy shape as an LLM row.
+    if model.get("model_type") not in {None, "llm", "chat"}:
+        return
+    model_name = str(model.get("id") or model.get("model_name") or "").strip()
+    if not model_name:
+        return
+    capability = resolve_reasoning_capability(model_name, base_url, provider_hint)
+    if capability is not None:
+        model["reasoning_capability"] = capability
+
+
+def _apply_model_reasoning_default(
+    model_data: Dict[str, Any], provider_hint: Optional[str]
+) -> None:
+    """Persist an enabled model's reasoning default without enabling it implicitly.
+
+    The value is kept in the existing ``extra_params`` JSONB column, so this
+    also upgrades old/custom model IDs without requiring a schema migration.
+    New models keep the switch disabled unless the caller explicitly enables
+    it.
+    """
+    if model_data.get("model_type") not in {"llm", "chat"}:
+        return
+    extra_params = dict(model_data.get("extra_params") or {})
+    enabled = extra_params.get("enable_thinking")
+    if enabled is not True:
+        if enabled is False:
+            extra_params.pop("reasoning_effort", None)
+            extra_params.pop("reasoning_budget_tokens", None)
+            model_data["extra_params"] = extra_params or None
+        return
+    model_name = add_repo_to_name(
+        model_data.get("model_repo", ""), model_data.get("model_name", "")
+    )
+    capability = resolve_reasoning_capability(
+        model_name=model_name,
+        base_url=model_data.get("base_url"),
+        provider_hint=provider_hint or model_data.get("model_factory"),
+    )
+    if isinstance(capability, dict) and capability.get("status") == "supported":
+        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
+    else:
+        # Keep a provider-agnostic profile for unknown/custom model IDs. The
+        # provider remains the source of truth if it rejects a concrete value.
+        levels = list(COMMON_REASONING_LEVELS)
+    if extra_params.get("reasoning_effort") == "auto":
+        return
+    if extra_params.get("reasoning_effort") in levels:
+        return
+    extra_params["reasoning_effort"] = COMMON_REASONING_DEFAULT
+    model_data["extra_params"] = extra_params
 
 
 # OpenTelemetry counter for silent catalog-matcher failures during the
@@ -372,6 +469,8 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
 
         _coerce_legacy_max_tokens_alias(model_data)
 
+        _apply_model_reasoning_default(model_data, _provider_hint)
+
         # Use NOT_DETECTED status as default
         model_data["connect_status"] = model_data.get(
             "connect_status") or ModelConnectStatusEnum.NOT_DETECTED.value
@@ -477,6 +576,16 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
             # Only merge when model_type is specified; skip for multi-type discovery
             model_list = merge_existing_model_attributes(
                 model_list, tenant_id, provider_request["provider"], model_type)
+
+        # The provider /models response only identifies model IDs. Resolve
+        # reasoning controls from the build-time models.dev snapshot using the
+        # exact API URL supplied for this discovery request.
+        for model in model_list:
+            _enrich_discovered_model_reasoning_capability(
+                model,
+                provider_request.get("base_url"),
+                provider_request.get("provider"),
+            )
 
         # Sort model list by ID
         model_list = sort_models_by_id(model_list)
@@ -717,6 +826,7 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             # the batch_create call).
             # ============================================================
             apply_catalog_defaults(model_dict, provider)
+            _apply_model_reasoning_default(model_dict, provider)
             create_model_record(model_dict, user_id, tenant_id)
             logging.debug(f"Model {model['id']} created successfully")
 
@@ -961,6 +1071,7 @@ async def list_models_for_tenant(tenant_id: str):
         }
 
         for record in records:
+            _enrich_model_reasoning_capability(record)
             record["model_name"] = add_repo_to_name(
                 model_repo=record["model_repo"],
                 model_name=record["model_name"],
@@ -987,6 +1098,7 @@ async def list_llm_models_for_tenant(tenant_id: str):
         records = get_model_records({"model_type": "llm"}, tenant_id)
         result: List[Dict[str, Any]] = []
         for record in records:
+            _enrich_model_reasoning_capability(record)
             result.append({
                 "model_id": record["model_id"],
                 "model_name": add_repo_to_name(
@@ -998,7 +1110,13 @@ async def list_llm_models_for_tenant(tenant_id: str):
                 "display_name": record["display_name"],
                 "api_key": record.get("api_key", ""),
                 "base_url": record.get("base_url", ""),
-                "max_tokens": record.get("max_tokens", 4096)
+                "max_tokens": record.get("max_tokens", 4096),
+                "extra_params": record.get("extra_params"),
+                **(
+                    {"reasoning_capability": record["reasoning_capability"]}
+                    if record.get("reasoning_capability") is not None
+                    else {}
+                ),
             })
 
         logging.debug("Successfully retrieved model list")

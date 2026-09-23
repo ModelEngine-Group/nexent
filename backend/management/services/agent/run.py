@@ -131,7 +131,6 @@ _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
 _fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
-
 def _unregister_agent_run_after_execution(
     conversation_id: int | str,
     user_id: str,
@@ -245,7 +244,7 @@ async def _consume_agent_stream_producer(
         )
         if not channel.is_completed:
             try:
-                await channel.publish(_safe_agent_stream_error_chunk())
+                await channel.publish(_safe_agent_stream_error_chunk(stream_exc))
             except Exception:
                 logger.exception(
                     "Failed to publish producer error conversation=%s",
@@ -784,8 +783,8 @@ async def _stream_agent_chunks(
         stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        await channel.publish(_safe_agent_stream_error_chunk(run_exc))
+        yield _safe_agent_stream_error_chunk(run_exc)
     finally:
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
@@ -1135,6 +1134,8 @@ async def prepare_agent_run(
         "is_debug": agent_request.is_debug,
         "override_version_no": agent_request.version_no,
         "override_model_id": agent_request.model_id,
+        "reasoning_effort": agent_request.reasoning_effort,
+        "reasoning_budget_tokens": agent_request.reasoning_budget_tokens,
         "requested_output_tokens": agent_request.requested_output_tokens,
         "tool_params": agent_request.tool_params,
         "conversation_id": agent_request.conversation_id,
@@ -1364,8 +1365,8 @@ async def generate_stream(
                 run_exc,
                 exc_info=True,
             )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            await channel.publish(_safe_agent_stream_error_chunk(run_exc))
+            yield _safe_agent_stream_error_chunk(run_exc)
             return
     except Exception as stream_exc:
         logger.error(
@@ -1373,8 +1374,8 @@ async def generate_stream(
             stream_exc,
             exc_info=True,
         )
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        await channel.publish(_safe_agent_stream_error_chunk(stream_exc))
+        yield _safe_agent_stream_error_chunk(stream_exc)
         return
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
@@ -2118,7 +2119,7 @@ async def run_agent_stream(
                 stream_exc,
                 exc_info=True,
             )
-            yield _safe_agent_stream_error_chunk()
+            yield _safe_agent_stream_error_chunk(stream_exc)
         finally:
             if channel is None and not execution.future.done():
                 deferred_run.cancel()
