@@ -13,14 +13,14 @@ import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Skill } from "@/types/agentConfig";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
-import ToolManagement from "./agentConfig/ToolManagement";
-import SkillBuildModal from "../../components/agentConfig/SkillBuildModal";
-import SelectedSkillManagement from "./agentConfig/SelectedSkillManagement";
-import McpConfigModal from "./agentConfig/McpConfigModal";
-import SelectToolsDialog from "./agentConfig/tool/SelectToolsDialog";
-import LabelManagementModal from "./agentConfig/tool/LabelManagementModal";
-import SelectSkillsDialog from "./agentConfig/skill/SelectSkillsDialog";
-import SkillTagManagementModal from "./agentConfig/skill/SkillTagManagementModal";
+import ToolManagement from "./agent-capability/ToolManagement";
+import SkillBuildModal from "../../components/agent-capability/SkillBuildModal";
+import SelectedSkillManagement from "./agent-capability/SelectedSkillManagement";
+import McpConfigModal from "./agent-capability/McpConfigModal";
+import SelectToolsDialog from "./agent-capability/tool/SelectToolsDialog";
+import LabelManagementModal from "./agent-capability/tool/LabelManagementModal";
+import SelectSkillsDialog from "./agent-capability/skill/SelectSkillsDialog";
+import SkillTagManagementModal from "./agent-capability/skill/SkillTagManagementModal";
 
 export function AgentToolCapability() {
   const { t } = useTranslation("common");

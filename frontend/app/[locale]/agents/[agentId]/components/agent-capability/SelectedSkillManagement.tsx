@@ -8,8 +8,8 @@ import { ChevronRight, Eye, Pencil, Settings, X } from "lucide-react";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillParam } from "@/types/agentConfig";
-import SkillDetailModal from "../../../components/agentConfig/SkillDetailModal";
-import SkillConfigModal from "../../../components/agentConfig/skill/SkillConfigModal";
+import SkillDetailModal from "../../../components/agent-capability/SkillDetailModal";
+import SkillConfigModal from "../../../components/agent-capability/skill/SkillConfigModal";
 
 type SkillSourceKey = "official" | "custom";
 

@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import type { Nl2SkillFileCardData } from "../adapter/remote-chat-model-adapter";
-import { SkillCodePreview } from "../../agents/components/agentConfig/SkillCodePreview";
+import { SkillCodePreview } from "../../agents/components/agent-capability/SkillCodePreview";
 
 export const SkillFileCard: FC<{
   data: Nl2SkillFileCardData;
