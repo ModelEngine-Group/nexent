@@ -17,6 +17,7 @@ import json
 import httpx
 import uuid
 from typing import List, Optional, Dict, Any
+from urllib.parse import urlsplit
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
@@ -1104,9 +1105,16 @@ class OpenAIModel(OpenAIServerModel):
         api_url = str(
             capability.get("matched_api") or self.api_base_url or ""
         ).lower()
-        if "aliyuncs.com" in api_url:
+        try:
+            api_hostname = (
+                urlsplit(api_url if "://" in api_url else f"//{api_url}").hostname
+                or ""
+            ).rstrip(".")
+        except ValueError:
+            api_hostname = ""
+        if api_hostname == "aliyuncs.com" or api_hostname.endswith(".aliyuncs.com"):
             provider_id = "dashscope"
-        elif "api.deepseek.com" in api_url:
+        elif api_hostname == "api.deepseek.com":
             provider_id = "deepseek"
 
         if capability.get("source") == "models_dev":

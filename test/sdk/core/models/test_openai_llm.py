@@ -3212,6 +3212,29 @@ def test_reasoning_wire_profile_infers_known_providers_from_api_url(openai_model
     }
 
 
+def test_reasoning_wire_profile_does_not_match_provider_names_in_untrusted_urls(
+    openai_model_instance,
+):
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "openai",
+    }
+
+    openai_model_instance.api_base_url = "https://dashscope.aliyuncs.com.evil.test/v1"
+    assert openai_model_instance._reasoning_wire_profile() == {
+        "effort": "reasoning_effort",
+        "budget": None,
+        "toggle": None,
+    }
+
+    openai_model_instance.api_base_url = "https://proxy.example.test/api.deepseek.com/v1"
+    assert openai_model_instance._reasoning_wire_profile() == {
+        "effort": "reasoning_effort",
+        "budget": None,
+        "toggle": None,
+    }
+
+
 def test_reasoning_wire_profile_supports_catalog_and_provider_fallbacks(openai_model_instance):
     openai_model_instance.reasoning_capability = {
         "source": "models_dev",
