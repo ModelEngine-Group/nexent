@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+from consts.const import ENABLE_AIDP_KNOWLEDGE
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import MAX_CASES_PER_SET
 from consts.evaluation_status import EvalRunStatus
@@ -473,11 +474,13 @@ def batch_delete_evaluation_set_cases_impl(evaluation_set_id, case_ids, tenant_i
 def _resolve_kb_info(kb_names, tenant_id):
     resolved = []
     for name in kb_names:
-        idx = get_index_name_by_knowledge_name(name, tenant_id)
+        try:
+            idx = get_index_name_by_knowledge_name(name, tenant_id)
+        except ValueError:
+            logger.warning("KB not found: '%s' for tenant %s", name, tenant_id)
+            continue
         if idx:
             resolved.append({"display_name": name, "index_name": idx})
-        else:
-            logger.warning("KB not found: '%s' for tenant %s", name, tenant_id)
     return resolved
 
 
@@ -499,8 +502,9 @@ def _build_kb_descriptions(kb_info, tenant_id):
     return "\n".join(lines) if lines else ""
 
 
-def _plan_search_queries(kb_info, description, model_id, tenant_id):
-    kb_desc_block = _build_kb_descriptions(kb_info, tenant_id)
+def _plan_search_queries(kb_info, description, model_id, tenant_id, kb_desc_block=None):
+    if kb_desc_block is None:
+        kb_desc_block = _build_kb_descriptions(kb_info, tenant_id)
     if not kb_desc_block:
         return []
     user_prompt = (
@@ -554,7 +558,9 @@ def _get_kb_embedding_model(tenant_id: str, kb: dict) -> Any:
 
     Returns ``None`` (with a warning log) when the model is unavailable.
     """
-    from management.services.knowledge_base.service import get_embedding_model_by_index_name
+    from management.services.knowledge_base.service import (
+        get_embedding_model_by_index_name,
+    )
 
     try:
         embedding_model, _, _ = get_embedding_model_by_index_name(
@@ -638,6 +644,115 @@ def _format_kb_hit(hit: dict, query: str) -> str:
     return f"- [{query}] (score={normalized:.2f}) {content.strip()[:400]}"
 
 
+# ── AIDP KB-aware helpers ────────────────────────────────────────────
+
+
+def _build_aidp_kb_descriptions(kb_info):
+    lines = []
+    for kb in kb_info:
+        desc = (kb.get("description") or "").strip()
+        desc_text = f" - {desc}" if desc else " (no description)"
+        lines.append(f"- {kb['display_name']}{desc_text}")
+    return "\n".join(lines) if lines else ""
+
+
+def _resolve_aidp_kb_info(kb_ids, user_id, tenant_id):
+    """Resolve requested AIDP kds_ids to the KBs the user can access.
+
+    AIDP knowledge bases do not live in ``knowledge_info`` nor in local ES,
+    so resolution goes through the AIDP access snapshot, which intersects
+    the remote catalog with the caller's permissions. Requested ids the
+    user cannot access are dropped (never silently passed upstream).
+    """
+    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+    from ext_components.aidp.services.aidp_access_service import (
+        resolve_current_aidp_access,
+    )
+
+    wanted = {str(kb_id) for kb_id in kb_ids if str(kb_id).strip()}
+    if not wanted:
+        return []
+    snapshot = resolve_current_aidp_access(
+        server_url=AIDP_SERVER_URL,
+        api_key=AIDP_API_KEY,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        aidp_tenant_id=AIDP_TENANT_ID,
+    )
+    resolved = []
+    for row in snapshot.accessible_rows:
+        kds_id = str(row.get("kb_id") or row.get("kds_id") or "")
+        if kds_id not in wanted:
+            continue
+        resolved.append(
+            {
+                "kds_id": kds_id,
+                "display_name": row.get("kds_name") or row.get("name") or kds_id,
+                "description": row.get("description") or "",
+            }
+        )
+    missing = wanted - {kb["kds_id"] for kb in resolved}
+    if missing:
+        logger.warning(
+            "AIDP KBs not accessible for user %s, skipped: %s", user_id, sorted(missing)
+        )
+    return resolved
+
+
+def _format_aidp_hit(record: dict, query: str) -> str:
+    """Format one AIDP FusionSearch record as a bullet line.
+
+    AIDP scores are already 0-1 similarities, unlike ES script_score output,
+    so they are used as-is. Returns ``""`` when the record has no text.
+    """
+    text = str(record.get("text") or "")
+    if not text.strip():
+        return ""
+    try:
+        score = float(record.get("score") or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    score = max(0.0, min(1.0, score))
+    return f"- [{query}] (score={score:.2f}) {text.strip()[:400]}"
+
+
+def _execute_aidp_searches(kb_info, queries, tenant_id, top_k=3):
+    """Run AIDP FusionSearch for the planned queries across all selected KBs.
+
+    One call per query carries every requested kds_id (the API accepts a
+    list), so the upstream call count stays at len(queries). Returns the
+    formatted hit lines, or ``""`` when nothing usable was retrieved.
+    """
+    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+    from ext_components.aidp.services.aidp_service import fusion_search_impl
+
+    if not kb_info or not queries:
+        return ""
+
+    kds_ids = [kb["kds_id"] for kb in kb_info]
+    parts: list[str] = []
+    for query in queries:
+        try:
+            records = fusion_search_impl(
+                server_url=AIDP_SERVER_URL,
+                api_key=AIDP_API_KEY,
+                tenant_id=AIDP_TENANT_ID,
+                query=query,
+                kds_list=kds_ids,
+                top_k=top_k,
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad query must not fail generation
+            logger.warning("AIDP search failed for query '%s': %s", query, exc)
+            continue
+        parts.extend(
+            line
+            for record in records[:top_k]
+            for line in [_format_aidp_hit(record, query)]
+            if line
+        )
+    return "\n".join(parts)
+
+
 def _update_generation_status(set_id, tenant_id, status, progress=0):
     try:
         with get_db_session() as s:
@@ -656,17 +771,37 @@ def _update_generation_status(set_id, tenant_id, status, progress=0):
 # ── AI case generation (shared helpers) ──────────────────────────────
 
 
-def _do_kb_search(knowledge_base_names, description, model_id, tenant_id) -> str:
-    """Resolve KBs → plan queries → execute searches.  Returns KB context text."""
+def _do_kb_search(knowledge_base_names, description, model_id, tenant_id, user_id=None) -> str:
+    """Resolve KBs → plan queries → execute searches.  Returns KB context text.
+
+    With ``ENABLE_AIDP_KNOWLEDGE`` the request carries AIDP kds_ids and
+    retrieval goes through the AIDP FusionSearch API; otherwise the names are
+    ES knowledge-base display names searched directly in Elasticsearch.
+    """
     if not knowledge_base_names:
         return ""
-    kb_info = _resolve_kb_info(knowledge_base_names, tenant_id)
-    if not kb_info:
-        return ""
-    queries = _plan_search_queries(kb_info, description, model_id, tenant_id)
-    if not queries:
-        return ""
-    kb_context = _execute_kb_searches(kb_info, queries, tenant_id)
+    if ENABLE_AIDP_KNOWLEDGE:
+        kb_info = _resolve_aidp_kb_info(knowledge_base_names, user_id, tenant_id)
+        if not kb_info:
+            return ""
+        queries = _plan_search_queries(
+            kb_info,
+            description,
+            model_id,
+            tenant_id,
+            kb_desc_block=_build_aidp_kb_descriptions(kb_info),
+        )
+        if not queries:
+            return ""
+        kb_context = _execute_aidp_searches(kb_info, queries, tenant_id)
+    else:
+        kb_info = _resolve_kb_info(knowledge_base_names, tenant_id)
+        if not kb_info:
+            return ""
+        queries = _plan_search_queries(kb_info, description, model_id, tenant_id)
+        if not queries:
+            return ""
+        kb_context = _execute_kb_searches(kb_info, queries, tenant_id)
     if kb_context:
         logger.info("KB search returned %d chars", len(kb_context))
     else:
@@ -696,7 +831,13 @@ def _build_agent_context_block(agent_id, tenant_id) -> str:
 
 
 def _format_kb_name(name: str, tenant_id: str) -> str:
-    """Format a single KB name with its description (truncated to 150 chars)."""
+    """Format a single KB name with its description (truncated to 150 chars).
+
+    AIDP knowledge-base ids have no ``knowledge_info`` record, so they are
+    returned as-is (the id carries no user-facing description locally).
+    """
+    if ENABLE_AIDP_KNOWLEDGE:
+        return name
     info = _resolve_kb_info([name], tenant_id)
     if info and info[0].get("description"):
         return f"{name}（{info[0]['description'][:150]}）"
@@ -724,10 +865,8 @@ def _build_case_gen_context_blocks(
     description,
     kb_context,
     knowledge_base_names,
-    file_content,
-    file_name,
 ):
-    """Build prompt context blocks for case generation.  Order: Agent → Scene → KB → File."""
+    """Build prompt context blocks for case generation.  Order: Agent → Scene → KB."""
     context_blocks: list[str] = []
 
     agent_block = _build_agent_context_block(agent_id, tenant_id)
@@ -740,13 +879,11 @@ def _build_case_gen_context_blocks(
     if kb_block:
         context_blocks.append(kb_block)
 
-    if file_content and file_name:
-        context_blocks.append(f"## 上传文档: {file_name}\n{file_content[:3000]}")
     return context_blocks
 
 
 def _build_case_gen_user_prompt(
-    context_blocks, count, kb_context, agent_id, file_content
+    context_blocks, count, kb_context, agent_id
 ):
     """Append generation instructions from YAML template to assembled context."""
     user_prompt = "\n\n".join(context_blocks)
@@ -755,8 +892,6 @@ def _build_case_gen_user_prompt(
         sources.append("知识库检索内容")
     if agent_id:
         sources.append("Agent 配置（含工具、技能、子智能体）")
-    if file_content:
-        sources.append("上传的参考文档")
     source_list = "、".join(sources)
 
     template = get_prompt_template("evaluation_generate_cases_system", "zh")
@@ -843,47 +978,6 @@ def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
 # ── Public API ───────────────────────────────────────────────────────
 
 
-def generate_cases_by_llm_impl(
-    description,
-    count,
-    tenant_id,
-    model_id,
-    knowledge_base_names=None,
-    agent_id=None,
-    agent_version_no=None,
-    file_content=None,
-    file_name=None,
-):
-    logger.info("Generating %d cases, KBs=%s", count, knowledge_base_names)
-
-    kb_context = _do_kb_search(knowledge_base_names, description, model_id, tenant_id)
-    context_blocks = _build_case_gen_context_blocks(
-        agent_id,
-        tenant_id,
-        description,
-        kb_context,
-        knowledge_base_names,
-        file_content,
-        file_name,
-    )
-    user_prompt = _build_case_gen_user_prompt(
-        context_blocks,
-        count,
-        kb_context,
-        agent_id,
-        file_content,
-    )
-    try:
-        cases = _call_llm_and_extract_cases(model_id, user_prompt, tenant_id)
-    except AppException:
-        raise
-    except Exception as exc:
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, f"Case generation failed: {exc}"
-        ) from exc
-    return cases[:count]
-
-
 def _report_progress(set_id, tenant_id, progress):
     """Update generation progress on the evaluation set."""
     _update_generation_status(set_id, tenant_id, "GENERATING", progress)
@@ -967,8 +1061,6 @@ def _generate_cases_async(
     description,
     count,
     model_id,
-    file_content,
-    file_name,
     agent_id,
     is_new_set=False,
     knowledge_base_names=None,
@@ -979,7 +1071,7 @@ def _generate_cases_async(
         _report_progress(set_id, tenant_id, 0)
 
         kb_context = _do_kb_search(
-            knowledge_base_names, description, model_id, tenant_id
+            knowledge_base_names, description, model_id, tenant_id, user_id
         )
         _report_progress(set_id, tenant_id, 8)
 
@@ -989,22 +1081,18 @@ def _generate_cases_async(
             description,
             kb_context,
             knowledge_base_names,
-            file_content,
-            file_name,
         )
         user_prompt = _build_case_gen_user_prompt(
             context_blocks,
             count,
             kb_context,
             agent_id,
-            file_content,
         )
         logger.info(
-            "Case gen prompt length=%d, has_agent=%s, has_kb=%s, has_file=%s, head=%s",
+            "Case gen prompt length=%d, has_agent=%s, has_kb=%s, head=%s",
             len(user_prompt),
             bool(agent_id),
             bool(kb_context),
-            bool(file_content),
             user_prompt[:200],
         )
         _report_progress(set_id, tenant_id, 10)

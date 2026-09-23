@@ -40,6 +40,7 @@ import {
 import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
 import {
   buildEvaluationTaskQuery,
@@ -2020,18 +2021,16 @@ function SetsTab() {
   const [genSetModel, setGenSetModel] = useState<number | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [genAgentId, setGenAgentId] = useState<number | undefined>(undefined);
-  const [genFiles, setGenFiles] = useState<File[]>([]);
-  const [genFileErr, setGenFileErr] = useState("");
-  const [genKbIds, setGenKbIds] = useState<number[]>([]);
-  const [kbList, setKbList] = useState<any[]>([]);
+  const [genKbIds, setGenKbIds] = useState<string[]>([]);
+  const [kbList, setKbList] = useState<{ label: string; value: string }[]>([]);
   const [genSetName, setGenSetName] = useState("");
   const [genSetDesc, setGenSetDesc] = useState("");
   const [genTargetSetId, setGenTargetSetId] = useState<number | undefined>(
     undefined
   );
   const { availableLlmModels } = useModelList();
+  const { enableAidpKnowledge } = useDeployment();
   const [agentList] = useList("/api/agent/published_list");
-  const genFileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!genSetModel && availableLlmModels.length > 0)
       setGenSetModel(availableLlmModels[0].id);
@@ -2788,7 +2787,6 @@ function SetsTab() {
           setGenSetName("");
           setGenSetDesc("");
           setGenKbIds([]);
-          setGenFiles([]);
         }}
         size="large"
         mask={{ closable: !busy }}
@@ -2908,7 +2906,10 @@ function SetsTab() {
                 {/* Knowledge base */}
                 <Flex vertical gap={4}>
                   <Text className="text-xs">
-                    {t("agentEvaluation.genKbLabel")}
+                    {t("agentEvaluation.genKbLabel")}{" "}
+                    <Text className="text-xs" type="secondary">
+                      {t("agentEvaluation.refDocHint")}
+                    </Text>
                   </Text>
                   <Select
                     mode="multiple"
@@ -2917,12 +2918,31 @@ function SetsTab() {
                     placeholder={t("agentEvaluation.genSelectKb")}
                     value={genKbIds}
                     onChange={setGenKbIds}
-                    options={kbList.map((k: any) => ({
-                      label: k.display_name || k.name || k,
-                      value: k.display_name || k.name || k,
-                    }))}
+                    options={kbList}
                     onOpenChange={(open) => {
-                      if (open) {
+                      if (!open) return;
+                      if (enableAidpKnowledge) {
+                        // AIDP mode: list AIDP knowledge bases (kds_id keyed).
+                        fetch(
+                          "/api/aidp-mgmt/knowledge-bases?page=1&page_size=100",
+                          { headers: getAuthHeaders() }
+                        )
+                          .then((r) => r.json())
+                          .then((d) => {
+                            const items = Array.isArray(d?.value)
+                              ? d.value
+                              : [];
+                            setKbList(
+                              items
+                                .filter((k: any) => k.kds_id)
+                                .map((k: any) => ({
+                                  label: k.kds_name || k.kds_id,
+                                  value: k.kds_id,
+                                }))
+                            );
+                          })
+                          .catch(() => setKbList([]));
+                      } else {
                         fetch("/api/indices?include_stats=true", {
                           headers: getAuthHeaders(),
                         })
@@ -2931,12 +2951,12 @@ function SetsTab() {
                             const info = d.indices_info || [];
                             setKbList(
                               info.map((x: any) => ({
-                                name: x.name,
-                                display_name: x.display_name,
-                                kb_id: x.display_name,
+                                label: x.display_name || x.name,
+                                value: x.display_name || x.name,
                               }))
                             );
-                          });
+                          })
+                          .catch(() => setKbList([]));
                       }
                     }}
                   />
@@ -2956,62 +2976,6 @@ function SetsTab() {
                       value: a.agent_id,
                     }))}
                   />
-                </Flex>
-                {/* File upload */}
-                <Flex vertical gap={4}>
-                  <Text className="text-xs">
-                    {t("agentEvaluation.genRefDocLabel")}{" "}
-                    <Text className="text-xs" type="secondary">
-                      {t("agentEvaluation.refDocHint")}
-                    </Text>
-                  </Text>
-                  <Flex gap={8} align="center" wrap>
-                    <Button
-                      icon={<Upload className="size-4" />}
-                      disabled={genFiles.length >= 1}
-                      onClick={() => genFileRef.current?.click()}
-                    >
-                      {t("agentEvaluation.selectFileButton")}
-                    </Button>
-                    <input
-                      ref={genFileRef}
-                      type="file"
-                      accept=".docx"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []);
-                        const valid = files.filter((f) => {
-                          if (f.size > 20 * 1024 * 1024) {
-                            setGenFileErr(
-                              t("agentEvaluation.over20MBHint", {
-                                name: f.name,
-                              })
-                            );
-                            return false;
-                          }
-                          return true;
-                        });
-                        setGenFileErr("");
-                        setGenFiles(valid.slice(0, 1));
-                      }}
-                    />
-                    {genFiles.map((f, i) => (
-                      <Tag
-                        key={`${f.name}_${f.size}`}
-                        closable
-                        onClose={() =>
-                          setGenFiles((p) => p.filter((_, j) => j !== i))
-                        }
-                      >
-                        {f.name} ({(f.size / 1024).toFixed(1)}KB)
-                      </Tag>
-                    ))}
-                  </Flex>
-                  {genFileErr && (
-                    <Text type="danger" className="text-xs">
-                      {genFileErr}
-                    </Text>
-                  )}
                 </Flex>
               </Flex>
             </Card>
@@ -3076,45 +3040,32 @@ function SetsTab() {
                       if (genSetDesc) body.set_description = genSetDesc;
                     }
                     let r: Response;
-                    if (genFiles.length > 0) {
-                      const fd = new FormData();
-                      fd.append("payload", JSON.stringify(body));
-                      fd.append("file", genFiles[0]);
-                      r = await fetch(
-                        "/api/evaluation-sets/generate-cases-async",
-                        {
-                          method: "POST",
-                          headers: { ...getAuthHeaders() },
-                          body: fd,
-                        }
-                      );
-                    } else {
-                      r = await fetch(
-                        "/api/evaluation-sets/generate-cases-async",
-                        {
-                          method: "POST",
-                          headers: {
-                            ...getAuthHeaders(),
-                            "Content-Type": "application/json",
-                          },
-                          body: JSON.stringify(body),
-                        }
-                      );
-                    }
+                    r = await fetch(
+                      "/api/evaluation-sets/generate-cases-async",
+                      {
+                        method: "POST",
+                        headers: {
+                          ...getAuthHeaders(),
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify(body),
+                      }
+                    );
                     const d = await r.json();
                     if (d?.data?.evaluation_set_id) {
                       setGenD(false);
                       setGenDesc("");
                       setGenDescError(null);
                       setGenAgentId(undefined);
-                      setGenFiles([]);
                       setGenSetName("");
                       setGenSetDesc("");
                       setGenTargetSetId(undefined);
                       refreshSets();
                     } else {
+                      // Backend errors carry {code, message, details}; read
+                      // the real reason instead of a generic fallback.
                       message.error(
-                        d?.detail || t("agentEvaluation.createFailedShort")
+                        d?.message || t("agentEvaluation.createFailedShort")
                       );
                     }
                   } catch {

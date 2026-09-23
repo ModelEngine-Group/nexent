@@ -1959,3 +1959,85 @@ def list_aidp_models_impl(
             ErrorCode.AIDP_RESPONSE_ERROR,
             f"Failed to parse AIDP models response: {str(e)}",
         )
+
+
+def _get_retrieval_path(tenant_id: str | None = None) -> str:
+    """Build the tenant-scoped retrieval (FusionSearch) API path."""
+    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/Retrieval/FusionSearch"
+
+
+def fusion_search_impl(
+    server_url: str,
+    api_key: str,
+    tenant_id: str | None = None,
+    query: str = "",
+    kds_list: list[str] | None = None,
+    search_method: str = "hybrid_search",
+    top_k: int = 3,
+    score_threshold: float = 0.0,
+    reranking_enable: bool = True,
+    rewrite_enable: bool = False,
+    related_search_enable: bool = False,
+    multi_modal: bool = False,
+) -> list[dict[str, Any]]:
+    """Run one FusionSearch retrieval against AIDP and return raw hit records.
+
+    Mirrors the SDK ``AidpSearchTool`` wire contract so server-side callers
+    (evaluation case generation) retrieve through the same channel as agents.
+    Records come back as ``{title, text, score, file_url, chunk_type, ...}``.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+    if not query or not query.strip():
+        raise AppException(ErrorCode.AIDP_CONFIG_INVALID, "AIDP search query is empty")
+    if not kds_list:
+        raise AppException(ErrorCode.AIDP_CONFIG_INVALID, "AIDP search requires kds_list")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "query": query,
+        "kds_list": [str(kds_id) for kds_id in kds_list],
+        "search_method": search_method,
+        "reranking_enable": reranking_enable,
+        "rewrite_enable": rewrite_enable,
+        "related_search_enable": related_search_enable,
+        "score_threshold": score_threshold,
+        "top_k": top_k,
+        "multi_modal": multi_modal,
+    }
+    retrieval_url = urljoin(f"{normalized_url}/", _get_retrieval_path(tenant_id))
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(retrieval_url, headers=headers, json=payload),
+            context="fusion-search",
+        )
+        response.raise_for_status()
+        result = response.json()
+    except httpx.RequestError as e:
+        logger.exception("AIDP fusion search request failed")
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP fusion search request failed: {e!s}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "fusion search")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP fusion search response")
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP fusion search response: {e!s}",
+        )
+
+    records = result.get("result", []) if isinstance(result, dict) else []
+    if not isinstance(records, list):
+        logger.warning("AIDP fusion search returned non-list result field")
+        return []
+    return records

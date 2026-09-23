@@ -144,7 +144,6 @@ _consts_pkg.evaluation_status = _consts_status_module
 # ── consts.exceptions stub (real Exception subclass so try/except works) ──
 _consts_exceptions_module = types.ModuleType("consts.exceptions")
 
-
 class _AppException(Exception):
     def __init__(self, error_code=None, message=None, details=None, *args, **kwargs):
         self.error_code = error_code
@@ -156,6 +155,19 @@ class _AppException(Exception):
 _consts_exceptions_module.AppException = _AppException
 sys.modules["consts.exceptions"] = _consts_exceptions_module
 _consts_pkg.exceptions = _consts_exceptions_module
+
+# ── consts.const stub (env switches + AIDP credentials) ──
+_consts_const_module = types.ModuleType("consts.const")
+_consts_const_module.ENABLE_AIDP_KNOWLEDGE = False
+_consts_const_module.AIDP_SERVER_URL = "http://aidp.example"
+_consts_const_module.AIDP_API_KEY = "test-key"
+_consts_const_module.AIDP_TENANT_ID = "aidp"
+sys.modules["consts.const"] = _consts_const_module
+_consts_pkg.const = _consts_const_module
+
+# Function-body imports used by the AIDP KB helpers.
+sys.modules["ext_components.aidp.services.aidp_access_service"] = MagicMock()
+sys.modules["ext_components.aidp.services.aidp_service"] = MagicMock()
 
 _db_pkg = _register_package("database")
 _db_client_module = MagicMock()
@@ -1200,6 +1212,140 @@ class TestDoKbSearch:
         assert service._do_kb_search(["kb1"], "d", "m", "t1") == ""
 
 
+class _AidpSnapshot:
+    def __init__(self, rows):
+        self.accessible_rows = rows
+
+
+class TestFormatAidpHit:
+    def test_formats_text_with_score(self, service_module):
+        service, _ = service_module
+        line = service._format_aidp_hit({"text": " hello ", "score": 0.87}, "q1")
+        assert line == "- [q1] (score=0.87) hello"
+
+    def test_clamps_out_of_range_score(self, service_module):
+        service, _ = service_module
+        line = service._format_aidp_hit({"text": "x", "score": 5}, "q1")
+        assert "(score=1.00)" in line
+
+    def test_returns_empty_without_text(self, service_module):
+        service, _ = service_module
+        assert service._format_aidp_hit({"text": "", "score": 0.5}, "q1") == ""
+        assert service._format_aidp_hit({}, "q1") == ""
+
+
+class TestResolveAidpKbInfo:
+    def test_filters_to_accessible_rows(self, service_module, monkeypatch):
+        service, _ = service_module
+        access_mod = sys.modules["ext_components.aidp.services.aidp_access_service"]
+        snapshot = _AidpSnapshot(
+            [
+                {"kb_id": "k1", "kds_name": "KB One", "description": "d1"},
+                {"kb_id": "k2", "kds_name": "KB Two"},
+            ]
+        )
+        monkeypatch.setattr(
+            access_mod, "resolve_current_aidp_access", MagicMock(return_value=snapshot)
+        )
+        resolved = service._resolve_aidp_kb_info(["k1"], "u1", "t1")
+        assert resolved == [{"kds_id": "k1", "display_name": "KB One", "description": "d1"}]
+
+    def test_drops_inaccessible_ids(self, service_module, monkeypatch):
+        service, _ = service_module
+        access_mod = sys.modules["ext_components.aidp.services.aidp_access_service"]
+        snapshot = _AidpSnapshot([{"kb_id": "k1", "kds_name": "KB One"}])
+        monkeypatch.setattr(
+            access_mod, "resolve_current_aidp_access", MagicMock(return_value=snapshot)
+        )
+        assert service._resolve_aidp_kb_info(["k9"], "u1", "t1") == []
+
+    def test_returns_empty_without_ids(self, service_module):
+        service, _ = service_module
+        assert service._resolve_aidp_kb_info([], "u1", "t1") == []
+
+
+class TestExecuteAidpSearches:
+    def test_one_call_per_query_formats_hits(self, service_module, monkeypatch):
+        service, _ = service_module
+        aidp_mod = sys.modules["ext_components.aidp.services.aidp_service"]
+        fusion = MagicMock(
+            side_effect=[
+                [{"text": "hit one", "score": 0.9}],
+                [],
+            ]
+        )
+        monkeypatch.setattr(aidp_mod, "fusion_search_impl", fusion)
+        kb_info = [
+            {"kds_id": "k1", "display_name": "KB One"},
+            {"kds_id": "k2", "display_name": "KB Two"},
+        ]
+        text = service._execute_aidp_searches(kb_info, ["q1", "q2"], "t1")
+        assert text == "- [q1] (score=0.90) hit one"
+        assert fusion.call_count == 2
+        assert fusion.call_args.kwargs["kds_list"] == ["k1", "k2"]
+
+    def test_swallows_search_failure(self, service_module, monkeypatch):
+        service, _ = service_module
+        aidp_mod = sys.modules["ext_components.aidp.services.aidp_service"]
+        monkeypatch.setattr(
+            aidp_mod,
+            "fusion_search_impl",
+            MagicMock(side_effect=RuntimeError("503")),
+        )
+        kb_info = [{"kds_id": "k1", "display_name": "KB One"}]
+        assert service._execute_aidp_searches(kb_info, ["q1"], "t1") == ""
+
+    def test_returns_empty_without_inputs(self, service_module):
+        service, _ = service_module
+        assert service._execute_aidp_searches([], ["q1"], "t1") == ""
+        assert service._execute_aidp_searches([{"kds_id": "k1"}], [], "t1") == ""
+
+
+class TestDoKbSearchAidpBranch:
+    def test_uses_aidp_path_when_enabled(self, service_module, monkeypatch):
+        service, _ = service_module
+        monkeypatch.setattr(service, "ENABLE_AIDP_KNOWLEDGE", True)
+        resolve = MagicMock(
+            return_value=[{"kds_id": "k1", "display_name": "KB One", "description": "d"}]
+        )
+        execute = MagicMock(return_value="aidp ctx")
+        monkeypatch.setattr(service, "_resolve_aidp_kb_info", resolve)
+        monkeypatch.setattr(
+            service, "_plan_search_queries", MagicMock(return_value=["q1"])
+        )
+        monkeypatch.setattr(service, "_execute_aidp_searches", execute)
+        assert (
+            service._do_kb_search(["k1"], "d", "m", "t1", "u1") == "aidp ctx"
+        )
+        resolve.assert_called_once_with(["k1"], "u1", "t1")
+        execute.assert_called_once_with(
+            [{"kds_id": "k1", "display_name": "KB One", "description": "d"}],
+            ["q1"],
+            "t1",
+        )
+
+    def test_returns_empty_when_no_aidp_kb_accessible(self, service_module, monkeypatch):
+        service, _ = service_module
+        monkeypatch.setattr(service, "ENABLE_AIDP_KNOWLEDGE", True)
+        monkeypatch.setattr(
+            service, "_resolve_aidp_kb_info", MagicMock(return_value=[])
+        )
+        assert service._do_kb_search(["k9"], "d", "m", "t1", "u1") == ""
+
+    def test_uses_es_path_when_disabled(self, service_module, monkeypatch):
+        service, _ = service_module
+        monkeypatch.setattr(service, "ENABLE_AIDP_KNOWLEDGE", False)
+        resolve = MagicMock(return_value=[{"display_name": "kb1"}])
+        execute = MagicMock(return_value="es ctx")
+        monkeypatch.setattr(service, "_resolve_kb_info", resolve)
+        monkeypatch.setattr(
+            service, "_plan_search_queries", MagicMock(return_value=["q1"])
+        )
+        monkeypatch.setattr(service, "_execute_kb_searches", execute)
+        assert service._do_kb_search(["kb1"], "d", "m", "t1", "u1") == "es ctx"
+        resolve.assert_called_once_with(["kb1"], "t1")
+
+
 class TestBuildAgentContextBlock:
     def test_returns_empty_without_agent(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1274,9 +1420,9 @@ class TestBuildCaseGenContextBlocks:
             service, "_build_kb_context_block", MagicMock(return_value="kb")
         )
         blocks = service._build_case_gen_context_blocks(
-            1, "t1", "scene", "kbctx", ["kb1"], "file content", "doc.pdf"
+            1, "t1", "scene", "kbctx", ["kb1"]
         )
-        assert blocks == ["agent", "## 场景描述\nscene", "kb", "## 上传文档: doc.pdf\nfile content"]
+        assert blocks == ["agent", "## 场景描述\nscene", "kb"]
 
     def test_minimal_blocks(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1287,7 +1433,7 @@ class TestBuildCaseGenContextBlocks:
             service, "_build_kb_context_block", MagicMock(return_value="")
         )
         blocks = service._build_case_gen_context_blocks(
-            None, "t1", "scene", "", None, None, None
+            None, "t1", "scene", "", None
         )
         assert blocks == ["## 场景描述\nscene"]
 
@@ -1305,10 +1451,10 @@ class TestBuildCaseGenUserPrompt:
             ),
         )
         prompt = service._build_case_gen_user_prompt(
-            ["ctx1", "ctx2"], 5, "kbctx", 7, "file"
+            ["ctx1", "ctx2"], 5, "kbctx", 7
         )
         assert prompt.startswith("ctx1\n\nctx2")
-        assert "use 场景描述、知识库检索内容、Agent 配置（含工具、技能、子智能体）、上传的参考文档" in prompt
+        assert "use 场景描述、知识库检索内容、Agent 配置（含工具、技能、子智能体）" in prompt
         assert "count 5" in prompt
         assert "max 100" in prompt
 
@@ -1317,7 +1463,7 @@ class TestBuildCaseGenUserPrompt:
         monkeypatch.setattr(
             service, "get_prompt_template", MagicMock(return_value={})
         )
-        prompt = service._build_case_gen_user_prompt(["ctx1"], 1, "", None, None)
+        prompt = service._build_case_gen_user_prompt(["ctx1"], 1, "", None)
         assert prompt == "ctx1"
 
 
@@ -1422,63 +1568,6 @@ class TestCallLlmAndExtractCases:
             excinfo.value.error_code
             == service.ErrorCode.AGENT_EVALUATION_CASE_GENERATION_EMPTY
         )
-
-
-class TestGenerateCasesByLlmImpl:
-    def _default_mocks(self, service, monkeypatch, cases):
-        monkeypatch.setattr(service, "_do_kb_search", MagicMock(return_value="kbctx"))
-        monkeypatch.setattr(
-            service,
-            "_build_case_gen_context_blocks",
-            MagicMock(return_value=["block"]),
-        )
-        monkeypatch.setattr(
-            service, "_build_case_gen_user_prompt", MagicMock(return_value="prompt")
-        )
-        monkeypatch.setattr(
-            service, "_call_llm_and_extract_cases", MagicMock(return_value=cases)
-        )
-
-    def test_generates_and_truncates(self, service_module, monkeypatch):
-        service, _ = service_module
-        cases = [
-            {"inputs": {"query": "q1"}, "label": {"answer": "a1"}},
-            {"inputs": {"query": "q2"}, "label": {"answer": "a2"}},
-            {"inputs": {"query": "q3"}, "label": {"answer": "a3"}},
-        ]
-        self._default_mocks(service, monkeypatch, cases)
-        result = service.generate_cases_by_llm_impl(
-            description="d", count=2, tenant_id="t1", model_id="m"
-        )
-        assert result == cases[:2]
-
-    def test_passes_through_app_exception(self, service_module, monkeypatch):
-        service, _ = service_module
-        self._default_mocks(service, monkeypatch, [])
-        err = _AppException(service.ErrorCode.AGENT_EVALUATION_CASE_GENERATION_EMPTY)
-        monkeypatch.setattr(
-            service, "_call_llm_and_extract_cases", MagicMock(side_effect=err)
-        )
-        with pytest.raises(_AppException) as excinfo:
-            service.generate_cases_by_llm_impl(
-                description="d", count=1, tenant_id="t1", model_id="m"
-            )
-        assert excinfo.value is err
-
-    def test_wraps_generic_exception(self, service_module, monkeypatch):
-        service, _ = service_module
-        self._default_mocks(service, monkeypatch, [])
-        monkeypatch.setattr(
-            service,
-            "_call_llm_and_extract_cases",
-            MagicMock(side_effect=ValueError("boom")),
-        )
-        with pytest.raises(_AppException) as excinfo:
-            service.generate_cases_by_llm_impl(
-                description="d", count=1, tenant_id="t1", model_id="m"
-            )
-        assert excinfo.value.error_code == service.ErrorCode.COMMON_VALIDATION_ERROR
-        assert "boom" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
@@ -1609,7 +1698,7 @@ class TestGenerateCasesAsync:
 
         service._generate_cases_async(
             set_id=1, tenant_id="t1", user_id="u1", description="d", count=2,
-            model_id="m", file_content=None, file_name=None, agent_id=None,
+            model_id="m", agent_id=None,
             is_new_set=True, knowledge_base_names=["kb1"],
         )
         assert progress.call_args_list[0].args == (1, "t1", 0)
@@ -1641,7 +1730,7 @@ class TestGenerateCasesAsync:
 
         service._generate_cases_async(
             set_id=1, tenant_id="t1", user_id="u1", description="d", count=1,
-            model_id="m", file_content=None, file_name=None, agent_id=None,
+            model_id="m", agent_id=None,
             is_new_set=False, knowledge_base_names=None,
         )
         assert fail.call_count == 1
