@@ -85,7 +85,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: migrate
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
@@ -120,7 +120,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
@@ -152,7 +152,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
     user: root
@@ -184,7 +184,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
     user: root
@@ -210,12 +210,16 @@ services:
       - nexent
     ports:
       - "3000:3000"
+    volumes:
+      - ${ROOT_DIR}/project-config:/mnt/nexent-data/project-config
     environment:
       - HTTP_BACKEND=http://nexent-config:5010
       - WS_BACKEND=ws://nexent-runtime:5014
       - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
       - NORTHBOUND_HTTP_BACKEND=http://nexent-northbound:5013
       - MINIO_ENDPOINT=http://nexent-minio:9000
+      - PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config
+      - FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}
     logging:
       driver: "json-file"
       options:

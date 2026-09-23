@@ -22,7 +22,6 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
-
 # Standard protocol labels used across A2A models
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_JSONRPC = "JSONRPC"
@@ -525,6 +524,13 @@ class ModelRecord(TableBase):
         String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, default, unknown.")
     capability_profile_version = Column(
         String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
+    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
+    temperature = Column(
+        Float, doc="Default sampling temperature for LLM/VLM models. NULL means provider default. Nullable.")
+    top_p = Column(
+        Float, doc="Default nucleus sampling probability for LLM/VLM models. NULL means provider default. Nullable.")
+    extra_params = Column(
+        JSONB, doc="Fixed inference params without dedicated columns (key-value pairs constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -589,7 +595,7 @@ class ModelMonitoringRecord(SimpleTableBase):
     requested_output_tokens = Column(
         Integer, doc="Output tokens requested or reserved during capacity resolution"
     )
-    provider_input_limit_tokens = Column(
+    effective_input_limit_tokens = Column(
         Integer, doc="Resolved provider input-token limit used by context management"
     )
     tokenizer_family = Column(
@@ -616,8 +622,11 @@ class ModelMonitoringRecord(SimpleTableBase):
     budget_output_reserve_source = Column(
         String(32), doc="Source of the W2 requested output token reserve"
     )
-    budget_provider_input_limit_tokens = Column(
-        Integer, doc="Provider input limit after applying the W2 output reserve"
+    budget_schema_version = Column(
+        Integer, doc="Version of the persisted context-budget contract"
+    )
+    budget_effective_input_limit_tokens = Column(
+        Integer, doc="Effective input limit after applying the output reserve"
     )
     budget_uncertainty_reserve_tokens = Column(
         Integer, doc="Additional W2 uncertainty reserve deducted from input budget"
@@ -625,14 +634,23 @@ class ModelMonitoringRecord(SimpleTableBase):
     budget_uncertainty_reserve_basis = Column(
         String(64), doc="Basis used for the W2 uncertainty reserve"
     )
-    budget_soft_limit_ratio = Column(
-        Float, doc="W2 soft input budget ratio"
+    budget_compaction_trigger_ratio = Column(
+        Float, doc="Compaction Trigger Threshold ratio"
     )
-    budget_soft_input_budget_tokens = Column(
-        Integer, doc="W2 soft input budget where proactive compression begins"
+    budget_compaction_trigger_ratio_source = Column(
+        String(32), doc="Source of the Compaction Trigger Threshold ratio"
     )
-    budget_hard_input_budget_tokens = Column(
-        Integer, doc="W2 hard input budget consumed by W3 final fit"
+    budget_compaction_trigger_threshold_tokens = Column(
+        Integer, doc="Effective input token threshold that triggers compaction"
+    )
+    budget_compaction_target_ratio = Column(
+        Float, doc="Compaction Target ratio"
+    )
+    budget_compaction_target_ratio_source = Column(
+        String(32), doc="Source of the Compaction Target ratio"
+    )
+    budget_compaction_target_tokens = Column(
+        Integer, doc="Desired effective input token count after compaction"
     )
     budget_warnings = Column(
         JSONB, doc="Structured W2 budget warnings active for this request"
@@ -745,6 +763,9 @@ class AgentInfo(TableBase):
     is_a2a = Column(Boolean, default=False, nullable=False, doc="Whether to publish this agent as an A2A Server agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
+    # v2.6.0 per-agent model inference param overrides.
+    # Shape: {"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}.
+    model_params_override = Column(JSONB, doc="Per-agent overrides for model inference params. NULL means inherit model defaults.")
     allow_chat_metadata = Column(
         Boolean,
         default=False,

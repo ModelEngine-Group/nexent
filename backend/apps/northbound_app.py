@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError as PydanticValidationError
 
+from consts.model import reject_legacy_agent_fields
 from consts.exceptions import (
     ConversationNotFoundError,
     ForbiddenError,
@@ -17,10 +18,12 @@ from consts.exceptions import (
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
     RuntimeUpstreamError,
+    TenantResourceLimitError,
     UnauthorizedError,
     NotFoundException,
     UnauthorizedError,
     ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from consts.model import (
     ApiKeyTargetRequest,
@@ -218,6 +221,11 @@ async def create_api_users_batch_endpoint(
             content={"message": "success", "requestId": ctx.request_id, "data": data},
         )
     except Exception as exc:
+        if isinstance(exc, TenantResourceLimitError):
+            return JSONResponse(
+                status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                content=tenant_resource_limit_error_payload(exc),
+            )
         _raise_api_key_http_exception(exc)
 
 
@@ -395,6 +403,7 @@ async def run_chat(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     try:
+        reject_legacy_agent_fields(await request.json())
         ctx: NorthboundContext = await _get_northbound_context(request)
         return await start_streaming_chat(
             ctx=ctx,
@@ -617,9 +626,15 @@ async def generate_title(payload: GenerateTitleRequest, request: Request):
             conversation_id=payload.conversation_id,
             question=payload.question,
             language=get_user_language(request),
+            model_id=payload.model_id,
         )
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:

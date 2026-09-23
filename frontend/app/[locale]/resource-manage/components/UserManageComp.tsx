@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
   type Tenant,
@@ -71,6 +72,7 @@ import {
   validatePassword as validatePasswordUtil,
 } from "@/lib/utils";
 import ProjectConfigTab from "./resources/projectConfig";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 // Default page size for pagination
 const DEFAULT_PAGE_SIZE = 20;
@@ -103,7 +105,7 @@ function TenantList({
   onPageChange?: (page: number) => void;
   onTenantsRefetch: () => Promise<unknown>;
   loading?: boolean;
-  t: (key: string, options?: any) => string;
+  t: TFunction;
   onUserListRefresh?: () => void;
   onInvitationListRefresh?: () => void;
   locale?: string;
@@ -243,7 +245,11 @@ function TenantList({
     } catch (error: any) {
       const errorMessage =
         error?.response?.data?.detail || error?.message || "";
-      message.error(errorMessage || t("tenantResources.tenantDeleteFailed"));
+      message.error(
+        getTenantResourceLimitMessage(error, t) ||
+          errorMessage ||
+          t("tenantResources.tenantDeleteFailed")
+      );
     } finally {
       setDeleteModalVisible(false);
       setDeletingTenant(null);
@@ -388,7 +394,13 @@ function TenantList({
             if (signupResult.error) {
               // Handle signup error
               const errorMsg = signupResult.error.message || "";
-              if (
+              const limitMessage = getTenantResourceLimitMessage(
+                signupResult.error,
+                t
+              );
+              if (limitMessage) {
+                message.error(limitMessage);
+              } else if (
                 errorMsg.includes("already exists") ||
                 errorMsg.includes("EMAIL_ALREADY_EXISTS")
               ) {
@@ -418,7 +430,10 @@ function TenantList({
             // Handle admin account creation error
             const errorMsg =
               adminError?.response?.data?.message || adminError?.message || "";
-            if (
+            const limitMessage = getTenantResourceLimitMessage(adminError, t);
+            if (limitMessage) {
+              message.error(limitMessage);
+            } else if (
               errorMsg.includes("already exists") ||
               errorMsg.includes("EMAIL_ALREADY_EXISTS")
             ) {
@@ -434,6 +449,7 @@ function TenantList({
       setModalVisible(false);
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
+      const limitMessage = getTenantResourceLimitMessage(err, t);
       const nameConflictMatch = errorMessage.match(
         /Tenant with name '(.*)' already exists/i
       );
@@ -450,7 +466,9 @@ function TenantList({
         message.error(t("tenantResources.tenants.nameRequired"));
       } else {
         message.error(
-          errorMessage || t("tenantResources.tenantOperationFailed")
+          limitMessage ||
+            errorMessage ||
+            t("tenantResources.tenantOperationFailed")
         );
       }
     }
@@ -969,7 +987,7 @@ function TenantList({
           type="error"
           showIcon
           className="mb-4"
-          message={t("common.cannotBeUndone")}
+          title={t("common.cannotBeUndone")}
           description={
             <ul className="list-disc pl-4 mt-2 space-y-1">
               <li>
@@ -1173,8 +1191,12 @@ export default function UserManageComp() {
       }
       message.success(t("tenantResources.tenants.updated"));
       setIsEditingTenantName(false);
-    } catch (error) {
-      message.error(t("tenantResources.tenantOperationFailed"));
+    } catch (error: any) {
+      message.error(
+        getTenantResourceLimitMessage(error, t) ||
+          error?.message ||
+          t("tenantResources.tenantOperationFailed")
+      );
     }
   };
 

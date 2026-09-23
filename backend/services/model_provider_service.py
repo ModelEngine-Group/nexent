@@ -14,6 +14,7 @@ from services.providers.silicon_provider import SiliconModelProvider
 from services.providers.tokenpony_provider import TokenPonyModelProvider
 from services.providers.dashscope_provider import DashScopeModelProvider
 from services.providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
+from services.providers.openai_provider import OpenAICompatibleProvider
 from utils.model_name_utils import split_repo_name, add_repo_to_name
 
 logger = logging.getLogger("model_provider")
@@ -28,28 +29,27 @@ async def get_provider_models(model_data: dict) -> List[dict]:
     """
     Get model list based on provider.
 
+    ModelEngine is dispatched to its dedicated provider class: its models
+    endpoint lives at {host}/open/router/v1/models (not the OpenAI
+    /models path), the response uses ModelEngine's own type taxonomy
+    ("chat"/"embed"/"multimodal"/...) that must be mapped to internal
+    types, each model must carry its host so prepare_model_dict can build
+    the full base_url later, and its endpoints serve self-signed
+    certificates (ssl=False). All other providers are queried via the
+    standard OpenAI-compatible GET {base_url}/models endpoint.
+
     Args:
         model_data: Model data containing provider information
 
     Returns:
         List of models from the specified provider
     """
-    model_list = []
-
-    if model_data["provider"] == ProviderEnum.SILICON.value:
-        provider = SiliconModelProvider()
-        model_list = await provider.get_models(model_data)
-    elif model_data["provider"] == ProviderEnum.MODELENGINE.value:
-        provider = ModelEngineProvider()
-        model_list = await provider.get_models(model_data)
-    elif model_data["provider"] == ProviderEnum.DASHSCOPE.value:
-        provider = DashScopeModelProvider()
-        model_list = await provider.get_models(model_data)
-    elif model_data["provider"] == ProviderEnum.TOKENPONY.value:
-        provider = TokenPonyModelProvider()
-        model_list = await provider.get_models(model_data)
-
-    return model_list
+    provider_key = (model_data.get("provider") or "").lower()
+    if provider_key == ProviderEnum.MODELENGINE.value:
+        client: AbstractModelProvider = ModelEngineProvider()
+    else:
+        client = OpenAICompatibleProvider()
+    return await client.get_models(model_data)
 
 
 # =============================================================================
@@ -74,6 +74,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         A dictionary ready to be passed to *create_model_record*.
     """
     # Split repo/name once so it can be reused multiple times.
+    if not model.get("id"):
+        raise ValueError("batch model entry is missing required field 'id'")
     model_repo, model_name = split_repo_name(model["id"])
     model_display_name = add_repo_to_name(model_repo, model_name)
 
@@ -230,6 +232,11 @@ def merge_existing_model_attributes(
     """
     if fields is None:
         fields = ["max_tokens", "api_key", "timeout_seconds", "concurrency_limit"]
+
+    # v2.6.0: When model_type is None/empty (multi-type discovery), skip merge
+    # because get_models_by_tenant_factory_type filters by a single model_type.
+    if not model_type:
+        return model_list
 
     if model_type == "embedding" or model_type == "multi_embedding":
         return model_list

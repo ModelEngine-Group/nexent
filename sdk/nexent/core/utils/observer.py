@@ -14,8 +14,18 @@ _NL2A_STATE_PATTERN = re.compile(
     r"<nl2a_state>\s*(.*?)\s*</nl2a_state>",
     re.DOTALL,
 )
+# Terminal/Jupyter tracebacks contain ANSI SGR and other control sequences for
+# console colouring. They have no meaning in JSON/SSE clients and otherwise
+# surface as visible ``[31m`` garbage in the web UI.
+_ANSI_ESCAPE_PATTERN = re.compile(
+    r"(?:\x1b\[[0-?]*[ -/]*[@-~]"
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
+    r"|\x1b[@-_]"
+    r"|\x9b[0-?]*[ -/]*[@-~])"
+)
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
     {
+        "name",
         "description",
         "duty_prompt",
         "constraint_prompt",
@@ -30,14 +40,17 @@ class ProcessType(Enum):
     MODEL_OUTPUT_THINKING = "model_output_thinking"  # model streaming output, thinking content
     MODEL_OUTPUT_DEEP_THINKING = "model_output_deep_thinking"  # model streaming output, deep thinking content
     MODEL_OUTPUT_CODE = "model_output_code"  # model streaming output, code content
+    MODEL_ATTEMPT_CONTROL = "model_attempt_control"  # hidden begin/rollback/commit boundary
 
     STEP_COUNT = "step_count"  # current step of agent
     PARSE = "parse"  # code parsing result
     EXECUTION_LOGS = "execution_logs"  # code execution result
     AGENT_NEW_RUN = "agent_new_run"  # Agent basic information
     AGENT_FINISH = "agent_finish"  # sub-agent end of run mark, mainly used for front-end display
+    HUMAN_INTERACTION = "human_interaction"  # terminal question form in an ordinary assistant message
     FINAL_ANSWER = "final_answer"  # final summary
     ERROR = "error"  # error field
+    WARNING = "warning"  # recoverable issue; execution can continue
     OTHER = "other"  # temporary other fields
     TOKEN_COUNT = "token_count"  # record the number of tokens used in each step
     HISTORY_SUMMARY = "history_summary"  # newly-created context compression checkpoint
@@ -91,17 +104,9 @@ class StepCountTransformer(MessageTransformer):
 
 
 class ParseTransformer(MessageTransformer):
-    # parse template
-    TEMPLATES = {"zh": "\n🛠️ 使用Python解释器执行代码\n",
-                 "en": "\n🛠️ Used tool python_interpreter\n"}
-
     def transform(self, **kwargs: Any) -> str:
         """convert the message of parse result"""
-        content = kwargs.get("content", "")
-        lang = kwargs.get("lang", "en")
-
-        template = self.TEMPLATES.get(lang, self.TEMPLATES["en"])
-        return template + f"```python\n{content}\n```\n"
+        return kwargs.get("content", "")
 
 
 class ExecutionLogsTransformer(MessageTransformer):
@@ -174,6 +179,9 @@ class MessageObserver:
         self._current_invocation_id: ContextVar[str | None] = ContextVar(
             "current_invocation_id", default=None
         )
+        self._model_attempt_id: ContextVar[str | None] = ContextVar(
+            "model_attempt_id", default=None
+        )
 
     @property
     def token_buffer(self) -> deque:
@@ -226,6 +234,7 @@ class MessageObserver:
             ProcessType.EXECUTION_LOGS: ExecutionLogsTransformer(),
             ProcessType.FINAL_ANSWER: FinalAnswerTransformer(),
             ProcessType.ERROR: default_transformer,
+            ProcessType.WARNING: default_transformer,
             ProcessType.OTHER: default_transformer,
             ProcessType.SEARCH_CONTENT: default_transformer,
             ProcessType.TOKEN_COUNT: TokenCountTransformer(),
@@ -233,6 +242,7 @@ class MessageObserver:
             ProcessType.PICTURE_WEB: default_transformer,
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
+            ProcessType.HUMAN_INTERACTION: default_transformer,
             ProcessType.TOOL: default_transformer,
             ProcessType.NL2A: default_transformer,
             ProcessType.NL2A_STATE: default_transformer,
@@ -244,6 +254,7 @@ class MessageObserver:
             ProcessType.PLAN: default_transformer,
             ProcessType.PLAN_STEP_UPDATE: default_transformer,
             ProcessType.AUTOMATION_PROPOSAL: default_transformer,
+            ProcessType.MODEL_ATTEMPT_CONTROL: default_transformer,
         }
 
     def _active_subagent(self) -> tuple | None:
@@ -270,6 +281,7 @@ class MessageObserver:
         invocation_id: str | None = None,
         explicit_agent_id: bool = False,
         explicit_invocation_id: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Append a ``Message`` with the current sub-agent context auto-stamped.
 
@@ -301,8 +313,50 @@ class MessageObserver:
                 depth=resolved_depth,
                 tool_call_id=tool_call_id,
                 invocation_id=resolved_invocation,
+                attempt_id=(
+                    self._model_attempt_id.get()
+                    if process_type in {
+                        ProcessType.MODEL_OUTPUT_THINKING,
+                        ProcessType.MODEL_OUTPUT_DEEP_THINKING,
+                        ProcessType.MODEL_OUTPUT_CODE,
+                    }
+                    else None
+                ),
+                metadata=metadata,
             ).to_json()
         )
+
+    def _reset_model_stream_state(self) -> None:
+        self.token_buffer.clear()
+        self.think_buffer.clear()
+        self.current_mode = ProcessType.MODEL_OUTPUT_THINKING
+        self.in_think_mode = False
+
+    def begin_model_attempt(self, attempt_id: str, attempt: int) -> None:
+        self._reset_model_stream_state()
+        self._model_attempt_id.set(attempt_id)
+        self._emit(
+            ProcessType.MODEL_ATTEMPT_CONTROL,
+            "",
+            metadata={"phase": "begin", "attempt_id": attempt_id, "attempt": attempt},
+        )
+
+    def rollback_model_attempt(self, attempt_id: str, attempt: int) -> None:
+        self._reset_model_stream_state()
+        self._emit(
+            ProcessType.MODEL_ATTEMPT_CONTROL,
+            "",
+            metadata={"phase": "rollback", "attempt_id": attempt_id, "attempt": attempt},
+        )
+        self._model_attempt_id.set(None)
+
+    def commit_model_attempt(self, attempt_id: str, attempt: int) -> None:
+        self._emit(
+            ProcessType.MODEL_ATTEMPT_CONTROL,
+            "",
+            metadata={"phase": "commit", "attempt_id": attempt_id, "attempt": attempt},
+        )
+        self._model_attempt_id.set(None)
 
     def add_model_new_token(self, new_token):
         """
@@ -533,6 +587,8 @@ class MessageObserver:
             process_type, self.transformers[ProcessType.OTHER])
         formatted_content = transformer.transform(
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
+        if isinstance(formatted_content, str):
+            formatted_content = _ANSI_ESCAPE_PATTERN.sub("", formatted_content)
         nl2a_content = None
         nl2a_state_content = None
 
@@ -601,6 +657,11 @@ class MessageObserver:
             agent_id=kwargs.get("agent_id"),
             agent_name=kwargs.get("agent_name"),
             explicit_agent_id=explicit_agent_id,
+            metadata={
+                key: kwargs[key]
+                for key in ("error_code", "retryable")
+                if key in kwargs
+            },
         )
 
     @contextmanager
@@ -744,7 +805,8 @@ class Message:
     def __init__(self, message_type: ProcessType, content, tool_name: str = None,
                  tool_arguments: dict = None, agent_id=None, agent_name: str = None,
                  depth: int = 0, tool_call_id: str | None = None,
-                 invocation_id: str | None = None):
+                 invocation_id: str | None = None, attempt_id: str | None = None,
+                 metadata: dict[str, Any] | None = None):
         self.message_type = message_type
         self.content = content
         self.tool_name = tool_name
@@ -754,6 +816,8 @@ class Message:
         self.depth = depth
         self.tool_call_id = tool_call_id
         self.invocation_id = invocation_id
+        self.attempt_id = attempt_id
+        self.metadata = metadata or {}
 
     # generate json format and convert to string
     def to_json(self):
@@ -780,4 +844,7 @@ class Message:
             result["depth"] = self.depth
         if self.invocation_id is not None:
             result["invocation_id"] = self.invocation_id
+        if self.attempt_id is not None:
+            result["attempt_id"] = self.attempt_id
+        result.update(self.metadata)
         return json.dumps(result, ensure_ascii=False)

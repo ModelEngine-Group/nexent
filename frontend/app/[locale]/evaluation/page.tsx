@@ -41,6 +41,11 @@ import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
 import { useModelList } from "@/hooks/model/useModelList";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
+import {
+  buildEvaluationTaskQuery,
+  parseEvaluationTaskAgentIds,
+  shouldShowCreatedEvaluationTask,
+} from "@/lib/evaluationTaskFilters";
 import AnnotationLabels from "./components/AnnotationLabels";
 const { Text, Title } = Typography;
 
@@ -85,11 +90,11 @@ function RunsTab() {
   const [agents] = useList("/api/agent/published_list");
 
   // ── Top-level list state ──────────────────────────────────────────────
-  // `filterAgent` is the selected agent dropdown (drives which runs appear
-  // in the main Table).  Initialised either from the `?agent_id=` URL query
-  // param (so users can deep-link from the agent detail page) or from the
-  // first agent returned by the published list.
-  const [filterAgent, setFilterAgent] = useState<number | null>(null);
+  // An empty selection represents all agents. A detail-page link may provide
+  // a JSON `agent_ids` list to start with a narrower selection.
+  const [filterAgentIds, setFilterAgentIds] = useState<number[]>([]);
+  const [filtersReady, setFiltersReady] = useState(false);
+  const filterInitializationRef = useRef(false);
   const [runs, setRuns] = useState<any[]>([]);
   const { availableLlmModels } = useModelList();
   const [evalSets, setEvalSets] = useState<any[]>([]);
@@ -158,36 +163,27 @@ function RunsTab() {
     refreshEvalSets();
   }, []);
 
-  // ── Init `filterAgent` from URL or default ────────────────────────────
-  // Runs exactly once after agents list loads (so deep-linking works even
-  // on page refresh, before the agent SELECT is interactive).  The guard
-  // `!filterAgent` prevents overwriting user selection when `agents` gets
-  // re-fetched later.
+  // ── Init agent filters from URL ───────────────────────────────────────
   useEffect(() => {
-    if (agents.length > 0) {
-      const urlAgentId = searchParams?.get("agent_id");
-      if (
-        urlAgentId &&
-        agents.some((a: any) => String(a.agent_id) === urlAgentId)
-      ) {
-        setFilterAgent(Number(urlAgentId));
-      } else if (!filterAgent) {
-        setFilterAgent(agents[0].agent_id);
-      }
-    }
-  }, [agents, searchParams]);
+    if (filterInitializationRef.current) return;
+    setFilterAgentIds(
+      parseEvaluationTaskAgentIds(searchParams?.get("agent_ids") || null)
+    );
+    filterInitializationRef.current = true;
+    setFiltersReady(true);
+  }, [searchParams]);
 
   const fetchRuns = useCallback(() => {
-    if (!filterAgent) return;
-    // limit=0 requests the full set for this agent (the backend treats it
-    // as "no pagination window") — the page is already narrowed to one
-    // agent, so a hard limit would silently hide older runs.
-    fetch(`/api/agent-evaluations?agent_id=${filterAgent}&limit=0`, {
-      headers: getAuthHeaders(),
-    })
+    if (!filtersReady) return;
+    fetch(
+      `${API_ENDPOINTS.agentEvaluations.list}?${buildEvaluationTaskQuery(filterAgentIds)}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    )
       .then((r) => r.json())
       .then((d) => setRuns(d.data || d.items || []));
-  }, [filterAgent]);
+  }, [filterAgentIds, filtersReady]);
 
   useEffect(() => {
     fetchRuns();
@@ -230,9 +226,13 @@ function RunsTab() {
     });
     const d = await r.json();
     if (r.ok) {
-      setRuns((prev) => [d.data || d, ...prev]);
+      const createdRun = d.data || d;
+      setRuns((prev) =>
+        shouldShowCreatedEvaluationTask(filterAgentIds, payload.agent_id)
+          ? [createdRun, ...prev]
+          : prev
+      );
       setDrawer(false);
-      setFilterAgent(sA);
     } else {
       message.error(d?.detail || t("agentEvaluation.createFailed"));
     }
@@ -382,9 +382,11 @@ function RunsTab() {
           <Select
             allowClear
             showSearch
-            placeholder="Agent"
-            value={filterAgent}
-            onChange={setFilterAgent}
+            mode="multiple"
+            maxTagCount="responsive"
+            placeholder={t("agentEvaluation.allAgents")}
+            value={filterAgentIds}
+            onChange={setFilterAgentIds}
             style={{ width: 240 }}
             options={agents.map((a: any) => ({
               label: a.display_name || a.name || `#${a.agent_id}`,
@@ -433,7 +435,7 @@ function RunsTab() {
           if (!trialRunning) setDrawer(false);
         }}
         size="large"
-        maskClosable={!trialRunning}
+        mask={{ closable: !trialRunning }}
         closable={!trialRunning}
       >
         <Spin
@@ -1410,7 +1412,7 @@ function EvaluatorsTab() {
         open={drawer}
         onClose={() => setDrawer(false)}
         size="large"
-        maskClosable={!busy}
+        mask={{ closable: !busy }}
         closable={!busy}
       >
         <Spin
@@ -2789,7 +2791,7 @@ function SetsTab() {
           setGenFiles([]);
         }}
         size="large"
-        maskClosable={!busy}
+        mask={{ closable: !busy }}
         closable={!busy}
       >
         <Spin spinning={busy} description={t("agentEvaluation.genRunningHint")}>

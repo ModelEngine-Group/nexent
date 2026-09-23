@@ -21,11 +21,18 @@ from smolagents.tools import Tool
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 from ..models.openai_llm import OpenAIModel
+from ..model_errors import ModelInvocationTerminalError
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
+from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
+from .output_protocol import ModelOutputProtocolExhaustedError
+from .tool_user_context import (
+    apply_model_visible_tool_schemas_to_context_items,
+    apply_user_context_to_mcp_tool,
+)
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
@@ -229,7 +236,9 @@ class NexentAgent:
                  tenant_id=None,
                  workspace_path=None,
                  workspace_run_id=None,
-                 minio_files=None):
+                 minio_files=None,
+                 cancellation_scope=None,
+                 user_context=None):
         """
         Initialize the NexentAgent factory.
 
@@ -249,6 +258,9 @@ class NexentAgent:
             workspace_path: Run-scoped host workspace path.
             workspace_run_id: Opaque run id used to validate cleanup scope.
             minio_files: Authorized files attached to the current request.
+            cancellation_scope: Optional run-scoped cancellation registry.
+            user_context: Optional caller user context (tenant/user/groups)
+                passed through to tools for tool-side authorization.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -256,6 +268,7 @@ class NexentAgent:
         self.observer = observer
         self.model_config_list = model_config_list
         self.stop_event = stop_event
+        self.cancellation_scope = cancellation_scope
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
@@ -266,6 +279,7 @@ class NexentAgent:
         self.workspace_path = workspace_path
         self.workspace_run_id = workspace_run_id
         self.minio_files = list(minio_files or [])
+        self.user_context = dict(user_context or {})
         self._workspace_uploads: List[Dict[str, Any]] = []
         self._workspace_uploaded_paths: set[str] = set()
         self._sandbox_executors: List[Any] = []
@@ -283,7 +297,7 @@ class NexentAgent:
         )
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
-        model = OpenAIModel(
+        model_kwargs = dict(
             observer=self.observer,
             model_id=model_config.model_name,
             api_key=model_config.api_key,
@@ -297,7 +311,26 @@ class NexentAgent:
             max_output_tokens=model_config.max_output_tokens,
             timeout_seconds=model_config.timeout_seconds,
             prompt_cache=model_config.prompt_cache,
+            reasoning_capability=model_config.reasoning_capability,
         )
+        if model_config.reasoning_budget_tokens is not None:
+            model_kwargs["reasoning_budget_tokens"] = model_config.reasoning_budget_tokens
+        if (
+            model_config.enable_thinking
+            and model_config.reasoning_effort is not None
+            and model_config.reasoning_effort != "auto"
+        ):
+            model_kwargs["reasoning_effort"] = model_config.reasoning_effort
+        if self.cancellation_scope is not None:
+            model_kwargs["cancellation_scope"] = self.cancellation_scope
+        if model_config.concurrency_limit is not None:
+            model_kwargs["concurrency_limit"] = model_config.concurrency_limit
+            model_kwargs["concurrency_key"] = (
+                str(self.tenant_id or "default"),
+                str(model_config.model_factory or "unknown"),
+                str(model_config.model_name),
+            )
+        model = OpenAIModel(**model_kwargs)
         model.stop_event = self.stop_event
         return model
 
@@ -505,7 +538,7 @@ class NexentAgent:
         )
         if tool_obj is None:
             raise ValueError(f"{class_name} not found in MCP server")
-        return tool_obj
+        return apply_user_context_to_mcp_tool(tool_obj, self.user_context)
 
     def create_builtin_tool(self, tool_config: ToolConfig):
         """Create a builtin tool instance.
@@ -694,9 +727,9 @@ class NexentAgent:
 
         try:
             model = self.create_model(agent_config.model_name)
-            model.safe_input_budget_snapshot = getattr(
+            model.context_budget_snapshot = getattr(
                 agent_config,
-                "safe_input_budget_snapshot",
+                "context_budget_snapshot",
                 None,
             )
             model.capacity_snapshot = getattr(
@@ -745,7 +778,9 @@ class NexentAgent:
                         wrapper = ExternalA2AAgentWrapper(
                             agent_info=a2a_agent_info,
                             stop_event=self.stop_event,
-                            observer=self.observer
+                            observer=self.observer,
+                            cancellation_scope=self.cancellation_scope,
+                            user_context=self.user_context,
                         )
                         managed_agents_list.append(
                             self._wrap_subagent(
@@ -769,11 +804,29 @@ class NexentAgent:
                 config=ctx_config,
                 max_steps=agent_config.max_steps,
             )
-            context_items = (
+            context_items = apply_model_visible_tool_schemas_to_context_items(
                 list(context_items_override)
                 if context_items_override is not None
-                else (getattr(agent_config, "context_items", None) or [])
+                else list(getattr(agent_config, "context_items", None) or []),
+                tool_list,
             )
+            from .context import ContextItemInput, ContextItemType
+
+            enable_clarification = (
+                not _managed_context
+                and getattr(self.observer, "enable_nl2a_wrapper", False) is not True
+                and getattr(agent_config, "output_protocol", "code_action") == "code_action"
+            )
+            if enable_clarification and any(item.type == ContextItemType.SYSTEM for item in context_items):
+                tool_name = choose_clarification_tool_name({tool.name for tool in [*tool_list, *managed_agents_list]})
+                context_items.append(ContextItemInput(
+                    id="system:clarification_protocol",
+                    type=ContextItemType.SYSTEM,
+                    content={"text": clarification_policy(tool_name)},
+                    source=("runtime:clarification_protocol",),
+                    priority=100,
+                    metadata={"authority": "platform"},
+                ))
             context_runtime = ManagedContextRuntime(
                 context_manager,
                 items=context_items,
@@ -800,6 +853,7 @@ class NexentAgent:
                     session_container_group=_sandbox_tree_context.get(
                         "session_container_group"
                     ),
+                    cancellation_scope=self.cancellation_scope,
                 )
                 session_container_group = None
                 if (
@@ -897,6 +951,8 @@ class NexentAgent:
                 user_id=self.user_id,
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
+                output_protocol=getattr(agent_config, "output_protocol", "code_action"),
+                enable_clarification=enable_clarification,
                 workspace_path=self.workspace_path,
             )
             agent.stop_event = self.stop_event
@@ -1067,13 +1123,13 @@ class NexentAgent:
 
                         token_threshold = None
                         context_window_tokens = None
-                        hard_input_budget_tokens = None
+                        effective_input_limit_tokens = None
                         context_processing_mode = None
                         context_runtime = getattr(self.agent, "context_runtime", None)
                         if context_runtime is not None:
                             token_threshold = context_runtime.token_threshold
                             context_window_tokens = context_runtime.context_window_tokens
-                            hard_input_budget_tokens = context_runtime.hard_input_budget_tokens
+                            effective_input_limit_tokens = context_runtime.effective_input_limit_tokens
                             context_processing_mode = context_runtime.processing_mode
 
                         token_data = {
@@ -1085,7 +1141,7 @@ class NexentAgent:
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
                             "context_window_tokens": context_window_tokens,
-                            "hard_input_budget_tokens": hard_input_budget_tokens,
+                            "effective_input_limit_tokens": effective_input_limit_tokens,
                             "context_processing_mode": context_processing_mode,
                             "output_finish_reason": getattr(
                                 getattr(self.agent, "model", None),
@@ -1128,8 +1184,16 @@ class NexentAgent:
                             })
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
-                        if hasattr(step_log, "error") and step_log.error is not None:
-                            observer.add_message("", ProcessType.ERROR, str(step_log.error))
+                        if (
+                            hasattr(step_log, "error")
+                            and step_log.error is not None
+                            and not getattr(step_log, "_suppress_user_error", False)
+                        ):
+                            # Action-step failures are observations in the ReAct loop:
+                            # the model receives them and can repair/retry on the next
+                            # step. Surface them as warnings so the UI does not imply
+                            # that the whole run has already failed.
+                            observer.add_message("", ProcessType.WARNING, str(step_log.error))
 
                     if step_log is None:
                         raise ValueError("Agent run produced no output")
@@ -1157,8 +1221,26 @@ class NexentAgent:
 
                     # Check if we need to stop from external stop_event
                     if self.agent.stop_event.is_set():
-                        observer.add_message(self.agent.agent_name, ProcessType.ERROR,
+                        observer.add_message(self.agent.agent_name, ProcessType.WARNING,
                                              "Agent execution interrupted by external stop signal")
+                except ModelOutputProtocolExhaustedError as e:
+                    observer.add_message(
+                        agent_name=self.agent.agent_name,
+                        process_type=ProcessType.ERROR,
+                        content=str(e),
+                        error_code="model_output_protocol_exhausted",
+                        retryable=False,
+                    )
+                    raise
+                except ModelInvocationTerminalError as e:
+                    observer.add_message(
+                        agent_name=self.agent.agent_name,
+                        process_type=ProcessType.ERROR,
+                        content=e.safe_message(getattr(observer, "lang", "en")),
+                        error_code=e.error_code.value,
+                        retryable=False,
+                    )
+                    raise
                 except Exception as e:
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
@@ -1362,7 +1444,7 @@ class NexentAgent:
 
     @staticmethod
     def _grant_sandbox_output_access(container: Any, workspace: Path) -> None:
-        """Allow the sandbox user to read and write the exact run workspace."""
+        """Allow sandbox traversal of the user directory and writes in the run workspace."""
         gid_result = container.exec_run(["id", "-g"])
         gid_exit_code = getattr(gid_result, "exit_code", None)
         gid_output = getattr(gid_result, "output", b"")
@@ -1376,7 +1458,10 @@ class NexentAgent:
             raise RuntimeError("Sandbox user returned an invalid group ID")
 
         workspace_dir = str(workspace)
+        workspace_parent_dir = str(workspace.parent)
         commands = (
+            ["chgrp", sandbox_gid, workspace_parent_dir],
+            ["chmod", "g+xs", workspace_parent_dir],
             ["chgrp", "-R", sandbox_gid, workspace_dir],
             ["chmod", "-R", "g+rwX", workspace_dir],
             ["find", workspace_dir, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"],
@@ -1448,7 +1533,11 @@ class NexentAgent:
                 upload_tool.forward(str(path), relative.as_posix())
             except Exception as exc:
                 logger.error("Failed to upload workspace output %s: %s", path, exc)
-                self.observer.add_message("", ProcessType.ERROR, f"Failed to upload output file {relative}: {exc}")
+                self.observer.add_message(
+                    "",
+                    ProcessType.WARNING,
+                    f"Failed to upload output file {relative}: {exc}",
+                )
 
         if self._workspace_uploads:
             self.observer.add_message(

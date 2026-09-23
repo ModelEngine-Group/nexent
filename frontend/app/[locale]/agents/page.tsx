@@ -65,7 +65,7 @@ function resolveDraftFocusTarget(
   if (updatedFields.includes("duty_prompt")) {
     return { section: "role_model", promptTab: "duty" };
   }
-  if (updatedFields.includes("description")) {
+  if (updatedFields.includes("name") || updatedFields.includes("description")) {
     return { section: "display_info" };
   }
   return null;
@@ -132,13 +132,20 @@ function AgentSetupContent() {
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const requestedAgentId = Number(searchParams.get("agent_id"));
+  const isRequestedAgentLoading =
+    Number.isInteger(requestedAgentId) &&
+    requestedAgentId > 0 &&
+    requestedAgentId !== currentAgentId;
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(
     currentAgentId
   );
   const { total } = useAgentVersionList(currentAgentId);
+  const shouldFetchVersionDetail = !isRequestedAgentLoading && total > 0;
   const { agentVersionDetail } = useAgentVersionDetail(
     currentAgentId,
-    agentInfo?.current_version_no ?? null
+    agentInfo?.current_version_no ?? null,
+    shouldFetchVersionDetail
   );
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
   const {
@@ -150,16 +157,13 @@ function AgentSetupContent() {
     markCompletionSyncFailed,
     markGenerationCompleted,
     markGenerationStopped,
+    markRunFinished,
+    markRunStarted,
     markPromptGenerationFailed,
     requestConfigFocus,
     resetFlow,
     sessionGeneration,
   } = useNl2AgentFlow();
-  const requestedAgentId = Number(searchParams.get("agent_id"));
-  const isRequestedAgentLoading =
-    Number.isInteger(requestedAgentId) &&
-    requestedAgentId > 0 &&
-    requestedAgentId !== currentAgentId;
   const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
   const canManualUnlock =
     !isNl2AgentUnavailable &&
@@ -387,6 +391,8 @@ function AgentSetupContent() {
                 }
                 onStateEvent={handleStateEvent}
                 onStopped={handleGenerationStopped}
+                onRunStart={markRunStarted}
+                onRunEnd={markRunFinished}
               />
             </div>
           </PanelCard>
@@ -526,7 +532,10 @@ function AgentSetupContent() {
               }
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentVersion />
+                <AgentVersion
+                  currentVersionNo={agentInfo?.current_version_no}
+                  onRefreshAgentInfo={refetchAgentInfo}
+                />
               </div>
             </PanelCard>
           )}

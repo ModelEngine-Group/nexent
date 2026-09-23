@@ -46,6 +46,7 @@ dotenv.config({
 
 const app = next({
   dev,
+  turbo: dev,
   ...(nextConfig && { conf: nextConfig }),
 });
 const handle = app.getRequestHandler();
@@ -59,9 +60,31 @@ const NORTHBOUND_HTTP_BACKEND =
   process.env.NORTHBOUND_HTTP_BACKEND || "http://localhost:5013"; // northbound
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
 
-const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
-const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
-const PORT = 3000;
+const BUILT_IN_PUBLIC_DIR = path.resolve(__dirname, "./public");
+const PROJECT_CONFIG_DIR = path.resolve(
+  process.env.PROJECT_CONFIG_DIR || BUILT_IN_PUBLIC_DIR
+);
+const ICON_UPLOAD_DIR = PROJECT_CONFIG_DIR;
+const PORT = Number(process.env.PORT) || 3000;
+
+const PROJECT_CONFIG_ASSETS = {
+  "/modelengine-logo.png": {
+    relativePath: "modelengine-logo.png",
+    contentType: "image/png",
+  },
+  "/modelengine-logo2.png": {
+    relativePath: "modelengine-logo2.png",
+    contentType: "image/png",
+  },
+  "/locales/zh/custom.json": {
+    relativePath: path.join("locales", "zh", "custom.json"),
+    contentType: "application/json; charset=utf-8",
+  },
+  "/locales/en/custom.json": {
+    relativePath: path.join("locales", "en", "custom.json"),
+    contentType: "application/json; charset=utf-8",
+  },
+};
 
 function withoutBasePath(pathname) {
   if (
@@ -575,6 +598,7 @@ app.prepare().then(() => {
 
     // Route dispatch uses paths without the Next.js base path.
     if (handleFrontendConfigApi(internalPathname, req, res)) return;
+    if (handleProjectConfigAsset(internalPathname, req, res)) return;
     if (await handleProjectConfigApi(internalPathname, req, res)) return;
     if (handleAttachmentProxy(internalPathname, req, res)) return;
     if (handleNorthboundProxy(internalPathname, req, res)) return;
@@ -606,10 +630,6 @@ app.prepare().then(() => {
           socket.destroy();
         }
       );
-    } else {
-      console.log(
-        `[Proxy] Ignoring non-voice WebSocket upgrade for: ${pathname}`
-      );
     }
   });
 
@@ -636,6 +656,29 @@ function handleFrontendConfigApi(pathname, req, res) {
   return true;
 }
 
+function handleProjectConfigAsset(pathname, req, res) {
+  const asset = PROJECT_CONFIG_ASSETS[pathname];
+  if (!asset || (req.method !== "GET" && req.method !== "HEAD")) return false;
+
+  const persistedPath = path.join(PROJECT_CONFIG_DIR, asset.relativePath);
+  const builtInPath = path.join(BUILT_IN_PUBLIC_DIR, asset.relativePath);
+  const selectedPath = fs.existsSync(persistedPath)
+    ? persistedPath
+    : builtInPath;
+  if (!fs.existsSync(selectedPath)) return false;
+
+  res.writeHead(200, {
+    "Content-Type": asset.contentType,
+    "Cache-Control": "no-store",
+  });
+  if (req.method === "HEAD") {
+    res.end();
+  } else {
+    fs.createReadStream(selectedPath).pipe(res);
+  }
+  return true;
+}
+
 /**
  * 接口：/api/config/project-config 上传Logo+修改多语言配置
  */
@@ -649,6 +692,7 @@ async function handleProjectConfigApi(pathname, req, res) {
   }
 
   // 文件上传处理
+  ensureDir(ICON_UPLOAD_DIR);
   const form = new multiparty.Form({ uploadDir: ICON_UPLOAD_DIR });
   try {
     const { fields, files } = await parseMultipartForm(form, req);

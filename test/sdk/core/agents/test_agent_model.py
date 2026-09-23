@@ -243,6 +243,14 @@ def _load_agent_model_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
+    models_package = ModuleType("sdk.nexent.core.models")
+    models_package.__path__ = []
+    capacity_budget = ModuleType("sdk.nexent.core.models.capacity_budget")
+    class ContextBudgetSnapshot(BaseModel):
+        fingerprint: str = "budget"
+    capacity_budget.ContextBudgetSnapshot = ContextBudgetSnapshot
+    sys.modules["sdk.nexent.core.models"] = models_package
+    sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget
     context_package = ModuleType("sdk.nexent.core.agents.context")
     context_package.__path__ = []
     context_models = ModuleType("sdk.nexent.core.agents.context.models")
@@ -1248,6 +1256,7 @@ class TestAgentConfig:
         )
         assert config.prompt_templates is None
         assert config.max_steps == 15
+        assert config.output_protocol == "code_action"
         assert config.provide_run_summary is False
         assert config.instructions is None
         assert config.managed_agents == []

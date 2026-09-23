@@ -3290,7 +3290,13 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
 
     unit_id = save_history_summary(
         1, "user-a", "tenant-a", {"task_overview": "done"}, 24,
-        trigger="soft_budget_exceeded")
+        trigger="compaction_trigger_threshold_exceeded",
+        history_tokens_before=9000,
+        history_tokens_after=5000,
+        compaction_attempts=2,
+        compaction_trigger_threshold_tokens=8000,
+        compaction_target_tokens=6000,
+    )
 
     assert unit_id == 1001
     assert fresh_insert_mock["message_id"] == 24
@@ -3299,7 +3305,12 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
     assert fresh_insert_mock["unit_status"] == "completed"
     payload = __import__("json").loads(fresh_insert_mock["unit_content"])
     assert payload["covered_through_message_id"] == 24
-    assert payload["trigger"] == "soft_budget_exceeded"
+    assert payload["trigger"] == "compaction_trigger_threshold_exceeded"
+    assert payload["history_tokens_before"] == 9000
+    assert payload["history_tokens_after"] == 5000
+    assert payload["compaction_attempts"] == 2
+    assert payload["compaction_trigger_threshold_tokens"] == 8000
+    assert payload["compaction_target_tokens"] == 6000
 
 
 def test_save_history_summary_rejects_incomplete_covered_range(
@@ -3362,9 +3373,9 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
     messages_result = MagicMock()
     messages_result.all.return_value = [
         SimpleNamespace(message_id=31, message_index=4, message_role="user",
-                        message_content="new question", minio_files=None),
+                        message_content="new question", minio_files=None, status="completed"),
         SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
-                        message_content="new answer", minio_files=None),
+                        message_content="new answer", minio_files=None, status="completed"),
     ]
     session.execute.side_effect = [
         current_result, candidates_result, boundary_result, messages_result]

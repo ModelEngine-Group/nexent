@@ -6,14 +6,15 @@ import { Button, Dropdown, Tag } from "antd";
 import { Bot, Download, MoreHorizontal, PackageX } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import {
-  getSkillRepositoryStatusLabel,
-  STATUS_COLORS,
-} from "./skillRepositoryShared";
+import ResourceCard from "@/components/resource/ResourceCard";
 import type {
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
+import {
+  getSkillRepositoryStatusLabel,
+  STATUS_COLORS,
+} from "./skillRepositoryShared";
 
 export function StatusTag({
   status,
@@ -44,38 +45,64 @@ export function SkillRepositoryCard({
   onTakeDown?: () => void;
 }) {
   const { t } = useTranslation("common");
-  const showMenu = showAdminMenu && onTakeDown != null;
   const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
-  const menuItems: MenuProps["items"] = showMenu
-    ? [
-        {
-          key: "takeDown",
-          label: t("skillRepository.action.status.notShared"),
-          icon: <PackageX className="size-3.5" aria-hidden />,
-          danger: true,
-          disabled: isTakingDown,
-          onClick: onTakeDown,
-        },
-      ]
-    : [];
+  const author = listing.author?.trim() || listing.submitted_by?.trim();
+  const menuItems: MenuProps["items"] =
+    showAdminMenu && onTakeDown != null
+      ? [
+          {
+            key: "takeDown",
+            label: t("skillRepository.action.status.notShared"),
+            icon: <PackageX className="size-3.5" aria-hidden />,
+            danger: true,
+            disabled: isTakingDown,
+            onClick: onTakeDown,
+          },
+        ]
+      : [];
 
   return (
-    <article
-      className="flex min-h-[220px] flex-col rounded-xl border border-border bg-background p-4 shadow-sm transition hover:border-primary/40 hover:shadow-md"
-      onDoubleClick={onDetailClick}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Bot className="size-5" aria-hidden />
-          </div>
-          <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
-              {listing.name}
-            </h3>
-          </div>
+    <ResourceCard
+      className="h-full"
+      title={listing.name}
+      footerLayout="inline"
+      icon={
+        <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Bot className="size-5" aria-hidden />
         </div>
-        {showMenu ? (
+      }
+      description={
+        listing.description || t("skillRepository.common.noDescription")
+      }
+      tags={
+        tags.length > 0 ? (
+          <>
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                {tag}
+              </span>
+            ))}
+          </>
+        ) : (
+          <span aria-hidden className="block min-h-7" />
+        )
+      }
+      headerActions={
+        <span
+          className="inline-flex items-center gap-1"
+          aria-label={t("skillRepository.card.downloadAria", {
+            count: listing.downloads ?? 0,
+          })}
+        >
+          <Download className="size-3.5" aria-hidden />
+          {(listing.downloads ?? 0).toLocaleString()}
+        </span>
+      }
+      actions={
+        menuItems.length > 0 ? (
           <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
             <Button
               type="text"
@@ -86,40 +113,11 @@ export function SkillRepositoryCard({
               aria-label={t("skillRepository.common.moreActions")}
             />
           </Dropdown>
-        ) : null}
-      </div>
-
-      <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-        {listing.description || t("skillRepository.common.noDescription")}
-      </p>
-
-      {tags.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="mt-auto flex flex-col gap-3 pt-4">
-        <div className="flex min-h-[1.75rem] items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          <span
-            className="inline-flex items-center gap-1"
-            aria-label={t("skillRepository.card.downloadAria", {
-              count: listing.downloads ?? 0,
-            })}
-          >
-            <Download className="size-3.5" aria-hidden />
-            {(listing.downloads ?? 0).toLocaleString()}
-          </span>
-        </div>
-        {action}
-      </div>
-    </article>
+        ) : undefined
+      }
+      meta={author ? <span className="truncate">{author}</span> : undefined}
+      footer={action}
+      onClick={onDetailClick}
+    />
   );
 }

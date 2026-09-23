@@ -517,6 +517,7 @@ async def export_agent_by_agent_id(
                                           allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
                                           verification_config=agent_info.get("verification_config"),
                                           context_policy=agent_info.get("context_policy"),
+                                          model_params_override=agent_info.get("model_params_override"),
                                           duty_prompt=agent_info.get(
                                               "duty_prompt"),
                                           constraint_prompt=agent_info.get(
@@ -693,6 +694,7 @@ async def import_agent_by_agent_id(
                                          "allow_chat_metadata": import_agent_info.allow_chat_metadata,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
+                                         "model_params_override": getattr(import_agent_info, "model_params_override", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
@@ -809,6 +811,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
             # Filter out deleted models (delete_flag='Y' in model_record_t)
             model_projection = project_agent_models(agent, tenant_id, model_cache)
             agent.update(model_projection.fields)
+            agent["model_ids"] = model_projection.availability_model_ids
 
             # Use shared availability check function
             _, unavailable_reasons = check_agent_availability(
@@ -817,6 +820,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 agent_info=agent,
                 model_cache=model_cache
             )
+            agent["model_ids"] = model_projection.fields["model_ids"]
             _, unavailable_reasons = apply_deleted_model_reason(
                 not unavailable_reasons,
                 unavailable_reasons,
@@ -869,6 +873,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
+                "model_params_override": agent.get("model_params_override"),
             })
 
         return simple_agent_list

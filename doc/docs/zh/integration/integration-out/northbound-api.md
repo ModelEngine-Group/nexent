@@ -197,12 +197,47 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/run" \
 接口返回 Server-Sent Events（SSE）流，逐块返回 Agent 响应：
 
 ```text
-data: {"type":"text","content":"正在分析数据"}
+data: {"type":"model_output_thinking","content":"正在分析数据","unit_index":1}
 
-data: {"type":"text","content":"，请稍候..."}
+data: {"type":"model_output_thinking","content":"，请稍候...","unit_index":1}
 
-data: {"type":"done","conversation_id":123,"content":"分析完成"}
+data: {"type":"final_answer","content":"分析完成","unit_index":2}
 ```
+
+## 结构化反问与停止后补充
+
+Agent 在缺少关键信息时可返回结构化反问。本轮通过普通完成流程结束并释放 worker，客户端在收到流结束后，把答案作为同一 conversation 的普通新 query 发送。不需要开关、待办查询、决定提交或执行恢复接口。
+
+### 反问 SSE
+
+外层继续使用 `data: {"type": ..., "content": ...}`。`type="human_interaction"` 的 `content` 是 **JSON 对象**，直接包含 `schema_version: 1` 和 `questions`；紧随的普通 `final_answer` 包含完整可读问题回退。
+
+```text
+data: {"type":"human_interaction","content":{"schema_version":1,"questions":[{"id":"audience","type":"single_choice","title":"通知发给谁？","required":true,"options":[{"id":"team","label":"内部团队"},{"id":"client","label":"客户"}],"allow_other":true,"placeholder":""}]},"unit_index":1}
+
+data: {"type":"final_answer","content":"1. 通知发给谁？\n   - 内部团队\n   - 客户\n   - 其他 / Other","unit_index":2}
+```
+
+`questions` 最多 5 项，支持 `text`、`single_choice`、`multiple_choice`。问题字段包括 `id`、`type`、`title`、`required`、`options`、`allow_other` 和 `placeholder`；选项使用 `id` 与 `label`。文本题没有选项；选择题提供 2–12 个选项。客户端可复用表单展示，在确认本轮流结束之前禁用提交。有效卡片已显示时可隐藏精确匹配的问题文本，纯文本客户端直接显示 `final_answer`。
+
+### 回答作为下一 query
+
+将问题和可读答案组合成普通文本，调用现有接口，并使用该会话的真实 `conversation_id`：
+
+```bash
+curl -N 'https://your-nexent-domain.com/api/nb/v1/chat/run' \
+  -H "Authorization: Bearer ${NEXENT_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"conversation_id":123,"agent_name":"general-assistant","query":"补充上一轮问题：通知发给内部团队，其他补充：仅研发部门。"}'
+```
+
+这里的 `123` 仅为示例。答案应包含选项文案以及用户填写的其他内容，而不只是问题 ID 或选项 ID。新运行读取普通会话历史，不恢复上一轮执行栈或计划游标。刷新后从普通消息中的 `human_interaction` 单元重建卡片；较早历史卡片只读，答案在后续 user 消息中查看。
+
+### 普通停止与兼容性
+
+仍使用 `GET /nb/v1/chat/stop/{conversation_id}`。成功表示停止已受理，在途 worker 实际退出前继续占用运行位置。若下一次发送收到 `X-Stream-Status: conflict`，应保留用户输入并提示稍后再发送，不自动重试。用户停止后的新 query 可读取原始任务、停止说明和已保存的部分结果；停止不会回滚已发生的外部操作。
+
+旧 HITL 专属路由、审批、暂停续跑、四表运行依赖和密钥配置已移除。北向 `/chat/run` 若收到 `enable_hitl`、`hitl_run_id` 或 `hitl_after_event`，明确返回 `400`；字段即使为 false、null 或零也不能继续发送。Web 与 runtime 应同步更新。普通身份、权限、附件、元数据及错误响应保持原有约定。
 
 ## 📎 上传对话附件
 

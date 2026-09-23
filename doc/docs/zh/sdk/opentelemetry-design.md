@@ -242,7 +242,8 @@ flowchart LR
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 监控总开关 |
 | `MONITORING_PROVIDER` | `otlp` | 监控 provider 和部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
-| `MONITORING_DASHBOARD_URL` | 空 | 前端顶栏监控入口跳转 URL，后端只读取并透传该值；speed 模式下可见，标准模式下仅超级管理员可见 |
+| `MONITORING_DASHBOARD_URL` | 空 | 前端顶栏监控入口跳转 URL，后端只读取并透传该值 |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | `SU,SPEED` | 可看到监控入口的角色，使用逗号分隔；配置为空时对所有角色隐藏 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | OpenTelemetry service name |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint |
@@ -300,11 +301,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 ```
 
-前端顶栏监控入口不再根据 provider 在代码中映射 UI 端口和路径。后端读取 `MONITORING_DASHBOARD_URL` 并通过 `/monitoring/status` 返回给前端；该值为空时前端不显示监控入口。speed 模式下配置 URL 后即可显示，标准模式下只有超级管理员可见。因此本地 Grafana 形态需要在 `deploy/env/monitoring.env` 中设置：
+前端顶栏监控入口不再根据 provider 在代码中映射 UI 端口和路径。后端读取 `MONITORING_DASHBOARD_URL` 和 `MONITORING_DASHBOARD_ALLOWED_ROLES`，并通过 `/monitoring/status` 返回给前端；URL 为空或当前角色不在允许列表时，前端不显示监控入口。因此本地 Grafana 形态需要在 `deploy/env/monitoring.env` 中设置：
 
 ```bash
 MONITORING_PROVIDER=grafana
 MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
+MONITORING_DASHBOARD_ALLOWED_ROLES=SU,ADMIN,SPEED
 ```
 
 ### Phoenix

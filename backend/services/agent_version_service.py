@@ -243,7 +243,10 @@ def get_version_impl(
     """
     Get version
     """
-    return search_version_by_version_no(agent_id, tenant_id, version_no)
+    version = search_version_by_version_no(agent_id, tenant_id, version_no)
+    if not version:
+        raise ValueError(f"Version {version_no} not found")
+    return version
 
 
 def get_version_detail_impl(
@@ -930,6 +933,15 @@ async def list_published_agents_impl(
                 agent_info=agent_info,
                 model_cache=model_cache
             )
+            for model_id in valid_model_ids:
+                if model_id not in model_cache:
+                    model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
+            available_model_ids = [
+                model_id
+                for model_id in valid_model_ids
+                if (model_cache.get(model_id) or {}).get("connect_status") == "available"
+            ]
+            agent_info["model_ids"] = available_model_ids
 
             # Preserve the raw data so we can adjust availability for duplicates
             enriched_agents.append({
@@ -989,6 +1001,7 @@ async def list_published_agents_impl(
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
+                "model_params_override": agent.get("model_params_override"),
             })
 
         return simple_agent_list

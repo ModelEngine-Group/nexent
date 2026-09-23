@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 ARG MIRROR
 ARG TARGETARCH
 ARG CONFIGURED_BASE_PATH=/
@@ -53,7 +53,7 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
     rm -rf ../frontend-dist/.next/cache
 
 # Production stage
-FROM node:20-alpine
+FROM node:22-alpine
 ARG APK_MIRROR
 ARG TARGETARCH
 ARG CONFIGURED_BASE_PATH=/

@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 import httpx
 from fastapi import UploadFile
 from nexent import MessageObserver
+from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 
@@ -555,9 +556,14 @@ async def upload_files_impl(
                 existing = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
                 existing_files = existing.get(
                     "files", []) if isinstance(existing, dict) else []
-                # Prefer 'file' field; fall back to 'filename' if present
+                # list_files merges durable lifecycle rows, including this
+                # batch's own -- exclude them or every first upload renames
+                # itself to <name>_1 (only merged rows carry a file_id).
+                own_file_ids = {r["file_id"] for r in lifecycle_records if r.get("file_id")}
                 existing_names = set()
                 for item in existing_files:
+                    if item.get("file_id") in own_file_ids:
+                        continue
                     name = (item.get("file") or item.get(
                         "filename") or "").strip()
                     if name:
@@ -791,13 +797,22 @@ async def delete_file_impl(
                 )
 
     if reference:
-        result = await asyncio.to_thread(
+        result = await run_blocking(
+            "delete-storage-file",
             delete_file,
+            lane="control-io",
+            owner="config",
             object_name=reference.object_name,
             bucket=reference.bucket_name,
         )
     else:
-        result = await asyncio.to_thread(delete_file, object_name=object_name)
+        result = await run_blocking(
+            "delete-storage-file",
+            delete_file,
+            object_name=object_name,
+            lane="control-io",
+            owner="config",
+        )
     if not result["success"]:
         raise Exception(
             f"File does not exist or deletion failed: {result.get('error', 'Unknown error')}")

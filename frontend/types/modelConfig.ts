@@ -1,9 +1,6 @@
 // Model connection status type
 export type ModelConnectStatus =
-  | "not_detected"
-  | "detecting"
-  | "available"
-  | "unavailable";
+  "not_detected" | "detecting" | "available" | "unavailable";
 
 // API response type
 export interface ApiResponse<T = any> {
@@ -21,7 +18,13 @@ export type ModelSource =
   | "tokenpony"
   | "OpenAI-API-Compatible"
   | "modelengine"
-  | "volcengine";
+  | "volcengine"
+  | "deepseek"
+  | "zhipu"
+  | "anthropic"
+  | "google"
+  | "mistral"
+  | "xai";
 
 // Model type
 export type ModelType =
@@ -35,6 +38,33 @@ export type ModelType =
   | "vlm3"
   | "vlm4"
   | "multi_embedding";
+
+export type ReasoningEffort =
+  | "auto"
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
+export interface ReasoningCapability {
+  status: "supported" | "unsupported" | "unknown";
+  control: "toggle" | "effort" | "budget_tokens";
+  levels: ReasoningEffort[];
+  default?: ReasoningEffort | null;
+  wire_format?: "reasoning_effort" | "thinking_toggle" | "thinking_budget";
+  effort_budgets?: Record<string, number>;
+  controls?: Array<
+    | { type: "toggle" }
+    | { type: "effort"; values: string[] }
+    | { type: "budget_tokens"; min: number; max: number }
+  >;
+  matched_api?: string | null;
+  matched_model_id?: string | null;
+  source: "catalog" | "models_dev" | "operator" | "unknown";
+}
 
 // Model option interface
 export interface ModelOption {
@@ -63,6 +93,15 @@ export interface ModelOption {
   accessToken?: string;
   timeoutSeconds?: number;
   concurrencyLimit?: number;
+  // v2.6.0 inference params (model-level defaults)
+  temperature?: number;
+  topP?: number;
+  extraParams?: Record<string, unknown>;
+  reasoningCapability?: ReasoningCapability;
+  /** Whether the model-level thinking switch is enabled. */
+  enableThinking?: boolean;
+  /** Persisted model-level default, stored in extra_params.reasoning_effort. */
+  defaultReasoningEffort?: ReasoningEffort;
 }
 
 // Application configuration interface
@@ -120,15 +159,13 @@ export interface CapacitySuggestionFields {
 }
 
 export type CapacitySuggestionMatchKind =
-  | "catalog_exact"
-  | "catalog_fuzzy"
-  | "provider_discovery"
-  | "none";
+  "catalog_exact" | "catalog_fuzzy" | "provider_discovery" | "none";
 
 export type CapacitySuggestionConfidence = "high" | "medium" | "low";
 
 export interface CapacitySuggestion {
   suggestions?: CapacitySuggestionFields | null;
+  reasoningCapability?: ReasoningCapability;
   matchKind: CapacitySuggestionMatchKind;
   matchConfidence?: CapacitySuggestionConfidence | null;
   matchExplanation: string;
@@ -180,3 +217,131 @@ export interface ModelValidationResponse {
   error?: string; // Error message when connectivity fails
   capacitySuggestion?: CapacitySuggestion | null;
 }
+
+// =============================================================================
+// Model Catalog (预置模型目录) types
+// =============================================================================
+
+/**
+ * Provider summary returned by GET /model/catalog/providers.  One item per
+ * provider block in backend/configs/model_catalog.json.
+ * Field names align with Pydantic's default (snake_case) JSON dump so no
+ * field-level mapping is needed between backend and frontend.
+ */
+export interface ModelCatalogProviderInfo {
+  id: string; // e.g. "silicon", "dashscope" (Pydantic field name)
+  display_name: string; // human-readable (zh-CN) name for UI buttons
+  base_url?: string | null; // default API base URL for this provider
+  supported_types: string[]; // llm / embedding / rerank / ...
+  model_count?: number; // how many preset models are registered
+}
+
+/**
+ * A single model profile from the catalog.  Every field is intentionally
+ * aligned to the snake_case form the backend /model/create endpoint accepts, so
+ * the frontend can do a straight 1:1 spread into the Add Model form.
+ *
+ * NOTE: extra fields from backend are stored as snake_case since they pass through
+ * Pydantic->json. In the frontend we keep them as snake_case too to avoid
+ * mapping boilerplate when submitting to /model/create.
+ */
+export interface ModelCatalogProfile {
+  model_type: ModelType;
+  display_name?: string | null;
+  base_url?: string | null;
+  model_factory?: string | null;
+  context_window_tokens?: number | null;
+  max_input_tokens?: number | null;
+  max_output_tokens?: number | null;
+  default_output_reserve_tokens?: number | null;
+  tokenizer_family?: string | null;
+  capability_profile_version?: string | null;
+  support_tool_calls?: boolean | null;
+  support_structured_outputs?: boolean | null;
+  support_reasoning?: boolean | null;
+  reasoning_capability?: ReasoningCapability | null;
+  support_vision?: boolean | null;
+  is_multimodal_inputs?: boolean | null;
+  modality?: string | null;
+  dimension?: number | null;
+  max_audio_length_seconds?: number | null;
+  audio_sampling_rate?: number | null;
+  expected_chunk_size?: number | null;
+  maximum_chunk_size?: number | null;
+  chunking_batch_size?: number | null;
+  timeout_seconds?: number | null;
+  concurrency_limit?: number | null;
+  recommended?: boolean | null;
+  capabilities?: string[];
+  tags?: string[];
+  pricing_per_1k_input_tokens_usd?: number | null;
+  pricing_per_1k_output_tokens_usd?: number | null;
+  docs_url?: string | null;
+  release_date?: string | null;
+}
+
+/** Entry from GET /model/catalog/{provider}/models */
+export interface ModelCatalogModelEntry {
+  provider_key: string;
+  model_name: string; // e.g. "Qwen/Qwen3-8B" (slash allowed in URL path)
+  profile: ModelCatalogProfile;
+}
+
+/** Single provider + all its models, used inside the /catalog/all payload. */
+export interface ModelCatalogFullProvider {
+  provider_info: ModelCatalogProviderInfo;
+  models: ModelCatalogModelEntry[];
+}
+
+/**
+ * Payload returned by GET /model/catalog/all.
+ * One call gives the frontend everything it needs - all filtering and
+ * individual profile lookups are done in the browser.
+ */
+export interface ModelCatalogFullPayload {
+  version: string;
+  metadata?: Record<string, any>;
+  providers: ModelCatalogFullProvider[];
+}
+
+/** Generic wrapper around catalog endpoint responses all share this envelope. */
+export interface ModelCatalogEnvelope<T> {
+  message: string;
+  catalog_available: boolean;
+  data: T;
+}
+
+// =============================================================================
+// v2.6.0: Fixed inference field specs (advanced settings)
+// =============================================================================
+
+/** Field type for fixed inference params, mirrors backend FieldSpec.type */
+export type InferenceFieldType =
+  "str" | "int" | "float" | "bool" | "select" | "array_str";
+
+/** Single field specification, mirrors backend FieldSpec Pydantic model. */
+export interface InferenceFieldSpec {
+  key: string;
+  label: string;
+  type: InferenceFieldType;
+  range?: number[] | null; // [min, max] for numeric fields
+  default?: unknown;
+  options?: string[] | null; // for "select" type
+  max_items?: number | null; // for "array_str" type
+}
+
+/** Field specs grouped by model type, returned by GET /model/catalog/inference_field_specs */
+export type InferenceFieldSpecsByType = Record<string, InferenceFieldSpec[]>;
+
+/**
+ * Per-agent model params override.
+ * Shape: { "<model_id>": { temperature?: number, topP?: number, extraParams?: Record<string, unknown> } }
+ */
+export type ModelParamsOverride = Record<
+  string,
+  {
+    temperature?: number | null;
+    top_p?: number | null;
+    extra_params?: Record<string, unknown> | null;
+  }
+>;

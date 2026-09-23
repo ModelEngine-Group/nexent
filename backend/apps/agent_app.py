@@ -36,13 +36,14 @@ from consts.exceptions import (
     AppException,
     UnauthorizedError,
     ValidationError,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
 from management.services.agent.service import (
     get_agent_info_impl,
     get_agent_icon_impl,
-    get_creating_sub_agent_info_impl,
     update_agent_info_impl,
     upload_agent_icon_impl,
     delete_agent_impl,
@@ -144,6 +145,22 @@ agent_config_router = APIRouter(prefix="/agent")
 agent_share_router = APIRouter(prefix="/agent-share", route_class=AgentShareRoute)
 
 
+def _runtime_overload_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, RuntimeQueueTimeoutError):
+        code = "RUNTIME_QUEUE_TIMEOUT"
+        retry_after = exc.retry_after_seconds
+        message = "Agent runtime queue wait timed out."
+    else:
+        code = "RUNTIME_CAPACITY_FULL"
+        retry_after = 1
+        message = "Agent runtime is at capacity."
+    return JSONResponse(
+        status_code=HTTPStatus.TOO_MANY_REQUESTS,
+        content={"code": code, "message": message, "retryable": True},
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
 @agent_config_router.get("/{agent_id}/knowledge-capabilities")
 async def get_agent_knowledge_capabilities_api(
     agent_id: int,
@@ -199,6 +216,10 @@ async def agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -242,6 +263,10 @@ async def northbound_agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
+    except AppException:
+        raise
     except Exception as exc:
         logger.error("Northbound agent run error: %s", exc)
         raise HTTPException(
@@ -309,7 +334,7 @@ async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None
     """
     Stop an agent run by conversation ID or ephemeral debug run ID.
     """
-    user_id, _ = get_current_user_id(authorization)
+    user_id, tenant_id = get_current_user_id(authorization)
     return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id)
 
 
@@ -323,7 +348,7 @@ async def northbound_agent_stop_api(
 ):
     """Stop a northbound agent run inside the runtime service."""
     try:
-        user_id, _ = verify_internal_runtime_jwt(authorization)
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
         return stop_agent_tasks(conversation_id, user_id)
     except UnauthorizedError as exc:
         raise HTTPException(
@@ -376,19 +401,6 @@ async def get_agent_by_name_api(
         logger.error(f"Agent by name lookup error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent not found.")
-
-
-@agent_config_router.get("/get_creating_sub_agent_id")
-async def get_creating_sub_agent_info_api(authorization: Optional[str] = Header(None)):
-    """
-    Create a new sub agent, return agent_ID
-    """
-    try:
-        return await get_creating_sub_agent_info_impl(authorization)
-    except Exception as e:
-        logger.error(f"Agent create error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent create error.")
 
 
 @agent_config_router.post("/update")

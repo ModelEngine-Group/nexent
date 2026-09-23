@@ -63,7 +63,7 @@ def _get_plugin_loader() -> PluginLoader:
     global _plugin_loader
     if _plugin_loader is None:
         plugins_dir = MEMORY_PROVIDER_PLUGINS_DIR or "/mnt/nexent-data/memory-provider-plugins"
-        _plugin_loader = PluginLoader(plugins_dir)
+        _plugin_loader = PluginLoader(plugins_dir, include_builtin_plugins=True)
         _plugin_loader.load_all()
     return _plugin_loader
 

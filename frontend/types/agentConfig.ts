@@ -34,6 +34,7 @@ export type AgentConfigUpdate = Partial<
     | "is_a2a"
     | "greeting_message"
     | "example_questions"
+    | "model_params_override"
   >
 >;
 
@@ -131,7 +132,15 @@ export interface PublishedAgent {
   greeting_message?: string;
   example_questions?: string[];
   allow_chat_metadata?: boolean;
+  /** Agent-owned model inference snapshots used by the chat runtime. */
+  model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   icon_url?: string;
+}
+
+export interface ModelParamsOverrideEntry {
+  temperature?: number | null;
+  top_p?: number | null;
+  extra_params?: Record<string, unknown> | null;
 }
 
 export interface Agent {
@@ -148,6 +157,15 @@ export interface Agent {
   model_names?: string[]; // Model display names resolved from model_ids for list/detail responses
   max_step: number;
   requested_output_tokens?: number | null;
+  /**
+   * v2.6.0: Per-agent overrides for model inference params.
+   * Shape: { "<model_id>": { temperature?: number|null, top_p?: number|null, extra_params?: Record<string, unknown>|null } }
+   * NULL/undefined means inherit the model's default values.
+   */
+  model_params_override?: Record<
+    string,
+    ModelParamsOverrideEntry
+  > | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   allow_chat_metadata?: boolean;
@@ -514,6 +532,8 @@ export interface DebugConfigProps {
 export interface McpConfigModalProps {
   visible: boolean;
   onCancel: () => void;
+  onBeforeMcpDelete?: () => void | Promise<void>;
+  onMcpDeleted?: () => void | Promise<void>;
 }
 
 // ========== Agent Call Relationship Interfaces ==========

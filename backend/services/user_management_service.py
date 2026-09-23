@@ -16,6 +16,7 @@ from pydantic import EmailStr
 from utils.auth_utils import (
     get_supabase_client,
     get_supabase_admin_client,
+    delete_supabase_user,
     calculate_expires_at,
     get_jwt_expiry_seconds,
     ensure_cas_session_active_from_authorization,
@@ -40,6 +41,7 @@ from consts.exceptions import (
     IncorrectInviteCodeException,
     UserRegistrationException,
     UnauthorizedError,
+    TenantResourceLimitError,
     ValidationError,
 )
 from consts.error_code import ErrorCode
@@ -47,6 +49,7 @@ from consts.exceptions import AppException
 
 from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
+from database.oauth_account_db import list_oauth_accounts_by_user_id
 from database.group_db import query_group_ids_by_user
 from database.client import as_dict, get_db_session
 from database.db_models import RolePermission
@@ -57,6 +60,25 @@ from management.services.skill.service import init_skill_list_for_tenant
 
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
+
+
+def get_provider_username(user_id: str, provider: str) -> Optional[str]:
+    """Return a non-empty username stored for a linked authentication provider."""
+    try:
+        accounts = list_oauth_accounts_by_user_id(user_id)
+    except Exception as e:
+        logging.warning(
+            "Failed to load %s username for user %s: %s", provider, user_id, e
+        )
+        return None
+
+    for account in accounts:
+        if account.get("provider") != provider:
+            continue
+        username = str(account.get("provider_username") or "").strip()
+        if username:
+            return username
+    return None
 
 
 def set_auth_token_to_client(client: Client, token: str) -> None:
@@ -229,8 +251,14 @@ async def signup_user_with_invitation(email: EmailStr,
         is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
         # Create user tenant relationship
-        insert_user_tenant(
-            user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
+        try:
+            insert_user_tenant(
+                user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
+        except TenantResourceLimitError:
+            # Supabase auth creation happens before the local tenant-limit check.
+            # Remove the auth identity so a rejected registration is fully rolled back.
+            delete_supabase_user(user_id)
+            raise
 
         # Use invitation code now that we have the real user_id
         if invitation_info:

@@ -39,6 +39,7 @@ from consts.exceptions import (
     UserRegistrationException,
     UnauthorizedError,
     AppException,
+    TenantResourceLimitError,
     ValidationError,
 )
 from consts.error_code import ErrorCode
@@ -278,6 +279,30 @@ class TestUserSignup:
 
             assert response.status_code == HTTPStatus.BAD_REQUEST
             assert "ASSET_OWNER feature is not enabled" in response.json()["detail"]
+
+    def test_signup_tenant_limit_returns_standard_429_payload(self):
+        """Test registration returns the structured tenant quota response."""
+        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+            mock_signup.side_effect = TenantResourceLimitError(
+                "Tenant user limit reached: maximum 10000 users per tenant",
+                resource="users",
+                scope="tenant",
+                limit=10000,
+                current_count=10000,
+            )
+
+            response = client.post(
+                "/user/signup",
+                json={
+                    "email": "limit@example.com",
+                    "password": "password123",
+                    "invite_code": "LIMIT123",
+                },
+            )
+
+        assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert response.json()["code"] == ErrorCode.TENANT_RESOURCE_EXCEEDED.value
+        assert response.json()["details"]["limit"] == 10000
 
     def test_signup_registration_service_exception(self):
         """Test registration fails due to service error"""
@@ -793,18 +818,21 @@ class TestCurrentUserInfo:
         mock_get_user_info.assert_called_once_with("user123")
 
     @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.get_provider_username')
     @patch('apps.user_management_app.validate_token')
     @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
     def test_current_user_info_marks_cas_user(
         self,
         mock_get_user_info,
         mock_validate_token,
+        mock_get_provider_username,
         mock_extract_session_id,
     ):
         """Test CAS-authenticated current user info includes auth provider"""
         mock_user = MockUser("user123", "test@example.com")
         mock_validate_token.return_value = (True, mock_user)
         mock_extract_session_id.return_value = "cas-session-123"
+        mock_get_provider_username.return_value = "CAS User"
         mock_get_user_info.return_value = {
             "user": {
                 "user_id": "user123",
@@ -825,7 +853,9 @@ class TestCurrentUserInfo:
         assert response.status_code == HTTPStatus.OK
         data = response.json()
         assert data["data"]["user"]["auth_provider"] == "cas"
+        assert data["data"]["user"]["username"] == "CAS User"
         mock_extract_session_id.assert_called_once_with("Bearer cas-token")
+        mock_get_provider_username.assert_called_once_with("user123", "cas")
 
     def test_current_user_info_no_authorization(self):
         """Test current user info retrieval without authorization header"""

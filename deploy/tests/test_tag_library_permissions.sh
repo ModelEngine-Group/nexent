@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MIGRATION_FILE="$DEPLOY_ROOT/sql/migrations/v2.5.2_unified_tag_management.sql"
+MIGRATION_FILE="$DEPLOY_ROOT/sql/migrations/v2.6.0_merged_migrations.sql"
 INIT_FILE="$DEPLOY_ROOT/sql/init.sql"
 
 fail() {

@@ -9,6 +9,18 @@ from dotenv import load_dotenv
 # avoids silently replacing operator-provided service addresses.
 load_dotenv(override=False)
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    """Read a positive integer configuration value with a clear validation error."""
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
 TEST_VOICE_PATH = os.path.join(os.path.dirname(
@@ -148,6 +160,8 @@ OAUTH_LOGIN_MODE = os.getenv("OAUTH_LOGIN_MODE", "button").lower()
 # CAS SSO Configuration
 CAS_ENABLED = os.getenv("CAS_ENABLED", "false").lower() in ("true", "1", "yes", "on")
 CAS_SERVER_URL = os.getenv("CAS_SERVER_URL", "").rstrip("/")
+# Optional backend-only URL for CAS servers reachable through an internal container network.
+CAS_INTERNAL_SERVER_URL = os.getenv("CAS_INTERNAL_SERVER_URL", "").rstrip("/")
 CAS_VALIDATE_PATH = os.getenv("CAS_VALIDATE_PATH", "/p3/serviceValidate")
 CAS_CALLBACK_BASE_URL = os.getenv("CAS_CALLBACK_BASE_URL", OAUTH_CALLBACK_BASE_URL).rstrip("/")
 # CAS login mode:
@@ -197,12 +211,12 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
-# Tenant resource hard limits. These values are intentionally not configurable.
-MAX_TENANT_COUNT = 100
-MAX_USERS_PER_TENANT = 10_000
-MAX_GROUPS_PER_TENANT = 1_000
-MAX_SUPER_ADMIN_COUNT = 1
-MAX_ADMINS_PER_TENANT = 1_000
+# Tenant resource hard limits. Environment variables override these defaults.
+MAX_TENANT_COUNT = _positive_int_env("MAX_TENANT_COUNT", 100)
+MAX_USERS_PER_TENANT = _positive_int_env("MAX_USERS_PER_TENANT", 10_000)
+MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
+MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
+MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -283,6 +297,45 @@ RUNTIME_RUN_TTL_SECONDS = int(os.getenv("RUNTIME_RUN_TTL_SECONDS", "86400"))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv("RUNTIME_CANCEL_TTL_SECONDS", "86400"))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv("RUNTIME_COMPLETED_TTL_SECONDS", "300"))
 RUNTIME_CANCEL_POLL_INTERVAL_SECONDS = float(os.getenv("RUNTIME_CANCEL_POLL_INTERVAL_SECONDS", "1.0"))
+RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS = int(
+    os.getenv("RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS", "50")
+)
+RUNTIME_AGENT_THREAD_MAX_WORKERS = int(os.getenv("RUNTIME_AGENT_THREAD_MAX_WORKERS", "200"))
+RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE = int(os.getenv("RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE", "32"))
+if RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS <= 0:
+    raise ValueError("RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS must be greater than zero")
+if RUNTIME_AGENT_THREAD_MAX_WORKERS <= 0:
+    raise ValueError("RUNTIME_AGENT_THREAD_MAX_WORKERS must be greater than zero")
+RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS", "30")
+)
+if RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS must be greater than zero")
+RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS = float(
+    os.getenv("RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS", "5")
+)
+RUNTIME_MCP_TOOL_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS", "60")
+)
+RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS", "5")
+)
+if RUNTIME_MCP_TOOL_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS must be greater than zero")
+if RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS must be greater than zero")
+RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = float(
+    os.getenv("RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS", "30")
+)
+NORTHBOUND_CONTROL_THREAD_MAX_WORKERS = int(
+    os.getenv("NORTHBOUND_CONTROL_THREAD_MAX_WORKERS", "8")
+)
+NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE = int(
+    os.getenv("NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE", "64")
+)
+NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = float(
+    os.getenv("NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS", "15")
+)
 NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv("NORTHBOUND_IDEMPOTENCY_TTL_SECONDS", "600"))
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv("NORTHBOUND_RATE_LIMIT_ENABLED", "true").lower() == "true"
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv("NORTHBOUND_RATE_LIMIT_PER_MINUTE", "120"))
@@ -611,6 +664,8 @@ MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
 MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
 MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
+MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv(
+    "MONITORING_DASHBOARD_ALLOWED_ROLES", "SU,SPEED")
 MONITORING_TRACE_CONTENT_MODE = os.getenv(
     "MONITORING_TRACE_CONTENT_MODE", "summary")
 MONITORING_TRACE_MAX_CHARS = os.getenv("MONITORING_TRACE_MAX_CHARS", "4000")
@@ -797,6 +852,19 @@ enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"
+
+# Model Catalog - 预置模型目录配置文件路径
+MODEL_CATALOG_JSON_PATH = os.getenv(
+    "MODEL_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "model_catalog.json")
+)
+"""Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
+
+MODELS_DEV_CATALOG_JSON_PATH = os.getenv(
+    "MODELS_DEV_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "models_dev_catalog.json")
+)
+"""models.dev capability catalog downloaded during the backend image build."""
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

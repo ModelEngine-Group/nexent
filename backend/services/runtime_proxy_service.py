@@ -29,6 +29,7 @@ _HOP_BY_HOP_HEADERS = {
 _STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 _REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _EVALUATION_DISPATCH_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
+_EVALUATION_TRIAL_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 _RUNTIME_SERVICE_UNAVAILABLE_MESSAGE = "Runtime service is unavailable"
 
 
@@ -101,21 +102,90 @@ def dispatch_agent_evaluation_run(
     return payload
 
 
+async def forward_agent_evaluation_trial_run(
+    *,
+    agent_id: int,
+    agent_version_no: int,
+    query: str,
+    judge_model_id: int,
+    evaluator_ids: list[int] | None,
+    language: str,
+    user_id: str,
+    tenant_id: str,
+) -> dict:
+    """Execute an ad-hoc evaluation in the Runtime process and return its result."""
+    try:
+        async with create_httpx_client(
+            headers=_authorization_headers(user_id, tenant_id),
+            timeout=_EVALUATION_TRIAL_TIMEOUT,
+        ) as client:
+            response = await client.post(
+                _runtime_url("/agent-evaluations/internal/trial-run"),
+                json={
+                    "agent_id": agent_id,
+                    "agent_version_no": agent_version_no,
+                    "query": query,
+                    "judge_model_id": judge_model_id,
+                    "evaluator_ids": evaluator_ids,
+                    "language": language,
+                },
+            )
+    except httpx.TimeoutException as exc:
+        raise RuntimeServiceTimeoutError("Runtime trial evaluation timed out") from exc
+    except httpx.RequestError as exc:
+        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
+
+    if response.status_code >= 400:
+        raise RuntimeUpstreamError(
+            status_code=response.status_code,
+            content=response.content,
+            headers=_forwarded_headers(response.headers),
+        )
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeServiceUnavailableError(
+            "Runtime trial evaluation response is not valid JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RuntimeServiceUnavailableError(
+            "Runtime trial evaluation response is not a JSON object"
+        )
+    return payload
+
+
 async def forward_agent_run(
     agent_request: AgentRequest,
     user_id: str,
     tenant_id: str,
 ) -> StreamingResponse:
     """Start a runtime agent run and proxy its response without buffering."""
+    return await _forward_runtime_stream(
+        "POST", "/agent/internal/northbound/run", user_id, tenant_id,
+        payload=agent_request.model_dump(mode="json"),
+    )
+
+
+async def _forward_runtime_stream(
+    method: str,
+    path: str,
+    user_id: str,
+    tenant_id: str,
+    *,
+    payload: dict | None = None,
+    params: dict | None = None,
+) -> StreamingResponse:
+    """Forward SSE bytes and preserve runtime status, headers, and event IDs."""
     client = create_httpx_client(
         headers=_authorization_headers(user_id, tenant_id),
         timeout=_STREAM_TIMEOUT,
     )
     try:
         request = client.build_request(
-            "POST",
-            _runtime_url("/agent/internal/northbound/run"),
-            json=agent_request.model_dump(mode="json"),
+            method,
+            _runtime_url(path),
+            json=payload,
+            params=params,
         )
         upstream = await client.send(request, stream=True)
     except httpx.TimeoutException as exc:

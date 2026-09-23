@@ -9,6 +9,7 @@ import os
 from typing import Any, BinaryIO, Dict, List, Union
 
 from ....models import OpenAIModel
+from nexent.core.concurrency import run_blocking
 
 from ...model_context import VLMContext
 from ...multimodal_adapter import ModelInfo, MultimodalAdapter
@@ -223,7 +224,14 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
         """
         if self._model is None:
             self._build_model()
-        module_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # Anchor on the nexent package root: the probe asset lives in
+        # nexent/assets/. A relative dirname chain silently broke when this
+        # module moved deeper into the package (3 levels up resolved to
+        # .../core/gateway instead of the package root), so the local probe
+        # image was never found and every check fell back to the public URL -
+        # which fails in offline deployments.
+        import nexent
+        module_dir = os.path.dirname(os.path.abspath(nexent.__file__))
         test_image_path = os.path.join(module_dir, "assets", "git-flow.png")
         if os.path.exists(test_image_path):
             base64_image = self.encode_image(test_image_path)
@@ -243,7 +251,8 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             ]
 
         try:
-            await asyncio.to_thread(
+            await run_blocking(
+                "gateway-vlm-connectivity",
                 self._model.client.chat.completions.create,
                 model=self._model.model_id,
                 messages=[{"role": "user", "content": content_parts}],

@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Card, Dropdown } from "antd";
+import { Button, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
   Bot,
@@ -23,6 +23,7 @@ import {
   type MineCardMenuAction,
 } from "@/lib/agentRepositoryMine";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
+import ResourceCard from "@/components/resource/ResourceCard";
 
 interface MyAgentCardProps {
   agent: MyEditableAgentItem;
@@ -49,8 +50,7 @@ const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
 const STATUS_BADGE_CLASS: Record<"pending" | "shared" | "rejected", string> = {
   pending:
     "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
-  shared:
-    "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+  shared: "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary",
   rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
 };
 
@@ -80,7 +80,6 @@ export function MyAgentCard({
     permission: agent.permission,
   });
   const repositoryInfo = agent.repository_info ?? [];
-  const hasRepositoryInfo = repositoryInfo.length > 0;
   const repositoryStatusBadge =
     getMineCardRepositoryStatusBadge(repositoryInfo);
   const footerDate = formatMineDate(agent.version_create_time);
@@ -113,7 +112,16 @@ export function MyAgentCard({
     };
   });
 
-  if (menuActions.length > 0) {
+  if (canEvaluate) {
+    menuItems.push({
+      key: "evaluate",
+      icon: <LineChart className="size-3.5" aria-hidden />,
+      label: t("agentRepository.mine.evaluate"),
+      onClick: onEvaluate,
+    });
+  }
+
+  if (menuItems.length > 0 && canEdit) {
     menuItems.push({ type: "divider" });
   }
 
@@ -139,19 +147,12 @@ export function MyAgentCard({
   }
 
   return (
-    <Card
-      className={`h-full rounded-2xl border border-slate-200 shadow-sm dark:border-slate-700 ${
-        highlighted ? "ring-2 ring-primary ring-offset-2" : ""
+    <ResourceCard
+      title={title}
+      className={`h-full ${
+        highlighted ? "rounded-xl ring-2 ring-primary ring-offset-2" : ""
       }`}
       aria-current={highlighted ? "true" : undefined}
-      styles={{
-        body: {
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          padding: 20,
-        },
-      }}
     >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -163,54 +164,63 @@ export function MyAgentCard({
               <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
                 {title}
               </h3>
-              {hasRepositoryInfo ? (
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                  <Share2 className="size-2.5" aria-hidden />
-                  {t("agentRepository.mine.onHub")}
-                </span>
-              ) : null}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <span
-                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-                  published
-                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                    : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
-                }`}
-              >
-                {published
-                  ? t("agentRepository.mine.lifecycle.published")
-                  : t("agentRepository.mine.lifecycle.draft")}
-              </span>
-              {repositoryStatusBadge ? (
-                <span
-                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
-                >
-                  {t(repositoryStatusBadge.labelKey)}{" "}
-                  {repositoryStatusBadge.versionLabel}
+            <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              {versionLabel != null ? (
+                <span className="inline-flex items-center gap-1.5 truncate">
+                  <span
+                    className="size-1.5 shrink-0 rounded-full bg-primary"
+                    aria-hidden
+                  />
+                  {t("agentRepository.mine.currentVersion", {
+                    version: versionLabel,
+                  })}
                 </span>
               ) : null}
             </div>
           </div>
         </div>
 
-        {canEdit || published ? (
-          <Dropdown
-            menu={{ items: menuItems }}
-            open={guideMenuOpen}
-            onOpenChange={onGuideMenuOpenChange}
-            trigger={["click"]}
-          >
-            <Button
-              type="text"
-              size="small"
-              className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-              icon={<MoreHorizontal className="size-4" aria-hidden />}
-              aria-label={t("agentRepository.mine.menu.more")}
-              aria-haspopup="menu"
-            />
-          </Dropdown>
-        ) : null}
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          {menuItems.length > 0 ? (
+            <Dropdown
+              menu={{ items: menuItems }}
+              open={guideMenuOpen}
+              onOpenChange={onGuideMenuOpenChange}
+              trigger={["click"]}
+            >
+              <Button
+                type="text"
+                size="small"
+                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                icon={<MoreHorizontal className="size-4" aria-hidden />}
+                aria-label={t("agentRepository.mine.menu.more")}
+                aria-haspopup="menu"
+              />
+            </Dropdown>
+          ) : null}
+          <div className="flex items-center gap-1.5">
+            {repositoryStatusBadge ? (
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
+              >
+                {t(repositoryStatusBadge.labelKey)}{" "}
+                {repositoryStatusBadge.versionLabel}
+              </span>
+            ) : null}
+            <span
+              className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                published
+                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                  : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+              }`}
+            >
+              {published
+                ? t("agentRepository.mine.lifecycle.published")
+                : t("agentRepository.mine.lifecycle.draft")}
+            </span>
+          </div>
+        </div>
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
@@ -230,36 +240,20 @@ export function MyAgentCard({
         </div>
       ) : null}
 
-      <div className="mt-auto flex flex-col gap-3">
-        <div className="flex min-h-[1.75rem] items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          <div className="min-w-0">
-            {versionLabel != null ? (
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  className="size-1.5 rounded-full bg-primary"
-                  aria-hidden
-                />
-                {t("agentRepository.mine.currentVersion", {
-                  version: versionLabel,
-                })}
-              </span>
-            ) : null}
-          </div>
-          <div className="shrink-0">
-            {footerDate ? (
-              <span className="inline-flex items-center gap-1">
-                <Clock className="size-3.5" aria-hidden />
-                {footerDate}
-              </span>
-            ) : null}
-          </div>
+      <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+        <div className="min-w-0">
+          {footerDate ? (
+            <span className="inline-flex items-center gap-1">
+              <Clock className="size-3.5" aria-hidden />
+              {footerDate}
+            </span>
+          ) : null}
         </div>
-
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {canEdit ? (
             <Button
-              type="default"
-              className="min-w-0 flex-1"
+              type="text"
+              size="small"
               icon={<Pencil className="size-3.5" aria-hidden />}
               onClick={onEdit}
             >
@@ -267,8 +261,8 @@ export function MyAgentCard({
             </Button>
           ) : (
             <Button
-              type="default"
-              className="min-w-0 flex-1"
+              type="text"
+              size="small"
               icon={<Eye className="size-3.5" aria-hidden />}
               onClick={onView}
               disabled={!canView}
@@ -276,17 +270,8 @@ export function MyAgentCard({
               {t("agentRepository.mine.view")}
             </Button>
           )}
-          <Button
-            type="default"
-            className="min-w-0 flex-1"
-            icon={<LineChart className="size-3.5" aria-hidden />}
-            onClick={onEvaluate}
-            disabled={!canEvaluate}
-          >
-            {t("agentRepository.mine.evaluate")}
-          </Button>
         </div>
       </div>
-    </Card>
+    </ResourceCard>
   );
 }

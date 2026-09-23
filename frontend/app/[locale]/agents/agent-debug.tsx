@@ -120,15 +120,16 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({ isCompareMode = false }) =>
     );
   }
 
-  if (isCompareMode) {
-    return (
-      <div className="h-full w-full">
+  return (
+    <div className="h-full w-full">
+      <div className={isCompareMode ? "hidden h-full w-full" : "h-full w-full"}>
+        <AgentDebugChat agent={debugAgent} agentId={agentId} />
+      </div>
+      <div className={isCompareMode ? "h-full w-full" : "hidden h-full w-full"}>
         <AgentDebugComparePanel agentId={agentId} />
       </div>
-    );
-  }
-
-  return <AgentDebugChat agent={debugAgent} agentId={agentId} />;
+    </div>
+  );
 };
 
 export default AgentDebugPanel;

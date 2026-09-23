@@ -18,26 +18,27 @@ import logging
 import time
 from http import HTTPStatus
 from typing import Annotated, List, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, File, Path, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
+from starlette.background import BackgroundTask
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
 from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
-    AidpKbConflictError,
-    AidpKbNotFoundError,
-    AidpKbPermissionDeniedError,
-    AidpKbSyncError,
     AidpGroupValidationError,
+    AidpKbConflictError,
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_access_service import (
+    get_cached_aidp_channels,
     get_cached_aidp_doc_count,
     get_cached_aidp_kb_detail,
     invalidate_aidp_catalog_cache,
@@ -45,24 +46,31 @@ from ext_components.aidp.services.aidp_access_service import (
     invalidate_aidp_kb_detail_cache,
     resolve_current_aidp_access,
 )
+from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
+from ext_components.aidp.services.aidp_permission_service import (
+    EDIT,
+    PRIVATE,
+    READ_ONLY,
+    _validate_group_ids_strict,  # noqa: F401 - retained as a module-level compatibility symbol
+)
 from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
     count_aidp_docs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
     get_aidp_kb_impl,
+    list_aidp_channels_impl,
+    list_aidp_doc_history_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
+    remove_aidp_docs_impl,
+    select_aidp_channel,
+    stream_aidp_doc_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from ext_components.aidp.services.aidp_permission_service import (
-    EDIT,
-    PRIVATE,
-    READ_ONLY,
-    _validate_group_ids_strict,
-)
 from utils import auth_utils as auth_utils_module
+
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
@@ -71,6 +79,14 @@ AIDP_MAX_UPLOAD_FILE_COUNT = 50
 AIDP_SMALL_FILE_MAX_SIZE_BYTES = 20 * 1024 * 1024
 AIDP_OTHER_FILE_MAX_SIZE_BYTES = 1024 * 1024 * 1024
 AIDP_SMALL_FILE_EXTENSIONS = {"txt", "xls", "xlsx", "csv"}
+
+# AIDP document statuses (mirrors the file-history vocabulary): UPLOADING,
+# PROCESSING and EXTRACTING are the stages a file walks through, COMPLETED and
+# FAILED are the two terminal outcomes. Only the terminal ones end the wait, so
+# every other reported status is counted as work in progress: `processing_count`
+# is what keeps the frontend polling, and a build that reports a stage we do not
+# know yet must not stop it early either.
+_TERMINAL_DOC_STATUSES = ("COMPLETED", "FAILED")
 
 
 def _upload_failure(file_name: str, reason_zh: str, reason_en: str) -> dict:
@@ -174,17 +190,26 @@ class UpdateKbRequest(BaseModel):
 
 
 class SetPermissionRequest(BaseModel):
-    """Request body for setting a KB's group-level permission.
+    """Save permissions and optionally synchronize explicitly changed metadata."""
 
-    The AIDP platform is not invoked; the change is purely a local table
-    write that controls who can see the KB in subsequent list/search calls.
-    """
-
+    name: Optional[str] = Field(None, min_length=1, description="Changed KB name; omit when unchanged")
+    description: Optional[str] = Field(None, description="Changed description; omit when unchanged")
     ingroup_permission: str = Field(..., description="EDIT / READ_ONLY / PRIVATE")
     group_ids: Optional[List[int]] = Field(
         None,
         description="Group IDs granted the in-group permission. Ignored when PRIVATE.",
     )
+
+
+class RemoveAidpDocumentsRequest(BaseModel):
+
+    file_uuids: List[UUID] = Field(..., min_length=1, description="AIDP file UUIDs")
+
+
+class DownloadAidpDocumentRequest(BaseModel):
+    """AIDP file selected for download."""
+
+    file_uuid: UUID = Field(..., description="AIDP file UUID")
 
 
 # ---------------------------------------------------------------------------
@@ -243,11 +268,6 @@ def _raise_aidp_conflict(exc: IntegrityError) -> None:
     )
 
 
-# HTTPException is imported lazily to keep FastAPI's exception handler in
-# control of the response body.
-from fastapi import HTTPException  # noqa: E402  (placed here to avoid editing mid-file)
-
-
 def _credentials() -> tuple[str, str]:
     return AIDP_SERVER_URL, AIDP_API_KEY
 
@@ -263,8 +283,16 @@ def _is_user_role(user_id: str, tenant_id: str) -> bool:
     return (role or "USER").upper() == "USER"
 
 
-def _current_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
-    """Return the current AIDP catalog intersected with local user access."""
+def _current_accessible_rows(
+    user_id: str,
+    tenant_id: str,
+    keyword: str | None = None,
+) -> list[dict]:
+    """Return the current AIDP catalog intersected with local user access.
+
+    ``keyword`` is forwarded to AIDP so the remote catalog is already narrowed
+    before the permission intersection runs.
+    """
     server_url, api_key = _credentials()
     snapshot = resolve_current_aidp_access(
         server_url=server_url,
@@ -272,6 +300,7 @@ def _current_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
         user_id=user_id,
         tenant_id=tenant_id,
         aidp_tenant_id="aidp",
+        keyword=keyword,
     )
     return snapshot.accessible_rows
 
@@ -316,6 +345,179 @@ def _load_cached_doc_count(server_url: str, api_key: str, kb_id: str) -> int:
     )
 
 
+# Knowledge bases whose all-status history has already been reported as
+# unavailable. Documents are polled every few seconds while they process, so the
+# fallback is reported once per KB instead of once per poll.
+_HISTORY_FALLBACK_REPORTED: set[str] = set()
+
+
+def _log_history_fallback(kds_id: str, reason: str) -> None:
+    """Report (once per KB) that the document list fell back to ingested files.
+
+    The status column can only be filled from the history payload, so a silent
+    fallback shows up as a column of dashes. Logging the concrete reason keeps
+    the cause traceable: an AIDP build without the endpoint, a channel list whose
+    fields we cannot read, and a failing history request all land here.
+    """
+    if kds_id in _HISTORY_FALLBACK_REPORTED:
+        logger.debug(
+            "AIDP file history still unavailable for KB %s (%s)",
+            kds_id,
+            reason,
+        )
+        return
+    _HISTORY_FALLBACK_REPORTED.add(kds_id)
+    logger.warning(
+        "AIDP all-status file history unavailable for KB %s (%s); the document list falls "
+        "back to ingested files only, so files under processing stay invisible and the "
+        "status column stays empty",
+        kds_id,
+        reason,
+    )
+
+
+def _resolve_doc_history_channel(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+) -> dict | None:
+    """Resolve the ingestion channel whose directory feeds ``kds_id``.
+
+    Returns ``None`` when AIDP exposes no channel carrying both ``fs_id`` and a
+    source directory, in which case the caller keeps using the completed-files
+    listing. The channel payload shape is reported when resolution fails, so an
+    unreadable field name is visible instead of silently degrading.
+    """
+    channels = get_cached_aidp_channels(
+        server_url=server_url,
+        api_key=api_key,
+        kds_id=kds_id,
+        loader=lambda: list_aidp_channels_impl(server_url, api_key, kds_id),
+    )
+    channel = select_aidp_channel(channels, kds_id)
+    if channel is None:
+        _log_history_fallback(
+            kds_id,
+            "no channel exposes fs_id + a source dir (channels=%d, sample keys=%s)"
+            % (len(channels), sorted(channels[0].keys()) if channels else []),
+        )
+    return channel
+
+
+async def _load_doc_history(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+) -> dict | None:
+    """Fetch the all-status document history for ``kds_id`` when available.
+
+    Any failure degrades to the legacy completed-files listing rather than
+    failing the request: the channel/history endpoints are newer than the
+    document list and may be missing on older AIDP builds, and a knowledge base
+    with no matching channel must still render its ingested files. Every
+    degraded case is logged with the offending KB so the cause stays traceable.
+    """
+    try:
+        channel = await run_blocking(
+            "aidp-doc-history-channel",
+            _resolve_doc_history_channel,
+            server_url,
+            api_key,
+            kds_id,
+            lane="control-io",
+            owner="config",
+        )
+        if not channel:
+            # The reason is reported by ``_resolve_doc_history_channel``.
+            return None
+        history = await run_blocking(
+            "aidp-doc-history",
+            list_aidp_doc_history_impl,
+            server_url,
+            api_key,
+            channel["fs_id"],
+            channel["src_dir"],
+            kds_id,
+            lane="control-io",
+            owner="config",
+        )
+        items = history.get("value") if isinstance(history, dict) else None
+        if isinstance(items, list) and not items:
+            # A resolved channel directory holding no file would blank the table
+            # and hide the KB's ingested files — the directory may simply not be
+            # where this KB's uploads live. The KB-scoped listing is always safe
+            # to show, so an empty history is treated as unusable rather than
+            # authoritative (an empty KB still renders an empty list either way).
+            _log_history_fallback(
+                kds_id,
+                "history returned no files for the resolved directory "
+                f"(fs_id={channel['fs_id']}, dir_path={channel['src_dir']})",
+            )
+            return None
+        return history
+    except AppException as exc:
+        _log_history_fallback(kds_id, f"history request failed: {exc}")
+        return None
+    except Exception as exc:  # noqa: BLE001 - history is an optional enhancement
+        _log_history_fallback(kds_id, f"unexpected history error: {exc!r}")
+        return None
+
+
+def _history_sort_key(item: dict) -> tuple:
+    """Sort key placing the most recently uploaded file first.
+
+    Numeric upload timestamps sort above entries that only expose an ISO
+    ``created_at`` string, and entries with neither sink to the bottom — the
+    ordering is only ever used to bring fresh uploads to the top of page 1.
+    """
+    raw = item.get("first_upload_time")
+    if raw is None:
+        raw = item.get("create_time")
+    try:
+        return (1, float(raw))
+    except (TypeError, ValueError):
+        created_at = item.get("created_at")
+        return (0, created_at) if isinstance(created_at, str) else (0, "")
+
+
+def _paginate_history_documents(result: dict, page: int, page_size: int) -> dict:
+    """Slice an all-status history payload into one page.
+
+    The history API returns the whole channel directory in one response, so the
+    total is exact and the document Count endpoint is not needed. Newest files
+    come first so an upload shows up at the top of page 1 as soon as it is
+    accepted, instead of only after ingestion completes.
+
+    ``processing_count`` covers the WHOLE directory, not just the returned page:
+    the frontend keeps polling while it is non-zero, so a file still being
+    processed on another page also keeps the status column live.
+    """
+    raw_items = result.get("value")
+    items = (
+        [item for item in raw_items if isinstance(item, dict)]
+        if isinstance(raw_items, list)
+        else []
+    )
+    ordered = sorted(items, key=_history_sort_key, reverse=True)
+    start = (page - 1) * page_size
+    end = start + page_size
+    # Count every non-terminal status, so a file that is uploading or extracting
+    # keeps the frontend polling exactly like one that is being chunked.
+    processing_count = sum(
+        1
+        for item in ordered
+        if isinstance(item.get("status"), str)
+        and item["status"].strip().upper() not in _TERMINAL_DOC_STATUSES
+    )
+    return {
+        "value": ordered[start:end],
+        "total_count": len(ordered),
+        "has_more": end < len(ordered),
+        "total_reliable": True,
+        "processing_count": processing_count,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
@@ -326,19 +528,36 @@ async def list_knowledge_bases(
     request: Request,
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
+    keyword: Annotated[
+        str | None,
+        Query(max_length=200, description="Optional name filter forwarded to AIDP"),
+    ] = None,
 ) -> JSONResponse:
-    """List KBs the caller can access.
+    """List KBs the caller can access, optionally filtered by name.
 
     Resolution order:
-    1. Fetch every KB visible to the currently configured AIDP credentials.
+    1. Fetch the AIDP catalog visible to the configured credentials, narrowed
+       server-side by ``keyword`` when one is supplied.
     2. Intersect that catalog with the caller's effective Nexent permissions.
     3. Paginate the intersection, then fetch details for the visible page.
+
+    A non-blank ``keyword`` therefore narrows both the fetched set and the
+    reported ``total_count``: both describe the filtered, permission-scoped set.
     """
     user_id, tenant_id = await _auth(request)
 
     server_url, api_key = _credentials()
+    normalized_keyword = (keyword or "").strip() or None
     started_at = time.perf_counter()
-    rows = await asyncio.to_thread(_current_accessible_rows, user_id, tenant_id)
+    rows = await run_blocking(
+        "aidp-accessible-rows",
+        _current_accessible_rows,
+        user_id,
+        tenant_id,
+        normalized_keyword,
+        lane="control-io",
+        owner="config",
+    )
     access_resolve_ms = (time.perf_counter() - started_at) * 1000
     total_count = len(rows)
     if total_count == 0:
@@ -358,11 +577,14 @@ async def list_knowledge_bases(
         kb_id = row["kb_id"]
         async with detail_semaphore:
             try:
-                detail = await asyncio.to_thread(
+                detail = await run_blocking(
+                    "aidp-kb-detail",
                     _load_cached_kb_detail,
                     server_url,
                     api_key,
                     kb_id,
+                    lane="control-io",
+                    owner="config",
                 )
                 return detail, "ACTIVE"
             except AppException as exc:
@@ -438,7 +660,10 @@ async def list_knowledge_bases(
 async def count_knowledge_bases(request: Request) -> JSONResponse:
     """Return the accessible KB count for the calling user/tenant."""
     user_id, tenant_id = await _auth(request)
-    rows = await asyncio.to_thread(_current_accessible_rows, user_id, tenant_id)
+    rows = await run_blocking(
+        "aidp-accessible-rows", _current_accessible_rows, user_id, tenant_id,
+        lane="control-io", owner="config",
+    )
     total = len(rows)
     return JSONResponse(status_code=HTTPStatus.OK, content={"total_count": total})
 
@@ -569,11 +794,14 @@ async def get_knowledge_base(
 
     server_url, api_key = _credentials()
     try:
-        detail = await asyncio.to_thread(
+        detail = await run_blocking(
+            "aidp-kb-detail",
             _load_cached_kb_detail,
             server_url,
             api_key,
             kds_id,
+            lane="control-io",
+            owner="config",
         )
         resource_status = "ACTIVE"
     except AppException as exc:
@@ -662,12 +890,15 @@ async def upload_documents(
     valid_files, validation_failures = _validate_upload_files(files)
     server_url, api_key = _credentials()
     if valid_files:
-        result = await asyncio.to_thread(
+        result = await run_blocking(
+            "aidp-upload-documents",
             upload_aidp_docs_impl,
             server_url,
             api_key,
             kds_id,
             valid_files,
+            lane="control-io",
+            owner="config",
         )
         invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
         invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
@@ -705,20 +936,48 @@ async def list_documents(
 
     server_url, api_key = _credentials()
     started_at = time.perf_counter()
+
+    # Preferred source: the all-status history, so files appear in the list
+    # while they are still being chunked/embedded (and when they failed). The
+    # payload covers the whole channel directory, so this branch paginates
+    # in-process and reports an exact total.
+    history_result = await _load_doc_history(server_url, api_key, kds_id)
+    if history_result is not None:
+        result = _paginate_history_documents(history_result, page, page_size)
+        logger.info(
+            "AIDP document list timing: total_ms=%.1f kb_id=%s page=%d page_size=%d "
+            "page_count=%d total_count=%d total_reliable=True source=history",
+            (time.perf_counter() - started_at) * 1000,
+            kds_id,
+            page,
+            page_size,
+            len(result["value"]),
+            result["total_count"],
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+    # Fallback: the completed-files listing (historical behaviour), used when
+    # AIDP has no channel/history support for this knowledge base.
     list_result, count_result = await asyncio.gather(
-        asyncio.to_thread(
+        run_blocking(
+            "aidp-list-documents",
             list_aidp_docs_impl,
             server_url,
             api_key,
             kds_id,
             page,
             page_size,
+            lane="control-io",
+            owner="config",
         ),
-        asyncio.to_thread(
+        run_blocking(
+            "aidp-document-count",
             _load_cached_doc_count,
             server_url,
             api_key,
             kds_id,
+            lane="control-io",
+            owner="config",
         ),
         return_exceptions=True,
     )
@@ -748,11 +1007,14 @@ async def list_documents(
 
     result["total_count"] = int(total_count)
     result["has_more"] = has_more
+    # The completed-files listing carries no processing statuses, so nothing
+    # keeps the frontend polling for this knowledge base.
+    result["processing_count"] = 0
     if not count_reliable:
         result["total_reliable"] = False
     logger.info(
         "AIDP document list timing: total_ms=%.1f kb_id=%s page=%d page_size=%d "
-        "page_count=%d total_count=%d total_reliable=%s",
+        "page_count=%d total_count=%d total_reliable=%s source=completed",
         (time.perf_counter() - started_at) * 1000,
         kds_id,
         page,
@@ -764,13 +1026,72 @@ async def list_documents(
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/remove")
+async def remove_documents(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: RemoveAidpDocumentsRequest,
+) -> JSONResponse:
+    """Remove AIDP documents."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-remove-documents",
+        remove_aidp_docs_impl,
+        server_url,
+        api_key,
+        kds_id,
+        [str(file_uuid) for file_uuid in body.file_uuids],
+        lane="control-io",
+        owner="config",
+    )
+
+    success_list = result["success_list"]
+    if success_list:
+        invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+        invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/download")
+async def download_document(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: DownloadAidpDocumentRequest,
+) -> StreamingResponse:
+    """Proxy an AIDP document as a binary attachment."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+
+    server_url, api_key = _credentials()
+    aidp_response = await stream_aidp_doc_impl(
+        server_url,
+        api_key,
+        kds_id,
+        str(body.file_uuid),
+    )
+    response_headers = {
+        "Content-Disposition": aidp_response.headers["Content-Disposition"],
+        "X-File-Size": aidp_response.headers["X-File-Size"],
+    }
+
+    return StreamingResponse(
+        aidp_response.aiter_bytes(),
+        media_type=aidp_response.headers["Content-Type"],
+        headers=response_headers,
+        background=BackgroundTask(aidp_response.aclose),
+    )
+
+
 @aidp_mgmt_router.patch("/aidp-permissions/{kds_id}")
 async def set_permission(
     request: Request,
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     body: SetPermissionRequest,
 ) -> JSONResponse:
-    """Update the in-group permission for a KB (does not call AIDP)."""
+    """Save local permissions first, then synchronize supplied metadata changes."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
@@ -802,14 +1123,23 @@ async def set_permission(
                 detail=str(exc),
             )
 
-    perms.update_permission(
+    metadata = body.model_dump(include={"name", "description"}, exclude_none=True)
+    if "name" in metadata:
+        metadata["name"] = metadata["name"].strip()
+        if not metadata["name"]:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Name must not be blank")
+    result = await asyncio.to_thread(
+        save_kb_settings,
         kb_id=kds_id,
         tenant_id=tenant_id,
+        user_id=user_id,
         ingroup_permission=body.ingroup_permission,
         group_ids=final_group_ids,
-        updated_by=user_id,
+        metadata=metadata,
+        server_url=AIDP_SERVER_URL,
+        api_key=AIDP_API_KEY,
     )
-    return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
 @aidp_mgmt_router.get("/models")

@@ -12,7 +12,10 @@ import {
 import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
+import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
+import { ClarificationMessageCard } from "../components/clarification-message-card";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
+import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
@@ -49,10 +52,12 @@ import {
   CopyIcon,
   DownloadIcon,
   FileTextIcon,
+  LoaderCircleIcon,
   ImageIcon,
   MoreHorizontalIcon,
   RefreshCwIcon,
   ArrowLeft,
+  AlertTriangleIcon,
   SparklesIcon,
   type LucideIcon,
   PencilIcon,
@@ -62,8 +67,11 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
+import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
+import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
@@ -95,6 +103,67 @@ import {
   type Nl2SkillFileCardData,
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+
+type HistorySummaryData = {
+  status?: "compacting" | "accepted";
+  summary?: { markdown?: string } | string;
+  covered_through_message_id?: number;
+};
+
+const resolveDefaultReasoningEffort = (
+  modelDefault: ReasoningEffort | undefined,
+  capability: ReasoningCapability | undefined,
+  levels: readonly ReasoningEffort[]
+): ReasoningEffort | undefined => {
+  if (modelDefault && levels.includes(modelDefault)) return modelDefault;
+  if (levels.includes("auto")) return "auto";
+  if (capability?.default && levels.includes(capability.default)) {
+    return capability.default;
+  }
+  if (levels.includes(DEFAULT_REASONING_EFFORT)) {
+    return DEFAULT_REASONING_EFFORT;
+  }
+  return levels[0];
+};
+
+const formatReasoningEffortName = (level: ReasoningEffort): string => {
+  return level;
+};
+
+const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {
+  const { t } = useTranslation();
+  if (data.status === "compacting") {
+    return (
+      <div className="my-2 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+        <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
+        {t("taskWindow.historySummary.compacting")}
+      </div>
+    );
+  }
+  const markdown =
+    typeof data.summary === "string"
+      ? data.summary
+      : data.summary?.markdown || "";
+  if (!markdown) return null;
+  return (
+    <details className="my-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+      <summary className="flex cursor-pointer items-center gap-2 font-medium">
+        <FileTextIcon className="size-4" aria-hidden="true" />
+        {t("taskWindow.historySummary.title")}
+        {typeof data.covered_through_message_id === "number" && (
+          <span className="text-xs font-normal text-muted-foreground">
+            {t("taskWindow.historySummary.coveredThrough", {
+              id: data.covered_through_message_id,
+            })}
+          </span>
+        )}
+      </summary>
+      <div className="mt-3 whitespace-pre-wrap border-t pt-3 text-muted-foreground">
+        {markdown}
+      </div>
+    </details>
+  );
+};
 import {
   formatMessageDate,
   formatMessageTime,
@@ -104,6 +173,7 @@ import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
+import { formatWarningText } from "@/lib/warningText";
 import { configService } from "@/services/configService";
 import { conversationService } from "@/services/conversationService";
 import type {
@@ -150,6 +220,7 @@ export interface ThreadProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
   showComposer?: boolean;
+  interactionContent?: ReactNode;
 }
 
 /**
@@ -159,9 +230,94 @@ export interface ThreadProps {
 const useAgentModels = (
   agent: Agent | PublishedAgent
 ): readonly ModelOption[] => {
+  const { models: availableModels } = useModelList();
+
   return useMemo(() => {
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
+
+    const toSelectorModel = (id: string, fallbackName: string) => {
+      const model = availableModels.find(
+        (item) =>
+          String(item.id) === id || item.name === id || item.displayName === id
+      );
+      const agentOverride = typedAgent.model_params_override?.[id];
+      const overrideExtra = agentOverride?.extra_params;
+      const hasAgentReasoningSnapshot =
+        typeof overrideExtra?.enable_thinking === "boolean" ||
+        typeof overrideExtra?.reasoning_effort === "string" ||
+        typeof overrideExtra?.reasoning_budget_tokens === "number";
+      const capability = model?.reasoningCapability;
+      const reasoningEnabled = hasAgentReasoningSnapshot
+        ? overrideExtra?.enable_thinking === true ||
+          (overrideExtra?.enable_thinking === undefined &&
+            (typeof overrideExtra?.reasoning_effort === "string" ||
+              typeof overrideExtra?.reasoning_budget_tokens === "number"))
+        : model?.enableThinking === true;
+      const effortControl =
+        capability?.status === "supported"
+          ? capability.controls?.find((control) => control.type === "effort")
+          : undefined;
+      const capabilityLevels =
+        effortControl?.type === "effort"
+          ? (effortControl.values as ReasoningEffort[])
+          : capability?.status === "supported" && capability.levels.length > 0
+            ? capability.levels
+            : [];
+      const budgetControl =
+        capability?.status === "supported"
+          ? capability.controls?.find(
+              (control) => control.type === "budget_tokens"
+            )
+          : undefined;
+      const supportsBudget =
+        reasoningEnabled && budgetControl?.type === "budget_tokens";
+      // A numeric budget is the preferred control when the catalog exposes
+      // both budget_tokens and effort for the same model.
+      const supportsEffort =
+        reasoningEnabled && !supportsBudget && capabilityLevels.length > 0;
+      const effortLevels = [
+        "auto",
+        ...capabilityLevels.filter((level) => level !== "auto"),
+      ] as ReasoningEffort[];
+      const snapshotEffort =
+        typeof overrideExtra?.reasoning_effort === "string"
+          ? (overrideExtra.reasoning_effort as ReasoningEffort)
+          : undefined;
+      const defaultEffort = hasAgentReasoningSnapshot
+        ? (snapshotEffort ?? "auto")
+        : resolveDefaultReasoningEffort(
+            model?.defaultReasoningEffort,
+            capability,
+            effortLevels
+          );
+      const snapshotBudget =
+        typeof overrideExtra?.reasoning_budget_tokens === "number"
+          ? overrideExtra.reasoning_budget_tokens
+          : undefined;
+      return {
+        id,
+        name: fallbackName,
+        ...(supportsEffort
+          ? {
+              efforts: effortLevels.map((level) => ({
+                id: level,
+                name: formatReasoningEffortName(level),
+              })),
+              defaultEffort: defaultEffort ?? undefined,
+            }
+          : {}),
+        ...(supportsBudget
+          ? {
+              budgetTokens: {
+                min: budgetControl.min,
+                max: budgetControl.max,
+              },
+              defaultBudgetTokens: snapshotBudget,
+            }
+          : {}),
+      };
+    };
 
     if (
       model_ids &&
@@ -169,27 +325,51 @@ const useAgentModels = (
       model_names &&
       model_names.length > 0
     ) {
-      return model_ids.map((id, i) => ({
-        id: String(id),
-        name: model_names[i] ?? `Model ${id}`,
-      }));
+      const configuredModels = model_ids.map((id, i) =>
+        toSelectorModel(String(id), model_names[i] ?? `Model ${id}`)
+      );
+      return configuredModels.filter((configuredModel) =>
+        availableModels.some(
+          (model) =>
+            model.connect_status !== "unavailable" &&
+            (String(model.id) === configuredModel.id ||
+              model.name === configuredModel.id ||
+              model.displayName === configuredModel.id)
+        )
+      );
     }
 
     // Fallback for single model: check model_name on typedAgent
     const modelName = (typedAgent as unknown as { model_name?: string })
       .model_name;
-    if (modelName) {
-      return [{ id: modelName, name: modelName }];
+    const modelIsAvailable = availableModels.some(
+      (model) =>
+        model.connect_status !== "unavailable" &&
+        (model.displayName === modelName || model.name === modelName)
+    );
+    if (modelName && modelIsAvailable) {
+      const model = availableModels.find(
+        (item) => item.displayName === modelName || item.name === modelName
+      );
+      return [toSelectorModel(String(model?.id ?? modelName), modelName)];
     }
 
     // Fallback to the single model field (used by AgentDraft / debug panel)
     const singleModel = (typedAgent as unknown as { model?: string }).model;
-    if (singleModel) {
-      return [{ id: singleModel, name: singleModel }];
+    const singleModelIsAvailable = availableModels.some(
+      (model) =>
+        model.connect_status !== "unavailable" &&
+        (model.displayName === singleModel || model.name === singleModel)
+    );
+    if (singleModel && singleModelIsAvailable) {
+      const model = availableModels.find(
+        (item) => item.displayName === singleModel || item.name === singleModel
+      );
+      return [toSelectorModel(String(model?.id ?? singleModel), singleModel)];
     }
 
     return [];
-  }, [agent]);
+  }, [agent, availableModels]);
 };
 
 export const Thread: FC<ThreadProps> = ({
@@ -217,9 +397,32 @@ export const Thread: FC<ThreadProps> = ({
   onRuntimeMetadataChange,
   readOnly = false,
   showComposer = true,
+  interactionContent,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
+  const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
+  const selectedModelIsValid = Boolean(
+    selectedModelId && models.some((model) => model.id === selectedModelId)
+  );
+  const fallbackModelId = models[0]?.id;
+  const effectiveSelectedModelId = selectedModelIsValid
+    ? selectedModelId
+    : localSelectedModelId &&
+        models.some((model) => model.id === localSelectedModelId)
+      ? localSelectedModelId
+      : fallbackModelId;
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      if (!models.some((model) => model.id === modelId)) return;
+      if (selectedModelId !== undefined) {
+        onModelChange?.(modelId);
+      } else {
+        setLocalSelectedModelId(modelId);
+      }
+    },
+    [models, onModelChange, selectedModelId]
+  );
 
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
@@ -420,8 +623,8 @@ export const Thread: FC<ThreadProps> = ({
         welcomeSuggestions={welcomeSuggestions}
         onBack={onBack}
         models={models}
-        selectedModelId={selectedModelId}
-        onModelChange={onModelChange}
+        selectedModelId={effectiveSelectedModelId}
+        onModelChange={handleModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
@@ -438,6 +641,7 @@ export const Thread: FC<ThreadProps> = ({
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
         showComposer={showComposer}
+        interactionContent={interactionContent}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -554,6 +758,7 @@ interface ThreadViewProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
   showComposer: boolean;
+  interactionContent?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -596,6 +801,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   onRuntimeMetadataChange,
   readOnly,
   showComposer,
+  interactionContent,
 }) => {
   const { t } = useTranslation();
 
@@ -637,7 +843,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                   </span>
                   {hasMessages && variant !== "embedded" && (
                     <span className="text-xs text-muted-foreground">
-                      {t("chat.thread.conversation")}
+                      {displayName}
                     </span>
                   )}
                 </div>
@@ -726,6 +932,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               suggestions={welcomeSuggestions}
             />
           )}
+          {interactionContent}
         </ThreadPrimitive.Viewport>
 
         {showComposer && (
@@ -875,9 +1082,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
                   <button
                     key={suggestion.id}
                     type="button"
-                    onClick={() =>
-                      handleSampleQuestionClick(suggestion.prompt)
-                    }
+                    onClick={() => handleSampleQuestionClick(suggestion.prompt)}
                     className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -1270,21 +1475,28 @@ const AssistantMessage: FC<{
                 Boolean((part as { image?: string }).image)) ||
               (part.type === "text" &&
                 Boolean(
-                  (part as {
-                    isSearchImage?: boolean;
-                    imageSource?: SourcePartLike;
-                  }).isSearchImage &&
-                    (part as { imageSource?: SourcePartLike }).imageSource
+                  (
+                    part as {
+                      isSearchImage?: boolean;
+                      imageSource?: SourcePartLike;
+                    }
+                  ).isSearchImage &&
+                  (part as { imageSource?: SourcePartLike }).imageSource
                 ));
+            const isExecutionCodePart =
+              part.type === "data" &&
+              (part as { name?: string }).name === "execution-code";
             const chainPath: `group-${string}`[] = isImagePart
               ? ["group-image"]
               : part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
-                : part.type === "tool-call"
-                  ? ["group-chainOfThought", "group-tool"]
-                  : part.type === "source"
-                    ? ["group-source"]
-                    : ["group-default"];
+                : isExecutionCodePart
+                  ? ["group-chainOfThought", "group-execution-code"]
+                  : part.type === "tool-call"
+                    ? ["group-chainOfThought", "group-tool"]
+                    : part.type === "source"
+                      ? ["group-source"]
+                      : ["group-default"];
             if (subagentId !== undefined) {
               const groupKey =
                 `group-subagent-${subagentId}-${runId ?? "unknown"}` as const;
@@ -1369,6 +1581,8 @@ const AssistantMessage: FC<{
                   </Reasoning.Root>
                 );
               }
+              case "group-execution-code":
+                return <div data-slot="aui_execution-code">{children}</div>;
               case "group-source":
                 return (
                   <SourceGroupButton
@@ -1383,6 +1597,7 @@ const AssistantMessage: FC<{
               case "text": {
                 const textPart = part as typeof part & {
                   isError?: boolean;
+                  isWarning?: boolean;
                   text?: string;
                   isSearchImage?: boolean;
                   imageSource?: SourcePartLike;
@@ -1395,6 +1610,17 @@ const AssistantMessage: FC<{
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                       <XCircleIcon className="mt-0.5 size-4 shrink-0 text-red-500 dark:text-red-400" />
                       <span className="break-all">{textPart.text}</span>
+                    </div>
+                  );
+                }
+                if (textPart.isWarning) {
+                  const warningText = formatWarningText(textPart.text ?? "");
+                  return (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
+                      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
+                      <span className="line-clamp-3 min-w-0 break-all">
+                        {warningText}
+                      </span>
                     </div>
                   );
                 }
@@ -1430,6 +1656,46 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "clarification"
+                ) {
+                  return (
+                    <ClarificationMessageCard
+                      readOnly={readOnly}
+                      data={(part as typeof part & { data?: unknown }).data}
+                    />
+                  );
+                }
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "history-summary"
+                ) {
+                  return (
+                    <HistorySummaryCard
+                      data={
+                        (part as typeof part & { data?: unknown })
+                          .data as HistorySummaryData
+                      }
+                    />
+                  );
+                }
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "execution-code"
+                ) {
+                  const data = (
+                    part as typeof part & {
+                      data?: { code?: unknown; language?: string };
+                    }
+                  ).data;
+                  return (
+                    <ExecutionCodeBlock
+                      code={data?.code}
+                      language={data?.language}
+                    />
+                  );
+                }
                 if (
                   (part as typeof part & { name?: string }).name ===
                   "nl2skill-file"
@@ -1602,7 +1868,7 @@ const UserMessage: FC<{
         <UserMessageAttachments />
 
         <div className="aui-user-message-content-wrapper relative self-end inline-block min-w-0">
-          <div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
+          <UserMessageBubble>
             <MessagePrimitive.Quote>
               {(quote) => <QuoteBlock {...quote} />}
             </MessagePrimitive.Quote>
@@ -1613,7 +1879,7 @@ const UserMessage: FC<{
                   : DirectiveText,
               }}
             />
-          </div>
+          </UserMessageBubble>
           {!readOnly && (
             <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">
               <UserActionBar />

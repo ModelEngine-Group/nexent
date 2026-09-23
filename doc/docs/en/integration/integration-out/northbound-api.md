@@ -197,12 +197,47 @@ Parameter merge rules:
 The API returns Server-Sent Events (SSE) stream, returning Agent responses in chunks:
 
 ```text
-data: {"type":"text","content":"Analyzing data"}
+data: {"type":"model_output_thinking","content":"Analyzing data","unit_index":1}
 
-data: {"type":"text","content":", please wait..."}
+data: {"type":"model_output_thinking","content":", please wait...","unit_index":1}
 
-data: {"type":"done","conversation_id":123,"content":"Analysis complete"}
+data: {"type":"final_answer","content":"Analysis complete","unit_index":2}
 ```
+
+## Structured clarification and follow-up after stopping
+
+When essential information is missing, the Agent can return a structured clarification. The ordinary completion path ends that run and releases its worker. After the stream ends, send the answers as a normal new query in the same conversation. No capability switch, pending-request lookup, decision endpoint, or execution-resume API is required.
+
+### Clarification SSE
+
+The envelope remains `data: {"type": ..., "content": ...}`. For `type="human_interaction"`, `content` is a **JSON object** containing `schema_version: 1` and `questions`. An ordinary `final_answer` also contains the complete readable questions as a text fallback.
+
+```text
+data: {"type":"human_interaction","content":{"schema_version":1,"questions":[{"id":"audience","type":"single_choice","title":"Who is the notice for?","required":true,"options":[{"id":"team","label":"Internal team"},{"id":"client","label":"Clients"}],"allow_other":true,"placeholder":""}]},"unit_index":1}
+
+data: {"type":"final_answer","content":"1. Who is the notice for?\n   - Internal team\n   - Clients\n   - 其他 / Other","unit_index":2}
+```
+
+There are at most five questions, using `text`, `single_choice`, or `multiple_choice`. Question fields include `id`, `type`, `title`, `required`, `options`, `allow_other`, and `placeholder`; each option has an `id` and `label`. Text questions have no options, and choice questions have 2–12 options. Render the form and keep submission disabled until the current stream ends. Clients rendering a valid card may hide its exactly matching text fallback; text-only clients display `final_answer`.
+
+### Send answers as the next query
+
+Combine the questions, readable option labels, and any additional text into an ordinary query using the actual conversation ID:
+
+```bash
+curl -N 'https://your-nexent-domain.com/api/nb/v1/chat/run' \
+  -H "Authorization: Bearer ${NEXENT_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"conversation_id":123,"agent_name":"general-assistant","query":"Answers to the previous questions: the notice is for the internal team, specifically the engineering department."}'
+```
+
+`123` is only an example. Send readable answers, not just question or option IDs. The new run reads ordinary conversation history without restoring a previous execution stack or plan cursor. On refresh, rebuild the card from its ordinary `human_interaction` message unit. Older cards are read-only, and their answers appear in the following user message.
+
+### Ordinary stop and compatibility
+
+Continue using `GET /nb/v1/chat/stop/{conversation_id}`. Success acknowledges the stop request; the run remains reserved until its worker actually exits. If the next send receives `X-Stream-Status: conflict`, preserve the draft and ask the user to send again shortly without automatically retrying. A new query after stopping can read the original task, the stop notice, and saved partial results. Stopping does not roll back external operations already performed.
+
+The old HITL routes, approvals, pause/resume engine, four-table runtime dependencies, and encryption-key settings have been removed. Northbound `/chat/run` returns `400` for any request containing `enable_hitl`, `hitl_run_id`, or `hitl_after_event`, including false, null, and zero values. Update Web and runtime together. Existing identity, permissions, attachment, metadata, and ordinary error contracts remain unchanged.
 
 ## Upload Conversation Attachments
 

@@ -99,7 +99,6 @@ export const API_ENDPOINTS = {
     list: `${API_BASE_URL}/agent/list`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
-    getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
     stop: (runId: string | number) =>
       `${API_BASE_URL}/agent/stop/${encodeURIComponent(String(runId))}`,
     export: `${API_BASE_URL}/agent/export`,
@@ -215,7 +214,7 @@ export const API_ENDPOINTS = {
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
-    listByAgent: `${API_BASE_URL}/agent-evaluations`,
+    list: `${API_BASE_URL}/agent-evaluations`,
     detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
     cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
     report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
@@ -307,6 +306,19 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/model/manage/delete?display_name=${encodeURIComponent(displayName)}`,
     manageProviderModelList: `${API_BASE_URL}/model/manage/provider/list`,
     manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
+    // Preset Model Catalog (预置模型目录)
+    catalogAll: `${API_BASE_URL}/model/catalog/all`,
+    catalogProviders: `${API_BASE_URL}/model/catalog/providers`,
+    catalogProviderModels: (provider: string, modelType?: string) => {
+      const base = `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/models`;
+      return modelType
+        ? `${base}?model_type=${encodeURIComponent(modelType)}`
+        : base;
+    },
+    catalogModelProfile: (provider: string, modelName: string) =>
+      `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/${encodeURIComponent(modelName)}`,
+    // v2.6.0: fixed inference field specs by model type (advanced settings)
+    catalogInferenceFieldSpecs: `${API_BASE_URL}/model/catalog/inference_field_specs`,
   },
   knowledgeBase: {
     // Elasticsearch service
@@ -381,6 +393,10 @@ export const API_ENDPOINTS = {
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    removeKbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
+    downloadKbDocument: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
     models: `${API_BASE_URL}/aidp-mgmt/models`,
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
@@ -572,7 +588,10 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       const queryString = queryParams.toString();
@@ -599,7 +618,10 @@ export const API_ENDPOINTS = {
         queryParams.append("agent_id", String(params.agent_id));
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.search_tag_predicates?.length) {
         queryParams.append(
@@ -642,7 +664,10 @@ export const API_ENDPOINTS = {
         queryParams.append("search", params.search.trim());
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       if (params?.sort_by_update_time) {
@@ -669,7 +694,10 @@ export const API_ENDPOINTS = {
         queryParams.append("new_skill_padding", "true");
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;

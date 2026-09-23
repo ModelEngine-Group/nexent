@@ -1,7 +1,7 @@
 /**
  * AIDP Knowledge Base Management Service
  *
- * Wraps the 8 AIDP management backend endpoints.
+ * Wraps the AIDP management backend endpoints.
  * Credentials (server_url, api_key) are read by the backend from environment variables.
  */
 
@@ -29,19 +29,25 @@ export interface AidpKbDetail {
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
   resource_status?:
-    | "ACTIVE"
-    | "CREATING"
-    | "DELETE_PENDING"
-    | "ORPHANED"
-    | "UNAVAILABLE";
+    "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
 }
 
 export interface AidpDocumentItem {
+  file_uuid: string;
   file_ino_no: string;
   file_name: string;
   file_size?: number;
   file_type?: string;
   created_at?: string;
+  /**
+   * Processing status reported by the AIDP file history endpoint:
+   * `PROCESSING` | `COMPLETED` | `FAILED` (upper-cased by the backend).
+   * Absent when the backend falls back to the completed-files listing, which
+   * only ever reports ingested files.
+   */
+  status?: string;
+  /** Channel directory the file was ingested from. */
+  dir_path?: string;
 }
 
 export interface AidpDocumentListResponse {
@@ -52,13 +58,20 @@ export interface AidpDocumentListResponse {
    *  fallback estimate when Count fails (false). When false the frontend
    *  should treat the total as approximate and avoid displaying "共 N 条". */
   total_reliable?: boolean;
+  /**
+   * Number of files still being processed across the WHOLE knowledge base
+   * (not just the returned page). The list polls while this is greater than
+   * zero and stops once every file has reached a terminal status.
+   */
+  processing_count?: number;
 }
 
 export interface AidpUploadSuccessItem {
+  file_uuid: string;
   file_name: string;
   file_type: string;
   file_size: number;
-  file_ino_no: number;
+  file_ino_no: string;
   first_upload_time: number;
 }
 
@@ -77,6 +90,62 @@ export interface AidpUploadResponse {
   success_list: AidpUploadSuccessItem[];
   failed_list: AidpUploadFailedItem[];
 }
+
+export interface AidpDocumentOperationItem {
+  file_uuid: string;
+}
+
+export interface AidpDocumentRemoveResponse {
+  summary: {
+    total: number;
+    success: number;
+    failed: number;
+  };
+  success_list: AidpDocumentOperationItem[];
+  failed_list: AidpDocumentOperationItem[];
+}
+
+type AidpOperationSummary = {
+  total: number;
+  success: number;
+  failed: number;
+};
+
+type AidpOperationResponse<TSuccess, TFailure> = {
+  summary: AidpOperationSummary;
+  success_list: TSuccess[];
+  failed_list: TFailure[];
+};
+
+const normalizeAidpOperationResponse = <TSuccess, TFailure>(
+  result: Partial<AidpOperationResponse<TSuccess, TFailure>>
+): AidpOperationResponse<TSuccess, TFailure> => {
+  const successList: TSuccess[] = Array.isArray(result.success_list)
+    ? result.success_list
+    : [];
+  const failedList: TFailure[] = Array.isArray(result.failed_list)
+    ? result.failed_list
+    : [];
+
+  return {
+    summary: {
+      total:
+        typeof result.summary?.total === "number"
+          ? result.summary.total
+          : successList.length + failedList.length,
+      success:
+        typeof result.summary?.success === "number"
+          ? result.summary.success
+          : successList.length,
+      failed:
+        typeof result.summary?.failed === "number"
+          ? result.summary.failed
+          : failedList.length,
+    },
+    success_list: successList,
+    failed_list: failedList,
+  };
+};
 
 export interface AidpModelItem {
   /** Display / identifier used for the model (sent to AIDP as ``vlm_model``). */
@@ -138,6 +207,16 @@ export interface AidpCreateKbPayload {
 export interface AidpSetPermissionPayload {
   ingroup_permission: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
+  /** Only include metadata fields when their values have changed. */
+  name?: string;
+  description?: string;
+}
+
+export interface AidpSaveSettingsResult {
+  success: boolean;
+  permissions_saved: boolean;
+  metadata_status: "unchanged" | "updated" | "failed";
+  metadata?: AidpKbDetail;
 }
 
 export interface AidpUpdateKbPayload {
@@ -164,15 +243,21 @@ function buildUrl(
 
 class AidpKnowledgeService {
   /**
-   * List knowledge bases (paginated).
+   * List knowledge bases (paginated), optionally filtered by name.
+   *
+   * `keyword` is forwarded to the backend, which passes it on to AIDP for
+   * server-side filtering. A blank keyword is omitted from the query string
+   * entirely so an unfiltered call produces the same request as before.
    */
   async listKbs(
     page: number = 1,
-    pageSize: number = 10
+    pageSize: number = 10,
+    keyword?: string
   ): Promise<AidpKnowledgeBaseListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.knowledgeBases, {
       page,
       page_size: pageSize,
+      keyword: keyword?.trim() || undefined,
     });
 
     const response = await fetchWithErrorHandling(url, {
@@ -336,31 +421,10 @@ class AidpKnowledgeService {
     }
 
     const result = (await response.json()) as Partial<AidpUploadResponse>;
-    const successList = Array.isArray(result.success_list)
-      ? result.success_list
-      : [];
-    const failedList = Array.isArray(result.failed_list)
-      ? result.failed_list
-      : [];
-
-    return {
-      summary: {
-        total:
-          typeof result.summary?.total === "number"
-            ? result.summary.total
-            : successList.length + failedList.length,
-        success:
-          typeof result.summary?.success === "number"
-            ? result.summary.success
-            : successList.length,
-        failed:
-          typeof result.summary?.failed === "number"
-            ? result.summary.failed
-            : failedList.length,
-      },
-      success_list: successList,
-      failed_list: failedList,
-    };
+    return normalizeAidpOperationResponse<
+      AidpUploadSuccessItem,
+      AidpUploadFailedItem
+    >(result);
   }
 
   /**
@@ -393,16 +457,15 @@ class AidpKnowledgeService {
   }
 
   /**
-   * Update the in-group permission for a KB (does not call AIDP).
-   * Required when a Nexent user with EDIT permission changes who can see the KB.
+   * Save local permissions first, then synchronize supplied metadata changes.
    */
   async setPermission(
     id: string,
     payload: AidpSetPermissionPayload
-  ): Promise<void> {
+  ): Promise<AidpSaveSettingsResult> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbPermission(id), {});
 
-    await fetchWithErrorHandling(url, {
+    const response = await fetchWithErrorHandling(url, {
       method: "PATCH",
       headers: {
         ...getAuthHeaders(),
@@ -410,6 +473,7 @@ class AidpKnowledgeService {
       },
       body: JSON.stringify(payload),
     });
+    return response.json();
   }
 
   /**
@@ -441,7 +505,51 @@ class AidpKnowledgeService {
         typeof result.total_reliable === "boolean"
           ? result.total_reliable
           : typeof result.total_count === "number",
+      processing_count:
+        typeof result.processing_count === "number"
+          ? result.processing_count
+          : undefined,
     };
+  }
+
+  /**
+   * Remove one document from an AIDP knowledge base.
+   * The AIDP API accepts an array, so the single-document UI sends one item.
+   */
+  async removeDoc(
+    id: string,
+    fileUuid: string
+  ): Promise<AidpDocumentRemoveResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.removeKbDocuments(id), {});
+    const response = await fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file_uuids: [fileUuid] }),
+    });
+    const result =
+      (await response.json()) as Partial<AidpDocumentRemoveResponse>;
+    return normalizeAidpOperationResponse<
+      AidpDocumentOperationItem,
+      AidpDocumentOperationItem
+    >(result);
+  }
+
+  /**
+   * Download one document through the AIDP management backend.
+   */
+  async downloadDoc(id: string, fileUuid: string): Promise<Response> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.downloadKbDocument(id), {});
+    return fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file_uuid: fileUuid }),
+    });
   }
 }
 

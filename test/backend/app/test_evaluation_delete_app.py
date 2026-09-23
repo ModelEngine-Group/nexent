@@ -41,7 +41,7 @@ _STUB_SYMBOLS = {
         "update_evaluation_set_case_impl",
     ),
     "database.agent_evaluation_db": ("update_annotation_schema_ids",),
-    "utils.auth_utils": ("get_current_user_id", "get_current_user_info"),
+    "utils.auth_utils": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
     "utils.evaluation_set_excel_utils": (
         "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
     ),
@@ -283,19 +283,19 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
         self.assertEqual(resp.status_code, 500)
 
     # ------------------------------------------------------------------
-    # ``GET /agent-evaluations?agent_id=...`` — list runs for an agent
+    # ``GET /agent-evaluations?agent_ids=[...]`` — list runs for selected agents
     # ------------------------------------------------------------------
     def test_list_agent_evaluations_forwards_query(self):
         list_mock = self.mocks[7]  # list_agent_evaluations_by_agent_impl
         list_mock.return_value = [{"agent_evaluation_id": 1}]
         resp = self.client.get(
             "/agent-evaluations",
-            params={"agent_id": 7, "limit": 10, "offset": 5},
+            params={"agent_ids": "[7]", "limit": 10, "offset": 5},
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["data"], [{"agent_evaluation_id": 1}])
         list_mock.assert_called_once_with(
-            agent_id=7,
+            agent_ids=[7],
             tenant_id="t1",
             limit=10,
             offset=5,
@@ -304,10 +304,10 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
     def test_list_agent_evaluations_default_pagination(self):
         list_mock = self.mocks[7]
         list_mock.return_value = []
-        resp = self.client.get("/agent-evaluations", params={"agent_id": 7})
+        resp = self.client.get("/agent-evaluations", params={"agent_ids": "[7]"})
         self.assertEqual(resp.status_code, 200)
         list_mock.assert_called_once_with(
-            agent_id=7,
+            agent_ids=[7],
             tenant_id="t1",
             limit=50,
             offset=0,
@@ -318,7 +318,7 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
         # so a genuinely out-of-range value is required to trigger 422.
         resp = self.client.get(
             "/agent-evaluations",
-            params={"agent_id": 7, "limit": -1},
+            params={"agent_ids": "[7]", "limit": -1},
         )
         self.assertEqual(resp.status_code, 422)
 

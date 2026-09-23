@@ -5,6 +5,7 @@ from http import HTTPStatus
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
+from nexent.core.concurrency import ManagedTaskSpec
 from pydantic import BaseModel, Field
 
 from consts.evaluation_status import EvalRunStatus
@@ -13,8 +14,8 @@ from database.agent_evaluation_db import (
     claim_agent_evaluation_run,
     get_agent_evaluation,
 )
+from services.thread_lifecycle_service import runtime_thread_manager
 from utils.auth_utils import verify_internal_runtime_jwt
-from utils.thread_utils import pool
 
 
 logger = logging.getLogger("agent_evaluation_runtime_app")
@@ -27,11 +28,57 @@ class EvaluationRunRequest(BaseModel):
     agent_evaluation_id: int = Field(gt=0)
 
 
+class TrialRunRequest(BaseModel):
+    """Payload used by Config service for a non-persistent trial evaluation."""
+
+    agent_id: int
+    agent_version_no: int = 1
+    query: str
+    judge_model_id: int
+    evaluator_ids: list[int] | None = None
+    language: str = "zh"
+
+
 def _load_evaluation_executor():
     """Load the evaluation service only when a runtime run is dispatched."""
     from services.agent_evaluation_service import execute_agent_evaluation_run
 
     return execute_agent_evaluation_run
+
+
+def _load_trial_executor():
+    """Load the trial executor only when Runtime receives a trial request."""
+    from services.agent_evaluation_service import trial_run_evaluator_impl
+
+    return trial_run_evaluator_impl
+
+
+@router.post("/trial-run", include_in_schema=False)
+async def trial_run_evaluation_api(
+    payload: TrialRunRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Run one ad-hoc evaluation in the Runtime process."""
+    try:
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+    except Exception as exc:
+        logger.warning("Rejected unauthenticated trial evaluation: %s", exc)
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail="Invalid internal runtime authorization",
+        ) from exc
+
+    trial_run_evaluator_impl = _load_trial_executor()
+    return await trial_run_evaluator_impl(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        agent_id=payload.agent_id,
+        agent_version_no=payload.agent_version_no,
+        query=payload.query,
+        judge_model_id=payload.judge_model_id,
+        evaluator_ids=payload.evaluator_ids,
+        language=payload.language,
+    )
 
 
 @router.post("/run", include_in_schema=False, status_code=HTTPStatus.ACCEPTED)
@@ -116,7 +163,13 @@ async def dispatch_evaluation_run_api(
 
     try:
         execute_agent_evaluation_run = _load_evaluation_executor()
-        pool.submit(
+        runtime_thread_manager.submit(
+            "evaluation",
+            ManagedTaskSpec(
+                task_name="agent-evaluation-dispatch",
+                owner="runtime",
+                run_id=str(payload.agent_evaluation_id),
+            ),
             execute_agent_evaluation_run,
             tenant_id,
             user_id,

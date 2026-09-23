@@ -72,6 +72,42 @@ Nexent 支持通过 URL 或 Nacos 发现第三方 A2A Agent，再将其添加为
 
 在“选择智能体的工具”页签中点击“MCP 配置”，可以接入远程 MCP、容器化 MCP，或将已有 API 转换为 MCP 工具。有关三种接入方式、OpenAPI 要求、服务管理和工具测试，请参阅 [MCP 服务接入](../../integration/integration-in/mcp.md)。
 
+### 🔐 向工具透传用户信息（工具侧鉴权）
+
+对于 MCP 工具，只有工具声明了下列约定字段，平台才会注入**当前调用者的用户信息**；外部 A2A Agent 则通过 `metadata.user_context` 接收同一份可信身份快照。
+
+🔔 **平台边界**：平台本身不对工具侧做鉴权，只透传认证会话中的用户身份；鉴权由工具自行完成。
+
+**声明方式**：工具的输入参数 Schema 中定义了以下任意约定字段名，即视为需要该用户信息，平台会在调用时自动以当前用户的值填充：
+
+| 约定字段名 | 含义 |
+|-----------|------|
+| `tenant_id` | 租户 ID |
+| `tenant_name` | 租户名 |
+| `user_id` | 用户 ID |
+| `user_name` | 登录名（当前为用户邮箱） |
+| `user_account` | 用户账号（邮箱） |
+| `user_groups` | 用户所属用户组名列表 |
+
+**示例**：某数据查询工具需要按调用者账号和用户组做数据权限控制，在其 inputSchema 中声明 `user_account` 与 `user_groups` 两个参数即可：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": { "type": "string", "description": "查询内容" },
+    "user_account": { "type": "string", "description": "调用者账号（平台自动注入）" },
+    "user_groups": { "type": "array", "items": { "type": "string" }, "description": "调用者所属用户组（平台自动注入）" }
+  }
+}
+```
+
+> 💡 **说明**：
+>
+> - 这些约定字段会从模型可见的工具签名和工具上下文说明中移除：模型不知道它们的存在、不会为其填值，注入值只来自当前登录会话，无法被伪造
+> - 未声明的约定字段不会注入，不影响工具的既有参数
+> - 外部 A2A Agent 从 `metadata.user_context` 接收可信身份；普通对话 metadata 中的同名字段会被忽略
+
 ### ⚙️ 自定义工具
 
 您可参考以下指导文档，开发自己的工具，并接入 Nexent 使用，丰富智能体能力。
