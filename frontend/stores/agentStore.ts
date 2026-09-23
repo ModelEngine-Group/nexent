@@ -30,6 +30,7 @@ export type AgentDraft = Pick<
   | "is_main_agent"
   | "provide_run_summary"
   | "allow_chat_metadata"
+  | "enable_protocol_repair_retry"
   | "enable_context_manager"
   | "is_a2a"
   | "verification_config"
@@ -119,6 +120,7 @@ const toDraft = (agent: Agent): AgentDraft => ({
   is_main_agent: agent.is_main_agent ?? true,
   provide_run_summary: agent.provide_run_summary,
   allow_chat_metadata: agent.allow_chat_metadata ?? false,
+  enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
   enable_context_manager: agent.enable_context_manager,
   is_a2a: agent.is_a2a,
   verification_config: agent.verification_config,
@@ -271,6 +273,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     : {}),
   ...(patch.allow_chat_metadata !== undefined
     ? { allow_chat_metadata: patch.allow_chat_metadata }
+    : {}),
+  ...(patch.enable_protocol_repair_retry !== undefined
+    ? { enable_protocol_repair_retry: patch.enable_protocol_repair_retry }
     : {}),
   ...(patch.is_a2a !== undefined ? { is_a2a: patch.is_a2a } : {}),
   ...(patch.enable_context_manager !== undefined

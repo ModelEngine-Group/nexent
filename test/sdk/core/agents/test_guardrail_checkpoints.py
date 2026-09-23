@@ -223,6 +223,7 @@ def _make_step_agent(rule, messages, model_output="ok"):
     agent._context_tools = MagicMock(return_value=[])
     agent._use_structured_outputs_internally = False
     agent.output_protocol = "code_action"
+    agent.enable_protocol_repair_retry = True
     agent._consecutive_protocol_errors = 0
     agent._ephemeral_system_messages = None
     agent.verification_controller = controller
@@ -327,6 +328,7 @@ def test_run_stream_silently_retries_invalid_action_then_returns_real_final_answ
     agent.memory = SimpleNamespace(steps=[])
     agent.logger = MagicMock()
     agent.enable_planning = False
+    agent.enable_protocol_repair_retry = True
     agent.final_answer_checks = None
     agent.verification_config = AgentVerificationConfig(enabled=False)
     agent._finalize_step = MagicMock()

@@ -1,15 +1,17 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Form, InputNumber, Switch, Row, Col, Flex } from "antd";
+import { Form, InputNumber, Switch, Row, Col } from "antd";
 
 import { useAgentStore } from "@/stores/agentStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
 
 export default function AgentRunPolicy() {
   const { t } = useTranslation("common");
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
+  const isReadOnly = useAgentReadOnly();
 
   return (
     <div className="w-full">
@@ -51,9 +53,7 @@ export default function AgentRunPolicy() {
                 updateAgent({ requested_output_tokens: val ?? 4096 })
               }
             />
-            <span className="ant-form-tex pl-2" >
-              tokens
-            </span>
+            <span className="ant-form-tex pl-2">tokens</span>
           </Form.Item>
         </Col>
       </Row>
@@ -62,10 +62,7 @@ export default function AgentRunPolicy() {
       <Row gutter={[16, 0]}>
         {/* Provide Run Summary */}
         <Col xs={24} sm={8}>
-          <Form.Item
-            label={t("agent.provideRunSummary")}
-            className="mb-3"
-          >
+          <Form.Item label={t("agent.provideRunSummary")} className="mb-3">
             <Switch
               checked={editedAgent.provide_run_summary}
               onChange={(checked) =>
@@ -85,6 +82,21 @@ export default function AgentRunPolicy() {
               checked={editedAgent.allow_chat_metadata ?? false}
               onChange={(checked) =>
                 updateAgent({ allow_chat_metadata: checked })
+              }
+            />
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={8}>
+          <Form.Item
+            label={t("agent.runPolicy.protocolRepairRetry")}
+            tooltip={t("agent.runPolicy.protocolRepairRetryHint")}
+            className="mb-3"
+          >
+            <Switch
+              checked={editedAgent.enable_protocol_repair_retry ?? false}
+              disabled={isReadOnly}
+              onChange={(checked) =>
+                updateAgent({ enable_protocol_repair_retry: checked })
               }
             />
           </Form.Item>
