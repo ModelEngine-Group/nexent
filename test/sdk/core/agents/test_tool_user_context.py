@@ -14,6 +14,7 @@ which has heavy dependencies not needed for this module.
 import importlib.util
 import inspect
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,9 @@ def _load_tool_user_context_module():
 tool_user_context = _load_tool_user_context_module()
 USER_CONTEXT_FIELDS = tool_user_context.USER_CONTEXT_FIELDS
 apply_user_context_to_mcp_tool = tool_user_context.apply_user_context_to_mcp_tool
+apply_model_visible_tool_schemas_to_context_items = (
+    tool_user_context.apply_model_visible_tool_schemas_to_context_items
+)
 
 
 class _FakeTool:
@@ -41,6 +45,20 @@ class _FakeTool:
         self.name = "fake_tool"
         self.inputs = dict(inputs)
         self.forward = forward
+
+
+class _FakeContextItem:
+    """Minimal immutable ContextItemInput stand-in."""
+
+    def __init__(self, content, item_type="tool"):
+        self.type = SimpleNamespace(value=item_type)
+        self.content = content
+
+    def model_copy(self, *, update):
+        return _FakeContextItem(
+            update.get("content", self.content),
+            getattr(self.type, "value", self.type),
+        )
 
 
 SAMPLE_CONTEXT = {
@@ -210,3 +228,31 @@ def test_non_dict_inputs_untouched():
     result = apply_user_context_to_mcp_tool(tool, SAMPLE_CONTEXT)
     assert result is tool
     assert not getattr(tool, "_nexent_user_context_wrapped", False)
+
+
+def test_context_snapshot_uses_the_wrapped_tool_schema():
+    tool = _FakeTool(
+        {
+            "query": {"type": "string"},
+            "tenant_id": {"type": "string"},
+            "user_groups": {"type": "array"},
+        },
+        lambda **kwargs: kwargs,
+    )
+    wrapped = apply_user_context_to_mcp_tool(tool, SAMPLE_CONTEXT)
+    context_item = _FakeContextItem({
+        "name": "fake_tool",
+        "inputs": {
+            "query": {"type": "string"},
+            "tenant_id": {"type": "string"},
+            "user_groups": {"type": "array"},
+        },
+    })
+
+    sanitized = apply_model_visible_tool_schemas_to_context_items(
+        [context_item],
+        [wrapped],
+    )
+
+    assert sanitized[0] is not context_item
+    assert sanitized[0].content["inputs"] == {"query": {"type": "string"}}

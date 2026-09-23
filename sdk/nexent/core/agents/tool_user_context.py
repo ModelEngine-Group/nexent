@@ -12,7 +12,7 @@ authenticated session.
 """
 
 import inspect
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 
@@ -118,3 +118,49 @@ def apply_user_context_to_mcp_tool(
     tool_obj.forward = forward_with_user_context
     setattr(tool_obj, "_nexent_user_context_wrapped", True)
     return tool_obj
+
+
+def apply_model_visible_tool_schemas_to_context_items(
+    context_items: Sequence[Any] | None,
+    tools: Sequence[Any],
+) -> list[Any]:
+    """Keep rendered tool context aligned with each wrapped tool's public schema.
+
+    The backend context snapshot may have been built from the original MCP
+    record before the runtime wrapper removes platform-owned identity fields.
+    Replace only those affected tool items with the already-sanitized runtime
+    schema, leaving the execution schema and every unrelated context item
+    untouched.
+    """
+    visible_inputs = {
+        str(getattr(tool, "name")): getattr(tool, "inputs")
+        for tool in tools
+        if getattr(tool, "_nexent_user_context_wrapped", False)
+        and isinstance(getattr(tool, "inputs", None), Mapping)
+    }
+    if not context_items or not visible_inputs:
+        return list(context_items or ())
+
+    sanitized_items: list[Any] = []
+    for item in context_items:
+        item_type = getattr(
+            getattr(item, "type", None),
+            "value",
+            getattr(item, "type", None),
+        )
+        content = getattr(item, "content", None)
+        tool_name = content.get("name") if isinstance(content, Mapping) else None
+        if item_type != "tool" or tool_name not in visible_inputs:
+            sanitized_items.append(item)
+            continue
+
+        model_copy = getattr(item, "model_copy", None)
+        if not callable(model_copy):
+            # Production ContextItemInput values are immutable Pydantic models.
+            # Do not mutate a foreign object if an integration supplies one.
+            sanitized_items.append(item)
+            continue
+        sanitized_items.append(model_copy(update={
+            "content": {**content, "inputs": dict(visible_inputs[tool_name])},
+        }))
+    return sanitized_items

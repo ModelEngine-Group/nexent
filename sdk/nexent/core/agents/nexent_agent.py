@@ -27,7 +27,10 @@ from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
-from .tool_user_context import apply_user_context_to_mcp_tool
+from .tool_user_context import (
+    apply_model_visible_tool_schemas_to_context_items,
+    apply_user_context_to_mcp_tool,
+)
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
@@ -790,10 +793,11 @@ class NexentAgent:
                 config=ctx_config,
                 max_steps=agent_config.max_steps,
             )
-            context_items = (
+            context_items = apply_model_visible_tool_schemas_to_context_items(
                 list(context_items_override)
                 if context_items_override is not None
-                else (getattr(agent_config, "context_items", None) or [])
+                else (getattr(agent_config, "context_items", None) or []),
+                tool_list,
             )
             context_runtime = ManagedContextRuntime(
                 context_manager,

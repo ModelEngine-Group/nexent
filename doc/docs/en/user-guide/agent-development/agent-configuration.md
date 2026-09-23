@@ -102,7 +102,7 @@ For MCP tools, the platform injects the **current caller's user information** on
 
 > 💡 **Notes**:
 >
-> - These conventional fields are **invisible to the model**: the model neither sees nor fills them, and injected values come only from the current authenticated session, so they cannot be forged
+> - These conventional fields are removed from both the model-visible tool signature and rendered tool context: the model neither sees nor fills them, and injected values come only from the current authenticated session, so they cannot be forged
 > - Undeclared conventional fields are never injected and do not affect the tool's existing parameters
 > - External A2A agents receive the trusted snapshot under `metadata.user_context`; a same-named value in chat metadata is ignored
 
