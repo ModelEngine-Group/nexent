@@ -113,17 +113,15 @@ const PersistentChatHome: FC = () => {
     await runtime.threads.switchToNewThread();
   }, [runtime]);
 
-  const handleAgentSelected = useCallback((agent: Agent) => {
-    setSelectedAgent(agent);
-    log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
-  }, []);
-
-  const handleDeepLinkAgentSelected = useCallback(
-    async (agent: Agent) => {
-      await switchToNewAgentThread();
-      handleAgentSelected(agent);
+  const handleAgentSelected = useCallback(
+    (agent: Agent) => {
+      setSelectedAgent(agent);
+      log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
+      void switchToNewAgentThread().catch((error) => {
+        log.error("[Home] Failed to switch to a new agent thread:", error);
+      });
     },
-    [handleAgentSelected, switchToNewAgentThread]
+    [switchToNewAgentThread]
   );
 
   useEffect(() => {
@@ -135,11 +133,13 @@ const PersistentChatHome: FC = () => {
       getAgentId: (agent) => Number((agent as { agent_id?: number }).agent_id),
     });
     if (action.action === "wait") return;
-    consumedDeepLinkRef.current = true;
-    if (action.action === "select") {
-      void handleDeepLinkAgentSelected(action.agent);
+    if (deepLinkedAgentId != null) {
+      consumedDeepLinkRef.current = true;
     }
-  }, [agents, deepLinkedAgentId, handleDeepLinkAgentSelected, isLoadingAgents]);
+    if (action.action === "select") {
+      handleAgentSelected(action.agent);
+    }
+  }, [agents, deepLinkedAgentId, handleAgentSelected, isLoadingAgents]);
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
