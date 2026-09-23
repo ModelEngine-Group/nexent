@@ -18,7 +18,7 @@ import { ServerDictationAdapter } from "../../../../newchat/adapter/server-dicta
 import { remoteChatModelAdapter } from "../../../../newchat/adapter/remote-chat-model-adapter";
 import { Chat } from "../../../../newchat/assistant-ui/chat";
 import type { ChatMode } from "../../../../newchat/assistant-ui/composer";
-import { AgentDebugComparePanel } from "./AgentDebugComparePanel";
+import { AgentDebugComparePanel } from "./compare-panel";
 
 interface AgentDebugPanelProps {
   isCompareMode?: boolean;
