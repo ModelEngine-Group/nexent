@@ -31,6 +31,7 @@ def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     assert config.instructions == "system"
     assert config.tools == []
     assert config.max_steps == 5
+    assert config.output_protocol == "final_answer_envelope"
     assert config.provide_run_summary is False
     assert config.enable_planning is False
 
@@ -202,13 +203,14 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
     async def fake_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
         chunks = [
-            {"type": "model_thinking_output", "content": "Preparing.\n<SK"},
+            {"type": "model_thinking_output", "content": "Preparing.\n<FINAL_"},
+            {"type": "model_output_thinking", "content": "ANSWER>\n<SK"},
             {
                 "type": "model_output_thinking",
                 "content": "ILL>\n---\nname: demo\ndescription: Demo\ntags: [demo]\n---\n# Demo\n</SKILL>\n",
             },
             {"type": "model_output_code", "content": '<FILE path="scripts/run.py">\nprint("ok")\n</FILE>\n'},
-            {"type": "model_output_thinking", "content": "<SUMMARY>\nReady.\n</SUMMARY>\n"},
+            {"type": "model_output_thinking", "content": "<SUMMARY>\nReady.\n</SUMMARY>\n</FINAL_ANSWER>"},
             {"type": "final_answer", "content": "duplicate"},
         ]
         for chunk in chunks:
@@ -231,6 +233,7 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
         for item in payloads
     )
     assert any(item["type"] == "summary" for item in payloads)
+    assert not any("FINAL_ANSWER" in item.get("content", "") for item in payloads)
     assert not any(item.get("content") == "duplicate" for item in payloads)
     assert payloads[-1]["type"] == "done"
     assert stop_event.is_set()

@@ -130,6 +130,47 @@ async def test_suggest_capacity_success(client, auth_header, user_credentials, m
     mock_suggest.assert_called_once()
 
 
+def test_suggest_capacity_includes_reasoning_capability(mocker):
+    """The shared model/base-URL lookup is returned to custom-access callers."""
+    from backend.apps.model_managment_app import _suggest_capacity_for_request
+    from backend.consts.model import ModelCapacitySuggestionRequest
+    from backend.services.model_capacity_suggestion_service import (
+        CapacitySuggestionMatchKind,
+        CapacitySuggestionResult,
+    )
+
+    mocker.patch(
+        "backend.apps.model_managment_app.suggest_capacity",
+        return_value=CapacitySuggestionResult(
+            suggestions=None,
+            match_kind=CapacitySuggestionMatchKind.NONE,
+            match_confidence=None,
+            match_explanation="No capacity profile",
+        ),
+    )
+    mocker.patch(
+        "backend.apps.model_managment_app.get_model_reasoning_capability",
+        return_value={
+            "status": "supported",
+            "control": "effort",
+            "levels": ["high", "max"],
+            "default": "auto",
+            "wire_format": "reasoning_effort",
+            "source": "models_dev",
+        },
+    )
+
+    response = _suggest_capacity_for_request(
+        ModelCapacitySuggestionRequest(
+            model_name="deepseek-v4-pro",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+    )
+
+    assert response.reasoning_capability is not None
+    assert response.reasoning_capability.levels == ["high", "max"]
+
+
 @pytest.mark.asyncio
 async def test_suggest_capacity_real_serialization_uses_envelope(client, auth_header, user_credentials, mocker):
     """End-to-end serialization test: hit /model/suggest-capacity without
@@ -760,7 +801,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     )
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -787,7 +828,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
     mock_suggest = mocker.patch('backend.apps.model_managment_app._capacity_suggestion_for_model_request')
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()

@@ -24,13 +24,15 @@ import { modelService } from "@/services/modelService";
 import {
   InferenceFieldSpecsByType,
   ModelCatalogFullPayload,
+  ModelCatalogProfile,
   ModelCatalogProviderInfo,
   ModelConfig,
   ModelOption,
   ModelType,
+  ReasoningCapability,
   SingleModelConfig,
 } from "@/types/modelConfig";
-import { MODEL_TYPES } from "@/const/modelConfig";
+import { MODEL_IMPORT_PROVIDER_KEYS, MODEL_TYPES } from "@/const/modelConfig";
 import log from "@/lib/logger";
 
 import {
@@ -200,6 +202,7 @@ interface BatchRowState {
   // Embedding-specific: multimodal switch + chunk size range slider
   isMultimodal: boolean;
   chunkSizeRange: [number, number];
+  reasoningCapability?: ReasoningCapability;
 }
 
 /** Resolve the effective model type for a batch row: embedding + multimodal → multi_embedding. */
@@ -289,7 +292,8 @@ const buildBatchRowParams = (opts: {
 
 const makeInitialRowState = (
   modelType: ModelType,
-  catalogProfile?: any
+  catalogProfile?: any,
+  discoveredReasoningCapability?: ReasoningCapability
 ): BatchRowState => {
   const advanced = advancedSettingsValueFromRecord(catalogProfile, {}, modelType);
   // STT/TTS default provider to DashScope (阿里灵积) when not provided by the
@@ -319,6 +323,10 @@ const makeInitialRowState = (
     checking: false,
     isMultimodal: false,
     chunkSizeRange: [DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE],
+    // Provider discovery is authoritative when available. The static profile
+    // remains a fallback for older endpoints and catalog-only rows.
+    reasoningCapability:
+      discoveredReasoningCapability ?? catalogProfile?.reasoning_capability ?? undefined,
   };
 };
 
@@ -371,6 +379,8 @@ export const ModelAddDialogV2 = ({
   const [customCapacity, setCustomCapacity] =
     useState<ModelCapacityFormState>(emptyCapacityForm);
   const [customAdvanced, setCustomAdvanced] = useState<ModelAdvancedSettingsValue>({});
+  const [customReasoningCapability, setCustomReasoningCapability] =
+    useState<ReasoningCapability | undefined>(undefined);
   // Suffix generated once per custom-access form lifecycle; reused while
   // the operator types the model name so display_name stays stable instead
   // of regenerating a new suffix on every keystroke. Regenerated on reset.
@@ -446,6 +456,7 @@ export const ModelAddDialogV2 = ({
     if (model.modelAppid) advancedValue.model_appid = model.modelAppid;
     if (model.accessToken) advancedValue.access_token = model.accessToken;
     setCustomAdvanced(advancedValue);
+    setCustomReasoningCapability(model.reasoningCapability);
     setCustomConnectivity({ status: null, message: "" });
     // Edit mode: if the existing model already carries capacity values, show
     // the "已配置" tag right away (the debounce lookup will also re-check and
@@ -456,9 +467,24 @@ export const ModelAddDialogV2 = ({
     );
   }, [isOpen, model, inferenceSpecs]);
 
-  // ---------- Tab B: debounced capacity auto-lookup on model name ----------
-  // When the operator types a model name in the custom-access form, wait for a
-  // pause (500ms) then query suggest_capacity (catalog → bundled LiteLLM).
+  const findCatalogProfile = useCallback(
+    (modelName: string): ModelCatalogProfile | undefined => {
+      const provider = catalog?.providers.find(
+        (entry) => entry.provider_info.id === providerKey
+      );
+      const normalizedName = modelName.trim().toLowerCase();
+      return provider?.models.find(
+        (entry) => entry.model_name.trim().toLowerCase() === normalizedName
+      )?.profile;
+    },
+    [catalog, providerKey]
+  );
+
+  const effectiveCustomReasoningCapability = customReasoningCapability;
+
+  // ---------- Tab B: debounced capability lookup on model name and Base URL ----------
+  // When the operator types a model name or Base URL in the custom-access form,
+  // wait for a pause (500ms) then query the shared capability endpoint.
   // Only fills EMPTY capacity fields — values the user already typed (or that
   // came from an edit-mode prefill) are never overwritten. Sets the
   // "已配置" tag when a suggestion was found.
@@ -467,8 +493,11 @@ export const ModelAddDialogV2 = ({
     const name = customForm.name.trim();
     if (!name || !supportsCapacityFields(customForm.type)) {
       setCapacityAutoFilled(false);
+      setCustomReasoningCapability(undefined);
       return;
     }
+    setCustomReasoningCapability(undefined);
+    let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         const suggestion = await modelService.suggestCapacity({
@@ -476,6 +505,8 @@ export const ModelAddDialogV2 = ({
           baseUrl: customForm.url || undefined,
           modelType: customForm.type,
         });
+        if (cancelled) return;
+        setCustomReasoningCapability(suggestion.reasoningCapability);
         const s = suggestion?.suggestions;
         if (!s) {
           setCapacityAutoFilled(false);
@@ -501,10 +532,14 @@ export const ModelAddDialogV2 = ({
             : {}),
         }));
       } catch {
+        if (cancelled) return;
         setCapacityAutoFilled(false);
       }
     }, 500);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [isOpen, customForm.name, customForm.url, customForm.type]);
 
   // ---------- derived: model type options (aligned with original ModelAddDialog) ----------
@@ -521,13 +556,14 @@ export const ModelAddDialogV2 = ({
 
   // ---------- derived: provider options ----------
   const providerOptions = useMemo(() => {
-    console.log("catalog", catalog);
     const preset =
-      catalog?.providers.map((p) => ({
-        value: p.models?.[0]?.provider_key,
-        label: p.provider_info.display_name,
-        info: p.provider_info,
-      })) || [];
+      catalog?.providers
+        .filter((p) => MODEL_IMPORT_PROVIDER_KEYS.includes(p.provider_info.id))
+        .map((p) => ({
+          value: p.provider_info.id,
+          label: p.provider_info.display_name,
+          info: p.provider_info,
+        })) || [];
     return [
       ...preset,
       { value: "__custom__", label: t("model.dialog.v2.customProvider", { defaultValue: "自定义 provider (OpenAI 兼容)" }), info: null },
@@ -537,7 +573,7 @@ export const ModelAddDialogV2 = ({
   const selectedProviderInfo = useMemo<ModelCatalogProviderInfo | null>(() => {
     if (!catalog) return null;
     for (const p of catalog.providers) {
-      if (p.models?.[0]?.provider_key === providerKey) {
+      if (p.provider_info.id === providerKey) {
         return p.provider_info;
       }
     }
@@ -564,7 +600,12 @@ export const ModelAddDialogV2 = ({
     const initStates: Record<string, BatchRowState> = {};
     await Promise.all(
       rows.map(async (row) => {
-        const initialState = makeInitialRowState(row.model_type);
+        const catalogProfile = findCatalogProfile(row.model_name);
+        const initialState = makeInitialRowState(
+          row.model_type,
+          catalogProfile,
+          row.reasoning_capability
+        );
         // Default display_name to model name + 5-char random suffix
         initialState.advanced.display_name = defaultDisplayName(row.model_name);
         // Unified capacity source: query capability_profiles.py / bundled
@@ -597,7 +638,7 @@ export const ModelAddDialogV2 = ({
       })
     );
     setRowStates(initStates);
-  }, [baseUrl, providerKey]);
+  }, [baseUrl, providerKey, findCatalogProfile]);
 
   const handleFetchModels = useCallback(async () => {
     if (!apiKey.trim()) {
@@ -631,6 +672,7 @@ export const ModelAddDialogV2 = ({
           model_name: m.id || m.model_name,
           model_type: (m.model_type || MODEL_TYPES.LLM) as ModelType,
           max_tokens: m.max_tokens,
+          reasoning_capability: m.reasoning_capability,
         }));
       await applyRows(rows);
     } catch (error: any) {
@@ -1173,6 +1215,7 @@ export const ModelAddDialogV2 = ({
     });
     setCustomCapacity(emptyCapacityForm);
     setCustomAdvanced({});
+    setCustomReasoningCapability(undefined);
     setCustomConnectivity({ status: null, message: "" });
     setCapacityAutoFilled(false);
     // Regenerate suffix so the next custom-access form gets a fresh one
@@ -1736,6 +1779,11 @@ export const ModelAddDialogV2 = ({
                   }))
                 }
                 mode="default"
+                reasoningCapability={
+                  settingsState.modelType === MODEL_TYPES.LLM
+                    ? settingsState.reasoningCapability
+                    : undefined
+                }
               />
             )}
           </div>
@@ -1835,6 +1883,11 @@ export const ModelAddDialogV2 = ({
             value={customAdvanced}
             onChange={setCustomAdvanced}
             mode="default"
+            reasoningCapability={
+              customForm.type === MODEL_TYPES.LLM
+                ? effectiveCustomReasoningCapability
+                : undefined
+            }
           />
         </div>
       </Modal>

@@ -89,11 +89,15 @@ MB = 1024 * 1024
 
 def _gb_to_bytes(gb: int) -> int:
     """Convert integer GB to bytes."""
+    if gb < 0:
+        raise ValueError(f"GB value must be non-negative, got {gb}")
     return gb * GB
 
 
 def _mb_to_bytes(mb: int) -> int:
     """Convert integer MB to bytes."""
+    if mb < 0:
+        raise ValueError(f"MB value must be non-negative, got {mb}")
     return mb * MB
 
 
@@ -232,15 +236,39 @@ class QuotaService:
         warning_pct: Optional[int] = None,
         critical_pct: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Set warning thresholds. Validates 1-100 range."""
+        """Set warning thresholds. Validates 1-100 range and warning < critical."""
         if warning_pct is not None:
             if not 1 <= warning_pct <= 100:
                 raise ValueError(f"warning_pct must be 1-100, got {warning_pct}")
-            self._set_tenant_config(KEY_WARNING_THRESHOLD_PCT, str(warning_pct))
 
         if critical_pct is not None:
             if not 1 <= critical_pct <= 100:
                 raise ValueError(f"critical_pct must be 1-100, got {critical_pct}")
+
+        # Reject inverted thresholds against the values effective after update.
+        effective_warning = (
+            warning_pct
+            if warning_pct is not None
+            else self.get_warning_config().get("warning_threshold_pct")
+        )
+        effective_critical = (
+            critical_pct
+            if critical_pct is not None
+            else self.get_warning_config().get("critical_threshold_pct")
+        )
+        if (
+            effective_warning is not None
+            and effective_critical is not None
+            and effective_warning >= effective_critical
+        ):
+            raise ValueError(
+                f"warning_threshold_pct ({effective_warning}) must be lower than "
+                f"critical_threshold_pct ({effective_critical})"
+            )
+
+        if warning_pct is not None:
+            self._set_tenant_config(KEY_WARNING_THRESHOLD_PCT, str(warning_pct))
+        if critical_pct is not None:
             self._set_tenant_config(KEY_CRITICAL_THRESHOLD_PCT, str(critical_pct))
 
         if enabled is not None:

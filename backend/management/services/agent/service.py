@@ -41,7 +41,6 @@ from database.agent_db import (
     query_sub_agent_relations,
     query_sub_agents_id_list,
     search_agent_info_by_agent_id,
-    search_blank_sub_agent_by_main_agent_id,
     update_agent,
     update_agent_icon,
     update_related_agents,
@@ -84,6 +83,9 @@ from services.conversation_management_service import (
 )
 from utils.auth_utils import get_current_user_info
 from utils.config_utils import tenant_config_manager
+from services.agent_reasoning_service import (
+    snapshot_agent_reasoning_config as build_reasoning_snapshot,
+)
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
@@ -388,20 +390,6 @@ def get_enable_tool_id_by_agent_id(agent_id: int, tenant_id: str):
     return list(enable_tool_id_set)
 
 
-async def get_creating_sub_agent_id_service(tenant_id: str, user_id: str = None) -> int:
-    """
-    first find the blank sub agent, if it exists, it means the agent was created before, but exited prematurely;
-                              if it does not exist, create a new one
-    """
-    sub_agent_id = search_blank_sub_agent_by_main_agent_id(tenant_id=tenant_id)
-    if sub_agent_id:
-        return sub_agent_id
-    else:
-        return create_agent(
-            agent_info={"enabled": False}, tenant_id=tenant_id, user_id=user_id
-        )["agent_id"]
-
-
 async def get_agent_info_impl(
     agent_id: int, tenant_id: str, version_no: int = 0, user_id: Optional[str] = None
 ):
@@ -628,49 +616,6 @@ async def get_agent_info_impl(
     return agent_info
 
 
-async def get_creating_sub_agent_info_impl(authorization: str = Header(None)):
-    user_id, tenant_id, _ = get_current_user_info(authorization)
-
-    try:
-        sub_agent_id = await get_creating_sub_agent_id_service(tenant_id, user_id)
-    except Exception as e:
-        logger.error(f"Failed to get creating sub agent id: {str(e)}")
-        raise ValueError(f"Failed to get creating sub agent id: {str(e)}")
-
-    try:
-        agent_info = search_agent_info_by_agent_id(
-            agent_id=sub_agent_id, tenant_id=tenant_id
-        )
-    except Exception as e:
-        logger.error(f"Failed to get sub agent info: {str(e)}")
-        raise ValueError(f"Failed to get sub agent info: {str(e)}")
-
-    try:
-        enable_tool_id_list = get_enable_tool_id_by_agent_id(sub_agent_id, tenant_id)
-    except Exception as e:
-        logger.error(f"Failed to get sub agent enable tool id list: {str(e)}")
-        raise ValueError(f"Failed to get sub agent enable tool id list: {str(e)}")
-
-    return {
-        "agent_id": sub_agent_id,
-        "name": agent_info.get("name"),
-        "display_name": agent_info.get("display_name"),
-        "description": agent_info.get("description"),
-        "enable_tool_id_list": enable_tool_id_list,
-        "model_ids": agent_info.get("model_ids"),
-        "model_names": agent_info.get("model_names"),
-        "max_steps": agent_info["max_steps"],
-        "requested_output_tokens": agent_info.get("requested_output_tokens"),
-        "business_description": agent_info["business_description"],
-        "duty_prompt": agent_info.get("duty_prompt"),
-        "constraint_prompt": agent_info.get("constraint_prompt"),
-        "few_shots_prompt": agent_info.get("few_shots_prompt"),
-        "sub_agent_id_list": query_sub_agents_id_list(
-            main_agent_id=sub_agent_id, tenant_id=tenant_id
-        ),
-    }
-
-
 def _validate_requested_output_tokens_for_agent(
     request: AgentInfoRequest,
     tenant_id: str,
@@ -737,6 +682,31 @@ async def update_agent_info_impl(
         user_id=user_id,
     )
 
+    existing_agent = None
+    if request.agent_id is not None:
+        existing_agent = search_agent_info_by_agent_id(
+            agent_id=request.agent_id,
+            tenant_id=tenant_id,
+            version_no=getattr(request, "version_no", 0),
+        )
+    request_fields = getattr(request, "model_fields_set", set())
+    model_ids = (
+        request.model_ids
+        if "model_ids" in request_fields and request.model_ids is not None
+        else (existing_agent or {}).get("model_ids")
+    )
+    requested_overrides = (
+        request.model_params_override
+        if "model_params_override" in request_fields
+        else None
+    )
+    model_params_override = build_reasoning_snapshot(
+        model_ids=model_ids,
+        requested_overrides=requested_overrides,
+        existing_overrides=(existing_agent or {}).get("model_params_override"),
+        tenant_id=tenant_id,
+    )
+
     # If agent_id is None, create a new agent; otherwise, update existing
     agent_id: Optional[int] = request.agent_id
     try:
@@ -767,7 +737,7 @@ async def update_agent_info_impl(
                     "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                     "verification_config": request.verification_config,
                     "context_policy": request.context_policy,
-                    "model_params_override": request.model_params_override,
+                    "model_params_override": model_params_override,
                     "duty_prompt": request.duty_prompt,
                     "constraint_prompt": request.constraint_prompt,
                     "few_shots_prompt": request.few_shots_prompt,
@@ -788,6 +758,7 @@ async def update_agent_info_impl(
             # Update agent
             request.prompt_template_id = prompt_template_id
             request.prompt_template_name = prompt_template_name
+            request.model_params_override = model_params_override
             update_agent(agent_id, request, user_id)
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")

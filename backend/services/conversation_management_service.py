@@ -887,6 +887,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 if 'minio_files' in msg and msg['minio_files']:
                     message_item['minio_files'] = msg['minio_files']
 
+            message_item["status"] = msg.get("status", "completed")
+
             # Keep the logical message position so clients can distinguish a
             # regenerated branch from a separate turn with identical text.
             if msg.get('message_index') is not None:

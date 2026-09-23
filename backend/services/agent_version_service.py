@@ -243,7 +243,10 @@ def get_version_impl(
     """
     Get version
     """
-    return search_version_by_version_no(agent_id, tenant_id, version_no)
+    version = search_version_by_version_no(agent_id, tenant_id, version_no)
+    if not version:
+        raise ValueError(f"Version {version_no} not found")
+    return version
 
 
 def get_version_detail_impl(
@@ -998,6 +1001,7 @@ async def list_published_agents_impl(
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
+                "model_params_override": agent.get("model_params_override"),
             })
 
         return simple_agent_list

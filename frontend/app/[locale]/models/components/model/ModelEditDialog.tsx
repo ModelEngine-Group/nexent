@@ -125,6 +125,16 @@ export const ModelEditDialog = ({
       next.default_output_reserve_tokens = model.defaultOutputReserveTokens;
     if (extra.enable_thinking !== undefined)
       next.enable_thinking = extra.enable_thinking === true;
+    // Reasoning effort / budget (develop's #3953) are managed by the spec-
+    // driven dialog; carry them through so saving the v0 form does not
+    // silently drop stored values from extra_params.
+    if (typeof extra.reasoning_effort === "string")
+      next.reasoning_effort = extra.reasoning_effort;
+    if (
+      typeof extra.reasoning_budget_tokens === "number" &&
+      Number.isFinite(extra.reasoning_budget_tokens)
+    )
+      next.reasoning_budget_tokens = extra.reasoning_budget_tokens;
     const customRaw = extra.__custom__;
     if (
       customRaw &&
