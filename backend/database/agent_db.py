@@ -203,6 +203,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     info_with_metadata.setdefault("context_policy", None)
     info_with_metadata.setdefault("model_params_override", None)
     info_with_metadata.setdefault("is_a2a", False)
+    info_with_metadata.setdefault("enable_protocol_repair_retry", False)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -233,6 +234,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "is_main_agent": new_agent.is_main_agent,
             "provide_run_summary": new_agent.provide_run_summary,
             "allow_chat_metadata": bool(new_agent.allow_chat_metadata),
+            "enable_protocol_repair_retry": new_agent.enable_protocol_repair_retry,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,
             "business_logic_model_name": new_agent.business_logic_model_name,

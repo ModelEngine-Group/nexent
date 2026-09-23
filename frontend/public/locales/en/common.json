@@ -4192,6 +4192,8 @@
   "agent.allowChatMetadata": "Allow Chat Metadata",
   "agent.allowChatMetadata.tooltip": "Allow Native Chat and Debug users to submit runtime metadata. Metadata is model-visible; do not include secrets.",
   "agent.runPolicy.selfValidateHint": "The agent validates the output before responding.",
+  "agent.runPolicy.protocolRepairRetry": "Strict output protocol and silent repair",
+  "agent.runPolicy.protocolRepairRetryHint": "Off by default: use the legacy Agent flow, executing paired <code> blocks, accepting plain answers, and continuing after ordinary step errors. On: enforce the strict action format and silently repair invalid output. Model-service retries are unaffected.",
   "agent.validation.displayNameRequired": "Please enter an agent name",
   "agent.validation.displayNameMaxLength": "Agent name cannot exceed {{max}} characters",
   "agent.validation.nameMaxLength": "Variable name cannot exceed {{max}} characters",

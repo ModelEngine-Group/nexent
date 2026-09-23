@@ -265,6 +265,7 @@ def mock_skills_draft():
 
 def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test successfully publishing a version"""
+    mock_agent_draft["enable_protocol_repair_retry"] = False
     # Mock query_agent_draft
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
@@ -315,6 +316,7 @@ def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_
     # Verify updated_by is set to user_id on all snapshot types
     agent_snapshot = mock_insert_agent.call_args[0][0]
     assert agent_snapshot["updated_by"] == "user1"
+    assert agent_snapshot["enable_protocol_repair_retry"] is False
 
     tool_snapshot_0 = mock_insert_tool.call_args_list[0][0][0]
     tool_snapshot_1 = mock_insert_tool.call_args_list[1][0][0]
@@ -713,7 +715,7 @@ def test_rollback_version_impl_success(monkeypatch):
 
     # Assign the mock to a variable
     mock_query_snapshot = MagicMock(return_value=(
-        {"agent_id": 1, "name": "Test Agent"},
+        {"agent_id": 1, "name": "Test Agent", "enable_protocol_repair_retry": False},
         [],
         [],
     ))
@@ -764,6 +766,7 @@ def test_rollback_version_impl_success(monkeypatch):
     mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
     mock_query_draft.assert_called_once_with(1, "tenant1")  # Verify it was called
     mock_restore.assert_called_once()
+    assert mock_restore.call_args.kwargs["target_agent_snapshot"]["enable_protocol_repair_retry"] is False
     
 
 def test_rollback_version_impl_version_not_found(monkeypatch):

@@ -41,6 +41,7 @@ export type EditableAgent = Pick<
   | "is_main_agent"
   | "provide_run_summary"
   | "allow_chat_metadata"
+  | "enable_protocol_repair_retry"
   | "tools"
   | "duty_prompt"
   | "constraint_prompt"
@@ -211,6 +212,7 @@ function createEmptyEditableAgent(llmConfig?: {
     is_main_agent: true,
     provide_run_summary: false,
     allow_chat_metadata: false,
+    enable_protocol_repair_retry: false,
     tools: [],
     skills: [],
     duty_prompt: "",
@@ -252,6 +254,8 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         is_main_agent: agent.is_main_agent ?? true,
         provide_run_summary: agent.provide_run_summary,
         allow_chat_metadata: agent.allow_chat_metadata ?? false,
+        enable_protocol_repair_retry:
+          agent.enable_protocol_repair_retry ?? false,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
         duty_prompt: agent.duty_prompt || "",
@@ -392,6 +396,7 @@ const isDirty = (
       editedAgent.is_main_agent !== true ||
       editedAgent.provide_run_summary !== false ||
       editedAgent.allow_chat_metadata !== false ||
+      editedAgent.enable_protocol_repair_retry !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
       editedAgent.few_shots_prompt !== "" ||
@@ -433,6 +438,8 @@ const isDirty = (
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
     (baselineAgent.allow_chat_metadata ?? false) !==
       (editedAgent.allow_chat_metadata ?? false) ||
+    (baselineAgent.enable_protocol_repair_retry ?? false) !==
+      (editedAgent.enable_protocol_repair_retry ?? false) ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
     baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||

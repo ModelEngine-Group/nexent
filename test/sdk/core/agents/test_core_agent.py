@@ -2206,6 +2206,7 @@ class TestRunStreamRealExecution:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+        agent.enable_protocol_repair_retry = True
 
         agent.stop_event = threading.Event()
         agent.agent_name = "test"
@@ -2250,6 +2251,7 @@ class TestRunStreamRealExecution:
         """The model receives a callback that records and returns rebuilt context."""
         module = self._load_core_agent_in_isolation()
         agent = object.__new__(module.CoreAgent)
+        agent.enable_protocol_repair_retry = True
         agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
@@ -2300,6 +2302,7 @@ class TestRunStreamRealExecution:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+        agent.enable_protocol_repair_retry = True
 
         agent.stop_event = threading.Event()
         agent.agent_name = "test"
@@ -2345,6 +2348,7 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
 
         agent = object.__new__(CoreAgent)
+        agent.enable_protocol_repair_retry = True
 
         agent.stop_event = threading.Event()
         agent.agent_name = "test"
@@ -2384,6 +2388,7 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
 
         agent = object.__new__(CoreAgent)
+        agent.enable_protocol_repair_retry = True
 
         agent.stop_event = threading.Event()
         agent.agent_name = "test"
@@ -2488,6 +2493,7 @@ class TestRunStreamRealExecution:
         """Text between executable blocks is rolled back before protocol repair."""
         module = core_agent_module
         agent = object.__new__(module.CoreAgent)
+        agent.enable_protocol_repair_retry = True
         agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
@@ -2775,6 +2781,7 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "AgentExecutionError", FakeAgentExecutionError)
         agent = self._create_canonical_run_agent(
             monkeypatch,
+            enable_protocol_repair_retry=True,
             model=MagicMock(last_response_diagnostics={"finish_reason": "stop"}),
         )
 
@@ -2806,7 +2813,7 @@ class TestRunStreamRealExecution:
 
         monkeypatch.setattr(module, "AgentError", FakeAgentError)
         monkeypatch.setattr(module, "ActionOutput", FakeActionOutput)
-        agent = self._create_canonical_run_agent(monkeypatch)
+        agent = self._create_canonical_run_agent(monkeypatch, enable_protocol_repair_retry=True)
         calls = 0
 
         def mock_step_stream(action_step):
@@ -2828,6 +2835,356 @@ class TestRunStreamRealExecution:
         assert agent.memory.steps[0].tool_calls[0].id == "executed"
         assert agent.memory.steps[0]._suppress_user_error is True
         assert agent.memory.steps[1].step_number == 2
+
+    @pytest.mark.parametrize("tool_executed", [False, True])
+    def test_cmsr_006_disabled_protocol_repair_stops_after_first_generation(
+        self, monkeypatch, tool_executed
+    ):
+        """CMSR-007: an incomplete action must not trigger another Agent generation."""
+        module = core_agent_module
+        agent = self._create_canonical_run_agent(
+            monkeypatch, enable_protocol_repair_retry=False
+        )
+        calls = 0
+
+        def failing_step(action_step):
+            nonlocal calls
+            calls += 1
+            action_step.model_output = "<code>final_answer("
+            if tool_executed:
+                action_step.tool_calls = [SimpleNamespace(id="executed")]
+            if False:
+                yield None
+            raise module.ModelOutputProtocolError(
+                module.ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION,
+                "code_action",
+            )
+
+        agent._step_stream = failing_step
+
+        with pytest.raises(module.ModelOutputProtocolExhaustedError) as exc_info:
+            list(agent._run_stream("test task", max_steps=5))
+
+        assert "Automatic repair is disabled" in str(exc_info.value)
+        assert "repeatedly failed" not in str(exc_info.value)
+        assert calls == 1
+        assert agent.step_number == 1
+        assert agent._protocol_repair_messages == []
+        if tool_executed:
+            assert len(agent.memory.steps) == 1
+            assert agent.memory.steps[0].tool_calls[0].id == "executed"
+            agent._finalize_step.assert_called_once()
+        else:
+            agent._finalize_step.assert_not_called()
+
+    def _create_cmsr_007_step_agent(self, content, *, finish_reason="stop"):
+        """Build one deferred model generation for the legacy-output compatibility cases."""
+        module = core_agent_module
+        agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
+        agent.agent_name = "test"
+        agent.name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[])
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        context = MagicMock()
+        context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step.return_value = context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._protocol_repair_messages = []
+        agent.output_protocol = "code_action"
+        agent.enable_protocol_repair_retry = False
+        agent.verification_controller = None
+        agent.clarification_tool_name = None
+        response = SimpleNamespace(
+            content=content,
+            token_usage=None,
+            model_attempt_id="legacy-attempt",
+            model_attempt_number=1,
+            model_attempt_commit_deferred=True,
+        )
+        model = MagicMock(return_value=response)
+        model.supports_deferred_attempt_commit = True
+        model.last_finish_reason = finish_reason
+        agent.model = model
+        action_step = SimpleNamespace(
+            model_output=None,
+            model_output_message=None,
+            token_usage=None,
+            model_input_messages=None,
+            action_output=None,
+            tool_calls=None,
+            step_number=1,
+        )
+        return agent, action_step, response
+
+    @pytest.mark.parametrize("content", ["答案是 4", "```python\nprint(4)\n```"])
+    def test_cmsr_007_disabled_plain_text_commits_direct_final_answer(self, monkeypatch, content):
+        """CMSR-007 / AC-020: legacy text is one accepted answer, not a protocol error."""
+        module = core_agent_module
+        monkeypatch.setattr(module, "ActionOutput", lambda output, is_final_answer: SimpleNamespace(
+            output=output, is_final_answer=is_final_answer,
+        ))
+        agent, action_step, response = self._create_cmsr_007_step_agent(content)
+
+        outputs = list(agent._step_stream(action_step))
+
+        assert len(outputs) == 1
+        assert outputs[0].is_final_answer is True
+        assert outputs[0].output == content
+        assert action_step.action_output == content
+        assert action_step.tool_calls is None
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.rollback_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+        agent.model.assert_called_once()
+        assert agent.model.call_args.kwargs["stop_sequences"] == ["Observation:", "Calling tools:"]
+
+    @pytest.mark.parametrize("format_name", ["code", "run"])
+    def test_cmsr_007_disabled_legacy_code_with_outer_text_executes_once(self, monkeypatch, format_name):
+        """CMSR-007 / AC-022: old block extraction ignores surrounding prose."""
+        module = core_agent_module
+        monkeypatch.setattr(module, "fix_final_answer_code", lambda code: code)
+        monkeypatch.setattr(module, "ActionOutput", lambda output, is_final_answer: SimpleNamespace(
+            output=output, is_final_answer=is_final_answer,
+        ))
+        code = (
+            "Intro <code>a = 1</code>explanation<code>final_answer(a + 1)</code> tail"
+            if format_name == "code"
+            else "Intro ```<RUN>\na = 1\n``` explanation ```<RUN>\nfinal_answer(a + 1)\n``` tail"
+        )
+        agent, action_step, response = self._create_cmsr_007_step_agent(code)
+        agent.python_executor = MagicMock(return_value=SimpleNamespace(
+            output="2", is_final_answer=True, logs="",
+        ))
+
+        outputs = list(agent._step_stream(action_step))
+
+        assert len(outputs) == 1
+        assert outputs[0].is_final_answer is True
+        assert action_step.code_action == "a = 1\n\nfinal_answer(a + 1)"
+        agent.python_executor.assert_called_once_with(action_step.code_action)
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.rollback_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+
+    @pytest.mark.parametrize("content,finish_reason,error_kind", [
+        ("   ", "stop", "generation"),
+        ("<code>final_answer(", "stop", "execution"),
+        ("I will call search next", "stop", "execution"),
+        ("答案是 4", "length", "execution"),
+    ])
+    def test_cmsr_008_disabled_incomplete_output_is_ordinary_step_error(
+        self, monkeypatch, content, finish_reason, error_kind
+    ):
+        """UT-SDK-CMSR-008-002: legacy parse failures keep their step and stream."""
+        module = core_agent_module
+        class LegacyGenerationError(Exception):
+            pass
+
+        class LegacyExecutionError(Exception):
+            pass
+
+        monkeypatch.setattr(module, "AgentGenerationError", LegacyGenerationError)
+        monkeypatch.setattr(module, "AgentExecutionError", LegacyExecutionError)
+        agent, action_step, response = self._create_cmsr_007_step_agent(
+            content, finish_reason=finish_reason,
+        )
+        if content == "I will call search next":
+            agent.tools = {"search": MagicMock()}
+
+        expected = LegacyGenerationError if error_kind == "generation" else LegacyExecutionError
+        with pytest.raises(expected):
+            list(agent._step_stream(action_step))
+
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.rollback_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+
+    @pytest.mark.parametrize("content", ["<code>print(1)</code>", "<code>  </code>"])
+    def test_cmsr_008_disabled_length_or_empty_code_reaches_executor(self, monkeypatch, content):
+        """UT-SDK-CMSR-008-003: pre-whitelist code was not rejected by these guards."""
+        module = core_agent_module
+        monkeypatch.setattr(module, "fix_final_answer_code", lambda code: code)
+        monkeypatch.setattr(module, "ActionOutput", lambda output, is_final_answer: SimpleNamespace(
+            output=output, is_final_answer=is_final_answer,
+        ))
+        agent, action_step, response = self._create_cmsr_007_step_agent(
+            content, finish_reason="length",
+        )
+        agent.python_executor = MagicMock(return_value=SimpleNamespace(
+            output="done", is_final_answer=True, logs="",
+        ))
+
+        list(agent._step_stream(action_step))
+
+        agent.python_executor.assert_called_once()
+        assert action_step.code_action == ("print(1)" if "print" in content else "")
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        assert response.model_attempt_commit_deferred is False
+
+    def test_cmsr_008_disabled_code_normalization_error_stays_in_legacy_flow(self, monkeypatch):
+        """UT-SDK-CMSR-008-003: later parse errors still become ordinary legacy step errors."""
+        module = core_agent_module
+
+        class LegacyExecutionError(Exception):
+            pass
+
+        monkeypatch.setattr(module, "AgentExecutionError", LegacyExecutionError)
+        monkeypatch.setattr(module, "AgentGenerationError", LegacyExecutionError)
+        monkeypatch.setattr(module, "fix_final_answer_code", MagicMock(side_effect=ValueError("bad code")))
+        agent, action_step, response = self._create_cmsr_007_step_agent("<code>bad()</code>")
+        agent.python_executor = MagicMock()
+
+        with pytest.raises(LegacyExecutionError):
+            list(agent._step_stream(action_step))
+
+        agent.python_executor.assert_not_called()
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.rollback_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+
+    def test_cmsr_007_enabled_plain_text_still_requires_explicit_protocol(self):
+        """CMSR-007 / AC-020: disabling the strict path is Agent-scoped."""
+        module = core_agent_module
+        agent, action_step, response = self._create_cmsr_007_step_agent("答案是 4")
+        agent.enable_protocol_repair_retry = True
+
+        with pytest.raises(module.ModelOutputProtocolError):
+            list(agent._step_stream(action_step))
+
+        agent.observer.commit_model_attempt.assert_not_called()
+        agent.observer.rollback_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        assert response.model_attempt_commit_deferred is False
+        assert agent.model.call_args.kwargs["stop_sequences"] is None
+
+    def test_cmsr_007_disabled_plain_text_completes_run_and_persists_step(self, monkeypatch):
+        """CMSR-007 / AC-020: accepted text reaches the normal final-step history path."""
+        module = core_agent_module
+
+        class FakeActionOutput:
+            def __init__(self, output, is_final_answer):
+                self.output = output
+                self.is_final_answer = is_final_answer
+
+        monkeypatch.setattr(module, "ActionOutput", FakeActionOutput)
+        monkeypatch.setattr(module, "ActionStep", lambda **kwargs: SimpleNamespace(**kwargs))
+        monkeypatch.setattr(module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
+        monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
+        agent, _, response = self._create_cmsr_007_step_agent("答案是 4")
+        agent.enable_planning = False
+        agent.verification_config = SimpleNamespace(enabled=False, final_verification_enabled=False)
+        agent.final_answer_checks = []
+        agent._finalize_step = MagicMock()
+        agent._collect_step_metrics = MagicMock()
+        agent._record_output_protocol = MagicMock()
+
+        outputs = list(agent._run_stream("question", max_steps=2))
+
+        assert outputs[-1].output == "答案是 4"
+        assert len(agent.memory.steps) == 1
+        assert agent.memory.steps[0].model_output == "答案是 4"
+        assert agent.memory.steps[0].is_final_answer is True
+        agent._record_output_protocol.assert_called_with(
+            "legacy_direct_final_answer", final_answer_source="direct_model_output",
+        )
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        assert response.model_attempt_commit_deferred is False
+
+    def test_cmsr_008_disabled_action_error_continues_as_next_react_step(self, monkeypatch):
+        """UT-SDK-CMSR-008-002: invalid legacy output stays in step history, not repair context."""
+        module = core_agent_module
+
+        class LegacyAgentError(Exception):
+            pass
+
+        class LegacyExecutionError(LegacyAgentError):
+            pass
+
+        class FakeActionOutput:
+            def __init__(self, output, is_final_answer):
+                self.output = output
+                self.is_final_answer = is_final_answer
+
+        monkeypatch.setattr(module, "AgentError", LegacyAgentError)
+        monkeypatch.setattr(module, "AgentExecutionError", LegacyExecutionError)
+        monkeypatch.setattr(module, "AgentGenerationError", LegacyAgentError)
+        monkeypatch.setattr(module, "ActionOutput", FakeActionOutput)
+        monkeypatch.setattr(module, "ActionStep", lambda **kwargs: SimpleNamespace(**kwargs))
+        monkeypatch.setattr(module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
+        monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
+        agent, _, first_response = self._create_cmsr_007_step_agent("<code>final_answer(")
+        second_response = SimpleNamespace(
+            content="答案是 4", token_usage=None, model_attempt_id="legacy-second",
+            model_attempt_number=1, model_attempt_commit_deferred=True,
+        )
+        agent.model.side_effect = [first_response, second_response]
+        agent.enable_planning = False
+        agent.verification_config = SimpleNamespace(enabled=False, final_verification_enabled=False)
+        agent.final_answer_checks = []
+        agent._finalize_step = MagicMock()
+        agent._collect_step_metrics = MagicMock()
+        agent._record_output_protocol = MagicMock()
+
+        outputs = list(agent._run_stream("question", max_steps=3))
+
+        assert outputs[-1].output == "答案是 4"
+        assert agent.model.call_count == 2
+        assert [step.step_number for step in agent.memory.steps] == [1, 2]
+        assert isinstance(agent.memory.steps[0].error, LegacyExecutionError)
+        assert agent.memory.steps[0].model_output == "<code>final_answer("
+        assert agent.memory.steps[1].is_final_answer is True
+        assert agent._protocol_repair_messages == []
+        assert agent.observer.commit_model_attempt.call_args_list == [
+            call("legacy-attempt", 1), call("legacy-second", 1),
+        ]
+        agent.observer.rollback_model_attempt.assert_not_called()
+
+    def test_cmsr_008_disabled_empty_final_answer_tool_result_is_step_error(self, monkeypatch):
+        """UT-SDK-CMSR-008-002: legacy final_answer errors use the normal ReAct loop."""
+        module = core_agent_module
+
+        class LegacyAgentError(Exception):
+            pass
+
+        class LegacyExecutionError(LegacyAgentError):
+            pass
+
+        class FakeActionOutput:
+            def __init__(self, output, is_final_answer):
+                self.output = output
+                self.is_final_answer = is_final_answer
+
+        monkeypatch.setattr(module, "AgentError", LegacyAgentError)
+        monkeypatch.setattr(module, "AgentExecutionError", LegacyExecutionError)
+        monkeypatch.setattr(module, "ActionOutput", FakeActionOutput)
+        agent = self._create_canonical_run_agent(
+            monkeypatch, enable_protocol_repair_retry=False,
+            model=MagicMock(last_response_diagnostics={"finish_reason": "stop"}),
+        )
+        outputs = iter(["", "valid answer"])
+        agent._step_stream = lambda _step: iter([FakeActionOutput(next(outputs), True)])
+
+        results = list(agent._run_stream("test task", max_steps=2))
+
+        assert results[-1].output == "valid answer"
+        assert len(agent.memory.steps) == 2
+        assert isinstance(agent.memory.steps[0].error, LegacyExecutionError)
+        assert agent.memory.steps[1].is_final_answer is True
+        assert agent._protocol_repair_messages == []
+
+    def test_cmsr_006_disabled_protocol_repair_chinese_message_describes_single_failure(self, monkeypatch):
+        agent = self._create_canonical_run_agent(monkeypatch, enable_protocol_repair_retry=False)
+        agent.observer.lang = "zh"
+
+        message = agent._controlled_protocol_failure(repair_disabled=True)
+
+        assert "已关闭自动修复" in message
+        assert "连续" not in message
 
     def test_cmsr_004_terminal_model_error_stops_react_without_memory_append(
         self, monkeypatch
@@ -2871,6 +3228,7 @@ class TestRunStreamRealExecution:
 
         agent = self._create_canonical_run_agent(
             monkeypatch,
+            enable_protocol_repair_retry=True,
             enable_planning=True,
             model=MagicMock(last_response_diagnostics={"finish_reason": "stop"}),
             verification_config=SimpleNamespace(

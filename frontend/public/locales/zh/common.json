@@ -4193,6 +4193,8 @@
   "agent.runPolicy.maxStepUnit": "步",
   "agent.runPolicy.tokensUnit": "令牌",
   "agent.runPolicy.selfValidateHint": "智能体会在回复前验证输出结果。",
+  "agent.runPolicy.protocolRepairRetry": "严格输出协议与静默修复",
+  "agent.runPolicy.protocolRepairRetryHint": "默认关闭：使用旧版智能体流程，执行成对的 <code> 代码块、接受普通文本答案，并在一般步骤错误后继续。开启：严格校验动作格式，对无效输出静默修复。模型服务自身的重试不受影响。",
   "agent.deployment.groupIds": "用户组",
   "agent.deployment.groupIdsPlaceholder": "请选择用户组",
   "agent.deployment.ingroupPermission": "组内权限",

@@ -1075,6 +1075,66 @@ async def test_update_agent_info_impl_success(
     mock_update_agent.assert_called_once_with(123, request, "test_user")
 
 
+@pytest.mark.asyncio
+async def test_cmsr_006_read_only_agent_cannot_change_protocol_repair_policy():
+    """The new policy cannot be changed through a read-only Agent update."""
+    request = MagicMock()
+    request.agent_id = 123
+    request.enable_protocol_repair_retry = False
+    request.requested_output_tokens = None
+    request.example_questions = None
+    apply_default_prompt_template_request_fields(request)
+
+    with patch(
+        "management.services.agent.service.get_current_user_info",
+        return_value=("test_user", "test_tenant", "en"),
+    ), patch(
+        "management.services.agent.service.search_agent_info_by_agent_id",
+        return_value={"agent_id": 123, "tenant_id": "test_tenant"},
+    ), patch(
+        "management.services.agent.service.get_user_tenant_by_user_id",
+        return_value={"user_role": "USER"},
+    ), patch(
+        "management.services.agent.service.resolve_agent_list_permission",
+        return_value="READ_ONLY",
+    ), patch("management.services.agent.service.update_agent") as mock_update:
+        with pytest.raises(agent_service.ForbiddenError):
+            await update_agent_info_impl(request, authorization="Bearer token")
+
+    mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cmsr_006_editable_agent_can_disable_protocol_repair_policy():
+    """An editable Agent can persist an explicitly disabled policy."""
+    request = MagicMock()
+    request.agent_id = 123
+    request.enable_protocol_repair_retry = False
+    request.requested_output_tokens = None
+    request.example_questions = None
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
+
+    with patch(
+        "management.services.agent.service.get_current_user_info",
+        return_value=("test_user", "test_tenant", "en"),
+    ), patch(
+        "management.services.agent.service.search_agent_info_by_agent_id",
+        return_value={"agent_id": 123, "tenant_id": "test_tenant"},
+    ), patch(
+        "management.services.agent.service.get_user_tenant_by_user_id",
+        return_value={"user_role": "USER"},
+    ), patch(
+        "management.services.agent.service.resolve_agent_list_permission",
+        return_value="EDIT",
+    ), patch("management.services.agent.service.update_agent") as mock_update:
+        result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 123
+    mock_update.assert_called_once_with(123, request, "test_user")
+
+
 @patch("management.services.agent.management.delete_tools_by_agent_id")
 @patch("management.services.agent.management.delete_agent_relationship")
 @patch("management.services.agent.management.delete_agent_by_id")
@@ -4021,6 +4081,7 @@ async def test_export_agent_by_agent_id_success(
         "business_description": "For testing purposes",
         "max_steps": 10,
         "provide_run_summary": True,
+        "enable_protocol_repair_retry": False,
         "duty_prompt": "Test duty prompt",
         "constraint_prompt": "Test constraint prompt",
         "few_shots_prompt": "Test few shots prompt",
@@ -4104,6 +4165,7 @@ async def test_export_agent_by_agent_id_success(
     assert result.agent_id == 123
     assert result.tenant_id == "test_tenant"
     assert result.name == "Test Agent"
+    assert result.enable_protocol_repair_retry is False
     assert len(result.tools) == 5
     assert result.managed_agents == mock_sub_agent_ids
 
@@ -4193,6 +4255,7 @@ async def test_import_agent_by_agent_id_success(
         business_description="Imported business description",
         max_steps=5,
         provide_run_summary=True,
+        enable_protocol_repair_retry=False,
         duty_prompt="Imported duty prompt",
         constraint_prompt="Imported constraint prompt",
         few_shots_prompt="Imported few shots prompt",
@@ -4208,6 +4271,7 @@ async def test_import_agent_by_agent_id_success(
 
     # Assert
     assert result == 456
+    assert mock_create_agent.call_args.kwargs["agent_info"]["enable_protocol_repair_retry"] is False
     mock_create_agent.assert_called_once()
     assert mock_create_agent.call_args[1]["agent_info"]["name"] == "valid_agent_name"
     assert (
