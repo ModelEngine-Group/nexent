@@ -306,7 +306,7 @@ class TestConfigAppRouterConfiguration:
             config_app,
             "sync_default_prompt_template_on_startup",
             new=sync_defaults,
-        ):
+        ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
             asyncio.run(exercise_lifespan())
 
         assert config_app.app.lifespan is config_app.config_lifespan

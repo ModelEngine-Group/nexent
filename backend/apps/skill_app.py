@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
 from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
+from consts.const import ENABLE_AGENT_WORKBENCH
 from consts.model import (
     NL2SkillRunRequest,
     SkillCreateRequest,
@@ -752,6 +753,8 @@ async def nl2skill_run_api(
     _current_user: CurrentUser = Depends(require_skill_create_permission),
 ):
     """Run NL2Skill; Workbench turns opt into conversation persistence."""
+    if (request.persist_history or request.workbench_config is not None) and not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     try:
         _, tenant_id, user_language = get_current_user_info(authorization)
     except Exception as e:

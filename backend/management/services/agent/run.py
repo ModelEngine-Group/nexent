@@ -31,6 +31,7 @@ from agents.preprocess_manager import preprocess_manager
 from consts.const import (
     DEFAULT_EN_TITLE,
     DEFAULT_ZH_TITLE,
+    ENABLE_AGENT_WORKBENCH,
     LANGUAGE,
     MESSAGE_ROLE,
     MODEL_CONFIG_MAPPING,
@@ -48,6 +49,7 @@ from consts.exceptions import (
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
     ValidationError,
+    WorkbenchError,
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from nexent.core.utils.observer import ProcessType
@@ -1577,6 +1579,9 @@ async def run_agent_stream(
     Args:
         resume: If True, check for existing streaming message and continue from where it left off
     """
+    if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
+        raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+
     resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
         authorization=authorization,
         http_request=http_request,
@@ -1608,6 +1613,8 @@ async def run_agent_stream(
             raise ForbiddenError(
                 "Conversation is not accessible to the current identity"
             )
+        if not ENABLE_AGENT_WORKBENCH and conversation.get("workbench_config"):
+            raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
         if not resume:
             is_workbench_conversation = isinstance(conversation.get("workbench_config"), dict)
             if is_workbench_conversation != (agent_request.entrypoint == "workbench"):

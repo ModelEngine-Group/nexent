@@ -35,6 +35,7 @@ from consts.const import (
     TENANT_ID,
     TENANT_NAME,
     IS_SPEED_MODE,
+    ENABLE_AGENT_WORKBENCH,
 )
 from consts.exceptions import (
     ForbiddenError,
@@ -234,6 +235,9 @@ def backfill_workbench_main_agents() -> Dict[str, int]:
     malformed or temporarily unavailable tenant does not prevent the remaining
     tenants from being upgraded.
     """
+    if not ENABLE_AGENT_WORKBENCH:
+        return {"total": 0, "succeeded": 0, "failed": 0}
+
     tenant_ids = [
         tenant_id
         for tenant_id in get_all_tenant_ids()
@@ -335,20 +339,21 @@ def create_tenant(
                 logger.warning(
                     f"Failed to install skills by IDs for tenant {tenant_id}: {e}")
 
-        try:
-            ensure_workbench_main_agent(
-                tenant_id=tenant_id,
-                user_id=created_by or "system",
-                locale=locale,
-            )
-        except Exception as e:
-            # Tenant creation remains recoverable because Workbench runtime also
-            # calls the provider lazily before using the system Agent.
-            logger.warning(
-                "Failed to provision workbench_main for tenant %s: %s",
-                tenant_id,
-                e,
-            )
+        if ENABLE_AGENT_WORKBENCH:
+            try:
+                ensure_workbench_main_agent(
+                    tenant_id=tenant_id,
+                    user_id=created_by or "system",
+                    locale=locale,
+                )
+            except Exception as e:
+                # Tenant creation remains recoverable because Workbench runtime also
+                # calls the provider lazily before using the system Agent.
+                logger.warning(
+                    "Failed to provision workbench_main for tenant %s: %s",
+                    tenant_id,
+                    e,
+                )
 
         tenant_info = {
             "tenant_id": tenant_id,

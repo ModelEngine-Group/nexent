@@ -408,7 +408,8 @@ class TestCreateTenant:
         group_id = 123
 
         service_mocks['create_tenant_with_default_group'].return_value = group_id
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', True), \
+                patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
                 patch('backend.services.tenant_service.ensure_workbench_main_agent') as ensure:
             result = create_tenant(tenant_name, user_id, locale="zh")
 
@@ -528,7 +529,7 @@ class TestWorkbenchMainBackfill:
             "tenant-b",
         ]
 
-        with patch(
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', True), patch(
             "backend.services.tenant_service.get_all_tenant_ids",
             return_value=tenant_ids,
         ), patch(
@@ -543,6 +544,15 @@ class TestWorkbenchMainBackfill:
             "tenant-b",
         ]
         assert all(call.kwargs["user_id"] == "system" for call in ensure.call_args_list)
+
+    def test_workbench_backfill_skipped_when_disabled(self):
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', False), patch(
+            'backend.services.tenant_service.get_all_tenant_ids'
+        ) as tenants:
+            result = backfill_workbench_main_agents()
+
+        assert result == {"total": 0, "succeeded": 0, "failed": 0}
+        tenants.assert_not_called()
 
 
 class TestUpdateTenantInfo:

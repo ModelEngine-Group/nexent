@@ -3,6 +3,7 @@ from http import HTTPStatus
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
+from consts.const import ENABLE_AGENT_WORKBENCH
 
 from consts.model import (
     BatchDeleteConversationRequest,
@@ -263,6 +264,8 @@ async def update_conversation_workbench_config_endpoint(
     authorization: Optional[str] = Header(None),
 ):
     """Replace canonical Workbench config using its independent optimistic lock."""
+    if not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
 
     try:
         user_id, _ = get_current_user_id(authorization)

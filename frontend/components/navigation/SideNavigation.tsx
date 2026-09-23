@@ -186,7 +186,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, enableAgentWorkbench } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -256,6 +256,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     }
 
     const filtered = ROUTE_CONFIG.filter((route) => {
+      if (route.path === "/workbench" && !enableAgentWorkbench) return false;
       return (
         accessibleRoutes.includes(route.path) ||
         (route.path === "/workbench" && accessibleRoutes.includes("/chat"))
@@ -284,7 +285,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       ...root,
       children: childrenByParent.get(root.path) || [],
     }));
-  }, [accessibleRoutes]);
+  }, [accessibleRoutes, enableAgentWorkbench]);
 
   /**
    * Create a menu item from route configuration

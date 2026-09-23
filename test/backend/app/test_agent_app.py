@@ -150,6 +150,7 @@ sys.modules['services.prompt_service'] = MagicMock()
 from apps.agent_app import (
     agent_config_router,
     agent_runtime_router,
+    get_workbench_bootstrap_api,
     nl2agent_run_api,
     require_agent_create_permission,
 )
@@ -312,6 +313,17 @@ def test_agent_run_preserves_runtime_metadata_app_exceptions(
     assert response.status_code == expected_status
     assert response.json()["code"] == error_code.value
     assert response.json()["details"] == {"reason": reason}
+
+
+@pytest.mark.asyncio
+async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
+    mocker.patch("apps.agent_app.ENABLE_AGENT_WORKBENCH", False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_workbench_bootstrap_api(authorization="Bearer test-token")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == {"code": "WORKBENCH_DISABLED"}
 
 
 @pytest.mark.asyncio

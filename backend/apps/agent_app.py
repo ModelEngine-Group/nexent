@@ -8,7 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import ASSET_OWNER_TENANT_ID, ENABLE_AGENT_WORKBENCH
 from consts.model import (
     AgentRequest,
     AgentInfoRequest,
@@ -70,6 +70,7 @@ from services.workbench_service import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
+from management.services.agent.system_agent_provider import ensure_workbench_main_agent
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from services.workbench_creation_history_service import (
@@ -123,18 +124,31 @@ async def get_workbench_bootstrap_api(
     authorization: Optional[str] = Header(None),
 ):
     """Return server-authoritative Workbench modes and creation capabilities."""
+    if not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     _, tenant_id = get_current_user_id(authorization)
     try:
         generic_agent = build_workbench_main_profile(tenant_id)
     except Exception:
-        logger.exception(
-            "Failed to load workbench_main presentation profile for tenant %s",
-            tenant_id,
-        )
-        generic_agent = {
-            "display_name": "Nexent Workbench",
-            "default_skill_resources": [],
-        }
+        # The feature may be enabled after this tenant was created. Initialize
+        # lazily if the startup backfill has not reached it yet.
+        try:
+            await run_blocking(
+                "workbench-bootstrap",
+                ensure_workbench_main_agent,
+                tenant_id,
+                "system",
+            )
+            generic_agent = build_workbench_main_profile(tenant_id)
+        except Exception:
+            logger.exception(
+                "Failed to load workbench_main presentation profile for tenant %s",
+                tenant_id,
+            )
+            generic_agent = {
+                "display_name": "Nexent Workbench",
+                "default_skill_resources": [],
+            }
     return {
         "code": 0,
         "message": "success",
@@ -158,6 +172,8 @@ async def preview_workbench_capabilities_api(
     authorization: Optional[str] = Header(None),
 ):
     """Lock an Agent version and return its published Workbench defaults."""
+    if not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     user_id, tenant_id = get_current_user_id(authorization)
     try:
         data = build_workbench_capability_preview(
@@ -310,6 +326,8 @@ async def nl2agent_run_api(
     _current_user: CurrentUser = Depends(require_agent_create_permission),
 ):
     """Run NL2Agent; Workbench turns opt into conversation persistence."""
+    if (nl2agent_request.persist_history or nl2agent_request.workbench_config is not None) and not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
 
     try:
         _, tenant_id, language = get_current_user_info(
