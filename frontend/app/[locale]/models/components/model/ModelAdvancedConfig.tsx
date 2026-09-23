@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -72,6 +73,17 @@ export function ModelAdvancedConfig({
   reasoningCapability?: ReasoningCapability;
 }) {
   const { t } = useTranslation();
+
+  // LLMs expose the thinking switch regardless of whether the catalog has
+  // declared a provider-specific reasoning control. Materialize the default
+  // (true) into the value — the payload builder treats an undefined
+  // enable_thinking as "thinking off" and would silently drop any stored
+  // reasoning_effort / budget (same seed ModelAdvancedSettings applies).
+  useEffect(() => {
+    if (modelType === "llm" && value.enable_thinking === undefined) {
+      onChange({ ...value, enable_thinking: true });
+    }
+  }, [modelType, value, onChange]);
 
   const setNumberField = (key: string, raw: string) =>
     onChange({ ...value, [key]: raw === "" ? undefined : Number(raw) });
