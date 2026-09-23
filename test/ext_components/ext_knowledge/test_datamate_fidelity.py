@@ -50,6 +50,22 @@ def test_kb_info_fields(datamate_client):
     assert info["processSource"] == "Unstructured"
 
 
+def test_every_listed_kb_has_info(mock_base_url, require_real_nexent):
+    # The product sync flow fetches details for EVERY listed knowledge base
+    # and dereferences detail['base_info'] unconditionally, so a real
+    # DataMate serves info for all listed KBs — listing a KB whose details
+    # 404 breaks the whole sync (KeyError 'base_info').
+    from nexent.vector_database.datamate_core import DataMateCore
+
+    core = DataMateCore(base_url=f"{mock_base_url}/datamate", timeout=10.0)
+    ids = core.get_user_indices()
+    assert len(ids) == 21
+    details, names = core.get_indices_detail(ids)
+    for kb_id, detail in details.items():
+        assert "error" not in detail, f"{kb_id}: {detail.get('error')}"
+        assert detail["base_info"]["embedding_model"], kb_id
+
+
 def test_unknown_kb_info_raises_runtime_error(datamate_client):
     with pytest.raises(RuntimeError):
         datamate_client.get_knowledge_base_info("datamate-kb-unknown")

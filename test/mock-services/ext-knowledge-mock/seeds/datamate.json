@@ -54,6 +54,101 @@
       "embedding": {"modelName": "text-embedding-3-small"},
       "createdAt": "2024-06-14T00:00:00Z",
       "updatedAt": "2024-06-16T13:00:00Z"
+    },
+    "datamate-kb-003": {
+      "fileCount": 2, "name": "DataMate KB 003", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-004": {
+      "fileCount": 2, "name": "DataMate KB 004", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-005": {
+      "fileCount": 2, "name": "DataMate KB 005", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-006": {
+      "fileCount": 2, "name": "DataMate KB 006", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-007": {
+      "fileCount": 2, "name": "DataMate KB 007", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-008": {
+      "fileCount": 2, "name": "DataMate KB 008", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-009": {
+      "fileCount": 2, "name": "DataMate KB 009", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-010": {
+      "fileCount": 2, "name": "DataMate KB 010", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-011": {
+      "fileCount": 2, "name": "DataMate KB 011", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-012": {
+      "fileCount": 2, "name": "DataMate KB 012", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-013": {
+      "fileCount": 2, "name": "DataMate KB 013", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-014": {
+      "fileCount": 2, "name": "DataMate KB 014", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-015": {
+      "fileCount": 2, "name": "DataMate KB 015", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-016": {
+      "fileCount": 2, "name": "DataMate KB 016", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-017": {
+      "fileCount": 2, "name": "DataMate KB 017", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-018": {
+      "fileCount": 2, "name": "DataMate KB 018", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-019": {
+      "fileCount": 2, "name": "DataMate KB 019", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-020": {
+      "fileCount": 2, "name": "DataMate KB 020", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
+    },
+    "datamate-kb-021": {
+      "fileCount": 2, "name": "DataMate KB 021", "chunkCount": 12, "storeSize": "1.0MB",
+      "processSource": "Unstructured", "embedding": {"modelName": "bge-m3"},
+      "createdAt": "2024-06-20T00:00:00Z", "updatedAt": "2024-06-20T00:00:00Z"
     }
   },
   "chunks_by_kb": {
