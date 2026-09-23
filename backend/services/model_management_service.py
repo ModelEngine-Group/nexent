@@ -53,7 +53,7 @@ from utils.model_name_utils import (
     split_repo_name,
     sort_models_by_id,
 )
-from utils.reasoning import normalize_reasoning_params, reasoning_controls
+from utils.reasoning import normalize_reasoning_params
 # Model Catalog - 预置模型目录，自动填充默认配置
 try:
     from configs.model_catalog_loader import (
@@ -68,9 +68,9 @@ except Exception as _exc:  # noqa: BLE001
         return False
 
     def resolve_reasoning_capability(  # type: ignore[no-redef]
-        _model_name: str,
-        _base_url: Optional[str] = None,
-        _provider_hint: Optional[str] = None,
+        model_name: str,
+        base_url: Optional[str] = None,
+        provider_hint: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         return None
 
@@ -141,6 +141,13 @@ def _apply_model_reasoning_default(
     if model_data.get("model_type") not in {"llm", "chat"}:
         return
     extra_params = dict(model_data.get("extra_params") or {})
+    enabled = extra_params.get("enable_thinking")
+    if enabled is not True:
+        if enabled is False:
+            extra_params.pop("reasoning_effort", None)
+            extra_params.pop("reasoning_budget_tokens", None)
+            model_data["extra_params"] = extra_params or None
+        return
     model_name = add_repo_to_name(
         model_data.get("model_repo", ""), model_data.get("model_name", "")
     )
@@ -149,21 +156,18 @@ def _apply_model_reasoning_default(
         base_url=model_data.get("base_url"),
         provider_hint=provider_hint or model_data.get("model_factory"),
     )
-    # Capability metadata is authoritative. Unsupported or unresolved models
-    # must not keep stale reasoning fields from historical rows.
-    normalized = normalize_reasoning_params(extra_params, capability)
-    if normalized.get("enable_thinking") is not True:
-        model_data["extra_params"] = normalized or None
+    if isinstance(capability, dict) and capability.get("status") == "supported":
+        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
+    else:
+        # Keep a provider-agnostic profile for unknown/custom model IDs. The
+        # provider remains the source of truth if it rejects a concrete value.
+        levels = list(COMMON_REASONING_LEVELS)
+    if extra_params.get("reasoning_effort") == "auto":
         return
-    if normalized.get("enable_thinking") is True:
-        controls = normalized.get("reasoning_effort") or normalized.get(
-            "reasoning_budget_tokens"
-        )
-        if controls is None and any(
-            control.get("type") == "effort" for control in reasoning_controls(capability)
-        ):
-            normalized["reasoning_effort"] = COMMON_REASONING_DEFAULT
-    model_data["extra_params"] = normalized or None
+    if extra_params.get("reasoning_effort") in levels:
+        return
+    extra_params["reasoning_effort"] = COMMON_REASONING_DEFAULT
+    model_data["extra_params"] = extra_params
 
 
 # OpenTelemetry counter for silent catalog-matcher failures during the

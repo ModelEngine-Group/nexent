@@ -70,7 +70,6 @@ from utils.automation_tool_prompt import build_automation_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.http_client_utils import create_httpx_client
 from utils.redis_utils import get_redis_client
-from utils.reasoning import normalize_reasoning_params, reasoning_controls, supports_reasoning
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
     AIDP_API_KEY,
@@ -301,26 +300,22 @@ def _resolve_model_reasoning_effort(
         return None
     if extra_params.get("reasoning_effort") == "auto":
         return None
-    effort_controls = [
-        control for control in reasoning_controls(capability)
-        if control.get("type") == "effort"
-    ]
-    if not effort_controls:
-        return None
-    levels = {
-        str(value)
-        for control in effort_controls
-        for value in control.get("values") or []
-    }
-    levels.update(capability.get("levels") or [] if isinstance(capability, dict) else [])
+    if isinstance(capability, dict) and capability.get("status") == "supported":
+        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
+        default = capability.get("default")
+        if default not in levels:
+            default = COMMON_REASONING_DEFAULT
+    else:
+        # Unknown/custom model IDs still use the common generic profile. The
+        # provider remains the source of truth when a concrete value is sent.
+        levels = list(COMMON_REASONING_LEVELS)
+        default = COMMON_REASONING_DEFAULT
     saved = extra_params.get("reasoning_effort")
-    if saved == "auto":
-        return None
     if saved in levels:
         return saved
     # Auto is the universal fallback: omit the provider-specific effort so the
     # model can choose its own reasoning depth.
-    return None
+    return None if saved is None or default == COMMON_REASONING_DEFAULT else default
 
 
 def _resolve_model_reasoning_budget(
@@ -344,7 +339,7 @@ def _resolve_model_reasoning_budget(
         maximum = budget_control.get("max")
         if isinstance(minimum, int) and isinstance(maximum, int):
             return min(maximum, max(minimum, value))
-    return None
+    return value
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -1095,9 +1090,6 @@ async def create_model_config_list(tenant_id):
             base_url=record.get("base_url"),
             provider_hint=record.get("model_factory"),
         )
-        reasoning_extra_params = normalize_reasoning_params(
-            record.get("extra_params"), reasoning_capability
-        )
         model_list.append(
             ModelConfig(cite_name=record["display_name"],
                         api_key=record.get("api_key", ""),
@@ -1123,18 +1115,15 @@ async def create_model_config_list(tenant_id):
                         # temperature/top_p/extra_params flow into SDK.
                         temperature=record.get("temperature"),
                         top_p=record.get("top_p"),
-                        enable_thinking=(
-                            supports_reasoning(reasoning_capability)
-                            and _is_thinking_enabled(reasoning_extra_params)
-                        ),
+                        enable_thinking=_is_thinking_enabled(record.get("extra_params")),
                         reasoning_capability=reasoning_capability,
                         reasoning_effort=_resolve_model_reasoning_effort(
-                            reasoning_extra_params, reasoning_capability
+                            record.get("extra_params"), reasoning_capability
                         ),
                         reasoning_budget_tokens=_resolve_model_reasoning_budget(
-                            reasoning_extra_params, reasoning_capability
+                            record.get("extra_params"), reasoning_capability
                         ),
-                        extra_body=_build_extra_body(reasoning_extra_params)))
+                        extra_body=_build_extra_body(record.get("extra_params"))))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -2516,9 +2505,6 @@ async def create_agent_run_info(
                             setattr(mc, field, override_entry[field])
                     override_extra = override_entry.get("extra_params")
                     if override_extra and isinstance(override_extra, dict):
-                        override_extra = normalize_reasoning_params(
-                            override_extra, mc.reasoning_capability
-                        )
                         merged = dict(mc.extra_body or {})
                         for k, v in override_extra.items():
                             if k == "enable_thinking":
@@ -2555,19 +2541,12 @@ async def create_agent_run_info(
                         budget = override_entry["reasoning_budget_tokens"]
                         if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
                             mc.reasoning_budget_tokens = budget
-                    # A numeric budget and an effort enum are alternative
-                    # controls. The budget is authoritative when both are
-                    # present, and unsupported historical values are ignored.
-                    if not supports_reasoning(mc.reasoning_capability):
-                        mc.enable_thinking = False
-                        mc.reasoning_effort = None
-                        mc.reasoning_budget_tokens = None
-                    elif mc.reasoning_budget_tokens is not None:
-                        mc.reasoning_effort = None
                     break
 
-    # A request-level effort is valid only when the selected model explicitly
-    # declares the corresponding capability. Unknown/custom models fail closed.
+    # A request-level effort is valid only when the selected model's switch is
+    # enabled. Known capabilities use their declared levels. Unknown/custom
+    # models use the common generic profile and let the provider reject an
+    # unsupported concrete value through the normal reasoning error path.
     # ``auto`` is represented by an omitted per-request effort. The selected
     # model keeps reasoning enabled, but the provider chooses the depth.
     if reasoning_effort == "auto":
@@ -2582,23 +2561,15 @@ async def create_agent_run_info(
             raise ValidationError(
                 "The selected model does not support the requested reasoning effort"
             )
-        effort_controls = [
-            control for control in reasoning_controls(capability)
-            if control.get("type") == "effort"
-        ]
-        supported_levels = {
-            str(value)
-            for control in effort_controls
-            for value in control.get("values") or []
-        }
-        if isinstance(capability, dict):
-            supported_levels.update(capability.get("levels") or [])
+        if isinstance(capability, dict) and capability.get("status") == "supported":
+            supported_levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
+        else:
+            supported_levels = list(COMMON_REASONING_LEVELS)
         if reasoning_effort not in supported_levels:
             raise ValidationError(
                 "The selected model does not support the requested reasoning effort"
             )
         selected_config.reasoning_effort = reasoning_effort
-        selected_config.reasoning_budget_tokens = None
 
     if reasoning_budget_tokens is not None:
         selected_config = next(
@@ -2627,7 +2598,6 @@ async def create_agent_run_info(
                 f"Reasoning budget must be between {minimum} and {maximum} tokens"
             )
         selected_config.reasoning_budget_tokens = reasoning_budget_tokens
-        selected_config.reasoning_effort = None
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
