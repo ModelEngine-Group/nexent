@@ -701,6 +701,7 @@ export function MyAgent({
               : undefined
         }
         detail={detail}
+        agent={detailTarget?.agent ?? null}
         published={(detailTarget?.versionNo ?? 0) > 0}
         status={detail?.status}
         isLoading={isDetailLoading || isDetailListingsLoading}
@@ -719,6 +720,7 @@ function toMyAgentItem(agent: Agent): MyEditableAgentItem {
   const currentVersionNo = agent.current_version_no ?? 0;
   return {
     agent_id: Number(agent.id),
+    icon_url: agent.icon_url,
     name: agent.display_name || agent.name,
     description: agent.description,
     current_version_no: currentVersionNo,

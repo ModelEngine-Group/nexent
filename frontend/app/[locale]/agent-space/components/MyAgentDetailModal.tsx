@@ -16,12 +16,15 @@ import { useTranslation } from "react-i18next";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import type { MyAgentDetailView } from "@/lib/myAgentDetail";
 import type { AgentRepositoryListingStatus } from "@/types/agentRepository";
+import type { MyEditableAgentItem } from "@/types/agentRepository";
+import { MyAgentIcon } from "./MyAgentIcon";
 
 interface MyAgentDetailModalProps {
   open: boolean;
   onClose: () => void;
   onEdit?: () => void;
   detail: MyAgentDetailView | null | undefined;
+  agent: Pick<MyEditableAgentItem, "agent_id" | "icon_url"> | null;
   published: boolean;
   status?: AgentRepositoryListingStatus;
   isLoading: boolean;
@@ -75,6 +78,7 @@ export function MyAgentDetailModal({
   onClose,
   onEdit,
   detail,
+  agent,
   published,
   status,
   isLoading,
@@ -110,9 +114,9 @@ export function MyAgentDetailModal({
           ) : detail ? (
             <>
               <div className="flex items-start gap-3 pr-6">
-                <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-rose-100 bg-rose-50 text-rose-600 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
-                  <Bot className="size-6" aria-hidden />
-                </div>
+                {agent ? (
+                  <MyAgentIcon agent={agent} size={48} iconSize={24} />
+                ) : null}
                 <div className="min-w-0 flex-1">
                   <h2 className="break-words text-lg font-semibold leading-7 text-slate-900 dark:text-slate-100">
                     {detail.title || t("agentRepository.card.untitled")}

@@ -28,7 +28,9 @@ const agentIcons = [SparklesIcon, BotIcon, WandIcon, LightbulbIcon, ZapIcon];
  * 2. Fall back to the agent ID based icon
  * 3. Default to SparklesIcon
  */
-export function getAgentIcon(agent: Agent | PublishedAgent): LucideIcon {
+export function getAgentIcon(
+  agent: Agent | PublishedAgent | { agent_id: number }
+): LucideIcon {
   const typedAgent = agent as PublishedAgent;
   // Try icon property first
   const iconType = (typedAgent as PublishedAgent & { icon?: AgentIconType })
@@ -44,4 +46,15 @@ export function getAgentIcon(agent: Agent | PublishedAgent): LucideIcon {
   }
 
   return SparklesIcon;
+}
+
+export function getAgentUploadedIconId(agent: {
+  agent_id: number;
+  icon_url?: string | null;
+}): number | null {
+  return agent.icon_url?.trim() &&
+    Number.isInteger(agent.agent_id) &&
+    agent.agent_id > 0
+    ? agent.agent_id
+    : null;
 }

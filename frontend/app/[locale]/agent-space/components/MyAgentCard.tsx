@@ -5,7 +5,6 @@ import type { MenuProps } from "antd";
 import { useState } from "react";
 import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
-  Bot,
   ClipboardCheck,
   Clock,
   Eye,
@@ -25,6 +24,7 @@ import {
 } from "@/lib/agentRepositoryMine";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 import ResourceCard from "@/components/resource/ResourceCard";
+import { MyAgentIcon } from "./MyAgentIcon";
 
 interface MyAgentCardProps {
   agent: MyEditableAgentItem;
@@ -170,11 +170,7 @@ export function MyAgentCard({
           </span>
         ) : undefined
       }
-      icon={
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Bot className="size-5" aria-hidden />
-        </div>
-      }
+      icon={<MyAgentIcon agent={agent} size={44} iconSize={20} />}
       description={description}
       descriptionLines={2}
       tags={
