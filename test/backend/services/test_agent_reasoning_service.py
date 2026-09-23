@@ -39,6 +39,64 @@ def test_reasoning_snapshot_from_model_normalizes_model_rows():
     }
 
 
+def test_reasoning_snapshot_from_model_clamps_budget_to_declared_range():
+    capability = {
+        "status": "supported",
+        "levels": [],
+        "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+    }
+
+    low = reasoning_snapshot_from_model(
+        {
+            "reasoning_capability": capability,
+            "extra_params": {
+                "enable_thinking": True,
+                "reasoning_budget_tokens": 64,
+            },
+        }
+    )
+    high = reasoning_snapshot_from_model(
+        {
+            "reasoning_capability": capability,
+            "extra_params": {
+                "enable_thinking": True,
+                "reasoning_budget_tokens": 65536,
+            },
+        }
+    )
+
+    assert low["reasoning_budget_tokens"] == 128
+    assert high["reasoning_budget_tokens"] == 32768
+
+
+def test_reasoning_snapshot_from_model_ignores_invalid_budget_values():
+    capability = {
+        "status": "supported",
+        "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+    }
+
+    for value in (True, 0, -1, "4096"):
+        result = reasoning_snapshot_from_model(
+            {
+                "reasoning_capability": capability,
+                "extra_params": {
+                    "enable_thinking": True,
+                    "reasoning_budget_tokens": value,
+                },
+            }
+        )
+        assert "reasoning_budget_tokens" not in result
+
+    result = reasoning_snapshot_from_model(
+        {
+            "reasoning_capability": {"status": "supported", "controls": []},
+            "extra_params": {"enable_thinking": True, "reasoning_budget_tokens": 4096},
+        }
+    )
+    assert result["reasoning_effort"] == "auto"
+    assert "reasoning_budget_tokens" not in result
+
+
 def test_resolve_model_reasoning_capability_handles_invalid_model_and_import_error():
     assert _resolve_model_reasoning_capability(None) is None
 

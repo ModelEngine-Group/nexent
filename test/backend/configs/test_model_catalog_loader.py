@@ -503,6 +503,113 @@ class TestModelsDevReasoningResolution:
         assert loader._api_url_path_prefix_length(
             "https://api.deepseek.com/other", "https://api.deepseek.com/v1"
         ) is None
+        assert loader._canonical_api_url(" HTTPS://API.DeepSeek.COM/v1/?x=1 ") == (
+            "https://api.deepseek.com/v1"
+        )
+        assert loader.infer_provider_from_base_url("https://unknown.example.com/v1") is None
+
+    def test_models_dev_option_shapes_are_normalized(self):
+        import configs.model_catalog_loader as loader
+
+        assert loader._normalize_reasoning_options(
+            {"type": "effort", "values": "high"}
+        ) == [{"type": "effort", "values": "high"}]
+        assert loader._normalize_reasoning_options(
+            {"effort": {"values": ["low"]}, "budget_tokens": [0, 32768]}
+        ) == [
+            {"type": "effort", "values": ["low"]},
+            {"type": "budget_tokens", "values": [0, 32768]},
+        ]
+        assert loader._normalize_reasoning_options(["low", "high"]) == [
+            {"type": "effort", "values": ["low", "high"]}
+        ]
+        assert loader._normalize_reasoning_options([{"type": "toggle"}, "ignored"]) == [
+            {"type": "toggle"}
+        ]
+        assert loader._normalize_reasoning_options(None) == []
+
+    def test_models_dev_matching_handles_hint_only_malformed_and_unsupported_records(self):
+        import configs.model_catalog_loader as loader
+
+        catalog = {
+            "providers": {
+                "malformed": "not-a-provider",
+                "empty": {"models": []},
+                "hint-provider": {
+                    "models": {
+                        "namespace/target": {
+                            "reasoning": True,
+                            "reasoning_options": {
+                                "type": "effort",
+                                "values": "high",
+                            },
+                        },
+                        "toggle": {
+                            "reasoning": True,
+                            "reasoning_options": [{"type": "toggle"}],
+                        },
+                        "disabled": {"reasoning": False},
+                        "invalid": {
+                            "reasoning": True,
+                            "reasoning_options": [
+                                {"type": "budget_tokens", "min": "bad", "max": 32}
+                            ],
+                        },
+                    }
+                },
+            }
+        }
+
+        effort = loader._resolve_models_dev_reasoning_capability(
+            catalog, "target", None, "hint-provider"
+        )
+        toggle = loader._resolve_models_dev_reasoning_capability(
+            catalog, "toggle", None, "hint-provider"
+        )
+
+        assert effort is not None
+        assert effort["control"] == "effort"
+        assert effort["controls"] == [{"type": "effort", "values": ["high"]}]
+        assert toggle is not None
+        assert toggle["control"] == "toggle"
+        assert loader._resolve_models_dev_reasoning_capability(
+            catalog, "disabled", None, "hint-provider"
+        ) is None
+        assert loader._resolve_models_dev_reasoning_capability(
+            catalog, "missing", None, "hint-provider"
+        ) is None
+        assert loader._resolve_models_dev_reasoning_capability(
+            catalog, "target", None, "unknown-provider"
+        ) is None
+
+    def test_models_dev_catalog_loader_handles_invalid_snapshots(self, tmp_path: Path):
+        import configs.model_catalog_loader as loader
+
+        invalid_json = tmp_path / "invalid-models-dev.json"
+        invalid_json.write_text("{", encoding="utf-8")
+        with mock.patch.object(loader, "MODELS_DEV_CATALOG_JSON_PATH", str(invalid_json)), \
+                mock.patch.object(loader, "_models_dev_cache", None):
+            assert loader._load_models_dev_catalog(force_reload=True) is None
+
+        malformed = tmp_path / "malformed-models-dev.json"
+        malformed.write_text(json.dumps({"providers": []}), encoding="utf-8")
+        with mock.patch.object(loader, "MODELS_DEV_CATALOG_JSON_PATH", str(malformed)), \
+                mock.patch.object(loader, "_models_dev_cache", None):
+            assert loader._load_models_dev_catalog(force_reload=True) is None
+
+    def test_catalog_profile_reasoning_overlay_keeps_profile_when_unmatched(self):
+        import configs.model_catalog_loader as loader
+        from consts.model import ModelCatalogProfile
+
+        profile = ModelCatalogProfile(
+            model_name="model",
+            model_type="llm",
+            display_name="Model",
+            base_url="https://example.com",
+        )
+        with mock.patch.object(loader, "_load_models_dev_catalog", return_value={}), \
+                mock.patch.object(loader, "_resolve_models_dev_reasoning_capability", return_value=None):
+            assert loader._enrich_catalog_profile_reasoning("provider", "model", profile) is profile
 
     def test_budget_control_accepts_zero_minimum(self):
         from consts.model import ReasoningControl

@@ -2953,6 +2953,32 @@ def test_budget_control_auto_omits_legacy_effort(openai_model_instance):
     assert completion_kwargs == {}
 
 
+def test_effort_control_with_declared_values_sends_selected_effort(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {
+        "wire_format": "reasoning_effort",
+        "controls": [{"type": "effort", "values": ["low", "high"]}],
+    }
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {"reasoning_effort": "high"}
+
+
+def test_budget_control_without_budget_selection_omits_effort(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {
+        "wire_format": "thinking_budget",
+        "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+    }
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {}
+
+
 def test_auto_reasoning_effort_is_omitted_from_provider_request(openai_model_instance):
     openai_model_instance.reasoning_effort = "auto"
     openai_model_instance.reasoning_capability = {
@@ -3017,6 +3043,22 @@ def test_reasoning_toggle_enabled_does_not_add_budget(openai_model_instance):
     assert completion_kwargs == {
         "extra_body": {
             "thinking": {"type": "enabled"},
+        },
+    }
+
+
+def test_reasoning_budget_uses_thinking_object_when_selected(openai_model_instance):
+    openai_model_instance.reasoning_budget_tokens = 4096
+    openai_model_instance.reasoning_capability = {
+        "wire_format": "thinking_toggle",
+    }
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {
+        "extra_body": {
+            "thinking": {"type": "enabled", "budget_tokens": 4096},
         },
     }
 

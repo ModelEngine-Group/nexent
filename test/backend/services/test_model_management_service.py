@@ -521,6 +521,22 @@ def test_reasoning_capability_enrichment_only_applies_to_chat_models():
     assert model["reasoning_capability"] == capability
 
 
+def test_discovered_model_reasoning_enrichment_skips_non_llm_and_empty_ids():
+    svc = import_svc()
+
+    embedding = {"model_type": "embedding", "id": "embed"}
+    svc._enrich_discovered_model_reasoning_capability(
+        embedding, "https://example.com/v1", "custom"
+    )
+    assert "reasoning_capability" not in embedding
+
+    empty = {"model_type": "llm", "id": ""}
+    svc._enrich_discovered_model_reasoning_capability(
+        empty, "https://example.com/v1", "custom"
+    )
+    assert "reasoning_capability" not in empty
+
+
 def test_apply_model_reasoning_default_handles_disabled_and_supported_profiles():
     svc = import_svc()
 

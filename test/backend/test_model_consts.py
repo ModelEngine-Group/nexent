@@ -203,6 +203,16 @@ def test_filter_extra_params_validates_reasoning_switch():
     ) is None
 
 
+def test_filter_extra_params_validates_reasoning_budget_tokens():
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_budget_tokens": 4096}
+    ) == {"reasoning_budget_tokens": 4096}
+    for value in (True, 0, -1, "4096"):
+        assert model_consts.filter_extra_params(
+            "llm", {"reasoning_budget_tokens": value}
+        ) is None
+
+
 def test_filter_extra_params_passes_through_custom_for_all_types():
     """__custom__ is type-agnostic: it survives for embedding/rerank/vlm too."""
     for model_type in ("embedding", "rerank", "vlm", "stt", "tts"):
@@ -1482,6 +1492,17 @@ def test_reasoning_capability_accepts_toggle_without_effort_levels():
     )
 
     assert capability.levels == []
+
+
+def test_reasoning_control_validates_effort_and_budget_shapes():
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="effort")
+
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="budget_tokens", min=1024)
+
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="budget_tokens", min=4096, max=1024)
 
 
 @pytest.mark.parametrize(
