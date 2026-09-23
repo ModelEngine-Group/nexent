@@ -3187,3 +3187,114 @@ def test_check_connectivity_translates_extra_body_before_reasoning_control(opena
         "chat_template_kwargs": {"enable_thinking": False},
         "thinking": {"type": "disabled"},
     }
+
+
+def test_reasoning_wire_profile_infers_known_providers_from_api_url(openai_model_instance):
+    openai_model_instance.api_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "openai",
+    }
+    dashscope_profile = openai_model_instance._reasoning_wire_profile()
+
+    openai_model_instance.api_base_url = "https://api.deepseek.com/v1"
+    deepseek_profile = openai_model_instance._reasoning_wire_profile()
+
+    assert dashscope_profile == {
+        "effort": "reasoning_effort",
+        "budget": "thinking_budget",
+        "toggle": "enable_thinking",
+    }
+    assert deepseek_profile == {
+        "effort": "reasoning_effort",
+        "budget": None,
+        "toggle": "thinking_object",
+    }
+
+
+def test_reasoning_wire_profile_supports_catalog_and_provider_fallbacks(openai_model_instance):
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "openai",
+    }
+    assert openai_model_instance._reasoning_wire_profile()["effort"] == "reasoning_effort"
+
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "other-provider",
+    }
+    assert openai_model_instance._reasoning_wire_profile() == {
+        "effort": "reasoning_effort",
+        "budget": None,
+        "toggle": None,
+    }
+
+    openai_model_instance.reasoning_capability = {"wire_format": "thinking_budget"}
+    assert openai_model_instance._reasoning_wire_profile()["budget"] == "thinking_object"
+
+    openai_model_instance.reasoning_capability = {
+        "provider_id": "deepseek",
+        "wire_format": "reasoning_effort",
+    }
+    assert openai_model_instance._reasoning_wire_profile()["toggle"] == "thinking_object"
+
+    openai_model_instance.reasoning_capability = {
+        "provider_id": "dashscope",
+        "wire_format": "reasoning_effort",
+    }
+    assert openai_model_instance._reasoning_wire_profile()["toggle"] == "enable_thinking"
+
+
+def test_dashscope_reasoning_toggle_keeps_top_level_flag(openai_model_instance):
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "dashscope",
+    }
+
+    assert openai_model_instance._translate_thinking_flag({"enable_thinking": False}) == {
+        "enable_thinking": False
+    }
+
+
+def test_reasoning_control_skips_unsupported_capability(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {"status": "unsupported"}
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {}
+
+
+def test_reasoning_control_handles_missing_wire_adapters(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {"status": "supported"}
+    with patch.object(openai_model_instance, "_reasoning_wire_profile", return_value=None):
+        completion_kwargs = {}
+        openai_model_instance._apply_reasoning_control(completion_kwargs)
+    assert completion_kwargs == {}
+
+    openai_model_instance.reasoning_budget_tokens = 4096
+    openai_model_instance.reasoning_capability = {
+        "status": "supported",
+        "wire_format": "reasoning_effort",
+        "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+    }
+    completion_kwargs = {}
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+    assert completion_kwargs == {}
+
+    openai_model_instance.reasoning_budget_tokens = None
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {
+        "status": "supported",
+        "controls": [{"type": "effort", "values": ["high"]}],
+    }
+    with patch.object(
+        openai_model_instance,
+        "_reasoning_wire_profile",
+        return_value={"effort": None, "budget": None, "toggle": None},
+    ):
+        completion_kwargs = {}
+        openai_model_instance._apply_reasoning_control(completion_kwargs)
+    assert completion_kwargs == {}

@@ -95,6 +95,48 @@ def test_reasoning_snapshot_from_model_ignores_invalid_budget_values():
     assert "reasoning_budget_tokens" not in result
 
 
+def test_reasoning_snapshot_from_model_handles_enabled_unknown_capability():
+    with patch(
+        "services.agent_reasoning_service.normalize_reasoning_params",
+        return_value={"enable_thinking": True},
+    ):
+        result = reasoning_snapshot_from_model(
+            {
+                "reasoning_capability": {"status": "unsupported"},
+                "extra_params": {"enable_thinking": True},
+            }
+        )
+
+    assert result == {"enable_thinking": True}
+
+
+def test_snapshot_agent_reasoning_config_adds_auto_for_effort_control():
+    with patch(
+        "services.agent_reasoning_service.get_model_by_model_id",
+        return_value={
+            "reasoning_capability": {
+                "status": "supported",
+                "controls": [{"type": "effort", "values": ["low", "high"]}],
+            }
+        },
+    ):
+        result = snapshot_agent_reasoning_config(
+            model_ids=[1],
+            requested_overrides={"1": {"extra_params": {"enable_thinking": True}}},
+            existing_overrides=None,
+            tenant_id="tenant-1",
+        )
+
+    assert result == {
+        "1": {
+            "extra_params": {
+                "enable_thinking": True,
+                "reasoning_effort": "auto",
+            }
+        }
+    }
+
+
 def test_resolve_model_reasoning_capability_handles_invalid_model_and_import_error():
     assert _resolve_model_reasoning_capability(None) is None
 
