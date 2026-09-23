@@ -7,6 +7,30 @@ import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
 
 export type MineCardMenuAction = "apply" | "review" | "reviewUpdate";
 
+export function toMineRepositoryInfo(
+  listings: AgentRepositoryListingItem[]
+): MyAgentRepositoryInfoItem[] {
+  return listings.flatMap((item) => {
+    if (
+      item.status !== "shared" &&
+      item.status !== "pending_review" &&
+      item.status !== "rejected"
+    ) {
+      return [];
+    }
+    return [
+      {
+        agent_repository_id: item.agent_repository_id,
+        status: item.status,
+        version_no: item.version_no,
+        version_label: item.version_label,
+        create_time: item.create_time,
+        content: item.content,
+      },
+    ];
+  });
+}
+
 function parseCreateTime(value?: string | null): number {
   if (!value) {
     return 0;
@@ -133,7 +157,9 @@ export function getMineCardMenuActions(
       (item) => item.status === "pending_review"
     );
     const hasShared = repositoryInfo.some((item) => item.status === "shared");
-    const hasRejected = repositoryInfo.some((item) => item.status === "rejected");
+    const hasRejected = repositoryInfo.some(
+      (item) => item.status === "rejected"
+    );
     if ((hasPending || hasRejected) && hasShared) {
       actions.push("reviewUpdate");
     } else {

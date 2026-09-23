@@ -26,6 +26,7 @@ interface AgentRepositoryDetailModalProps {
   isError: boolean;
   isFetching: boolean;
   onRetry: () => void;
+  showDownloads?: boolean;
 }
 
 function formatCreatedAt(value?: string | null): string | null {
@@ -128,10 +129,12 @@ function AgentRepositoryDetailMeta({
   detail,
   downloads,
   createdAtText,
+  showDownloads,
 }: {
   detail: AgentDetailModalData;
   downloads: number;
   createdAtText: string | null;
+  showDownloads: boolean;
 }) {
   const { t } = useTranslation("common");
 
@@ -150,12 +153,14 @@ function AgentRepositoryDetailMeta({
             {detail.version_label}
           </span>
         ) : null}
-        <span className="inline-flex items-center gap-1">
-          <Download className="size-3.5" aria-hidden />
-          {t("agentRepository.detail.downloads", {
-            count: downloads.toLocaleString(),
-          })}
-        </span>
+        {showDownloads ? (
+          <span className="inline-flex items-center gap-1">
+            <Download className="size-3.5" aria-hidden />
+            {t("agentRepository.detail.downloads", {
+              count: downloads.toLocaleString(),
+            })}
+          </span>
+        ) : null}
         {createdAtText ? (
           <span className="inline-flex items-center gap-1">
             <Calendar className="size-3.5" aria-hidden />
@@ -177,8 +182,10 @@ function AgentRepositoryDetailMeta({
 
 function AgentRepositoryDetailHeader({
   detail,
+  showDownloads,
 }: {
   detail: AgentDetailModalData;
+  showDownloads: boolean;
 }) {
   const { t } = useTranslation("common");
   const title = resolveDetailTitle(detail, t("agentRepository.card.untitled"));
@@ -202,6 +209,7 @@ function AgentRepositoryDetailHeader({
             detail={detail}
             downloads={downloads}
             createdAtText={createdAtText}
+            showDownloads={showDownloads}
           />
         </div>
       </div>
@@ -259,15 +267,20 @@ function AgentRepositoryDetailDutyPrompt({
 
 function AgentRepositoryDetailContent({
   detail,
+  showDownloads,
 }: {
   detail: AgentDetailModalData;
+  showDownloads: boolean;
 }) {
   const { t } = useTranslation("common");
   const tools = detail.tools?.filter((tool) => tool.trim()) ?? [];
 
   return (
     <div className="max-h-[80vh] overflow-y-auto">
-      <AgentRepositoryDetailHeader detail={detail} />
+      <AgentRepositoryDetailHeader
+        detail={detail}
+        showDownloads={showDownloads}
+      />
       <div className="space-y-6 p-6">
         <section className="space-y-2">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -291,9 +304,15 @@ function resolveDetailModalBody({
   isFetching,
   detail,
   onRetry,
+  showDownloads = true,
 }: Pick<
   AgentRepositoryDetailModalProps,
-  "isLoading" | "isError" | "isFetching" | "detail" | "onRetry"
+  | "isLoading"
+  | "isError"
+  | "isFetching"
+  | "detail"
+  | "onRetry"
+  | "showDownloads"
 >) {
   if (isLoading) {
     return <AgentRepositoryDetailLoading />;
@@ -306,7 +325,12 @@ function resolveDetailModalBody({
   if (!detail) {
     return null;
   }
-  return <AgentRepositoryDetailContent detail={detail} />;
+  return (
+    <AgentRepositoryDetailContent
+      detail={detail}
+      showDownloads={showDownloads}
+    />
+  );
 }
 
 export function AgentRepositoryDetailModal({
@@ -317,6 +341,7 @@ export function AgentRepositoryDetailModal({
   isError,
   isFetching,
   onRetry,
+  showDownloads = true,
 }: AgentRepositoryDetailModalProps) {
   return (
     <ResourceDetail
@@ -332,6 +357,7 @@ export function AgentRepositoryDetailModal({
         isFetching,
         detail,
         onRetry,
+        showDownloads,
       })}
     </ResourceDetail>
   );

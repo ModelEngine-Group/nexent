@@ -3045,6 +3045,106 @@ async def test_list_agent_page_impl_filters_before_paginating(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_agent_page_filters_creator_before_pagination(monkeypatch):
+    agents = [
+        {"agent_id": 1, "created_by": "alice"},
+        {"agent_id": 2, "created_by": "bob"},
+        {"agent_id": 3, "created_by": "alice"},
+        {"agent_id": 4, "created_by": "bob"},
+    ]
+
+    async def list_agents(**_kwargs):
+        return agents
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+
+    mine = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", created_by="alice", page=2, page_size=1
+    )
+    others = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", created_by_not="alice", page=2, page_size=1
+    )
+
+    assert [item["agent_id"] for item in mine["items"]] == [3]
+    assert [item["agent_id"] for item in others["items"]] == [4]
+    assert mine["pagination"]["total"] == 2
+    assert others["pagination"]["total"] == 2
+    assert mine["creator_counts"] == {"all": 4, "created": 2, "others": 2}
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_rejects_conflicting_creator_filters(monkeypatch):
+    async def list_agents(**_kwargs):
+        return []
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+
+    with pytest.raises(ValueError, match="created_by"):
+        await list_agent_page_impl(
+            tenant_id="tenant_123", user_id="alice", created_by="alice", created_by_not="alice"
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_applies_structured_tags_before_pagination(monkeypatch):
+    agents = [
+        {"agent_id": 1, "name": "First", "created_by": "alice"},
+        {"agent_id": 2, "name": "Second", "created_by": "bob"},
+        {"agent_id": 3, "name": "Third", "created_by": "alice"},
+    ]
+
+    async def list_agents(**_kwargs):
+        return agents
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+    monkeypatch.setattr(
+        agent_management.TagManagementDB,
+        "filter_authorized_resource_ids",
+        lambda *_args: ["1", "3"],
+    )
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", tag_predicates=[object()], page=2, page_size=1
+    )
+
+    assert [item["agent_id"] for item in result["items"]] == [3]
+    assert result["pagination"]["total"] == 2
+    assert result["creator_counts"] == {"all": 2, "created": 2, "others": 0}
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_enriches_only_current_page_version_metadata(monkeypatch):
+    agents = [
+        {"agent_id": 1, "created_by": "alice", "current_version_no": 1},
+        {"agent_id": 2, "created_by": "alice", "current_version_no": 2},
+    ]
+    calls = []
+
+    async def list_agents(**_kwargs):
+        return agents
+
+    def versions(agent_ids, tenant_id, version_nos):
+        calls.append((agent_ids, tenant_id, version_nos))
+        return [{
+            "agent_id": 2,
+            "version_no": 2,
+            "version_name": "Release Two",
+            "create_time": "2026-09-23T10:00:00",
+        }]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+    monkeypatch.setattr(agent_management, "batch_search_version_names", versions)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=2, page_size=1
+    )
+
+    assert calls == [([2], "tenant_123", [2])]
+    assert result["items"][0]["version_label"] == "Release Two"
+    assert result["items"][0]["version_create_time"] == "2026-09-23T10:00:00"
+
+
+@pytest.mark.asyncio
 @patch("management.services.model.resolver.get_model_by_model_id")
 @patch("management.services.agent.management.check_agent_availability")
 @patch("management.services.agent.management.convert_string_to_list")

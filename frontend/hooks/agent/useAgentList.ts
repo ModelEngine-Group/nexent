@@ -20,7 +20,9 @@ export function useAgentList(input: UseAgentListInput) {
     ? { tenantId: input, page: 1, pageSize: 20 }
     : input;
   // null = caller is waiting (e.g. tenant not selected); empty string = use auth tenant from backend
-  const queryEnabled = filters.tenantId !== null;
+  const queryEnabled =
+    filters.tenantId !== null &&
+    (legacyInput || !("enabled" in filters) || filters.enabled !== false);
   const apiTenantId =
     filters.tenantId !== null && filters.tenantId?.trim() !== ""
       ? filters.tenantId
@@ -43,6 +45,7 @@ export function useAgentList(input: UseAgentListInput) {
       const agents = res.data || [];
       return {
         agents,
+        creatorCounts: undefined,
         pagination: {
           page: 1,
           pageSize: agents.length,
@@ -55,7 +58,7 @@ export function useAgentList(input: UseAgentListInput) {
     enabled: queryEnabled,
   });
 
-  const agents = query.data?.agents ?? EMPTY_AGENTS;
+  const agents: Agent[] = query.data?.agents ?? EMPTY_AGENTS;
 
   const availableAgents = useMemo(() => {
     return (agents as Agent[]).filter((a) => a.is_available !== false);
@@ -65,6 +68,7 @@ export function useAgentList(input: UseAgentListInput) {
     ...query,
     agents,
     pagination: query.data?.pagination,
+    creatorCounts: query.data?.creatorCounts,
     availableAgents,
     invalidate: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
   };

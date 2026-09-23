@@ -1,7 +1,9 @@
 "use client";
 
-import { Button, Dropdown } from "antd";
+import { Button, Dropdown, Spin } from "antd";
 import type { MenuProps } from "antd";
+import { useState } from "react";
+import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
   Bot,
   ClipboardCheck,
@@ -18,7 +20,7 @@ import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import {
   formatMineDate,
   getMineCardMenuActions,
-  getMineCardRepositoryStatusBadge,
+  toMineRepositoryInfo,
   type MineCardMenuAction,
 } from "@/lib/agentRepositoryMine";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
@@ -29,7 +31,10 @@ interface MyAgentCardProps {
   onEdit: () => void;
   onView: () => void;
   onApplyListing: () => void;
-  onViewReview: (mode: "review" | "reviewUpdate") => void;
+  onViewReview: (
+    agent: MyEditableAgentItem,
+    mode: "review" | "reviewUpdate"
+  ) => void;
   onDelete: () => void;
   onEvaluate: () => void;
   isApplying?: boolean;
@@ -40,13 +45,6 @@ const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
   apply: "agentRepository.mine.menu.apply",
   review: "agentRepository.mine.menu.review",
   reviewUpdate: "agentRepository.mine.menu.reviewUpdate",
-};
-
-const STATUS_BADGE_CLASS: Record<"pending" | "shared" | "rejected", string> = {
-  pending:
-    "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
-  shared: "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary",
-  rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
 };
 
 export function MyAgentCard({
@@ -61,21 +59,32 @@ export function MyAgentCard({
   isDeleting = false,
 }: MyAgentCardProps) {
   const { t } = useTranslation("common");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const {
+    data: listingData,
+    isLoading: isListingLoading,
+    isError: isListingError,
+    refetch,
+  } = useAgentRepositoryListings(
+    { agent_id: agent.agent_id, page: 1, page_size: 100 },
+    menuOpen
+  );
 
   const title = agent.name?.trim() || t("agentRepository.card.untitled");
   const description =
     agent.description?.trim() || t("agentRepository.card.noDescription");
   const tags = agent.tags?.filter((tag) => tag.trim()) ?? [];
   const published = (agent.current_version_no ?? 0) > 0;
-  const repositoryInfo = agent.repository_info ?? [];
-  const repositoryStatusBadge =
-    getMineCardRepositoryStatusBadge(repositoryInfo);
+  const repositoryInfo = toMineRepositoryInfo(listingData?.items ?? []);
+  const agentWithRepository = { ...agent, repository_info: repositoryInfo };
   const footerDate = formatMineDate(agent.version_create_time);
   const versionLabel = agent.version_label;
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
   const canEvaluate = canView;
-  const menuActions = getMineCardMenuActions(agent);
+  const menuActions = listingData
+    ? getMineCardMenuActions(agentWithRepository)
+    : [];
 
   const menuItems: MenuProps["items"] = menuActions.map((action) => {
     const icon =
@@ -95,10 +104,29 @@ export function MyAgentCard({
           onApplyListing();
           return;
         }
-        onViewReview(action === "reviewUpdate" ? "reviewUpdate" : "review");
+        onViewReview(
+          agentWithRepository,
+          action === "reviewUpdate" ? "reviewUpdate" : "review"
+        );
       },
     };
   });
+
+  if (isListingLoading) {
+    menuItems.unshift({
+      key: "loading",
+      label: <Spin size="small" />,
+      disabled: true,
+    });
+  } else if (isListingError) {
+    menuItems.unshift({
+      key: "retry",
+      label: t("repository.common.retry"),
+      onClick: () => {
+        void refetch();
+      },
+    });
+  }
 
   if (canEvaluate) {
     menuItems.push({
@@ -165,7 +193,11 @@ export function MyAgentCard({
       headerActions={
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {menuItems.length > 0 ? (
-            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+            <Dropdown
+              menu={{ items: menuItems }}
+              trigger={["click"]}
+              onOpenChange={setMenuOpen}
+            >
               <Button
                 type="text"
                 size="small"
@@ -176,14 +208,6 @@ export function MyAgentCard({
             </Dropdown>
           ) : null}
           <div className="flex items-center gap-1.5">
-            {repositoryStatusBadge ? (
-              <span
-                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
-              >
-                {t(repositoryStatusBadge.labelKey)}{" "}
-                {repositoryStatusBadge.versionLabel}
-              </span>
-            ) : null}
             <span
               className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
                 published

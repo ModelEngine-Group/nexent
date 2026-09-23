@@ -27,6 +27,7 @@ from consts.model import (
     VersionCompareRequest,
     VersionUpdateRequest,
     NL2AgentRunRequest,
+    TagAssignmentFilter,
 )
 from consts.exceptions import (
     ForbiddenError,
@@ -689,6 +690,10 @@ async def list_agent_page_api(
     permission: Optional[str] = Query(None, description="EDIT or READ_ONLY"),
     tag: Optional[str] = Query(None, description="Exact agent tag"),
     search: Optional[str] = Query(None, description="Agent name or description search"),
+    created_by: Optional[str] = Query(None, description="Exact creator user ID"),
+    created_by_not: Optional[str] = Query(None, description="Exclude creator user ID"),
+    tag_predicates: Optional[str] = Query(None, description="Structured tag predicates as JSON"),
+    search_tag_predicates: Optional[str] = Query(None, description="Text-search tag predicates as JSON"),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     authorization: Optional[str] = Header(None),
@@ -712,6 +717,16 @@ async def list_agent_page_api(
             "page": page,
             "page_size": page_size,
         }
+        if created_by:
+            kwargs["created_by"] = created_by
+        if created_by_not:
+            kwargs["created_by_not"] = created_by_not
+        for key, raw in (("tag_predicates", tag_predicates), ("search_tag_predicates", search_tag_predicates)):
+            if raw:
+                parsed = json.loads(raw)
+                if not isinstance(parsed, list):
+                    raise ValueError(f"{key} must be a list")
+                kwargs[key] = [TagAssignmentFilter.model_validate(item) for item in parsed]
         if additional_tenant_id:
             kwargs["additional_tenant_id"] = additional_tenant_id
         return await list_agent_page_impl(**kwargs)

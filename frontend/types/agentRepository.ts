@@ -22,6 +22,8 @@ export interface AgentRepositoryListingItem {
   tags?: string[];
   tool_count?: number | null;
   version_label?: string | null;
+  version_no?: number | null;
+  create_time?: string | null;
   downloads?: number;
   submitted_by?: string | null;
   content?: string | null;

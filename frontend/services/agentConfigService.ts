@@ -12,6 +12,7 @@ import log from "@/lib/logger";
 import type { Agent } from "@/types/agentConfig";
 import yaml from "js-yaml";
 import type { SkillFileNode } from "@/types/skill";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
 /** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
 function normalizeTags(tags: unknown): string[] {
@@ -170,6 +171,8 @@ type AgentListApiItem = {
   permission?: "EDIT" | "READ_ONLY";
   is_published?: boolean;
   current_version_no?: number;
+  version_label?: string | null;
+  version_create_time?: string | null;
   is_a2a_server?: boolean;
   allow_chat_metadata?: boolean;
   icon_url?: string;
@@ -195,6 +198,8 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     permission: agent.permission,
     is_published: agent.is_published,
     current_version_no: agent.current_version_no,
+    version_label: agent.version_label,
+    version_create_time: agent.version_create_time,
     is_a2a_server: agent.is_a2a_server || false,
     allow_chat_metadata: agent.allow_chat_metadata ?? false,
     icon_url: agent.icon_url,
@@ -202,8 +207,13 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
 
 export type AgentListFilters = {
   tenantId?: string | null;
+  enabled?: boolean;
   permission?: "EDIT" | "READ_ONLY";
   tag?: string;
+  tagPredicates?: TagResourcePredicate[];
+  searchTagPredicates?: TagResourcePredicate[];
+  createdBy?: string;
+  createdByNot?: string;
   search?: string;
   page?: number;
   pageSize?: number;
@@ -219,6 +229,7 @@ export type AgentListPagination = {
 export type PagedAgentList = {
   agents: Agent[];
   pagination: AgentListPagination;
+  creatorCounts?: { all: number; created: number; others: number };
 };
 
 export const fetchAgentList = async (tenantId?: string) => {
@@ -261,6 +272,16 @@ export const fetchPagedAgentList = async (
     const tenantId = filters.tenantId?.trim();
     if (tenantId) queryParams.set("tenant_id", tenantId);
     if (filters.permission) queryParams.set("permission", filters.permission);
+    if (filters.createdBy) queryParams.set("created_by", filters.createdBy);
+    if (filters.createdByNot)
+      queryParams.set("created_by_not", filters.createdByNot);
+    if (filters.tagPredicates?.length)
+      queryParams.set("tag_predicates", JSON.stringify(filters.tagPredicates));
+    if (filters.searchTagPredicates?.length)
+      queryParams.set(
+        "search_tag_predicates",
+        JSON.stringify(filters.searchTagPredicates)
+      );
     if (filters.tag?.trim()) queryParams.set("tag", filters.tag.trim());
     if (filters.search?.trim())
       queryParams.set("search", filters.search.trim());
@@ -279,6 +300,7 @@ export const fetchPagedAgentList = async (
       success: true,
       data: {
         agents: (data.items || []).map(formatAgentListItem),
+        creatorCounts: data.creator_counts,
         pagination: {
           page: data.pagination.page,
           pageSize: data.pagination.page_size,

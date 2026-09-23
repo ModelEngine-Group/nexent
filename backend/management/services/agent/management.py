@@ -62,7 +62,7 @@ from database.tool_db import (
 )
 from database import skill_db
 from management.services.skill.service import SkillService
-from database.agent_version_db import query_version_list
+from database.agent_version_db import batch_search_version_names, query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids
@@ -911,8 +911,14 @@ async def list_agent_page_impl(
     page: int = 1,
     page_size: int = 20,
     additional_tenant_id: Optional[str] = None,
+    created_by: Optional[str] = None,
+    created_by_not: Optional[str] = None,
+    tag_predicates: Optional[list] = None,
+    search_tag_predicates: Optional[list] = None,
 ) -> Dict[str, Any]:
     """List visible agents with server-side filters and pagination."""
+    if created_by and created_by_not:
+        raise ValueError("created_by and created_by_not cannot be used together")
     agents = await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
     if additional_tenant_id:
         agents.extend(
@@ -920,6 +926,34 @@ async def list_agent_page_impl(
                 tenant_id=additional_tenant_id, user_id=user_id
             )
         )
+
+    agent_ids = [str(agent["agent_id"]) for agent in agents if agent.get("agent_id") is not None]
+    if tag_predicates:
+        matched_ids = set(TagManagementDB.filter_authorized_resource_ids(
+            tenant_id, "agent", agent_ids, tag_predicates
+        ))
+        agents = [agent for agent in agents if str(agent.get("agent_id")) in matched_ids]
+        agent_ids = [str(agent["agent_id"]) for agent in agents if agent.get("agent_id") is not None]
+
+    search_tag_ids = set()
+    if search_tag_predicates:
+        search_tag_ids = set(TagManagementDB.filter_authorized_resource_ids(
+            tenant_id, "agent", agent_ids, search_tag_predicates
+        ))
+
+    creator_count = sum(
+        str(agent.get("created_by")) == str(user_id) for agent in agents
+    )
+    creator_counts = {
+        "all": len(agents),
+        "created": creator_count,
+        "others": len(agents) - creator_count,
+    }
+
+    if created_by:
+        agents = [agent for agent in agents if str(agent.get("created_by")) == created_by]
+    if created_by_not:
+        agents = [agent for agent in agents if str(agent.get("created_by")) != created_by_not]
 
     if permission:
         normalized_permission = permission.strip().upper()
@@ -947,7 +981,7 @@ async def list_agent_page_impl(
         agents = [
             agent
             for agent in agents
-            if any(
+            if str(agent.get("agent_id")) in search_tag_ids or any(
                 normalized_search in str(agent.get(field) or "").casefold()
                 for field in ("name", "display_name", "description")
             )
@@ -955,8 +989,28 @@ async def list_agent_page_impl(
 
     total = len(agents)
     offset = (page - 1) * page_size
+    paged_agents = [dict(agent) for agent in agents[offset:offset + page_size]]
+    versioned_agents = [
+        agent for agent in paged_agents if (agent.get("current_version_no") or 0) > 0
+    ]
+    if versioned_agents:
+        version_rows = batch_search_version_names(
+            [int(agent["agent_id"]) for agent in versioned_agents],
+            tenant_id,
+            [int(agent["current_version_no"]) for agent in versioned_agents],
+        )
+        version_by_key = {
+            (row["agent_id"], row["version_no"]): row for row in version_rows
+        }
+        for agent in versioned_agents:
+            version = version_by_key.get(
+                (int(agent["agent_id"]), int(agent["current_version_no"])), {}
+            )
+            agent["version_label"] = version.get("version_name")
+            agent["version_create_time"] = version.get("create_time")
     return {
-        "items": agents[offset:offset + page_size],
+        "items": paged_agents,
+        "creator_counts": creator_counts,
         "pagination": {
             "page": page,
             "page_size": page_size,

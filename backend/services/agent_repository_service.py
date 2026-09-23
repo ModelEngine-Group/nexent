@@ -104,6 +104,8 @@ def _to_summary_item(
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count") or 0,
         "version_label": record.get("version_name"),
+        "version_no": record.get("version_no"),
+        "create_time": _serialize_created_at(record.get("create_time")),
         "icon": record.get("icon"),
         "downloads": downloads,
         "content": record.get("content"),

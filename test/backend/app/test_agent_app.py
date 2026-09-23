@@ -1553,6 +1553,37 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
     )
 
 
+def test_list_agent_page_api_forwards_creator_and_structured_tag_filters(
+    mocker, mock_auth_header
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("test_user", "auth_tenant", "en"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
+    )
+    mock_list.return_value = {"items": [], "pagination": {"total": 0}}
+
+    response = config_client.get(
+        "/agent/list/page",
+        params={
+            "tenant_id": "auth_tenant",
+            "created_by_not": "test_user",
+            "tag_predicates": '[{"definition_id":1,"value_ids":[2]}]',
+            "page": 1,
+            "page_size": 8,
+        },
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    kwargs = mock_list.await_args.kwargs
+    assert kwargs["created_by_not"] == "test_user"
+    assert kwargs["tag_predicates"][0].definition_id == 1
+    assert kwargs["page_size"] == 8
+
+
 def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     """Test list_all_agent_info_api success case without tenant_id."""
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
