@@ -567,6 +567,7 @@ function SingleAddForm({
                 setProbe("idle");
               }}
               placeholder="Qwen/Qwen3-8B"
+              autoComplete="off"
             />
           </div>
           <div className="col-span-2 space-y-2">
@@ -592,6 +593,7 @@ function SingleAddForm({
                       defaultValue: "便于识别的别名",
                     })
               }
+              autoComplete="off"
             />
           </div>
           <div className="col-span-2 space-y-2">
@@ -605,6 +607,7 @@ function SingleAddForm({
                 setProbe("idle");
               }}
               placeholder="https://api.example.com/v1"
+              autoComplete="off"
             />
             <p className="text-xs text-muted-foreground">
               {isCustom
@@ -628,6 +631,7 @@ function SingleAddForm({
                 setProbe("idle");
               }}
               placeholder="sk-..."
+              autoComplete="new-password"
             />
           </div>
         </div>
