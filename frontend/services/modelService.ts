@@ -94,7 +94,7 @@ const buildCapacityRequestBody = (model: {
  * so callers don't need to convert between the two.
  */
 /** First defined value among the arguments, or undefined. */
-const firstDefined = <T,>(...values: (T | undefined)[]): T | undefined => {
+const firstDefined = <T>(...values: (T | undefined)[]): T | undefined => {
   for (const value of values) {
     if (value !== undefined) {
       return value;
@@ -334,11 +334,14 @@ export const modelService = {
         requestBody.access_token = model.accessToken;
       }
 
-      const response = await authedFetch(API_ENDPOINTS.model.customModelCreate, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(requestBody),
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.customModelCreate,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(requestBody),
+        }
+      );
 
       const result = await response.json();
 
@@ -398,16 +401,19 @@ export const modelService = {
     models: any[];
   }): Promise<number> => {
     try {
-      const response = await authedFetch(API_ENDPOINTS.model.customModelBatchCreate, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          api_key: model.api_key,
-          models: model.models,
-          ...(model.type !== undefined ? { type: model.type } : {}),
-          provider: model.provider,
-        }),
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.customModelBatchCreate,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            api_key: model.api_key,
+            models: model.models,
+            ...(model.type !== undefined ? { type: model.type } : {}),
+            provider: model.provider,
+          }),
+        }
+      );
       const result = await response.json();
 
       if (response.status !== 200) {
@@ -534,6 +540,12 @@ export const modelService = {
     temperature?: number;
     topP?: number;
     extraParams?: Record<string, unknown>;
+    // Type change: sent only when the operator re-typed the model. The
+    // backend single-update path writes model_type through to the record.
+    type?: ModelType;
+    // Sent together with a type change: the stored probe status was measured
+    // under the old type, so it must not stay "available".
+    connectStatus?: ModelConnectStatus;
   }): Promise<void> => {
     try {
       const response = await authedFetch(
@@ -546,6 +558,10 @@ export const modelService = {
               ? { display_name: model.displayName }
               : {}),
             ...(model.name !== undefined ? { model_name: model.name } : {}),
+            ...(model.type !== undefined ? { model_type: model.type } : {}),
+            ...(model.connectStatus !== undefined
+              ? { connect_status: model.connectStatus }
+              : {}),
             base_url: model.url,
             ...(model.apiKey?.trim() ? { api_key: model.apiKey } : {}),
             ...(model.maxTokens !== undefined
@@ -742,19 +758,22 @@ export const modelService = {
   ): Promise<ModelConnectivityResult> => {
     try {
       if (!displayName) return { connectivity: false };
-      const response = await authedFetch(API_ENDPOINTS.model.manageModelHealthcheck, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          display_name: displayName,
-          model_type: modelType,
-        }),
-        signal,
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.manageModelHealthcheck,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: tenantId,
+            display_name: displayName,
+            model_type: modelType,
+          }),
+          signal,
+        }
+      );
       const result = await response.json();
       if (response.status === 200 && result.data) {
         return {
@@ -787,19 +806,22 @@ export const modelService = {
   ): Promise<boolean> => {
     try {
       if (!displayName) return false;
-      const response = await authedFetch(API_ENDPOINTS.model.manageModelHealthcheck, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          display_name: displayName,
-          model_type: modelType,
-        }),
-        signal,
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.manageModelHealthcheck,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: tenantId,
+            display_name: displayName,
+            model_type: modelType,
+          }),
+          signal,
+        }
+      );
       const result = await response.json();
       if (response.status === 200 && result.data) {
         return result.data.connectivity;
@@ -865,12 +887,15 @@ export const modelService = {
         requestBody.access_token = config.accessToken;
       }
 
-      const response = await authedFetch(API_ENDPOINTS.model.verifyModelConfig, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(requestBody),
-        signal,
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.verifyModelConfig,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(requestBody),
+          signal,
+        }
+      );
 
       const result = await response.json();
 
@@ -1150,14 +1175,17 @@ export const modelService = {
         requestBody.access_token = params.accessToken;
       }
 
-      const response = await authedFetch(API_ENDPOINTS.model.manageModelCreate, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.manageModelCreate,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        }
+      );
 
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {
@@ -1335,20 +1363,23 @@ export const modelService = {
     modelsCount: number;
   }> => {
     try {
-      const response = await authedFetch(API_ENDPOINTS.model.manageModelBatchCreate, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: params.tenantId,
-          provider: params.provider,
-          ...(params.type !== undefined ? { type: params.type } : {}),
-          api_key: params.apiKey,
-          models: params.models,
-        }),
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.manageModelBatchCreate,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            provider: params.provider,
+            ...(params.type !== undefined ? { type: params.type } : {}),
+            api_key: params.apiKey,
+            models: params.models,
+          }),
+        }
+      );
 
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {

@@ -342,21 +342,25 @@ function ModelRow({
       {/* Model name */}
       <div className="flex min-w-0 items-center gap-2 md:w-64 md:shrink-0">
         <div className="flex min-w-0 flex-col">
-          <span className="truncate font-medium text-foreground">
-            {model.displayName || model.name}
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-medium text-foreground">
+              {model.displayName || model.name}
+            </span>
+            {isDefault && (
+              <Badge
+                variant="secondary"
+                className="shrink-0 bg-primary/10 px-1.5 text-[10px] font-normal text-primary hover:bg-primary/10"
+              >
+                {t("modelConfig.list.defaultBadge", {
+                  defaultValue: "默认",
+                })}
+              </Badge>
+            )}
           </span>
           <span className="truncate font-mono text-xs text-muted-foreground">
             {model.name}
           </span>
         </div>
-        {isDefault && (
-          <Badge
-            variant="secondary"
-            className="shrink-0 bg-primary/10 px-1.5 text-[10px] font-normal text-primary hover:bg-primary/10"
-          >
-            {t("modelConfig.list.defaultBadge", { defaultValue: "默认" })}
-          </Badge>
-        )}
       </div>
 
       {/* Type */}

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App } from "antd";
-import { Loader2, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Loader2, ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,25 +16,26 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 import { MODEL_TYPES } from "@/const/modelConfig";
 import { modelService, ModelError } from "@/services/modelService";
-import {
-  ModelOption,
-  ModelType,
-  InferenceFieldSpecsByType,
-} from "@/types/modelConfig";
+import { ModelOption, ModelType } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
 import {
-  ModelAdvancedSettings,
   ModelAdvancedSettingsValue,
   buildInferenceParamsPayload,
-  advancedSettingsValueFromRecord,
+  formatCustomValueForEditing,
 } from "./ModelAdvancedSettings";
-import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
 
 /**
  * v2.6.1 redesign (v0 design): the per-model edit dialog.
@@ -61,20 +62,6 @@ const TYPE_LABEL_KEY_MAP: Record<string, string> = {
   tts: "tts",
 };
 
-/** Filter the tokenizer_family field out of the specs — internal implementation
- *  detail, not something operators should configure. */
-function filterOutTokenizer(
-  specs: InferenceFieldSpecsByType,
-  modelType: string
-): InferenceFieldSpecsByType {
-  const list = specs[modelType];
-  if (!Array.isArray(list)) return specs;
-  return {
-    ...specs,
-    [modelType]: list.filter((s: any) => s.key !== "tokenizer_family"),
-  };
-}
-
 const TYPE_BADGE_CLASS: Record<string, string> = {
   [MODEL_TYPES.LLM]: "bg-blue-100 text-blue-700",
   [MODEL_TYPES.EMBEDDING]: "bg-indigo-100 text-indigo-700",
@@ -87,35 +74,6 @@ const TYPE_BADGE_CLASS: Record<string, string> = {
   [MODEL_TYPES.VLM3]: "bg-emerald-100 text-emerald-700",
   [MODEL_TYPES.VLM4]: "bg-emerald-100 text-emerald-700",
 };
-
-/** v0-style advanced field: label + input + hint below. */
-function AdvField({
-  label,
-  placeholder,
-  hint,
-  value,
-  onChange,
-}: {
-  label: string;
-  placeholder?: string;
-  hint?: string;
-  value: string;
-  onChange: (next: string) => void;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-sm">{label}</Label>
-      <Input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-      />
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
 
 export interface ModelEditDialogProps {
   model: ModelOption | null;
@@ -130,14 +88,19 @@ export const ModelEditDialog = ({
 }: ModelEditDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
 
   const [displayName, setDisplayName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [type, setType] = useState<ModelType>(MODEL_TYPES.LLM as ModelType);
   const [advanced, setAdvanced] = useState<ModelAdvancedSettingsValue>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
+  // In-dialog connectivity probe. "available" is only meaningful for the
+  // current form values — any type/URL/key change resets it to "idle".
+  const [probe, setProbe] = useState<
+    "idle" | "checking" | "available" | "unavailable"
+  >("idle");
 
   // Re-initialize whenever a different model opens (key in the parent forces
   // remount, but this effect also handles the initial open).
@@ -146,27 +109,87 @@ export const ModelEditDialog = ({
     setDisplayName(model.displayName || model.name);
     setApiKey(model.apiKey || "");
     setBaseUrl(model.apiUrl || "");
-    setAdvanced(
-      advancedSettingsValueFromRecord(
-        {
-          temperature: model.temperature,
-          top_p: model.topP,
-          extra_params: model.extraParams,
-        },
-        { [model.type]: [] },
-        model.type
-      )
-    );
+    setType(model.type);
+    setProbe("idle");
+    const extra = (model.extraParams ?? {}) as Record<string, unknown>;
+    const next: ModelAdvancedSettingsValue = {};
+    if (model.temperature != null) next.temperature = model.temperature;
+    if (model.topP != null) next.top_p = model.topP;
+    if (model.contextWindowTokens != null)
+      next.context_window_tokens = model.contextWindowTokens;
+    if (model.maxInputTokens != null)
+      next.max_input_tokens = model.maxInputTokens;
+    if (model.maxOutputTokens != null)
+      next.max_output_tokens = model.maxOutputTokens;
+    if (model.defaultOutputReserveTokens != null)
+      next.default_output_reserve_tokens = model.defaultOutputReserveTokens;
+    if (extra.enable_thinking !== undefined)
+      next.enable_thinking = extra.enable_thinking === true;
+    const customRaw = extra.__custom__;
+    if (
+      customRaw &&
+      typeof customRaw === "object" &&
+      !Array.isArray(customRaw)
+    ) {
+      next.__custom__ = Object.entries(
+        customRaw as Record<string, unknown>
+      ).map(
+        ([k, v]) => [k, formatCustomValueForEditing(v)] as [string, string]
+      );
+    }
+    setAdvanced(next);
   }, [model]);
+
+  const typeOptions = useMemo(
+    () =>
+      (Object.keys(TYPE_LABEL_KEY_MAP) as ModelType[]).map((v) => ({
+        value: v,
+        label: t(`model.type.${TYPE_LABEL_KEY_MAP[v]}`, {
+          defaultValue: v,
+        }),
+      })),
+    [t]
+  );
 
   if (!model) return null;
 
+  // Embedding / multi_embedding records share one display name and are
+  // updated as a pair; the backend update path deliberately ignores
+  // model_type there, so the field is not editable for those types.
+  const typeLocked =
+    model.type === MODEL_TYPES.EMBEDDING ||
+    model.type === MODEL_TYPES.MULTI_EMBEDDING;
+
   const canSubmit = displayName.trim().length > 0 && baseUrl.trim().length > 0;
+
+  async function handleCheck() {
+    if (!model || probe === "checking") return;
+    setProbe("checking");
+    try {
+      // Empty apiKey falls back to the stored key via probe_model_id. The
+      // inference params (temperature / top_p / extra_params incl.
+      // __custom__) ride along so an invalid custom param fails the probe
+      // here instead of at runtime — same contract as the backend probe.
+      const result = await modelService.verifyModelConfigConnectivity({
+        modelName: model.name,
+        modelType: type,
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim() || undefined,
+        modelId: model.id,
+        modelFactory: model.source || "OpenAI-API-Compatible",
+        ...buildInferenceParamsPayload(advanced),
+      });
+      setProbe(result.connectivity ? "available" : "unavailable");
+    } catch {
+      setProbe("unavailable");
+    }
+  }
 
   async function handleSave() {
     if (!canSubmit || saving || !model) return;
     setSaving(true);
     try {
+      const typeChanged = type !== model.type;
       const params: Record<string, any> = {
         currentDisplayName: model.displayName,
         displayName: displayName.trim(),
@@ -175,17 +198,42 @@ export const ModelEditDialog = ({
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         ...buildInferenceParamsPayload(advanced),
       };
-      // Capacity fields from the model record (only re-send if the user
-      // changed them via advanced settings).
+      if (typeChanged) {
+        params.type = type;
+      }
+      if (probe === "available") {
+        // The in-dialog probe passed with the exact values being saved.
+        params.connectStatus = "available";
+      } else if (typeChanged) {
+        // No passing probe for the new type; reset so the row must be
+        // re-checked before it counts as available.
+        params.connectStatus = "not_detected";
+      }
+      // Capacity fields: only re-send what the advanced section carries
+      // (pre-filled from the record, so unchanged values round-trip). The
+      // camelCase mapping is required because buildCapacityRequestBody in
+      // modelService only reads camelCase keys.
       if (advanced.context_window_tokens != null)
         params.contextWindowTokens = advanced.context_window_tokens;
       if (advanced.max_input_tokens != null)
         params.maxInputTokens = advanced.max_input_tokens;
-      if (advanced.max_output_tokens != null)
+      if (advanced.max_output_tokens != null) {
         params.maxOutputTokens = advanced.max_output_tokens;
+        // Mirror into the deprecated max_tokens column so legacy readers
+        // stay consistent (same mirroring as buildCapacityPayload).
+        params.maxTokens = advanced.max_output_tokens;
+      }
       if (advanced.default_output_reserve_tokens != null)
         params.defaultOutputReserveTokens =
           advanced.default_output_reserve_tokens;
+      if (
+        advanced.context_window_tokens != null ||
+        advanced.max_input_tokens != null ||
+        advanced.max_output_tokens != null ||
+        advanced.default_output_reserve_tokens != null
+      ) {
+        params.capacitySource = "operator";
+      }
 
       await modelService.updateSingleModel(params as any);
       onSuccess();
@@ -241,15 +289,34 @@ export const ModelEditDialog = ({
               <Input value={model.name} disabled className="font-mono" />
             </div>
             <div className="flex items-center gap-2">
-              <Badge
-                variant="secondary"
-                className={cn("border-0 text-xs", TYPE_BADGE_CLASS[model.type])}
+              <Select
+                value={type}
+                onValueChange={(v) => {
+                  setType(v as ModelType);
+                  setProbe("idle");
+                }}
+                disabled={typeLocked}
               >
-                {t(
-                  `model.type.${TYPE_LABEL_KEY_MAP[model.type] ?? model.type}`,
-                  { defaultValue: model.type }
-                )}
-              </Badge>
+                <SelectTrigger
+                  className={cn(
+                    "h-6 w-fit gap-1 border-0 px-2 text-xs font-normal shadow-none focus:ring-0",
+                    TYPE_BADGE_CLASS[type]
+                  )}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {typeOptions.map((opt) => (
+                    <SelectItem
+                      key={opt.value}
+                      value={opt.value}
+                      className="text-xs"
+                    >
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Badge variant="secondary" className="border-0 text-xs">
                 {model.source}
               </Badge>
@@ -264,8 +331,13 @@ export const ModelEditDialog = ({
               <Input
                 type="password"
                 value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="留空保持原有 Key"
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  setProbe("idle");
+                }}
+                placeholder={t("modelConfig.editDialog.apiKeyKeepHint", {
+                  defaultValue: "留空保持原有 Key",
+                })}
               />
             </div>
             <div className="space-y-2">
@@ -276,7 +348,10 @@ export const ModelEditDialog = ({
               </Label>
               <Input
                 value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  setProbe("idle");
+                }}
               />
             </div>
           </div>
@@ -299,200 +374,58 @@ export const ModelEditDialog = ({
             </button>
             {showAdvanced && (
               <div className="mt-4 border-t pt-4">
-                {/* Capacity fields with v0-style hints */}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-                  <AdvField
-                    label="上下文窗口"
-                    placeholder="如 131072"
-                   
-                    value={advanced.context_window_tokens?.toString() ?? ""}
-                    onChange={(v) =>
-                      setAdvanced((a) => ({
-                        ...a,
-                        context_window_tokens: v ? Number(v) : undefined,
-                      }))
-                    }
-                  />
-                  <AdvField
-                    label="最大输入Token数"
-                    placeholder="如 98304"
-                    value={advanced.max_input_tokens?.toString() ?? ""}
-                    onChange={(v) =>
-                      setAdvanced((a) => ({
-                        ...a,
-                        max_input_tokens: v ? Number(v) : undefined,
-                      }))
-                    }
-                  />
-                  <AdvField
-                    label="最大输出Token数"
-                    placeholder="如 8192"
-                    value={advanced.max_output_tokens?.toString() ?? ""}
-                    onChange={(v) =>
-                      setAdvanced((a) => ({
-                        ...a,
-                        max_output_tokens: v ? Number(v) : undefined,
-                      }))
-                    }
-                  />
-                  <AdvField
-                    label="输出预留Token数"
-                    placeholder="如 1024"
-                   
-                    value={
-                      advanced.default_output_reserve_tokens?.toString() ?? ""
-                    }
-                    onChange={(v) =>
-                      setAdvanced((a) => ({
-                        ...a,
-                        default_output_reserve_tokens: v
-                          ? Number(v)
-                          : undefined,
-                      }))
-                    }
-                  />
-                  <AdvField
-                    label="温度"
-                    placeholder="如 0.7"
-                   
-                    value={advanced.temperature?.toString() ?? ""}
-                    onChange={(v) =>
-                      setAdvanced((a) => ({
-                        ...a,
-                        temperature: v ? Number(v) : undefined,
-                      }))
-                    }
-                  />
-                  <AdvField
-                    label="Top P"
-                    placeholder="如 0.9"
-                   
-                    value={advanced.top_p?.toString() ?? ""}
-                    onChange={(v) =>
-                      setAdvanced((a) => ({
-                        ...a,
-                        top_p: v ? Number(v) : undefined,
-                      }))
-                    }
-                  />
-                </div>
-
-                {/* Deep thinking toggle */}
-                <div className="mt-4 flex items-center justify-between rounded-lg border px-4 py-3">
-                  <div>
-                    <Label className="text-sm">深度思考</Label>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      允许模型在回答前进行显式推理
-                    </p>
-                  </div>
-                  <Switch
-                    checked={advanced.enable_thinking === true}
-                    onCheckedChange={(checked) =>
-                      setAdvanced((a) => ({
-                        ...a,
-                        enable_thinking: checked,
-                      }))
-                    }
-                  />
-                </div>
-
-                {/* Custom params */}
-                <div className="mt-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label className="text-sm">自定义参数</Label>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        附加到请求体的额外参数
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setAdvanced((a) => {
-                          const customs = Array.isArray(a.__custom__)
-                            ? [...a.__custom__]
-                            : [];
-                          customs.push(["", ""]);
-                          return { ...a, __custom__: customs };
-                        });
-                      }}
-                    >
-                      <Plus className="size-4" />
-                      添加参数
-                    </Button>
-                  </div>
-                  <div className="mt-2 space-y-2">
-                    {(Array.isArray(advanced.__custom__)
-                      ? (advanced.__custom__ as [string, string][])
-                      : []
-                    ).map(([k, v], idx) => (
-                      <div
-                        key={`custom-param-${idx}`}
-                        className="flex items-center gap-2"
-                      >
-                        <Input
-                          className="flex-1"
-                          placeholder="参数名"
-                          value={k}
-                          onChange={(e) => {
-                            setAdvanced((a) => {
-                              const customs = Array.isArray(a.__custom__)
-                                ? [...(a.__custom__ as [string, string][])]
-                                : [];
-                              customs[idx] = [e.target.value, v];
-                              return { ...a, __custom__: customs };
-                            });
-                          }}
-                        />
-                        <Input
-                          className="flex-1"
-                          placeholder="JSON 或字符串"
-                          value={v}
-                          onChange={(e) => {
-                            setAdvanced((a) => {
-                              const customs = Array.isArray(a.__custom__)
-                                ? [...(a.__custom__ as [string, string][])]
-                                : [];
-                              customs[idx] = [k, e.target.value];
-                              return { ...a, __custom__: customs };
-                            });
-                          }}
-                        />
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-8 shrink-0 text-destructive hover:text-destructive"
-                          onClick={() => {
-                            setAdvanced((a) => {
-                              const customs = Array.isArray(a.__custom__)
-                                ? (a.__custom__ as [string, string][]).filter(
-                                    (_, i) => i !== idx
-                                  )
-                                : [];
-                              return { ...a, __custom__: customs };
-                            });
-                          }}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <ModelAdvancedConfig
+                  value={advanced}
+                  onChange={(next) => {
+                    setAdvanced(next);
+                    // Inference params ride along in the probe, so changing
+                    // them invalidates a previous probe result.
+                    setProbe("idle");
+                  }}
+                />
               </div>
             )}
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t px-6 py-4">
-          <Button variant="outline" onClick={onClose}>
-            {t("common.cancel", { defaultValue: "取消" })}
-          </Button>
-          <Button disabled={!canSubmit || saving} onClick={handleSave}>
-            {saving && <Loader2 className="size-4 animate-spin" />}
-            {t("common.save", { defaultValue: "保存" })}
-          </Button>
+        <div className="flex items-center justify-between border-t px-6 py-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Button
+              variant="outline"
+              onClick={handleCheck}
+              disabled={probe === "checking" || saving}
+            >
+              {probe === "checking" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="size-4" />
+              )}
+              {t("modelConfig.editDialog.checkConnectivity", {
+                defaultValue: "检测连通性",
+              })}
+            </Button>
+            {probe === "available" && (
+              <span className="flex items-center gap-1.5 text-xs text-emerald-600">
+                <span className="size-2 rounded-full bg-emerald-500" />
+                {t("model.status.available", { defaultValue: "可用" })}
+              </span>
+            )}
+            {probe === "unavailable" && (
+              <span className="flex items-center gap-1.5 text-xs text-red-500">
+                <span className="size-2 rounded-full bg-red-500" />
+                {t("model.status.unavailable", { defaultValue: "不可用" })}
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" onClick={onClose}>
+              {t("common.cancel", { defaultValue: "取消" })}
+            </Button>
+            <Button disabled={!canSubmit || saving} onClick={handleSave}>
+              {saving && <Loader2 className="size-4 animate-spin" />}
+              {t("common.save", { defaultValue: "保存" })}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

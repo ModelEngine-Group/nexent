@@ -42,12 +42,10 @@ import { ModelType } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
 import {
-  ModelAdvancedSettings,
   ModelAdvancedSettingsValue,
   buildInferenceParamsPayload,
 } from "./ModelAdvancedSettings";
-import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
-import { InferenceFieldSpecsByType } from "@/types/modelConfig";
+import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
 
 /**
  * v2.6.1 redesign (v0 design): the add-model dialog.
@@ -293,12 +291,6 @@ function useTypeOptions() {
   );
 }
 
-function typeLabel(type: string, t: (key: string, opts?: any) => string) {
-  return t(`model.type.${TYPE_LABEL_KEY_MAP[type] ?? type}`, {
-    defaultValue: type,
-  });
-}
-
 async function createModel(
   tenantId: string | undefined,
   params: Record<string, any>
@@ -310,6 +302,41 @@ async function createModel(
     } as any);
   }
   return modelService.addCustomModel(params as any);
+}
+
+/**
+ * Merge an advanced-settings value (snake_case spec keys) into the create
+ * params. buildInferenceParamsPayload emits snake_case top-level keys, but
+ * buildCapacityRequestBody in modelService only reads camelCase — without
+ * this explicit mapping the capacity fields are silently dropped on create
+ * (mirrors the inline mapping ModelAddDialogV2 does for the same contract).
+ */
+function applyAdvancedSettingsToParams(
+  params: Record<string, any>,
+  settings: ModelAdvancedSettingsValue
+) {
+  const payload = buildInferenceParamsPayload(settings);
+  Object.assign(params, payload);
+  const hasCapacity =
+    payload.context_window_tokens != null ||
+    payload.max_input_tokens != null ||
+    payload.max_output_tokens != null ||
+    payload.default_output_reserve_tokens != null;
+  if (payload.context_window_tokens != null)
+    params.contextWindowTokens = payload.context_window_tokens;
+  if (payload.max_input_tokens != null)
+    params.maxInputTokens = payload.max_input_tokens;
+  if (payload.max_output_tokens != null) {
+    params.maxOutputTokens = payload.max_output_tokens;
+    // Mirror max_output_tokens into the deprecated max_tokens column so
+    // legacy readers stay consistent (same mirroring as buildCapacityPayload).
+    params.maxTokens = payload.max_output_tokens;
+  }
+  if (payload.default_output_reserve_tokens != null)
+    params.defaultOutputReserveTokens = payload.default_output_reserve_tokens;
+  if (payload.tokenizer_family != null)
+    params.tokenizerFamily = payload.tokenizer_family;
+  if (hasCapacity) params.capacitySource = "operator";
 }
 
 /* ------------------------------ 单个添加 ------------------------------ */
@@ -327,7 +354,6 @@ function SingleAddForm({
   const { message } = App.useApp();
   const presets = useProviderPresets(true);
   const typeOptions = useTypeOptions();
-  const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
 
   const [provider, setProvider] = useState<string>(CUSTOM_PROVIDER_KEY);
   const [type, setType] = useState<ModelType>(MODEL_TYPES.LLM as ModelType);
@@ -365,7 +391,7 @@ function SingleAddForm({
         modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
       };
       if (override?.settings) {
-        Object.assign(params, buildInferenceParamsPayload(override.settings));
+        applyAdvancedSettingsToParams(params, override.settings);
       }
       await createModel(tenantId, params);
       onSuccess({ name: name.trim(), type });
@@ -539,7 +565,6 @@ function SingleAddForm({
             model_type: type,
           }}
           override={override}
-          specs={inferenceSpecs}
           onSave={(next) => {
             setOverride(next);
             setShowSettings(false);
@@ -579,7 +604,7 @@ function BatchAddForm({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const presets = useProviderPresets(true);
-  const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
+  const typeOptions = useTypeOptions();
 
   const [provider, setProvider] = useState<string>(CUSTOM_PROVIDER_KEY);
   const [apiKey, setApiKey] = useState("");
@@ -637,6 +662,20 @@ function BatchAddForm({
         next[row.id] = on;
       });
       return next;
+    });
+  }
+
+  // The fetched type is the provider's guess (LLM by default); operators can
+  // correct it per row before importing. The stored probe result was measured
+  // under the previous type, so reset it to force a re-probe before submit.
+  function updateRowType(rowId: string, next: ModelType) {
+    setFetched((prev) =>
+      prev.map((r) => (r.id === rowId ? { ...r, model_type: next } : r))
+    );
+    setRowCheck((s) => {
+      const nextCheck = { ...s };
+      delete nextCheck[rowId];
+      return nextCheck;
     });
   }
 
@@ -803,7 +842,7 @@ function BatchAddForm({
           connectStatus: "available",
         };
         if (override?.settings) {
-          Object.assign(params, buildInferenceParamsPayload(override.settings));
+          applyAdvancedSettingsToParams(params, override.settings);
         }
         await createModel(tenantId, params);
         created++;
@@ -999,15 +1038,37 @@ function BatchAddForm({
                         {rowCheck[row.id] === "unavailable" && (
                           <span className="size-2 rounded-full bg-red-500" />
                         )}
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            "border-0 text-xs font-normal",
-                            TYPE_BADGE_CLASS[row.model_type]
-                          )}
-                        >
-                          {typeLabel(row.model_type, t)}
-                        </Badge>
+                        {/* Per-row type editor — styled like the old badge.
+                            stopPropagation keeps opening the dropdown from
+                            toggling the row's selection checkbox. */}
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <Select
+                            value={row.model_type}
+                            onValueChange={(v) =>
+                              updateRowType(row.id, v as ModelType)
+                            }
+                          >
+                            <SelectTrigger
+                              className={cn(
+                                "h-6 w-fit gap-1 border-0 px-2 text-xs font-normal shadow-none focus:ring-0",
+                                TYPE_BADGE_CLASS[row.model_type]
+                              )}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {typeOptions.map((opt) => (
+                                <SelectItem
+                                  key={opt.value}
+                                  value={opt.value}
+                                  className="text-xs"
+                                >
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </span>
                         {rowOverrides[row.id] && (
                           <span className="size-1.5 rounded-full bg-primary" />
                         )}
@@ -1110,7 +1171,6 @@ function BatchAddForm({
           override={
             rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
           }
-          specs={inferenceSpecs}
           onSave={(next) => {
             setRowOverrides((prev) => ({
               ...prev,
@@ -1125,38 +1185,22 @@ function BatchAddForm({
   );
 }
 
-/** Filter the tokenizer_family field out of the specs — it's an internal
- *  implementation detail, not something operators should configure per-model. */
-function filterOutTokenizer(
-  specs: InferenceFieldSpecsByType,
-  modelType: string
-): InferenceFieldSpecsByType {
-  const list = specs[modelType];
-  if (!Array.isArray(list)) return specs;
-  return {
-    ...specs,
-    [modelType]: list.filter((s: any) => s.key !== "tokenizer_family"),
-  };
-}
-
 /* ------------------------ per-row advanced settings ------------------------ */
 
 function RowSettingsDialog({
   row,
   override,
-  specs,
   onSave,
   onClose,
 }: {
   row: FetchedRow | null;
   override?: RowOverride;
-  specs: InferenceFieldSpecsByType;
   onSave: (next: RowOverride) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  // One flat value drives the whole form — ModelAdvancedSettings in override
-  // mode renders both capacity and inference fields, no manual grid needed.
+  // One flat value drives the whole form — ModelAdvancedConfig renders the
+  // fixed v0 field set (capacity + inference + custom params).
   const [settings, setSettings] = useState<ModelAdvancedSettingsValue>(
     override?.settings ?? {}
   );
@@ -1204,13 +1248,7 @@ function RowSettingsDialog({
               })}
             />
           </div>
-          <ModelAdvancedSettings
-            modelType={row.model_type}
-            specs={filterOutTokenizer(specs, row.model_type)}
-            value={settings}
-            onChange={setSettings}
-            mode="override"
-          />
+          <ModelAdvancedConfig value={settings} onChange={setSettings} />
         </div>
         <div className="flex justify-end gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose}>

@@ -179,7 +179,7 @@ const parseCustomValue = (raw: string): unknown => {
  * in the text control. Strings that look like another JSON type are quoted
  * to avoid changing their type when the form is opened and saved again.
  */
-const formatCustomValueForEditing = (raw: unknown): string => {
+export const formatCustomValueForEditing = (raw: unknown): string => {
   if (typeof raw === "string") {
     const trimmed = raw.trim();
     if (trimmed !== "") {
