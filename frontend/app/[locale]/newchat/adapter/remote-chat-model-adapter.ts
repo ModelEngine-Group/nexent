@@ -1496,6 +1496,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
+    const reasoningEffort = context.config?.reasoningEffort;
+    const reasoningBudgetTokens = (
+      context.config as { reasoningBudgetTokens?: number } | undefined
+    )?.reasoningBudgetTokens;
+    const hasBudgetSelection =
+      typeof reasoningBudgetTokens === "number" &&
+      Number.isInteger(reasoningBudgetTokens) &&
+      reasoningBudgetTokens >= 0;
     const modelIdFromCustom = custom?.modelId;
 
     if (isAgentDebug && modelIdFromCustom) {
@@ -1504,6 +1512,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     } else if (modelName) {
       // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
+    }
+    if (
+      !isResume &&
+      !hasBudgetSelection &&
+      typeof reasoningEffort === "string" &&
+      reasoningEffort &&
+      reasoningEffort !== "auto"
+    ) {
+      requestBody.reasoning_effort = reasoningEffort;
+    }
+    if (!isResume && hasBudgetSelection && reasoningBudgetTokens > 0) {
+      requestBody.reasoning_budget_tokens = reasoningBudgetTokens;
     }
 
     log.log(
@@ -1515,8 +1535,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Workbench v3 owns model selection; legacy composer state is only a projection.
     const workbenchConfig = custom?.workbenchConfig;
-    if (workbenchConfig)
+    if (workbenchConfig) {
       requestBody.model_id = workbenchConfig.model_id ?? undefined;
+      // Workbench generation_config is authoritative for this run. Do not let
+      // the shared selector's ordinary-chat effort/budget override it.
+      delete requestBody.reasoning_effort;
+      delete requestBody.reasoning_budget_tokens;
+    }
     if (!workbenchConfig && !isEphemeralRuntime) {
       const modelContext = context.config as
         | { deepThinking?: boolean; reasoningEffort?: string }

@@ -182,6 +182,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
       tags: normalizeTags(agent.tags),
     }));
@@ -239,6 +240,7 @@ export const fetchPublishedAgentList = async () => {
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
     }));
 

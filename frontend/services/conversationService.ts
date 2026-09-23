@@ -1050,6 +1050,16 @@ export const conversationService = {
         deep_thinking: boolean;
         thinking_effort?: "low" | "medium" | "high";
       };
+      reasoning_effort?:
+        | "auto"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max";
+      reasoning_budget_tokens?: number;
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
@@ -1120,6 +1130,25 @@ export const conversationService = {
       }
       if (params.generation_config !== undefined) {
         requestParams.generation_config = params.generation_config;
+      }
+      const budgetTokens = params.reasoning_budget_tokens;
+      const hasBudgetSelection =
+        typeof budgetTokens === "number" &&
+        Number.isInteger(budgetTokens) &&
+        budgetTokens >= 0;
+      if (
+        !hasBudgetSelection &&
+        params.reasoning_effort !== undefined &&
+        params.reasoning_effort !== "auto"
+      ) {
+        requestParams.reasoning_effort = params.reasoning_effort;
+      }
+      if (
+        hasBudgetSelection &&
+        budgetTokens !== undefined &&
+        budgetTokens > 0
+      ) {
+        requestParams.reasoning_budget_tokens = budgetTokens;
       }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;

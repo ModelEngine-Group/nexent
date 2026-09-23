@@ -127,6 +127,6 @@ it("keeps single-agent model selection restricted to configured models", () => {
   ] as ModelOption[];
 
   expect(deriveModelOptions(agent, catalog, "agent")).toEqual([
-    { id: "11", name: "Configured Model", efforts: true },
+    { id: "11", name: "Configured Model" },
   ]);
 });

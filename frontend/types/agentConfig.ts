@@ -132,8 +132,16 @@ export interface PublishedAgent {
   greeting_message?: string;
   example_questions?: string[];
   allow_chat_metadata?: boolean;
+  /** Agent-owned model inference snapshots used by the chat runtime. */
+  model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   icon_url?: string;
   tags?: string[];
+}
+
+export interface ModelParamsOverrideEntry {
+  temperature?: number | null;
+  top_p?: number | null;
+  extra_params?: Record<string, unknown> | null;
 }
 
 export interface Agent {
@@ -158,11 +166,7 @@ export interface Agent {
    */
   model_params_override?: Record<
     string,
-    {
-      temperature?: number | null;
-      top_p?: number | null;
-      extra_params?: Record<string, unknown> | null;
-    }
+    ModelParamsOverrideEntry
   > | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;

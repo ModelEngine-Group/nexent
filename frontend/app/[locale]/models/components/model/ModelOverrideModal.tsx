@@ -199,6 +199,7 @@ export const ModelOverrideModal = ({
                 onChange={(next) => handleFieldChange(model.id, next)}
                 mode="override"
                 disabled={disabled}
+                reasoningCapability={model.reasoningCapability}
               />
             </div>
           ))}

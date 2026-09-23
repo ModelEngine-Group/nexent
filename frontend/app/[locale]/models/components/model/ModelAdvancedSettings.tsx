@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 
-import { Input, InputNumber, Select, Switch, Tooltip, Empty, Button } from "antd";
+import {
+  Input,
+  InputNumber,
+  Select,
+  Slider,
+  Switch,
+  Tooltip,
+  Empty,
+  Button,
+} from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
@@ -10,7 +19,10 @@ import type {
   InferenceFieldSpec,
   InferenceFieldSpecsByType,
   InferenceFieldType,
+  ReasoningCapability,
+  ReasoningEffort,
 } from "@/types/modelConfig";
+import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
 
 // =============================================================================
 // v2.6.0: ModelAdvancedSettings — per-type fixed-field form
@@ -70,6 +82,8 @@ export interface ModelAdvancedSettingsProps {
    * (override mode): makes "empty = inherit this value" visible. Keys match
    * spec.key (snake_case). */
   inheritedDefaults?: Record<string, unknown>;
+  /** Capability metadata for the model-level default reasoning selector. */
+  reasoningCapability?: ReasoningCapability;
 }
 
 /** Keys that have dedicated DB columns or are stored as top-level fields (not in extra_params). */
@@ -147,6 +161,106 @@ const REMOVED_ADVANCED_PARAM_KEYS = new Set<string>([
   "voice",
   "speed",
 ]);
+
+const resolveReasoningDefault = (
+  currentEffort: ReasoningEffort | undefined,
+  capability: ReasoningCapability | undefined,
+  levels: readonly ReasoningEffort[]
+): ReasoningEffort | undefined => {
+  if (currentEffort && levels.includes(currentEffort)) return currentEffort;
+  if (levels.includes("auto")) return "auto";
+  if (capability?.default && levels.includes(capability.default)) {
+    return capability.default;
+  }
+  if (levels.includes(DEFAULT_REASONING_EFFORT)) {
+    return DEFAULT_REASONING_EFFORT;
+  }
+  return levels[0];
+};
+
+const shouldSkipInferenceParam = (
+  key: string,
+  raw: unknown,
+  thinkingEnabled: boolean
+): boolean => {
+  if (raw === undefined || raw === null || raw === "") return true;
+  if (REMOVED_ADVANCED_PARAM_KEYS.has(key)) return true;
+  return (
+    (key === "reasoning_effort" || key === "reasoning_budget_tokens") &&
+    !thinkingEnabled
+  );
+};
+
+const assignInferenceParam = (
+  key: string,
+  raw: unknown,
+  result: Record<string, unknown>,
+  extraParams: Record<string, unknown>
+): void => {
+  if (key === "__custom__") {
+    const dict = buildCustomDict(raw);
+    if (Object.keys(dict).length > 0) {
+      extraParams["__custom__"] = dict;
+    }
+    return;
+  }
+  if (DEDICATED_KEYS.has(key)) {
+    result[key] = raw;
+    return;
+  }
+  extraParams[key] = raw;
+};
+
+const applyReasoningValues = (
+  value: ModelAdvancedSettingsValue,
+  extra: Record<string, unknown>
+): void => {
+  if (typeof extra.enable_thinking === "boolean") {
+    value.enable_thinking = extra.enable_thinking;
+  }
+  if (typeof extra.reasoning_effort === "string") {
+    if (value.enable_thinking !== false) {
+      value.reasoning_effort = extra.reasoning_effort;
+    }
+    if (typeof value.enable_thinking !== "boolean") {
+      value.enable_thinking = true;
+    }
+  }
+  if (
+    typeof extra.reasoning_budget_tokens === "number" &&
+    Number.isFinite(extra.reasoning_budget_tokens)
+  ) {
+    if (value.enable_thinking !== false) {
+      value.reasoning_budget_tokens = extra.reasoning_budget_tokens;
+    }
+    if (typeof value.enable_thinking !== "boolean") {
+      value.enable_thinking = true;
+    }
+  }
+};
+
+const getVisibleAdvancedSpecs = (
+  specs: InferenceFieldSpecsByType,
+  modelType: string,
+  mode: ModelAdvancedSettingsMode,
+  isVoiceType: boolean,
+  isVolcengineVoice: boolean
+): InferenceFieldSpec[] => {
+  const specList = specs[modelType] || [];
+  return specList.filter((spec) => {
+    if (REMOVED_ADVANCED_PARAM_KEYS.has(spec.key)) return false;
+    // Thinking has a dedicated two-row control below the generic fields.
+    if (spec.key === "enable_thinking") return false;
+    if (mode === "default" && CAPACITY_FIELD_KEYS.has(spec.key)) return false;
+    if (mode === "default" && EMBEDDING_FIELD_KEYS.has(spec.key)) return false;
+    if (mode === "override" && spec.key === "display_name") return false;
+    const isVolcengineCredential =
+      isVoiceType &&
+      mode === "default" &&
+      (spec.key === "model_appid" || spec.key === "access_token");
+    return !isVolcengineCredential || isVolcengineVoice;
+  });
+};
 
 /**
  * Split a form-state object into the wire payload shape consumed by the
@@ -268,7 +382,10 @@ export const diffCustomParamsForSave = (
   }
   const modelDict = modelCustoms ?? {};
   const result: Record<string, unknown> = {};
-  const keys = new Set([...Object.keys(modelDict), ...Object.keys(editingDict)]);
+  const keys = new Set([
+    ...Object.keys(modelDict),
+    ...Object.keys(editingDict),
+  ]);
   for (const k of keys) {
     if (k in editingDict) {
       if (
@@ -295,25 +412,27 @@ export const buildInferenceParamsPayload = (
 } => {
   const result: Record<string, unknown> = {};
   const extraParams: Record<string, unknown> = {};
+  const thinkingEnabled = value.enable_thinking === true;
 
   for (const [key, raw] of Object.entries(value)) {
-    if (raw === undefined || raw === null || raw === "") continue;
-    if (REMOVED_ADVANCED_PARAM_KEYS.has(key)) continue;
-    if (key === "__custom__") {
-      const dict = buildCustomDict(raw);
-      if (Object.keys(dict).length > 0) {
-        extraParams["__custom__"] = dict;
-      }
-      continue;
-    }
-    if (DEDICATED_KEYS.has(key)) {
-      result[key] = raw;
-    } else {
-      extraParams[key] = raw;
-    }
+    if (shouldSkipInferenceParam(key, raw, thinkingEnabled)) continue;
+    assignInferenceParam(key, raw, result, extraParams);
+  }
+
+  if (!thinkingEnabled) {
+    delete extraParams.reasoning_effort;
+    delete extraParams.reasoning_budget_tokens;
   }
 
   if (Object.keys(extraParams).length > 0) {
+    // Numeric budgets and effort enums are alternative controls. When both
+    // exist in a legacy form value, the numeric budget takes precedence.
+    if (
+      typeof extraParams.reasoning_budget_tokens === "number" &&
+      Number.isFinite(extraParams.reasoning_budget_tokens)
+    ) {
+      delete extraParams.reasoning_effort;
+    }
     result.extra_params = extraParams;
   }
   return result;
@@ -350,12 +469,15 @@ export const buildModelOverrideEntry = (
  * back into a single snake_case-keyed object keyed by spec.key.
  */
 export const advancedSettingsValueFromRecord = (
-  record: {
-    temperature?: number | null;
-    top_p?: number | null;
-    extra_params?: Record<string, unknown> | null;
-    [key: string]: unknown;
-  } | null | undefined,
+  record:
+    | {
+        temperature?: number | null;
+        top_p?: number | null;
+        extra_params?: Record<string, unknown> | null;
+        [key: string]: unknown;
+      }
+    | null
+    | undefined,
   specs: InferenceFieldSpecsByType,
   modelType: string
 ): ModelAdvancedSettingsValue => {
@@ -375,6 +497,10 @@ export const advancedSettingsValueFromRecord = (
     }
   }
 
+  // The model-level reasoning default is catalog-driven rather than part of
+  // the generic field-spec payload, but it still lives in extra_params.
+  applyReasoningValues(value, extra);
+
   // Pass through user-defined custom params (extra_params.__custom__).
   // Backend stores a dict of JSON-compatible values; the editor works on a
   // [string, string][] entries array so the user can edit empty/duplicate
@@ -382,7 +508,9 @@ export const advancedSettingsValueFromRecord = (
   const customRaw =
     "__custom__" in record ? record["__custom__"] : extra["__custom__"];
   if (customRaw && typeof customRaw === "object" && !Array.isArray(customRaw)) {
-    value["__custom__"] = Object.entries(customRaw as Record<string, unknown>).map(
+    value["__custom__"] = Object.entries(
+      customRaw as Record<string, unknown>
+    ).map(
       ([key, customValue]) =>
         [key, formatCustomValueForEditing(customValue)] as [string, string]
     );
@@ -622,10 +750,12 @@ const renderCustomParamsSection = ({
         <div className="space-y-2">
           {customEntries.map(([k, v], idx) => {
             const isDuplicate =
-              k !== "" &&
-              customEntries.filter(([ek]) => ek === k).length > 1;
+              k !== "" && customEntries.filter(([ek]) => ek === k).length > 1;
             return (
-              <div key={`custom-param-${idx}`} className="flex items-center gap-2">
+              <div
+                key={`custom-param-${idx}`}
+                className="flex items-center gap-2"
+              >
                 <Input
                   className="flex-1"
                   size="small"
@@ -685,6 +815,7 @@ export const ModelAdvancedSettings = ({
   mode = "default",
   disabled = false,
   inheritedDefaults,
+  reasoningCapability,
 }: ModelAdvancedSettingsProps) => {
   const { t } = useTranslation();
   // STT/TTS auth fields (AppID, Access Token) only apply to Volcano Engine.
@@ -694,7 +825,9 @@ export const ModelAdvancedSettings = ({
   // override mode all non-removed fields remain visible.
   const isVoiceType = modelType === "stt" || modelType === "tts";
   const isVolcengineVoice =
-    isVoiceType && mode === "default" && (value.model_factory as string) === "volcengine";
+    isVoiceType &&
+    mode === "default" &&
+    (value.model_factory as string) === "volcengine";
 
   // STT/TTS default provider to DashScope (阿里灵积) when empty, matching the
   // original ModelAddDialog (sttProvider/ttsProvider: "dashscope"). Applied
@@ -703,14 +836,19 @@ export const ModelAdvancedSettings = ({
   // dialog reopen). Only in default mode: override mode leaves empty as
   // "inherit model default".
   useEffect(() => {
-    if (
-      isVoiceType &&
-      mode === "default" &&
-      !value.model_factory
-    ) {
+    if (isVoiceType && mode === "default" && !value.model_factory) {
       onChange({ ...value, model_factory: "dashscope" });
     }
   }, [isVoiceType, mode, value, onChange]);
+
+  // LLMs expose the thinking switch regardless of whether the catalog has
+  // declared a provider-specific reasoning control. Keep the default enabled
+  // so an empty legacy/new form is saved with the same visible state.
+  useEffect(() => {
+    if (modelType === "llm" && value.enable_thinking === undefined) {
+      onChange({ ...value, enable_thinking: true });
+    }
+  }, [modelType, value, onChange]);
 
   // Filter out:
   //  - capacity fields in default mode: rendered by the dedicated
@@ -719,21 +857,13 @@ export const ModelAdvancedSettings = ({
   //    capacity panel, so capacity fields ARE shown here.
   //  - display_name in override mode: it's a model-level property, not an
   //    inference parameter that can be overridden per-agent/per-KB.
-  const specList: InferenceFieldSpec[] = (specs[modelType] || []).filter((spec) => {
-    if (REMOVED_ADVANCED_PARAM_KEYS.has(spec.key)) return false;
-    if (mode === "default" && CAPACITY_FIELD_KEYS.has(spec.key)) return false;
-    if (mode === "default" && EMBEDDING_FIELD_KEYS.has(spec.key)) return false;
-    if (mode === "override" && spec.key === "display_name") return false;
-    if (
-      isVoiceType &&
-      mode === "default" &&
-      (spec.key === "model_appid" || spec.key === "access_token") &&
-      !isVolcengineVoice
-    ) {
-      return false;
-    }
-    return true;
-  });
+  const specList = getVisibleAdvancedSpecs(
+    specs,
+    modelType,
+    mode,
+    isVoiceType,
+    isVolcengineVoice
+  );
 
   const handleFieldChange = (key: string, next: unknown) => {
     onChange({ ...value, [key]: next });
@@ -750,6 +880,134 @@ export const ModelAdvancedSettings = ({
   })();
   const hasDuplicateKey = customEntries.some(
     ([k], i) => k !== "" && customEntries.findIndex(([k2]) => k2 === k) !== i
+  );
+
+  const declaredReasoningControls =
+    reasoningCapability?.status === "supported"
+      ? reasoningCapability.controls?.length
+        ? reasoningCapability.controls
+        : reasoningCapability.levels.length > 0
+          ? [{ type: "effort" as const, values: reasoningCapability.levels }]
+          : reasoningCapability.control === "toggle"
+            ? [{ type: "toggle" as const }]
+            : []
+      : [];
+  const effortControl = declaredReasoningControls.find(
+    (control) => control.type === "effort"
+  );
+  const budgetControl = declaredReasoningControls.find(
+    (control) => control.type === "budget_tokens"
+  );
+  const budgetPreferred = budgetControl?.type === "budget_tokens";
+  const effectiveEffortControl = budgetPreferred ? undefined : effortControl;
+  const reasoningControlVisible = modelType === "llm";
+  const thinkingEnabled =
+    modelType === "llm" && value.enable_thinking !== false;
+  const configuredReasoningLevels =
+    effectiveEffortControl?.type === "effort"
+      ? (effectiveEffortControl.values as ReasoningEffort[])
+      : reasoningCapability?.levels || [];
+  const reasoningLevels = [
+    "auto",
+    ...configuredReasoningLevels.filter((level) => level !== "auto"),
+  ] as ReasoningEffort[];
+  const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
+  const reasoningDefault = resolveReasoningDefault(
+    reasoningEffort,
+    reasoningCapability,
+    reasoningLevels
+  );
+  const reasoningBudget =
+    budgetControl?.type === "budget_tokens"
+      ? typeof value.reasoning_budget_tokens === "number"
+        ? Math.min(
+            budgetControl.max,
+            Math.max(budgetControl.min, value.reasoning_budget_tokens)
+          )
+        : undefined
+      : undefined;
+
+  useEffect(() => {
+    if (budgetPreferred && value.reasoning_effort !== undefined) {
+      onChange({ ...value, reasoning_effort: undefined });
+    }
+  }, [budgetPreferred, onChange, value]);
+
+  const renderReasoningControls = reasoningControlVisible && (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <label className="text-sm font-medium text-gray-700">
+          {t("model.advanced.reasoningEnabled", {
+            defaultValue: "深度思考",
+          })}
+        </label>
+        <Switch
+          size="small"
+          checked={thinkingEnabled}
+          disabled={disabled}
+          onChange={(checked) =>
+            onChange({
+              ...value,
+              enable_thinking: checked,
+              reasoning_effort:
+                checked && effectiveEffortControl?.type === "effort"
+                  ? reasoningDefault
+                  : undefined,
+              reasoning_budget_tokens: checked
+                ? value.reasoning_budget_tokens
+                : undefined,
+            })
+          }
+        />
+      </div>
+      {thinkingEnabled && effectiveEffortControl?.type === "effort" && (
+        <Select
+          className="w-full"
+          aria-label={t("model.advanced.reasoningEffort", {
+            defaultValue: "思考挡位",
+          })}
+          value={
+            reasoningEffort && reasoningLevels.includes(reasoningEffort)
+              ? reasoningEffort
+              : reasoningDefault
+          }
+          disabled={disabled}
+          options={reasoningLevels.map((level) => ({
+            value: level,
+            // models.dev values are protocol enums; keep them unchanged.
+            label: level,
+          }))}
+          onChange={(next: ReasoningEffort | undefined) =>
+            onChange({ ...value, reasoning_effort: next })
+          }
+        />
+      )}
+      {thinkingEnabled && budgetControl?.type === "budget_tokens" && (
+        <div className="flex items-center gap-3">
+          <span className="shrink-0 text-sm text-gray-500">
+            {t("model.advanced.reasoningBudget", {
+              defaultValue: "预算 tokens",
+            })}
+          </span>
+          <Slider
+            className="flex-1"
+            min={budgetControl.min}
+            max={budgetControl.max}
+            value={reasoningBudget ?? budgetControl.min}
+            disabled={disabled}
+            onChange={(next: number | number[]) =>
+              onChange({
+                ...value,
+                reasoning_budget_tokens: Array.isArray(next) ? next[0] : next,
+              })
+            }
+          />
+          <span className="w-16 text-right text-xs text-gray-500">
+            {reasoningBudget ?? "auto"}
+          </span>
+        </div>
+      )}
+    </div>
   );
 
   const commitCustomEntries = (nextEntries: [string, string][]) => {
@@ -778,7 +1036,7 @@ export const ModelAdvancedSettings = ({
     commitCustomEntries(next);
   };
 
-  if (specList.length === 0) {
+  if (specList.length === 0 && !reasoningControlVisible) {
     return (
       <div className="space-y-3">
         <Empty
@@ -818,40 +1076,46 @@ export const ModelAdvancedSettings = ({
               ? `(${spec.range[0]} ~ ${spec.range[1]})`
               : null;
           return (
-            <div key={spec.key}>
-              <label className="block mb-1 text-sm font-medium text-gray-700">
-                <Tooltip
-                  title={
-                    rangeHint
-                      ? `${spec.label} ${rangeHint}`
-                      : spec.label
-                  }
-                >
-                  <span>{spec.label}</span>
-                </Tooltip>
-                {rangeHint && (
-                  <span className="ml-1 text-xs text-gray-400">
-                    {rangeHint}
-                  </span>
-                )}
-              </label>
-              {renderFieldControl(
-                spec,
-                fieldValue,
-                (next) => handleFieldChange(spec.key, next),
-                disabled,
-                // Show what an empty field inherits (model-level defaults in
-                // override mode) so "empty" is an informed choice.
-                fieldValue === undefined || fieldValue === null || fieldValue === ""
-                  ? inheritedDefaults?.[spec.key] !== undefined &&
-                    inheritedDefaults?.[spec.key] !== null
-                    ? String(inheritedDefaults[spec.key])
+            <Fragment key={spec.key}>
+              <div>
+                <label className="block mb-1 text-sm font-medium text-gray-700">
+                  <Tooltip
+                    title={
+                      rangeHint ? `${spec.label} ${rangeHint}` : spec.label
+                    }
+                  >
+                    <span>{spec.label}</span>
+                  </Tooltip>
+                  {rangeHint && (
+                    <span className="ml-1 text-xs text-gray-400">
+                      {rangeHint}
+                    </span>
+                  )}
+                </label>
+                {renderFieldControl(
+                  spec,
+                  fieldValue,
+                  (next) => handleFieldChange(spec.key, next),
+                  disabled,
+                  // Show what an empty field inherits (model-level defaults in
+                  // override mode) so "empty" is an informed choice.
+                  fieldValue === undefined ||
+                    fieldValue === null ||
+                    fieldValue === ""
+                    ? inheritedDefaults?.[spec.key] !== undefined &&
+                      inheritedDefaults?.[spec.key] !== null
+                      ? String(inheritedDefaults[spec.key])
+                      : undefined
                     : undefined
-                  : undefined
-              )}
-            </div>
+                )}
+              </div>
+              {spec.key === "top_p" && renderReasoningControls}
+            </Fragment>
           );
         })}
+        {reasoningControlVisible &&
+          !specList.some((spec) => spec.key === "top_p") &&
+          renderReasoningControls}
       </div>
       {renderCustomParamsSection({
         t,
