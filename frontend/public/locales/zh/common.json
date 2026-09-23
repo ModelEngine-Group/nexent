@@ -3111,7 +3111,7 @@
   "agentAutomation.page.recurring": "周期性",
   "agentAutomation.page.everySeconds": "每 {{count}} 秒",
   "agentAutomation.page.cronSchedule": "Cron {{expression}}",
-  "agentAutomation.page.nextFireAt": "下次执行",
+  "agentAutomation.page.lastFireAt": "上次执行",
   "agentAutomation.page.lastResult": "最近结果",
   "agentAutomation.page.actions": "操作",
   "agentAutomation.page.run": "立刻运行",
