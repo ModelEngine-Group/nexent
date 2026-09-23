@@ -140,9 +140,16 @@ const mapInferenceParamsFromApi = (model: any) => ({
         typeof model.extra_params?.reasoning_budget_tokens === "number")),
   defaultReasoningEffort:
     typeof model.extra_params?.reasoning_effort === "string" &&
-    ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
-      model.extra_params.reasoning_effort
-    )
+    [
+      "auto",
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ].includes(model.extra_params.reasoning_effort)
       ? (model.extra_params.reasoning_effort as ReasoningEffort)
       : undefined,
 });
@@ -163,8 +170,7 @@ const mapCapacitySuggestionFromApi = (
         }
       : null,
     reasoningCapability: (suggestion.reasoning_capability ?? undefined) as
-      | ReasoningCapability
-      | undefined,
+      ReasoningCapability | undefined,
     matchKind: suggestion.match_kind,
     matchConfidence: suggestion.match_confidence,
     matchExplanation: suggestion.match_explanation || "",
