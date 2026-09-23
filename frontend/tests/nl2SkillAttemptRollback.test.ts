@@ -7,7 +7,7 @@ const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 test("NL2Skill rolls rejected model attempts out of both chat and draft UI", async () => {
   const [adapter, modal] = await Promise.all([
     read("../app/[locale]/newchat/adapter/remote-chat-model-adapter.ts"),
-    read("../app/[locale]/agents/components/agent-capability/SkillBuildModal.tsx"),
+    read("../app/[locale]/agents/components/capability/SkillBuildModal.tsx"),
   ]);
 
   assert.match(adapter, /beginNl2SkillAttempt\(chunk\.attempt_id\)/);

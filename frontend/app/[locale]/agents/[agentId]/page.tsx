@@ -26,7 +26,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import AgentConfig from "./agent-config";
 import AgentVersion from "../agent-version";
-import AgentDebugPanel from "./components/agent-debug/agent-debug";
+import AgentDebugPanel from "./components/debug/agent-debug";
 import {
   Nl2AgentChatPanel,
   type Nl2AgentChatPanelHandle,
