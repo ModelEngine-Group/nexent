@@ -8,10 +8,8 @@ from jinja2 import Template
 from consts.const import LANGUAGE
 from database.agent_db import query_all_agent_info_by_tenant_id
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import (
-    get_prompt_generate_prompt_template,
-    normalize_prompt_generate_template_content,
-)
+from nexent.core.prompts import load_prompt
+from utils.prompt_template_utils import normalize_prompt_generate_template_content
 
 logger = logging.getLogger(__name__)
 _NAME_PROMPTS = {
@@ -109,7 +107,7 @@ def regenerate_agent_value(
         )
     else:
         template = normalize_prompt_generate_template_content(
-            get_prompt_generate_prompt_template(language)
+            load_prompt(language, "meta/generate_prompt")
         )
     values = {value for value in existing_values if value}
     empty_values = "无" if (language or "").lower().startswith(LANGUAGE["ZH"]) else "None"

@@ -1,17 +1,72 @@
 """Focused factory tests for ContextRuntime selection in NexentAgent."""
 from __future__ import annotations
 
+import json
 import types
 
 import pytest
 from threading import Event
 from unittest.mock import MagicMock, patch
 
-from sdk.nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from sdk.nexent.core.agents.agent_model import AgentConfig, ModelConfig, ToolConfig
 from sdk.nexent.core.agents.context import ContextItemInput
 from sdk.nexent.core.agents.nexent_agent import NexentAgent
 from sdk.nexent.core.agents.context import ContextManagerConfig
 from sdk.nexent.core.utils.observer import MessageObserver
+
+
+def test_ut_sdk_dpr_004_factory_filters_prompt_and_execution_tools_by_run_policy():
+    """UT-SDK-DPR-004: a versioned SDK snapshot gates executable and visible tools."""
+    factory = _factory()
+    configs = [
+        ToolConfig(class_name="StubTool", name=name, description=name, metadata={"schema_version": version})
+        for name, version in (("allowed", "v1"), ("blocked", "v1"), ("stale", "v0"), ("hidden", "v1"))
+    ]
+    items = [
+        ContextItemInput(id=f"tool:{name}", type="tool", content={"name": name, "description": name})
+        for name in ("allowed", "blocked", "stale", "hidden")
+    ]
+    config = AgentConfig(
+        name="agent", description="desc", model_name="main", tools=configs,
+        context_items=items,
+        prompt_tool_policy_snapshot={
+            "enabled": ["allowed", "blocked", "stale"],
+            "allowed": ["allowed", "stale"],
+            "system_default_hidden": ["hidden"],
+            "policy_version": "p1", "tool_schema_version": "v1",
+        },
+    )
+    second_config = config.model_copy(deep=True)
+    second_config.prompt_tool_policy_snapshot = {
+        "enabled": ["blocked"], "allowed": ["blocked"],
+        "system_default_hidden": [],
+        "policy_version": "p2", "tool_schema_version": "v1",
+    }
+    captured_runs = []
+
+    def fake_core_agent(**kwargs):
+        captured_runs.append(kwargs)
+        return MagicMock(enable_planning=False)
+
+    with patch.object(factory, "create_model", return_value=MagicMock()), \
+            patch.object(factory, "create_tool", side_effect=lambda tool: MagicMock(name=tool.name)), \
+            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+        factory.create_single_agent(config)
+        factory.create_single_agent(second_config)
+
+    assert {item.id for item in captured_runs[0]["context_runtime"].items} == {"tool:allowed"}
+    assert {item.id for item in captured_runs[1]["context_runtime"].items} == {"tool:blocked"}
+    assert len(captured_runs[0]["tools"]) == 2
+    assert len(captured_runs[1]["tools"]) == 1
+    events = [message for message in factory.observer.message_query if "prompt_tool_registry" in str(message)]
+    assert len(events) == 2
+    first_audit, second_audit = [json.loads(json.loads(event)["content"]) for event in events]
+    assert first_audit["policy_version"] == "p1"
+    assert second_audit["policy_version"] == "p2"
+    assert first_audit["tool_schema_version"] == second_audit["tool_schema_version"] == "v1"
+    assert first_audit["visible_tools"] == ["allowed"]
+    assert second_audit["visible_tools"] == ["blocked"]
+    assert first_audit["registry_hash"] != second_audit["registry_hash"]
 
 
 def _factory() -> NexentAgent:
@@ -56,7 +111,8 @@ def test_create_single_agent_injects_managed_runtime_and_run_items():
     assert type(runtime).__name__ == "ManagedContextRuntime"
     assert runtime.items[0] == item
     assert runtime.items[1].id == "system:clarification_protocol"
-    assert "ends the current execution" in runtime.items[1].content["text"]
+    assert "ask_user" in runtime.items[1].content["text"]
+    assert "人在回路" in runtime.items[1].content["text"]
     assert captured["enable_clarification"] is True
     assert runtime.context_manager.get_registered_items() == []
 
@@ -178,7 +234,7 @@ def test_clarification_policy_is_not_injected_into_other_protocols(kind):
     factory.observer.enable_nl2a_wrapper = kind == "nl2agent"
     item = ContextItemInput(id="system:policy", type="system", content={"text": "original policy"})
     config = AgentConfig(name="agent", description="test", model_name="main", tools=[], context_items=[item],
-                         output_protocol="final_answer_envelope" if kind == "nl2skill" else "code_action")
+                         output_protocol="final_envelope" if kind == "nl2skill" else "code_action")
     with patch.object(factory, "create_model", return_value=MagicMock()), \
             patch("sdk.nexent.core.agents.nexent_agent.CoreAgent") as core:
         factory.create_single_agent(config, _managed_context=kind == "child")

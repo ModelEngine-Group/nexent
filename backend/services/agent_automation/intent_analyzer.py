@@ -17,7 +17,7 @@ from consts.const import (
     MODEL_CONFIG_MAPPING,
 )
 from database.model_management_db import get_model_by_model_id
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.prompts import load_prompt
 
 from .intent_parser import has_automation_schedule_signal, parse_automation_intent
 from .models import ScheduleMode, ScheduleRuleType, ScheduleTrigger
@@ -283,7 +283,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
         from utils.config_utils import get_model_name_from_config
 
         language = detect_instruction_language(context.message)
-        prompt_template = get_prompt_template("agent_automation", language)
+        prompt_template = load_prompt(language, "automation/agent")
         now = _analysis_time(context)
         values = {
             "message": context.message.strip(),

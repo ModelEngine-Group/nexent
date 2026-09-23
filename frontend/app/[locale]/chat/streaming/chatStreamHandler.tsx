@@ -4,6 +4,7 @@ import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, AgentStep } from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 
 // Streaming message types for recovery
 export interface StreamingUnit {
@@ -387,7 +388,7 @@ export function reconstructFromStreamingMessage(
         break;
 
       case "final_answer":
-        state.finalAnswer = unit.unit_content;
+        state.finalAnswer = unwrapFinalAnswer(unit.unit_content);
         break;
 
       default: {
@@ -1042,7 +1043,10 @@ export const handleStreamResponse = async (
 
                 case chatConfig.messageTypes.FINAL_ANSWER:
                   // Accumulate final answer content and process user break tag
-                  finalAnswer += processUserBreakTag(messageContent, t);
+                  finalAnswer += processUserBreakTag(
+                    unwrapFinalAnswer(messageContent),
+                    t
+                  );
                   break;
 
                 case chatConfig.messageTypes.PARSE:
@@ -1469,7 +1473,7 @@ export const handleStreamResponse = async (
 
           // Process the last message, focusing on final_answer and card
           if (messageType === chatConfig.messageTypes.FINAL_ANSWER) {
-            finalAnswer += messageContent;
+            finalAnswer += unwrapFinalAnswer(messageContent);
           }
         }
       } catch (error) {

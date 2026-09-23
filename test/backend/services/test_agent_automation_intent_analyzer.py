@@ -238,7 +238,7 @@ def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
 
     monkeypatch.setattr("nexent.core.models.OpenAIModel", build_fake_model)
     monkeypatch.setattr(
-        "services.agent_automation.intent_analyzer.get_prompt_template",
+        "services.agent_automation.intent_analyzer.load_prompt",
         lambda *a, **k: {
             "INTENT_ANALYSIS_SYSTEM_PROMPT": "sys",
             "INTENT_ANALYSIS_USER_PROMPT": "msg: {{message}}",

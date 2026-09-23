@@ -4,7 +4,37 @@ These pure functions are owned by the SDK because final model-message
 rendering is an SDK responsibility. Callers provide authorized data only.
 """
 
+import json
 from typing import Any, Dict, List
+
+
+def _localize_schema_descriptions(value: Any, language: str) -> Any:
+    """Select localized prose while preserving fixed schema/protocol fields."""
+    was_json = isinstance(value, str)
+    if was_json:
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return value
+    else:
+        parsed = value
+
+    def localize(item: Any) -> Any:
+        if isinstance(item, list):
+            return [localize(entry) for entry in item]
+        if not isinstance(item, dict):
+            return item
+        localized = {
+            key: localize(entry)
+            for key, entry in item.items()
+            if key != "description_zh"
+        }
+        if language == "zh" and item.get("description_zh"):
+            localized["description"] = item["description_zh"]
+        return localized
+
+    result = localize(parsed)
+    return json.dumps(result, ensure_ascii=False) if was_json else result
 
 
 def _format_memory_context(
@@ -110,6 +140,7 @@ def _format_memory_context(
 def _format_skills_description(
     skills: List[Dict[str, str]],
     language: str = "zh",
+    section_number: int = 1,
 ) -> str:
     """Format skill descriptions with full 6-step usage process.
 
@@ -134,7 +165,7 @@ def _format_skills_description(
     skills_block = "\n".join(skills_block_lines)
 
     if language == "zh":
-        lines.append("### 可用技能")
+        lines.append(f"{section_number}. 技能")
         lines.append("")
         lines.append("你拥有以下技能（Skills）。技能是预定义的专业能力模块，包含详细执行指南和可选的附加脚本。")
         lines.append("")
@@ -143,10 +174,10 @@ def _format_skills_description(
         lines.append("**技能使用流程**：")
         lines.append("1. 收到用户请求后，首先审视 `<available_skills>` 中每个技能的 description，判断是否有匹配的技能。")
         lines.append("2. **加载技能**：根据不同场景选择读取方式：")
-        lines.append("   - **首次加载**：调用 `read_skill_md(\"skill_name\")` 读取技能的完整执行指南（默认读取 SKILL.md）")
+        lines.append("   - **首次加载**：调用 `read_skill_md(skill_name=\"skill_name\", additional_files=[])` 读取技能的完整执行指南（默认读取 SKILL.md）")
         lines.append("   - **精确读取**：如只需特定文件（如示例、参考文档），可指定 additional_files：")
         lines.append("   <code>")
-        lines.append("   skill_content = read_skill_md(\"skill_name\", [\"examples.md\", \"reference/api_doc\"])")
+        lines.append("   skill_content = read_skill_md(skill_name=\"skill_name\", additional_files=[\"examples.md\", \"reference/api_doc\"])")
         lines.append("   print(skill_content)")
         lines.append("   </code>")
         lines.append("   注意：当 additional_files 非空时，默认不再自动读取 SKILL.md，如需同时读取请显式指定。")
@@ -154,7 +185,7 @@ def _format_skills_description(
         lines.append("   - **加载技能配置**：如果技能需要读取配置变量，可先调用 `read_skill_config(\"skill_name\")` 读取配置字符串，通过 `json.loads` 方法转化为配置字典，再从中获取所需值：")
         lines.append("   <code>")
         lines.append("   import json")
-        lines.append("   config = json.loads(read_skill_config(\"skill_name\"))")
+        lines.append("   config = json.loads(read_skill_config(skill_name=\"skill_name\"))")
         lines.append("   # 返回示例: {\"key_a\": {\"key2\": \"value2\"}, \"others\": {...}}")
         lines.append("   value = config[\"key1\"][\"key2\"]")
         lines.append("   print(value)")
@@ -168,25 +199,25 @@ def _format_skills_description(
         lines.append("   - 三重反引号代码块：`` ```scripts/analyze.py``` ``（当代码块内仅有单行路径时）")
         lines.append("   调用 `run_skill_script` 时，默认的 `source=\"skill\"` 会相对技能根目录解析 `script_path`，常见形式如下：")
         lines.append("   <code>")
-        lines.append("   result = run_skill_script(\"skill_name\", \"script_path\")")
+        lines.append("   result = run_skill_script(skill_name=\"skill_name\", script_path=\"scripts/example.py\", params=\"\", source=\"skill\")")
         lines.append("   print(result)")
         lines.append("   </code>")
         lines.append("   对于需要附加参数的脚本，需要参照脚本调用说明，将参数直接以字符串形式传递。")
         lines.append("   例如对于希望附加的参数：--param1 value1 --flag，则使用以下格式调用run_skill_script：")
         lines.append("   <code>")
-        lines.append("   result = run_skill_script(\"skill_name\", \"script_path\", \"--param1 value1 --flag\")")
+        lines.append("   result = run_skill_script(skill_name=\"skill_name\", script_path=\"scripts/example.py\", params=\"--param1 value1 --flag\", source=\"skill\")")
         lines.append("   print(result)")
         lines.append("   </code>")
         lines.append("   如果技能要求先在当前运行工作区生成 `.py`、`.js` 或 `.mjs` 脚本，再执行该脚本，请显式使用 `source=\"workspace\"`：")
         lines.append("   <code>")
-        lines.append("   result = run_skill_script(\"skill_name\", \"outputs/generated.js\", source=\"workspace\")")
+        lines.append("   result = run_skill_script(skill_name=\"skill_name\", script_path=\"outputs/generated.js\", params=\"\", source=\"workspace\")")
         lines.append("   </code>")
         lines.append("   注意：")
-        lines.append("   - 每个执行轮次优先输出一个完整的 `<code>...</code>`；如确需多个代码块，必须相邻且块间只能有空白，它们会合并为同一个动作执行。第一个代码块开始后及最后一个代码块之后不得输出正文。")
+        lines.append("   - 每个执行轮次最多输出一个 `<code>...</code>`；需要多个工具调用时，将它们放在同一个代码块中，并等待执行结果后再继续下一轮。")
         lines.append("   - 如果提示缺少 Python 包且沙箱已启用公网，可使用 `%pip install --user 包名`，也可沿用 `subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"包名\"], check=True)`；`subprocess` 仅允许这种不经过 Shell 的 pip install argv 调用，禁止 `shell=True` 和其他系统命令。安装成功后下一轮重试。Node 依赖可通过技能自带的 npm/pnpm 脚本安装。不要安装与任务无关的包。")
         lines.append("   - `source=\"skill\"` 的路径相对于技能根目录；`source=\"workspace\"` 的路径相对于当前运行工作区。两种模式都拒绝绝对路径和路径穿越。")
         lines.append("   - 脚本的执行目录（CWD）始终是当前运行的 `outputs` 目录；生成产物时使用裸文件名，例如 `report.pptx`，不要写成 `outputs/report.pptx`。")
-        lines.append("   - 使用 `skill-creator` 创建待校验、待打包的新技能时，必须用代码执行器的文件 API 在当前 `outputs/<new-skill>` 中创建文件，再把相对目录传给校验/打包脚本。`write_skill_file` 用于修改租户已安装技能，不会把文件写入本次运行的 outputs。")
+        lines.append("   - 使用 `skill-creator` 创建待校验、待打包的新技能时，必须用代码执行器的文件 API 在当前 `outputs/<new-skill>` 中创建文件，再把相对目录传给校验/打包脚本。")
         lines.append("   - 如果 `run_skill_script` 报告执行失败，必须先修复脚本并重新调用成功，禁止继续验证、上传或声称产物已经生成。禁止改用 `subprocess`、`os.system` 或直接 Shell 绕过。")
         lines.append("   - 当脚本不存在时，返回的错误信息中会列出该技能根目录下的可用脚本，请据此修正路径。")
         lines.append("")
@@ -202,11 +233,11 @@ def _format_skills_description(
         lines.append("   - **示例**：")
         lines.append("   <code>")
         lines.append("   # 技能内容提示\"请参考 examples.md 获取详细示例\"")
-        lines.append("   additional_info = read_skill_md(\"skill_name\", [\"examples.md\"])")
+        lines.append("   additional_info = read_skill_md(skill_name=\"skill_name\", additional_files=[\"examples.md\"])")
         lines.append("   print(additional_info)")
         lines.append("   </code>")
     else:
-        lines.append("### Available Skills")
+        lines.append(f"{section_number}. Skills")
         lines.append("")
         lines.append("You have the following Skills. Skills are predefined professional capability modules with detailed execution guides and optional additional scripts.")
         lines.append("")
@@ -215,10 +246,10 @@ def _format_skills_description(
         lines.append("**Skill Usage Process**:")
         lines.append("1. After receiving a user request, first examine the description of each skill in `<available_skills>` to determine if there is a matching skill.")
         lines.append("2. **Load Skill**: Choose the appropriate reading method based on the scenario:")
-        lines.append("   - **First-time load**: Call `read_skill_md(\"skill_name\")` to read the complete execution guide (defaults to reading SKILL.md)")
+        lines.append("   - **First-time load**: Call `read_skill_md(skill_name=\"skill_name\", additional_files=[])` to read the complete execution guide (defaults to reading SKILL.md)")
         lines.append("   - **Precise read**: If you only need specific files (like examples, reference docs), specify additional_files:")
         lines.append("   <code>")
-        lines.append("   skill_content = read_skill_md(\"skill_name\", [\"examples.md\", \"reference/api_doc\"])")
+        lines.append("   skill_content = read_skill_md(skill_name=\"skill_name\", additional_files=[\"examples.md\", \"reference/api_doc\"])")
         lines.append("   print(skill_content)")
         lines.append("   </code>")
         lines.append("   Note: When additional_files is non-empty, SKILL.md is no longer auto-read. If you need both, explicitly specify it.")
@@ -226,7 +257,7 @@ def _format_skills_description(
         lines.append("   - **Load skill config**: If the skill needs configuration variables, call `read_skill_config(\"skill_name\")` to read the config string, convert to dict via `json.loads`, then access values:")
         lines.append("   <code>")
         lines.append("   import json")
-        lines.append("   config = json.loads(read_skill_config(\"skill_name\"))")
+        lines.append("   config = json.loads(read_skill_config(skill_name=\"skill_name\"))")
         lines.append("   # Example: {\"key_a\": {\"key2\": \"value2\"}, \"others\": {...}}")
         lines.append("   value = config[\"key1\"][\"key2\"]")
         lines.append("   print(value)")
@@ -240,20 +271,20 @@ def _format_skills_description(
         lines.append("   - Triple-backtick fenced code blocks: `` ```scripts/analyze.py``` `` (only when the block body is a single path line)")
         lines.append("   When calling `run_skill_script`, the `script_path` is **always resolved relative to the skill's root directory** (this is the platform behaviour, not the agent's CWD). Common forms:")
         lines.append("   <code>")
-        lines.append("   result = run_skill_script(\"skill_name\", \"script_path\")")
+        lines.append("   result = run_skill_script(skill_name=\"skill_name\", script_path=\"scripts/example.py\", params=\"\", source=\"skill\")")
         lines.append("   print(result)")
         lines.append("   </code>")
         lines.append("   For scripts needing extra params, pass them as a command-line string per the script's calling instructions.")
         lines.append("   Example for --param1 value1 --flag:")
         lines.append("   <code>")
-        lines.append("   result = run_skill_script(\"skill_name\", \"script_path\", \"--param1 value1 --flag\")")
+        lines.append("   result = run_skill_script(skill_name=\"skill_name\", script_path=\"scripts/example.py\", params=\"--param1 value1 --flag\", source=\"skill\")")
         lines.append("   print(result)")
         lines.append("   </code>")
         lines.append("   If the skill requires generating a `.py`, `.js`, or `.mjs` script in the current run workspace before executing it, explicitly use `source=\"workspace\"`:")
         lines.append("   <code>")
-        lines.append("   result = run_skill_script(\"skill_name\", \"outputs/generated.js\", source=\"workspace\")")
+        lines.append("   result = run_skill_script(skill_name=\"skill_name\", script_path=\"outputs/generated.js\", params=\"\", source=\"workspace\")")
         lines.append("   </code>")
-        lines.append("   Notes: Prefer one complete executable `<code>...</code>` block per step. If multiple blocks are necessary, emit them consecutively with whitespace only between them; they execute together as one action, with no prose after the first block begins or after the final block. If a Python package is missing and sandbox network access is enabled, use either `%pip install --user <package>` or `subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"<package>\"], check=True)`, then retry on the next step. `subprocess` is allowed only for this shell-free pip-install argv form; never set `shell=True` or run unrelated system commands. Install Node dependencies through the skill's bundled npm/pnpm script. Do not install unrelated packages. `source=\"skill\"` paths are relative to the skill root; `source=\"workspace\"` paths are relative to the current run workspace. Both reject absolute paths and traversal. Scripts always execute with the current run's `outputs` directory as CWD, so create artifacts with a bare filename such as `report.pptx`, not `outputs/report.pptx`. When using `skill-creator`, create the new skill under `outputs/<new-skill>` with the code executor's file APIs and pass that relative directory to its validation and packaging scripts; `write_skill_file` edits an installed tenant skill and does not create output files. If `run_skill_script` reports failure, repair and rerun it successfully before validation or upload; do not bypass a failed skill script with unrelated commands. When a bundled skill script cannot be found, use the returned list of available scripts to correct the path.")
+        lines.append("   Notes: Prefer one complete executable `<code>...</code>` block per step. If multiple blocks are necessary, emit them consecutively with whitespace only between them; they execute together as one action, with no prose after the first block begins or after the final block. If a Python package is missing and sandbox network access is enabled, use either `%pip install --user <package>` or `subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"<package>\"], check=True)`, then retry on the next step. `subprocess` is allowed only for this shell-free pip-install argv form; never set `shell=True` or run unrelated system commands. Install Node dependencies through the skill's bundled npm/pnpm script. Do not install unrelated packages. `source=\"skill\"` paths are relative to the skill root; `source=\"workspace\"` paths are relative to the current run workspace. Both reject absolute paths and traversal. Scripts always execute with the current run's `outputs` directory as CWD, so create artifacts with a bare filename such as `report.pptx`, not `outputs/report.pptx`. When using `skill-creator`, create the new skill under `outputs/<new-skill>` with the code executor's file APIs and pass that relative directory to its validation and packaging scripts. If `run_skill_script` reports failure, repair and rerun it successfully before validation or upload; do not bypass a failed skill script with unrelated commands. When a bundled skill script cannot be found, use the returned list of available scripts to correct the path.")
         lines.append("")
         lines.append("5. **Integrate Output**: Generate the final answer based on the skill guide's output format and script execution results.")
         lines.append("")
@@ -267,10 +298,32 @@ def _format_skills_description(
         lines.append("   - **Example**:")
         lines.append("   <code>")
         lines.append("   # Skill content says \"see examples.md for detailed examples\"")
-        lines.append("   additional_info = read_skill_md(\"skill_name\", [\"examples.md\"])")
+        lines.append("   additional_info = read_skill_md(skill_name=\"skill_name\", additional_files=[\"examples.md\"])")
         lines.append("   print(additional_info)")
         lines.append("   </code>")
 
+    return "\n".join(lines)
+
+
+def _format_skills_inventory(
+    skills: List[Dict[str, str]],
+    language: str = "zh",
+    section_number: int = 1,
+) -> str:
+    """Format dynamic skill data; static usage policy is supplied by YAML."""
+    if not skills:
+        return ""
+    title = "技能" if language == "zh" else "Skills"
+    intro = "你拥有以下技能：" if language == "zh" else "You have the following skills:"
+    lines = [f"{section_number}. {title}", intro, "", "<available_skills>"]
+    for skill in skills:
+        lines.extend([
+            "  <skill>",
+            f"    <name>{skill.get('name', '')}</name>",
+            f"    <description>{skill.get('description', '')}</description>",
+            "  </skill>",
+        ])
+    lines.append("</available_skills>")
     return "\n".join(lines)
 
 
@@ -278,6 +331,7 @@ def _format_tools_description(
     tools: Dict[str, Any],
     language: str = "zh",
     is_manager: bool = True,
+    section_number: int = 1,
 ) -> str:
     """Format tool descriptions with file URL usage guide.
 
@@ -288,15 +342,15 @@ def _format_tools_description(
     """
     if not tools:
         no_tools_msg = "- 当前没有可用的工具" if language == "zh" else "- No tools are currently available"
-        prefix = "1. 工具\n" if language == "zh" else "1. Tools\n"
+        prefix = f"{section_number}. 工具\n" if language == "zh" else f"{section_number}. Tools\n"
         return prefix + no_tools_msg
 
     lines = []
 
     if language == "zh":
-        lines.append("1. 工具")
+        lines.append(f"{section_number}. 工具")
     else:
-        lines.append("1. Tools")
+        lines.append(f"{section_number}. Tools")
 
     if language == "zh":
         lines.append("- 你只能使用以下工具，不得使用任何其他工具：")
@@ -305,15 +359,23 @@ def _format_tools_description(
 
     for name, tool in tools.items():
         if hasattr(tool, 'description'):
-            desc = tool.description
+            desc = (
+                getattr(tool, 'description_zh', None) or tool.description
+                if language == "zh" else tool.description
+            )
             inputs = tool.inputs
             output_type = tool.output_type
             source = getattr(tool, 'source', 'local')
         else:
-            desc = tool.get('description', '')
+            desc = (
+                tool.get('description_zh') or tool.get('description', '')
+                if language == "zh" else tool.get('description', '')
+            )
             inputs = tool.get('inputs', '')
             output_type = tool.get('output_type', '')
             source = tool.get('source', 'local')
+
+        inputs = _localize_schema_descriptions(inputs, language)
 
         # MCP tools have [MCP] prefix
         if source == 'mcp':
@@ -370,6 +432,7 @@ def _format_tools_description(
 def _format_managed_agents_description(
     managed_agents: Dict[str, Any],
     language: str = "zh",
+    section_number: int = 1,
 ) -> str:
     """Format managed sub-agent descriptions with calling specifications.
 
@@ -382,9 +445,9 @@ def _format_managed_agents_description(
     lines = []
 
     if language == "zh":
-        lines.append("2. 助手")
+        lines.append(f"{section_number}. 助手")
     else:
-        lines.append("2. Agents")
+        lines.append(f"{section_number}. Agents")
 
     if language == "zh":
         lines.append("你可以使用以下内部助手（通过函数调用方式协作）：")
@@ -435,6 +498,8 @@ def _format_managed_agents_description(
 def _format_external_agents_description(
     external_a2a_agents: Dict[str, Any],
     language: str = "zh",
+    section_number: int = 1,
+    include_heading: bool = False,
 ) -> str:
     """Format external A2A agent descriptions with calling specifications.
 
@@ -447,6 +512,8 @@ def _format_external_agents_description(
     lines = []
 
     if language == "zh":
+        if include_heading:
+            lines.append(f"{section_number}. 助手")
         lines.append("你还可以使用以下外部助手（通过 A2A 协议远程调用）：")
         for agent_id, agent in external_a2a_agents.items():
             name = agent.name if hasattr(agent, 'name') else agent.get('name', '')
@@ -458,6 +525,8 @@ def _format_external_agents_description(
         lines.append("  2. 例如：`tool_assistant(task=\"北京天气怎么样\")`")
         lines.append("  3. 任务描述使用自然语言，让外部助手自动识别和处理")
     else:
+        if include_heading:
+            lines.append(f"{section_number}. Agents")
         lines.append("You can also use the following external agents (called via A2A protocol remotely):")
         for agent_id, agent in external_a2a_agents.items():
             name = agent.name if hasattr(agent, 'name') else agent.get('name', '')

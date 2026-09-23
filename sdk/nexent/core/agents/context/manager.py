@@ -564,20 +564,18 @@ class ContextManager:
             return [], []
         if not final_answer_templates:
             raise ValueError("final_answer purpose requires final_answer_templates")
-        from jinja2 import StrictUndefined, Template
+        from ..prompt import AgentPromptComposer
 
-        template = final_answer_templates["final_answer"]
+        composer = AgentPromptComposer.from_compatibility_templates(final_answer_templates)
         return (
-            [{"role": "system", "content": [{"type": "text", "text": template["pre_messages"]}]}],
+            [{"role": "system", "content": [{"type": "text", "text": composer.render_final_answer_pre_message()}]}],
             [
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": Template(template["post_messages"], undefined=StrictUndefined).render(
-                                task=task or ""
-                            ),
+                            "text": composer.render_final_answer_post_message(task or ""),
                         }
                     ],
                 }

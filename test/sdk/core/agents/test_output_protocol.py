@@ -43,11 +43,7 @@ def test_ac_001_visible_content_is_meaningful(value):
             ProtocolErrorReason.MALFORMED_ACTION,
         ),
         (
-            "<code>final_answer('done')</code><code>print('late')</code>",
-            ProtocolErrorReason.MALFORMED_ACTION,
-        ),
-        (
-            "<code>final_answer('done')\nprint('late')</code>",
+            "<FINAL_ANSWER>done</FINAL_ANSWER><code>print('late')</code>",
             ProtocolErrorReason.MALFORMED_ACTION,
         ),
         (
@@ -88,7 +84,7 @@ def test_ac_001_ac_002_invalid_code_outputs_are_protocol_errors(output, reason):
 def test_ac_008_length_finish_reason_is_never_executable_or_final():
     with pytest.raises(ModelOutputProtocolError) as exc_info:
         classify_model_output(
-            "<code>final_answer('partial')</code>",
+            "<FINAL_ANSWER>partial</FINAL_ANSWER>",
             protocol="code_action",
             finish_reason="length",
         )
@@ -98,11 +94,11 @@ def test_ac_008_length_finish_reason_is_never_executable_or_final():
 
 def test_ac_003_exact_code_action_is_executable():
     result = classify_model_output(
-        "\u200b\n<code>final_answer('done')</code>\ufeff",
+        "\u200b\n<code>print('working')</code>\ufeff",
         protocol="code_action",
     )
 
-    assert result == ExecutableAction(code="final_answer('done')")
+    assert result == ExecutableAction(code="print('working')")
 
 
 @pytest.mark.parametrize("prefix", [
@@ -114,7 +110,7 @@ def test_ac_003_exact_code_action_is_executable():
 ])
 @pytest.mark.parametrize("legacy", [False, True])
 def test_platform_think_code_preamble_is_not_an_invalid_action(prefix, legacy):
-    code = "final_answer('done')"
+    code = "some_tool('done')"
     envelope = f"```<RUN>\n{code}\n```" if legacy else f"<code>{code}</code>"
 
     assert classify_model_output(prefix + envelope, protocol="code_action") == ExecutableAction(
@@ -204,25 +200,6 @@ def test_ac_021_protocol_markers_inside_python_literals_and_comments_are_preserv
     assert result == ExecutableAction(code=code)
 
 
-def test_ac_021_display_payload_inside_final_answer_is_preserved():
-    code = 'final_answer("<DISPLAY:python>print(1)</DISPLAY>")'
-
-    result = classify_model_output(f"<code>{code}</code>", protocol="code_action")
-
-    assert result == ExecutableAction(code=code)
-
-
-def test_ac_004_code_action_preserves_protocol_like_text_inside_final_answer():
-    code = '''final_answer("""Markdown: ```python\nprint(1)\n```\nHTML: <code>x</code>\nXML: <node>值🙂</node>""")'''
-
-    result = classify_model_output(
-        f"<code>{code}</code>",
-        protocol="code_action",
-    )
-
-    assert result == ExecutableAction(code=code)
-
-
 def test_legacy_run_action_remains_executable_only():
     result = classify_model_output(
         "```<RUN>\nprint('legacy')\n```",
@@ -233,13 +210,31 @@ def test_legacy_run_action_remains_executable_only():
 
 
 def test_ac_004_final_envelope_preserves_arbitrary_payload():
-    payload = "\n<SKILL># Skill\n```python\nprint('<xml/>')\n```\n🙂</SKILL>\n"
+    payload = (
+        "\n<SKILL># Skill\n```python\nprint('<xml/>')\n```\n🙂</SKILL>\n"
+        "<DISPLAY:python>print(1)</DISPLAY>\n"
+    )
     result = classify_model_output(
         f"<FINAL_ANSWER>{payload}</FINAL_ANSWER>",
-        protocol="final_answer_envelope",
+        protocol="code_action",
     )
 
     assert result == ExplicitFinalAnswer(answer=payload)
+
+
+def test_cftp_001_final_only_protocol_accepts_the_same_envelope():
+    result = classify_model_output(
+        "<FINAL_ANSWER>clarification?</FINAL_ANSWER>",
+        protocol="final_envelope",
+    )
+
+    assert result == ExplicitFinalAnswer(answer="clarification?")
+
+
+@pytest.mark.parametrize("protocol", ["final_envelope", "code_action"])
+def test_cftp_001_lowercase_final_envelope_is_rejected(protocol):
+    with pytest.raises(ModelOutputProtocolError):
+        classify_model_output("<final>legacy</final>", protocol=protocol)
 
 
 @pytest.mark.parametrize(
@@ -254,6 +249,23 @@ def test_ac_004_final_envelope_preserves_arbitrary_payload():
 )
 def test_ac_010_invalid_final_envelopes_are_rejected(output):
     with pytest.raises(ModelOutputProtocolError) as exc_info:
-        classify_model_output(output, protocol="final_answer_envelope")
+        classify_model_output(output, protocol="final_envelope")
+
+    assert exc_info.value.reason == ProtocolErrorReason.INVALID_FINAL_ENVELOPE
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "<FINAL_ANSWER></FINAL_ANSWER>",
+        "outside<FINAL_ANSWER>inside</FINAL_ANSWER>",
+        "<FINAL_ANSWER>one</FINAL_ANSWER><FINAL_ANSWER>two</FINAL_ANSWER>",
+        "<FINAL_ANSWER><FINAL_ANSWER>nested</FINAL_ANSWER></FINAL_ANSWER>",
+        "<FINAL_ANSWER>unfinished",
+    ],
+)
+def test_cftp_001_invalid_final_envelopes_in_code_action_mode_are_rejected(output):
+    with pytest.raises(ModelOutputProtocolError) as exc_info:
+        classify_model_output(output, protocol="code_action")
 
     assert exc_info.value.reason == ProtocolErrorReason.INVALID_FINAL_ENVELOPE

@@ -11,7 +11,7 @@ from .formatting import (
     _format_external_agents_description,
     _format_managed_agents_description,
     _format_memory_context,
-    _format_skills_description,
+    _format_skills_inventory,
     _format_skills_usage_requirements,
     _format_tools_description,
 )
@@ -209,9 +209,15 @@ class ContextItemRenderer:
             )
         language = first.metadata.get("language", "zh")
         is_manager = bool(first.metadata.get("is_manager", True))
+        section_number = int(first.metadata.get("resource_section_number", 1))
+        include_section_heading = bool(first.metadata.get("include_section_heading", False))
+        usage_guidance = first.metadata.get("usage_guidance", "")
         if any(
             item.metadata.get("language", "zh") != language
             or bool(item.metadata.get("is_manager", True)) != is_manager
+            or int(item.metadata.get("resource_section_number", 1)) != section_number
+            or bool(item.metadata.get("include_section_heading", False)) != include_section_heading
+            or item.metadata.get("usage_guidance", "") != usage_guidance
             for item in items[1:]
         ):
             raise ContextItemRenderingError(
@@ -221,17 +227,29 @@ class ContextItemRenderer:
         try:
             if first.type == ContextItemType.TOOL:
                 data = {str(item["name"]): item for item in contents}
-                text = _format_tools_description(data, language=language, is_manager=is_manager)
+                text = _format_tools_description(
+                    data, language=language, is_manager=is_manager,
+                    section_number=section_number,
+                )
             elif first.type == ContextItemType.SKILL:
-                text = _format_skills_description(contents, language=language)
+                text = _format_skills_inventory(
+                    contents, language=language, section_number=section_number,
+                )
+                if usage_guidance:
+                    text += f"\n\n{usage_guidance}"
             elif first.type == ContextItemType.MEMORY:
                 text = _format_memory_context(contents, language=language)
             elif first.type == ContextItemType.MANAGED_AGENT:
                 data = {str(item["name"]): item for item in contents}
-                text = _format_managed_agents_description(data, language=language)
+                text = _format_managed_agents_description(
+                    data, language=language, section_number=section_number,
+                )
             elif first.type == ContextItemType.EXTERNAL_AGENT:
                 data = {str(item["agent_id"]): item for item in contents}
-                text = _format_external_agents_description(data, language=language)
+                text = _format_external_agents_description(
+                    data, language=language, section_number=section_number,
+                    include_heading=include_section_heading,
+                )
             else:
                 raise ContextItemRenderingError(f"unsupported render group type: {first.type.value}")
         except ContextItemRenderingError:

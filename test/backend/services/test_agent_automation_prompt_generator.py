@@ -278,8 +278,8 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
     monkeypatch.setattr("utils.config_utils.get_model_name_from_config", lambda config: "resolved-model")
     monkeypatch.setattr(
         prompt_generator,
-        "get_prompt_template",
-        lambda name, language: {
+        "load_prompt",
+            lambda language, path: {
             "TASK_CONTENT_SYSTEM_PROMPT": "system",
             "TASK_CONTENT_USER_PROMPT": "Instruction: {{ instruction }}",
         },

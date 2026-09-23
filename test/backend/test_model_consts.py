@@ -1093,10 +1093,9 @@ def test_nl2_agent_skill_requests():
 
     nl2_skill = model_consts.NL2SkillRunRequest(
         query="Build an automation",
-        complexity="simple",
         language="en"
     )
-    assert nl2_skill.complexity == "simple"
+    assert "complexity" not in nl2_skill.model_dump()
     assert nl2_skill.language == "en"
 
 
@@ -1186,19 +1185,12 @@ def test_agent_name_batch_requests():
     assert len(batch_check.items) == 1
 
 
-def test_nl2_skill_run_with_complexity():
-    """Test NL2SkillRunRequest with different complexity modes"""
-    req_simple = model_consts.NL2SkillRunRequest(
-        query="Simple task",
-        complexity="simple"
+def test_nl2_skill_run_ignores_retired_complexity_field():
+    """Legacy clients cannot select a different NL2Skill prompt."""
+    request = model_consts.NL2SkillRunRequest.model_validate(
+        {"query": "Create a skill", "complexity": "simple"}
     )
-    assert req_simple.complexity == "simple"
-
-    req_complicated = model_consts.NL2SkillRunRequest(
-        query="Complex task",
-        complexity="complicated"
-    )
-    assert req_complicated.complexity == "complicated"
+    assert "complexity" not in request.model_dump()
 
 
 def test_model_api_config():

@@ -63,7 +63,8 @@ from database.model_management_db import get_model_records, get_model_by_model_i
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
-from utils.prompt_template_utils import get_agent_prompt_template
+from management.services.agent.prompt_template_loader import load_agent_prompt_bundle
+from nexent.core.agents.prompt import AgentPromptComposer
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.memory_tool_prompt import build_memory_tool_policy
 from utils.automation_tool_prompt import build_automation_tool_policy
@@ -81,6 +82,7 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
+    NEXENT_SANDBOX_DEFAULT_LEVEL,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
@@ -112,6 +114,19 @@ def _select_agent_model_id(
         if is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)):
             return model_id
     return agent_model_ids[0] if agent_model_ids else None
+
+
+def _resolve_prompt_runtime_flags(
+    agent_info: Dict[str, Any],
+) -> tuple[AgentVerificationConfig, bool]:
+    """Resolve prompt gates from Backend-owned configuration facts."""
+    verification_config = AgentVerificationConfig.model_validate(
+        agent_info.get("verification_config") or {}
+    )
+    is_local_python_executor = (
+        NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() == "local"
+    )
+    return verification_config, is_local_python_executor
 
 
 def _get_external_provider_service_for_search():
@@ -799,7 +814,7 @@ def _get_skill_script_tools(
     version_no: int = 0,
     runtime_file_context: Optional[Dict[str, Any]] = None,
 ) -> List[ToolConfig]:
-    """Get tool config for skill script execution and skill reading.
+    """Build fixed file tools and skill tools for the current Agent.
 
     Args:
         agent_id: Agent ID for filtering available skills in error messages.
@@ -807,7 +822,7 @@ def _get_skill_script_tools(
         version_no: Version number for filtering available skills.
 
     Returns:
-        List of ToolConfig for skill execution and reading tools
+        Fixed file-transfer tools plus skill tools when this Agent has skills.
     """
     from consts.const import CONTAINER_SKILLS_PATH
 
@@ -836,71 +851,71 @@ def _get_skill_script_tools(
         logger.warning(f"Failed to resolve effective skill configuration: {exc}", exc_info=True)
 
     try:
-        return [
-            ToolConfig(
-                class_name="RunSkillScriptTool",
-                name="run_skill_script",
-                description=(
-                    "Execute an enabled skill's bundled script, or a generated Python/Node.js "
-                    "script in the current run workspace, inside the Docker sandbox. For "
-                    "workspace scripts written as bare filenames by the code executor, pass "
-                    "script_path='outputs/<filename>'. Ordinary agent code must not use "
-                    "subprocess, os.system, or shell calls for system commands; use a "
-                    "skill-bundled wrapper or a shell-free language API."
+        tools: List[ToolConfig] = []
+        if skill_config_values:
+            tools.extend([
+                ToolConfig(
+                    class_name="RunSkillScriptTool",
+                    name="run_skill_script",
+                    description=(
+                        "Execute an enabled skill's bundled script, or a generated Python/Node.js "
+                        "script in the current run workspace, inside the Docker sandbox. For "
+                        "workspace scripts written as bare filenames by the code executor, pass "
+                        "script_path='outputs/<filename>'. Ordinary agent code must not use "
+                        "subprocess, os.system, or shell calls for system commands; use a "
+                        "skill-bundled wrapper or a shell-free language API."
+                    ),
+                    description_zh=(
+                        "在 Docker 沙箱中执行已启用技能的自带脚本，或执行本轮工作区中生成的 "
+                        "Python/Node.js 脚本。代码执行器用裸文件名写入工作区脚本时，"
+                        "script_path 应传入 'outputs/<文件名>'。普通智能体代码不得使用 "
+                        "subprocess、os.system 或 Shell 执行系统命令；应使用技能脚本封装或"
+                        "不依赖 Shell 的语言 API。"
+                    ),
+                    inputs=(
+                        '{"skill_name": "str", "script_path": "str", '
+                        '"params": "str", "source": "str"}'
+                    ),
+                    output_type="string",
+                    params={
+                        "local_skills_dir": CONTAINER_SKILLS_PATH,
+                        "workspace_path": file_context.get("workspace_path"),
+                        "authorized_skill_names": sorted(skill_config_values),
+                    },
+                    source="builtin",
+                    usage="builtin",
+                    metadata=skill_context,
                 ),
-                inputs=(
-                    '{"skill_name": "str", "script_path": "str", '
-                    '"params": "str", "source": "str"}'
+                ToolConfig(
+                    class_name="ReadSkillMdTool",
+                    name="read_skill_md",
+                    description="Read skill execution guide and optional additional files. Always reads SKILL.md first, then optionally reads additional files.",
+                    description_zh="读取技能执行指南和可选附加文件。始终先读取 SKILL.md，再按需读取附加文件。",
+                    inputs='{"skill_name": "str", "additional_files": "list[str]"}',
+                    output_type="string",
+                    params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                    source="builtin",
+                    usage="builtin",
+                    metadata=skill_context,
                 ),
-                output_type="string",
-                params={
-                    "local_skills_dir": CONTAINER_SKILLS_PATH,
-                    "workspace_path": file_context.get("workspace_path"),
-                    "authorized_skill_names": sorted(skill_config_values),
-                },
-                source="builtin",
-                usage="builtin",
-                metadata=skill_context,
-            ),
-            ToolConfig(
-                class_name="ReadSkillMdTool",
-                name="read_skill_md",
-                description="Read skill execution guide and optional additional files. Always reads SKILL.md first, then optionally reads additional files.",
-                inputs='{"skill_name": "str", "additional_files": "list[str]"}',
-                output_type="string",
-                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
-                source="builtin",
-                usage="builtin",
-                metadata=skill_context,
-            ),
-            ToolConfig(
-                class_name="ReadSkillConfigTool",
-                name="read_skill_config",
-                description="Read the config.yaml file from a skill directory. Returns JSON containing configuration variables needed for skill workflows.",
-                inputs='{"skill_name": "str"}',
-                output_type="string",
-                params={
-                    "local_skills_dir": CONTAINER_SKILLS_PATH,
-                    "config_overrides": skill_config_values,
-                },
-                source="builtin",
-                usage="builtin",
-                metadata=skill_context,
-            ),
-            ToolConfig(
-                class_name="WriteSkillFileTool",
-                name="write_skill_file",
-                description=(
-                    "Edit an installed tenant-scoped skill file. This does not create files in "
-                    "the current run workspace or outputs directory."
+                ToolConfig(
+                    class_name="ReadSkillConfigTool",
+                    name="read_skill_config",
+                    description="Read the config.yaml file from a skill directory. Returns JSON containing configuration variables needed for skill workflows.",
+                    description_zh="读取技能目录中的 config.yaml，返回技能工作流所需配置变量的 JSON。",
+                    inputs='{"skill_name": "str"}',
+                    output_type="string",
+                    params={
+                        "local_skills_dir": CONTAINER_SKILLS_PATH,
+                        "config_overrides": skill_config_values,
+                    },
+                    source="builtin",
+                    usage="builtin",
+                    metadata=skill_context,
                 ),
-                inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
-                output_type="string",
-                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
-                source="builtin",
-                usage="builtin",
-                metadata=skill_context,
-            ),
+            ])
+
+        tools.extend([
             ToolConfig(
                 class_name="DownloadFromS3Tool",
                 name="download_from_s3",
@@ -908,11 +923,16 @@ def _get_skill_script_tools(
                     "Download an authorized S3/MinIO object into this run's isolated workspace. "
                     "Files uploaded with the current request are downloaded automatically."
                 ),
+                description_zh="将已授权的 S3/MinIO 对象下载到本轮隔离工作区。当前请求上传的文件会自动下载。",
                 inputs=json.dumps({
-                    "s3_path": {"type": "string", "description": "Authorized S3/MinIO path"},
+                    "s3_path": {
+                        "type": "string", "description": "Authorized S3/MinIO path",
+                        "description_zh": "已授权的 S3/MinIO 路径",
+                    },
                     "local_filename": {
                         "type": "string",
                         "description": "Optional path relative to the run workspace",
+                        "description_zh": "相对于本轮工作区的可选路径",
                         "nullable": True,
                     },
                 }),
@@ -930,11 +950,19 @@ def _get_skill_script_tools(
                     "return frontend-compatible download metadata. Remaining output files are "
                     "uploaded automatically when the run finishes."
                 ),
+                description_zh=(
+                    "将本轮隔离工作区生成的文件上传到 MinIO，并返回前端可用的下载元数据。"
+                    "运行结束时会自动上传剩余输出文件。"
+                ),
                 inputs=json.dumps({
-                    "file_path": {"type": "string", "description": "Path inside the run workspace"},
+                    "file_path": {
+                        "type": "string", "description": "Path inside the run workspace",
+                        "description_zh": "本轮工作区内的文件路径",
+                    },
                     "target_filename": {
                         "type": "string",
                         "description": "Optional output filename",
+                        "description_zh": "可选的输出文件名",
                         "nullable": True,
                     },
                 }),
@@ -944,7 +972,8 @@ def _get_skill_script_tools(
                 usage="builtin",
                 metadata=file_context,
             ),
-        ]
+        ])
+        return tools
     except Exception as e:
         logger.warning(f"Failed to load skill script tool: {e}")
         return []
@@ -1026,14 +1055,13 @@ def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
     if any(t.name in plan_names for t in tools):
         return
 
-    # description_zh/zh pairs match the bilingual descriptions in plan_tools.py
+    # Protocol fields stay fixed while prose follows the run language at render time.
     tools.extend([
         ToolConfig(
             class_name="CreatePlanTool",
             name="create_plan",
-            description="为当前任务创建执行计划。开始执行前调用一次，传入 3-8 个功能块步骤。"
-            "每个步骤必须有稳定的 id（step-1、step-2、...）、简短标题和详细描述。"
-            "返回创建的计划 id 和步骤数量。",
+            description="Create an execution plan for the current task before starting. Pass 3-8 functional steps with a stable id, short title, and detailed description. Returns the plan id and step count.",
+            description_zh="为当前任务创建执行计划。开始执行前调用一次，传入 3-8 个功能块步骤。每个步骤必须有稳定的 id（step-1、step-2、...）、简短标题和详细描述。返回创建的计划 id 和步骤数量。",
             inputs='{"title": "string", "steps": "array"}',
             output_type="object",
             params={},
@@ -1042,9 +1070,8 @@ def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
         ToolConfig(
             class_name="UpdatePlanStepTool",
             name="update_plan_step",
-            description="更新单个计划步骤的状态。完成后调用 status='completed'，不再需要时调用"
-            " status='skipped'，开始执行时调用 status='in_progress'。"
-            "返回被更新的步骤 id 和状态。",
+            description="Update one plan step status. Use status='in_progress' when starting, status='completed' when done, or status='skipped' when no longer needed. Returns the updated step id and status.",
+            description_zh="更新单个计划步骤的状态。开始执行时使用 status='in_progress'，完成后使用 status='completed'，不再需要时使用 status='skipped'。返回被更新的步骤 id 和状态。",
             inputs='{"step_id": "string", "status": "string"}',
             output_type="object",
             params={},
@@ -1126,6 +1153,7 @@ async def create_agent_config(
         class_name=ParallelExecutorTool.__name__,
         name=ParallelExecutorTool.name,
         description=ParallelExecutorTool.description,
+        description_zh=ParallelExecutorTool.description_zh,
         inputs=json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
         output_type=ParallelExecutorTool.output_type,
         params={},
@@ -1441,24 +1469,31 @@ async def create_agent_config(
     available_tools = tool_list + builtin_tools
 
     _inject_plan_tools(available_tools, enable_planning)
+    prompt_tools = {tool.name: tool for tool in available_tools}
+    prompt_tool_policy_snapshot = agent_info.get("prompt_tool_policy_snapshot")
+    if prompt_tool_policy_snapshot is not None:
+        from nexent.core.tools.prompt_registry import (
+            PromptToolPolicySnapshot, filter_effective_prompt_tools,
+        )
+
+        policy = PromptToolPolicySnapshot.from_mapping(prompt_tool_policy_snapshot)
+        prompt_tools = dict(filter_effective_prompt_tools(
+            prompt_tools, enabled=set(policy.enabled), allowed=set(policy.allowed),
+            system_default_hidden=set(policy.system_default_hidden),
+            policy_version=policy.policy_version,
+            tool_schema_version=policy.tool_schema_version,
+        ).tools)
     memory_tool_policy = build_memory_tool_policy(
         language,
-        (tool.name for tool in available_tools),
+        prompt_tools,
     )
     automation_tool_policy = build_automation_tool_policy(
         language,
-        (tool.name for tool in available_tools),
+        prompt_tools,
     )
 
-    render_kwargs = {
-        "duty": duty_prompt,
-        "constraint": constraint_prompt,
-        "few_shots": few_shots_prompt,
-        "tools": {tool.name: tool for tool in available_tools},
-        "skills": skills,
-        "managed_agents": {agent.name: agent for agent in managed_agents},
-        "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
-    }
+    prompt_bundle = load_agent_prompt_bundle(is_manager=is_manager, language=language)
+    prompt_composer = AgentPromptComposer(prompt_bundle)
     # AgentInfo stores model_ids (a list); pick the first available model.
     agent_model_ids = agent_info.get("model_ids") or []
     model_id_to_use = _select_agent_model_id(agent_model_ids, override_model_id, tenant_id)
@@ -1511,13 +1546,8 @@ async def create_agent_config(
         else input_budget
     )
 
-    sandbox_policy = agent_info.get("sandbox_policy")
-    configured_sandbox_level = (
-        sandbox_policy.get("level") if isinstance(sandbox_policy, dict) else None
-    )
-    is_local_python_executor = (
-        str(configured_sandbox_level or os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL", "local"))
-        .strip().lower() == "local"
+    verification_config, is_local_python_executor = _resolve_prompt_runtime_flags(
+        agent_info
     )
 
     context_items = build_context_inputs(
@@ -1527,10 +1557,11 @@ async def create_agent_config(
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,
-        tools=render_kwargs["tools"],
+        verification_enabled=verification_config.enabled,
+        tools=prompt_tools,
         skills=skills,
-        managed_agents=render_kwargs["managed_agents"],
-        external_a2a_agents=render_kwargs["external_a2a_agents"],
+        managed_agents={agent.name: agent for agent in managed_agents},
+        external_a2a_agents={agent.agent_id: agent for agent in external_a2a_agents},
         memory_list=memory_list,
         memory_search_query=last_user_query,
         memory_tool_policy=memory_tool_policy,
@@ -1543,6 +1574,8 @@ async def create_agent_config(
         restricted_python_authorized_imports=(
             get_local_python_authorized_imports() if is_local_python_executor else None
         ),
+        sandbox_workspace_enabled=not is_local_python_executor,
+        prompt_bundle=prompt_bundle,
     )
 
     logger.debug(
@@ -1588,11 +1621,7 @@ async def create_agent_config(
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         description="undefined" if agent_info["description"] is None else agent_info["description"],
-        prompt_templates=await prepare_prompt_templates(
-            is_manager=len(managed_agents) > 0 or len(external_a2a_agents) > 0,
-            language=language,
-            agent_id=agent_id
-        ),
+        prompt_templates=prompt_composer.compatibility_templates(),
         tools=available_tools,
         max_steps=agent_info.get("max_steps", 15),
         requested_output_tokens=requested_output_tokens,
@@ -1603,10 +1632,11 @@ async def create_agent_config(
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
         context_items=context_items,
+        prompt_tool_policy_snapshot=prompt_tool_policy_snapshot,
         pre_run_tool_events=pre_run_tool_events,
         capacity_snapshot=capacity_snapshot,
         context_budget_snapshot=context_budget_snapshot,
-        verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
+        verification_config=verification_config,
         enable_planning=enable_planning,
     )
     return agent_config
@@ -1810,6 +1840,7 @@ async def create_tool_config_list(
             class_name=tool.get("class_name"),
             name=tool.get("name"),
             description=tool.get("description"),
+            description_zh=tool.get("description_zh"),
             inputs=tool.get("inputs"),
             output_type=tool.get("output_type"),
             params=param_dict,
@@ -2044,13 +2075,8 @@ async def prepare_prompt_templates(
     Returns:
         dict: Prompt template configuration
     """
-    prompt_templates = get_agent_prompt_template(is_manager, language)
-    # Stable context is assembled exclusively by ContextManager. Keep the key
-    # for smolagents prompt-template compatibility, but never source it from a
-    # second rendering path.
-    prompt_templates["system_prompt"] = ""
-
-    return prompt_templates
+    bundle = load_agent_prompt_bundle(is_manager=is_manager, language=language)
+    return AgentPromptComposer(bundle).compatibility_templates()
 
 
 async def join_minio_file_description_to_query(

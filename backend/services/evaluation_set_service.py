@@ -35,7 +35,7 @@ from database.evaluation_set_db import (
 )
 from database.knowledge_db import get_index_name_by_knowledge_name
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.prompts import load_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -509,7 +509,7 @@ def _plan_search_queries(kb_info, description, model_id, tenant_id):
         f"Plan search queries to retrieve relevant content. Only query topics that appear in the KB descriptions above."
     )
     try:
-        template = get_prompt_template("evaluation_plan_kb_queries", "zh")
+        template = load_prompt("zh", "evaluation/plan_kb_queries")
         response = call_llm_for_system_prompt(
             model_id=model_id,
             user_prompt=user_prompt,
@@ -759,7 +759,7 @@ def _build_case_gen_user_prompt(
         sources.append("上传的参考文档")
     source_list = "、".join(sources)
 
-    template = get_prompt_template("evaluation_generate_cases_system", "zh")
+    template = load_prompt("zh", "evaluation/generate_cases")
     instruction = (
         (template.get("USER_PROMPT_INSTRUCTION") or "")
         .replace("{{sources}}", source_list)
@@ -820,7 +820,7 @@ def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
     resp = call_llm_for_system_prompt(
         model_id=model_id,
         user_prompt=user_prompt,
-        system_prompt=get_prompt_template("evaluation_generate_cases_system", "zh")[
+        system_prompt=load_prompt("zh", "evaluation/generate_cases")[
             "SYSTEM_PROMPT"
         ].replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION)),
         tenant_id=tenant_id,

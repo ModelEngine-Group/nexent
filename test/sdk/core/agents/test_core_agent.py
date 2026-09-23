@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import threading
+import jinja2
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
@@ -47,7 +48,12 @@ def _create_mock_smolagents():
             # the parent's kwargs; always set enable_planning from the class-level
             # default above (CoreAgent already assigned it before calling super).
             self.enable_planning = kwargs.pop("enable_planning", self.enable_planning)
-            self.tools = kwargs.pop("tools", {}) or {}
+            supplied_tools = kwargs.pop("tools", {}) or {}
+            self.tools = dict(supplied_tools) if isinstance(supplied_tools, dict) else {
+                getattr(tool, "name", str(index)): tool
+                for index, tool in enumerate(supplied_tools)
+            }
+            self.tools.setdefault("final_answer", object())
             self.managed_agents = kwargs.pop("managed_agents", {}) or {}
             self.prompt_templates = kwargs.pop("prompt_templates", {}) or {}
             self.max_steps = kwargs.pop("max_steps", 10)
@@ -76,7 +82,6 @@ def _create_mock_smolagents():
 
     # local_python_executor submodule
     local_python_mod = ModuleType("smolagents.local_python_executor")
-    setattr(local_python_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     setattr(mock_smolagents, "local_python_executor", local_python_mod)
 
     # memory submodule
@@ -146,10 +151,8 @@ def _create_mock_modules():
     setattr(mock_rich, "text", mock_rich_text)
     setattr(mock_rich_console, "Group", MagicMock(side_effect=lambda *args: args))
 
-    # Mock jinja2
-    mock_jinja2 = ModuleType("jinja2")
-    setattr(mock_jinja2, "Template", MagicMock())
-    setattr(mock_jinja2, "StrictUndefined", MagicMock())
+    # Prompt composition uses the real strict Jinja environment.
+    mock_jinja2 = jinja2
 
     # Mock langchain_core
     mock_langchain_core = ModuleType("langchain_core")
@@ -335,6 +338,21 @@ def test_remove_parallel_executor_import_preserves_unrelated_code():
     code = "from other_module import parallel_executor_helper\nprint(parallel_executor_helper)"
 
     assert core_agent_module._remove_parallel_executor_import(code) == code
+
+
+def test_ut_sdk_cftp_003_core_agent_removes_framework_final_answer_tool():
+    """UT-SDK-cftp-003: CoreAgent exposes no callable final-answer tool."""
+    agent = core_agent_module.CoreAgent(
+        observer=MagicMock(),
+        tools={},
+        model=MagicMock(),
+        name="agent",
+        description="test",
+        prompt_templates={},
+    )
+
+    assert "final_answer" not in agent.tools
+    assert "final_answer" not in agent._verification_tool_names()
 
 
 def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
@@ -1934,10 +1952,8 @@ class TestRunStreamRealExecution:
         mock_modules['rich.console'] = mock_rich.console
         mock_modules['rich.text'] = mock_rich.Text
 
-        # Create mock jinja2
-        mock_jinja2 = MagicMock()
-        mock_jinja2.Template = MagicMock()
-        mock_jinja2.StrictUndefined = MagicMock()
+        # Prompt composition uses the real strict Jinja environment.
+        mock_jinja2 = jinja2
         mock_modules['jinja2'] = mock_jinja2
 
         # Create mock smolagents with REAL CodeAgent base
@@ -1957,7 +1973,6 @@ class TestRunStreamRealExecution:
 
         # local_python_executor
         mock_local_python = MagicMock()
-        mock_local_python.fix_final_answer_code = lambda x: x
         mock_modules['smolagents.local_python_executor'] = mock_local_python
         mock_smolagents.local_python_executor = mock_local_python
 
@@ -2434,7 +2449,7 @@ class TestRunStreamRealExecution:
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
         agent._protocol_repair_messages = []
-        agent.output_protocol = "final_answer_envelope"
+        agent.output_protocol = "final_envelope"
         agent.verification_controller = None
         response = SimpleNamespace(
             content="<FINAL_ANSWER>ok</FINAL_ANSWER>",
@@ -2467,7 +2482,7 @@ class TestRunStreamRealExecution:
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
         agent._protocol_repair_messages = []
-        agent.output_protocol = "final_answer_envelope"
+        agent.output_protocol = "final_envelope"
         agent.verification_controller = None
         agent.model = MagicMock(
             return_value=SimpleNamespace(
@@ -2506,7 +2521,7 @@ class TestRunStreamRealExecution:
         agent.verification_controller = None
 
         response = SimpleNamespace(
-            content='<code>print("first")</code>explanation<code>final_answer("ok")</code>',
+            content='<code>print("first")</code>explanation<code>print("ok")</code>',
             token_usage=None,
             model_attempt_id="semantic-attempt",
             model_attempt_number=1,
@@ -2538,6 +2553,57 @@ class TestRunStreamRealExecution:
             call_.args[1] is not module.ProcessType.STEP_COUNT
             for call_ in agent.observer.add_message.call_args_list
         )
+
+    def test_step_stream_hides_valid_repair_generation_raw_stream(self):
+        """A valid semantic repair keeps its result but rolls back raw reasoning."""
+        module = core_agent_module
+        agent = object.__new__(module.CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[])
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._protocol_repair_messages = [MagicMock()]
+        agent.output_protocol = "final_envelope"
+        agent.verification_controller = None
+        agent.stop_event = threading.Event()
+
+        response = SimpleNamespace(
+            content="<FINAL_ANSWER>recovered</FINAL_ANSWER>",
+            token_usage=None,
+            model_attempt_id="repair-attempt",
+            model_attempt_number=2,
+            model_attempt_commit_deferred=False,
+        )
+        model = MagicMock(return_value=response)
+        model.supports_deferred_attempt_commit = True
+        model.supports_suppressed_attempt_stream = True
+        model.last_finish_reason = "stop"
+        agent.model = model
+        action_step = SimpleNamespace(
+            model_output=None,
+            model_output_message=None,
+            token_usage=None,
+            model_input_messages=None,
+            action_output=None,
+        )
+
+        outputs = list(agent._step_stream(action_step))
+
+        assert outputs
+        assert action_step.action_output == "recovered"
+        assert model.call_args.kwargs["_suppress_attempt_stream"] is True
+        agent.observer.rollback_model_attempt.assert_not_called()
+        agent.observer.commit_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+        assert agent._protocol_repair_messages == []
 
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
@@ -2701,8 +2767,8 @@ class TestRunStreamRealExecution:
         assert len(agent.memory.steps) == 1
         agent.verification_controller.verify_final_answer.assert_not_called()
 
-    def test_run_stream_retries_empty_final_answer_tool_result(self, monkeypatch):
-        """An empty final_answer tool result must not end the run successfully."""
+    def test_run_stream_retries_empty_terminal_action_result(self, monkeypatch):
+        """An empty terminal action result must not end the run successfully."""
         module = core_agent_module
 
         class FakeActionOutput:
@@ -2918,7 +2984,7 @@ class TestHandleMaxStepsReached:
         # Mock the model to return a final answer
         mock_chat_message = MagicMock()
         mock_chat_message.role = "assistant"
-        mock_chat_message.content = "This is the summary after reaching max steps."
+        mock_chat_message.content = "<FINAL_ANSWER>This is the summary after reaching max steps.</FINAL_ANSWER>"
         mock_chat_message.token_usage = MagicMock()
         mock_chat_message.token_usage.input_tokens = 100
         mock_chat_message.token_usage.output_tokens = 50
@@ -2962,8 +3028,8 @@ class TestHandleMaxStepsReached:
         # Call the method
         result = agent._handle_max_steps_reached("original task")
 
-        # Should return error message
-        assert "Error in generating final LLM output" in result
+        # A non-envelope provider failure is converted to the controlled protocol failure.
+        assert "failed to follow the Agent output protocol" in result
 
         # Verify logger was called with error
         agent.logger.log.assert_called()
@@ -3567,8 +3633,22 @@ def test_run_injects_current_time_when_missing():
     assert "What time is it?" in agent.task
 
 
-def test_managed_agent_call_injects_workspace_instructions(tmp_path):
-    """Managed sub-agents receive the run output path in their delegated task."""
+def test_ut_sdk_dpr_005_run_does_not_append_hitl_policy_as_task_step():
+    """UT-SDK-DPR-005: HITL policy remains system context and never becomes a user task."""
+    agent = _create_minimal_core_agent_for_time_tests()
+    agent.human_interaction = SimpleNamespace(
+        preserves_executor=True,
+        restore=MagicMock(return_value=False),
+        instructions="Localized clarification policy",
+    )
+
+    list(agent.run(task="Hello", stream=True))
+
+    assert agent.memory.steps.append.call_count == 1
+
+
+def test_managed_agent_call_injects_only_dynamic_workspace_paths(tmp_path):
+    """Delegated tasks carry run paths while generic rules remain system context."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     module.RunResult = type("RunResult", (), {})
     workspace = tmp_path / "user" / "run"
@@ -3588,16 +3668,13 @@ def test_managed_agent_call_injects_workspace_instructions(tmp_path):
 
     agent("create test.txt")
 
-    render_payload = module.Template.return_value.render.call_args_list[0].args[0]
-    managed_task = render_payload["task"]
+    managed_task = agent.run.call_args.args[0]
     assert "[Nexent run workspace]" in managed_task
     assert str(workspace / "outputs") in managed_task
-    assert "current working directory" in managed_task
-    assert "Never prefix a relative output path" in managed_task
-    assert "pass the same bare relative path" in managed_task
-    assert "use its permanent s3_url in Markdown" in managed_task
-    assert "Never use a local path or presigned_url" in managed_task
-    assert "only call .save() on PIL images" in managed_task
+    assert str(workspace / "inputs") in managed_task
+    assert "current working directory" not in managed_task
+    assert "Never prefix a relative output path" not in managed_task
+    assert "upload_to_s3" not in managed_task
 
 
 def test_run_with_metadata_injects_untrusted_metadata_block():
@@ -3632,7 +3709,7 @@ def test_run_with_metadata_skips_optional_sections():
 
 
 def test_call_forwards_metadata_to_sub_agent_run():
-    """__call__ must exclude metadata from the template state and pass it via additional_args."""
+    """__call__ passes run metadata separately and preserves the report."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = module.CoreAgent.__new__(module.CoreAgent)
     agent.workspace_path = None
@@ -3649,8 +3726,8 @@ def test_call_forwards_metadata_to_sub_agent_run():
     agent.python_executor = None
     agent.prompt_templates = {
         "managed_agent": {
-            "task": "Task for {name}: {task}",
-            "report": "Report {name}: {final_answer}",
+            "task": "{{task}}",
+            "report": "{{final_answer}}",
         }
     }
     agent.provide_run_summary = False
@@ -3659,20 +3736,6 @@ def test_call_forwards_metadata_to_sub_agent_run():
     # smolagents mock leaves it as a MagicMock, which isinstance rejects).
     fake_run_result = type("FakeRunResult", (), {})
     module.RunResult = fake_run_result
-
-    # Replace the mocked jinja Template with a recorder so we can assert on the
-    # rendered context (template_state must drop metadata but keep state keys).
-    recorded_renders = []
-
-    class _RecorderTemplate:
-        def __init__(self, template, **kwargs):
-            self._template = template
-
-        def render(self, context, **kwargs):
-            recorded_renders.append({"template": self._template, "context": dict(context)})
-            return f"RENDERED-{len(recorded_renders)}"
-
-    module.Template = _RecorderTemplate
 
     calls = {}
     def fake_run(full_task, **kwargs):
@@ -3686,11 +3749,6 @@ def test_call_forwards_metadata_to_sub_agent_run():
 
     answer = agent(task="summarize")
 
-    task_render = recorded_renders[0]["context"]
-    # metadata was kept out of the rendered template state
-    assert "metadata" not in task_render
-    assert task_render["region"] == "cn"
-    assert "Task for {name}: {task}" in recorded_renders[0]["template"]
-    assert "Report {name}: {final_answer}" in recorded_renders[1]["template"]
+    assert calls["full_task"] == "summarize"
     assert calls["kwargs"]["additional_args"] == {"metadata": {"session": "abc"}}
-    assert answer == "RENDERED-2"
+    assert answer == "sub-agent-output"

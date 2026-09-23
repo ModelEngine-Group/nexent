@@ -561,15 +561,6 @@ class NexentAgent:
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
-        elif class_name == "WriteSkillFileTool":
-            from nexent.core.tools.write_skill_file_tool import WriteSkillFileTool
-            metadata = tool_config.metadata or {}
-            return WriteSkillFileTool(
-                local_skills_dir=params.get("local_skills_dir"),
-                agent_id=metadata.get("agent_id"),
-                tenant_id=metadata.get("tenant_id"),
-                version_no=metadata.get("version_no", 0),
-            )
         elif class_name == "ReadSkillConfigTool":
             from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
             metadata = tool_config.metadata or {}
@@ -721,13 +712,33 @@ class NexentAgent:
             )
             prompt_templates = agent_config.prompt_templates
 
+            prompt_tool_policy = getattr(agent_config, "prompt_tool_policy_snapshot", None)
+            effective_prompt_tools = None
+            tool_configs = agent_config.tools
+            if prompt_tool_policy is not None:
+                from ..tools.prompt_registry import (
+                    PromptToolPolicySnapshot, filter_effective_prompt_tools,
+                )
+
+                snapshot = PromptToolPolicySnapshot.from_mapping(prompt_tool_policy)
+                registry = {config.name: config for config in agent_config.tools if config.name}
+                if len(registry) != len(agent_config.tools):
+                    raise ValueError("Agent prompt tool registry has duplicate or unnamed entries")
+                effective_prompt_tools = filter_effective_prompt_tools(
+                    registry, enabled=set(snapshot.enabled), allowed=set(snapshot.allowed),
+                    system_default_hidden=set(snapshot.system_default_hidden),
+                    policy_version=snapshot.policy_version,
+                    tool_schema_version=snapshot.tool_schema_version,
+                )
+                tool_configs = list(effective_prompt_tools.execution_tools.values())
+
             try:
                 tool_list = [
                     _wrap_tool_with_monitoring(
                         self.create_tool(tool_config),
                         agent_config.name,
                     )
-                    for tool_config in agent_config.tools
+                    for tool_config in tool_configs
                 ]
             except Exception as e:
                 raise ValueError(f"Error in creating tool: {e}")
@@ -802,11 +813,28 @@ class NexentAgent:
                 context_items.append(ContextItemInput(
                     id="system:clarification_protocol",
                     type=ContextItemType.SYSTEM,
-                    content={"text": clarification_policy(tool_name)},
+                    content={
+                        "text": clarification_policy(
+                            tool_name,
+                            language=getattr(self.observer, "lang", "en"),
+                        )
+                    },
                     source=("runtime:clarification_protocol",),
                     priority=100,
                     metadata={"authority": "platform"},
                 ))
+            if effective_prompt_tools is not None:
+                visible_names = set(effective_prompt_tools.tools)
+                context_items = [
+                    item for item in context_items
+                    if getattr(getattr(item, "type", None), "value", getattr(item, "type", None)) != "tool"
+                    or item.id.removeprefix("tool:") in visible_names
+                ]
+                self.observer.add_message(
+                    agent_config.name,
+                    ProcessType.OTHER,
+                    json.dumps({"event": "prompt_tool_registry", **dict(effective_prompt_tools.audit)}),
+                )
             context_runtime = ManagedContextRuntime(
                 context_manager,
                 items=context_items,
@@ -1278,23 +1306,7 @@ class NexentAgent:
         file_lines = "\n".join(f"- {item['name']}: {item['path']}" for item in downloaded)
         workspace_note = (
             f"\n\nRun workspace: {workspace}\n"
-            f"Write every generated file under: {workspace / 'outputs'}\n"
-            "The code executor already runs in that outputs directory. Use bare relative "
-            "paths such as 'report.pdf', not 'outputs/report.pdf', to avoid creating an "
-            "outputs/outputs directory.\n"
-            "Exception: run_skill_script(source='workspace') resolves script_path from the "
-            "run workspace root. If code writes a generated script as bare 'build.js', call "
-            "run_skill_script with script_path='outputs/build.js'. The generated script itself "
-            "still writes output artifacts with bare filenames because its CWD is outputs.\n"
-            "Direct subprocess, os.system, and shell calls for system commands are blocked by "
-            "the code executor. Use run_skill_script with a skill-bundled wrapper, or use a "
-            "shell-free Python/Node.js API instead. When sandbox networking is enabled, only a "
-            "shell-free argv call to sys.executable -m pip install is permitted for dependency "
-            "installation.\n"
-            "For skill-creator output packages, create the new skill under outputs/<new-skill> "
-            "with normal code-executor file APIs; write_skill_file edits installed tenant skills "
-            "and does not create files in this run workspace.\n"
-            "Files created there are uploaded to MinIO automatically when the run finishes."
+            f"Write every generated file under: {workspace / 'outputs'}"
         )
         if file_lines:
             workspace_note += f"\nUploaded files are available locally:\n{file_lines}"

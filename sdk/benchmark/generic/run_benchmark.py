@@ -904,6 +904,7 @@ def main():
         tenant_id=str(tenant_id),
         version_no=int(agent_cfg.get("version_no", 0) or 0),
         local_skills_dir=skills_path,
+        has_enabled_skills=bool(agent_config.get("skills")),
     )
     exa_cache_controller = None
     if args.exa_cache_mode != "off":

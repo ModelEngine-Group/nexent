@@ -177,7 +177,6 @@ class MockNL2SkillRunRequest(BaseModel):
     query: str
     history: Optional[List[Dict[str, str]]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
-    complexity: str = "complicated"
     language: Optional[str] = None
 
 consts_model_mock.SkillCreateRequest = MockSkillCreateRequest
@@ -260,7 +259,7 @@ setattr(utils_mock, 'config_utils', utils_config_utils_mock)
 # Mock utils.prompt_template_utils
 utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
 sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
-utils_prompt_template_utils_mock.get_skill_creation_simple_prompt_template = MagicMock(return_value={
+utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={
     "system_prompt": "You are a skill creator",
     "user_prompt": "Create a skill"
 })
@@ -2539,7 +2538,7 @@ class TestCreateSkillInteractiveEndpoint:
 
                 response = client.post(
                     "/skills/nl2skill/run",
-                    json={"query": "Create a skill", "language": "zh", "complexity": "simple"},
+                    json={"query": "Create a skill", "language": "zh"},
                     headers={"Authorization": "Bearer token123"}
                 )
 

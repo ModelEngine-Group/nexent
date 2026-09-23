@@ -15,8 +15,13 @@ from collections.abc import Generator
 from rich.console import Group
 from rich.text import Text
 
-from smolagents.agents import CodeAgent, handle_agent_output_types, AgentError, ActionOutput, RunResult
-from smolagents.local_python_executor import fix_final_answer_code
+from smolagents.agents import (
+    ActionOutput,
+    AgentError,
+    CodeAgent,
+    RunResult,
+    handle_agent_output_types,
+)
 from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep, SystemPromptStep
 from smolagents.models import ChatMessage, CODEAGENT_RESPONSE_FORMAT, MessageRole
 from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
@@ -27,7 +32,7 @@ from ...monitor import get_monitoring_manager
 
 from ..model_errors import ModelErrorCode, ModelInvocationTerminalError
 from ..utils.observer import MessageObserver, ProcessType
-from jinja2 import Template, StrictUndefined
+from .prompt import AgentPromptComposer
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -427,6 +432,30 @@ def _wrap_tool_for_observer(
 
 
 class CoreAgent(CodeAgent):
+    def _setup_tools(self, tools, add_base_tools):
+        """Build the executable tool registry without smolagents' terminal tool."""
+        from smolagents.tools import BaseTool
+
+        assert all(isinstance(tool, BaseTool) for tool in tools), (
+            "All elements must be instance of BaseTool (or a subclass)"
+        )
+        self.tools = {
+            tool.name: tool
+            for tool in tools
+            if getattr(tool, "name", None) != "final_answer"
+        }
+        if add_base_tools:
+            from smolagents.agents import TOOL_MAPPING
+
+            self.tools.update(
+                {
+                    name: cls()
+                    for name, cls in TOOL_MAPPING.items()
+                    if name != "python_interpreter"
+                    or self.__class__.__name__ == "ToolCallingAgent"
+                }
+            )
+
     def __init__(
         self,
         observer: MessageObserver,
@@ -442,9 +471,10 @@ class CoreAgent(CodeAgent):
         self.user_id = kwargs.pop("user_id", None)
         self.workspace_path = kwargs.pop("workspace_path", None)
         self.output_protocol = kwargs.pop("output_protocol", "code_action")
-        if self.output_protocol not in ("code_action", "final_answer_envelope"):
+        if self.output_protocol not in ("code_action", "final_envelope"):
             raise ValueError(f"Unsupported output protocol: {self.output_protocol}")
         self._consecutive_protocol_errors = 0
+        self.lang = getattr(observer, "lang", "en")
         self.clarification_tool_name = None
         if kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action":
             occupied = {
@@ -455,6 +485,11 @@ class CoreAgent(CodeAgent):
 
         context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
+        self.tools.pop("final_answer", None)
+        for container_name in ("functions", "tools"):
+            container = getattr(self.python_executor, container_name, None)
+            if hasattr(container, "pop"):
+                container.pop("final_answer", None)
         self.observer = observer
         self.verification_config = verification_config or AgentVerificationConfig(enabled=False)
         self.verification_controller = VerificationController(
@@ -496,7 +531,10 @@ class CoreAgent(CodeAgent):
     def initialize_system_prompt(self) -> str:
         prompt = super().initialize_system_prompt()
         if self.clarification_tool_name:
-            prompt += "\n\n" + clarification_policy(self.clarification_tool_name)
+            prompt += "\n\n" + clarification_policy(
+                self.clarification_tool_name,
+                language=self.lang,
+            )
         return prompt
 
     def _screen_clarification(self, form: ClarificationForm) -> ClarificationForm:
@@ -522,7 +560,6 @@ class CoreAgent(CodeAgent):
                 names.update(str(name) for name in container.keys())
             except AttributeError:
                 continue
-        names.add("final_answer")
         return sorted(names)
 
     def _known_tool_names(self) -> set:
@@ -867,17 +904,17 @@ Additional Args:
 
         if not input_messages or message_role(input_messages[-1]) != "assistant":
             return input_messages
-        if getattr(self, "output_protocol", "code_action") == "final_answer_envelope":
+        if getattr(self, "output_protocol", "code_action") == "final_envelope":
             instruction = (
                 "Continue the current task from the read-only completed-action record above. "
                 "Do not repeat any completed action. Return the next response using the required "
-                "Agent protocol; when complete, return exactly one <FINAL_ANSWER> envelope."
+                "Agent protocol; when complete, return exactly one <FINAL_ANSWER>...</FINAL_ANSWER> envelope."
             )
         else:
             instruction = (
                 "Continue the current task from the read-only completed-action record above. "
                 "Do not repeat any completed action. Return exactly one next executable action "
-                "using the required Agent protocol; call final_answer(...) when the task is complete."
+                "using the required Agent protocol, or return exactly one <FINAL_ANSWER>...</FINAL_ANSWER> envelope when complete."
             )
         return [
             *input_messages,
@@ -892,6 +929,7 @@ Additional Args:
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
         Returns None if the step is not final.
         """
+        suppress_repair_generation_stream = False
         final_context = self.context_runtime.prepare_step(
             model=self.model,
             memory=self.memory,
@@ -929,6 +967,9 @@ Additional Args:
 
         repair_messages = getattr(self, "_protocol_repair_messages", [])
         if repair_messages:
+            suppress_repair_generation_stream = True
+            if getattr(self.model, "supports_suppressed_attempt_stream", False) is True:
+                additional_args["_suppress_attempt_stream"] = True
             input_messages = [*input_messages, *repair_messages]
         input_messages = self._ensure_open_model_turn(input_messages)
         memory_step.model_input_messages = input_messages
@@ -1036,8 +1077,10 @@ Additional Args:
                     logger=self.logger,
                 )
             if isinstance(classified_output, ExplicitFinalAnswer):
-                self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
-
+                self._resolve_deferred_model_attempt(
+                    memory_step.model_output_message,
+                    accepted=False,
+                )
                 getattr(self, "_protocol_repair_messages", []).clear()
                 self._consecutive_protocol_errors = 0
                 self._record_output_protocol("explicit_final_answer")
@@ -1055,7 +1098,10 @@ Additional Args:
                 form = self._screen_clarification(form)
                 if self.stop_event.is_set():
                     raise RunTerminated()
-                self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+                self._resolve_deferred_model_attempt(
+                    memory_step.model_output_message,
+                    accepted=not suppress_repair_generation_stream,
+                )
                 getattr(self, "_protocol_repair_messages", []).clear()
                 self._consecutive_protocol_errors = 0
                 self.observer.add_message(self.agent_name, ProcessType.STEP_COUNT, self.step_number)
@@ -1064,10 +1110,12 @@ Additional Args:
                     {"schema_version": 1, **form.model_dump(mode="json")},
                 )
                 raise RuntimeFinalAnswer(render_question_text(form), source="clarification")
-            code_action = fix_final_answer_code(code_action)
             code_action = _remove_parallel_executor_import(code_action)
             memory_step.code_action = code_action
-            self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+            self._resolve_deferred_model_attempt(
+                memory_step.model_output_message,
+                accepted=not suppress_repair_generation_stream,
+            )
 
             getattr(self, "_protocol_repair_messages", []).clear()
             self._consecutive_protocol_errors = 0
@@ -1137,16 +1185,8 @@ Additional Args:
                 code_output = self.python_executor(code_action)
                 monitoring_manager.set_tool_output({
                     "output": getattr(code_output, "output", None),
-                    "is_final_answer": getattr(code_output, "is_final_answer", False),
                     "logs": getattr(code_output, "logs", ""),
                 })
-            if getattr(code_output, "is_final_answer", False):
-                with monitoring_manager.trace_tool_call(
-                    "FinalAnswerTool",
-                    self.name,
-                    {"step_number": memory_step.step_number},
-                ):
-                    monitoring_manager.set_tool_output(code_output.output)
             execution_outputs_console = []
             if len(code_output.logs) > 0:
                 # Record execution results
@@ -1214,7 +1254,7 @@ Additional Args:
                 code_action=code_action,
                 observation=memory_step.observations,
                 step_number=memory_step.step_number,
-                is_final_answer=bool(code_output.is_final_answer),
+                is_final_answer=False,
             )
             if not postcheck.passed and postcheck.severity == "blocking":
                 self._append_verification_feedback(memory_step, postcheck)
@@ -1240,7 +1280,7 @@ Additional Args:
                 memory_step.observations = decision.cleaned_content
                 self._append_verification_feedback(memory_step, decision.verification_result)
 
-        if not code_output.is_final_answer and truncated_output is not None:
+        if truncated_output is not None:
             execution_outputs_console += [
                 Text(
                     f"Out: {truncated_output}",
@@ -1251,13 +1291,13 @@ Additional Args:
 
         # v1.4: Plan step state advances entirely via the update_plan_step
         # tool. _implicit_advance_step is the only fallback we still run here:
-        # if the LLM skipped the tool on the final step before final_answer,
+        # if the LLM skipped the tool before returning the final envelope,
         # we still want to flip the current row from in_progress to completed
         # so the UI does not get stuck on a half-finished plan.
         if self.enable_planning and not self.stop_event.is_set():
             self._implicit_advance_step()
 
-        yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
+        yield ActionOutput(output=code_output.output, is_final_answer=False)
 
     def run(self, task: str, stream: bool = False, reset: bool = True, images: Optional[List[str]] = None,
             additional_args: Optional[Dict] = None, max_steps: Optional[int] = None, return_full_result: bool | None = None):
@@ -1415,34 +1455,17 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             self.context_runtime.finalize_evidence(status=status)
 
     def __call__(self, task: str, **kwargs):
-        """Adds additional prompting for the managed agent, runs it, and wraps the output.
-        This method is called only by a managed agent.
-        """
+        """Delegate a task through the called Agent's own prompt role."""
         if self.workspace_path and "[Nexent run workspace]" not in task:
             output_dir = os.path.join(self.workspace_path, "outputs")
             task = (
                 f"{task}\n\n[Nexent run workspace]\n"
                 f"Run workspace: {self.workspace_path}\n"
                 f"Write every generated file under: {output_dir}\n"
-                "The code executor's current working directory is this outputs directory. "
-                "Create files with a bare relative path such as 'report.pdf', or use an "
-                "absolute path under NEXENT_OUTPUT_DIR. Never prefix a relative output path "
-                "with 'outputs/', because that would create an outputs/outputs directory. "
-                "Uploaded input files are under "
-                f"{os.path.join(self.workspace_path, 'inputs')}. When calling upload_to_s3, "
-                "pass the same bare relative path used to create the file, or its absolute path. "
-                "Before linking a generated file or image in the final answer, call upload_to_s3 "
-                "and use its permanent s3_url in Markdown. Never use a local path or presigned_url "
-                "in the final answer. MCP image and chart tools may return either a PIL image or a "
-                "string URL/data URI/text result. Inspect the runtime type first: only call .save() "
-                "on PIL images; materialize string results into an output file before upload_to_s3."
+                f"Uploaded input files are under {os.path.join(self.workspace_path, 'inputs')}."
             )
-        template_state = {
-            key: value for key, value in self.state.items() if key != "metadata"
-        }
-        full_task = Template(self.prompt_templates["managed_agent"]["task"], undefined=StrictUndefined).render({
-            "name": self.name, "task": task, **template_state
-        })
+        composer = AgentPromptComposer.from_compatibility_templates(self.prompt_templates)
+        full_task = composer.render_delegated_task(name=self.name, task=task)
         run_kwargs = dict(kwargs)
         if "additional_args" not in run_kwargs and "metadata" in self.state:
             run_kwargs["additional_args"] = {
@@ -1461,16 +1484,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         except Exception:
             self.observer.add_message(self.name, ProcessType.AGENT_FINISH, "")
 
-        answer = Template(self.prompt_templates["managed_agent"]["report"], undefined=StrictUndefined).render({
-            "name": self.name, "final_answer": report
-        })
-        if self.provide_run_summary:
-            answer += "\n\nFor more detail, find below a summary of this agent's work:\n<summary_of_work>\n"
-            for message in self.context_runtime.render_summary_messages(memory=self.memory):
-                content = message.get("content") if isinstance(message, dict) else message.content
-                answer += "\n" + truncate_content(str(content)) + "\n---"
-            answer += "\n</summary_of_work>"
-        return answer
+        return composer.render_delegated_report(str(report), name=self.name)
 
     def _run_stream(
             self, task: str, max_steps: int, images: list["PIL.Image.Image"] | None = None
@@ -1519,7 +1533,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                     if not has_meaningful_visible_content(candidate_answer):
                         diagnostics = getattr(self.model, "last_response_diagnostics", None)
                         logger.warning(
-                            "event=empty_final_answer_candidate source=final_answer_tool "
+                            "event=empty_final_answer_candidate source=final_envelope "
                             "step_number=%s model_diagnostics=%s",
                             self.step_number,
                             diagnostics,
@@ -1550,12 +1564,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                             action_step.is_final_answer = True
                             self._record_output_protocol(
                                 "explicit_final_answer",
-                                final_answer_source=(
-                                    "final_answer_envelope"
-                                    if getattr(self, "output_protocol", "code_action")
-                                    == "final_answer_envelope"
-                                    else "final_answer_tool"
-                                ),
+                                final_answer_source="final_envelope",
                             )
                         else:
                             returned_final_answer, final_answer = self._finalize_failed_verification_candidate(
@@ -1573,12 +1582,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                         action_step.is_final_answer = True
                         self._record_output_protocol(
                             "explicit_final_answer",
-                            final_answer_source=(
-                                "final_answer_envelope"
-                                if getattr(self, "output_protocol", "code_action")
-                                == "final_answer_envelope"
-                                else "final_answer_tool"
-                            ),
+                            final_answer_source="final_envelope",
                         )
 
             except RuntimeFinalAnswer as terminal:
@@ -1814,6 +1818,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         total_input_tokens = 0
         total_output_tokens = 0
         role = None
+        chat_message = None
 
         try:
             # Use streaming call (model.__call__) to generate final answer
@@ -1834,13 +1839,17 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 self._emit_history_summary_event()
                 return rebuilt
 
-            chat_message: ChatMessage = self.model(
+            model_kwargs: dict[str, Any] = {}
+            if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
+                model_kwargs["_defer_attempt_commit"] = True
+            chat_message = self.model(
                 messages,
                 context_rebuild=(
                     rebuild_final_after_provider_overflow
                     if self._provider_overflow_recovery_safe()
                     else None
                 ),
+                **model_kwargs,
             )
 
             # Update role and content from the completed message
@@ -1859,9 +1868,18 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             model_output = f"Error in generating final LLM output: {e}"
             self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.ERROR)
 
-        # Guard: if the model returned empty content at max-steps, provide a
-        # meaningful fallback instead of an empty final_answer.
-        if not has_meaningful_visible_content(model_output):
+        if has_meaningful_visible_content(model_output):
+            try:
+                classified_output = classify_model_output(
+                    model_output,
+                    protocol="final_envelope",
+                    finish_reason=getattr(self.model, "last_finish_reason", None),
+                    logger=self.logger,
+                )
+                model_output = classified_output.answer
+            except ModelOutputProtocolError:
+                model_output = self._controlled_protocol_failure()
+        else:
             model_output = (
                 "The agent was unable to generate a valid response after reaching "
                 "the maximum number of steps. Please try rephrasing your request."
@@ -1869,6 +1887,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             logger.warning(
                 "_handle_max_steps_reached: model returned empty content, using fallback"
             )
+        self._resolve_deferred_model_attempt(chat_message, accepted=False)
 
         # Finalize the memory step
         final_memory_step.timing.end_time = time.time()
@@ -1946,7 +1965,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         If the current step is in_progress and every other step is already in
         a terminal state, flip it to completed and advance. Mirrors what the
         tool would have done; only used when the LLM jumped straight to
-        final_answer without calling update_plan_step.
+        the final envelope without calling update_plan_step.
         """
         if not (self.enable_planning and self.current_plan):
             return

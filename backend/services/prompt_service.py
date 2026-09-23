@@ -7,6 +7,7 @@ import threading
 from typing import Optional, List
 
 from jinja2 import StrictUndefined, Template
+from nexent.core.prompts import load_prompt
 
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec
@@ -32,11 +33,6 @@ from database.agent_db import update_agent
 from services.prompt_template_service import resolve_prompt_generate_template
 from services.thread_lifecycle_service import config_thread_manager
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import (
-    get_prompt_optimize_prompt_template,
-    get_prompt_template,
-    get_guardrail_regex_prompt_template,
-)
 
 from dataclasses import dataclass
 from typing import Optional as Opt
@@ -308,7 +304,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
 
     # 3. Generate greeting message and example questions
     try:
-        greeting_template = get_prompt_template('greeting_generate', language)
+        greeting_template = load_prompt(language, "meta/generate_greeting")
         greeting_system_prompt = greeting_template.get("GREETING_SYSTEM_PROMPT", "")
         greeting_user_prompt_template = greeting_template.get("USER_PROMPT", "")
 
@@ -415,7 +411,7 @@ def optimize_prompt_section_impl(
         sub_agent_ids=sub_agent_ids,
     )
 
-    prompt_template = get_prompt_optimize_prompt_template(language)
+    prompt_template = load_prompt(language, "meta/optimize_prompt")
     prompt_context = join_info_for_optimize_prompt_section(
         prompt_for_optimize=prompt_template,
         section_type=normalized_section_type,
@@ -521,7 +517,7 @@ def generate_guardrail_rules_impl(
             "Description is required.",
         )
 
-    prompt_template = get_guardrail_regex_prompt_template(language)
+    prompt_template = load_prompt(language, "safety/guardrail_regex")
     user_prompt = Template(
         prompt_template["GUARDRAIL_USER_PROMPT"], undefined=StrictUndefined
     ).render({"description": description})

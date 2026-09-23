@@ -47,39 +47,6 @@ class RecordingTelemetry:
         )
 
 
-class RecordingSpan:
-    def __init__(self):
-        self.attributes = {}
-        self.events = []
-        self.statuses = []
-        self.ended = 0
-
-    def set_attributes(self, attributes):
-        self.attributes.update(attributes)
-
-    def add_event(self, name, attributes=None):
-        self.events.append((name, attributes or {}))
-
-    def set_status(self, status):
-        self.statuses.append(status)
-
-    def end(self):
-        self.ended += 1
-
-
-class RecordingTracer:
-    def __init__(self):
-        self.calls = []
-        self.spans = []
-
-    def start_span(self, name, *, kind, attributes):
-        span = RecordingSpan()
-        self.calls.append((name, kind, attributes))
-        self.spans.append(span)
-        span.attributes.update(attributes)
-        return span
-
-
 def _manager(telemetry):
     manager = ThreadManager(
         service_name="test-runtime",
@@ -129,13 +96,9 @@ def test_tc_tlm_017_emits_current_statistics_for_each_state_change():
     asyncio.run(manager.shutdown(timeout=1))
 
 
-def test_tc_tlm_017_otel_snapshot_span_is_immediate_and_uses_current_counts(
-    monkeypatch,
-):
-    tracer = RecordingTracer()
-    monkeypatch.setattr(telemetry_module, "OTEL_AVAILABLE", True)
-    monkeypatch.setattr(telemetry_module.trace, "get_tracer", lambda _name: tracer)
-    telemetry = telemetry_module.OpenTelemetryThreadTelemetry()
+def test_ut_sdk_tlm_041_default_telemetry_has_no_phoenix_side_effects():
+    """UT-SDK-TLM-041: thread state changes must not create Phoenix spans."""
+    telemetry = telemetry_module.get_thread_telemetry()
     execution = types.SimpleNamespace(
         execution_id="execution-1",
         lane="agent-run",
@@ -152,38 +115,14 @@ def test_tc_tlm_017_otel_snapshot_span_is_immediate_and_uses_current_counts(
     )
 
     telemetry.record_snapshot(
-        "runtime",
-        "thread.started",
-        execution,
-        (3, 0, 3, 0),
-        dedicated=False,
-    )
-    execution.state = types.SimpleNamespace(value="succeeded")
-    telemetry.record_snapshot(
-        "runtime",
-        "thread.finished",
-        execution,
-        (0, 0, 0, 0),
-        dedicated=False,
-        result="succeeded",
+        "runtime", "thread.started", execution, (3, 0, 3, 0), dedicated=False,
     )
 
-    name, kind, initial_attributes = tracer.calls[0]
-    assert name == "thread.manager.snapshot"
-    assert kind is telemetry_module.SpanKind.INTERNAL
-    assert initial_attributes["openinference.span.kind"] == "CHAIN"
-    assert initial_attributes["nexent.span.kind"] == "thread"
-    assert initial_attributes["thread.event"] == "thread.started"
-    assert initial_attributes["thread.execution.id"] == "execution-1"
-    assert initial_attributes["thread.counts.managed_active"] == 3
-    assert initial_attributes["thread.counts.queued"] == 0
-    assert initial_attributes["thread.counts.running"] == 3
-    assert not any(key.endswith(".start") for key in initial_attributes)
-    assert not any(key.endswith(".end") for key in initial_attributes)
-    assert len(tracer.spans) == 2
-    assert all(span.ended == 1 for span in tracer.spans)
-    assert tracer.calls[1][2]["thread.counts.managed_active"] == 0
-    assert tracer.calls[1][2]["thread.result"] == "succeeded"
+    source = Path(telemetry_module.__file__).read_text(encoding="utf-8")
+    assert type(telemetry).__name__ == "NoOpThreadTelemetry"
+    assert "thread.manager.snapshot" not in source
+    assert "nexent.thread_manager" not in source
+    assert "opentelemetry" not in source
 
 
 def test_tc_tlm_021_snapshot_lists_task_composition_without_telemetry_side_effects():

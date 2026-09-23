@@ -3,11 +3,27 @@
 import hashlib
 
 import pytest
-
-from backend.utils.context_utils import build_context_inputs
-from nexent.core.agents.context import ContextManager as RealContextManager
 from nexent.core.agents.context import ContextItemRenderer, ContextItemType
+from nexent.core.agents.context import ContextManager as RealContextManager
 from nexent.core.agents.context.models import normalize_context_inputs
+
+from backend.management.services.agent.prompt_template_loader import (
+    load_agent_prompt_bundle,
+)
+from backend.utils.context_utils import (
+    build_context_inputs as _runtime_build_context_inputs,
+)
+
+
+def build_context_inputs(**kwargs):
+    """Call the Backend adapter with an explicit run-scoped prompt bundle."""
+    language = kwargs.get("language", "zh")
+    is_manager = kwargs.get("is_manager", True)
+    kwargs.setdefault(
+        "prompt_bundle",
+        load_agent_prompt_bundle(is_manager=is_manager, language=language),
+    )
+    return _runtime_build_context_inputs(**kwargs)
 
 
 def _items(**kwargs):

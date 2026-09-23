@@ -9,7 +9,7 @@ from jinja2 import StrictUndefined, Template
 from nexent.core.concurrency import run_blocking
 
 from consts.const import LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.prompts import load_prompt
 
 logger = logging.getLogger("agent_automation.prompt_generator")
 
@@ -233,7 +233,7 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
         from nexent.core.utils.observer import MessageObserver
         from utils.config_utils import get_model_name_from_config
 
-        prompt_template = get_prompt_template("agent_automation", context.language)
+        prompt_template = load_prompt(context.language, "automation/agent")
         values = {"instruction": context.instruction.strip()}
         user_prompt = Template(prompt_template[user_key], undefined=StrictUndefined).render(**values).strip()
         llm = OpenAIModel(

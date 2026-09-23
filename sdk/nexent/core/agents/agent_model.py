@@ -118,6 +118,7 @@ class ToolConfig(BaseModel):
     class_name: str = Field(description="Tool class name")
     name: Optional[str] = Field(description="Tool name")
     description: Optional[str] = Field(description="Tool description", default=None)
+    description_zh: Optional[str] = Field(description="Chinese tool description", default=None)
     inputs: Optional[str] = Field(description="Tool inputs", default=None)
     output_type: Optional[str] = Field(description="Tool output type", default=None)
     params: Dict[str, Any] = Field(description="Initialization parameters", default=None)
@@ -256,7 +257,7 @@ class AgentConfig(BaseModel):
         ge=1,
     )
     model_name: str = Field(description="Model alias from ModelConfig")
-    output_protocol: Literal["code_action", "final_answer_envelope"] = Field(
+    output_protocol: Literal["code_action", "final_envelope"] = Field(
         description="Closed model-output protocol used by the Agent runtime",
         default="code_action",
     )
@@ -279,6 +280,9 @@ class AgentConfig(BaseModel):
     )
     context_items: Optional[List[ContextItemInput]] = Field(
         description="Authorized fine-grained context item inputs for SDK assembly", default=None
+    )
+    prompt_tool_policy_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Immutable versioned tool policy values injected for this Agent run", default=None
     )
     pre_run_tool_events: List[Dict[str, Any]] = Field(
         description=(

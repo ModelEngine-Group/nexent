@@ -4,18 +4,25 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
-
-from backend.utils.context_utils import (
-    _build_execution_flow_text,
-    build_authorized_context_input,
-    build_context_inputs,
-)
 from nexent.core.agents.context import (
     ContextItemInput,
     ContextItemRenderer,
     ContextItemType,
 )
 from nexent.core.agents.context.models import normalize_context_inputs
+
+from backend.management.services.agent.prompt_template_loader import (
+    load_agent_prompt_bundle,
+)
+from backend.utils.context_utils import (
+    _build_execution_flow_text as _runtime_build_execution_flow_text,
+)
+from backend.utils.context_utils import (
+    build_authorized_context_input,
+)
+from backend.utils.context_utils import (
+    build_context_inputs as _runtime_build_context_inputs,
+)
 
 
 @dataclass
@@ -28,6 +35,28 @@ class Value:
     tools: tuple = ()
     agent_id: str = "external-id"
     url: str = "https://example.invalid"
+
+
+def build_context_inputs(**kwargs):
+    """Call the Backend adapter with an explicit run-scoped prompt bundle."""
+    language = kwargs.get("language", "zh")
+    is_manager = kwargs.get("is_manager", True)
+    kwargs.setdefault(
+        "prompt_bundle",
+        load_agent_prompt_bundle(is_manager=is_manager, language=language),
+    )
+    return _runtime_build_context_inputs(**kwargs)
+
+
+def _build_execution_flow_text(**kwargs):
+    """Call the fixed-section adapter with an explicit prompt bundle."""
+    language = kwargs.get("language", "zh")
+    is_manager = kwargs.get("is_manager", True)
+    kwargs.setdefault(
+        "prompt_bundle",
+        load_agent_prompt_bundle(is_manager=is_manager, language=language),
+    )
+    return _runtime_build_execution_flow_text(**kwargs)
 
 
 def _messages(**kwargs):
@@ -108,15 +137,13 @@ def test_authorized_context_snapshot_ignores_unpaired_assistant_history():
     assert "Orphaned private output" not in str(context_input.items)
 
 
-def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
+def test_empty_inputs_do_not_emit_empty_resource_sections():
     items = build_context_inputs()
 
     assert [item.id for item in items] == [
         "system:header",
         "system:execution_flow",
-        "system:available_resources_header",
-        "system:agent_fallback",
-        "system:skills_usage",
+        "system:manager_orchestration",
         "system:code_norms",
     ]
     assert all(item.type == ContextItemType.SYSTEM for item in items)
@@ -171,8 +198,8 @@ def test_restricted_python_policy_is_injected_before_code_norms(language):
 @pytest.mark.parametrize(
     ("language", "expected_text"),
     [
-        ("zh", "一个引用标记只对应它紧前的一句话"),
-        ("en", "applies only to the sentence immediately before it"),
+        ("zh", "一个引用标记只对应它前方最近的一句话"),
+        ("en", "applies only to the nearest preceding sentence"),
     ],
 )
 def test_retrieval_citation_prompt_requires_sentence_level_marks(
@@ -181,7 +208,7 @@ def test_retrieval_citation_prompt_requires_sentence_level_marks(
     prompt = _build_execution_flow_text(language=language, is_manager=False)
 
     assert expected_text in prompt
-    assert "同一句可标记多个来源" in prompt or "multiple sources may be marked" in prompt
+    assert "一个或多个引用标记" in prompt or "matching mark or marks" in prompt
 
 
 def test_all_sources_are_naturally_granular_and_keep_stable_order():

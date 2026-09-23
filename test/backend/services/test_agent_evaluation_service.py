@@ -437,6 +437,11 @@ _nexent_core_models_module.OpenAIModel = MagicMock()
 sys.modules["nexent.core.models"] = _nexent_core_models_module
 _nexent_core.models = _nexent_core_models_module
 
+_nexent_core_prompts_module = types.ModuleType("nexent.core.prompts")
+_nexent_core_prompts_module.load_prompt = MagicMock()
+sys.modules["nexent.core.prompts"] = _nexent_core_prompts_module
+_nexent_core.prompts = _nexent_core_prompts_module
+
 _eval_prompt_service_module = types.ModuleType("services.evaluation_prompt_service")
 _eval_prompt_service_module.build_prompts_for_evaluation_cases = MagicMock(
     return_value=[]
@@ -1428,7 +1433,7 @@ class TestGenerateFriendlyErrorMessage:
         service_module.call_llm_for_system_prompt = MagicMock(
             return_value="Friendly error from LLM"
         )
-        service_module.get_prompt_template = MagicMock(
+        service_module.load_prompt = MagicMock(
             return_value={"USER_PROMPT": "test", "SYSTEM_PROMPT": "test"}
         )
 
@@ -2145,7 +2150,7 @@ class TestGenerateTestQueries:
         profile_utils = sys.modules["utils.agent_profile_utils"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         monkeypatch.setattr(
-            service_module, "get_prompt_template", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
+            service_module, "load_prompt", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
         )
         monkeypatch.setattr(
             service_module,
@@ -2164,7 +2169,7 @@ class TestGenerateTestQueries:
         profile_utils = sys.modules["utils.agent_profile_utils"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         monkeypatch.setattr(
-            service_module, "get_prompt_template", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
+            service_module, "load_prompt", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
         )
         # Non-empty list whose queries are all blank -> filtered to nothing -> EMPTY.
         monkeypatch.setattr(
@@ -2187,7 +2192,7 @@ class TestGenerateTestQueries:
         profile_utils = sys.modules["utils.agent_profile_utils"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         monkeypatch.setattr(
-            service_module, "get_prompt_template", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
+            service_module, "load_prompt", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
         )
         response = json.dumps(
             [
@@ -2296,7 +2301,7 @@ class TestCasePassStatusHelpers:
 
 
 def test_generate_friendly_error_message_llm_exception_returns_default(service_module):
-    service_module.get_prompt_template = MagicMock(
+    service_module.load_prompt = MagicMock(
         return_value={"USER_PROMPT": "u {{error_message}}", "SYSTEM_PROMPT": "s"}
     )
     service_module.call_llm_for_system_prompt = MagicMock(
@@ -2721,7 +2726,7 @@ class TestAnalysisHelpers:
         assert block.count("Case ") == service_module.MAX_FAILURE_EXAMPLES
 
     def test_call_analysis_llm_and_parse(self, service_module):
-        service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.call_llm_for_system_prompt = MagicMock(return_value='{"summary": "x"}')
         assert service_module._call_analysis_llm_and_parse(
             {"judge_model_id": 99}, "zh", "up", "t1"
@@ -2733,7 +2738,7 @@ class TestAnalysisHelpers:
 
     def test_call_analysis_llm_and_parse_non_dict_raises(self, service_module):
         from consts.exceptions import AppException
-        service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.call_llm_for_system_prompt = MagicMock(return_value="[1, 2]")
         with pytest.raises(AppException) as excinfo:
             service_module._call_analysis_llm_and_parse({"judge_model_id": 99}, "zh", "up", "t1")
@@ -2810,7 +2815,7 @@ class TestGenerateAnalysisReportImpl:
         service_module.get_evaluator = MagicMock(
             return_value={"name": "judge-a", "pass_threshold": 0.8}
         )
-        service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.call_llm_for_system_prompt = MagicMock(
             return_value='{"summary": "ok", "failures": []}'
         )
@@ -2825,7 +2830,7 @@ class TestGenerateAnalysisReportImpl:
         self._run(service_module)
         service_module.list_agent_evaluation_cases = MagicMock(return_value=[])
         service_module.get_evaluator = MagicMock(return_value=None)
-        service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.call_llm_for_system_prompt = MagicMock(
             side_effect=RuntimeError("llm down")
         )
@@ -2841,7 +2846,7 @@ class TestGenerateAnalysisReportImpl:
         self._run(service_module)
         service_module.list_agent_evaluation_cases = MagicMock(return_value=[])
         service_module.get_evaluator = MagicMock(return_value=None)
-        service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.call_llm_for_system_prompt = MagicMock(return_value="[1, 2]")
         with pytest.raises(AppException) as excinfo:
             service_module.generate_analysis_report_impl(1, "t1")
@@ -2954,7 +2959,7 @@ class TestTrialRunEvaluatorImpl:
                 {"status": "DRAFT", "name": "b"},
             ]
         )
-        service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.JiuwenSDKAdapter = MagicMock()
 
         async def _fake_eval(**kwargs):
@@ -2973,7 +2978,7 @@ class TestTrialRunEvaluatorImpl:
 
     def test_sdk_unavailable_raises(self, service_module):
         import asyncio
-        service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.JiuwenSDKAdapter = None
         with pytest.raises(service_module.JiuwenSDKUnavailableError):
             asyncio.run(

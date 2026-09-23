@@ -67,7 +67,7 @@ from services.thread_lifecycle_service import (
     runtime_thread_manager,
 )
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.prompts import load_prompt
 
 
 _QUERY_FORMAT_ERR_MSG = "AI returned invalid format for test queries"
@@ -360,7 +360,7 @@ def _generate_friendly_error_message(
     if not model_id or not _is_llm_related_error(exc):
         return default_msg
     try:
-        template = get_prompt_template("evaluation_error_explain", language)
+        template = load_prompt(language, "evaluation/error_explain")
         user_prompt = template["USER_PROMPT"].replace(
             "{{error_message}}", str(exc)[:500]
         )
@@ -1329,7 +1329,7 @@ def _generate_test_queries(
         )
 
     profile_parts = _build_agent_profile_parts(profile)
-    tpl = get_prompt_template("evaluation_generate_queries", language)
+    tpl = load_prompt(language, "evaluation/generate_cases")
     user_prompt = "\n".join(profile_parts)
     user_prompt += f"\n\nGenerate {query_count} test cases for this agent."
 
@@ -1781,8 +1781,8 @@ def execute_agent_evaluation_run(
 
         # Preload evaluators and judge template (loaded once, reused for all cases)
         evaluators = _preload_evaluators_for_run(run, tenant_id)
-        judge_system_prompt = get_prompt_template(
-            "evaluation_judge_system", run.get("language", "zh")
+        judge_system_prompt = load_prompt(
+            run.get("language", "zh"), "evaluation/judge"
         )["SYSTEM_PROMPT"]
 
         # Resolve judge model context window once (used for runtime_events trimming)
@@ -2017,7 +2017,7 @@ def _call_analysis_llm_and_parse(
     parsed response is not a dict; the caller is responsible for catching
     and logging the underlying ``Exception`` for observability.
     """
-    template = get_prompt_template("evaluation_analyze_report", language)
+    template = load_prompt(language, "evaluation/analyze_report")
     response = call_llm_for_system_prompt(
         model_id=int(run["judge_model_id"]),
         user_prompt=user_prompt,
@@ -2375,8 +2375,8 @@ async def trial_run_evaluator_impl(
             ev = get_evaluator(eid, tenant_id)
             if ev and ev.get("status") == "PUBLISHED":
                 evaluators[eid] = ev
-    judge_system_prompt = get_prompt_template(
-        "evaluation_judge_system", language
+    judge_system_prompt = load_prompt(
+        language, "evaluation/judge"
     )["SYSTEM_PROMPT"]
 
     if JiuwenSDKAdapter is None:

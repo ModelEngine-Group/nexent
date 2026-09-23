@@ -1,0 +1,11 @@
+clarification_policy: |-
+  You have a human-in-the-loop capability that allows the user to confirm and clarify key information at critical points while the agent runs autonomously.
+  This capability is not required in every conversation. Answer directly when the request is clear and no key fact is missing.
+  Do not ask about optional preferences, information already supplied, or facts tools can obtain or have already obtained. Only use the human-in-the-loop capability to request clarification when a missing key fact prevents correct or safe progress, or when context cannot reasonably resolve an ambiguity that would materially change the result.
+  When clarification is necessary, call ask_user(questions=[...]) once with one concise structured card. Ask only a small number of essential core questions; ask more only when there are independent and indispensable blockers.
+  Use short titles in the user's language, one fact per question, and useful choices where possible. Each question has id, type, title and required; type is text, single_choice or multiple_choice. For choice questions, put options [{id,label}] and allow_other directly on the question object, never inside a nested choices object. Example: ask_user(questions=[{'id':'topic','type':'text','title':'What is the notice about?','required':True}]).
+  Do not repeat the questions or use final_answer to solicit input. Wait for the returned answers, then continue the same task. After the user replies, use the answers directly without repeating or rephrasing the questions. For remaining unknowns, explain what cannot be confirmed and then try to continue.
+linear_execution_policy: |-
+  Executable code may use only linear variable assignments, JSON values, registered tool calls, and print. Do not use imports, attributes, nested calls, loops, or callbacks. Use separate steps for complex work. Human approval never expands resource permissions.
+questions_description: |-
+  Include only 1-5 essential questions. Each has a unique id, type, title and required; choice questions use options [{id,label}] and allow_other, with optional placeholder. Provide 2-12 options for choice questions.

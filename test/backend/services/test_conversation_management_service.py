@@ -170,7 +170,7 @@ sys.modules["database.client"] = db_client_stub
 
 # Stub utils.prompt_template_utils to avoid requiring PyYAML
 prompt_mod = types.ModuleType("utils.prompt_template_utils")
-prompt_mod.get_generate_title_prompt_template = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
+prompt_mod.load_prompt = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
 sys.modules["utils.prompt_template_utils"] = prompt_mod
 
 # Stub storage components
@@ -497,7 +497,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.load_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
         # Setup
@@ -527,10 +527,10 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
         mock_llm_instance.assert_called_once()
-        mock_get_prompt_template.assert_called_once_with(language='zh')
+        mock_get_prompt_template.assert_called_once_with('zh', 'agent/generate_chat_title')
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.load_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     @patch('backend.services.conversation_management_service.get_model_by_model_id')
     def test_call_llm_for_title_uses_selected_tenant_model(
@@ -1323,7 +1323,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
     """Test edge cases for call_llm_for_title."""
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.load_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_modelengine_factory_uses_flat_messages(self, mock_get_config, mock_get_prompt, mock_model):
         """Should flatten messages when model_factory is modelengine."""
@@ -1353,7 +1353,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             self.assertIn("content", msg)
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.load_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_empty_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is empty."""
@@ -1377,7 +1377,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertIn("title_generation: unknown -> 新对话", "\n".join(logs.output))
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.load_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_none_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is None."""
@@ -1399,7 +1399,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "新对话")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.load_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_english_title_response(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default English title for English language."""
@@ -1421,7 +1421,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "New Conversation")  # DEFAULT_EN_TITLE
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.load_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_remove_think_blocks(self, mock_get_config, mock_get_prompt, mock_model):
         """Should remove think blocks from title."""
@@ -1443,7 +1443,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "Actual Title")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.load_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_no_model_config_returns_empty_display_name(self, mock_get_config, mock_get_prompt, mock_model):
         """Should handle None model_config gracefully."""

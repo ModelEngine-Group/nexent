@@ -49,7 +49,7 @@ from database.model_management_db import get_model_by_model_id
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.model_gateway_service import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
-from utils.prompt_template_utils import get_generate_title_prompt_template
+from nexent.core.prompts import load_prompt
 from utils.str_utils import remove_think_blocks
 
 logger = logging.getLogger("conversation_management_service")
@@ -324,7 +324,7 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     Returns:
         str: Generated title
     """
-    prompt_template = get_generate_title_prompt_template(language=language)
+    prompt_template = load_prompt(language, "agent/generate_chat_title")
     set_monitoring_context(tenant_id=tenant_id, user_id=None)
 
     if model_id is not None:

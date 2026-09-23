@@ -109,7 +109,7 @@ def bundle():
     profile = MagicMock(name="fetch_agent_profile")
     fmt_profile = MagicMock(name="format_agent_profile_context")
     llm = MagicMock(name="call_llm_for_system_prompt")
-    tmpl = MagicMock(name="get_prompt_template")
+    tmpl = MagicMock(name="load_prompt")
 
     for n, m in db_impls.items():
         setattr(sys.modules["database.evaluator_db"], n, m)
@@ -131,6 +131,7 @@ def bundle():
     mod = _ilu.module_from_spec(spec)
     sys.modules[MODULE_UNDER_TEST] = mod
     spec.loader.exec_module(mod)
+    mod.load_prompt = tmpl
     svc_pkg.evaluator_service = mod
 
     class _Bundle:
@@ -336,7 +337,7 @@ class TestGenerateEvaluatorByLlm:
             {"name": "expected", "type": "string", "required": True},
             {"name": "actual", "type": "string", "required": True},
         ]
-        bundle.tmpl.assert_called_once_with("evaluation_generate_evaluator", "zh")
+        bundle.tmpl.assert_called_once_with("zh", "evaluation/generate_evaluator")
         bundle.llm.assert_called_once_with(
             model_id=7, user_prompt=bundle.llm.call_args.kwargs["user_prompt"],
             system_prompt="sys", tenant_id="t1",

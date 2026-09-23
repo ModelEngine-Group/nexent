@@ -17,16 +17,13 @@ from jinja2 import Template, StrictUndefined
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
+from nexent.core.prompts import load_prompt
 
 from consts.const import LANGUAGE
 from database.model_management_db import get_model_by_model_id
 from nexent.core.utils.observer import MessageObserver
 from nexent.vector_database.base import VectorDatabaseCore
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import (
-    get_document_summary_prompt_template,
-    get_cluster_summary_reduce_prompt_template
-)
 
 logger = logging.getLogger("document_vector_utils")
 
@@ -506,8 +503,7 @@ def summarize_document(document_content: str, filename: str, language: str = LAN
         Document summary text
     """
     try:
-        # Get prompt template from prompt_template_utils
-        prompts = get_document_summary_prompt_template(language)
+        prompts = load_prompt(language, "document/summary")
         
         system_prompt = prompts.get('system_prompt', '')
         user_prompt_template = prompts.get('user_prompt', '')
@@ -563,8 +559,7 @@ def summarize_cluster(document_summaries: List[str], language: str = LANGUAGE["Z
         Cluster summary text
     """
     try:
-        # Get prompt template from prompt_template_utils
-        prompts = get_cluster_summary_reduce_prompt_template(language)
+        prompts = load_prompt(language, "document/cluster_summary_reduce")
         
         system_prompt = prompts.get('system_prompt', '')
         user_prompt_template = prompts.get('user_prompt', '')

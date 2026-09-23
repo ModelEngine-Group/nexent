@@ -20,7 +20,7 @@ from database.evaluator_db import (
 )
 from utils.agent_profile_utils import fetch_agent_profile, format_agent_profile_context
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.prompts import load_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -233,7 +233,7 @@ def generate_evaluator_by_llm_impl(
         agent_id,
     )
 
-    template = get_prompt_template("evaluation_generate_evaluator", language)
+    template = load_prompt(language, "evaluation/generate_evaluator")
     user_prompt = _build_evaluator_gen_prompt(description, agent_id, tenant_id)
 
     try:

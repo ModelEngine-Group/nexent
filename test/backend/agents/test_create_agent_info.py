@@ -135,6 +135,7 @@ consts_const.LOCAL_MCP_SERVER = "http://localhost:5011"
 consts_const.MODEL_CONFIG_MAPPING = {"llm": "llm_config"}
 consts_const.LANGUAGE = {"ZH": "zh"}
 consts_const.DATA_PROCESS_SERVICE = "https://example.com/data-process"
+consts_const.NEXENT_SANDBOX_DEFAULT_LEVEL = "local"
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -178,7 +179,7 @@ mock_message_observer = MagicMock()
 class MockAgentVerificationConfig:
     @classmethod
     def model_validate(cls, value):
-        return value or {}
+        return types.SimpleNamespace(enabled=bool((value or {}).get("enabled", False)))
 
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
 sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
@@ -210,6 +211,30 @@ sys.modules['nexent.core.agents.context'] = _create_stub_module(
         processing_mode=(layers.get("request") or {}).get("processing_mode", "passthrough")
     ),
 )
+sys.modules['nexent.core.agents.context'].__path__ = [
+    str(Path(__file__).parents[3] / "sdk" / "nexent" / "core" / "agents" / "context")
+]
+sys.modules['nexent.core'].__path__ = [
+    str(Path(__file__).parents[3] / "sdk" / "nexent" / "core")
+]
+_agents_package = _create_stub_module("nexent.core.agents")
+_agents_package.__path__ = [
+    str(Path(__file__).parents[3] / "sdk" / "nexent" / "core" / "agents")
+]
+_composer_module = importlib.import_module("nexent.core.agents.prompt")
+
+_prompt_loader_stub = types.ModuleType("management.services.agent.prompt_template_loader")
+
+def _load_stub_prompt_bundle(*, is_manager, language, **kwargs):
+    role = "manager" if is_manager else "managed"
+    module = f"{role}_agent"
+    return _composer_module.AgentPromptComposer.from_compatibility_templates(
+        {module: {"task": "{{task}}", "report": "{{final_answer}}"},
+         "final_answer": {"pre_messages": "", "post_messages": "{{task}}"}},
+    ).bundle
+
+_prompt_loader_stub.load_agent_prompt_bundle = _load_stub_prompt_bundle
+sys.modules[_prompt_loader_stub.__name__] = _prompt_loader_stub
 sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
     "nexent.core.agents.summary_config",
     ContextManagerConfig=MagicMock(),
@@ -451,6 +476,7 @@ _mock_parallel_executor_tool_cls = MagicMock()
 _mock_parallel_executor_tool_cls.__name__ = "ParallelExecutorTool"
 _mock_parallel_executor_tool_cls.name = "parallel_executor"
 _mock_parallel_executor_tool_cls.description = "Execute multiple independent calls in parallel."
+_mock_parallel_executor_tool_cls.description_zh = "并行执行多个互不依赖的工具或助手调用。"
 _mock_parallel_executor_tool_cls.inputs = {"tasks": {"type": "array"}}
 _mock_parallel_executor_tool_cls.output_type = "any"
 _parallel_executor_mod = _create_stub_module(
@@ -528,6 +554,8 @@ create_agent_info_module = importlib.util.module_from_spec(spec)
 sys.modules["backend.agents.create_agent_info"] = create_agent_info_module
 assert spec.loader is not None
 spec.loader.exec_module(create_agent_info_module)
+# Keep older patch targets available while those tests are migrated to the loader.
+create_agent_info_module.get_agent_prompt_template = MagicMock()
 setattr(agents_pkg, "create_agent_info", create_agent_info_module)
 
 # Now import the symbols under test
@@ -580,6 +608,28 @@ def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
     workspace = create_agent_info_module._build_run_workspace("user-1", "run-1")
 
     assert Path(workspace) == tmp_path.resolve() / "user-1" / "run-1"
+
+
+@pytest.mark.parametrize(
+    ("sandbox_level", "verification_enabled", "expected_local"),
+    [("local", False, True), ("docker", True, False)],
+)
+def test_ut_be_dpr_007_prompt_runtime_flags_follow_backend_configuration(
+    monkeypatch, sandbox_level, verification_enabled, expected_local,
+):
+    """UT-BE-DPR-007: Backend resolves sandbox and verification prompt gates."""
+    monkeypatch.setattr(
+        create_agent_info_module,
+        "NEXENT_SANDBOX_DEFAULT_LEVEL",
+        sandbox_level,
+    )
+
+    verification, is_local = create_agent_info_module._resolve_prompt_runtime_flags(
+        {"verification_config": {"enabled": verification_enabled}}
+    )
+
+    assert verification.enabled is verification_enabled
+    assert is_local is expected_local
 
 # Import HistoryItem for testing (from mocked consts.model)
 HistoryItem = sys.modules["consts.model"].HistoryItem
@@ -735,6 +785,66 @@ class TestGetSkillsForTemplate:
 class TestGetSkillScriptTools:
     """Tests for the _get_skill_script_tools function"""
 
+    @pytest.fixture(autouse=True)
+    def _enabled_skill_service(self):
+        module = types.ModuleType("management.services.skill.service")
+        module.SkillService = MagicMock(
+            return_value=MagicMock(
+                get_enabled_skills_for_agent=MagicMock(
+                    return_value=[{"name": "test_skill", "config_values": {}}]
+                )
+            )
+        )
+        with patch.dict(sys.modules, {module.__name__: module}):
+            yield
+
+    def test_ut_be_dpr_006_omits_skill_tools_without_enabled_skills(self):
+        """UT-BE-DPR-006: a skill-free Agent receives only fixed file tools."""
+        mock_tool_config.reset_mock()
+        skill_service_module = types.ModuleType("management.services.skill.service")
+        skill_service_module.SkillService = MagicMock(
+            return_value=MagicMock(get_enabled_skills_for_agent=MagicMock(return_value=[]))
+        )
+
+        with patch.dict(sys.modules, {skill_service_module.__name__: skill_service_module}):
+            _get_skill_script_tools(agent_id=1, tenant_id="tenant_1")
+
+        names = [call.kwargs["name"] for call in mock_tool_config.call_args_list]
+        assert names == ["download_from_s3", "upload_to_s3"]
+        assert "write_skill_file" not in names
+
+    def test_ut_be_dpr_006_injects_skill_tools_per_agent_without_write_tool(self):
+        """UT-BE-DPR-006: each Agent's own skill binding controls three skill tools."""
+        mock_tool_config.reset_mock()
+        service = MagicMock()
+        service.get_enabled_skills_for_agent.side_effect = lambda *, agent_id, **_: (
+            [{"name": "analysis", "config_values": {"format": "csv"}}]
+            if agent_id == 2 else []
+        )
+        skill_service_module = types.ModuleType("management.services.skill.service")
+        skill_service_module.SkillService = MagicMock(return_value=service)
+
+        with patch.dict(sys.modules, {skill_service_module.__name__: skill_service_module}):
+            parent_tools = _get_skill_script_tools(agent_id=1, tenant_id="tenant_1")
+            parent_names = [call.kwargs["name"] for call in mock_tool_config.call_args_list]
+            mock_tool_config.reset_mock()
+            child_tools = _get_skill_script_tools(agent_id=2, tenant_id="tenant_1")
+            child_names = [call.kwargs["name"] for call in mock_tool_config.call_args_list]
+
+        assert len(parent_tools) == 2
+        assert parent_names == ["download_from_s3", "upload_to_s3"]
+        assert len(child_tools) == 5
+        assert child_names == [
+            "run_skill_script",
+            "read_skill_md",
+            "read_skill_config",
+            "download_from_s3",
+            "upload_to_s3",
+        ]
+        assert "write_skill_file" not in child_names
+        run_skill_call = mock_tool_config.call_args_list[0]
+        assert run_skill_call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+
     def test_get_skill_script_tools_success(self):
         """Test case for successfully getting skill script tools"""
         mock_tool_config.reset_mock()
@@ -745,8 +855,8 @@ class TestGetSkillScriptTools:
                 version_no=0
             )
 
-            assert len(result) == 6
-            assert mock_tool_config.call_count == 6
+            assert len(result) == 5
+            assert mock_tool_config.call_count == 5
 
             # Verify the calls made to ToolConfig
             calls = mock_tool_config.call_args_list
@@ -765,14 +875,10 @@ class TestGetSkillScriptTools:
             assert calls[2][1]['class_name'] == "ReadSkillConfigTool"
             assert calls[2][1]['name'] == "read_skill_config"
 
-            # Fourth call: WriteSkillFileTool
-            assert calls[3][1]['class_name'] == "WriteSkillFileTool"
-            assert calls[3][1]['name'] == "write_skill_file"
-
-            assert calls[4][1]['class_name'] == "DownloadFromS3Tool"
-            assert calls[4][1]['name'] == "download_from_s3"
-            assert calls[5][1]['class_name'] == "UploadToS3Tool"
-            assert calls[5][1]['name'] == "upload_to_s3"
+            assert calls[3][1]['class_name'] == "DownloadFromS3Tool"
+            assert calls[3][1]['name'] == "download_from_s3"
+            assert calls[4][1]['class_name'] == "UploadToS3Tool"
+            assert calls[4][1]['name'] == "upload_to_s3"
 
     def test_get_skill_script_tools_metadata_context(self):
         """Test that skill context metadata is correctly set for all tools"""
@@ -784,16 +890,16 @@ class TestGetSkillScriptTools:
                 version_no=7
             )
 
-            assert len(result) == 6
+            assert len(result) == 5
             # Skill tools retain skill context; file tools use run-scoped metadata.
             calls = mock_tool_config.call_args_list
-            for call in calls[:4]:
+            for call in calls[:3]:
                 assert call[1]['metadata'] == {
                     "agent_id": 123,
                     "tenant_id": "test_tenant",
                     "version_no": 7
                 }
-            for call in calls[4:]:
+            for call in calls[3:]:
                 assert call[1]['metadata'] == {}
 
     def test_get_skill_script_tools_input_schemas(self):
@@ -819,11 +925,6 @@ class TestGetSkillScriptTools:
 
             # ReadSkillConfigTool
             assert '"skill_name": "str"' in calls[2][1]['inputs']
-
-            # WriteSkillFileTool
-            assert '"skill_name": "str"' in calls[3][1]['inputs']
-            assert '"file_path": "str"' in calls[3][1]['inputs']
-            assert '"content": "str"' in calls[3][1]['inputs']
 
     def test_get_skill_script_tools_output_types(self):
         """Test that output types are correctly set for all tools"""
@@ -870,6 +971,8 @@ class TestGetSkillScriptTools:
                 desc = call[1]['description']
                 assert len(desc) > 0
                 assert isinstance(desc, str)
+                assert isinstance(call[1]["description_zh"], str)
+                assert call[1]["description_zh"]
 
     def test_get_skill_script_tools_injects_runtime_file_context(self):
         mock_tool_config.reset_mock()
@@ -885,7 +988,7 @@ class TestGetSkillScriptTools:
 
         calls = mock_tool_config.call_args_list
         assert calls[0][1]["params"]["workspace_path"] == file_context["workspace_path"]
-        for call in calls[4:]:
+        for call in calls[3:]:
             assert call[1]["metadata"] == file_context
             assert call[1]["params"]["workspace_path"] == file_context["workspace_path"]
 
@@ -1109,6 +1212,7 @@ class TestCreateToolConfigList:
                 class_name="TestTool",
                 name="test_tool",
                 description="A test tool",
+                description_zh=None,
                 inputs="string",
                 output_type="string",
                 params={"param1": "value1"},
@@ -2143,7 +2247,7 @@ class TestCreateAgentConfig:
         )
 
         mocks["build_components"].assert_called_once()
-        mocks["prepare_templates"].assert_awaited_once()
+        mocks["prepare_templates"].assert_not_awaited()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
         assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
@@ -2178,8 +2282,8 @@ class TestCreateAgentConfig:
     ):
         sdk_authorized_imports = ["sdk_default_import", "sdk_extra_import"]
         with patch(
-            "backend.agents.create_agent_info.os.getenv",
-            return_value=sandbox_default_level,
+            "backend.agents.create_agent_info.NEXENT_SANDBOX_DEFAULT_LEVEL",
+            sandbox_default_level,
         ), patch(
             "backend.agents.create_agent_info.get_local_python_authorized_imports",
             return_value=sdk_authorized_imports,
@@ -2198,6 +2302,9 @@ class TestCreateAgentConfig:
             ]
             == expected_authorized_imports
         )
+        assert mocks["build_components"].call_args.kwargs[
+            "sandbox_workspace_enabled"
+        ] is (sandbox_default_level != "local")
         if sandbox_default_level == "local":
             get_authorized_imports.assert_called_once_with()
         else:
@@ -2250,7 +2357,8 @@ class TestCreateAgentConfig:
             types.SimpleNamespace(name="run_skill_script"),
             types.SimpleNamespace(name="read_skill_md"),
             types.SimpleNamespace(name="read_skill_config"),
-            types.SimpleNamespace(name="write_skill_file"),
+            types.SimpleNamespace(name="download_from_s3"),
+            types.SimpleNamespace(name="upload_to_s3"),
         ]
         with patch(
             'backend.agents.create_agent_info._get_skill_script_tools',
@@ -2268,7 +2376,7 @@ class TestCreateAgentConfig:
         assert "run_skill_script" in context_tools
         assert "read_skill_md" in context_tools
         assert "read_skill_config" in context_tools
-        assert "write_skill_file" in context_tools
+        assert "write_skill_file" not in context_tools
         assert set(context_tools) == {tool.name for tool in agent_tools}
 
     @pytest.mark.asyncio
@@ -2280,7 +2388,8 @@ class TestCreateAgentConfig:
             types.SimpleNamespace(name="run_skill_script"),
             types.SimpleNamespace(name="read_skill_md"),
             types.SimpleNamespace(name="read_skill_config"),
-            types.SimpleNamespace(name="write_skill_file"),
+            types.SimpleNamespace(name="download_from_s3"),
+            types.SimpleNamespace(name="upload_to_s3"),
         ]
         with patch(
             'backend.agents.create_agent_info._get_skill_script_tools',
@@ -2297,7 +2406,7 @@ class TestCreateAgentConfig:
         assert "run_skill_script" in context_tools
         assert "read_skill_md" in context_tools
         assert "read_skill_config" in context_tools
-        assert "write_skill_file" in context_tools
+        assert "write_skill_file" not in context_tools
         assert set(context_tools) == {tool.name for tool in agent_tools}
 
     @pytest.mark.asyncio
@@ -2313,14 +2422,14 @@ class TestCreateAgentConfig:
         )
 
         mocks["build_components"].assert_called_once()
-        assert "system_prompt" not in mocks["prepare_templates"].call_args.kwargs
+        mocks["prepare_templates"].assert_not_called()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
         assert config.policy_layers["platform"]["processing_mode"] == "passthrough"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
-        """Test case for basic agent configuration creation"""
+        """UT-BE-DPR-010: basic agent keeps parallel tool's bilingual metadata."""
         # Reset module-level mock - parallel_executor appends an extra
         # ToolConfig call after create_tool_config_list returns.  Both
         # call history and side_effect must be cleared because prior
@@ -2371,7 +2480,7 @@ class TestCreateAgentConfig:
             mock_agent_config.assert_called_once_with(
                 name="test_agent",
                 description="test description",
-                prompt_templates={"system_prompt": "populated_system_prompt"},
+                prompt_templates=ANY,
                 tools=ANY,
                 max_steps=5,
                 requested_output_tokens=None,
@@ -2382,6 +2491,7 @@ class TestCreateAgentConfig:
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,
+                prompt_tool_policy_snapshot=ANY,
                 pre_run_tool_events=ANY,
                 capacity_snapshot=ANY,
                 context_budget_snapshot=ANY,
@@ -2396,6 +2506,8 @@ class TestCreateAgentConfig:
             assert len(pe_calls) == 1
             assert pe_calls[0][1]["name"] == "parallel_executor"
             assert pe_calls[0][1]["source"] == "local"
+            assert pe_calls[0][1]["description_zh"] == _mock_parallel_executor_tool_cls.description_zh
+            assert pe_calls[0][1]["description"] == _mock_parallel_executor_tool_cls.description
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):
@@ -2455,8 +2567,7 @@ class TestCreateAgentConfig:
                 mock_agent_config.assert_called_once_with(
                     name="test_agent",
                     description="test description",
-                    prompt_templates={
-                        "system_prompt": "populated_system_prompt"},
+                    prompt_templates=ANY,
                     tools=ANY,
                     max_steps=5,
                     requested_output_tokens=None,
@@ -2467,6 +2578,7 @@ class TestCreateAgentConfig:
                     external_a2a_agents=[],
                     context_manager_config=ANY,
                     context_items=ANY,
+                    prompt_tool_policy_snapshot=ANY,
                     pre_run_tool_events=ANY,
                     capacity_snapshot=ANY,
                     context_budget_snapshot=ANY,
@@ -2742,7 +2854,7 @@ class TestCreateAgentConfig:
             mock_agent_config.assert_called_with(
                 name="test_agent",
                 description="test description",
-                prompt_templates={"system_prompt": "populated_system_prompt"},
+                prompt_templates=ANY,
                 tools=ANY,
                 max_steps=5,
                 requested_output_tokens=None,
@@ -2753,6 +2865,7 @@ class TestCreateAgentConfig:
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,
+                prompt_tool_policy_snapshot=ANY,
                 pre_run_tool_events=ANY,
                 capacity_snapshot=None,
                 context_budget_snapshot=None,
@@ -3337,7 +3450,7 @@ class TestCreateAgentConfig:
             mock_logger.warning.assert_called_once()
             assert "idx_b" in mock_logger.warning.call_args[0][0]
 
-            mock_prepare_templates.assert_called_once()
+            mock_prepare_templates.assert_not_called()
             assert create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ] == "**idx_a**: AAA\n\n"
@@ -3549,7 +3662,7 @@ class TestCreateAgentConfig:
             mock_get_knowledge_name_map.assert_not_called()
 
             # Verify the SDK context component uses display names from metadata.
-            mock_prepare_templates.assert_called_once()
+            mock_prepare_templates.assert_not_called()
             knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ]
@@ -3649,7 +3762,7 @@ class TestCreateAgentConfig:
 
             # When metadata is empty, it should fall back to using index_name
             # as the display_name (no mapping available)
-            mock_prepare_templates.assert_called_once()
+            mock_prepare_templates.assert_not_called()
             knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summary"
             ]
@@ -3823,7 +3936,6 @@ class TestCreateAgentConfig:
                 assert last_tool.name == "parallel_executor"
                 assert last_tool.class_name == "ParallelExecutorTool"
                 assert last_tool.source == "local"
-
 
 class TestCreateModelConfigList:
     """Tests for the create_model_config_list function"""
@@ -5158,45 +5270,35 @@ class TestPreparePromptTemplates:
 
     @pytest.mark.asyncio
     async def test_prepare_prompt_templates_manager_zh(self):
-        """Test case for manager mode Chinese prompt templates"""
-        with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
-
-            mock_get_template.return_value = {"test": "template"}
-
+        """Manager templates are loaded once through the bundle boundary."""
+        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', wraps=_load_stub_prompt_bundle) as mock_loader:
             result = await prepare_prompt_templates(True, "zh")
-
-            mock_get_template.assert_called_once_with(True, "zh")
+            mock_loader.assert_called_once_with(is_manager=True, language="zh")
             assert result["system_prompt"] == ""
-            assert result["test"] == "template"
+            assert "manager_agent" in result
 
     @pytest.mark.asyncio
     async def test_prepare_prompt_templates_worker_en(self):
-        """Test case for worker mode English prompt templates"""
-        with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
-
-            mock_get_template.return_value = {"test": "template"}
-
+        """Worker templates are loaded once through the bundle boundary."""
+        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', wraps=_load_stub_prompt_bundle) as mock_loader:
             result = await prepare_prompt_templates(False, "en")
-
-            mock_get_template.assert_called_once_with(False, "en")
+            mock_loader.assert_called_once_with(is_manager=False, language="en")
             assert result["system_prompt"] == ""
-            assert result["test"] == "template"
+            assert "managed_agent" in result
 
     @pytest.mark.asyncio
     async def test_prepare_prompt_templates_clears_existing_system_prompt(self):
         """Template files cannot introduce a second stable-context source."""
-        with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
-            mock_get_template.return_value = {
-                "system_prompt": "stale prompt",
-                "user_prompt": "keep me",
-            }
-
+        stale_bundle = _composer_module.AgentPromptComposer.from_compatibility_templates(
+            {
+                "managed_agent": {"task": "{{task}}", "report": "{{final_answer}}"},
+                "system_prompt": "stale prompt", "user_prompt": "keep me",
+            },
+        ).bundle
+        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', return_value=stale_bundle):
             result = await prepare_prompt_templates(False, "en")
-
-            assert result == {
-                "system_prompt": "",
-                "user_prompt": "keep me",
-            }
+            assert result["system_prompt"] == ""
+            assert result["user_prompt"] == "keep me"
 
 
 class TestAdditionalAgentInfoCoverage:
@@ -5259,6 +5361,27 @@ class TestAdditionalAgentInfoCoverage:
 
         assert len(tools) == 2
         assert mock_tool_config.call_count == 2
+
+    def test_ut_be_dpr_006_plan_tools_follow_planning_mode(self):
+        """UT-BE-DPR-006: execution mode omits plan tools; planning mode adds both."""
+        tools = []
+        mock_tool_config.reset_mock()
+        first_tool = MagicMock(name="create_plan")
+        first_tool.name = "create_plan"
+        second_tool = MagicMock(name="update_plan_step")
+        second_tool.name = "update_plan_step"
+        mock_tool_config.side_effect = [first_tool, second_tool]
+
+        try:
+            create_agent_info_module._inject_plan_tools(tools, False)
+            assert tools == []
+            assert mock_tool_config.call_count == 0
+
+            create_agent_info_module._inject_plan_tools(tools, True)
+        finally:
+            mock_tool_config.side_effect = None
+
+        assert [tool.name for tool in tools] == ["create_plan", "update_plan_step"]
 
     def test_resolve_runtime_tool_records_rejects_missing_or_unavailable_dependency(self):
         common_patches = (

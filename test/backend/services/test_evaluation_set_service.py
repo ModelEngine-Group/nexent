@@ -54,6 +54,10 @@ _nexent_pkg.monitor = _nexent_monitor
 _nexent_pkg.storage = _nexent_storage
 _nexent_core.agents = _nexent_core_agents
 _nexent_core.utils = _nexent_core_utils
+_nexent_core_prompts = types.ModuleType("nexent.core.prompts")
+_nexent_core_prompts.load_prompt = MagicMock()
+sys.modules["nexent.core.prompts"] = _nexent_core_prompts
+_nexent_core.prompts = _nexent_core_prompts
 
 _agent_model_mock = MagicMock()
 
@@ -990,7 +994,7 @@ class TestPlanSearchQueries:
         )
         monkeypatch.setattr(
             service,
-            "get_prompt_template",
+            "load_prompt",
             MagicMock(return_value={"SYSTEM_PROMPT": "sp"}),
         )
         monkeypatch.setattr(
@@ -1007,7 +1011,7 @@ class TestPlanSearchQueries:
             service, "_build_kb_descriptions", MagicMock(return_value="block")
         )
         monkeypatch.setattr(
-            service, "get_prompt_template", MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+            service, "load_prompt", MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         )
         monkeypatch.setattr(
             service, "call_llm_for_system_prompt", MagicMock(side_effect=ValueError("x"))
@@ -1297,7 +1301,7 @@ class TestBuildCaseGenUserPrompt:
         service, _ = service_module
         monkeypatch.setattr(
             service,
-            "get_prompt_template",
+            "load_prompt",
             MagicMock(
                 return_value={
                     "USER_PROMPT_INSTRUCTION": "use {{sources}} count {{count}} max {{max_turns}}"
@@ -1315,7 +1319,7 @@ class TestBuildCaseGenUserPrompt:
     def test_returns_context_when_no_instruction(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service, "get_prompt_template", MagicMock(return_value={})
+            service, "load_prompt", MagicMock(return_value={})
         )
         prompt = service._build_case_gen_user_prompt(["ctx1"], 1, "", None, None)
         assert prompt == "ctx1"
@@ -1391,7 +1395,7 @@ class TestCallLlmAndExtractCases:
         service, _ = service_module
         monkeypatch.setattr(
             service,
-            "get_prompt_template",
+            "load_prompt",
             MagicMock(return_value={"SYSTEM_PROMPT": "sp {{max_turns}}"}),
         )
         monkeypatch.setattr(
@@ -1410,7 +1414,7 @@ class TestCallLlmAndExtractCases:
         service, _ = service_module
         monkeypatch.setattr(
             service,
-            "get_prompt_template",
+            "load_prompt",
             MagicMock(return_value={"SYSTEM_PROMPT": "sp"}),
         )
         monkeypatch.setattr(

@@ -18,7 +18,7 @@ class TestContentClassifier:
         )
         events.extend(classifier.flush())
 
-        assert all("FINAL_ANSWER" not in event.get("content", "") for event in events)
+        assert all("<FINAL_ANSWER>" not in event.get("content", "") for event in events)
         assert any(event["type"] == "skill_body" and "# Demo" in event["content"] for event in events)
         assert any(event["type"] == "summary" and "Created." in event["content"] for event in events)
         assert classifier.saw_control_tag is True

@@ -19,7 +19,7 @@ from consts.model import HistoryItem, NL2SkillRunRequest
 from database.model_management_db import get_model_by_model_id
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.content_classifier_utils import ContentClassifier
-from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
+from utils.prompt_template_utils import get_nl2skill_prompt_template
 from services.thread_lifecycle_service import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
@@ -183,10 +183,9 @@ async def build_nl2skill_run_info(
     template_language = LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
     target_files = _extract_target_files(request.query, request.draft_snapshot)
     draft_snapshot = _normalize_draft_snapshot(request.draft_snapshot)
-    template = get_skill_creation_simple_prompt_template(
+    template = get_nl2skill_prompt_template(
         language=template_language,
         existing_skill=draft_snapshot,
-        complexity=request.complexity,
         user_request=request.query,
         target_files=target_files,
     )

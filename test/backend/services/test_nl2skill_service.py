@@ -31,7 +31,7 @@ def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     assert config.instructions == "system"
     assert config.tools == []
     assert config.max_steps == 5
-    assert config.output_protocol == "final_answer_envelope"
+    assert config.output_protocol == "final_envelope"
     assert config.provide_run_summary is False
     assert config.enable_planning is False
 
@@ -160,7 +160,7 @@ def test_resolve_model_for_nl2skill_rejects_missing_requested_or_any_model(mocke
 @pytest.mark.asyncio
 async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker):
     model_config = {"cite_name": "main_model", "model_name": "primary"}
-    mocker.patch.object(nl2skill_service, "get_skill_creation_simple_prompt_template", return_value={
+    prompt_loader = mocker.patch.object(nl2skill_service, "get_nl2skill_prompt_template", return_value={
         "system_prompt": "system", "user_prompt": "rendered query"
     })
     mocker.patch.object(nl2skill_service, "create_model_config_list", new_callable=AsyncMock, return_value=[model_config])
@@ -176,6 +176,8 @@ async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker)
     )
 
     assert result.query == "rendered query"
+    prompt_loader.assert_called_once()
+    assert "complexity" not in prompt_loader.call_args.kwargs
     assert result.agent_config is agent_config
     assert [(item.role, item.content) for item in result.history] == [("user", "old")]
     assert result.enable_planning is False
@@ -183,7 +185,7 @@ async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker)
 
 @pytest.mark.asyncio
 async def test_build_nl2skill_run_info_requires_at_least_one_model(mocker):
-    mocker.patch.object(nl2skill_service, "get_skill_creation_simple_prompt_template", return_value={})
+    mocker.patch.object(nl2skill_service, "get_nl2skill_prompt_template", return_value={})
     mocker.patch.object(nl2skill_service, "create_model_config_list", new_callable=AsyncMock, return_value=[])
 
     with pytest.raises(ValueError, match="No LLM model"):
@@ -233,7 +235,7 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
         for item in payloads
     )
     assert any(item["type"] == "summary" for item in payloads)
-    assert not any("FINAL_ANSWER" in item.get("content", "") for item in payloads)
+    assert not any("</FINAL_ANSWER>" in item.get("content", "") for item in payloads)
     assert not any(item.get("content") == "duplicate" for item in payloads)
     assert payloads[-1]["type"] == "done"
     assert stop_event.is_set()

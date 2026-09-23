@@ -5,12 +5,11 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import as_completed
-from pathlib import Path
 
-import yaml
 from consts.const import MODEL_CONFIG_MAPPING
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.models import OpenAIModel
+from nexent.core.prompts import load_prompt
 from nexent.memory.dreaming import (
     DreamingSummarizationOutput,
     DreamingSummarizationRequest,
@@ -20,18 +19,14 @@ from nexent.monitor import (
     agent_monitoring_context,
     set_monitoring_operation,
 )
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from services.thread_lifecycle_service import config_thread_manager
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 logger = logging.getLogger(__name__)
 
 DREAMING_SUMMARIZATION_MAX_WORKERS = 3
-_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "dreaming_user_memory_en.yaml"
-
-
 def _load_prompt() -> dict:
-    with _PROMPT_PATH.open(encoding="utf-8") as stream:
-        prompt = yaml.safe_load(stream)
+    prompt = load_prompt("en", "memory/dreaming_user")
     if not isinstance(prompt, dict) or not prompt.get("system") or not prompt.get("user"):
         raise RuntimeError("Dreaming summary prompt is invalid")
     return prompt

@@ -2669,46 +2669,6 @@ class TestCreateBuiltinTool:
         )
         assert result is mock_tool_instance
 
-    def test_create_builtin_tool_write_skill_file_tool(self, nexent_agent_instance):
-        """Test create_builtin_tool creates WriteSkillFileTool with the correct arguments.
-
-        Covers the WriteSkillFileTool branch (lines 345-353) and verifies that
-        all four constructor parameters are forwarded correctly.
-        """
-        mock_tool_instance = MagicMock(name="WriteSkillFileToolInstance")
-        mock_tool_class = MagicMock(return_value=mock_tool_instance, name="WriteSkillFileTool")
-        mock_write_skill_file_tool_module = MagicMock()
-        mock_write_skill_file_tool_module.WriteSkillFileTool = mock_tool_class
-
-        tool_config = ToolConfig(
-            class_name="WriteSkillFileTool",
-            name="write_skill_file",
-            description="desc",
-            inputs="{}",
-            output_type="string",
-            params={"local_skills_dir": "/tmp/skills"},
-            source="builtin",
-            metadata={
-                "agent_id": 21,
-                "tenant_id": "tenant_write",
-                "version_no": 5,
-            },
-        )
-
-        with patch.dict(
-            "sys.modules",
-            {"nexent.core.tools.write_skill_file_tool": mock_write_skill_file_tool_module},
-        ):
-            result = nexent_agent_instance.create_builtin_tool(tool_config)
-
-        mock_tool_class.assert_called_once_with(
-            local_skills_dir="/tmp/skills",
-            agent_id=21,
-            tenant_id="tenant_write",
-            version_no=5,
-        )
-        assert result is mock_tool_instance
-
     def test_create_builtin_tool_read_skill_config_tool(self, nexent_agent_instance):
         """Test create_builtin_tool creates ReadSkillConfigTool with the correct arguments.
 
@@ -3803,7 +3763,7 @@ class TestCreateSingleAgent:
             tools=[],
             max_steps=5,
             model_name="test_model",
-            output_protocol="final_answer_envelope",
+            output_protocol="final_envelope",
         )
 
         with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
@@ -3815,7 +3775,7 @@ class TestCreateSingleAgent:
         context_runtime = mock_core_agent_fn.call_args.kwargs["context_runtime"]
         assert result is mock_core_agent
         assert context_runtime.items == [context_item]
-        assert mock_core_agent_fn.call_args.kwargs["output_protocol"] == "final_answer_envelope"
+        assert mock_core_agent_fn.call_args.kwargs["output_protocol"] == "final_envelope"
 
     def test_create_single_agent_with_prompt_templates(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent correctly passes prompt_templates."""
@@ -4542,6 +4502,21 @@ class TestCreateBuiltinTool:
 
 
 class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
+    def test_create_builtin_tool_rejects_removed_write_skill_file(self, nexent_agent_instance):
+        """UT-SDK-DPR-011: The removed skill-writing tool cannot be constructed."""
+        tool_config = ToolConfig(
+            class_name="WriteSkillFileTool",
+            name="write_skill_file",
+            description="removed",
+            inputs="{}",
+            output_type="string",
+            params={},
+            source="builtin",
+        )
+
+        with pytest.raises(ValueError, match="Unknown builtin tool: WriteSkillFileTool"):
+            nexent_agent_instance.create_builtin_tool(tool_config)
+
     @pytest.mark.parametrize("class_name", ["DownloadFromS3Tool", "UploadToS3Tool"])
     def test_create_local_s3_tool_injects_runtime_context(
         self, nexent_agent_instance, class_name
@@ -4680,11 +4655,10 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             result = nexent_agent_instance._prepare_file_workspace("query")
 
         assert "Run workspace" in result
-        assert "Use bare relative paths" in result
-        assert "not 'outputs/report.pdf'" in result
-        assert "script_path='outputs/build.js'" in result
-        assert "Direct subprocess, os.system, and shell calls" in result
-        assert "sys.executable -m pip install" in result
+        assert f"Write every generated file under: {workspace / 'outputs'}" in result
+        assert "Use bare relative paths" not in result
+        assert "script_path='outputs/build.js'" not in result
+        assert "Direct subprocess, os.system, and shell calls" not in result
         push.assert_called_once_with()
 
     def test_initialize_sandbox_workspaces_sets_cwd_for_every_docker_kernel(
@@ -5243,40 +5217,6 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         with patch.dict("sys.modules", {
             "nexent.core.tools.read_skill_md_tool": MagicMock(
                 ReadSkillMdTool=mock_tool_class,
-            )
-        }):
-            result = nexent_agent_instance.create_builtin_tool(tool_config)
-            assert result is mock_tool_instance
-            mock_tool_class.assert_called_once_with(
-                local_skills_dir="/tmp/skills",
-                agent_id="agent_123",
-                tenant_id="tenant_456",
-                version_no=1,
-            )
-
-    def test_create_builtin_tool_write_skill_file(self, nexent_agent_instance):
-        """Test create_builtin_tool with WriteSkillFileTool."""
-        tool_config = ToolConfig(
-            class_name="WriteSkillFileTool",
-            name="write_skill_file",
-            description="Write skill file",
-            inputs="{}",
-            output_type="string",
-            params={"local_skills_dir": "/tmp/skills"},
-            source="builtin",
-            metadata={
-                "agent_id": "agent_123",
-                "tenant_id": "tenant_456",
-                "version_no": 1
-            },
-        )
-
-        mock_tool_instance = MagicMock()
-        mock_tool_class = MagicMock(return_value=mock_tool_instance)
-
-        with patch.dict("sys.modules", {
-            "nexent.core.tools.write_skill_file_tool": MagicMock(
-                WriteSkillFileTool=mock_tool_class,
             )
         }):
             result = nexent_agent_instance.create_builtin_tool(tool_config)

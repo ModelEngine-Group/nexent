@@ -5,15 +5,11 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
-import yaml
+from nexent.core.prompts import load_prompt
 from nexent.memory.models import MemoryLayer, MemoryType
 
 logger = logging.getLogger("fa_memory_extractor")
-
-_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "fa_memory_extraction_en.yaml"
-
 
 @dataclass
 class ExtractionResult:
@@ -44,9 +40,7 @@ class FaMemoryExtractor:
         self.model_client = model_client
 
     def _load_prompt(self) -> dict:
-        with _PROMPT_PATH.open(encoding="utf-8") as stream:
-            prompt = yaml.safe_load(stream)
-        return prompt
+        return load_prompt("en", "memory/fa_extraction")
 
     def _build_messages(self, final_answer: str, user_query: str = "") -> list[dict]:
         prompt = self._load_prompt()

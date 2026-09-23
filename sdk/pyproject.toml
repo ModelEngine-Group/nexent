@@ -102,7 +102,7 @@ exclude = ["tests*", "examples*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"nexent.core.prompts" = ["*.yaml"]
+"nexent.core.prompts" = ["zh/*/*.yaml", "en/*/*.yaml"]
 "nexent.assets" = ["*.png", "*.jpg", "*.gif", "*.webp"]
 
 [tool.ruff]

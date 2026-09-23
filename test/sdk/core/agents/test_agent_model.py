@@ -54,7 +54,6 @@ def _create_mock_smolagents():
     setattr(mock_smolagents, "agents", agents_mod)
 
     local_python_mod = ModuleType("smolagents.local_python_executor")
-    setattr(local_python_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     setattr(mock_smolagents, "local_python_executor", local_python_mod)
 
     memory_mod = ModuleType("smolagents.memory")

@@ -300,7 +300,7 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
     ) -> None:
         request_id = f"chatcmpl-mock-{uuid.uuid4().hex}"
         model = payload["model"]
-        code = f'<code>final_answer({json.dumps(answer)})</code>' if answer else ""
+        code = f'<FINAL_ANSWER>{answer}</FINAL_ANSWER>' if answer else ""
         chunks = [
             self._completion_chunk(
                 request_id=request_id,
@@ -380,7 +380,7 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
     def _send_non_stream_response(
         self, payload: dict[str, Any], answer: str, finish_reason: str
     ) -> None:
-        code = f'<code>final_answer({json.dumps(answer)})</code>' if answer else ""
+        code = f'<FINAL_ANSWER>{answer}</FINAL_ANSWER>' if answer else ""
         self._send_json(
             HTTPStatus.OK,
             {

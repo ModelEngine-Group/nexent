@@ -15,11 +15,8 @@ from database.prompt_template_db import (
     upsert_prompt_template_by_id,
     update_prompt_template,
 )
-from utils.prompt_template_utils import (
-    get_prompt_generate_prompt_template,
-    merge_prompt_generate_templates,
-    normalize_prompt_generate_template_content,
-)
+from nexent.core.prompts import load_prompt
+from utils.prompt_template_utils import merge_prompt_generate_templates, normalize_prompt_generate_template_content
 
 logger = logging.getLogger("prompt_template_service")
 
@@ -50,10 +47,10 @@ def _normalize_prompt_template_entity(template: Optional[dict]) -> Optional[dict
 def build_system_default_prompt_template_payload() -> dict:
     """Build the canonical system default prompt template payload from YAML files."""
     system_template_zh = normalize_prompt_generate_template_content(
-        get_prompt_generate_prompt_template(LANGUAGE["ZH"])
+        load_prompt(LANGUAGE["ZH"], "meta/generate_prompt")
     )
     system_template_en = normalize_prompt_generate_template_content(
-        get_prompt_generate_prompt_template(LANGUAGE["EN"])
+        load_prompt(LANGUAGE["EN"], "meta/generate_prompt")
     )
     return {
         "template_id": SYSTEM_PROMPT_TEMPLATE_ID,

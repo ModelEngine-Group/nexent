@@ -55,6 +55,7 @@ class _CodeAgent:
         self.tools = kwargs.get("tools", {}) or {}
         self.managed_agents = kwargs.get("managed_agents", {}) or {}
         self.code_block_tags = ["python", ""]
+        self.python_executor = SimpleNamespace(functions={}, tools={})
 
 
 mock_agents.CodeAgent = _CodeAgent
@@ -66,7 +67,6 @@ mock_smolagents.agents = mock_agents
 sys.modules["smolagents.agents"] = mock_agents
 
 mock_lpe = _mock_module("smolagents.local_python_executor")
-mock_lpe.fix_final_answer_code = lambda x: x
 sys.modules["smolagents.local_python_executor"] = mock_lpe
 
 mock_memory = _mock_module("smolagents.memory")
@@ -210,6 +210,10 @@ contracts_mod.ContextRuntime = type("ContextRuntime", (), {})
 # token_estimation stub
 token_mod = _sdk_pkg("sdk.nexent.core.utils.token_estimation")
 token_mod.msg_token_count = lambda *a, **k: 0
+
+# Agent prompt composer stub
+prompt_mod = _sdk_pkg("sdk.nexent.core.agents.prompt")
+prompt_mod.AgentPromptComposer = MagicMock()
 
 # context budget helper stub
 budget_mod = _sdk_pkg("sdk.nexent.core.agents.context.budget")

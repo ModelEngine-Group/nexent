@@ -1024,7 +1024,6 @@ export const conversationService = {
       expected_metadata_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
       draft_snapshot?: Record<string, unknown>;
-      complexity?: "simple" | "complicated";
       language?: "zh" | "en";
     },
     signal?: AbortSignal,
@@ -1046,7 +1045,6 @@ export const conversationService = {
       };
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
-        requestParams.complexity = params.complexity || "complicated";
         requestParams.language = params.language;
       }
 
