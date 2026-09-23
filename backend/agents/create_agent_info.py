@@ -89,6 +89,8 @@ from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 
+from .tool_user_context import resolve_tool_user_context
+
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
 
@@ -2473,5 +2475,6 @@ async def create_agent_run_info(
         tenant_id=tenant_id,
         minio_files=minio_files,
         redis_client=get_redis_client(),
+        user_context=resolve_tool_user_context(agent_config, user_id, tenant_id),
     )
     return agent_run_info

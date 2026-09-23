@@ -4148,6 +4148,7 @@ class TestCreateAgentRunInfo:
                 workspace_run_id=ANY,
                 tenant_id="tenant_1",
                 minio_files=[],
+                user_context=None,
             )
 
             # Verify that other functions were called correctly

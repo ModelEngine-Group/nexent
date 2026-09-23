@@ -262,6 +262,11 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
 def agent_run_thread(agent_run_info: AgentRunInfo):
     try:
+        # Keep the runner compatible with legacy/lightweight AgentRunInfo
+        # stand-ins used by integrations.  Full AgentRunInfo instances always
+        # define this field, but its absence must not prevent a run that does
+        # not need tool-side authorization context.
+        user_context = getattr(agent_run_info, "user_context", None)
         set_monitoring_capacity_snapshot(
             getattr(agent_run_info, "capacity_snapshot", None)
         )
@@ -276,6 +281,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 model_config_list=agent_run_info.model_config_list,
                 stop_event=agent_run_info.stop_event,
                 redis_client=agent_run_info.redis_client,
+                user_context=user_context,
                 sandbox_config=getattr(agent_run_info, "sandbox_config", None),
                 minio_client=getattr(agent_run_info, "minio_client", None),
                 conversation_id=agent_run_info.conversation_id,
@@ -321,6 +327,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     stop_event=agent_run_info.stop_event,
                     mcp_tool_collection=tool_collection,
                     redis_client=agent_run_info.redis_client,
+                    user_context=user_context,
                     sandbox_config=getattr(agent_run_info, "sandbox_config", None),
                     minio_client=getattr(agent_run_info, "minio_client", None),
                     conversation_id=agent_run_info.conversation_id,
