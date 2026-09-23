@@ -1015,6 +1015,16 @@ export const conversationService = {
       }>;
       agent_id?: number; // Add agent_id parameter
       model_id?: number; // Optional model override
+      reasoning_effort?:
+        | "auto"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max";
+      reasoning_budget_tokens?: number;
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
@@ -1064,6 +1074,25 @@ export const conversationService = {
       }
       if (params.model_id !== undefined && params.model_id !== null) {
         requestParams.model_id = params.model_id;
+      }
+      const budgetTokens = params.reasoning_budget_tokens;
+      const hasBudgetSelection =
+        typeof budgetTokens === "number" &&
+        Number.isInteger(budgetTokens) &&
+        budgetTokens >= 0;
+      if (
+        !hasBudgetSelection &&
+        params.reasoning_effort !== undefined &&
+        params.reasoning_effort !== "auto"
+      ) {
+        requestParams.reasoning_effort = params.reasoning_effort;
+      }
+      if (
+        hasBudgetSelection &&
+        budgetTokens !== undefined &&
+        budgetTokens > 0
+      ) {
+        requestParams.reasoning_budget_tokens = budgetTokens;
       }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;

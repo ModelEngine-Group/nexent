@@ -61,6 +61,7 @@ from services.model_management_service import (
     get_capacity_coverage,
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
+    get_model_reasoning_capability,
 )
 from utils.auth_utils import get_current_user_id
 from consts.exceptions import TokenExpiredError
@@ -143,7 +144,10 @@ def _catalog_unavailable_response(status_code: HTTPStatus, **extra: Any) -> JSON
     return JSONResponse(status_code=status_code, content=content)
 
 
-def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionResponse:
+def _capacity_suggestion_response_to_model(
+    result,
+    reasoning_capability: Optional[dict] = None,
+) -> ModelCapacitySuggestionResponse:
     suggestions = None
     if result.suggestions is not None:
         suggestions = CapacitySuggestionFields(
@@ -156,6 +160,7 @@ def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionRes
 
     return ModelCapacitySuggestionResponse(
         suggestions=suggestions,
+        reasoning_capability=reasoning_capability,
         match_kind=result.match_kind.value,
         match_confidence=result.match_confidence.value if result.match_confidence else None,
         match_explanation=result.match_explanation,
@@ -174,7 +179,12 @@ def _suggest_capacity_for_request(request: ModelCapacitySuggestionRequest) -> Mo
         model_type=request.model_type,
         enabled=CAPACITY_SUGGESTION_ENABLED,
     )
-    return _capacity_suggestion_response_to_model(result)
+    reasoning_capability = get_model_reasoning_capability(
+        model_name=request.model_name,
+        base_url=request.base_url,
+        provider_hint=request.provider_hint,
+    )
+    return _capacity_suggestion_response_to_model(result, reasoning_capability)
 
 
 def _capacity_suggestion_for_model_request(request: ModelRequest):

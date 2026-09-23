@@ -185,9 +185,9 @@ export const ModelConfigSection = forwardRef<
   const [searchKeyword, setSearchKeyword] = useState<string>("");
   const [filterType, setFilterType] = useState<ModelType | "all">("all");
   const [filterSource, setFilterSource] = useState<ModelSource | "all">("all");
-  const [filterStatus, setFilterStatus] = useState<
-    ModelConnectStatus | "all"
-  >("all");
+  const [filterStatus, setFilterStatus] = useState<ModelConnectStatus | "all">(
+    "all"
+  );
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(12);
 
@@ -249,7 +249,10 @@ export const ModelConfigSection = forwardRef<
         }, 100);
       }
     };
-    window.addEventListener("highlightMissingField", handleHighlightMissingField);
+    window.addEventListener(
+      "highlightMissingField",
+      handleHighlightMissingField
+    );
     return () =>
       window.removeEventListener(
         "highlightMissingField",
@@ -285,12 +288,9 @@ export const ModelConfigSection = forwardRef<
   };
 
   /* ------------------ Card-level edit / delete ------------------ */
-  const handleCardEdit = useCallback(
-    (model: ModelOption) => {
-      setEditingCardModel(model);
-    },
-    []
-  );
+  const handleCardEdit = useCallback((model: ModelOption) => {
+    setEditingCardModel(model);
+  }, []);
 
   const handleCardDelete = useCallback(
     async (model: ModelOption) => {
@@ -445,9 +445,7 @@ export const ModelConfigSection = forwardRef<
         dataIndex: "source",
         key: "source",
         width: 130,
-        render: (source: ModelSource) => (
-          <Tag>{source}</Tag>
-        ),
+        render: (source: ModelSource) => <Tag>{source}</Tag>,
       },
       {
         title: t("modelConfig.table.col.connectStatus", {
@@ -492,7 +490,8 @@ export const ModelConfigSection = forwardRef<
         key: "maxOutput",
         width: 100,
         render: (_: any, m: ModelOption) => {
-          if (!m.maxOutputTokens) return <span className="text-gray-400">—</span>;
+          if (!m.maxOutputTokens)
+            return <span className="text-gray-400">—</span>;
           return <span>{m.maxOutputTokens.toLocaleString()}</span>;
         },
       },
@@ -662,12 +661,14 @@ export const ModelConfigSection = forwardRef<
       const llmMain = cfg.llm.displayName;
       const llmMainExists = exists(llmMain, (m) => m.type === MODEL_TYPES.LLM);
       const embedding = cfg.embedding.displayName;
-      const embeddingExists = exists(embedding, (m) =>
-        m.type === MODEL_TYPES.EMBEDDING
+      const embeddingExists = exists(
+        embedding,
+        (m) => m.type === MODEL_TYPES.EMBEDDING
       );
       const multiEmbedding = cfg.multiEmbedding.displayName;
-      const multiEmbeddingExists = exists(multiEmbedding, (m) =>
-        m.type === MODEL_TYPES.MULTI_EMBEDDING
+      const multiEmbeddingExists = exists(
+        multiEmbedding,
+        (m) => m.type === MODEL_TYPES.MULTI_EMBEDDING
       );
       const rerank = cfg.rerank.displayName;
       const rerankExists = exists(rerank, (m) => m.type === MODEL_TYPES.RERANK);
@@ -783,8 +784,10 @@ export const ModelConfigSection = forwardRef<
   ) => {
     if (isVerifying) return;
     if (allModels.length === 0) return;
-    const currentSelectedModels: Record<string, Record<string, string>> =
-      modelsToCheck || structuredClone(selectedModels);
+    const currentSelectedModels: Record<
+      string,
+      Record<string, string>
+    > = modelsToCheck || structuredClone(selectedModels);
 
     let hasSelectedModels = false;
     outer: for (const cat in currentSelectedModels) {
@@ -948,7 +951,9 @@ export const ModelConfigSection = forwardRef<
             );
           } catch (error: any) {
             log.error(
-              t("modelConfig.error.verifyCustomModel", { model: m.displayName }),
+              t("modelConfig.error.verifyCustomModel", {
+                model: m.displayName,
+              }),
               error
             );
             updateModelStatus(m.displayName, m.type, MODEL_STATUS.UNAVAILABLE);
@@ -966,10 +971,7 @@ export const ModelConfigSection = forwardRef<
   };
 
   /* ------------------ Verify single ------------------ */
-  const verifyOneModel = async (
-    displayName: string,
-    modelType: ModelType
-  ) => {
+  const verifyOneModel = async (displayName: string, modelType: ModelType) => {
     if (!displayName) return;
     updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
     if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
@@ -1167,19 +1169,34 @@ export const ModelConfigSection = forwardRef<
   /* ------------------ Select options ------------------ */
   const modelTypeOptions = useMemo(() => {
     const list: { value: ModelType | "all"; label: string }[] = [
-      { value: "all", label: t("model.filter.allTypes", { defaultValue: "全部类型" }) },
+      {
+        value: "all",
+        label: t("model.filter.allTypes", { defaultValue: "全部类型" }),
+      },
     ];
     const map: [ModelType, string][] = [
       [MODEL_TYPES.LLM, t("model.type.llm", { defaultValue: "大语言模型" })],
-      [MODEL_TYPES.EMBEDDING, t("model.type.embedding", { defaultValue: "文本嵌入" })],
+      [
+        MODEL_TYPES.EMBEDDING,
+        t("model.type.embedding", { defaultValue: "文本嵌入" }),
+      ],
       [
         MODEL_TYPES.MULTI_EMBEDDING,
         t("model.type.multiEmbedding", { defaultValue: "多模态嵌入" }),
       ],
       [MODEL_TYPES.RERANK, t("model.type.rerank", { defaultValue: "重排" })],
-      [MODEL_TYPES.VLM, t("model.type.imageUnderstanding", { defaultValue: "图像理解" })],
-      [MODEL_TYPES.VLM2, t("model.type.imageGeneration", { defaultValue: "图像生成" })],
-      [MODEL_TYPES.VLM3, t("model.type.videoUnderstanding", { defaultValue: "视频理解" })],
+      [
+        MODEL_TYPES.VLM,
+        t("model.type.imageUnderstanding", { defaultValue: "图像理解" }),
+      ],
+      [
+        MODEL_TYPES.VLM2,
+        t("model.type.imageGeneration", { defaultValue: "图像生成" }),
+      ],
+      [
+        MODEL_TYPES.VLM3,
+        t("model.type.videoUnderstanding", { defaultValue: "视频理解" }),
+      ],
       [MODEL_TYPES.STT, t("model.type.stt", { defaultValue: "语音识别" })],
       [MODEL_TYPES.TTS, t("model.type.tts", { defaultValue: "语音合成" })],
     ];
@@ -1189,17 +1206,29 @@ export const ModelConfigSection = forwardRef<
 
   const modelSourceOptions = useMemo(() => {
     const list: { value: ModelSource | "all"; label: string }[] = [
-      { value: "all", label: t("model.filter.allSources", { defaultValue: "全部来源" }) },
+      {
+        value: "all",
+        label: t("model.filter.allSources", { defaultValue: "全部来源" }),
+      },
     ];
     const sMap: [ModelSource, string][] = [
       [MODEL_SOURCES.MODELENGINE, "ModelEngine"],
       [MODEL_SOURCES.SILICON, "SiliconFlow"],
       [MODEL_SOURCES.OPENAI, "OpenAI"],
       [MODEL_SOURCES.OPENAI_API_COMPATIBLE, "OpenAI-API-Compatible"],
-      [MODEL_SOURCES.CUSTOM, t("model.source.custom", { defaultValue: "自定义" })],
+      [
+        MODEL_SOURCES.CUSTOM,
+        t("model.source.custom", { defaultValue: "自定义" }),
+      ],
       [MODEL_SOURCES.DASHSCOPE, "DashScope"],
       [MODEL_SOURCES.TOKENPONY, "TokenPony"],
       [MODEL_SOURCES.VOLCENGINE, "VolcEngine"],
+      [MODEL_SOURCES.DEEPSEEK, "DeepSeek"],
+      [MODEL_SOURCES.ZHIPU, "智谱 Z.AI"],
+      [MODEL_SOURCES.ANTHROPIC, "Anthropic Claude"],
+      [MODEL_SOURCES.GOOGLE, "Google Gemini"],
+      [MODEL_SOURCES.MISTRAL, "Mistral"],
+      [MODEL_SOURCES.XAI, "xAI Grok"],
     ];
     sMap.forEach(([v, l]) => list.push({ value: v, label: l }));
     return list;
@@ -1364,9 +1393,7 @@ export const ModelConfigSection = forwardRef<
             <Select
               style={{ width: "100%" }}
               value={filterStatus}
-              onChange={(v) =>
-                setFilterStatus(v as ModelConnectStatus | "all")
-              }
+              onChange={(v) => setFilterStatus(v as ModelConnectStatus | "all")}
               options={statusOptions}
             />
           </Col>

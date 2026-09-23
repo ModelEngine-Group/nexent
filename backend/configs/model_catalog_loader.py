@@ -13,10 +13,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
-from consts.const import MODEL_CATALOG_JSON_PATH
+from consts.const import MODEL_CATALOG_JSON_PATH, MODELS_DEV_CATALOG_JSON_PATH
 from consts.model import ModelCatalogProfile, ModelCatalogProviderInfo
 
 logger = logging.getLogger("model_catalog")
@@ -32,6 +34,11 @@ _load_lock = threading.Lock()
 #: In-memory normalized catalog.  ``None`` means "not loaded yet"; an empty
 #: dict means "loaded but empty / file was missing".
 _catalog_cache: Optional[Dict[str, Any]] = None
+
+# Raw models.dev data is kept separate from the operator-maintained Nexent
+# catalog.  A missing downloaded file intentionally falls back to the legacy
+# resolver; an existing file is authoritative and prevents stale heuristics.
+_models_dev_cache: Optional[Dict[str, Any]] = None
 
 
 # =============================================================================
@@ -78,9 +85,30 @@ def _safe_load_json(path: str) -> Dict[str, Any]:
     return data
 
 
+def _load_models_dev_catalog(force_reload: bool = False) -> Optional[Dict[str, Any]]:
+    """Load the build-time models.dev snapshot, returning None when unavailable."""
+    global _models_dev_cache
+    if _models_dev_cache is not None and not force_reload:
+        return _models_dev_cache
+    if not MODELS_DEV_CATALOG_JSON_PATH or not os.path.isfile(MODELS_DEV_CATALOG_JSON_PATH):
+        return None
+    try:
+        with open(MODELS_DEV_CATALOG_JSON_PATH, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load models.dev catalog: %s", exc)
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("providers"), dict):
+        logger.warning("Ignoring malformed models.dev catalog: providers must be a mapping")
+        return None
+    _models_dev_cache = data
+    return data
+
+
 def _normalize_provider_models(
     provider_id_str: str,
     base_url: str,
+    provider_factory: Optional[str],
     raw_models: Any,
 ) -> Dict[str, ModelCatalogProfile]:
     """Normalize the raw ``models`` mapping of one provider into profiles."""
@@ -96,7 +124,7 @@ def _normalize_provider_models(
         try:
             profile = _build_model_profile(
                 provider_base_url=base_url,
-                provider_factory=None,
+                provider_factory=provider_factory,
                 model_name=model_name_str,
                 raw=model_raw,
             )
@@ -121,12 +149,14 @@ def _normalize_provider(provider_id: Any, provider_raw: Any) -> Optional[Dict[st
 
     display_name = str(provider_raw.get("display_name") or provider_id_str)
     base_url = str(provider_raw.get("base_url") or "").strip()
+    provider_factory = _raw_nonempty_str(provider_raw, "model_factory")
 
     return {
         "display_name": display_name,
         "base_url": base_url,
+        "model_factory": provider_factory,
         "models": _normalize_provider_models(
-            provider_id_str, base_url, provider_raw.get("models")
+            provider_id_str, base_url, provider_factory, provider_raw.get("models")
         ),
     }
 
@@ -263,6 +293,7 @@ def _build_model_profile(
         timeout_seconds=_raw_positive_int(raw, "timeout_seconds"),
         concurrency_limit=_raw_positive_int(raw, "concurrency_limit"),
         capability_profile_version=_raw_nonempty_str(raw, "capability_profile_version"),
+        reasoning_capability=raw.get("reasoning_capability"),
         requires_appid=_raw_bool(raw, "requires_appid"),
         requires_access_token=_raw_bool(raw, "requires_access_token"),
         forced_temperature=_raw_forced_temperature(raw),
@@ -369,7 +400,39 @@ def get_model_profile(
     if not provider:
         return None
     models = provider.get("models") or {}
-    return models.get(str(model_name).strip())
+    profile = models.get(str(model_name).strip())
+    if profile is None:
+        return None
+    return _enrich_catalog_profile_reasoning(provider_id, str(model_name).strip(), profile)
+
+
+def _enrich_catalog_profile_reasoning(
+    provider_id: str,
+    model_name: str,
+    profile: ModelCatalogProfile,
+) -> ModelCatalogProfile:
+    """Overlay build-time models.dev reasoning metadata on a static profile.
+
+    The operator-maintained catalog remains the source for capacity and other
+    defaults.  Reasoning controls are resolved from the provider API and model
+    ID in the build-time snapshot so newly released models do not depend on a
+    second, stale static capability declaration.
+    """
+    models_dev_catalog = _load_models_dev_catalog()
+    if models_dev_catalog is None:
+        return profile
+
+    capability = _resolve_models_dev_reasoning_capability(
+        models_dev_catalog,
+        model_name,
+        profile.base_url,
+        profile.model_factory or provider_id,
+    )
+    if capability is None:
+        return profile
+    profile_data = profile.model_dump(mode="python")
+    profile_data["reasoning_capability"] = capability
+    return ModelCatalogProfile.model_validate(profile_data)
 
 
 def list_models_by_provider(
@@ -399,6 +462,7 @@ def list_models_by_provider(
     for model_name, profile in models.items():
         if model_type and profile.model_type != str(model_type).strip():
             continue
+        profile = _enrich_catalog_profile_reasoning(provider_id, model_name, profile)
         results.append(
             {
                 "provider_key": provider_id,
@@ -459,6 +523,220 @@ def dump_full_catalog() -> Dict[str, Any]:
 # Provider inference heuristics (used when user picks "OpenAI-API-Compatible")
 # ---------------------------------------------------------------------------
 
+
+def _canonical_api_url(value: Any) -> str:
+    """Normalize an API URL for exact provider matching."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+        if parsed.scheme and parsed.netloc:
+            return urlunsplit(
+                (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/"), "", "")
+            )
+    except ValueError:
+        pass
+    return raw.rstrip("/").lower()
+
+
+def _api_url_path_prefix_length(provider_url: Any, requested_url: Any) -> Optional[int]:
+    """Return the catalog path length when it prefixes the requested URL.
+
+    The provider API in models.dev is often a host-level root while a user
+    enters a versioned endpoint such as ``/v1``.  Matching only within the
+    same domain and requiring the catalog path to be a segment prefix keeps
+    different services on one host isolated.
+    """
+    provider_api = _canonical_api_url(provider_url)
+    requested_api = _canonical_api_url(requested_url)
+    if not provider_api or not requested_api:
+        return None
+    try:
+        provider = urlsplit(provider_api)
+        requested = urlsplit(requested_api)
+    except ValueError:
+        return None
+    if not provider.scheme or not provider.netloc or provider.netloc != requested.netloc:
+        return None
+    provider_parts = [part for part in provider.path.split("/") if part]
+    requested_parts = [part for part in requested.path.split("/") if part]
+    if requested_parts[: len(provider_parts)] != provider_parts:
+        return None
+    return len(provider_parts)
+
+
+def _model_id_candidates(model_key: Any, model_raw: Dict[str, Any]) -> List[str]:
+    """Return model IDs exposed by one models.dev model record."""
+    candidates = [model_key, model_raw.get("id"), model_raw.get("model")]
+    result: List[str] = []
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value and value.lower() not in {item.lower() for item in result}:
+            result.append(value)
+    return result
+
+
+def _normalize_reasoning_options(raw_options: Any) -> List[Dict[str, Any]]:
+    """Normalize models.dev reasoning_options object/array variants."""
+    if isinstance(raw_options, dict):
+        if isinstance(raw_options.get("type"), str):
+            raw_options = [raw_options]
+        else:
+            expanded: List[Dict[str, Any]] = []
+            for option_type, option_value in raw_options.items():
+                if isinstance(option_value, dict):
+                    expanded.append({"type": option_type, **option_value})
+                elif isinstance(option_value, list):
+                    expanded.append({"type": option_type, "values": option_value})
+            raw_options = expanded
+    elif isinstance(raw_options, list):
+        if all(isinstance(item, str) for item in raw_options):
+            raw_options = [{"type": "effort", "values": raw_options}]
+    else:
+        raw_options = []
+
+    return [item for item in raw_options if isinstance(item, dict)]
+
+
+def _resolve_models_dev_reasoning_capability(
+    catalog: Dict[str, Any],
+    model_name: str,
+    base_url: Optional[str],
+    provider_hint: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Resolve one model by API first and model ID second."""
+    requested_api = _canonical_api_url(base_url)
+    requested_id = str(model_name or "").strip().lower()
+    requested_leaf = requested_id.rsplit("/", 1)[-1]
+    requested_provider = str(provider_hint or "").strip().lower()
+
+    provider_candidates: List[tuple[str, Dict[str, Any]]] = []
+    prefix_candidates: List[tuple[int, str, Dict[str, Any]]] = []
+    for provider_id, provider_raw in (catalog.get("providers") or {}).items():
+        if not isinstance(provider_raw, dict):
+            continue
+        provider_api = _canonical_api_url(provider_raw.get("api") or provider_raw.get("base_url"))
+        if requested_api:
+            if provider_api == requested_api:
+                provider_candidates.append((str(provider_id), provider_raw))
+            else:
+                prefix_length = _api_url_path_prefix_length(provider_api, requested_api)
+                if prefix_length is not None:
+                    prefix_candidates.append((prefix_length, str(provider_id), provider_raw))
+        elif requested_provider and str(provider_id).lower() == requested_provider:
+            provider_candidates.append((str(provider_id), provider_raw))
+
+    if not provider_candidates and requested_api:
+        best_prefix_length = max((item[0] for item in prefix_candidates), default=-1)
+        provider_candidates = [
+            (provider_id, provider_raw)
+            for prefix_length, provider_id, provider_raw in prefix_candidates
+            if prefix_length == best_prefix_length
+        ]
+
+    # API is the trust boundary. Do not search another provider when an API was
+    # supplied but its model ID is absent from the source snapshot.
+    if not provider_candidates:
+        return None
+
+    selected: Optional[tuple[str, str, Dict[str, Any]]] = None
+    for provider_id, provider_raw in provider_candidates:
+        raw_models = provider_raw.get("models")
+        if not isinstance(raw_models, dict):
+            continue
+        for model_key, model_raw in raw_models.items():
+            if not isinstance(model_raw, dict):
+                continue
+            ids = _model_id_candidates(model_key, model_raw)
+            lowered_ids = {item.lower() for item in ids}
+            if requested_id in lowered_ids:
+                selected = (provider_id, ids[0], model_raw)
+                break
+            if requested_leaf and requested_leaf in {item.rsplit("/", 1)[-1].lower() for item in ids}:
+                selected = (provider_id, ids[0], model_raw)
+                break
+        if selected:
+            break
+
+    if selected is None:
+        return None
+
+    provider_id, matched_model_id, model_raw = selected
+    if model_raw.get("reasoning") is not True:
+        return None
+    options = _normalize_reasoning_options(model_raw.get("reasoning_options"))
+    controls: List[Dict[str, Any]] = []
+    effort_values: List[str] = []
+    budget_range: Optional[Dict[str, int]] = None
+    has_toggle = False
+    for option in options:
+        option_type = str(option.get("type") or "").strip().lower()
+        if option_type == "toggle":
+            has_toggle = True
+        elif option_type == "effort":
+            values = option.get("values") or option.get("options") or []
+            if isinstance(values, str):
+                values = [values]
+            effort_values.extend(
+                str(value).strip() for value in values
+                if str(value).strip() and str(value).strip() not in effort_values
+            )
+        elif option_type == "budget_tokens":
+            min_value = option.get("min", option.get("min_tokens", option.get("minimum")))
+            max_value = option.get("max", option.get("max_tokens", option.get("maximum")))
+            try:
+                # models.dev uses zero as the lower bound for some providers.
+                min_value = 0 if min_value is None else int(min_value)
+                max_value = int(max_value)
+            except (TypeError, ValueError):
+                continue
+            if min_value >= 0 and max_value >= min_value:
+                budget_range = {"min": min_value, "max": max_value}
+
+    if has_toggle:
+        controls.append({"type": "toggle"})
+    if effort_values:
+        controls.append({"type": "effort", "values": effort_values})
+    if budget_range:
+        controls.append({"type": "budget_tokens", **budget_range})
+    if not controls:
+        return None
+
+    if effort_values:
+        legacy_levels = [value for value in effort_values if value in {
+            "none", "minimal", "low", "medium", "high", "xhigh", "max"
+        }]
+        control = "effort"
+        wire_format = "reasoning_effort"
+    elif budget_range:
+        legacy_levels = []
+        control = "budget_tokens"
+        wire_format = "thinking_budget"
+    else:
+        legacy_levels = []
+        control = "toggle"
+        wire_format = "thinking_toggle"
+
+    return {
+        "status": "supported",
+        "control": control,
+        "levels": legacy_levels,
+        "default": "auto",
+        "wire_format": wire_format,
+        "effort_budgets": {},
+        "controls": controls,
+        "matched_api": _canonical_api_url(
+            next(
+                provider.get("api") or provider.get("base_url")
+                for pid, provider in provider_candidates
+                if pid == provider_id
+            )
+        ),
+        "matched_model_id": matched_model_id,
+        "source": "models_dev",
+    }
+
 #: Ordered candidates; first match wins.  The tuple is (provider_id, url_keyword).
 _PROVIDER_URL_HINTS: Iterable[tuple[str, str]] = (
     ("silicon", "siliconflow"),
@@ -468,6 +746,12 @@ _PROVIDER_URL_HINTS: Iterable[tuple[str, str]] = (
     ("tokenpony", "tokenpony"),
     ("volcengine", "volces"),
     ("volcengine", "volcengine"),
+    ("deepseek", "api.deepseek.com"),
+    ("zhipu", "open.bigmodel.cn"),
+    ("anthropic", "api.anthropic.com"),
+    ("google", "generativelanguage.googleapis.com"),
+    ("mistral", "api.mistral.ai"),
+    ("xai", "api.x.ai"),
     ("openai", "api.openai.com"),
     ("modelengine", "modelengine"),
 )
@@ -487,6 +771,192 @@ def infer_provider_from_base_url(base_url: str) -> Optional[str]:
         if keyword in lowered:
             return provider_id
     return None
+
+
+def resolve_reasoning_capability(
+    model_name: str,
+    base_url: Optional[str] = None,
+    provider_hint: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Resolve reasoning capability from an exact profile or safe ID family.
+
+    Exact catalog entries are authoritative.  When an older/custom row is not
+    an exact key, deterministic vendor/model-ID rules cover known families so
+    newly released IDs do not lose the selector until the catalog is updated.
+    Unknown IDs still return ``None``.
+    """
+    if not model_name:
+        return None
+
+    models_dev_catalog = _load_models_dev_catalog()
+    if models_dev_catalog is not None:
+        return _resolve_models_dev_reasoning_capability(
+            models_dev_catalog,
+            model_name,
+            base_url,
+            provider_hint,
+        )
+
+    provider_id = str(provider_hint or "").strip()
+    if not get_provider_info(provider_id):
+        provider_id = infer_provider_from_base_url(str(base_url or "")) or ""
+    model_name_lower = str(model_name).strip().lower()
+    model_leaf = model_name_lower.rsplit("/", 1)[-1]
+
+    # A provider factory is not always persisted for older/custom rows. Infer
+    # the vendor from the model id before falling back to an OpenAI-compatible
+    # URL. This keeps historical rows discoverable after the catalog grows.
+    if not provider_id:
+        provider_id = _infer_provider_from_model_id(model_leaf) or ""
+
+    inferred_provider = _infer_provider_from_model_id(model_leaf)
+
+    if provider_id:
+        profile = get_model_profile(provider_id, model_name)
+        if profile is not None:
+            # An explicit catalog entry without reasoning metadata is an
+            # intentional unsupported declaration; do not override it with a
+            # broad name heuristic.
+            if profile.reasoning_capability is None:
+                return None
+            return profile.reasoning_capability.model_dump(mode="json")
+
+    heuristic_provider = provider_id
+    if provider_id in {
+        "",
+        "custom",
+        "OpenAI-API-Compatible",
+        "silicon",
+        "modelengine",
+    } and inferred_provider:
+        heuristic_provider = inferred_provider
+    return _infer_reasoning_capability_from_model_id(model_leaf, heuristic_provider)
+
+
+def _infer_provider_from_model_id(model_id: str) -> Optional[str]:
+    """Infer a known vendor from a model id when an old row lacks provider data."""
+    value = str(model_id or "").lower()
+    if "deepseek" in value:
+        return "deepseek"
+    if "claude" in value:
+        return "anthropic"
+    if "gemini" in value:
+        return "google"
+    if "grok" in value:
+        return "xai"
+    if re.match(r"^(?:o[1-4](?:[-.]|$)|gpt-5(?:[-.]|$))", value):
+        return "openai"
+    if re.match(r"^(?:glm|chatglm)[-_]", value):
+        return "zhipu"
+    if "qwen" in value or "qwq" in value:
+        return "dashscope"
+    if "mistral" in value or "magistral" in value:
+        return "mistral"
+    return None
+
+
+def _reasoning_effort_capability(
+    levels: List[str], default: str, wire_format: str = "reasoning_effort"
+) -> Dict[str, Any]:
+    return {
+        "status": "supported",
+        "control": "effort",
+        "levels": levels,
+        "default": default,
+        "wire_format": wire_format,
+        "source": "operator",
+    }
+
+
+def _resolve_deepseek_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"deepseek[-_]?v4", value) or "deepseek-reasoner" in value:
+        return _reasoning_effort_capability(["low", "high", "max"], "high")
+    return None
+
+
+def _resolve_zhipu_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.match(r"(?:glm|chatglm)[-_]?(?:4\.[5-9]|5)", value):
+        return {
+            "status": "supported",
+            "control": "toggle",
+            "levels": ["none", "high"],
+            "default": "high",
+            "wire_format": "thinking_toggle",
+            "source": "operator",
+        }
+    return None
+
+
+def _resolve_anthropic_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"claude[-_].*4", value):
+        return _reasoning_effort_capability(
+            ["none", "low", "medium", "high"], "medium", "thinking_budget"
+        ) | {"effort_budgets": {"low": 2048, "medium": 8192, "high": 16384}}
+    return None
+
+
+def _resolve_google_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"gemini[-_](?:2\.5|3|4)", value):
+        return _reasoning_effort_capability(["low", "medium", "high"], "high")
+    return None
+
+
+def _resolve_openai_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.match(r"(?:o[1-4]|gpt-5)(?:[-.]|$)", value):
+        levels = (
+            ["low", "medium", "high"]
+            if value.startswith("o")
+            else ["minimal", "low", "medium", "high"]
+        )
+        return _reasoning_effort_capability(levels, "medium")
+    return None
+
+
+def _resolve_xai_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.match(r"grok[-_]4", value):
+        return _reasoning_effort_capability(["low", "medium", "high", "xhigh"], "high")
+    return None
+
+
+def _resolve_qwen_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"qwen[-_]?3", value) or "qwq" in value:
+        return _reasoning_effort_capability(["low", "medium", "xhigh"], "medium")
+    return None
+
+
+def _resolve_mistral_reasoning(value: str) -> Optional[Dict[str, Any]]:
+    if re.search(r"(?:magistral|mistral[-_]medium|mistral[-_]large)", value):
+        return _reasoning_effort_capability(["none", "high"], "high")
+    return None
+
+
+_REASONING_CAPABILITY_RESOLVERS = {
+    "deepseek": _resolve_deepseek_reasoning,
+    "zhipu": _resolve_zhipu_reasoning,
+    "anthropic": _resolve_anthropic_reasoning,
+    "google": _resolve_google_reasoning,
+    "openai": _resolve_openai_reasoning,
+    "xai": _resolve_xai_reasoning,
+    "dashscope": _resolve_qwen_reasoning,
+    "silicon": _resolve_qwen_reasoning,
+    "modelengine": _resolve_qwen_reasoning,
+    "mistral": _resolve_mistral_reasoning,
+}
+
+
+def _infer_reasoning_capability_from_model_id(
+    model_id: str,
+    provider_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Return a conservative capability for recognized model-id families.
+
+    Exact catalog entries always win. This fallback is for provider model IDs
+    introduced after the bundled catalog version and for historical custom
+    rows whose provider/model name was not an exact catalog key.
+    """
+    value = str(model_id or "").lower()
+    resolver = _REASONING_CAPABILITY_RESOLVERS.get(str(provider_id or "").lower())
+    return resolver(value) if resolver else None
 
 
 # ---------------------------------------------------------------------------
