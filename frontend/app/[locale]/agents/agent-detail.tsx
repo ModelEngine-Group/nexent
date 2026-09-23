@@ -2,7 +2,6 @@
 
 import { Button, Tag } from "antd";
 import {
-  Bot,
   BookOpen,
   Calendar,
   Cpu,
@@ -16,6 +15,7 @@ import type { ReactNode } from "react";
 
 import type { Agent } from "@/types/agentConfig";
 import ResourceDetail from "@/components/resource/ResourceDetail";
+import AgentAvatar from "./components/agent-avatar";
 
 interface AgentDetailProps {
   agent: Agent | null;
@@ -54,9 +54,9 @@ export default function AgentDetail({
       <div className="flex max-h-[calc(100vh-8rem)] flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           <div className="flex items-start gap-4">
-            <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <Bot className="size-6" aria-hidden />
-            </span>
+            {agent ? (
+              <AgentAvatar agent={agent} size={48} iconSize={24} />
+            ) : null}
             <div className="min-w-0">
               <h2 className="truncate text-xl font-semibold text-slate-900 dark:text-slate-100">
                 {title}

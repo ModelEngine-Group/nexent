@@ -33,6 +33,7 @@ import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
 
 import AgentConfigActions from "./components/agent-config-actions";
+import AgentAvatar from "./components/agent-avatar";
 import AgentDetail from "./agent-detail";
 import AgentVersion from "./agent-version";
 
@@ -264,9 +265,11 @@ export default function AgentsPage() {
                               : undefined
                           }
                           icon={
-                            <span className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                              <Bot className="size-5" aria-hidden />
-                            </span>
+                            <AgentAvatar
+                              agent={agent}
+                              size={44}
+                              iconSize={20}
+                            />
                           }
                           description={
                             agent.description ||
