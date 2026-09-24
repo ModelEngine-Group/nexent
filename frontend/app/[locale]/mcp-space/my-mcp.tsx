@@ -584,10 +584,7 @@ export function MyMcp({
         ...current,
         [key]: result.success ? "success" : "failed",
       }));
-      if (result.success) {
-        message.success(t("mcpConfig.message.healthCheckSuccess"));
-      } else {
-        message.error(t("mcpConfig.message.healthCheckFailed"));
+      if (!result.success) {
         // If MCP is enabled and health check fails, auto-disable it
         if (
           item.kind === "local" &&
@@ -599,7 +596,6 @@ export function MyMcp({
       await refreshMineData();
     } catch {
       setConnectionStatuses((current) => ({ ...current, [key]: "failed" }));
-      message.error(t("mcpConfig.message.healthCheckFailed"));
     } finally {
       setRefreshingMineKey(null);
     }

@@ -93,6 +93,7 @@ test("shows each MCP card's latest connectivity result below its name", async ({
 
   await firstCard.getByRole("button", { name: "连通性校验" }).click();
   await expect(firstCard.getByText("连接成功", { exact: true })).toBeVisible();
+  expect(await page.getByText("mcp服务器连接成功").count()).toBe(0);
   await expect(
     firstCard
       .getByText("连接成功", { exact: true })
@@ -102,6 +103,9 @@ test("shows each MCP card's latest connectivity result below its name", async ({
 
   await firstCard.getByRole("button", { name: "连通性校验" }).click();
   await expect(firstCard.getByText("连接失败", { exact: true })).toBeVisible();
+  expect(
+    await page.getByText("无法连接mcp服务器，请检查服务器是否正常运行").count()
+  ).toBe(0);
   await expect(
     firstCard
       .getByText("连接失败", { exact: true })
