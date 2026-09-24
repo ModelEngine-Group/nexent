@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 
 import { MODEL_SOURCES } from "@/const/modelConfig";
 import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
+import { Can } from "@/components/permission/Can";
 import {
   STATUS_DOT_CLASS,
   TYPE_BADGE_CLASS,
@@ -367,7 +368,8 @@ function ModelRow({
         )}
       </div>
 
-      {/* Actions */}
+      {/* Actions — edit/delete gated by #4008 RBAC; the probe stays open to
+          any tenant user (probe endpoints are auth-only). */}
       <div className="flex shrink-0 items-center gap-0.5 md:w-32 md:justify-end">
         <RowAction
           label={t("modelConfig.list.checkConnectivity", {
@@ -378,19 +380,23 @@ function ModelRow({
         >
           <ShieldCheck className="size-4" />
         </RowAction>
-        <RowAction
-          label={t("common.edit", { defaultValue: "编辑" })}
-          onClick={onEdit}
-        >
-          <Pencil className="size-4" />
-        </RowAction>
-        <RowAction
-          label={t("common.delete", { defaultValue: "删除" })}
-          onClick={onDelete}
-          destructive
-        >
-          <Trash2 className="size-4" />
-        </RowAction>
+        <Can permission="model:update">
+          <RowAction
+            label={t("common.edit", { defaultValue: "编辑" })}
+            onClick={onEdit}
+          >
+            <Pencil className="size-4" />
+          </RowAction>
+        </Can>
+        <Can permission="model:delete">
+          <RowAction
+            label={t("common.delete", { defaultValue: "删除" })}
+            onClick={onDelete}
+            destructive
+          >
+            <Trash2 className="size-4" />
+          </RowAction>
+        </Can>
       </div>
     </div>
   );

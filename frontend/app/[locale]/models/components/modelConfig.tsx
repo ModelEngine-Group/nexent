@@ -29,6 +29,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
+import { usePermission } from "@/hooks/permission/usePermission";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
 import {
@@ -81,6 +82,10 @@ export const ModelConfigSection = forwardRef<
   const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig, appConfig, saveConfig } = useConfig();
   const modelEngineEnable = appConfig?.modelEngineEnabled ?? false;
+  // #4008: default-slot changes are an update operation; the slot selects
+  // stay visible for read-only users but are disabled.
+  const { can: canPermission } = usePermission();
+  const canUpdateModels = canPermission("model:update");
 
   const { confirm } = useConfirmModal();
 
@@ -1000,19 +1005,21 @@ export const ModelConfigSection = forwardRef<
                   })}
                 </Badge>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={verifyModels}
-                disabled={isVerifying}
-              >
-                {isVerifying ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <ShieldCheck className="size-4" />
-                )}
-                {t("modelConfig.button.checkConnectivity")}
-              </Button>
+              <Can permission="model:update">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={verifyModels}
+                  disabled={isVerifying}
+                >
+                  {isVerifying ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="size-4" />
+                  )}
+                  {t("modelConfig.button.checkConnectivity")}
+                </Button>
+              </Can>
             </div>
 
             <Card className="gap-0 p-5 sm:p-6">
@@ -1041,7 +1048,9 @@ export const ModelConfigSection = forwardRef<
                 </span>
               </div>
 
-              {/* Flat slot grid (replaces the DefaultModelDialog) */}
+              {/* Flat slot grid (replaces the DefaultModelDialog). Slots stay
+                  visible for read-only users (model:read) but are disabled —
+                  changing default slots is an update operation (#4008). */}
               <div className="grid grid-cols-1 gap-x-8 gap-y-5 pt-5 md:grid-cols-2 xl:grid-cols-3">
                 {modelSlots.map((slot) => (
                   <ModelSlotSelect
@@ -1050,6 +1059,7 @@ export const ModelConfigSection = forwardRef<
                     models={models}
                     value={selectedModels[slot.category]?.[slot.option] ?? ""}
                     error={!!errorFields[slot.fieldKey]}
+                    disabled={!canUpdateModels}
                     onChange={(displayName) =>
                       handleModelChange(slot.category, slot.option, displayName)
                     }
@@ -1097,45 +1107,51 @@ export const ModelConfigSection = forwardRef<
                   </Button>
                 </Can>
                 {modelEngineEnable && (
+                  <Can permission="model:update">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAddDialogTab("batch");
+                        setIsAddModalV2Open(true);
+                      }}
+                    >
+                      <RefreshCw className="size-4" />
+                      {t("modelConfig.button.syncModelEngine")}
+                    </Button>
+                  </Can>
+                )}
+                <Can permission="model:update">
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      setAddDialogTab("batch");
-                      setIsAddModalV2Open(true);
+                      setManagerMode("editGroup");
+                      setIsManagerOpen(true);
                     }}
                   >
-                    <RefreshCw className="size-4" />
-                    {t("modelConfig.button.syncModelEngine")}
+                    <Pencil className="size-4" />
+                    {t("modelConfig.batchEdit.title", {
+                      defaultValue: "批量修改",
+                    })}
                   </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setManagerMode("editGroup");
-                    setIsManagerOpen(true);
-                  }}
-                >
-                  <Pencil className="size-4" />
-                  {t("modelConfig.batchEdit.title", {
-                    defaultValue: "批量修改",
-                  })}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => {
-                    setManagerMode("deleteGroup");
-                    setIsManagerOpen(true);
-                  }}
-                >
-                  <Trash2 className="size-4" />
-                  {t("modelConfig.batchDelete.title", {
-                    defaultValue: "批量删除",
-                  })}
-                </Button>
+                </Can>
+                <Can permission="model:delete">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => {
+                      setManagerMode("deleteGroup");
+                      setIsManagerOpen(true);
+                    }}
+                  >
+                    <Trash2 className="size-4" />
+                    {t("modelConfig.batchDelete.title", {
+                      defaultValue: "批量删除",
+                    })}
+                  </Button>
+                </Can>
               </div>
             </div>
 
