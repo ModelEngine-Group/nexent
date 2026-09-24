@@ -142,16 +142,22 @@ it("preserves catalog reasoning capabilities for the shared model selector", () 
     controls: [{ type: "effort" as const, values: ["low", "high"] }],
     source: "catalog" as const,
   };
-  const catalog = [{
-    id: 11,
-    name: "reasoning-model",
-    displayName: "Reasoning model",
-    type: "llm",
-    connect_status: "available",
-    enableThinking: true,
-    reasoningCapability: capability,
-  }] as ModelOption[];
-  const agent = { id: "7", model_ids: [11], model_names: ["Reasoning model"] } as Agent;
+  const catalog = [
+    {
+      id: 11,
+      name: "reasoning-model",
+      displayName: "Reasoning model",
+      type: "llm",
+      connect_status: "available",
+      enableThinking: true,
+      reasoningCapability: capability,
+    },
+  ] as ModelOption[];
+  const agent = {
+    id: "7",
+    model_ids: [11],
+    model_names: ["Reasoning model"],
+  } as Agent;
 
   expect(deriveModelOptions(agent, catalog, "agent")[0]).toMatchObject({
     reasoningCapability: capability,
@@ -164,51 +170,69 @@ it("preserves catalog reasoning capabilities for the shared model selector", () 
 });
 
 it("keeps an explicitly configured model reasoning default", () => {
-  const catalog = [{
-    id: 11,
-    name: "reasoning-model",
-    displayName: "Reasoning model",
-    type: "llm",
-    connect_status: "available",
-    enableThinking: true,
-    defaultReasoningEffort: "high",
-    reasoningCapability: {
-      status: "supported",
-      control: "effort",
-      levels: ["low", "high"],
-      controls: [{ type: "effort", values: ["low", "high"] }],
-      source: "catalog",
+  const catalog = [
+    {
+      id: 11,
+      name: "reasoning-model",
+      displayName: "Reasoning model",
+      type: "llm",
+      connect_status: "available",
+      enableThinking: true,
+      defaultReasoningEffort: "high",
+      reasoningCapability: {
+        status: "supported",
+        control: "effort",
+        levels: ["low", "high"],
+        controls: [{ type: "effort", values: ["low", "high"] }],
+        source: "catalog",
+      },
     },
-  }] as ModelOption[];
-  const agent = { id: "7", model_ids: [11], model_names: ["Reasoning model"] } as Agent;
+  ] as ModelOption[];
+  const agent = {
+    id: "7",
+    model_ids: [11],
+    model_names: ["Reasoning model"],
+  } as Agent;
 
-  expect(deriveModelOptions(agent, catalog, "agent")[0].defaultEffort).toBe("high");
+  expect(deriveModelOptions(agent, catalog, "agent")[0].defaultEffort).toBe(
+    "high"
+  );
 });
 
 it("defaults an enabled Agent reasoning override without an effort to low", () => {
-  const catalog = [{
-    id: 11,
-    name: "reasoning-model",
-    displayName: "Reasoning model",
-    type: "llm",
-    connect_status: "available",
-    enableThinking: true,
-    reasoningCapability: {
-      status: "supported",
-      control: "effort",
-      levels: ["low", "high"],
-      controls: [{ type: "effort", values: ["low", "high"] }],
-      source: "catalog",
+  const catalog = [
+    {
+      id: 11,
+      name: "reasoning-model",
+      displayName: "Reasoning model",
+      type: "llm",
+      connect_status: "available",
+      enableThinking: true,
+      reasoningCapability: {
+        status: "supported",
+        control: "effort",
+        levels: ["low", "high"],
+        controls: [{ type: "effort", values: ["low", "high"] }],
+        source: "catalog",
+      },
     },
-  }] as ModelOption[];
-  const agent = {
+  ] as ModelOption[];
+  const agent: Agent = {
     id: "7",
+    name: "reasoning-agent",
+    description: "Agent used to verify reasoning defaults",
+    model: "reasoning-model",
+    max_step: 5,
+    provide_run_summary: false,
+    tools: [],
     model_ids: [11],
     model_names: ["Reasoning model"],
     model_params_override: {
       "11": { extra_params: { enable_thinking: true } },
     },
-  } as Agent;
+  };
 
-  expect(deriveModelOptions(agent, catalog, "agent")[0].defaultEffort).toBe("low");
+  expect(deriveModelOptions(agent, catalog, "agent")[0].defaultEffort).toBe(
+    "low"
+  );
 });
