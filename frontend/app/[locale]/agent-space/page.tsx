@@ -73,7 +73,7 @@ export default function AgentRepositoryPage() {
   });
   const { data: reviewCountData } = useAgentRepositoryListings(
     { status: "pending_review", page: 1, page_size: 1 },
-    isReviewTab
+    isAdmin
   );
   const repositoryTabCount = repositoryCountData?.pagination?.total;
   const mineTabCount = isMineTab
