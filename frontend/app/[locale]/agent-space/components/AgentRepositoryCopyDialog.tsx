@@ -45,7 +45,7 @@ const TYPE_ICON: Record<RepositoryImportRequirementType, typeof Database> = {
   tool: Wrench,
 };
 
-const SYSTEM_TENANT_ID = "__nexent_system__";
+const SYSTEM_TENANT_ID = "system";
 
 interface AgentRepositoryCopyDialogProps {
   listing: AgentRepositoryListingItem | null;

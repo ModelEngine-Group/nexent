@@ -72,7 +72,7 @@ def test_find_or_create_source_agent_reuses_existing_agent():
             result = sync_service._find_or_create_source_agent(_agent())
 
     assert result == 17
-    search.assert_called_once_with("medical_assistant", sync_service.OFFICIAL_AGENT_TENANT_ID)
+    search.assert_called_once_with("medical_assistant", sync_service.SYSTEM_TENANT_ID)
     create.assert_not_called()
 
 
@@ -85,11 +85,11 @@ def test_find_or_create_source_agent_creates_when_source_is_missing():
             result = sync_service._find_or_create_source_agent(agent)
 
     assert result == 23
-    search.assert_called_once_with("medical_assistant", sync_service.OFFICIAL_AGENT_TENANT_ID)
+    search.assert_called_once_with("medical_assistant", sync_service.SYSTEM_TENANT_ID)
     create.assert_called_once_with(
         sync_service._source_agent_payload(agent),
-        tenant_id=sync_service.OFFICIAL_AGENT_TENANT_ID,
-        user_id=sync_service.OFFICIAL_AGENT_USER_ID,
+        tenant_id=sync_service.SYSTEM_TENANT_ID,
+        user_id=sync_service.SYSTEM_USER_ID,
     )
 
 
@@ -118,14 +118,14 @@ def test_materialize_snapshot_remaps_agent_and_managed_agent_ids():
     root.model_copy.assert_called_once_with(
         update={
             "agent_id": 601,
-            "tenant_id": sync_service.OFFICIAL_AGENT_TENANT_ID,
+            "tenant_id": sync_service.SYSTEM_TENANT_ID,
             "managed_agents": [602],
         }
     )
     child.model_copy.assert_called_once_with(
         update={
             "agent_id": 602,
-            "tenant_id": sync_service.OFFICIAL_AGENT_TENANT_ID,
+            "tenant_id": sync_service.SYSTEM_TENANT_ID,
             "managed_agents": [],
         }
     )
@@ -175,7 +175,7 @@ def test_sync_bundle_upserts_official_repository_record():
         "display_name": "Root Agent",
         "description": "Root description",
         "author": "Nexent",
-        "submitted_by": sync_service.OFFICIAL_AGENT_USER_ID,
+        "submitted_by": sync_service.SYSTEM_USER_ID,
         "version_name": "Official",
         "agent_info_json": {"agent_id": 601},
         "status": sync_service.STATUS_SHARED,
@@ -186,13 +186,13 @@ def test_sync_bundle_upserts_official_repository_record():
     }
     upsert.assert_called_once_with(
         repository_data,
-        publisher_tenant_id=sync_service.OFFICIAL_AGENT_TENANT_ID,
-        publisher_user_id=sync_service.OFFICIAL_AGENT_USER_ID,
+        publisher_tenant_id=sync_service.SYSTEM_TENANT_ID,
+        publisher_user_id=sync_service.SYSTEM_USER_ID,
     )
     update.assert_called_once_with(
         repository_id=88,
-        publisher_tenant_id=sync_service.OFFICIAL_AGENT_TENANT_ID,
-        user_id=sync_service.OFFICIAL_AGENT_USER_ID,
+        publisher_tenant_id=sync_service.SYSTEM_TENANT_ID,
+        user_id=sync_service.SYSTEM_USER_ID,
         updates={"name": "medical-assistant"},
     )
 

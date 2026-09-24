@@ -15,8 +15,6 @@ from consts.agent_repository import (
 from consts.exceptions import UnauthorizedError
 from consts.const import SYSTEM_TENANT_ID
 
-# Compatibility export for callers and tests that still import the former name.
-OFFICIAL_AGENT_TENANT_ID = SYSTEM_TENANT_ID
 from consts.model import AgentRepositorySnapshot, KnowledgeBaseResolution, SkillResolution
 from consts.notification import (
     EVENT_TYPE_REPOSITORY_REVIEW_PENDING,

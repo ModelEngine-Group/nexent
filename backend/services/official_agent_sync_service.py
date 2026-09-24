@@ -14,9 +14,6 @@ from consts.const import (
     OFFICIAL_AGENT_PROFILES,
 )
 
-# Compatibility exports for integrations that still import the former names.
-OFFICIAL_AGENT_TENANT_ID = SYSTEM_TENANT_ID
-OFFICIAL_AGENT_USER_ID = SYSTEM_USER_ID
 from database.agent_db import create_agent, find_agent_id_by_agent_name
 from database.agent_repository_db import upsert_agent_repository_record
 from database.agent_repository_db import update_agent_repository_by_id

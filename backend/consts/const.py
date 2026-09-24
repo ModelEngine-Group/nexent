@@ -119,12 +119,8 @@ OFFICIAL_AGENTS_PATH = os.getenv(
 )
 
 OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "")
-SYSTEM_TENANT_ID = "__nexent_system__"
-SYSTEM_USER_ID = "__nexent_system__"
-
-# Backward-compatible aliases for integrations importing the former names.
-OFFICIAL_AGENT_TENANT_ID = SYSTEM_TENANT_ID
-OFFICIAL_AGENT_USER_ID = SYSTEM_USER_ID
+SYSTEM_TENANT_ID = "system"
+SYSTEM_USER_ID = "system"
 
 
 # Preview Configuration

@@ -1485,7 +1485,7 @@ def test_update_status_uses_official_fallback_listing(mock_status_update_deps):
     deps = mock_status_update_deps
     official_record = _repository_record(
         status="shared",
-        publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+        publisher_tenant_id=ars.SYSTEM_TENANT_ID,
     )
     deps["get_by_id"].side_effect = [None, official_record, official_record]
     deps["update_status"].return_value = 1
@@ -1500,7 +1500,7 @@ def test_update_status_uses_official_fallback_listing(mock_status_update_deps):
     assert result["status"] == "shared"
     assert deps["get_by_id"].call_args_list == [
         call(1, "tenant_a"),
-        call(1, ars.OFFICIAL_AGENT_TENANT_ID),
+        call(1, ars.SYSTEM_TENANT_ID),
         call(1, "tenant_a"),
     ]
 
@@ -1544,13 +1544,13 @@ def test_list_official_agent_management_marks_records_as_official():
         result = ars.list_official_agent_management_impl()
 
     mock_list.assert_called_once_with(
-        publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+        publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         status="shared",
     )
     assert result == [
         {
             **records[0],
-            "publisher_tenant_id": ars.OFFICIAL_AGENT_TENANT_ID,
+            "publisher_tenant_id": ars.SYSTEM_TENANT_ID,
         }
     ]
 
@@ -1568,7 +1568,7 @@ def test_delete_official_agent_removes_bundle_sources_and_listing(tmp_path):
     record = {
         **_repository_record(
             agent_repository_id=42,
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": "medical-assistant",
         "agent_info_json": {"agent_info": {"10": {}, "child": {}, "11": {}}},
@@ -1585,12 +1585,12 @@ def test_delete_official_agent_removes_bundle_sources_and_listing(tmp_path):
     assert not nested_json.exists()
     assert not nested_zip.exists()
     mock_delete_agent.assert_has_calls([
-        call(10, ars.OFFICIAL_AGENT_TENANT_ID, "su_user"),
-        call(11, ars.OFFICIAL_AGENT_TENANT_ID, "su_user"),
+        call(10, ars.SYSTEM_TENANT_ID, "su_user"),
+        call(11, ars.SYSTEM_TENANT_ID, "su_user"),
     ])
     mock_soft_delete.assert_called_once_with(
         42,
-        publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+        publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         user_id="su_user",
     )
     assert result["preserved_tenant_copies"] is True
@@ -1608,7 +1608,7 @@ def test_delete_official_agent_rejects_invalid_bundle_name(name):
     record = {
         **_repository_record(
             agent_repository_id=42,
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": name,
     }
@@ -1622,7 +1622,7 @@ def test_delete_official_agent_rejects_already_deleted_listing(tmp_path):
     record = {
         **_repository_record(
             agent_repository_id=42,
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": "medical-assistant",
     }
@@ -2422,7 +2422,7 @@ async def test_check_repository_import_precheck_loads_official_bundle_from_fallb
         **_repository_record(
             agent_repository_id=42,
             status="shared",
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": "medical-assistant",
         "display_name": "  ",
@@ -2450,7 +2450,7 @@ async def test_check_repository_import_precheck_loads_official_bundle_from_fallb
     assert result == {"agent_repository_id": 42, "has_abnormal": False}
     assert get_record.call_args_list == [
         call(42, "tenant_a"),
-        call(42, ars.OFFICIAL_AGENT_TENANT_ID),
+        call(42, ars.SYSTEM_TENANT_ID),
     ]
     load_bundle.assert_called_once_with("medical-assistant")
     build_precheck.assert_called_once_with(
@@ -2467,7 +2467,7 @@ def test_check_repository_import_precheck_rejects_missing_official_bundle():
         **_repository_record(
             agent_repository_id=42,
             status="shared",
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": "missing-agent",
     }
@@ -2485,7 +2485,7 @@ async def test_import_agent_from_repository_installs_official_bundle_from_fallba
             agent_repository_id=42,
             agent_id=10,
             status="shared",
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": "medical-assistant",
     }
@@ -2511,7 +2511,7 @@ async def test_import_agent_from_repository_installs_official_bundle_from_fallba
     assert result == {10: 100}
     assert get_record.call_args_list == [
         call(42, "tenant_a"),
-        call(42, ars.OFFICIAL_AGENT_TENANT_ID),
+        call(42, ars.SYSTEM_TENANT_ID),
     ]
     install.assert_awaited_once_with(
         ["medical-assistant"],
@@ -2542,7 +2542,7 @@ async def test_import_agent_from_repository_rejects_failed_official_install(
         **_repository_record(
             agent_repository_id=42,
             status="shared",
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": "medical-assistant",
     }
@@ -2571,7 +2571,7 @@ async def test_import_agent_from_repository_rejects_empty_official_install_resul
         **_repository_record(
             agent_repository_id=42,
             status="shared",
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": "medical-assistant",
     }
@@ -2597,7 +2597,7 @@ async def test_import_agent_from_repository_warns_when_official_download_increme
             agent_repository_id=42,
             agent_id=10,
             status="shared",
-            publisher_tenant_id=ars.OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
         ),
         "name": "medical-assistant",
     }

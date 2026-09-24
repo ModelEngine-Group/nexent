@@ -22,7 +22,7 @@ def _record(repository_id: int, tenant_id: str, status: str = "shared") -> dict:
 def test_repository_list_merges_selected_official_shared_entries():
     with patch.object(repository_service, "list_agent_repository_summaries", side_effect=[
              [_record(1, "tenant-a")],
-             [_record(2, "__nexent_system__")],
+             [_record(2, "system")],
          ]), patch.object(
              repository_service,
              "sum_agent_repository_downloads_by_agent_ids",
@@ -35,7 +35,7 @@ def test_repository_list_merges_selected_official_shared_entries():
 
 
 def test_official_detail_is_readable_but_is_marked_official():
-    record = _record(2, "__nexent_system__")
+    record = _record(2, "system")
     record["agent_info_json"] = {"agent_id": 2, "agent_info": {}, "mcp_info": []}
     with patch.object(repository_service, "get_agent_repository_by_id", side_effect=[None, record]), \
          patch.object(repository_service, "sum_agent_repository_downloads_by_agent_ids", return_value={2: 0}):
