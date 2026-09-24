@@ -552,7 +552,7 @@ def test_sal_016_publish_failure_does_not_advance_revision(mocker):
 def test_sal_014_migration_contains_nullable_system_revision():
     """UT-BE-SAL-014."""
     migration = (
-        "deploy/sql/migrations/v2.5.2_0902_agent_workbench_system_agents.sql"
+        "deploy/sql/migrations/v2.6.2_001_agent_workbench.sql"
     )
 
     with open(migration, encoding="utf-8") as file:
