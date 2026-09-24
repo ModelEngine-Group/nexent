@@ -3857,6 +3857,7 @@
   "quota.tenantUsage": "租户用量",
   "quota.fairShare": "公平分配参考",
   "quota.perKbBreakdown": "知识库明细",
+  "quota.breakdownTotal": "共 {{total}} 个知识库",
   "quota.editHint": "在知识库列表 → 操作列 → 编辑图标中设置每知识库配额",
   "quota.summary": "汇总",
   "quota.totalAllocated": "已分配",
