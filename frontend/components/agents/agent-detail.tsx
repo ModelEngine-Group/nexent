@@ -95,7 +95,7 @@ export function AgentDetail({
       bodyStyle={{ padding: 0 }}
     >
       <div className="flex max-h-[min(740px,calc(100dvh-3rem))] flex-col overflow-hidden">
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-5 sm:px-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-4 sm:px-4">
           {isLoading ? (
             <div className="flex min-h-64 items-center justify-center">
               <Spin size="large" />
@@ -225,7 +225,7 @@ export function AgentDetail({
             </>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/60 px-4 py-4 dark:border-slate-700 dark:bg-slate-900/60 sm:px-5">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/60 px-3 py-3 dark:border-slate-700 dark:bg-slate-900/60 sm:px-4">
           <Button onClick={onClose}>{t("common.close")}</Button>
           {onEdit && detail && !isError ? (
             <Button
