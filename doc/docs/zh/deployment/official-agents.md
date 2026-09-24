@@ -338,9 +338,23 @@ docker logs nexent-config --tail 200
 
 不要直接删除数据库记录或手工删除容器文件。管理页面会同时处理仓库记录、源 Agent 和 Bundle 文件，避免出现数据库和文件状态不一致。
 
-## 十三、常见问题
+## 十三、重新部署或更新 Profile
 
-### 13.1 `profile not found`
+更新 Agent Hub 中的官方资源后，可以重复执行相同命令：
+
+```bash
+bash deploy/deploy-official-agents.sh \
+  --source hub \
+  --ref main \
+  --profile-root "行业智能体" \
+  --profiles "金融"
+```
+
+重复部署会更新官方仓库模板，不会覆盖用户已经复制到租户中的 Agent。需要删除官方模板时，应通过超级管理员的官方智能体管理功能执行，避免直接删除容器内资源造成数据库和文件不一致。
+
+## 十四、常见问题
+
+### 14.1 `profile not found`
 
 通常是 Profile 根目录层级不匹配。检查：
 
@@ -349,15 +363,15 @@ docker logs nexent-config --tail 200
 - `--profiles` 是否使用实际目录名；
 - 中文目录名是否使用引号包裹。
 
-### 13.2 `Synchronized 0 official agent bundle(s)`
+### 14.2 `Synchronized 0 official agent bundle(s)`
 
 检查选中的 Profile 下是否存在以 Bundle 为根目录的 `agent.json`。如果 `agent.json` 位于更深层目录，说明资源目录结构或 `--profile-root` 配置不正确。
 
-### 13.3 `duplicate official agent bundle`
+### 14.3 `duplicate official agent bundle`
 
 说明同一个 Profile 扫描到了多个同名 Bundle，常见原因是上一次复制留下了嵌套目录。清理资源源目录中的重复 Bundle 后重新部署。脚本在复制选中 Profile 前会清理目标 Profile，避免旧的嵌套目录继续参与同步。
 
-### 13.4 Git LFS 下载失败
+### 14.4 Git LFS 下载失败
 
 如果提示 `smudge filter lfs failed`、`Access forbidden` 或 `project lfs not enabled`：
 
@@ -366,7 +380,7 @@ docker logs nexent-config --tail 200
 3. 在有权限的机器上准备完整本地目录或压缩包；
 4. 在目标环境改用 `--source local` 部署。
 
-### 13.5 `Remote branch main not found`
+### 14.5 `Remote branch main not found`
 
 先检查远端实际分支：
 
@@ -383,7 +397,7 @@ bash deploy/deploy-official-agents.sh \
   --profiles general
 ```
 
-### 13.6 页面没有显示官方智能体
+### 14.6 页面没有显示官方智能体
 
 依次检查：
 
@@ -392,17 +406,3 @@ bash deploy/deploy-official-agents.sh \
 3. 容器日志中是否有 Bundle 校验或数据库错误；
 4. 浏览器是否使用 `Ctrl + F5` 强制刷新；
 5. 是否登录到了正确的租户。
-
-## 十四、重新部署或更新 Profile
-
-更新 Agent Hub 中的官方资源后，可以重复执行相同命令：
-
-```bash
-bash deploy/deploy-official-agents.sh \
-  --source hub \
-  --ref main \
-  --profile-root "行业智能体" \
-  --profiles "金融"
-```
-
-重复部署会更新官方仓库模板，不会覆盖用户已经复制到租户中的 Agent。需要删除官方模板时，应通过超级管理员的官方智能体管理功能执行，避免直接删除容器内资源造成数据库和文件不一致。
