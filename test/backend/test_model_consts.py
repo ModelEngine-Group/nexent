@@ -179,6 +179,40 @@ def test_filter_extra_params_passes_through_custom_object():
     }
 
 
+def test_filter_extra_params_accepts_reasoning_effort_for_llm_only():
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_effort": "high"}
+    ) == {"reasoning_effort": "high"}
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_effort": "unsupported"}
+    ) is None
+    assert model_consts.filter_extra_params(
+        "embedding", {"reasoning_effort": "high"}
+    ) is None
+
+
+def test_filter_extra_params_validates_reasoning_switch():
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": True, "reasoning_effort": "medium"}
+    ) == {"enable_thinking": True, "reasoning_effort": "medium"}
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": False, "reasoning_effort": "high"}
+    ) == {"enable_thinking": False, "reasoning_effort": "high"}
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": "true"}
+    ) is None
+
+
+def test_filter_extra_params_validates_reasoning_budget_tokens():
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_budget_tokens": 4096}
+    ) == {"reasoning_budget_tokens": 4096}
+    for value in (True, 0, -1, "4096"):
+        assert model_consts.filter_extra_params(
+            "llm", {"reasoning_budget_tokens": value}
+        ) is None
+
+
 def test_filter_extra_params_passes_through_custom_for_all_types():
     """__custom__ is type-agnostic: it survives for embedding/rerank/vlm too."""
     for model_type in ("embedding", "rerank", "vlm", "stt", "tts"):
@@ -1474,3 +1508,57 @@ def test_delete_mcp_service_request():
         mcp_id=42
     )
     assert req.mcp_id == 42
+
+
+def test_reasoning_capability_normalizes_unsupported_profiles():
+    capability = model_consts.ReasoningCapability(
+        status="unsupported",
+        levels=["low"],
+        default="low",
+        effort_budgets={"low": 2048},
+    )
+
+    assert capability.levels == []
+    assert capability.default is None
+    assert capability.effort_budgets == {}
+
+
+def test_reasoning_capability_accepts_toggle_without_effort_levels():
+    capability = model_consts.ReasoningCapability(
+        status="supported",
+        control="toggle",
+        wire_format="thinking_toggle",
+    )
+
+    assert capability.levels == []
+
+
+def test_reasoning_control_validates_effort_and_budget_shapes():
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="effort")
+
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="budget_tokens", min=1024)
+
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="budget_tokens", min=4096, max=1024)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"status": "supported", "control": "effort"},
+        {"status": "supported", "levels": ["low"], "default": "high"},
+        {"status": "supported", "levels": ["low"], "effort_budgets": {"high": 2048}},
+        {"status": "supported", "levels": ["low"], "effort_budgets": {"low": 512}},
+        {
+            "status": "supported",
+            "levels": ["none", "high"],
+            "wire_format": "thinking_budget",
+            "effort_budgets": {},
+        },
+    ],
+)
+def test_reasoning_capability_rejects_invalid_profiles(payload):
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningCapability(**payload)

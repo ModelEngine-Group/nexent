@@ -39,7 +39,10 @@ class TagManagementService:
                 "Tag value capacity exceeded",
                 {"limit": 1000, "current_count": 1000, "scope": "value"},
             )
-        if "Resource tag assignment limit exceeded" in message:
+        # The DB trigger omits the "Resource " prefix; match both spellings.
+        if "Resource tag assignment limit exceeded" in message or (
+            "Tag assignment limit exceeded" in message
+        ):
             raise TagManagementConflictError(
                 "Resource tag assignment capacity exceeded",
                 {"limit": 100, "current_count": 100, "scope": "assignment"},

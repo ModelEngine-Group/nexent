@@ -1527,6 +1527,31 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
+    const reasoningEffort = context.config?.reasoningEffort;
+    const reasoningBudgetTokens = (
+      context.config as { reasoningBudgetTokens?: number } | undefined
+    )?.reasoningBudgetTokens;
+    const reasoningCapability = (
+      context.config as {
+        reasoningCapability?: {
+          status?: string;
+          controls?: Array<{ type?: string }>;
+          levels?: string[];
+          control?: string;
+        };
+      } | undefined
+    )?.reasoningCapability;
+    const reasoningSupported =
+      reasoningCapability?.status === "supported" &&
+      Boolean(
+        reasoningCapability.controls?.length ||
+          reasoningCapability.levels?.length ||
+          reasoningCapability.control === "toggle"
+      );
+    const hasBudgetSelection =
+      typeof reasoningBudgetTokens === "number" &&
+      Number.isInteger(reasoningBudgetTokens) &&
+      reasoningBudgetTokens >= 0;
     const modelIdFromCustom = custom?.modelId;
 
     if (isAgentDebug && modelIdFromCustom) {
@@ -1535,6 +1560,24 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     } else if (modelName) {
       // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
+    }
+    if (
+      !isResume &&
+      reasoningSupported &&
+      !hasBudgetSelection &&
+      typeof reasoningEffort === "string" &&
+      reasoningEffort &&
+      reasoningEffort !== "auto"
+    ) {
+      requestBody.reasoning_effort = reasoningEffort;
+    }
+    if (
+      !isResume &&
+      reasoningSupported &&
+      hasBudgetSelection &&
+      reasoningBudgetTokens > 0
+    ) {
+      requestBody.reasoning_budget_tokens = reasoningBudgetTokens;
     }
 
     log.log(
@@ -1930,9 +1973,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             };
       nl2SkillAttemptCheckpoints.set(attemptId, { files, summary });
     };
-    const rollbackNl2SkillAttempt = (
-      checkpoint: Nl2SkillAttemptCheckpoint
-    ) => {
+    const rollbackNl2SkillAttempt = (checkpoint: Nl2SkillAttemptCheckpoint) => {
       const createdIndices = new Set<number>();
       for (const [path, index] of nl2SkillFilePartIndices) {
         if (!checkpoint.files.has(path)) createdIndices.add(index);

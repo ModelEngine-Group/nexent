@@ -67,9 +67,11 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
+import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
+import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
@@ -106,6 +108,26 @@ type HistorySummaryData = {
   status?: "compacting" | "accepted";
   summary?: { markdown?: string } | string;
   covered_through_message_id?: number;
+};
+
+const resolveDefaultReasoningEffort = (
+  modelDefault: ReasoningEffort | undefined,
+  capability: ReasoningCapability | undefined,
+  levels: readonly ReasoningEffort[]
+): ReasoningEffort | undefined => {
+  if (modelDefault && levels.includes(modelDefault)) return modelDefault;
+  if (levels.includes("auto")) return "auto";
+  if (capability?.default && levels.includes(capability.default)) {
+    return capability.default;
+  }
+  if (levels.includes(DEFAULT_REASONING_EFFORT)) {
+    return DEFAULT_REASONING_EFFORT;
+  }
+  return levels[0];
+};
+
+const formatReasoningEffortName = (level: ReasoningEffort): string => {
+  return level;
 };
 
 const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {
@@ -214,23 +236,107 @@ const useAgentModels = (
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
 
+    const toSelectorModel = (id: string, fallbackName: string) => {
+      const model = availableModels.find(
+        (item) =>
+          String(item.id) === id || item.name === id || item.displayName === id
+      );
+      const agentOverride = typedAgent.model_params_override?.[id];
+      const overrideExtra = agentOverride?.extra_params;
+      const hasAgentReasoningSnapshot =
+        typeof overrideExtra?.enable_thinking === "boolean" ||
+        typeof overrideExtra?.reasoning_effort === "string" ||
+        typeof overrideExtra?.reasoning_budget_tokens === "number";
+      const capability = model?.reasoningCapability;
+      const reasoningEnabled = hasAgentReasoningSnapshot
+        ? overrideExtra?.enable_thinking === true ||
+          (overrideExtra?.enable_thinking === undefined &&
+            (typeof overrideExtra?.reasoning_effort === "string" ||
+              typeof overrideExtra?.reasoning_budget_tokens === "number"))
+        : model?.enableThinking === true;
+      const effortControl =
+        capability?.status === "supported"
+          ? capability.controls?.find((control) => control.type === "effort")
+          : undefined;
+      const capabilityLevels =
+        effortControl?.type === "effort"
+          ? (effortControl.values as ReasoningEffort[])
+          : capability?.status === "supported" && capability.levels.length > 0
+            ? capability.levels
+            : [];
+      const budgetControl =
+        capability?.status === "supported"
+          ? capability.controls?.find(
+              (control) => control.type === "budget_tokens"
+            )
+          : undefined;
+      const supportsBudget =
+        reasoningEnabled && budgetControl?.type === "budget_tokens";
+      // A numeric budget is the preferred control when the catalog exposes
+      // both budget_tokens and effort for the same model.
+      const supportsEffort =
+        reasoningEnabled && !supportsBudget && capabilityLevels.length > 0;
+      const effortLevels = [
+        "auto",
+        ...capabilityLevels.filter((level) => level !== "auto"),
+      ] as ReasoningEffort[];
+      const snapshotEffort =
+        typeof overrideExtra?.reasoning_effort === "string"
+          ? (overrideExtra.reasoning_effort as ReasoningEffort)
+          : undefined;
+      const defaultEffort = hasAgentReasoningSnapshot
+        ? (snapshotEffort ?? "auto")
+        : resolveDefaultReasoningEffort(
+            model?.defaultReasoningEffort,
+            capability,
+            effortLevels
+          );
+      const snapshotBudget =
+        typeof overrideExtra?.reasoning_budget_tokens === "number"
+          ? overrideExtra.reasoning_budget_tokens
+          : undefined;
+      return {
+        id,
+        name: fallbackName,
+        reasoningCapability: capability,
+        ...(supportsEffort
+          ? {
+              efforts: effortLevels.map((level) => ({
+                id: level,
+                name: formatReasoningEffortName(level),
+              })),
+              defaultEffort: defaultEffort ?? undefined,
+            }
+          : {}),
+        ...(supportsBudget
+          ? {
+              budgetTokens: {
+                min: budgetControl.min,
+                max: budgetControl.max,
+              },
+              defaultBudgetTokens: snapshotBudget,
+            }
+          : {}),
+      };
+    };
+
     if (
       model_ids &&
       model_ids.length > 0 &&
       model_names &&
       model_names.length > 0
     ) {
-      const configuredModels = model_ids.map((id, i) => ({
-        id: String(id),
-        name: model_names[i] ?? `Model ${id}`,
-      }));
-      const availableModelIds = new Set(
-        availableModels
-          .filter((model) => model.connect_status === "available")
-          .map((model) => String(model.id))
+      const configuredModels = model_ids.map((id, i) =>
+        toSelectorModel(String(id), model_names[i] ?? `Model ${id}`)
       );
-      return configuredModels.filter((model) =>
-        availableModelIds.has(model.id)
+      return configuredModels.filter((configuredModel) =>
+        availableModels.some(
+          (model) =>
+            model.connect_status !== "unavailable" &&
+            (String(model.id) === configuredModel.id ||
+              model.name === configuredModel.id ||
+              model.displayName === configuredModel.id)
+        )
       );
     }
 
@@ -239,22 +345,28 @@ const useAgentModels = (
       .model_name;
     const modelIsAvailable = availableModels.some(
       (model) =>
-        model.connect_status === "available" &&
+        model.connect_status !== "unavailable" &&
         (model.displayName === modelName || model.name === modelName)
     );
     if (modelName && modelIsAvailable) {
-      return [{ id: modelName, name: modelName }];
+      const model = availableModels.find(
+        (item) => item.displayName === modelName || item.name === modelName
+      );
+      return [toSelectorModel(String(model?.id ?? modelName), modelName)];
     }
 
     // Fallback to the single model field (used by AgentDraft / debug panel)
     const singleModel = (typedAgent as unknown as { model?: string }).model;
     const singleModelIsAvailable = availableModels.some(
       (model) =>
-        model.connect_status === "available" &&
+        model.connect_status !== "unavailable" &&
         (model.displayName === singleModel || model.name === singleModel)
     );
     if (singleModel && singleModelIsAvailable) {
-      return [{ id: singleModel, name: singleModel }];
+      const model = availableModels.find(
+        (item) => item.displayName === singleModel || item.name === singleModel
+      );
+      return [toSelectorModel(String(model?.id ?? singleModel), singleModel)];
     }
 
     return [];

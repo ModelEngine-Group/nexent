@@ -56,7 +56,7 @@ from database.agent_db import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
 )
-from database.agent_version_db import query_current_version_no
+from database.agent_version_db import query_current_version_no, update_agent_snapshot
 from database import skill_db
 from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
@@ -91,6 +91,8 @@ from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 
+from .tool_user_context import resolve_tool_user_context
+
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
 
@@ -114,6 +116,45 @@ def _select_agent_model_id(
         if is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)):
             return model_id
     return agent_model_ids[0] if agent_model_ids else None
+
+
+def _ensure_agent_reasoning_snapshot(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+) -> None:
+    """Backfill reasoning ownership for agents created before Scheme B."""
+    from services.agent_reasoning_service import snapshot_agent_reasoning_config
+
+    try:
+        agent_info = search_agent_info_by_agent_id(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        if not agent_info:
+            return
+        current_overrides = agent_info.get("model_params_override")
+        updated_overrides = snapshot_agent_reasoning_config(
+            model_ids=agent_info.get("model_ids"),
+            requested_overrides=current_overrides,
+            existing_overrides=current_overrides,
+            tenant_id=agent_info.get("tenant_id") or tenant_id,
+        )
+        if updated_overrides == current_overrides:
+            return
+        update_agent_snapshot(
+            agent_id=agent_id,
+            tenant_id=agent_info.get("tenant_id") or tenant_id,
+            version_no=version_no,
+            agent_data={"model_params_override": updated_overrides},
+        )
+    except Exception as exc:  # pragma: no cover - defensive migration fallback
+        logger.warning(
+            "Failed to backfill agent reasoning snapshot for agent %s: %s",
+            agent_id,
+            exc,
+        )
 
 
 def _get_external_provider_service_for_search():
@@ -201,6 +242,20 @@ _OPERATOR_OVERRIDE_FIELDS = (
     "tokenizer_family",
 )
 
+COMMON_REASONING_LEVELS = ("low", "medium", "high")
+COMMON_REASONING_DEFAULT = "auto"
+
+def _is_thinking_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
+    """Return whether the model explicitly or implicitly enables reasoning."""
+    if not isinstance(extra_params, dict):
+        return False
+    if isinstance(extra_params.get("enable_thinking"), bool):
+        return extra_params["enable_thinking"]
+    return (
+        isinstance(extra_params.get("reasoning_effort"), str)
+        or isinstance(extra_params.get("reasoning_budget_tokens"), int)
+    )
+
 
 def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Build extra_body for ModelConfig from model_record_t.extra_params.
@@ -212,10 +267,81 @@ def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[s
     if not extra_params or not isinstance(extra_params, dict):
         return None
     extra_body = dict(extra_params)
+    # These are dedicated ModelConfig fields, not provider request-body keys.
+    extra_body.pop("reasoning_effort", None)
+    extra_body.pop("reasoning_budget_tokens", None)
     custom = extra_body.pop("__custom__", None)
     if custom and isinstance(custom, dict):
         extra_body.update(custom)
     return extra_body if extra_body else None
+
+
+def _resolve_reasoning_capability(
+    model_name: str,
+    base_url: Optional[str],
+    provider_hint: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Resolve catalog reasoning metadata without coupling import-time setup."""
+    try:
+        from configs.model_catalog_loader import resolve_reasoning_capability
+    except ImportError:
+        return None
+    return resolve_reasoning_capability(
+        model_name=model_name,
+        base_url=base_url,
+        provider_hint=provider_hint,
+    )
+
+
+def _resolve_model_reasoning_effort(
+    extra_params: Optional[Dict[str, Any]],
+    capability: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """Resolve the enabled model's effort from its supported profile."""
+    if not isinstance(extra_params, dict) or not _is_thinking_enabled(extra_params):
+        return None
+    if extra_params.get("reasoning_effort") == "auto":
+        return None
+    if isinstance(capability, dict) and capability.get("status") == "supported":
+        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
+        default = capability.get("default")
+        if default not in levels:
+            default = COMMON_REASONING_DEFAULT
+    else:
+        # Unknown/custom model IDs still use the common generic profile. The
+        # provider remains the source of truth when a concrete value is sent.
+        levels = list(COMMON_REASONING_LEVELS)
+        default = COMMON_REASONING_DEFAULT
+    saved = extra_params.get("reasoning_effort")
+    if saved in levels:
+        return saved
+    # Auto is the universal fallback: omit the provider-specific effort so the
+    # model can choose its own reasoning depth.
+    return None if saved is None or default == COMMON_REASONING_DEFAULT else default
+
+
+def _resolve_model_reasoning_budget(
+    extra_params: Optional[Dict[str, Any]],
+    capability: Optional[Dict[str, Any]],
+) -> Optional[int]:
+    """Resolve a persisted numeric reasoning budget within the source range."""
+    if not isinstance(extra_params, dict) or not _is_thinking_enabled(extra_params):
+        return None
+    value = extra_params.get("reasoning_budget_tokens")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    controls = capability.get("controls") if isinstance(capability, dict) else None
+    budget_control = next(
+        (control for control in controls or []
+         if isinstance(control, dict) and control.get("type") == "budget_tokens"),
+        None,
+    )
+    if isinstance(budget_control, dict):
+        minimum = budget_control.get("min")
+        maximum = budget_control.get("max")
+        if isinstance(minimum, int) and isinstance(maximum, int):
+            return min(maximum, max(minimum, value))
+    return value
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -957,13 +1083,19 @@ async def create_model_config_list(tenant_id):
     model_list = []
     extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     for record in records:
+        model_name = add_repo_to_name(
+            model_repo=record["model_repo"],
+            model_name=record["model_name"],
+        )
+        reasoning_capability = _resolve_reasoning_capability(
+            model_name=model_name,
+            base_url=record.get("base_url"),
+            provider_hint=record.get("model_factory"),
+        )
         model_list.append(
             ModelConfig(cite_name=record["display_name"],
                         api_key=record.get("api_key", ""),
-                        model_name=add_repo_to_name(
-                                model_repo=record["model_repo"],
-                                model_name=record["model_name"],
-                            ),
+                        model_name=model_name,
                         url=record["base_url"],
                         ssl_verify=record.get("ssl_verify", True),
                         model_factory=record.get("model_factory"),
@@ -985,6 +1117,14 @@ async def create_model_config_list(tenant_id):
                         # temperature/top_p/extra_params flow into SDK.
                         temperature=record.get("temperature"),
                         top_p=record.get("top_p"),
+                        enable_thinking=_is_thinking_enabled(record.get("extra_params")),
+                        reasoning_capability=reasoning_capability,
+                        reasoning_effort=_resolve_model_reasoning_effort(
+                            record.get("extra_params"), reasoning_capability
+                        ),
+                        reasoning_budget_tokens=_resolve_model_reasoning_budget(
+                            record.get("extra_params"), reasoning_capability
+                        ),
                         extra_body=_build_extra_body(record.get("extra_params"))))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
@@ -2253,6 +2393,8 @@ async def create_agent_run_info(
     is_debug: bool = False,
     override_version_no: int | None = None,
     override_model_id: int | None = None,
+    reasoning_effort: str | None = None,
+    reasoning_budget_tokens: int | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     conversation_id: Optional[int] = None,
@@ -2285,6 +2427,12 @@ async def create_agent_run_info(
         if version_no is None:
             version_no = 0
             logger.info(f"Agent {agent_id} has no published version, using draft version 0")
+
+    _ensure_agent_reasoning_snapshot(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+    )
 
     final_query = await join_minio_file_description_to_query(
         minio_files=minio_files,
@@ -2361,6 +2509,21 @@ async def create_agent_run_info(
                     if override_extra and isinstance(override_extra, dict):
                         merged = dict(mc.extra_body or {})
                         for k, v in override_extra.items():
+                            if k == "enable_thinking":
+                                if isinstance(v, bool):
+                                    mc.enable_thinking = v
+                                    if not v:
+                                        mc.reasoning_effort = None
+                                        mc.reasoning_budget_tokens = None
+                                continue
+                            if k == "reasoning_effort":
+                                if isinstance(v, str):
+                                    mc.reasoning_effort = v
+                                continue
+                            if k == "reasoning_budget_tokens":
+                                if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                                    mc.reasoning_budget_tokens = v
+                                continue
                             if k == "__custom__" and isinstance(v, dict):
                                 for custom_key, custom_value in v.items():
                                     # A null custom value is an explicit
@@ -2374,7 +2537,69 @@ async def create_agent_run_info(
                             else:
                                 merged[k] = v
                         mc.extra_body = merged if merged else None
+                    if override_entry.get("reasoning_effort") is not None:
+                        mc.reasoning_effort = override_entry["reasoning_effort"]
+                    if override_entry.get("reasoning_budget_tokens") is not None:
+                        budget = override_entry["reasoning_budget_tokens"]
+                        if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
+                            mc.reasoning_budget_tokens = budget
                     break
+
+    # A request-level effort is valid only when the selected model's switch is
+    # enabled. Known capabilities use their declared levels. Unknown/custom
+    # models use the common generic profile and let the provider reject an
+    # unsupported concrete value through the normal reasoning error path.
+    # ``auto`` is represented by an omitted per-request effort. The selected
+    # model keeps reasoning enabled, but the provider chooses the depth.
+    if reasoning_effort == "auto":
+        reasoning_effort = None
+    if reasoning_effort is not None:
+        selected_config = next(
+            (mc for mc in model_list if mc.cite_name == agent_config.model_name),
+            None,
+        )
+        capability = selected_config.reasoning_capability if selected_config else None
+        if not selected_config or not selected_config.enable_thinking:
+            raise ValidationError(
+                "The selected model does not support the requested reasoning effort"
+            )
+        if isinstance(capability, dict) and capability.get("status") == "supported":
+            supported_levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
+        else:
+            supported_levels = list(COMMON_REASONING_LEVELS)
+        if reasoning_effort not in supported_levels:
+            raise ValidationError(
+                "The selected model does not support the requested reasoning effort"
+            )
+        selected_config.reasoning_effort = reasoning_effort
+
+    if reasoning_budget_tokens is not None:
+        selected_config = next(
+            (mc for mc in model_list if mc.cite_name == agent_config.model_name),
+            None,
+        )
+        capability = selected_config.reasoning_capability if selected_config else None
+        if not selected_config or not selected_config.enable_thinking:
+            raise ValidationError(
+                "The selected model does not support the requested reasoning budget"
+            )
+        controls = capability.get("controls") if isinstance(capability, dict) else None
+        budget_control = next(
+            (control for control in controls or []
+             if isinstance(control, dict) and control.get("type") == "budget_tokens"),
+            None,
+        )
+        minimum = budget_control.get("min") if isinstance(budget_control, dict) else None
+        maximum = budget_control.get("max") if isinstance(budget_control, dict) else None
+        if not isinstance(minimum, int) or not isinstance(maximum, int):
+            raise ValidationError(
+                "The selected model does not support the requested reasoning budget"
+            )
+        if reasoning_budget_tokens < minimum or reasoning_budget_tokens > maximum:
+            raise ValidationError(
+                f"Reasoning budget must be between {minimum} and {maximum} tokens"
+            )
+        selected_config.reasoning_budget_tokens = reasoning_budget_tokens
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = get_tenant_local_mcp_server(tenant_id)
@@ -2479,5 +2704,6 @@ async def create_agent_run_info(
         tenant_id=tenant_id,
         minio_files=minio_files,
         redis_client=get_redis_client(),
+        user_context=resolve_tool_user_context(agent_config, user_id, tenant_id),
     )
     return agent_run_info
