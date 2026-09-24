@@ -1095,8 +1095,9 @@ class OpenAIModel(OpenAIServerModel):
         not define a universal request field for every OpenAI-compatible
         provider. Confirmed providers use their own adapter. For an unknown
         provider, an enum effort falls back to OpenAI's public
-        ``reasoning_effort`` field; numeric budgets and toggles still require
-        an explicit provider adapter and are not guessed.
+        ``reasoning_effort`` field. Numeric budgets still require an explicit
+        provider adapter; an explicitly supplied thinking toggle retains the
+        legacy top-level passthrough for generic compatible gateways.
         """
         capability = self.reasoning_capability or {}
         provider_id = str(
@@ -1173,8 +1174,9 @@ class OpenAIModel(OpenAIServerModel):
 
         Qwen-family self-hosted deployments read the flag from
         ``chat_template_kwargs.enable_thinking``. DashScope's OpenAI-compatible
-        endpoint accepts the top-level ``enable_thinking`` extra field, so the
-        translation is selected by provider/API rather than model name alone.
+        endpoint accepts the top-level ``enable_thinking`` extra field. Known
+        providers use their adapter; unknown compatible gateways retain an
+        explicitly supplied top-level flag for backward compatibility.
         """
         if "enable_thinking" not in extra_body:
             return extra_body
@@ -1201,8 +1203,19 @@ class OpenAIModel(OpenAIServerModel):
                 }
             else:
                 translated["chat_template_kwargs"] = {"enable_thinking": thinking}
-        # No confirmed adapter means the canonical toggle is deliberately
-        # omitted instead of being guessed as a top-level provider field.
+        elif toggle_format is None:
+            capability = self.reasoning_capability or {}
+            provider_id = str(
+                capability.get("provider_id") or self.model_factory or ""
+            ).lower()
+            if capability.get("status") != "unsupported" and not (
+                capability.get("source") == "models_dev"
+                and provider_id in {"openai", "google"}
+            ):
+                # Preserve the pre-merge behavior for generic OpenAI-compatible
+                # gateways. This only forwards a toggle explicitly supplied by
+                # the caller; it does not enable the flag for every request.
+                translated["enable_thinking"] = thinking
         return translated
 
     def _apply_reasoning_control(self, completion_kwargs: Dict[str, Any]) -> None:

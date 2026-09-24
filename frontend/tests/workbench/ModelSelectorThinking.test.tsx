@@ -88,7 +88,17 @@ it("lets Start Chat toggle deep thinking and choose an effort in the shared sele
   expect(thinking).toHaveAttribute("aria-checked", "true");
   const effort = screen.getByRole("combobox");
   await user.click(effort);
-  await user.click(screen.getByText("Low"));
+  await user.click(screen.getByText("Medium"));
+  expect(register.mock.lastCall?.[0].getModelContext()).toMatchObject({
+    config: { modelName: "12", deepThinking: true, reasoningEffort: "medium" },
+  });
+});
+
+it("defaults the shared selector to low reasoning effort", async () => {
+  const user = userEvent.setup();
+  render(<ModelSelector models={models} value="12" />);
+  await user.click(screen.getByRole("switch"));
+
   expect(register.mock.lastCall?.[0].getModelContext()).toMatchObject({
     config: { modelName: "12", deepThinking: true, reasoningEffort: "low" },
   });

@@ -52,6 +52,7 @@ export function ResourceCard({
         </span>
       }
       description={description}
+      descriptionLines={2}
       icon={
         <span
           aria-hidden
@@ -65,7 +66,7 @@ export function ResourceCard({
       selectionRole="option"
       describedBy={disabledReason ? reasonId : undefined}
       onClick={onClick ?? (() => {})}
-      className="h-[220px] min-h-0 rounded-xl p-4 [&_h2]:text-lg [&_h2]:leading-6 [&_.line-clamp-3]:line-clamp-2 [&_.line-clamp-3]:mt-2 [&_.mt-3]:mt-2 [&_.border-t]:pt-3"
+      className="h-[220px] min-h-0 rounded-xl p-4 [&_h2]:text-lg [&_h2]:leading-6 [&_.mt-3]:mt-2 [&_.border-t]:pt-3"
       badge={
         badges.length > 0 ? (
           <span
@@ -125,7 +126,9 @@ export function ResourceCard({
         ) : undefined
       }
       footer={
-        actions ?? (
+        actions ? (
+          <div className="flex w-full justify-end">{actions}</div>
+        ) : (
           <button
             type="button"
             disabled={disabled}

@@ -42,7 +42,7 @@ export const initialWorkbenchState: WorkbenchState = {
   config: {
     schema_version: 3,
     mode: "generic_chat",
-    generation_config: { deep_thinking: false, thinking_effort: "high" },
+    generation_config: { deep_thinking: false, thinking_effort: "low" },
     agent_mounts: [],
     skill_mounts: [],
   },

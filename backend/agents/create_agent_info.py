@@ -2568,15 +2568,22 @@ def apply_root_generation_overlay(
         if model_config.cite_name != agent_config.model_name:
             continue
         extra_body = dict(model_config.extra_body or {})
-        extra_body["enable_thinking"] = bool(generation_config.get("deep_thinking"))
-        if generation_config.get("deep_thinking") and generation_config.get("thinking_effort"):
-            extra_body["reasoning_effort"] = generation_config["thinking_effort"]
-        else:
-            extra_body.pop("reasoning_effort", None)
+        deep_thinking = bool(generation_config.get("deep_thinking"))
+        extra_body["enable_thinking"] = deep_thinking
+        # Effort is a dedicated ModelConfig field, not an extra_body override.
+        # Clear inherited model settings so the Workbench choice is authoritative.
+        extra_body.pop("reasoning_effort", None)
+        extra_body.pop("reasoning_budget_tokens", None)
         root_model = model_config.model_copy(
             deep=True,
             update={
                 "cite_name": "workbench_root_model",
+                "enable_thinking": deep_thinking,
+                "reasoning_effort": (
+                    (generation_config.get("thinking_effort") or "low")
+                    if deep_thinking else None
+                ),
+                "reasoning_budget_tokens": None,
                 "temperature": (
                     generation_config.get("temperature")
                     if generation_config.get("temperature") is not None

@@ -231,7 +231,7 @@ function ModelSelectorRoot({
       models.find(
         (model) => model.id === (valueProp ?? defaultValue ?? models[0]?.id)
       )?.defaultEffort ??
-      (deepThinkingProp !== undefined ? "high" : undefined),
+      "low",
     onChange: onEffortChange,
   });
   const [deepThinking, setDeepThinking] = useControllableState({

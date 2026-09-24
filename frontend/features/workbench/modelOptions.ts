@@ -33,7 +33,12 @@ export const deriveModelOptions = (
         String(item.id) === id || item.name === id || item.displayName === id
     );
     if (scope === "tenant" && !model?.reasoningCapability) {
-      return { id, name: fallbackName, efforts: true };
+      return {
+        id,
+        name: fallbackName,
+        efforts: true,
+        defaultEffort: model?.defaultReasoningEffort ?? "low",
+      };
     }
     const extra =
       scope === "agent"
@@ -82,12 +87,12 @@ export const deriveModelOptions = (
         : undefined;
     const defaultCandidates: (ReasoningEffort | null | undefined)[] = [
       model?.defaultReasoningEffort,
-      "auto",
+      "low",
       capability?.status === "supported" ? capability.default : undefined,
       DEFAULT_REASONING_EFFORT,
     ];
     const defaultEffort = hasSnapshot
-      ? (snapshotEffort ?? "auto")
+      ? (snapshotEffort ?? "low")
       : (defaultCandidates.find(
           (candidate) => candidate != null && effortLevels.includes(candidate)
         ) ?? undefined);

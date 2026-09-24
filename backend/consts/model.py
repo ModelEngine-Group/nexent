@@ -872,7 +872,7 @@ class WorkbenchGenerationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     deep_thinking: bool = False
-    thinking_effort: Literal["low", "medium", "high"] = "high"
+    thinking_effort: Literal["low", "medium", "high"] = "low"
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     top_p: Optional[float] = Field(default=None, gt=0, le=1)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
