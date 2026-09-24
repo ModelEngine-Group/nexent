@@ -717,6 +717,14 @@ def reset_mocks():
     """Reset all mocks before each test to ensure a clean test environment."""
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
+    agent_run_service.get_conversation_service.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
+    agent_run_service.get_conversation_service.return_value = {
+        "conversation_id": 123,
+        "knowledge_scope": None,
+    }
     yield
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()

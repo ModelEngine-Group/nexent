@@ -377,6 +377,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
 async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
     mocker, mock_auth_header
 ):
+    mocker.patch("apps.agent_app.ENABLE_AGENT_WORKBENCH", True)
     mocker.patch(
         "apps.agent_app.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),

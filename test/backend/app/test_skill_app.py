@@ -119,6 +119,7 @@ sys.modules['consts.model'] = consts_model_mock
 sys.modules['consts.const'] = consts_const_mock
 consts_const_mock.MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
 consts_const_mock.APP_VERSION = "v2.0.2"
+consts_const_mock.ENABLE_AGENT_WORKBENCH = False
 consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
 
 # Keep permission dependencies inert in endpoint tests that exercise legacy
@@ -3331,7 +3332,11 @@ class TestSkillAppRemainingExceptionMappings:
         )
         expected = skill_app.HTTPException(status_code=409, detail="conflict")
         mocker.patch.object(skill_app, "create_nl2skill_stream", side_effect=expected)
-        request = MagicMock(language=None)
+        request = MagicMock(
+            language=None,
+            persist_history=False,
+            workbench_config=None,
+        )
 
         with pytest.raises(skill_app.HTTPException) as exc_info:
             await skill_app.nl2skill_run_api(request=request, authorization="token")

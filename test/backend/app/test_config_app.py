@@ -188,6 +188,7 @@ class TestConfigAppRouterConfiguration:
         const_module.AIDP_API_KEY = ""
         const_module.AIDP_SERVER_URL = ""
         const_module.ENABLE_AIDP_KNOWLEDGE = False
+        const_module.ENABLE_AGENT_WORKBENCH = False
         const_module.IS_SPEED_MODE = False
         const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
         monkeypatch.setitem(sys.modules, "consts.const", const_module)

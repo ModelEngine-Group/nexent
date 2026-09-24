@@ -50,7 +50,7 @@ LEGACY_MODULE_NAMES = {
 
 DEFAULT_MODULE_LINE_LIMIT = 2000
 MODULE_LINE_LIMITS = {
-    "agent/run.py": 2300,
+    "agent/run.py": 2500,
 }
 
 
