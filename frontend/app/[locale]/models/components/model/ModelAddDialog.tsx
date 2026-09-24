@@ -62,22 +62,6 @@ import { TYPE_BADGE_CLASS, useTypeOptions } from "./modelTypeUi";
 
 const CUSTOM_PROVIDER_KEY = "__custom__";
 
-function generateRandomSuffix(length: number): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  const values = new Uint32Array(length);
-  crypto.getRandomValues(values);
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(values[i] % chars.length);
-  }
-  return result;
-}
-
-const defaultDisplayName = (modelName: string): string => {
-  const base = modelName?.trim() || "custom-model";
-  return `${base}${generateRandomSuffix(5)}`;
-};
-
 export interface ModelAddDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -1006,8 +990,10 @@ function BatchAddForm({
           type: row.model_type,
           url: baseUrl.trim(),
           apiKey: apiKey.trim(),
-          displayName:
-            override?.displayName?.trim() || defaultDisplayName(row.model_name),
+          // develop #4009: no automatic renaming — the clean model name is
+          // the default display name; a collision with an existing row is
+          // reported as a per-row failure instead of silently suffixed.
+          displayName: override?.displayName?.trim() || row.model_name,
           maxTokens: row.model_type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
           modelFactory:
             provider === CUSTOM_PROVIDER_KEY
@@ -1411,7 +1397,7 @@ function RowSettingsDialog({
               })}
               <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {t("modelConfig.addDialog.displayNameHint", {
-                  defaultValue: "选填，留空自动生成",
+                  defaultValue: "选填，留空使用模型名称",
                 })}
               </span>
             </Label>
@@ -1419,7 +1405,7 @@ function RowSettingsDialog({
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder={t("modelConfig.addDialog.displayNameDefault", {
-                defaultValue: "默认自动生成",
+                defaultValue: "默认使用模型名称",
               })}
             />
           </div>
