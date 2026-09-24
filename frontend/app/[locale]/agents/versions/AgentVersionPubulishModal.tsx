@@ -124,6 +124,7 @@ export default function AgentVersionPubulishModal({
         onPublished?.();
         queryClient.invalidateQueries({ queryKey: ["agents"] });
         queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
+        queryClient.invalidateQueries({ queryKey: ["myEditableAgents"] });
       } else {
         message.error(result.message || t("agent.version.publishFailed"));
       }

@@ -129,6 +129,34 @@ describe("publish navigation component contract", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("UT-FE-AGUG-025 refreshes the editable Agent list after a successful publish", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App>
+          <AgentVersionPubulishModal
+            open
+            onClose={vi.fn()}
+            agentId={41}
+            onPublished={vi.fn()}
+          />
+        </App>
+      </QueryClientProvider>
+    );
+
+    await submitPublish(user);
+
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["myEditableAgents"],
+      })
+    );
+  });
+
   it("UT-FE-AGUG-003 keeps the editor modal open and skips navigation on publish failure", async () => {
     const user = userEvent.setup();
     vi.mocked(publishVersion).mockResolvedValue({
