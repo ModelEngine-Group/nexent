@@ -2721,6 +2721,7 @@
   "skillRepository.review.approve": "通过",
   "skillRepository.review.reject": "驳回",
   "skillRepository.detail.unknownAuthor": "未知作者",
+  "skillRepository.detail.author": "作者",
   "skillRepository.detail.loadError": "详情加载失败",
   "skillRepository.detail.tags": "标签",
   "skillRepository.detail.noTags": "暂无标签",

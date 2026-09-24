@@ -24,7 +24,7 @@ import { listMcpRuntimeTools } from "@/services/mcpToolsService";
 import type { McpTool } from "@/types/agentConfig";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 
-interface McpDetailsProps {
+interface McpDetailProps {
   open: boolean;
   service: CommunityMcpCard;
   installed: boolean;
@@ -33,14 +33,14 @@ interface McpDetailsProps {
   onInstall: (service: CommunityMcpCard) => void;
 }
 
-export function McpDetails({
+export function McpDetail({
   open,
   service,
   installed,
   icon,
   onClose,
   onInstall,
-}: McpDetailsProps) {
+}: McpDetailProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -86,7 +86,7 @@ export function McpDetails({
         open={open}
         onClose={onClose}
         width={560}
-        className="mcp-details-modal [&_.ant-modal-close]:!z-20 [&_.ant-modal-content]:!overflow-hidden [&_.ant-modal-content]:!rounded-2xl [&_.ant-modal-content]:!p-0"
+        className="mcp-detail-modal [&_.ant-modal-close]:!z-20 [&_.ant-modal-content]:!overflow-hidden [&_.ant-modal-content]:!rounded-2xl [&_.ant-modal-content]:!p-0"
         bodyStyle={{ padding: 0 }}
       >
         <div className="flex max-h-[min(740px,calc(100dvh-3rem))] flex-col overflow-hidden">

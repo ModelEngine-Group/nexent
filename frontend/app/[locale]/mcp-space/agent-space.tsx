@@ -15,7 +15,7 @@ import {
   matchesNameOrTag,
   resolveDeploymentType,
 } from "@/lib/mcpTools";
-import { McpDetails } from "@/components/mcp/mcp-details";
+import { McpDetail } from "@/components/mcp/mcp-detail";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
@@ -379,7 +379,7 @@ export function useMcpSpaceController() {
       ) : null}
 
       {selectedRepository ? (
-        <McpDetails
+        <McpDetail
           open
           service={selectedRepository}
           installed={isRepositoryInstalled(selectedRepository)}

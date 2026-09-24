@@ -2599,6 +2599,7 @@
   "skillRepository.review.approve": "Approve",
   "skillRepository.review.reject": "Reject",
   "skillRepository.detail.unknownAuthor": "Unknown author",
+  "skillRepository.detail.author": "Author",
   "skillRepository.detail.loadError": "Failed to load details",
   "skillRepository.detail.tags": "Tags",
   "skillRepository.detail.noTags": "No tags",
