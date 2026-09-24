@@ -10,6 +10,7 @@ import re
 import shutil
 import tarfile
 import time
+from concurrent.futures import CancelledError
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -26,6 +27,8 @@ from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
+from .core_agent import CoreAgent, convert_code_format
+from .sandbox_workspace import SandboxWorkspace, probe_workspace
 from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
 from .output_protocol import ModelOutputProtocolExhaustedError
@@ -277,6 +280,12 @@ class NexentAgent:
         self.user_id = user_id
         self.tenant_id = tenant_id
         self.workspace_path = workspace_path
+        self.workspace_mapping = None
+        if sandbox_config is not None and sandbox_config.workspace_mode == "bind" and workspace_path:
+            from .sandbox import SandboxLevel
+
+            if sandbox_config.level == SandboxLevel.DOCKER:
+                self.workspace_mapping = sandbox_config.bind_workspace().for_run(workspace_path)
         self.workspace_run_id = workspace_run_id
         self.minio_files = list(minio_files or [])
         self.user_context = dict(user_context or {})
@@ -660,6 +669,13 @@ class NexentAgent:
                 tool_obj = self.create_builtin_tool(tool_config)
             else:
                 raise ValueError(f"unsupported tool source: {source}")
+            mapping = getattr(self, "workspace_mapping", None)
+            if mapping is not None and class_name in {
+                "CreateFileTool", "ReadFileTool", "DeleteFileTool", "DownloadFromS3Tool", "UploadToS3Tool",
+            }:
+                tool_obj.workspace_mapping = mapping
+                if class_name in {"CreateFileTool", "ReadFileTool", "DeleteFileTool"}:
+                    tool_obj.init_path = str(mapping.host_root / "outputs")
             if source in {"local", "builtin", "mcp"}:
                 try:
                     setattr(tool_obj, "_nexent_execute_on_host", True)
@@ -702,6 +718,11 @@ class NexentAgent:
             agent_name=str(agent_name),
         )
 
+    def _check_sandbox_cancelled(self) -> None:
+        """Stop initialization and retries after the owning run is cancelled."""
+        if self.stop_event.is_set() is True:
+            raise CancelledError("Sandbox initialization cancelled")
+
     def create_single_agent(
         self,
         agent_config: AgentConfig,
@@ -726,6 +747,7 @@ class NexentAgent:
             _sandbox_tree_context = {}
 
         try:
+            self._check_sandbox_cancelled()
             model = self.create_model(agent_config.model_name)
             model.context_budget_snapshot = getattr(
                 agent_config,
@@ -890,6 +912,7 @@ class NexentAgent:
                         timeout_seconds=skill_timeout,
                         workspace_path=self.workspace_path,
                         network_enabled=not self.sandbox_config.network_disabled,
+                        workspace_mapping=getattr(self, "workspace_mapping", None),
                     )
                     for tool in tool_list:
                         bind_backend = getattr(tool, "bind_execution_backend", None)
@@ -903,10 +926,22 @@ class NexentAgent:
                 if self.sandbox_config.level != SandboxLevel.LOCAL:
                     try:
                         warm_start = time.time()
+                        self._check_sandbox_cancelled()
                         python_executor("[0, None]")
+                        self._check_sandbox_cancelled()
                         warm_dur = time.time() - warm_start
                         backend = getattr(python_executor, "_nexent_backend", "unknown")
                         if backend == "local":
+                            if self.sandbox_config.failure_policy == "error":
+                                raise RuntimeError("Docker was requested but the executor is local")
+                            self.workspace_mapping = None
+                            for tool in tool_list:
+                                if getattr(tool, "workspace_mapping", None) is not None:
+                                    tool.workspace_mapping = None
+                            self.observer.add_message(
+                                "", ProcessType.WARNING,
+                                "Docker sandbox unavailable; execution has fallen back to LocalPythonExecutor.",
+                            )
                             logger.warning(
                                 "Sandbox level '%s' unavailable; using LocalPythonExecutor instead "
                                 "(scope=%s, warm-up %.2fs)",
@@ -922,7 +957,12 @@ class NexentAgent:
                                 self.sandbox_config.level.value,
                                 self.sandbox_config.scope.value,
                             )
+                    except CancelledError:
+                        raise
                     except Exception as warm_err:
+                        self._check_sandbox_cancelled()
+                        if self.sandbox_config.failure_policy == "error":
+                            raise RuntimeError("Sandbox FAILED phase=warmup") from warm_err
                         logger.warning(
                             "Sandbox warm-up failed (%s): %s",
                             self.sandbox_config.level.value,
@@ -932,6 +972,7 @@ class NexentAgent:
                 self._sandbox_scope = self.sandbox_config.scope.value
 
             # Create the agent
+            self._check_sandbox_cancelled()
             agent = CoreAgent(
                 observer=self.observer,
                 tools=tool_list,
@@ -974,7 +1015,15 @@ class NexentAgent:
                     update_step._get_user_id = agent._get_user_id
 
             return agent
+        except CancelledError:
+            self._cleanup_sandbox()
+            raise
         except Exception as e:
+            if getattr(self.sandbox_config, "failure_policy", None) == "error":
+                try:
+                    self._cleanup_sandbox()
+                except Exception:
+                    logger.exception("Failed to release sandbox resources after agent construction failed")
             raise ValueError(f"Error in creating agent, agent name: {agent_config.name}, Error: {e}")
 
     def add_history_to_agent(self, history: List[AgentHistory]):
@@ -1295,10 +1344,12 @@ class NexentAgent:
             result = json.loads(download_tool.forward(source_url, local_filename))
             downloaded.append({"name": filename, "path": result["local_path"]})
 
+        mapping = getattr(self, "workspace_mapping", None)
+        display_workspace = mapping.container_root if mapping is not None else workspace
         file_lines = "\n".join(f"- {item['name']}: {item['path']}" for item in downloaded)
         workspace_note = (
-            f"\n\nRun workspace: {workspace}\n"
-            f"Write every generated file under: {workspace / 'outputs'}\n"
+            f"\n\nRun workspace: {display_workspace}\n"
+            f"Write every generated file under: {display_workspace / 'outputs'}\n"
             "The code executor already runs in that outputs directory. Use bare relative "
             "paths such as 'report.pdf', not 'outputs/report.pdf', to avoid creating an "
             "outputs/outputs directory.\n"
@@ -1352,6 +1403,8 @@ class NexentAgent:
 
     def _uses_shared_file_workspace(self) -> bool:
         """Return whether the runtime and sandbox use the same workspace volume."""
+        if getattr(self, "workspace_mapping", None) is not None:
+            return True
         extra_kwargs = getattr(self.sandbox_config, "extra_kwargs", {}) or {}
         return bool(
             extra_kwargs.get("shared_workspace")
@@ -1364,6 +1417,10 @@ class NexentAgent:
         if not containers or not self.workspace_path:
             return
         workspace = Path(self.workspace_path).resolve()
+        mapping = getattr(self, "workspace_mapping", None)
+        if mapping is not None:
+            self._verify_bind_workspace_access(containers, workspace, mapping)
+            return
         if not workspace.exists() or workspace.drive:
             return
         shared_workspace = self._uses_shared_file_workspace()
@@ -1379,11 +1436,28 @@ class NexentAgent:
                 raise RuntimeError("Failed to copy run workspace into the sandbox")
             self._grant_sandbox_output_access(container, workspace)
 
+    def _verify_bind_workspace_access(self, containers, workspace: Path, mapping: SandboxWorkspace) -> None:
+        """Probe the mounted run directory without copying or changing Windows ACLs."""
+        for container in containers:
+            try:
+                if not workspace.drive:
+                    self._grant_sandbox_output_access(container, mapping.container_root)
+                probe_workspace(container, mapping.container_root)
+            except Exception:
+                logger.exception(
+                    "Sandbox FAILED phase=workspace_access run_id=%s container_id=%s",
+                    self.workspace_run_id, getattr(container, "id", None),
+                )
+                raise
+
     def _initialize_sandbox_workspaces(self) -> None:
         """Set every Docker kernel's cwd and workspace environment for this run."""
         if not self.workspace_path:
             return
         workspace = Path(self.workspace_path).resolve()
+        mapping = getattr(self, "workspace_mapping", None)
+        if mapping is not None:
+            workspace = mapping.container_root
         output_dir = workspace / "outputs"
         bootstrap_code = (
             "import os as _nexent_os\n"
@@ -1396,6 +1470,7 @@ class NexentAgent:
         )
         seen_executor_ids = set()
         for executor in self._sandbox_executors:
+            self._check_sandbox_cancelled()
             executor_id = id(executor)
             if executor_id in seen_executor_ids:
                 continue
@@ -1419,7 +1494,18 @@ class NexentAgent:
             )
             try:
                 execute_bootstrap(bootstrap_code)
+                self._check_sandbox_cancelled()
+                logger.info(
+                    "Sandbox READY run_id=%s actual_backend=docker scope=%s container_id=%s kernel_id=%s "
+                    "host_workspace=%s container_workspace=%s",
+                    self.workspace_run_id, getattr(getattr(self.sandbox_config, "scope", None), "value", None),
+                    getattr(getattr(executor, "container", None), "id", None),
+                    getattr(executor, "kernel_id", None), self.workspace_path, workspace,
+                )
+            except CancelledError:
+                raise
             except Exception as exc:
+                self._check_sandbox_cancelled()
                 # Workspace initialization is idempotent. If the kernel channel
                 # failed and marked this lease unhealthy, retry the bootstrap in
                 # the same run so the lease can replace its kernel immediately.
@@ -1428,16 +1514,27 @@ class NexentAgent:
                 if (
                     getattr(executor, "_nexent_kernel_recovery_supported", False)
                     and getattr(executor, "_unhealthy", False)
+                    # Registered bootstraps already own their bounded recovery.
+                    and not callable(register_bootstrap)
                 ):
                     logger.warning(
                         "Retrying sandbox workspace initialization with a replacement kernel: %s",
                         exc,
+                        exc_info=True,
                     )
                     try:
                         execute_bootstrap(bootstrap_code)
+                        self._check_sandbox_cancelled()
                         continue
+                    except CancelledError:
+                        raise
                     except Exception as retry_exc:
+                        self._check_sandbox_cancelled()
                         exc = retry_exc
+                logger.exception(
+                    "Sandbox FAILED phase=workspace run_id=%s: %s", self.workspace_run_id, exc,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
                 raise RuntimeError(
                     f"Failed to initialize sandbox workspace '{workspace}': {exc}"
                 ) from exc
@@ -1554,7 +1651,8 @@ class NexentAgent:
         if workspace.name != self.workspace_run_id:
             return
         try:
-            for container in self._sandbox_containers():
+            containers = [] if getattr(self, "workspace_mapping", None) is not None else self._sandbox_containers()
+            for container in containers:
                 try:
                     result = container.exec_run(
                         ["rm", "-rf", "--", str(workspace)],

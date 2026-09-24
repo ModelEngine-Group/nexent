@@ -71,6 +71,7 @@ class CreateFileTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
+        self.workspace_mapping = None
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
@@ -84,6 +85,8 @@ class CreateFileTool(Tool):
         Raises:
             Exception: If path is outside workspace or invalid
         """
+        if self.workspace_mapping is not None:
+            return str(self.workspace_mapping.resolve_file(file_path, self.init_path))
         # Check for absolute path
         if os.path.isabs(file_path):
             abs_path = os.path.abspath(file_path)
@@ -144,7 +147,9 @@ class CreateFileTool(Tool):
             success_msg = {
                 "status": "success",
                 "file_path": relative_path,
-                "absolute_path": abs_path,
+                "absolute_path": (
+                    str(self.workspace_mapping.to_container(abs_path)) if self.workspace_mapping else abs_path
+                ),
                 "content_length": len(content) if content else 0,
                 "file_size_bytes": file_size,
                 "encoding": encoding,

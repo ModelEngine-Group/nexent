@@ -31,7 +31,6 @@ from nexent.core.models.capacity_budget import (
     UncertaintyReserveBasisUnknown,
 )
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
-from nexent.core.agents.sandbox import SandboxConfig
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.memory import models as memory_models
 
@@ -72,6 +71,9 @@ from utils.http_client_utils import create_httpx_client
 from utils.redis_utils import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
+    NEXENT_SANDBOX_WORKSPACE_MODE,
+    NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
+    NEXENT_SANDBOX_FAILURE_POLICY,
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
@@ -2649,11 +2651,16 @@ async def create_agent_run_info(
     # Resolve sandbox config: DB policy overrides env-var defaults.
     # build_sandbox_policy returns None when level=local (backward-compatible).
     # Import inside function body to avoid circular dependency.
+    from agents.sandbox_config import resolve_sandbox_config
     from management.services.agent.service import build_sandbox_policy, get_sandbox_minio_client
     sandbox_policy = build_sandbox_policy(tenant_id=tenant_id, agent_type="")
     agent_db_policy = getattr(agent_config, "sandbox_policy", None)
-    merged_policy = sandbox_policy if sandbox_policy else agent_db_policy
-    sandbox_config = SandboxConfig.from_dict(merged_policy) if merged_policy else None
+    sandbox_config = resolve_sandbox_config(
+        agent_db_policy, sandbox_policy,
+        workspace_mode=NEXENT_SANDBOX_WORKSPACE_MODE,
+        container_workspace_root=NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
+        failure_policy=NEXENT_SANDBOX_FAILURE_POLICY,
+    )
     sandbox_minio_client = (
         get_sandbox_minio_client()
         if sandbox_config and sandbox_config.auto_sync_outputs
@@ -2669,6 +2676,7 @@ async def create_agent_run_info(
         if (
             getattr(sandbox_config.level, "value", sandbox_config.level) == "docker"
             and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
+            and sandbox_config.workspace_mode == "legacy"
         ):
             sandbox_config.extra_kwargs.update({
                 "workspace_volume_name": NEXENT_SANDBOX_WORKSPACE_VOLUME,
