@@ -8,11 +8,15 @@ from typing import Any
 
 from consts.agent_repository import STATUS_SHARED
 from consts.const import (
-    OFFICIAL_AGENT_TENANT_ID,
-    OFFICIAL_AGENT_USER_ID,
+    SYSTEM_TENANT_ID,
+    SYSTEM_USER_ID,
     OFFICIAL_AGENTS_PATH,
     OFFICIAL_AGENT_PROFILES,
 )
+
+# Compatibility exports for integrations that still import the former names.
+OFFICIAL_AGENT_TENANT_ID = SYSTEM_TENANT_ID
+OFFICIAL_AGENT_USER_ID = SYSTEM_USER_ID
 from database.agent_db import create_agent, find_agent_id_by_agent_name
 from database.agent_repository_db import upsert_agent_repository_record
 from database.agent_repository_db import update_agent_repository_by_id
@@ -53,14 +57,14 @@ def _source_agent_payload(agent: Any) -> dict[str, Any]:
 
 def _find_or_create_source_agent(agent: Any) -> int:
     existing_agent_id = find_agent_id_by_agent_name(
-        agent.name, OFFICIAL_AGENT_TENANT_ID
+        agent.name, SYSTEM_TENANT_ID
     )
     if existing_agent_id is not None:
         return int(existing_agent_id)
     return int(create_agent(
         _source_agent_payload(agent),
-        tenant_id=OFFICIAL_AGENT_TENANT_ID,
-        user_id=OFFICIAL_AGENT_USER_ID,
+        tenant_id=SYSTEM_TENANT_ID,
+        user_id=SYSTEM_USER_ID,
     )["agent_id"])
 
 
@@ -73,7 +77,7 @@ def _materialize_snapshot(bundle: OfficialAgentBundle):
     for source_id, agent in bundle.snapshot.agent_info.items():
         remapped = agent.model_copy(update={
             "agent_id": mapping[int(source_id)],
-            "tenant_id": OFFICIAL_AGENT_TENANT_ID,
+            "tenant_id": SYSTEM_TENANT_ID,
             "managed_agents": [mapping[item] for item in agent.managed_agents],
         })
         agent_info[str(mapping[int(source_id)])] = remapped
@@ -100,7 +104,7 @@ def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
         # Official repository cards are published by Nexent, regardless of
         # the author metadata carried by an exported source Agent.
         "author": "Nexent",
-        "submitted_by": OFFICIAL_AGENT_USER_ID,
+        "submitted_by": SYSTEM_USER_ID,
         "version_name": "Official",
         "agent_info_json": snapshot.model_dump(mode="json"),
         "status": STATUS_SHARED,
@@ -111,13 +115,13 @@ def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
     }
     repository_id, updated = upsert_agent_repository_record(
         repository_data,
-        publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
-        publisher_user_id=OFFICIAL_AGENT_USER_ID,
+        publisher_tenant_id=SYSTEM_TENANT_ID,
+        publisher_user_id=SYSTEM_USER_ID,
     )
     update_agent_repository_by_id(
         repository_id=repository_id,
-        publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
-        user_id=OFFICIAL_AGENT_USER_ID,
+        publisher_tenant_id=SYSTEM_TENANT_ID,
+        user_id=SYSTEM_USER_ID,
         updates={"name": bundle.name},
     )
     return {"name": bundle.name, "agent_repository_id": repository_id, "updated": updated}

@@ -13,7 +13,10 @@ from consts.agent_repository import (
     VALID_REPOSITORY_STATUSES,
 )
 from consts.exceptions import UnauthorizedError
-from consts.const import OFFICIAL_AGENT_TENANT_ID
+from consts.const import SYSTEM_TENANT_ID
+
+# Compatibility export for callers and tests that still import the former name.
+OFFICIAL_AGENT_TENANT_ID = SYSTEM_TENANT_ID
 from consts.model import AgentRepositorySnapshot, KnowledgeBaseResolution, SkillResolution
 from consts.notification import (
     EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
@@ -110,7 +113,7 @@ def _to_summary_item(
         "downloads": downloads,
         "content": record.get("content"),
         "publisher_tenant_id": record.get("publisher_tenant_id"),
-        "is_official": record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID,
+        "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
     }
 
 
@@ -218,12 +221,12 @@ def list_agent_repository_listings_impl(
     # the Nexent container's startup environment.
     if agent_id is None and (status is None or status == STATUS_SHARED):
         official_records = list_agent_repository_summaries(
-            publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
+            publisher_tenant_id=SYSTEM_TENANT_ID,
             status=STATUS_SHARED,
             agent_id=agent_id,
         )
         for record in official_records:
-            record["publisher_tenant_id"] = OFFICIAL_AGENT_TENANT_ID
+            record["publisher_tenant_id"] = SYSTEM_TENANT_ID
         records.extend(official_records)
         # Keep the response stable if a repository record is visible through
         # both tenant queries (for example during a migration or in tests).
@@ -774,7 +777,7 @@ def get_agent_repository_listing_detail_impl(
     if not record:
         record = get_agent_repository_by_id(
             agent_repository_id,
-            OFFICIAL_AGENT_TENANT_ID,
+            SYSTEM_TENANT_ID,
         )
     if not record:
         raise ValueError("Repository listing not found")
@@ -803,7 +806,7 @@ def get_agent_repository_listing_detail_impl(
         "model_name": root_agent.get("model_name"),
         "duty_prompt": root_agent.get("duty_prompt"),
         "tools": _extract_tool_names(root_agent),
-        "is_official": record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID,
+        "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
     }
 
 
@@ -910,7 +913,7 @@ def update_agent_repository_status_impl(
     if not record:
         record = get_agent_repository_by_id(
             agent_repository_id,
-            OFFICIAL_AGENT_TENANT_ID,
+            SYSTEM_TENANT_ID,
         )
     if not record:
         raise ValueError("Repository listing not found")
@@ -1259,14 +1262,14 @@ def check_repository_import_precheck_impl(
     if not record:
         record = get_agent_repository_by_id(
             agent_repository_id,
-            OFFICIAL_AGENT_TENANT_ID,
+            SYSTEM_TENANT_ID,
         )
     if not record:
         raise ValueError("Repository listing not found")
     if record.get("status") != STATUS_SHARED:
         raise ValueError("Repository listing is not available for import")
 
-    if record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID:
+    if record.get("publisher_tenant_id") == SYSTEM_TENANT_ID:
         # Re-read the mounted bundle so the precheck sees the same Skill,
         # MCP, model and logical KB declarations that the official installer
         # will use. The repository snapshot is intentionally not treated as
@@ -1328,7 +1331,7 @@ async def import_agent_from_repository_impl(
     if not record:
         record = get_agent_repository_by_id(
             agent_repository_id,
-            OFFICIAL_AGENT_TENANT_ID,
+            SYSTEM_TENANT_ID,
         )
     if not record:
         raise ValueError("Repository listing not found")
@@ -1337,7 +1340,7 @@ async def import_agent_from_repository_impl(
     # knowledge bases, skills and MCP servers must be prepared in the target
     # tenant before the normal agent snapshot is imported. Ordinary listings
     # continue through the existing import path below.
-    if record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID:
+    if record.get("publisher_tenant_id") == SYSTEM_TENANT_ID:
         from services.official_agent_service import install_official_agents
 
         # The official bundle directory name is the root Agent name, which is
@@ -1413,13 +1416,13 @@ async def import_agent_from_repository_impl(
 def list_official_agent_management_impl() -> List[Dict[str, Any]]:
     """Return active official listings for super-admin management."""
     records = list_agent_repository_summaries(
-        publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
+        publisher_tenant_id=SYSTEM_TENANT_ID,
         status=STATUS_SHARED,
     )
     return [
         {
             **record,
-            "publisher_tenant_id": OFFICIAL_AGENT_TENANT_ID,
+            "publisher_tenant_id": SYSTEM_TENANT_ID,
         }
         for record in records
     ]
@@ -1431,7 +1434,7 @@ def delete_official_agent_impl(agent_repository_id: int, user_id: str) -> Dict[s
     import shutil
     from consts.const import OFFICIAL_AGENTS_PATH
 
-    record = get_agent_repository_by_id(agent_repository_id, OFFICIAL_AGENT_TENANT_ID)
+    record = get_agent_repository_by_id(agent_repository_id, SYSTEM_TENANT_ID)
     if not record:
         raise ValueError("Official agent repository listing not found")
     bundle_name = str(record.get("name") or "").strip()
@@ -1462,10 +1465,10 @@ def delete_official_agent_impl(agent_repository_id: int, user_id: str) -> Dict[s
     snapshot = record.get("agent_info_json") or {}
     for source_id in (snapshot.get("agent_info") or {}).keys():
         if str(source_id).isdigit():
-            delete_agent_by_id(int(source_id), OFFICIAL_AGENT_TENANT_ID, user_id)
+            delete_agent_by_id(int(source_id), SYSTEM_TENANT_ID, user_id)
     affected = soft_delete_agent_repository_record(
         agent_repository_id,
-        publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
+        publisher_tenant_id=SYSTEM_TENANT_ID,
         user_id=user_id,
     )
     if affected == 0:

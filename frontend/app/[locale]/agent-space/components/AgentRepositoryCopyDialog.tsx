@@ -45,7 +45,7 @@ const TYPE_ICON: Record<RepositoryImportRequirementType, typeof Database> = {
   tool: Wrench,
 };
 
-const OFFICIAL_TENANT_ID = "__nexent_official__";
+const SYSTEM_TENANT_ID = "__nexent_system__";
 
 interface AgentRepositoryCopyDialogProps {
   listing: AgentRepositoryListingItem | null;
@@ -96,7 +96,7 @@ export function AgentRepositoryCopyDialog({
     t("agentRepository.card.untitled");
   const isOfficialListing =
     listing?.is_official === true ||
-    listing?.publisher_tenant_id === OFFICIAL_TENANT_ID;
+    listing?.publisher_tenant_id === SYSTEM_TENANT_ID;
 
   const {
     data: precheck,
