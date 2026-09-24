@@ -627,6 +627,7 @@ class SkillService:
     def update_skill_from_file(
         self, skill_name: str, file_content: Union[bytes, str, io.BytesIO],
         file_type: str = "auto", tenant_id: Optional[str] = None, user_id: Optional[str] = None,
+        rewrite_name: bool = False,
     ) -> Dict[str, Any]:
         """Validate access before sharing the MD/ZIP replacement pipeline."""
         tenant_id = self._require_tenant_id(tenant_id)
@@ -637,7 +638,13 @@ class SkillService:
             raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
         content, kind = normalize_skill_upload(file_content, file_type)
         return self._save_skill_upload(
-            content, skill_name, kind, tenant_id=tenant_id, user_id=user_id, update=True
+            content,
+            skill_name,
+            kind,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            update=True,
+            rewrite_name=rewrite_name,
         )
 
     def update_skill(
@@ -1474,9 +1481,46 @@ def install_skills_from_zip_for_tenant(
             if existing:
                 logger.info(
                     f"Skill '{official_name}' already exists for tenant {tenant_id} "
-                    "with a non-official source, skipping"
+                    "with a non-official source; installing the official package "
+                    "under a numbered alias"
                 )
-                installed.append(official_name)
+                alias_name = None
+                alias_existing = None
+                for suffix in range(1, 1001):
+                    candidate = f"{official_name}_{suffix}"
+                    candidate_existing = skill_db.get_skill_by_name(
+                        candidate,
+                        tenant_id,
+                    )
+                    if not candidate_existing or candidate_existing.get("source") == "official":
+                        alias_name = candidate
+                        alias_existing = candidate_existing
+                        break
+                if alias_name is None:
+                    logger.warning(
+                        "No free official alias found for skill '%s' in tenant %s",
+                        official_name,
+                        tenant_id,
+                    )
+                    continue
+                if alias_existing:
+                    service.update_skill_from_file(
+                        skill_name=alias_name,
+                        file_content=zip_content,
+                        file_type="zip",
+                        tenant_id=tenant_id,
+                        user_id=None,
+                        rewrite_name=True,
+                    )
+                else:
+                    service.create_skill_from_zip_bytes(
+                        zip_bytes=zip_content,
+                        skill_name=alias_name,
+                        source="official",
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                    )
+                installed.append(alias_name)
                 continue
 
             # The request name only selects a pre-existing official resource.

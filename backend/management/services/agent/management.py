@@ -12,10 +12,12 @@ from fastapi import Header
 from fastapi.responses import JSONResponse
 
 from agents.create_agent_info import create_tool_config_list
+from utils.agent_transfer_utils import portable_tool_params, validate_import_tool_params
 from services.agent_version_service import publish_version_impl
 from consts.const import TOOL_TYPE_MAPPING, \
     MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from consts.exceptions import (
+    ForbiddenError,
     SkillDuplicateError,
 )
 from consts.model import (
@@ -40,6 +42,7 @@ from database.agent_db import (
     delete_agent_relationship,
     delete_related_agent,
     insert_related_agent,
+    is_system_agent,
     query_all_agent_info_by_tenant_id,
     query_sub_agent_relations,
     query_sub_agents_id_list,
@@ -231,6 +234,9 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         tenant_id: Tenant ID
         user_id: User ID performing the deletion
     """
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent is managed by the platform")
+
     try:
         try:
             agent = search_agent_info_by_agent_id(agent_id, tenant_id)
@@ -261,6 +267,9 @@ async def _export_agent_dict_core(
     version_no: int = 0,
 ) -> dict:
     """Build ExportAndImportDataFormat dict for an agent tree at the given version."""
+    if is_system_agent(root_agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent cannot be exported")
+
     export_agent_dict = {}
     search_list: deque = deque([(root_agent_id, version_no)])
     visited: set = set()
@@ -478,6 +487,9 @@ async def export_agent_by_agent_id(
 
     # Check if any tool is KnowledgeBaseSearchTool and set its metadata to empty dict
     for tool in tool_list:
+        if tool.class_name == "AidpSearchTool":
+            tool.params = portable_tool_params(tool.class_name, tool.params)
+            tool.metadata = {}
         if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool", "DataMateSearchTool"]:
             tool.metadata = {}
         if tool.class_name == "IndependentAidpSearchTool":
@@ -618,23 +630,14 @@ async def import_agent_by_agent_id(
         db_tool_info: dict | None = db_all_tool_info_dict.get(
             f"{tool.class_name}&{tool.source}", None)
 
-        if db_tool_info is None:
-            raise ValueError(
-                f"Cannot find tool {tool.class_name} in {tool.source}.")
-
-        db_tool_info_params = db_tool_info["params"]
-        db_tool_info_params_name_set = set(
-            [param_info["name"] for param_info in db_tool_info_params])
-
-        for tool_param_name in tool.params:
-            if tool_param_name not in db_tool_info_params_name_set:
-                raise ValueError(
-                    f"Parameter {tool_param_name} in tool {tool.class_name} from {tool.source} cannot be found.")
+        portable_params = validate_import_tool_params(
+            tool.class_name, tool.source, tool.params, db_tool_info,
+        )
 
         tool_list.append(ToolInstanceInfoRequest(tool_id=db_tool_info['tool_id'],
                                                  agent_id=-1,
                                                  enabled=True,
-                                                 params=tool.params))
+                                                 params=portable_params))
     # check the validity of the agent parameters
     if import_agent_info.max_steps <= 0:
         raise ValueError(
@@ -795,6 +798,8 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
         enriched_agents: list[dict] = []
 
         for agent in agent_list:
+            if agent.get("agent_origin") == "SYSTEM" or agent.get("system_key"):
+                continue
             if not agent["enabled"]:
                 continue
 
@@ -1091,6 +1096,8 @@ async def export_agent_with_skills_impl(
       - ExportAndImportDataFormat as a plain dict when the agent has no skills
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent cannot be exported")
 
     skill_zip_entries = collect_skill_zip_entries(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
@@ -1145,6 +1152,18 @@ async def import_agent_with_skills_impl(
     skill names are resolved to tenant-local skill IDs before creating instances.
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
+
+    # Validate every agent before creating any dependency skills.
+    catalog = {
+        (tool["class_name"], tool["source"]): tool
+        for tool in query_all_tools(tenant_id=tenant_id)
+    }
+    for agent in agent_info.agent_info.values():
+        for tool in agent.tools:
+            validate_import_tool_params(
+                tool.class_name, tool.source, tool.params,
+                catalog.get((tool.class_name, tool.source)),
+            )
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}

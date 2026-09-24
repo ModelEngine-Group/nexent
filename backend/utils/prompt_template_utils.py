@@ -70,6 +70,7 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
             - 'document_summary': Document summary template (Map stage)
             - 'cluster_summary_reduce': Cluster summary reduce template (Reduce stage)
             - 'nl2agent': NL2Agent runtime system prompt
+            - 'workbench_main': General workbench system Agent prompt
         language: Language code ('zh' or 'en')
         **kwargs: Additional parameters, for agent type need to pass is_manager parameter
 
@@ -132,6 +133,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'nl2agent': {
             LANGUAGE["ZH"]: 'backend/prompts/nl2agent_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/nl2agent_en.yaml'
+        },
+        'workbench_main': {
+            LANGUAGE["ZH"]: 'backend/prompts/workbench_main_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/workbench_main_en.yaml'
         },
         'evaluation_generate_evaluator': {
             LANGUAGE["ZH"]: 'backend/prompts/evaluation/generate_evaluator_zh.yaml',

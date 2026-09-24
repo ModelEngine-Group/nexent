@@ -2298,6 +2298,19 @@ async def test_import_agent_from_repository_increments_downloads():
 
 
 @pytest.mark.asyncio
+async def test_workbench_import_response_identifies_root_not_first_child():
+    record = {
+        **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
+        "agent_info_json": {"agent_id": 10, "agent_info": {"10": {"name": "root"}}, "mcp_info": []},
+    }
+    with patch.object(ars, "get_agent_repository_by_id", return_value=record), \
+            patch.object(ars, "import_agent_impl", new_callable=AsyncMock, return_value={2: 102, 10: 110}), \
+            patch.object(ars, "increment_agent_repository_downloads", return_value=1):
+        result = await ars.import_agent_from_repository_impl(42, "tenant_a", "Bearer token", return_root_id=True)
+    assert result == {"agent_id": 110}
+
+
+@pytest.mark.asyncio
 async def test_import_agent_from_repository_skips_increment_on_import_failure():
     record = {
         **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),

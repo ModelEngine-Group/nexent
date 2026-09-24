@@ -539,7 +539,6 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
     ("agent_id", "fields"),
     [
         (None, {"description": "Missing ID"}),
-        (1042, {"display_name": "Renamed Agent"}),
         (1042, {"business_description": "Removed field"}),
         (1042, {}),
     ],

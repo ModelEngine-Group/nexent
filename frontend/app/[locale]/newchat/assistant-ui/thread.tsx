@@ -67,11 +67,13 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
-import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
+import {
+  deriveModelOptions,
+  type ModelSelectionScope,
+} from "@/features/workbench/modelOptions";
 import type { ModelOption } from "../ui/model-selector";
-import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
@@ -81,12 +83,14 @@ import {
 import { DirectiveText, SkillDirectiveText } from "../ui/directive-text";
 import { QuoteBlock } from "../ui/quote";
 import { BranchPicker } from "../ui/branch-picker";
+import { getCreationRetryTarget } from "@/features/workbench/creationRetry";
 import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
+import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -108,26 +112,6 @@ type HistorySummaryData = {
   status?: "compacting" | "accepted";
   summary?: { markdown?: string } | string;
   covered_through_message_id?: number;
-};
-
-const resolveDefaultReasoningEffort = (
-  modelDefault: ReasoningEffort | undefined,
-  capability: ReasoningCapability | undefined,
-  levels: readonly ReasoningEffort[]
-): ReasoningEffort | undefined => {
-  if (modelDefault && levels.includes(modelDefault)) return modelDefault;
-  if (levels.includes("auto")) return "auto";
-  if (capability?.default && levels.includes(capability.default)) {
-    return capability.default;
-  }
-  if (levels.includes(DEFAULT_REASONING_EFFORT)) {
-    return DEFAULT_REASONING_EFFORT;
-  }
-  return levels[0];
-};
-
-const formatReasoningEffortName = (level: ReasoningEffort): string => {
-  return level;
 };
 
 const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {
@@ -197,13 +181,19 @@ export interface ThreadProps {
   generatedTitle?: string;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
+  welcomeContent?: ReactNode;
   conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -219,8 +209,13 @@ export interface ThreadProps {
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
+  readOnlyReason?: string;
   showComposer?: boolean;
   interactionContent?: ReactNode;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 /**
@@ -228,149 +223,15 @@ export interface ThreadProps {
  * Falls back to model_name for single model scenarios.
  */
 const useAgentModels = (
-  agent: Agent | PublishedAgent
+  agent: Agent | PublishedAgent,
+  scope: ModelSelectionScope
 ): readonly ModelOption[] => {
   const { models: availableModels } = useModelList();
 
-  return useMemo(() => {
-    const typedAgent = agent as PublishedAgent;
-    const { model_ids, model_names } = typedAgent;
-
-    const toSelectorModel = (id: string, fallbackName: string) => {
-      const model = availableModels.find(
-        (item) =>
-          String(item.id) === id || item.name === id || item.displayName === id
-      );
-      const agentOverride = typedAgent.model_params_override?.[id];
-      const overrideExtra = agentOverride?.extra_params;
-      const hasAgentReasoningSnapshot =
-        typeof overrideExtra?.enable_thinking === "boolean" ||
-        typeof overrideExtra?.reasoning_effort === "string" ||
-        typeof overrideExtra?.reasoning_budget_tokens === "number";
-      const capability = model?.reasoningCapability;
-      const reasoningEnabled = hasAgentReasoningSnapshot
-        ? overrideExtra?.enable_thinking === true ||
-          (overrideExtra?.enable_thinking === undefined &&
-            (typeof overrideExtra?.reasoning_effort === "string" ||
-              typeof overrideExtra?.reasoning_budget_tokens === "number"))
-        : model?.enableThinking === true;
-      const effortControl =
-        capability?.status === "supported"
-          ? capability.controls?.find((control) => control.type === "effort")
-          : undefined;
-      const capabilityLevels =
-        effortControl?.type === "effort"
-          ? (effortControl.values as ReasoningEffort[])
-          : capability?.status === "supported" && capability.levels.length > 0
-            ? capability.levels
-            : [];
-      const budgetControl =
-        capability?.status === "supported"
-          ? capability.controls?.find(
-              (control) => control.type === "budget_tokens"
-            )
-          : undefined;
-      const supportsBudget =
-        reasoningEnabled && budgetControl?.type === "budget_tokens";
-      // A numeric budget is the preferred control when the catalog exposes
-      // both budget_tokens and effort for the same model.
-      const supportsEffort =
-        reasoningEnabled && !supportsBudget && capabilityLevels.length > 0;
-      const effortLevels = [
-        "auto",
-        ...capabilityLevels.filter((level) => level !== "auto"),
-      ] as ReasoningEffort[];
-      const snapshotEffort =
-        typeof overrideExtra?.reasoning_effort === "string"
-          ? (overrideExtra.reasoning_effort as ReasoningEffort)
-          : undefined;
-      const defaultEffort = hasAgentReasoningSnapshot
-        ? (snapshotEffort ?? "auto")
-        : resolveDefaultReasoningEffort(
-            model?.defaultReasoningEffort,
-            capability,
-            effortLevels
-          );
-      const snapshotBudget =
-        typeof overrideExtra?.reasoning_budget_tokens === "number"
-          ? overrideExtra.reasoning_budget_tokens
-          : undefined;
-      return {
-        id,
-        name: fallbackName,
-        reasoningCapability: capability,
-        ...(supportsEffort
-          ? {
-              efforts: effortLevels.map((level) => ({
-                id: level,
-                name: formatReasoningEffortName(level),
-              })),
-              defaultEffort: defaultEffort ?? undefined,
-            }
-          : {}),
-        ...(supportsBudget
-          ? {
-              budgetTokens: {
-                min: budgetControl.min,
-                max: budgetControl.max,
-              },
-              defaultBudgetTokens: snapshotBudget,
-            }
-          : {}),
-      };
-    };
-
-    if (
-      model_ids &&
-      model_ids.length > 0 &&
-      model_names &&
-      model_names.length > 0
-    ) {
-      const configuredModels = model_ids.map((id, i) =>
-        toSelectorModel(String(id), model_names[i] ?? `Model ${id}`)
-      );
-      return configuredModels.filter((configuredModel) =>
-        availableModels.some(
-          (model) =>
-            model.connect_status !== "unavailable" &&
-            (String(model.id) === configuredModel.id ||
-              model.name === configuredModel.id ||
-              model.displayName === configuredModel.id)
-        )
-      );
-    }
-
-    // Fallback for single model: check model_name on typedAgent
-    const modelName = (typedAgent as unknown as { model_name?: string })
-      .model_name;
-    const modelIsAvailable = availableModels.some(
-      (model) =>
-        model.connect_status !== "unavailable" &&
-        (model.displayName === modelName || model.name === modelName)
-    );
-    if (modelName && modelIsAvailable) {
-      const model = availableModels.find(
-        (item) => item.displayName === modelName || item.name === modelName
-      );
-      return [toSelectorModel(String(model?.id ?? modelName), modelName)];
-    }
-
-    // Fallback to the single model field (used by AgentDraft / debug panel)
-    const singleModel = (typedAgent as unknown as { model?: string }).model;
-    const singleModelIsAvailable = availableModels.some(
-      (model) =>
-        model.connect_status !== "unavailable" &&
-        (model.displayName === singleModel || model.name === singleModel)
-    );
-    if (singleModel && singleModelIsAvailable) {
-      const model = availableModels.find(
-        (item) => item.displayName === singleModel || item.name === singleModel
-      );
-      return [toSelectorModel(String(model?.id ?? singleModel), singleModel)];
-    }
-
-    return [];
-  }, [agent, availableModels]);
+  return useMemo(
+    () => deriveModelOptions(agent, availableModels, scope),
+    [agent, availableModels, scope]
+  );
 };
 
 export const Thread: FC<ThreadProps> = ({
@@ -378,13 +239,19 @@ export const Thread: FC<ThreadProps> = ({
   generatedTitle,
   welcomeTitle,
   welcomeSuggestions,
+  welcomeContent,
   conversationId,
   onBack,
   selectedModelId,
   onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  modelSelectionScope = "agent",
   showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
@@ -397,11 +264,16 @@ export const Thread: FC<ThreadProps> = ({
   runtimeMetadata = {},
   onRuntimeMetadataChange,
   readOnly = false,
+  readOnlyReason,
   showComposer = true,
   interactionContent,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
-  const models = useAgentModels(agent);
+  const models = useAgentModels(agent, modelSelectionScope);
   const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
   const selectedModelIsValid = Boolean(
     selectedModelId && models.some((model) => model.id === selectedModelId)
@@ -409,20 +281,22 @@ export const Thread: FC<ThreadProps> = ({
   const fallbackModelId = models[0]?.id;
   const effectiveSelectedModelId = selectedModelIsValid
     ? selectedModelId
-    : localSelectedModelId &&
-        models.some((model) => model.id === localSelectedModelId)
-      ? localSelectedModelId
-      : fallbackModelId;
+    : onModelChange
+      ? ""
+      : localSelectedModelId &&
+          models.some((model) => model.id === localSelectedModelId)
+        ? localSelectedModelId
+        : fallbackModelId;
   const handleModelChange = useCallback(
     (modelId: string) => {
       if (!models.some((model) => model.id === modelId)) return;
-      if (selectedModelId !== undefined) {
-        onModelChange?.(modelId);
+      if (onModelChange) {
+        onModelChange(modelId);
       } else {
         setLocalSelectedModelId(modelId);
       }
     },
-    [models, onModelChange, selectedModelId]
+    [models, onModelChange]
   );
 
   const messages = useAuiState((s) => s.thread.messages);
@@ -622,10 +496,15 @@ export const Thread: FC<ThreadProps> = ({
         agent={agent}
         welcomeTitle={welcomeTitle}
         welcomeSuggestions={welcomeSuggestions}
+        welcomeContent={welcomeContent}
         onBack={onBack}
         models={models}
         selectedModelId={effectiveSelectedModelId}
         onModelChange={handleModelChange}
+        deepThinking={deepThinking}
+        onDeepThinkingChange={onDeepThinkingChange}
+        thinkingEffort={thinkingEffort}
+        onThinkingEffortChange={onThinkingEffortChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
@@ -641,8 +520,13 @@ export const Thread: FC<ThreadProps> = ({
         runtimeMetadata={runtimeMetadata}
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
+        readOnlyReason={readOnlyReason}
         showComposer={showComposer}
         interactionContent={interactionContent}
+        workbenchPresentation={workbenchPresentation}
+        workbenchResources={workbenchResources}
+        onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+        onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -720,10 +604,15 @@ interface ThreadViewProps {
   agent: Agent | PublishedAgent;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
+  welcomeContent?: ReactNode;
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
@@ -758,18 +647,28 @@ interface ThreadViewProps {
   runtimeMetadata: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
+  readOnlyReason?: string;
   showComposer: boolean;
   interactionContent?: ReactNode;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
   welcomeTitle,
   welcomeSuggestions,
+  welcomeContent,
   onBack,
   models,
   selectedModelId,
   onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
@@ -801,10 +700,18 @@ const ThreadView: FC<ThreadViewProps> = ({
   runtimeMetadata,
   onRuntimeMetadataChange,
   readOnly,
+  readOnlyReason,
   showComposer,
   interactionContent,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
+  const workbenchLanding = Boolean(
+    workbenchPresentation && !hasMessages && !isShareMode
+  );
 
   return (
     <ThreadPrimitive.Root
@@ -814,7 +721,12 @@ const ThreadView: FC<ThreadViewProps> = ({
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
     >
-      <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div
+        className={cn(
+          "flex h-full min-w-0 flex-1 flex-col",
+          workbenchLanding && "overflow-y-auto pb-[10vh]"
+        )}
+      >
         {showConversationTitle && (
           <header className="flex items-center gap-2 border-b px-3 py-2">
             {isShareMode ? (
@@ -840,13 +752,22 @@ const ThreadView: FC<ThreadViewProps> = ({
                 )}
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="text-sm font-medium text-foreground">
-                    {hasMessages ? conversationTitle : displayName}
+                    {workbenchPresentation || hasMessages
+                      ? conversationTitle
+                      : displayName}
                   </span>
                   {hasMessages && variant !== "embedded" && (
                     <span className="text-xs text-muted-foreground">
                       {displayName}
                     </span>
                   )}
+                  {!hasMessages &&
+                    workbenchPresentation &&
+                    variant !== "embedded" && (
+                      <span className="text-xs text-muted-foreground">
+                        {displayName}
+                      </span>
+                    )}
                 </div>
                 {hasMessages && conversationId && (
                   <Button
@@ -912,7 +833,9 @@ const ThreadView: FC<ThreadViewProps> = ({
         <ThreadPrimitive.Viewport
           className={cn(
             "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
-            variant === "embedded" ? "px-4 py-4" : "px-8 py-6"
+            variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
+            workbenchLanding &&
+              "mt-auto flex-none overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
           {hasMessages ? (
@@ -927,11 +850,13 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent
-              agent={agent}
-              title={welcomeTitle}
-              suggestions={welcomeSuggestions}
-            />
+            (welcomeContent ?? (
+              <ThreadWelcomeContent
+                agent={agent}
+                title={welcomeTitle}
+                suggestions={welcomeSuggestions}
+              />
+            ))
           )}
           {interactionContent}
         </ThreadPrimitive.Viewport>
@@ -940,7 +865,8 @@ const ThreadView: FC<ThreadViewProps> = ({
           <ThreadPrimitive.ViewportFooter
             className={cn(
               "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
-              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
+              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8",
+              workbenchLanding && "static mb-auto gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
             <ThreadScrollToBottom />
@@ -948,6 +874,10 @@ const ThreadView: FC<ThreadViewProps> = ({
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
+              deepThinking={deepThinking}
+              onDeepThinkingChange={onDeepThinkingChange}
+              thinkingEffort={thinkingEffort}
+              onThinkingEffortChange={onThinkingEffortChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
@@ -962,6 +892,11 @@ const ThreadView: FC<ThreadViewProps> = ({
               onRuntimeMetadataChange={onRuntimeMetadataChange}
               allowRuntimeMetadata={agent.allow_chat_metadata === true}
               disabled={readOnly}
+              disabledReason={readOnlyReason}
+              workbenchPresentation={workbenchPresentation}
+              workbenchResources={workbenchResources}
+              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
             />
           </ThreadPrimitive.ViewportFooter>
         )}
@@ -1412,11 +1347,19 @@ const AssistantMessage: FC<{
     (s) =>
       (s.message.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
   );
+  const isLatestMessage = useAuiState(
+    (s) => s.thread.messages.at(-1)?.id === s.message.id
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
+    name?: string;
+    data?: { agentId?: number; completed?: boolean };
     skillFileAttachments?: CompleteAttachment[];
   }>;
+  const createdAgent = content.find(
+    (part) => part.type === "data" && part.name === "nl2agent-created"
+  )?.data;
   const streamedSkillFileAttachments = useMemo(() => {
     for (let index = content.length - 1; index >= 0; index -= 1) {
       const part = content[index];
@@ -1736,7 +1679,7 @@ const AssistantMessage: FC<{
         {nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : nl2a?.content.subtype === "local_mcp_recommendation" ? (
           <ToolRecommendations payload={nl2a.content} disabled={readOnly} />
@@ -1745,16 +1688,23 @@ const AssistantMessage: FC<{
         ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
           <SuggestedResourceInstallationCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
           <InstalledResourceBindingCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
+        ) : null}
+        {typeof createdAgent?.agentId === "number" &&
+        createdAgent.agentId > 0 ? (
+          <AgentCreationResultCard
+            agentId={createdAgent.agentId}
+            completed={createdAgent.completed === true}
+          />
         ) : null}
         <MessageError />
       </div>
@@ -1772,6 +1722,42 @@ const AssistantMessage: FC<{
 
 const AssistantActionBar: FC = () => {
   const { t } = useTranslation();
+  const aui = useAui();
+  const creationMode = useAuiState((s) => {
+    const custom = s.thread.composer.runConfig.custom as
+      { runtimeMode?: string } | undefined;
+    return (
+      custom?.runtimeMode === "nl2skill" || custom?.runtimeMode === "nl2agent"
+    );
+  });
+  const creationRetryDisabled = useAuiState(
+    (s) =>
+      s.thread.isRunning || s.thread.isDisabled || !s.thread.capabilities.reload
+  );
+
+  const reloadMessage = () => {
+    const runConfig = aui.thread.composer().getState().runConfig;
+    const custom = runConfig.custom as
+      { runtimeMode?: string; [key: string]: unknown } | undefined;
+    if (
+      custom?.runtimeMode !== "nl2skill" &&
+      custom?.runtimeMode !== "nl2agent"
+    ) {
+      aui.message.reload();
+      return;
+    }
+    const target = getCreationRetryTarget(
+      aui.thread.getState().messages,
+      aui.message.getState().parentId
+    );
+    if (!target) {
+      message.error(t("chat.thread.refresh"));
+      return;
+    }
+    aui.message.reload({
+      runConfig: { ...runConfig, custom: { ...custom, ...target } },
+    });
+  };
 
   return (
     <ActionBarPrimitive.Root
@@ -1790,11 +1776,21 @@ const AssistantActionBar: FC = () => {
             </AuiIf>
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
-        <ActionBarPrimitive.Reload asChild>
-          <TooltipIconButton tooltip={t("chat.thread.refresh")}>
+        {creationMode ? (
+          <TooltipIconButton
+            tooltip={t("chat.thread.refresh")}
+            onClick={reloadMessage}
+            disabled={creationRetryDisabled}
+          >
             <RefreshCwIcon />
           </TooltipIconButton>
-        </ActionBarPrimitive.Reload>
+        ) : (
+          <ActionBarPrimitive.Reload asChild>
+            <TooltipIconButton tooltip={t("chat.thread.refresh")}>
+              <RefreshCwIcon />
+            </TooltipIconButton>
+          </ActionBarPrimitive.Reload>
+        )}
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
             <TooltipIconButton

@@ -19,7 +19,59 @@ from backend.services.knowledge_scope_service import (
     get_agent_knowledge_capabilities,
     resolve_root_version,
     resolve_knowledge_scope,
+    resolve_executable_knowledge_scope,
 )
+
+
+def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker):
+    """UT-BE-WB-016/UT-BE-WB-023: same-name system nodes retain separate scopes."""
+    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
+
+    def node(ref, index):
+        return AgentConfig(
+            runtime_ref=ref, origin="SYSTEM", name="same-name", description="test", model_name="model",
+            tools=[ToolConfig(class_name="KnowledgeBaseSearchTool", name="search", params={"index_names": [index]},
+                              metadata={"allowed_index_names": [index], "untouched": "value"})],
+        )
+
+    root = node("system:root", "root-index")
+    root.managed_agents = [node("system:child", "child-index")]
+    before = root.model_dump()
+    walk = mocker.patch("backend.services.knowledge_scope_service._walk_agent_tree")
+    version = mocker.patch("backend.services.knowledge_scope_service.resolve_root_version")
+    mocker.patch("backend.services.knowledge_scope_service.ElasticSearchService.filter_accessible_indices",
+                 side_effect=lambda indices, **_kwargs: indices)
+    mocker.patch("backend.services.knowledge_scope_service.get_knowledge_name_map_by_index_names", return_value={})
+    scope = ConversationKnowledgeScopeRequest.model_validate({"local": {"mode": "inherit"}, "aidp": {"mode": "disabled"}})
+    compiled, resolution = resolve_executable_knowledge_scope(root, scope, tenant_id="tenant", user_id="user")
+    assert compiled.tools[0].params["index_names"] == ["root-index"]
+    assert compiled.managed_agents[0].tools[0].params["index_names"] == ["child-index"]
+    assert set(resolution.tool_params.agents) == {"system:root", "system:child"}
+    assert root.model_dump() == before
+    walk.assert_not_called()
+    version.assert_not_called()
+
+    disabled = scope.model_copy(deep=True)
+    disabled.local.mode = "disabled"
+    cleared, _ = resolve_executable_knowledge_scope(root, disabled, tenant_id="tenant", user_id="user")
+    for agent in [cleared, *cleared.managed_agents]:
+        assert agent.tools[0].params["index_names"] == []
+        assert agent.tools[0].metadata["allowed_index_names"] == []
+        assert agent.tools[0].metadata["untouched"] == "value"
+    assert root.model_dump() == before
+
+
+@pytest.mark.parametrize("child_ref", [None, "system:root"])
+def test_executable_knowledge_rejects_ambiguous_runtime_identity(child_ref, mocker):
+    """UT-BE-WB-023: invalid executable identity fails before resource access."""
+    from nexent.core.agents.agent_model import AgentConfig
+
+    root = AgentConfig(runtime_ref="system:root", name="root", description="test", model_name="model", tools=[])
+    root.managed_agents = [root.model_copy(update={"runtime_ref": child_ref})]
+    resolve = mocker.patch("backend.services.knowledge_scope_service.resolve_knowledge_scope")
+    with pytest.raises(ValidationError):
+        resolve_executable_knowledge_scope(root, ConversationKnowledgeScopeRequest(), tenant_id="tenant", user_id="user")
+    resolve.assert_not_called()
 
 
 def _agent_tree():
@@ -128,6 +180,34 @@ def test_disabled_projects_deny_all_whitelists(_mock_tree):
     assert tools["aidp_search"]["kds_list"] == []
     assert resolved.local_disabled is True
     assert resolved.aidp_disabled is True
+
+
+@patch("backend.services.knowledge_scope_service._walk_agent_tree")
+def test_ut_be_wb_016_runtime_tree_snapshot_prevents_repository_reread(mock_tree):
+    """UT-BE-WB-016: Workbench knowledge resolution consumes its frozen tree."""
+    runtime_tree = _agent_tree()
+    scope = ConversationKnowledgeScopeRequest.model_validate({
+        "local": {"mode": "disabled", "knowledge_ids": []},
+        "aidp": {"mode": "disabled", "kds_ids": []},
+    })
+
+    resolved = resolve_knowledge_scope(
+        scope=scope,
+        agent_id=7,
+        tenant_id="tenant",
+        user_id="user",
+        version_no=3,
+        is_debug=False,
+        runtime_agent_tree=runtime_tree,
+    )
+
+    mock_tree.assert_not_called()
+    assert resolved.tool_params.agents["root-agent"].tools[
+        "knowledge_base_search"
+    ]["index_names"] == []
+    assert runtime_tree[0]["tools"][0]["params"][0]["default"] == [
+        "default-index"
+    ]
 
 
 @patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
@@ -268,6 +348,7 @@ def test_walk_agent_tree_resolves_children_and_static_prompt(
     ],
 )
 def test_local_override_filters_inaccessible_and_invalid_ids(_mock_records, _mock_filter):
+    """UT-BE-WB-017: inaccessible IDs are excluded from the effective scope."""
     records, warnings = _resolve_local_override(
         ["1", "2", "invalid"], "user", "tenant"
     )

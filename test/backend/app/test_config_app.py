@@ -188,6 +188,7 @@ class TestConfigAppRouterConfiguration:
         const_module.AIDP_API_KEY = ""
         const_module.AIDP_SERVER_URL = ""
         const_module.ENABLE_AIDP_KNOWLEDGE = False
+        const_module.ENABLE_AGENT_WORKBENCH = False
         const_module.IS_SPEED_MODE = False
         const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
         monkeypatch.setitem(sys.modules, "consts.const", const_module)
@@ -254,12 +255,16 @@ class TestConfigAppRouterConfiguration:
 
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
+        schedule_workbench_main_backfill = MagicMock()
         startup_recovery_module = types.ModuleType(
             "services.startup_recovery_service"
         )
         startup_recovery_module.recover_config_tasks = recover_config_tasks
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
             schedule_upload_cleanup
+        )
+        startup_recovery_module.schedule_workbench_main_backfill = (
+            schedule_workbench_main_backfill
         )
         monkeypatch.setitem(
             sys.modules,
@@ -302,7 +307,7 @@ class TestConfigAppRouterConfiguration:
             config_app,
             "sync_default_prompt_template_on_startup",
             new=sync_defaults,
-        ):
+        ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
             asyncio.run(exercise_lifespan())
 
         assert config_app.app.lifespan is config_app.config_lifespan
@@ -311,6 +316,7 @@ class TestConfigAppRouterConfiguration:
             config_app.config_thread_manager
         )
         schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
+        schedule_workbench_main_backfill.assert_called_once_with()
         sync_defaults.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()

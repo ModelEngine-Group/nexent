@@ -31,6 +31,15 @@ class ValidationError(Exception):
     pass
 
 
+class WorkbenchError(ValidationError):
+    """Safe runtime boundary error used by the generation overlay."""
+
+    def __init__(self, code, status_code=422):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(code)
+
+
 class MCPConnectionError(Exception):
     """Mock MCPConnectionError for testing."""
     pass
@@ -72,6 +81,7 @@ sys.modules["consts.capability_profiles"].CATALOG = {}
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
+consts_exceptions_module.WorkbenchError = WorkbenchError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
@@ -737,7 +747,7 @@ class TestGetSkillScriptTools:
     """Tests for the _get_skill_script_tools function"""
 
     def test_get_skill_script_tools_success(self):
-        """Test case for successfully getting skill script tools"""
+        """UT-BE-WMA-019: standard runtime injects upload/download helpers."""
         mock_tool_config.reset_mock()
         with patch('consts.const.CONTAINER_SKILLS_PATH', "/container/skills"):
             result = _get_skill_script_tools(
@@ -2476,6 +2486,68 @@ class TestCreateAgentConfig:
                 )
 
     @pytest.mark.asyncio
+    async def test_create_agent_config_mounts_runtime_sub_agents_without_relation_write(self):
+        """Workbench children are pinned request inputs, not persisted relations."""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]) as mock_query_sub, \
+                patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock, return_value=[]), \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock, return_value={"system_prompt": "manager"}), \
+                patch('backend.agents.create_agent_info.get_model_by_model_id', return_value={"display_name": "test_model"}):
+
+            mock_search_agent.return_value = {
+                "name": "workbench_main",
+                "description": "root",
+                "model_ids": [123],
+                "max_steps": 5,
+            }
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id=99,
+            )
+            child = Mock()
+            child.name = "published-name"
+            child.invocation_name = "published-name"
+            child.display_name = "Published name"
+
+            with patch(
+                'backend.agents.create_agent_info.create_agent_config',
+                new_callable=AsyncMock,
+                return_value=child,
+            ) as recursive_create:
+                mock_agent_config.reset_mock()
+                await create_agent_config(
+                    99,
+                    "tenant_1",
+                    "user_1",
+                    runtime_sub_agent_mounts=[{
+                        "agent_id": 7,
+                        "version_no": 3,
+                        "runtime_ref": "agent:7:v3",
+                        "invocation_name": "agent_7_v3",
+                        "display_name": "Research",
+                    }],
+                )
+
+            recursive_create.assert_awaited_once()
+            assert recursive_create.await_args.kwargs["agent_id"] == 7
+            assert recursive_create.await_args.kwargs["version_no"] == 3
+            assert recursive_create.await_args.kwargs["runtime_sub_agent_mounts"] is None
+            assert child.name == "agent_7_v3"
+            assert child.runtime_ref == "agent:7:v3"
+            assert child.display_name == "Research"
+            assert mock_agent_config.call_args.kwargs["managed_agents"] == [child]
+            mock_query_sub.assert_called_once_with(
+                main_agent_id=99, tenant_id="tenant_1", version_no=0
+            )
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_with_pinned_sub_agent_version(self):
         """Test sub-agent config uses pinned selected_agent_version_no from relation"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
@@ -2533,10 +2605,11 @@ class TestCreateAgentConfig:
                 )
                 mock_recursive_create.assert_called_once()
                 assert mock_recursive_create.call_args.kwargs["version_no"] == 3
+                assert mock_sub_agent_config.invocation_name == "sub_agent"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_memory(self):
-        """Test case for creating agent configuration with memory"""
+        """UT-BE-WMA-018: standard Agent configuration preserves memory."""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
@@ -7316,6 +7389,38 @@ class TestDispatchProfileHitMetric:
 # ============================================================================
 
 
+@pytest.mark.asyncio
+async def test_runtime_knowledge_records_reach_tool_constructor_without_mutation(mocker):
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    original = [{"name": "aidp_search", "class_name": "AidpSearchTool", "params": []}]
+    runtime = [{"name": "knowledge_base_search", "class_name": "KnowledgeBaseSearchTool",
+                "description": "Search", "inputs": "{}", "output_type": "string",
+                "params": [{"name": "top_k", "default": 8},
+                           {"name": "index_names", "default": ["old"]}]}]
+    before = deepcopy(runtime)
+    prefix = "backend.agents.create_agent_info."
+    mocker.patch(prefix + "_resolve_runtime_tool_records", return_value=original)
+    mocker.patch(prefix + "discover_langchain_tools", new_callable=AsyncMock, return_value=[])
+    mocker.patch(prefix + "search_agent_info_by_agent_id", return_value={"name": "root"})
+    mocker.patch(prefix + "get_vector_db_core", return_value=MagicMock())
+    mocker.patch(prefix + "get_embedding_model_by_index_name", return_value=(MagicMock(), None, None))
+    mocker.patch(prefix + "get_knowledge_name_map_by_index_names", return_value={"new": "Selected"})
+    mocker.patch(prefix + "ElasticSearchService.filter_accessible_indices", return_value=["new"])
+    mocker.patch(prefix + "ToolConfig", side_effect=lambda **kwargs: SimpleNamespace(metadata=None, **kwargs))
+    configs = await create_agent_info_module.create_tool_config_list(
+        1, "tenant", "user", runtime_knowledge_tools=runtime,
+        tool_params={"agents": {"root": {"tools": {"knowledge_base_search": {"index_names": ["new"]}}}}},
+    )
+    assert len(configs) == 1
+    assert configs[0].params["top_k"] == 8
+    assert configs[0].params["index_names"] == ["new"]
+    assert configs[0].metadata["allowed_index_names"] == ["new"]
+    assert runtime == before
+    assert original[0]["class_name"] == "AidpSearchTool"
+
+
 class TestKBPermissionFilteringInCreateToolConfigList:
     """Tests for knowledge base permission filtering in create_tool_config_list."""
 
@@ -7450,6 +7555,65 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             assert len(result) == 1
             assert mock_tc_instance.params["index_names"] == ["kb1", "kb2"]
             assert mock_tc_instance.metadata["allowed_index_names"] == []
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_normalizes_null_index_names(self):
+        """A persisted null index_names value behaves like an empty KB selection."""
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_tools_for_sub_agent"
+            ) as mock_tools,
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                return_value={"name": "workbench_main"},
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_vector_db_core",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_embedding_model_by_index_name"
+            ) as mock_get_embedding,
+            patch(
+                "backend.agents.create_agent_info.ToolConfig"
+            ) as mock_tool_config,
+        ):
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": None},
+                    {"name": "rerank", "default": False},
+                ],
+            }]
+
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+
+            instance = MockToolConfigInstance()
+
+            def capture_and_return(**kwargs):
+                for key, value in kwargs.items():
+                    setattr(instance, key, value)
+                return instance
+
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            assert result == [instance]
+            assert instance.params["index_names"] == []
+            assert instance.metadata["allowed_index_names"] == []
+            mock_get_embedding.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_preserves_order_after_filtering(self):
