@@ -1275,6 +1275,24 @@ class TestResolveAidpKbInfo:
         assert service._resolve_aidp_kb_info([], "u1", "t1") == []
 
 
+class TestBuildAidpKbDescriptions:
+    def test_with_description(self, service_module):
+        service, _ = service_module
+        block = service._build_aidp_kb_descriptions(
+            [{"display_name": "KB One", "description": " sales docs "}]
+        )
+        assert block == "- KB One - sales docs"
+
+    def test_without_description(self, service_module):
+        service, _ = service_module
+        block = service._build_aidp_kb_descriptions([{"display_name": "KB One"}])
+        assert block == "- KB One (no description)"
+
+    def test_empty_info_returns_empty(self, service_module):
+        service, _ = service_module
+        assert service._build_aidp_kb_descriptions([]) == ""
+
+
 class TestExecuteAidpSearches:
     def test_one_call_per_query_formats_hits(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1344,6 +1362,31 @@ class TestDoKbSearchAidpBranch:
         )
         assert service._do_kb_search(["k9"], "d", "m", "t1", "u1") == ("", [])
 
+    def test_returns_names_when_no_queries(self, service_module, monkeypatch):
+        service, _ = service_module
+        monkeypatch.setattr(service, "ENABLE_AIDP_KNOWLEDGE", True)
+        monkeypatch.setattr(
+            service,
+            "_resolve_aidp_kb_info",
+            MagicMock(return_value=[{"kds_id": "k1", "display_name": "KB One"}]),
+        )
+        monkeypatch.setattr(service, "_plan_search_queries", MagicMock(return_value=[]))
+        assert service._do_kb_search(["k1"], "d", "m", "t1", "u1") == ("", ["KB One"])
+
+    def test_returns_names_when_no_results(self, service_module, monkeypatch):
+        service, _ = service_module
+        monkeypatch.setattr(service, "ENABLE_AIDP_KNOWLEDGE", True)
+        monkeypatch.setattr(
+            service,
+            "_resolve_aidp_kb_info",
+            MagicMock(return_value=[{"kds_id": "k1", "display_name": "KB One"}]),
+        )
+        monkeypatch.setattr(
+            service, "_plan_search_queries", MagicMock(return_value=["q1"])
+        )
+        monkeypatch.setattr(service, "_execute_aidp_searches", MagicMock(return_value=""))
+        assert service._do_kb_search(["k1"], "d", "m", "t1", "u1") == ("", ["KB One"])
+
     def test_uses_es_path_when_disabled(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(service, "ENABLE_AIDP_KNOWLEDGE", False)
@@ -1401,6 +1444,18 @@ class TestFormatKbName:
         service, _ = service_module
         monkeypatch.setattr(service, "_resolve_kb_info", MagicMock(return_value=[]))
         assert service._format_kb_name("kb1", "t1") == "kb1"
+
+    def test_aidp_mode_returns_name_without_es_resolution(
+        self, service_module, monkeypatch
+    ):
+        # AIDP kds_ids have no knowledge_info record; the ES resolver must
+        # not be consulted (it would raise or warn per id).
+        service, _ = service_module
+        monkeypatch.setattr(service, "ENABLE_AIDP_KNOWLEDGE", True)
+        resolve = MagicMock()
+        monkeypatch.setattr(service, "_resolve_kb_info", resolve)
+        assert service._format_kb_name("aidp-kb-1", "t1") == "aidp-kb-1"
+        resolve.assert_not_called()
 
 
 class TestBuildKbContextBlock:
