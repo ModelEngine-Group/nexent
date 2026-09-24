@@ -25,6 +25,8 @@ export type MineMcpCardItem =
   | { kind: "local"; service: McpServiceItem }
   | { kind: "community"; service: CommunityMcpCard };
 
+export type McpConnectionStatus = "unchecked" | "success" | "failed";
+
 interface MineMcpServiceCardProps {
   item: MineMcpCardItem;
   onlineService?: CommunityMcpCard;
@@ -32,6 +34,7 @@ interface MineMcpServiceCardProps {
   publishing?: boolean;
   unpublishing?: boolean;
   healthChecking?: boolean;
+  connectionStatus?: McpConnectionStatus;
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
   onToggle: (service: McpServiceItem) => void;
@@ -58,6 +61,7 @@ export default function MineMcpServiceCard({
   publishing,
   unpublishing,
   healthChecking = false,
+  connectionStatus = "unchecked",
   onEditLocal,
   onEditCommunity,
   onToggle,
@@ -83,11 +87,10 @@ export default function MineMcpServiceCard({
         onlineService?.reviewStatus === "pending")
     : reviewStatus === "approved";
   const reviewBadge = getMineCardReviewBadge(item, onlineService);
-  const timeSource = item.service as any;
   const createDate = formatRegistryDate(
     item.kind === "local"
-      ? timeSource.createTime || ""
-      : timeSource.createdAt || ""
+      ? item.service.createTime || ""
+      : item.service.createdAt || ""
   );
   const toolCount = resolveToolCount(item);
 
@@ -176,6 +179,19 @@ export default function MineMcpServiceCard({
     <ResourceCard
       className="h-full"
       title={service.name}
+      subtitle={
+        <span
+          className={
+            connectionStatus === "success"
+              ? "text-green-600 dark:text-green-400"
+              : connectionStatus === "failed"
+                ? "text-red-600 dark:text-red-400"
+                : "text-slate-500 dark:text-slate-400"
+          }
+        >
+          {t(`mcpTools.mine.connectionStatus.${connectionStatus}`)}
+        </span>
+      }
       onClick={handleEdit}
       footerLayout="inline"
       icon={
