@@ -1118,6 +1118,24 @@ def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: O
         return result.rowcount > 0
 
 
+def rebind_conversation_agent_id(
+    conversation_id: int, expected_agent_id: int, agent_id: int, user_id: str
+) -> bool:
+    """Rebind an owned creation conversation only if its Agent has not changed."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.agent_id == expected_agent_id,
+                ConversationRecord.delete_flag == 'N',
+            )
+            .values(agent_id=agent_id, update_time=func.current_timestamp(), updated_by=user_id)
+        )
+        return result.rowcount == 1
+
+
 # Allowed values for conversation_record_t.chat_mode. Anything outside this set
 # is rejected at the service boundary so the column never stores free-form text.
 CHAT_MODE_VALUES = {"planning", "execution"}

@@ -37,6 +37,69 @@ def test_creation_session_rejects_other_agent_or_mode(mocker):
         "agent_id": 17,
         "message_records": [{"message_index": 1}],
     })
+    mocker.patch.object(service, "query_agent_records_for_nl2agent", return_value=[
+        {"delete_flag": "N"},
+    ])
+    save = mocker.patch.object(service, "save_message")
+    with pytest.raises(ValueError, match="Agent does not match"):
+        service.prepare_creation_history(
+            conversation_id=42, mode="agent_create", query="continue",
+            minio_files=None, workbench_config=None, agent_id=18,
+            user_id="user", tenant_id="tenant",
+        )
+    save.assert_not_called()
+
+
+def test_deleted_agent_creation_session_rebinds_and_keeps_history(mocker):
+    mocker.patch.object(service, "get_conversation_history", return_value={
+        "workbench_config": config("agent_create"),
+        "agent_id": 17,
+        "message_records": [{"message_index": 0}, {"message_index": 1}],
+    })
+    mocker.patch.object(service, "query_agent_records_for_nl2agent", return_value=[
+        {"delete_flag": "Y", "version_no": 0},
+    ])
+    rebind = mocker.patch.object(service, "rebind_conversation_agent_id", return_value=True)
+    save = mocker.patch.object(service, "save_message")
+
+    assert service.prepare_creation_history(
+        conversation_id=42, mode="agent_create", query="Create another agent",
+        minio_files=None, workbench_config=None, agent_id=18,
+        user_id="user", tenant_id="tenant",
+    ) == (42, 3)
+    rebind.assert_called_once_with(42, 17, 18, "user")
+    assert save.call_args.args[0].message_idx == 2
+
+
+@pytest.mark.parametrize("records", [[], [{"delete_flag": "N"}],
+    [{"delete_flag": "Y"}, {"delete_flag": "N"}]])
+def test_creation_session_cannot_rebind_unowned_or_live_agent(mocker, records):
+    mocker.patch.object(service, "get_conversation_history", return_value={
+        "workbench_config": config("agent_create"),
+        "agent_id": 17,
+        "message_records": [],
+    })
+    mocker.patch.object(service, "query_agent_records_for_nl2agent", return_value=records)
+    rebind = mocker.patch.object(service, "rebind_conversation_agent_id")
+    with pytest.raises(ValueError, match="Agent does not match"):
+        service.prepare_creation_history(
+            conversation_id=42, mode="agent_create", query="continue",
+            minio_files=None, workbench_config=None, agent_id=18,
+            user_id="user", tenant_id="tenant",
+        )
+    rebind.assert_not_called()
+
+
+def test_deleted_agent_creation_session_rejects_stale_rebind(mocker):
+    mocker.patch.object(service, "get_conversation_history", return_value={
+        "workbench_config": config("agent_create"),
+        "agent_id": 17,
+        "message_records": [],
+    })
+    mocker.patch.object(service, "query_agent_records_for_nl2agent", return_value=[
+        {"delete_flag": "Y"},
+    ])
+    mocker.patch.object(service, "rebind_conversation_agent_id", return_value=False)
     save = mocker.patch.object(service, "save_message")
     with pytest.raises(ValueError, match="Agent does not match"):
         service.prepare_creation_history(

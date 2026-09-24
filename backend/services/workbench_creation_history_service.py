@@ -6,7 +6,8 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from consts.model import MessageRequest, MessageUnit, WorkbenchSessionConfig
-from database.conversation_db import get_conversation_history
+from database.agent_db import query_agent_records_for_nl2agent
+from database.conversation_db import get_conversation_history, rebind_conversation_agent_id
 from services.conversation_management_service import (
     create_new_conversation,
     save_message,
@@ -65,7 +66,26 @@ def prepare_creation_history(
         if not history or (history.get("workbench_config") or {}).get("mode") != mode:
             raise ValueError("Conversation is not an accessible creation session")
         if mode == "agent_create" and history.get("agent_id") != agent_id:
-            raise ValueError("Agent does not match the creation session")
+            old_agent_id = history.get("agent_id")
+            old_records = (
+                query_agent_records_for_nl2agent(old_agent_id, tenant_id)
+                if isinstance(old_agent_id, int) and old_agent_id > 0
+                else []
+            )
+            # An inaccessible or still-live Agent must never be silently replaced.
+            # Soft-deleted tenant-owned records are the only recoverable case.
+            if (
+                retry_user_message_id is not None
+                or retry_message_index is not None
+                or not isinstance(agent_id, int)
+                or agent_id <= 0
+                or not old_records
+                or any(record.get("delete_flag") != "Y" for record in old_records)
+                or not rebind_conversation_agent_id(
+                    conversation_id, old_agent_id, agent_id, user_id
+                )
+            ):
+                raise ValueError("Agent does not match the creation session")
         resolved_id = conversation_id
         if retry_user_message_id is not None or retry_message_index is not None:
             user_record = next(

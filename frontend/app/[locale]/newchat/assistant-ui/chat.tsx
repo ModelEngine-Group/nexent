@@ -1,7 +1,7 @@
 "use client";
 
 import type { FC, ReactNode } from "react";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Thread, type WelcomeSuggestion } from "./thread";
 import type { ChatMode } from "./composer";
@@ -119,6 +119,19 @@ export const Chat: FC<ChatProps> = ({
     },
     [onAgentSelected]
   );
+  const workbenchPlaceholderAgent = useMemo<Agent>(
+    () => ({
+      id: "__workbench_empty__",
+      name: fallbackAgentName,
+      display_name: fallbackAgentName,
+      description: "",
+      model: "",
+      max_step: 8,
+      provide_run_summary: false,
+      tools: [],
+    }),
+    [fallbackAgentName]
+  );
 
   if (!selectedAgent) {
     if (isLoadingAgents) {
@@ -127,16 +140,7 @@ export const Chat: FC<ChatProps> = ({
     if (workbenchPresentation || landingContent) {
       return (
         <Thread
-          agent={{
-            id: "__workbench_empty__",
-            name: fallbackAgentName,
-            display_name: fallbackAgentName,
-            description: "",
-            model: "",
-            max_step: 8,
-            provide_run_summary: false,
-            tools: [],
-          }}
+          agent={workbenchPlaceholderAgent}
           generatedTitle={generatedTitle}
           conversationId={conversationId}
           welcomeContent={landingContent}

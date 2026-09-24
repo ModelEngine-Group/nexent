@@ -10,8 +10,11 @@ const register = vi.hoisted(() =>
     return () => undefined;
   })
 );
+const modelApi = vi.hoisted(() => ({
+  modelContext: () => ({ register }),
+}));
 vi.mock("@assistant-ui/react", () => ({
-  useAui: () => ({ modelContext: () => ({ register }) }),
+  useAui: () => modelApi,
 }));
 vi.mock("@/components/ui/popover", () => ({
   Popover: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -47,6 +50,18 @@ vi.mock("@/components/ui/command", () => ({
 }));
 
 const models = [{ id: "12", name: "Qwen", efforts: true }];
+
+it("does not re-register model context when equivalent model objects rerender", () => {
+  register.mockClear();
+  const { rerender } = render(
+    <ModelSelector models={[{ ...models[0] }]} value="12" deepThinking />
+  );
+  const firstRegistrationCount = register.mock.calls.length;
+  rerender(
+    <ModelSelector models={[{ ...models[0] }]} value="12" deepThinking />
+  );
+  expect(register).toHaveBeenCalledTimes(firstRegistrationCount);
+});
 
 it("shows settings even without a selected model and forwards the first selection", async () => {
   const user = userEvent.setup();
