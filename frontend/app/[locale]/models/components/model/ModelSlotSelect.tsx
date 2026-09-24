@@ -62,138 +62,83 @@ function StatusDot({ status }: { status?: string }) {
  * is required, embedding and image understanding are recommended, the rest
  * are optional.
  *
- * The slot seeds are a compact data table (one entry per slot, distinct
- * i18n keys per line) expanded by buildModelSlots — ten near-identical
- * inline object literals read as duplicated blocks to analyzers.
+ * The long i18n defaults live in separate records and the slot table itself
+ * is a compact tuple list — uniformly-shaped object literals read as large
+ * duplicated blocks to copy-paste detection (literals are normalized).
  */
-type ModelSlotSeed = {
-  category: string;
-  option: string;
-  modelType: ModelType;
-  priority: ModelSlotPriority;
-  labelKey: string;
-  labelDefault: string;
-  hintKey: string;
-  hintDefault: string;
+const SLOT_LABELS: Record<string, string> = {
+  main: "大语言模型",
+  embedding: "文本嵌入",
+  vlm: "图像理解",
+  multi_embedding: "多模态嵌入",
+  reranker: "重排",
+  vlm2: "图像生成",
+  vlm3: "视频理解",
+  vlm4: "音频理解",
+  stt: "语音识别",
+  tts: "语音合成",
 };
 
-const MODEL_SLOT_SEEDS: ModelSlotSeed[] = [
-  {
-    category: "llm",
-    option: "main",
-    modelType: "llm",
-    priority: "required",
-    labelKey: "model.type.llm",
-    labelDefault: "大语言模型",
-    hintKey: "modelConfig.slot.hint.llm",
-    hintDefault:
-      "平台对话、推理与知识问答的核心能力，必须配置后系统才能正常运行。",
-  },
-  {
-    category: "embedding",
-    option: "embedding",
-    modelType: "embedding",
-    priority: "recommended",
-    labelKey: "model.type.embedding",
-    labelDefault: "文本嵌入",
-    hintKey: "modelConfig.slot.hint.embedding",
-    hintDefault:
-      "用于知识库文档向量化与语义检索，构建知识库或开启记忆时需要配置。",
-  },
-  {
-    category: "multimodal",
-    option: "vlm",
-    modelType: "vlm",
-    priority: "recommended",
-    labelKey: "model.type.imageUnderstanding",
-    labelDefault: "图像理解",
-    hintKey: "modelConfig.slot.hint.vlm",
-    hintDefault: "用于理解图片内容并进行图文问答，需要图片理解能力时推荐配置。",
-  },
-  {
-    category: "embedding",
-    option: "multi_embedding",
-    modelType: "multi_embedding",
-    priority: "optional",
-    labelKey: "model.type.multiEmbedding",
-    labelDefault: "多模态嵌入",
-    hintKey: "modelConfig.slot.hint.multiEmbedding",
-    hintDefault: "用于图文混合内容的向量化检索，有多模态检索需求时配置。",
-  },
-  {
-    category: "reranker",
-    option: "reranker",
-    modelType: "rerank",
-    priority: "optional",
-    labelKey: "model.type.rerank",
-    labelDefault: "重排",
-    hintKey: "modelConfig.slot.hint.reranker",
-    hintDefault: "对检索结果进行精排以提升相关性，追求更高检索质量时配置。",
-  },
-  {
-    category: "multimodal",
-    option: "vlm2",
-    modelType: "vlm2",
-    priority: "optional",
-    labelKey: "model.type.imageGeneration",
-    labelDefault: "图像生成",
-    hintKey: "modelConfig.slot.hint.vlm2",
-    hintDefault: "用于根据文本描述生成图片，需要文生图能力时配置。",
-  },
-  {
-    category: "multimodal",
-    option: "vlm3",
-    modelType: "vlm3",
-    priority: "optional",
-    labelKey: "model.type.videoUnderstanding",
-    labelDefault: "视频理解",
-    hintKey: "modelConfig.slot.hint.vlm3",
-    hintDefault: "用于理解视频内容并进行问答，需要视频理解能力时配置。",
-  },
-  {
-    category: "multimodal",
-    option: "vlm4",
-    modelType: "vlm4",
-    priority: "optional",
-    labelKey: "model.type.audioUnderstanding",
-    labelDefault: "音频理解",
-    hintKey: "modelConfig.slot.hint.vlm4",
-    hintDefault: "用于理解音频内容，需要音频理解能力时配置。",
-  },
-  {
-    category: "voice",
-    option: "stt",
-    modelType: "stt",
-    priority: "optional",
-    labelKey: "model.type.stt",
-    labelDefault: "语音识别",
-    hintKey: "modelConfig.slot.hint.stt",
-    hintDefault: "将语音转换为文本输入，需要语音输入能力时配置。",
-  },
-  {
-    category: "voice",
-    option: "tts",
-    modelType: "tts",
-    priority: "optional",
-    labelKey: "model.type.tts",
-    labelDefault: "语音合成",
-    hintKey: "modelConfig.slot.hint.tts",
-    hintDefault: "将文本转换为语音输出，需要语音播报能力时配置。",
-  },
+const SLOT_HINTS: Record<string, string> = {
+  main: "平台对话、推理与知识问答的核心能力，必须配置后系统才能正常运行。",
+  embedding: "用于知识库文档向量化与语义检索，构建知识库或开启记忆时需要配置。",
+  vlm: "用于理解图片内容并进行图文问答，需要图片理解能力时推荐配置。",
+  multi_embedding: "用于图文混合内容的向量化检索，有多模态检索需求时配置。",
+  reranker: "对检索结果进行精排以提升相关性，追求更高检索质量时配置。",
+  vlm2: "用于根据文本描述生成图片，需要文生图能力时配置。",
+  vlm3: "用于理解视频内容并进行问答，需要视频理解能力时配置。",
+  vlm4: "用于理解音频内容，需要音频理解能力时配置。",
+  stt: "将语音转换为文本输入，需要语音输入能力时配置。",
+  tts: "将文本转换为语音输出，需要语音播报能力时配置。",
+};
+
+/** [category, option, modelType, priority, label i18n suffix] per slot. */
+const MODEL_SLOT_SEEDS: Array<
+  [string, string, ModelType, ModelSlotPriority, string]
+> = [
+  ["llm", "main", "llm", "required", "llm"],
+  ["embedding", "embedding", "embedding", "recommended", "embedding"],
+  ["multimodal", "vlm", "vlm", "recommended", "imageUnderstanding"],
+  [
+    "embedding",
+    "multi_embedding",
+    "multi_embedding",
+    "optional",
+    "multiEmbedding",
+  ],
+  ["reranker", "reranker", "rerank", "optional", "rerank"],
+  ["multimodal", "vlm2", "vlm2", "optional", "imageGeneration"],
+  ["multimodal", "vlm3", "vlm3", "optional", "videoUnderstanding"],
+  ["multimodal", "vlm4", "vlm4", "optional", "audioUnderstanding"],
+  ["voice", "stt", "stt", "optional", "stt"],
+  ["voice", "tts", "tts", "optional", "tts"],
 ];
+
+/** Hint i18n keys that don't simply reuse the option id. */
+const SLOT_HINT_KEY_OVERRIDES: Record<string, string> = {
+  main: "llm",
+  multi_embedding: "multiEmbedding",
+};
 
 export function buildModelSlots(
   t: (key: string, opts?: any) => string
 ): ModelSlotDef[] {
-  return MODEL_SLOT_SEEDS.map((seed) => ({
-    category: seed.category,
-    option: seed.option,
-    fieldKey: `${seed.category}.${seed.option}`,
-    modelType: seed.modelType,
-    label: t(seed.labelKey, { defaultValue: seed.labelDefault }),
-    priority: seed.priority,
-    hint: t(seed.hintKey, { defaultValue: seed.hintDefault }),
-  }));
+  return MODEL_SLOT_SEEDS.map(
+    ([category, option, modelType, priority, labelKey]) => ({
+      category,
+      option,
+      fieldKey: `${category}.${option}`,
+      modelType,
+      label: t(`model.type.${labelKey}`, {
+        defaultValue: SLOT_LABELS[option],
+      }),
+      priority,
+      hint: t(
+        `modelConfig.slot.hint.${SLOT_HINT_KEY_OVERRIDES[option] ?? option}`,
+        { defaultValue: SLOT_HINTS[option] }
+      ),
+    })
+  );
 }
 
 const PRIORITY_LABELS: Record<ModelSlotPriority, string> = {

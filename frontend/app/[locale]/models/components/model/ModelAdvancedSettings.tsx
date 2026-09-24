@@ -251,6 +251,49 @@ export function clampReasoningBudget(
   return Math.min(budgetControl.max, Math.max(budgetControl.min, raw));
 }
 
+/**
+ * Shared reasoning-form state effects (develop #4009 semantics), used by
+ * ModelAdvancedSettings and the v0 ModelAdvancedConfig:
+ *  - strips legacy reasoning values when the capability is not supported,
+ *    so an unchanged save cannot re-submit them
+ *  - materializes enable_thinking=true for visible controls, because the
+ *    payload builder drops reasoning params when it is not strictly true.
+ * Returns whether the thinking UI should render.
+ */
+export function useReasoningFormEffects(
+  modelType: string,
+  reasoningCapability: ReasoningCapability | undefined,
+  value: ModelAdvancedSettingsValue,
+  onChange: (next: ModelAdvancedSettingsValue) => void
+): boolean {
+  const { hasDeclaredControls } = resolveReasoningControls(reasoningCapability);
+  const reasoningControlVisible = modelType === "llm" && hasDeclaredControls;
+
+  useEffect(() => {
+    if (
+      modelType === "llm" &&
+      !reasoningControlVisible &&
+      (value.enable_thinking !== undefined ||
+        value.reasoning_effort !== undefined ||
+        value.reasoning_budget_tokens !== undefined)
+    ) {
+      const next = { ...value };
+      delete next.enable_thinking;
+      delete next.reasoning_effort;
+      delete next.reasoning_budget_tokens;
+      onChange(next);
+    }
+  }, [modelType, onChange, reasoningControlVisible, value]);
+
+  useEffect(() => {
+    if (reasoningControlVisible && value.enable_thinking === undefined) {
+      onChange({ ...value, enable_thinking: true });
+    }
+  }, [onChange, reasoningControlVisible, value]);
+
+  return reasoningControlVisible;
+}
+
 const shouldSkipInferenceParam = (
   key: string,
   raw: unknown,
@@ -998,36 +1041,15 @@ export const ModelAdvancedSettings = ({
     budgetPreferred,
     effectiveEffortControl,
     reasoningLevels,
-    hasDeclaredControls,
   } = resolveReasoningControls(reasoningCapability);
-  // develop #4009: the thinking controls are LLM-only AND require a declared
-  // capability; unsupported models render nothing.
-  const reasoningControlVisible = modelType === "llm" && hasDeclaredControls;
-
-  // A capability refresh can invalidate a legacy value while the dialog is
-  // open. Remove it from local form state immediately so an unchanged save
-  // cannot re-submit reasoning fields for an unsupported model.
-  useEffect(() => {
-    if (
-      modelType === "llm" &&
-      !reasoningControlVisible &&
-      (value.enable_thinking !== undefined ||
-        value.reasoning_effort !== undefined ||
-        value.reasoning_budget_tokens !== undefined)
-    ) {
-      const next = { ...value };
-      delete next.enable_thinking;
-      delete next.reasoning_effort;
-      delete next.reasoning_budget_tokens;
-      onChange(next);
-    }
-  }, [modelType, onChange, reasoningControlVisible, value]);
-
-  useEffect(() => {
-    if (reasoningControlVisible && value.enable_thinking === undefined) {
-      onChange({ ...value, enable_thinking: true });
-    }
-  }, [onChange, reasoningControlVisible, value]);
+  // develop #4009: capability-gated visibility plus the shared strip/seed
+  // effects live in useReasoningFormEffects.
+  const reasoningControlVisible = useReasoningFormEffects(
+    modelType,
+    reasoningCapability,
+    value,
+    onChange
+  );
   const thinkingEnabled =
     modelType === "llm" && value.enable_thinking !== false;
   const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;

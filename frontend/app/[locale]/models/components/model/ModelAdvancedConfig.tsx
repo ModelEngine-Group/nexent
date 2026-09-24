@@ -21,6 +21,7 @@ import {
   clampReasoningBudget,
   resolveReasoningDefault,
   resolveReasoningControls,
+  useReasoningFormEffects,
 } from "./ModelAdvancedSettings";
 import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 
@@ -75,41 +76,16 @@ export function ModelAdvancedConfig({
   const { t } = useTranslation();
 
   // ---- Reasoning controls (shared resolution, see ModelAdvancedSettings) ----
-  // develop #4009: the thinking UI is LLM-only AND requires a declared
-  // capability; unsupported models render nothing and legacy stored reasoning
-  // values are stripped so an unchanged save cannot re-submit them.
-  const {
-    budgetControl,
-    effectiveEffortControl,
-    reasoningLevels,
-    hasDeclaredControls,
-  } = resolveReasoningControls(reasoningCapability);
-  const reasoningControlVisible = modelType === "llm" && hasDeclaredControls;
-
-  useEffect(() => {
-    if (
-      modelType === "llm" &&
-      !reasoningControlVisible &&
-      (value.enable_thinking !== undefined ||
-        value.reasoning_effort !== undefined ||
-        value.reasoning_budget_tokens !== undefined)
-    ) {
-      const next = { ...value };
-      delete next.enable_thinking;
-      delete next.reasoning_effort;
-      delete next.reasoning_budget_tokens;
-      onChange(next);
-    }
-  }, [modelType, onChange, reasoningControlVisible, value]);
-
-  // Materialize the default (true) into the value — the payload builder
-  // treats an undefined enable_thinking as "thinking off" and would silently
-  // drop any stored reasoning_effort / budget.
-  useEffect(() => {
-    if (reasoningControlVisible && value.enable_thinking === undefined) {
-      onChange({ ...value, enable_thinking: true });
-    }
-  }, [reasoningControlVisible, value, onChange]);
+  // develop #4009: capability-gated visibility plus the shared strip/seed
+  // effects live in useReasoningFormEffects.
+  const { budgetControl, effectiveEffortControl, reasoningLevels } =
+    resolveReasoningControls(reasoningCapability);
+  const reasoningControlVisible = useReasoningFormEffects(
+    modelType ?? "",
+    reasoningCapability,
+    value,
+    onChange
+  );
 
   const setNumberField = (key: string, raw: string) =>
     onChange({ ...value, [key]: raw === "" ? undefined : Number(raw) });
