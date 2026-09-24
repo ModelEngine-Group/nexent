@@ -1,6 +1,7 @@
 import React from "react";
 import { App } from "antd";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/dom";
+import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -29,7 +30,9 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("next/image", () => ({
-  default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img {...props} />,
+  default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+    <img {...props} />
+  ),
 }));
 vi.mock("@/components/providers/AuthenticationProvider", () => ({
   useAuthenticationContext: () => authenticationContext,
@@ -57,8 +60,12 @@ vi.mock("@/lib/auth", () => ({
   getEffectiveRoutePath: (pathname: string) => pathname.replace(/^\/zh/, ""),
 }));
 vi.mock("@/components/navigation/TopNavbar", () => ({ TopNavbar: () => null }));
-vi.mock("@/components/navigation/SideNavigation", () => ({ SideNavigation: () => null }));
-vi.mock("@/components/navigation/FooterLayout", () => ({ FooterLayout: () => null }));
+vi.mock("@/components/navigation/SideNavigation", () => ({
+  SideNavigation: () => null,
+}));
+vi.mock("@/components/navigation/FooterLayout", () => ({
+  FooterLayout: () => null,
+}));
 
 afterEach(cleanup);
 

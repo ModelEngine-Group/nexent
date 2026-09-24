@@ -1,14 +1,22 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/dom";
+import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "../../app/[locale]/newchat/page";
 
-const switchToNewThread = vi.fn(() => new Promise<void>(() => undefined));
+const switchToNewThread = vi.fn();
 
 const runtimeMock = {
-  threads: { switchToNewThread },
+  threads: {
+    switchToNewThread,
+    getItemById: vi.fn(() => ({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      updateCustom: vi.fn().mockResolvedValue(undefined),
+    })),
+    getState: vi.fn(() => ({ mainThreadId: "main-thread" })),
+  },
   thread: { composer: { setRunConfig: vi.fn() } },
 };
 
@@ -113,11 +121,14 @@ vi.mock("react-i18next", () => ({
 
 describe("newchat Agent deep-link page wiring", () => {
   beforeEach(() => {
-    switchToNewThread.mockClear();
+    switchToNewThread.mockReset();
     window.history.replaceState({}, "", "/zh/newchat?agent_id=41");
   });
 
   it("selects the target Agent even while the runtime thread switch is pending", async () => {
+    switchToNewThread.mockImplementation(
+      () => new Promise<void>(() => undefined)
+    );
     render(<Home />);
 
     expect(
@@ -127,17 +138,21 @@ describe("newchat Agent deep-link page wiring", () => {
   });
 
   it("consumes the deep link once and keeps manual selection working", async () => {
+    switchToNewThread.mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(<Home />);
 
     expect(
       await screen.findByText("Agent chat: Fixed Agent")
     ).toBeInTheDocument();
+    const callsAfterDeepLink = switchToNewThread.mock.calls.length;
     await user.click(screen.getByRole("button", { name: "back to list" }));
-    expect(screen.getByText("Agent list")).toBeInTheDocument();
+    expect(await screen.findByText("Agent list")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "select agent" }));
-    expect(screen.getByText("Agent chat: Fixed Agent")).toBeInTheDocument();
-    expect(switchToNewThread).toHaveBeenCalledTimes(2);
+    expect(
+      await screen.findByText("Agent chat: Fixed Agent")
+    ).toBeInTheDocument();
+    expect(switchToNewThread.mock.calls.length).toBe(callsAfterDeepLink + 3);
   });
 });

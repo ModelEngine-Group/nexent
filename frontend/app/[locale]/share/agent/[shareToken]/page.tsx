@@ -25,7 +25,7 @@ import {
 } from "@/services/agentShareRuntimeService";
 
 function createMessageId(role: AgentShareChatMessage["role"]): string {
-  return `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `${role}-${crypto.randomUUID()}`;
 }
 
 export default function AgentSharePage() {

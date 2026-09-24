@@ -12,6 +12,15 @@ interface AgentShareHistoryMessage {
   message_id?: unknown;
 }
 
+function getHistoryMessageId(
+  messageId: unknown,
+  index: number
+): string | number {
+  if (typeof messageId === "string") return messageId;
+  if (typeof messageId === "number") return messageId;
+  return index;
+}
+
 interface AgentShareHistoryConversation {
   message?: unknown;
 }
@@ -78,7 +87,7 @@ export function extractAgentShareHistory(
     if (message.role === "user" && typeof message.message === "string") {
       return [
         {
-          id: `history-user-${message.message_id ?? index}`,
+          id: `history-user-${getHistoryMessageId(message.message_id, index)}`,
           role: "user" as const,
           content: message.message,
         },
@@ -98,7 +107,10 @@ export function extractAgentShareHistory(
 
     return [
       {
-        id: `history-assistant-${message.message_id ?? index}`,
+        id: `history-assistant-${getHistoryMessageId(
+          message.message_id,
+          index
+        )}`,
         role: "assistant" as const,
         content: finalAnswer.content,
       },
