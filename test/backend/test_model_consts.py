@@ -1413,15 +1413,17 @@ def test_manage_tenant_model_list_response():
 
 
 def test_agent_repository_listing_requests():
-    """Test AgentRepositoryListingCreateRequest"""
+    """Test the repository icon URL in the listing creation request."""
+    icon_url = "/api/repository/agent/1/versions/1/icon/image-id"
     req = model_consts.AgentRepositoryListingCreateRequest(
-        icon="🚀",
+        icon_url=icon_url,
         downloads=100,
         tags=["ai", "automation"],
         tool_count=10,
         content="This is a great agent"
     )
-    assert req.icon == "🚀"
+    assert req.icon_url == icon_url
+    assert req.model_dump(exclude_unset=True)["icon_url"] == icon_url
     assert req.downloads == 100
 
 
