@@ -181,14 +181,24 @@ export default function MineMcpServiceCard({
       title={service.name}
       subtitle={
         <span
-          className={
+          className={`inline-flex items-center gap-1.5 ${
             connectionStatus === "success"
               ? "text-green-600 dark:text-green-400"
               : connectionStatus === "failed"
                 ? "text-red-600 dark:text-red-400"
                 : "text-slate-500 dark:text-slate-400"
-          }
+          }`}
         >
+          <span
+            aria-hidden="true"
+            className={`size-1.5 shrink-0 rounded-full ${
+              connectionStatus === "success"
+                ? "bg-green-500"
+                : connectionStatus === "failed"
+                  ? "bg-red-500"
+                  : "bg-slate-400"
+            }`}
+          />
           {t(`mcpTools.mine.connectionStatus.${connectionStatus}`)}
         </span>
       }

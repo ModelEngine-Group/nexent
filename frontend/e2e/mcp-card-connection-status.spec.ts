@@ -85,13 +85,28 @@ test("shows each MCP card's latest connectivity result below its name", async ({
   await expect(page.getByRole("heading", { name: "Second MCP" })).toBeVisible();
   await expect(firstCard.getByText("未连接", { exact: true })).toBeVisible();
   await expect(secondCard.getByText("未连接", { exact: true })).toBeVisible();
+  await expect(
+    firstCard
+      .getByText("未连接", { exact: true })
+      .locator("span[aria-hidden='true']")
+  ).toHaveClass(/bg-slate-400/);
 
   await firstCard.getByRole("button", { name: "连通性校验" }).click();
   await expect(firstCard.getByText("连接成功", { exact: true })).toBeVisible();
+  await expect(
+    firstCard
+      .getByText("连接成功", { exact: true })
+      .locator("span[aria-hidden='true']")
+  ).toHaveClass(/bg-green-500/);
   await expect(secondCard.getByText("未连接", { exact: true })).toBeVisible();
 
   await firstCard.getByRole("button", { name: "连通性校验" }).click();
   await expect(firstCard.getByText("连接失败", { exact: true })).toBeVisible();
+  await expect(
+    firstCard
+      .getByText("连接失败", { exact: true })
+      .locator("span[aria-hidden='true']")
+  ).toHaveClass(/bg-red-500/);
 
   await secondCard.getByRole("button", { name: "连通性校验" }).click();
   await expect(secondCard.getByText("连接失败", { exact: true })).toBeVisible();
