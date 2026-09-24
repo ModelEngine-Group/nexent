@@ -71,6 +71,7 @@ def _agent_run_info(outcome: str = "completed"):
         cancellation_scope=None,
         stop_event=asyncio.Event(),
         human_interaction=None,
+
         attempt_outcome=outcome,
         thread_future=None,
     )

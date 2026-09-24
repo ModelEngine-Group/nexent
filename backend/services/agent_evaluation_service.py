@@ -23,6 +23,7 @@ from nexent.core.agents.run_agent import agent_run
 from nexent.core.agents.sandbox import _scan_shell_calls
 from nexent.core.concurrency import ManagedTaskSpec
 
+from consts.const import CAN_EDIT_ALL_USER_ROLES
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import (
     DEFAULT_PASS_THRESHOLD,
@@ -60,9 +61,13 @@ from database.evaluation_set_db import (
     materialize_virtual_evaluation_set_for_run,
 )
 from database.evaluator_db import get_evaluator
+from database.user_tenant_db import get_user_tenant_by_user_id
 from management.services.agent.service import prepare_agent_run
 from services.evaluation_set_service import resolve_latest_published_version_no
-from services.thread_lifecycle_service import runtime_thread_manager
+from services.thread_lifecycle_service import (
+    config_thread_manager,
+    runtime_thread_manager,
+)
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import get_prompt_template
 
@@ -1054,12 +1059,12 @@ def _check_run_limits(tenant_id: str) -> None:
 def _run_in_background(
     fn, *fn_args, tenant_id, user_id, agent_evaluation_id, language="zh"
 ):
-    """Submit fn to the Runtime evaluation lane and attach failure cleanup."""
-    execution = runtime_thread_manager.submit(
+    """Submit Config-owned preparation or dispatch work in the background."""
+    execution = config_thread_manager.submit(
         "evaluation",
         ManagedTaskSpec(
             task_name="agent-evaluation-run",
-            owner="runtime",
+            owner="config",
             run_id=str(agent_evaluation_id),
         ),
         fn,
@@ -2324,6 +2329,12 @@ def get_evaluation_stats_impl(
     }
 
 
+def _resolve_user_role(user_id: str) -> str:
+    """Return the caller's tenant role; unknown callers fall back to USER."""
+    record = get_user_tenant_by_user_id(user_id)
+    return str((record or {}).get("user_role") or "USER").upper()
+
+
 def delete_agent_evaluation_run_impl(
     agent_evaluation_id: int,
     tenant_id: str,
@@ -2332,7 +2343,8 @@ def delete_agent_evaluation_run_impl(
     run = get_agent_evaluation(
         agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id
     )
-    if run.get("created_by") != user_id:
+    is_creator = run.get("created_by") == user_id
+    if not is_creator and _resolve_user_role(user_id) not in CAN_EDIT_ALL_USER_ROLES:
         raise AppException(ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE)
 
     evaluator_config_raw = run.get("evaluator_config")

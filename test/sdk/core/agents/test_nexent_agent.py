@@ -199,6 +199,8 @@ mock_sdk_agent_context_domain_module.__path__ = [
 mock_sdk_agent_context_domain_module.ContextManager = _MockContextManager
 mock_sdk_agent_context_domain_module.ContextManagerConfig = _MockContextManagerConfig
 mock_sdk_agent_context_domain_module.ManagedContextRuntime = _MockManagedContextRuntime
+mock_sdk_agent_context_domain_module.ContextItemInput = MagicMock()
+mock_sdk_agent_context_domain_module.ContextItemType = types.SimpleNamespace(SYSTEM="system")
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
@@ -689,6 +691,7 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         max_output_tokens=mock_model_config.max_tokens,
         timeout_seconds=mock_model_config.timeout_seconds,
         prompt_cache=mock_model_config.prompt_cache,
+        reasoning_capability=None,
     )
 
     # Verify stop_event was set
@@ -723,10 +726,29 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         max_output_tokens=mock_deep_thinking_model_config.max_tokens,
         timeout_seconds=mock_deep_thinking_model_config.timeout_seconds,
         prompt_cache=mock_deep_thinking_model_config.prompt_cache,
+        reasoning_capability=None,
     )
 
     # Verify stop_event was set
     assert result.stop_event == nexent_agent_with_models.stop_event
+
+
+def test_create_model_passes_enabled_reasoning_configuration(
+    nexent_agent_with_models, mock_model_config, monkeypatch
+):
+    mock_model_config.enable_thinking = True
+    mock_model_config.reasoning_effort = "high"
+    mock_model_config.reasoning_capability = {
+        "status": "supported",
+        "levels": ["low", "high"],
+    }
+    monkeypatch.setattr(mock_openai_model_class, "return_value", MagicMock())
+
+    nexent_agent_with_models.create_model("test_model")
+
+    call_kwargs = mock_openai_model_class.call_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "high"
+    assert call_kwargs["reasoning_capability"] == mock_model_config.reasoning_capability
 
 
 def test_create_model_not_found(nexent_agent_with_models):

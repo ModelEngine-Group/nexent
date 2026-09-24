@@ -281,6 +281,8 @@ output_protocol_spec = importlib.util.spec_from_file_location(OUTPUT_PROTOCOL_NA
 output_protocol_module = importlib.util.module_from_spec(output_protocol_spec)
 sys.modules[OUTPUT_PROTOCOL_NAME] = output_protocol_module
 agents_mod = sys.modules["sdk.nexent.core.agents"]
+# Let relative imports resolve real sibling modules such as clarification.
+agents_mod.__path__ = [str(OUTPUT_PROTOCOL_PATH.parent)]
 agents_mod.output_protocol = output_protocol_module
 assert output_protocol_spec and output_protocol_spec.loader
 output_protocol_spec.loader.exec_module(output_protocol_module)

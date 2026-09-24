@@ -83,6 +83,9 @@ from services.conversation_management_service import (
 )
 from utils.auth_utils import get_current_user_info
 from utils.config_utils import tenant_config_manager
+from services.agent_reasoning_service import (
+    snapshot_agent_reasoning_config as build_reasoning_snapshot,
+)
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
@@ -652,6 +655,31 @@ async def update_agent_info_impl(
         user_id=user_id,
     )
 
+    existing_agent = None
+    if request.agent_id is not None:
+        existing_agent = search_agent_info_by_agent_id(
+            agent_id=request.agent_id,
+            tenant_id=tenant_id,
+            version_no=getattr(request, "version_no", 0),
+        )
+    request_fields = getattr(request, "model_fields_set", set())
+    model_ids = (
+        request.model_ids
+        if "model_ids" in request_fields and request.model_ids is not None
+        else (existing_agent or {}).get("model_ids")
+    )
+    requested_overrides = (
+        request.model_params_override
+        if "model_params_override" in request_fields
+        else None
+    )
+    model_params_override = build_reasoning_snapshot(
+        model_ids=model_ids,
+        requested_overrides=requested_overrides,
+        existing_overrides=(existing_agent or {}).get("model_params_override"),
+        tenant_id=tenant_id,
+    )
+
     # If agent_id is None, create a new agent; otherwise, update existing
     agent_id: Optional[int] = request.agent_id
     try:
@@ -682,7 +710,7 @@ async def update_agent_info_impl(
                     "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                     "verification_config": request.verification_config,
                     "context_policy": request.context_policy,
-                    "model_params_override": request.model_params_override,
+                    "model_params_override": model_params_override,
                     "duty_prompt": request.duty_prompt,
                     "constraint_prompt": request.constraint_prompt,
                     "few_shots_prompt": request.few_shots_prompt,
@@ -703,6 +731,7 @@ async def update_agent_info_impl(
             # Update agent
             request.prompt_template_id = prompt_template_id
             request.prompt_template_name = prompt_template_name
+            request.model_params_override = model_params_override
             update_agent(agent_id, request, user_id)
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")

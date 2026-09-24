@@ -131,7 +131,6 @@ _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
 _fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
-
 def _unregister_agent_run_after_execution(
     conversation_id: int | str,
     user_id: str,
@@ -245,7 +244,7 @@ async def _consume_agent_stream_producer(
         )
         if not channel.is_completed:
             try:
-                await channel.publish(_safe_agent_stream_error_chunk())
+                await channel.publish(_safe_agent_stream_error_chunk(stream_exc))
             except Exception:
                 logger.exception(
                     "Failed to publish producer error conversation=%s",
@@ -483,19 +482,13 @@ async def _stream_agent_chunks(
             execution=execution,
             deferred_run=deferred_run,
         )
-        interaction = getattr(agent_run_info, "human_interaction", None)
-        port = getattr(interaction, "port", None)
-        if callable(getattr(port, "visible_guidance", None)):
-            from services.human_interaction.stream import stream_with_guidance
-
-            source = stream_with_guidance(source, port)
         async for agent_chunk in source:
             yield agent_chunk
 
     try:
         async for chunk in _iter_run_chunks():
             chunk_type: Optional[str] = None
-            chunk_content: str = ""
+            chunk_content: Any = ""
             try:
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
@@ -790,8 +783,8 @@ async def _stream_agent_chunks(
         stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        await channel.publish(_safe_agent_stream_error_chunk(run_exc))
+        yield _safe_agent_stream_error_chunk(run_exc)
     finally:
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
@@ -808,13 +801,8 @@ async def _stream_agent_chunks(
             else "failed"
         )
         outcome = getattr(agent_run_info, "attempt_outcome", None)
-        if (
-            getattr(agent_run_info, "human_interaction", None) is not None
-            and isinstance(outcome, str)
-        ):
-            terminal_status = outcome if stream_completed_normally else "recovery_required"
-            agent_run_info.attempt_outcome = terminal_status
-        elif outcome in {"failed", "stopped"}:
+        if outcome in {"failed", "stopped"}:
+
             # A typed terminal model error is delivered as a normal observer
             # ``error`` chunk, so the async iterator can finish normally while
             # the worker outcome still authoritatively marks the run failed.
@@ -931,8 +919,7 @@ async def _stream_agent_chunks(
             except Exception:
                 persistence_failed = True
                 terminal_status = "failed"
-                if getattr(agent_run_info, "human_interaction", None) is not None:
-                    agent_run_info.attempt_outcome = "recovery_required"
+                agent_run_info.attempt_outcome = "failed"
                 logger.exception(
                     "Failed to persist assistant stream batch conversation=%s message=%s",
                     agent_request.conversation_id,
@@ -1147,6 +1134,8 @@ async def prepare_agent_run(
         "is_debug": agent_request.is_debug,
         "override_version_no": agent_request.version_no,
         "override_model_id": agent_request.model_id,
+        "reasoning_effort": agent_request.reasoning_effort,
+        "reasoning_budget_tokens": agent_request.reasoning_budget_tokens,
         "requested_output_tokens": agent_request.requested_output_tokens,
         "tool_params": agent_request.tool_params,
         "conversation_id": agent_request.conversation_id,
@@ -1376,8 +1365,8 @@ async def generate_stream(
                 run_exc,
                 exc_info=True,
             )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            await channel.publish(_safe_agent_stream_error_chunk(run_exc))
+            yield _safe_agent_stream_error_chunk(run_exc)
             return
     except Exception as stream_exc:
         logger.error(
@@ -1385,8 +1374,8 @@ async def generate_stream(
             stream_exc,
             exc_info=True,
         )
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        await channel.publish(_safe_agent_stream_error_chunk(stream_exc))
+        yield _safe_agent_stream_error_chunk(stream_exc)
         return
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
@@ -1508,32 +1497,6 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    if isinstance(agent_request.hitl_run_id, str) and agent_request.hitl_run_id:
-        from services.human_interaction.application import stream_run
-
-        return await stream_run(
-            agent_request.hitl_run_id,
-            resolved_tenant_id,
-            resolved_user_id,
-            after=agent_request.hitl_after_event,
-        )
-
-    from consts.const import HITL_ENABLED
-
-    if HITL_ENABLED and not agent_request.is_debug and agent_request.conversation_id:
-        from services.human_interaction.application import get_service, stream_run
-        from services.human_interaction.models import InteractionError
-
-        active_hitl = await run_blocking(
-            "hitl-get_service-repository-latest", get_service().repository.latest, resolved_tenant_id,
-            resolved_user_id, agent_request.conversation_id, active_only=True, lane="control-io",
-            owner=__name__,
-        )
-        if active_hitl:
-            if resume:
-                return await stream_run(active_hitl, resolved_tenant_id, resolved_user_id)
-            raise InteractionError("This conversation has a paused or active human interaction run")
-
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -1764,15 +1727,6 @@ async def run_agent_stream(
             agent_id=agent_request.agent_id,
             user_id=resolved_user_id,
         )
-
-    if agent_request.enable_hitl is True and not resume:
-        from services.human_interaction.application import start_run
-
-        human_response = await start_run(
-            agent_request, resolved_tenant_id, resolved_user_id, language, skip_user_save=skip_user_save,
-        )
-        if human_response is not None:
-            return human_response
 
     # Resume mode: check for existing streaming message
     if resume:
@@ -2165,7 +2119,7 @@ async def run_agent_stream(
                 stream_exc,
                 exc_info=True,
             )
-            yield _safe_agent_stream_error_chunk()
+            yield _safe_agent_stream_error_chunk(stream_exc)
         finally:
             if channel is None and not execution.future.done():
                 deferred_run.cancel()
@@ -2288,13 +2242,4 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str):
 
 
 def is_agent_running(conversation_id: int, user_id: str) -> bool:
-    if agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None:
-        return True
-
-    from consts.const import HITL_ENABLED
-
-    if not HITL_ENABLED:
-        return False
-    from services.human_interaction.application import is_conversation_running
-
-    return is_conversation_running(conversation_id, user_id)
+    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None

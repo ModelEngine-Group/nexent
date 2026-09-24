@@ -894,6 +894,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
+                "model_params_override": agent.get("model_params_override"),
             })
 
         return simple_agent_list
