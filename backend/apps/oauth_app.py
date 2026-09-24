@@ -40,6 +40,7 @@ from utils.auth_utils import (
     get_current_user_id,
     get_supabase_admin_client,
 )
+from services.audit_service import record_security_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/oauth", tags=["oauth"])
@@ -100,6 +101,7 @@ async def link(provider: str, authorization: Optional[str] = Header(None)):
 
 @router.get("/callback")
 async def callback(
+    http_request: Request,
     provider: str,
     code: str = "",
     state: str = "",
@@ -215,6 +217,9 @@ async def callback(
         expiry_seconds = JWT_EXPIRY_SECONDS
         expires_at = calculate_expires_at(jwt_token)
 
+        record_security_event("oauth_login", request=http_request,
+                              user_id=supabase_user_id, user_email=email,
+                              details={"provider": provider, "linked": bool(link_user_id)})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -301,6 +306,10 @@ async def complete(
             password=request_data.password,
             invite_code=request_data.invite_code,
         )
+        completed_user = (result or {}).get("user") or {}
+        record_security_event("oauth_signup", request=request,
+                              user_id=completed_user.get("id"),
+                              user_email=completed_user.get("email"))
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "OAuth account completed", "data": result},
@@ -355,13 +364,16 @@ async def get_accounts(authorization: Optional[str] = Header(None)):
 
 
 @router.delete("/accounts/{provider}")
-async def delete_account(provider: str, authorization: Optional[str] = Header(None)):
+async def delete_account(provider: str, http_request: Request, authorization: Optional[str] = Header(None)):
     if not authorization:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
 
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         unlink_account(user_id, provider)
+        record_security_event("oauth_unlink", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"provider": provider})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
