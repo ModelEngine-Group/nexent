@@ -594,6 +594,16 @@ async def check_model_health(
                             detail=str(e))
 
 
+def _normalize_probe_base_url(url: Optional[str]) -> str:
+    """Normalize a base_url for the probe key-fallback match.
+
+    Only trailing slashes are stripped: the match must stay an exact-string
+    comparison — prefix or fuzzy matching would re-open the exfiltration
+    path the fallback guards against.
+    """
+    return (url or "").rstrip("/")
+
+
 @router.post("/temporary_healthcheck")
 async def check_temporary_model_health(
     request: ModelProbeRequest, authorization: Optional[str] = Header(None)
@@ -609,10 +619,18 @@ async def check_temporary_model_health(
         # Edit-dialog probes arrive without the api_key (the backend never
         # returns the persisted key to the client, and the dialog leaves the
         # field empty to "keep existing"). Fall back to the stored key so
-        # verifying does not require retyping it.
+        # verifying does not require retyping it — but ONLY when the probe
+        # targets the stored endpoint itself: substituting the key while the
+        # caller controls base_url would let any tenant member exfiltrate a
+        # stored key by pointing the probe at their own server.
         if request.probe_model_id is not None and request.api_key in (None, "", "sk-no-api-key"):
             stored_model = get_model_by_model_id(request.probe_model_id, tenant_id=tenant_id)
-            if stored_model and stored_model.get("api_key"):
+            if (
+                stored_model
+                and stored_model.get("api_key")
+                and _normalize_probe_base_url(request.base_url)
+                == _normalize_probe_base_url(stored_model.get("base_url"))
+            ):
                 request.api_key = stored_model["api_key"]
         result = await verify_model_config_connectivity(request.model_dump())
         if result.get("connectivity") is True:
