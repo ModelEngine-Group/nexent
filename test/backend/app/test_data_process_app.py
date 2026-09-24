@@ -154,12 +154,15 @@ class _ServiceStub:
 
 @pytest.fixture(autouse=True)
 def stub_modules(monkeypatch):
+    # monkeypatch.setitem restores the real modules after each test; direct
+    # sys.modules assignment would leak the stubs into later test files that
+    # share the same pytest process.
     # consts.model
     model_mod = types.ModuleType("consts.model")
     model_mod.TaskRequest = _TaskRequest
     model_mod.BatchTaskRequest = _BatchTaskRequest
     model_mod.ConvertStateRequest = _ConvertStateRequest
-    sys.modules["consts.model"] = model_mod
+    monkeypatch.setitem(sys.modules, "consts.model", model_mod)
 
     # data_process.tasks
     tasks_mod = types.ModuleType("data_process.tasks")
@@ -169,13 +172,13 @@ def stub_modules(monkeypatch):
             return _tasks.process_sync_apply_async(**kwargs)
     tasks_mod.submit_process_forward_chain = _tasks.submit_process_forward_chain
     tasks_mod.process_sync = _PSync()
-    sys.modules["data_process.tasks"] = tasks_mod
+    monkeypatch.setitem(sys.modules, "data_process.tasks", tasks_mod)
 
     # The router imports this helper directly from data_process.parse_tasks.
     # Stub that import as well so the synchronous endpoint never reaches Redis.
     parse_tasks_mod = types.ModuleType("data_process.parse_tasks")
     parse_tasks_mod.load_chunks_from_redis = lambda _key: [{"content": "hello"}]
-    sys.modules["data_process.parse_tasks"] = parse_tasks_mod
+    monkeypatch.setitem(sys.modules, "data_process.parse_tasks", parse_tasks_mod)
 
     # Keep this app-router test independent from the production Celery
     # bootstrap, which intentionally fails fast when Redis is not configured.
@@ -192,13 +195,13 @@ def stub_modules(monkeypatch):
             return decorator
 
     app_mod.app = _CeleryAppStub()
-    sys.modules["data_process.app"] = app_mod
+    monkeypatch.setitem(sys.modules, "data_process.app", app_mod)
 
     # services.data_process_service
     service_stub = _ServiceStub()
     svc_mod = types.ModuleType("services.data_process_service")
     svc_mod.get_data_process_service = lambda: service_stub
-    sys.modules["services.data_process_service"] = svc_mod
+    monkeypatch.setitem(sys.modules, "services.data_process_service", svc_mod)
 
     # data_process.utils
     utils_mod = types.ModuleType("data_process.utils")
@@ -214,7 +217,7 @@ def stub_modules(monkeypatch):
             return None
         return {"id": task_id, "ok": True}
     utils_mod.get_task_details = get_task_details
-    sys.modules["data_process.utils"] = utils_mod
+    monkeypatch.setitem(sys.modules, "data_process.utils", utils_mod)
 
     # yield to tests
     yield
