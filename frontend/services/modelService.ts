@@ -639,6 +639,12 @@ export const modelService = {
     temperature?: number;
     topP?: number;
     extraParams?: Record<string, unknown>;
+    // Type change: sent only when the operator re-typed the model. The
+    // backend single-update path writes model_type through to the record.
+    type?: ModelType;
+    // Sent together with a type change: the stored probe status was measured
+    // under the old type, so it must not stay "available".
+    connectStatus?: ModelConnectStatus;
   }): Promise<void> => {
     try {
       const response = await authedFetch(
@@ -651,6 +657,10 @@ export const modelService = {
               ? { display_name: model.displayName }
               : {}),
             ...(model.name !== undefined ? { model_name: model.name } : {}),
+            ...(model.type !== undefined ? { model_type: model.type } : {}),
+            ...(model.connectStatus !== undefined
+              ? { connect_status: model.connectStatus }
+              : {}),
             base_url: model.url,
             ...(model.apiKey?.trim() ? { api_key: model.apiKey } : {}),
             ...(model.maxTokens !== undefined
