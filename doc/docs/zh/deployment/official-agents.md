@@ -1,6 +1,29 @@
-# 官方智能体部署
+---
+title: 官方智能体部署
+---
+
+# 🚀 官方智能体部署
 
 本文介绍如何在 Nexent 主平台部署完成后，单独获取并同步官方智能体。
+
+## 📋 页面导航
+
+- [一、部署概述](#一部署概述)
+- [二、前置条件](#二前置条件)
+- [三、官方资源目录结构](#三官方资源目录结构)
+- [四、从 Agent Hub 在线部署](#四从-agent-hub-在线部署)
+- [五、从本地目录部署](#五从本地目录部署)
+- [六、从本地压缩包部署](#六从本地压缩包部署)
+- [七、交互式部署](#七交互式部署)
+- [八、Docker 部署流程](#八docker-部署流程)
+- [九、Kubernetes 部署](#九kubernetes-部署)
+- [十、部署完成后的用户安装](#十部署完成后的用户安装)
+- [十一、验证部署结果](#十一验证部署结果)
+- [十二、删除官方智能体](#十二删除官方智能体)
+- [十三、常见问题](#十三常见问题)
+- [十四、重新部署或更新 Profile](#十四重新部署或更新-profile)
+
+## 一、部署概述
 
 官方智能体部署与 Nexent 主平台部署相互独立：
 
@@ -10,7 +33,7 @@
 - 部署阶段不会为租户创建知识库，也不会要求配置向量模型；
 - 用户从智能体仓库复制官方智能体时，才会按需创建或复用知识库、Skill 和 MCP。
 
-## 1. 前置条件
+## 二、前置条件
 
 执行官方智能体部署前，请确认：
 
@@ -28,7 +51,7 @@ cd nexent
 
 `deploy/deploy-official-agents.sh` 会自动完成资源复制和容器内同步，用户不需要手工执行 `git clone`、`docker cp` 或 `sync_official_agents.py`。
 
-## 2. 官方资源目录结构
+## 三、官方资源目录结构
 
 部署脚本按照“Profile → Agent Bundle”的结构扫描资源。每个官方智能体 Bundle 的根目录必须包含一个 `agent.json`：
 
@@ -60,7 +83,7 @@ AgentsHub/
 
 则使用 `--profile-root "行业智能体"` 指定 Profile 根目录，并使用实际目录名称作为 `--profiles` 参数。
 
-## 3. 从 Agent Hub 在线部署
+## 四、从 Agent Hub 在线部署
 
 默认仓库地址为：
 
@@ -97,7 +120,7 @@ bash deploy/deploy-official-agents.sh \
   --profiles "医疗,金融"
 ```
 
-### 3.1 使用其他 Hub 地址
+### 4.1 使用其他 Hub 地址
 
 可以通过环境变量覆盖默认仓库地址和分支：
 
@@ -112,7 +135,7 @@ bash deploy/deploy-official-agents.sh \
 
 脚本不会把 Git 凭证写入 Nexent 配置或日志。
 
-### 3.2 Hub 下载范围
+### 4.2 Hub 下载范围
 
 脚本不会把整个 Agent Hub 的工作区内容全部检出到部署目录：
 
@@ -123,7 +146,7 @@ bash deploy/deploy-official-agents.sh \
 
 因此，未选择的行业 Profile 不会被复制到 Nexent，也不会触发其 LFS 文件下载。
 
-## 4. 从本地目录部署
+## 五、从本地目录部署
 
 联网机器或交付包已经准备好资源目录时，可以直接使用本地目录：
 
@@ -162,7 +185,7 @@ bash deploy/deploy-official-agents.sh \
   --profiles "金融"
 ```
 
-## 5. 从本地压缩包部署
+## 六、从本地压缩包部署
 
 本地源也可以是 `.zip` 或 tar 压缩包。脚本会自动解压到临时目录，校验压缩包路径安全性，然后按与本地目录相同的流程扫描：
 
@@ -185,7 +208,7 @@ bash deploy/deploy-official-agents.sh \
 
 本地目录和本地压缩包在部署语义上等价，区别只在于资源交付形式。
 
-## 6. 交互式部署
+## 七、交互式部署
 
 不传 `--source` 或 `--profiles` 时，脚本会交互式询问资源来源和 Profile：
 
@@ -202,7 +225,7 @@ bash deploy/deploy-official-agents.sh
 5. 复制选中的资源；
 6. 调用容器内同步脚本。
 
-## 7. Docker 部署流程
+## 八、Docker 部署流程
 
 Docker 模式下，脚本的内部流程如下：
 
@@ -231,7 +254,7 @@ Synchronized 3 official agent bundle(s)
 Official Agent deployment completed for profiles: general
 ```
 
-## 8. Kubernetes 部署
+## 九、Kubernetes 部署
 
 Kubernetes 环境使用相同的资源来源和 Profile 选择方式，并增加 `--kubernetes` 参数：
 
@@ -251,7 +274,7 @@ bash deploy/deploy-official-agents.sh \
 - 官方资源目录能够写入 Nexent 使用的工作目录或 PVC；
 - `--namespace` 与 Nexent 实际命名空间一致。
 
-## 9. 部署完成后的用户安装
+## 十、部署完成后的用户安装
 
 官方智能体同步完成后，用户可以在 **智能体仓库** 中复制官方智能体。
 
@@ -260,15 +283,14 @@ bash deploy/deploy-official-agents.sh \
 - 用户需要选择当前租户可用的语言模型；
 - 带有官方文档知识库的智能体，在需要创建知识库时选择向量模型；
 - 如果同租户已有同名 Skill 或知识库，用户可以选择复用或创建副本；
-- 资源名称冲突不会跳转到“开通”页面；
 - 创建完成的 Agent 属于当前用户，可继续编辑；
 - 官方模板删除不会删除已经复制到租户中的用户副本。
 
 因此，部署官方资源不等于把官方 Agent 自动安装到所有用户或所有租户。部署只发布官方模板，具体安装由用户从智能体仓库发起。
 
-## 10. 验证部署结果
+## 十一、验证部署结果
 
-### 10.1 检查 Docker 容器中的资源
+### 11.1 检查 Docker 容器中的资源
 
 ```bash
 docker exec nexent-config \
@@ -281,7 +303,7 @@ docker exec nexent-config \
 docker logs nexent-config --tail 200
 ```
 
-### 10.2 检查页面
+### 11.2 检查页面
 
 登录 Nexent 后：
 
@@ -290,9 +312,56 @@ docker logs nexent-config --tail 200
 3. 确认卡片显示“官方”标识；
 4. 点击复制，确认可以看到模型选择和资源冲突处理选项。
 
-## 11. 常见问题
+## 十二、删除官方智能体
 
-### 11.1 `profile not found`
+官方智能体删除功能仅用于删除官方模板，只有超级管理员可以执行。租户管理员、开发者和普通用户不能删除官方模板。
+
+> ⚠️ **重要提示**：删除操作会移除官方智能体仓库条目、官方源 Agent 记录以及服务器上的官方 Bundle 文件。已经被用户复制到租户中的 Agent 副本不会被删除，也不会被回滚。
+
+### 12.1 删除操作步骤
+
+1. 使用超级管理员账号登录 Nexent。
+2. 进入 **资源管理** 页面。
+3. 打开 **智能体** 页签。
+4. 点击 **管理官方智能体**。
+5. 在官方智能体列表中找到要删除的模板。
+6. 点击该模板对应的 **删除** 按钮。
+7. 在确认弹窗中检查智能体名称和删除影响，确认后继续。
+
+删除成功后，该官方智能体不会再出现在智能体仓库中，用户也不能继续从仓库复制新的实例。
+
+### 12.2 删除范围
+
+删除官方模板时，系统会清理以下内容：
+
+| 内容 | 是否删除 | 说明 |
+| --- | :---: | --- |
+| 官方智能体仓库条目 | ✅ | 不再对用户展示和提供复制 |
+| 官方源 Agent | ✅ | 删除官方保留租户中的源 Agent |
+| 官方 Bundle 文件 | ✅ | 删除配置的官方资源目录中的对应文件或目录 |
+| 已复制到租户的 Agent | ❌ | 保留用户副本及其编辑内容 |
+| 用户租户中的知识库、Skill、MCP | ❌ | 不删除用户复制时创建或复用的资源 |
+
+### 12.3 删除后的验证
+
+删除后可以进行以下检查：
+
+1. 刷新 **智能体仓库**，确认对应官方模板不再显示；
+2. 使用超级管理员返回 **管理官方智能体**，确认模板已从列表中移除；
+3. 对 Docker 部署检查官方 Bundle 文件是否已清理：
+
+   ```bash
+   docker exec nexent-config \
+     find /mnt/nexent/official-agents -iname '*<bundle-name>*' -print
+   ```
+
+4. 如果用户之前已经复制过该 Agent，进入对应租户的 **我的智能体**，确认用户副本仍然存在。
+
+不要直接删除数据库记录或手工删除容器文件。管理页面会同时处理仓库记录、源 Agent 和 Bundle 文件，避免出现数据库和文件状态不一致。
+
+## 十三、常见问题
+
+### 13.1 `profile not found`
 
 通常是 Profile 根目录层级不匹配。检查：
 
@@ -301,15 +370,15 @@ docker logs nexent-config --tail 200
 - `--profiles` 是否使用实际目录名；
 - 中文目录名是否使用引号包裹。
 
-### 11.2 `Synchronized 0 official agent bundle(s)`
+### 13.2 `Synchronized 0 official agent bundle(s)`
 
 检查选中的 Profile 下是否存在以 Bundle 为根目录的 `agent.json`。如果 `agent.json` 位于更深层目录，说明资源目录结构或 `--profile-root` 配置不正确。
 
-### 11.3 `duplicate official agent bundle`
+### 13.3 `duplicate official agent bundle`
 
 说明同一个 Profile 扫描到了多个同名 Bundle，常见原因是上一次复制留下了嵌套目录。清理资源源目录中的重复 Bundle 后重新部署。脚本在复制选中 Profile 前会清理目标 Profile，避免旧的嵌套目录继续参与同步。
 
-### 11.4 Git LFS 下载失败
+### 13.4 Git LFS 下载失败
 
 如果提示 `smudge filter lfs failed`、`Access forbidden` 或 `project lfs not enabled`：
 
@@ -318,7 +387,7 @@ docker logs nexent-config --tail 200
 3. 在有权限的机器上准备完整本地目录或压缩包；
 4. 在目标环境改用 `--source local` 部署。
 
-### 11.5 `Remote branch main not found`
+### 13.5 `Remote branch main not found`
 
 先检查远端实际分支：
 
@@ -335,7 +404,7 @@ bash deploy/deploy-official-agents.sh \
   --profiles general
 ```
 
-### 11.6 页面没有显示官方智能体
+### 13.6 页面没有显示官方智能体
 
 依次检查：
 
@@ -345,7 +414,7 @@ bash deploy/deploy-official-agents.sh \
 4. 浏览器是否使用 `Ctrl + F5` 强制刷新；
 5. 是否登录到了正确的租户。
 
-## 12. 重新部署或更新 Profile
+## 十四、重新部署或更新 Profile
 
 更新 Agent Hub 中的官方资源后，可以重复执行相同命令：
 
