@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mapMyAgentDetail } from "../lib/myAgentDetail.ts";
+import { mapAgentInfoDetail, mapMyAgentDetail } from "../lib/myAgentDetail.ts";
 
 test("resolves tool and skill names from version instance IDs", () => {
   const detail = {
@@ -49,4 +49,39 @@ test("retains bound resources by ID while names are unavailable", () => {
 
   assert.deepEqual(view.tools, ["#42"]);
   assert.deepEqual(view.skills, ["#7"]);
+});
+
+test("maps the Agents page record to the shared detail view", () => {
+  const view = mapAgentInfoDetail({
+    display_name: "Research Assistant",
+    description: "Finds sources",
+    author: "Alice",
+    model_names: ["Model A", "Model B"],
+    current_version_no: 3,
+    tools: [
+      {
+        id: "42",
+        name: "Search",
+        origin_name: "Web Search",
+        display_names: ["Docs"],
+      },
+      { id: "43", name: "Reader", display_names: ["Docs", "Wiki"] },
+    ],
+    skills: [{ skill_id: 7, name: "Summarize" }],
+    sub_agent_relations: [{ agent_id: 9, agent_name: "Writer" }],
+    tags: ["internal", "internal"],
+  });
+
+  assert.deepEqual(view, {
+    title: "Research Assistant",
+    description: "Finds sources",
+    author: "Alice",
+    modelName: "Model A, Model B",
+    versionLabel: "V3",
+    tools: ["Web Search", "Reader"],
+    skills: ["Summarize"],
+    knowledgeBases: ["Docs", "Wiki"],
+    subAgents: ["Writer"],
+    tags: ["internal"],
+  });
 });

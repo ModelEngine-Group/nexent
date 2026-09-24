@@ -1,6 +1,6 @@
 import type { AgentVersionDetail } from "@/services/agentVersionService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
-import type { Skill, Tool } from "@/types/agentConfig";
+import type { Agent, Skill, Tool } from "@/types/agentConfig";
 
 export interface MyAgentDetailView {
   title: string;
@@ -75,6 +75,29 @@ export function mapMyAgentDetail(
     ),
     subAgents: uniqueNames(
       detail.sub_agent_relations?.map((relation) => relation.agent_name) ?? []
+    ),
+    tags: uniqueNames(agent.tags ?? []),
+  };
+}
+
+export function mapAgentInfoDetail(agent: Agent): MyAgentDetailView {
+  return {
+    title: agent.display_name?.trim() || agent.name?.trim() || "",
+    description: agent.description?.trim() || "",
+    author: agent.author?.trim() || null,
+    modelName: agent.model_names?.filter(Boolean).join(", ") || null,
+    versionLabel:
+      agent.version_name?.trim() ||
+      (agent.current_version_no ? `V${agent.current_version_no}` : null),
+    tools: uniqueNames(
+      agent.tools?.map((tool) => tool.origin_name || tool.name) ?? []
+    ),
+    skills: uniqueNames(agent.skills?.map((skill) => skill.name) ?? []),
+    knowledgeBases: uniqueNames(
+      agent.tools?.flatMap((tool) => tool.display_names ?? []) ?? []
+    ),
+    subAgents: uniqueNames(
+      agent.sub_agent_relations?.map((relation) => relation.agent_name) ?? []
     ),
     tags: uniqueNames(agent.tags ?? []),
   };

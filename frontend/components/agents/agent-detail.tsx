@@ -25,10 +25,10 @@ interface AgentDetailProps {
   agentIcon?: ReactNode;
   published: boolean;
   status?: AgentRepositoryListingStatus;
-  isLoading: boolean;
-  isError: boolean;
-  isFetching: boolean;
-  onRetry: () => void;
+  isLoading?: boolean;
+  isError?: boolean;
+  isFetching?: boolean;
+  onRetry?: () => void;
 }
 
 function DetailSection({
@@ -79,9 +79,9 @@ export function AgentDetail({
   agentIcon,
   published,
   status,
-  isLoading,
-  isError,
-  isFetching,
+  isLoading = false,
+  isError = false,
+  isFetching = false,
   onRetry,
 }: AgentDetailProps) {
   const { t } = useTranslation("common");
@@ -105,9 +105,11 @@ export function AgentDetail({
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 {t("agentRepository.detail.loadError")}
               </p>
-              <Button type="primary" onClick={onRetry} loading={isFetching}>
-                {t("repository.common.retry")}
-              </Button>
+              {onRetry ? (
+                <Button type="primary" onClick={onRetry} loading={isFetching}>
+                  {t("repository.common.retry")}
+                </Button>
+              ) : null}
             </div>
           ) : detail ? (
             <>

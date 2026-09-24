@@ -31,10 +31,11 @@ import log from "@/lib/logger";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
+import { AgentDetail } from "@/components/agents/agent-detail";
+import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
 
 import AgentConfigActions from "./components/agent-config-actions";
 import AgentAvatar from "./components/agent-avatar";
-import AgentDetail from "./agent-detail";
 import AgentVersion from "./agent-version";
 
 interface AgentCardItem extends Agent {
@@ -126,7 +127,7 @@ export default function AgentsPage() {
     const loadedAgent = await loadAgent(Number(selectedAgent.id));
     if (loadedAgent) setSelectedAgent(loadedAgent);
     return loadedAgent;
-  }, [loadAgent, selectedAgent?.id]);
+  }, [loadAgent, selectedAgent]);
 
   const handleCreate = ({ agentId }: { agentId: number }) => {
     setIsCreateOpen(false);
@@ -339,11 +340,16 @@ export default function AgentsPage() {
       </Card>
 
       <AgentDetail
-        agent={selectedAgent}
+        detail={selectedAgent ? mapAgentInfoDetail(selectedAgent) : null}
+        agentIcon={
+          selectedAgent ? (
+            <AgentAvatar agent={selectedAgent} size={48} iconSize={24} />
+          ) : undefined
+        }
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
         onEdit={() => selectedAgent && updateUrl(Number(selectedAgent.id))}
-        onManageVersions={() => setIsVersionManageOpen(true)}
+        published={Boolean(selectedAgent?.current_version_no)}
       />
       <Modal
         centered
