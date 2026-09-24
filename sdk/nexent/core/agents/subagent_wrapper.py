@@ -14,8 +14,16 @@ perspective.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import Any, Callable, Iterable
 
+from ...monitor import (
+    OPENINFERENCE_SPAN_KIND_AGENT,
+    AgentRunMetadata,
+    agent_monitoring_context,
+    get_agent_monitoring_context,
+    get_monitoring_manager,
+)
 from ..utils.observer import MessageObserver
 
 
@@ -33,9 +41,8 @@ class SubAgentToolWrapper:
       ``__getattr__`` / ``__setattr__`` so smolagents can mutate the wrapped
       agent's Tool contract fields without hitting read-only properties.
 
-    The wrapper is intentionally minimal — it does not duplicate any of
-    smolagents' Tool machinery. The inner agent remains the source of truth
-    for execution; the wrapper only annotates the stream.
+    The inner agent remains the source of truth for execution. The wrapper
+    annotates the observer stream and scopes the nested Agent trace.
     """
 
     # Managed-agent orchestration must stay in the trusted Runtime process.
@@ -124,27 +131,18 @@ class SubAgentToolWrapper:
         during this invocation, even when sibling sub-agents execute in
         parallel.
         """
-        task_text = self._task_extractor(args, kwargs)
-        invocation_id = uuid.uuid4().hex
-        self._observer.add_subagent_start(
-            agent_id=self._agent_id,
-            agent_name=self._agent_name,
-            task=task_text,
-            invocation_id=invocation_id,
-        )
-        try:
-            return self._inner(*args, **kwargs)
-        finally:
-            self._observer.add_subagent_end(
-                agent_id=self._agent_id,
-                agent_name=self._agent_name,
-                invocation_id=invocation_id,
-            )
+        return self._invoke(self._inner, args, kwargs)
 
     # Some smolagents versions dispatch via ``forward`` rather than
     # ``__call__``. Forward through to the inner agent's ``forward`` if it
     # exists, but still wrap with the observer signals.
-    def forward(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+    def forward(self, *args: Any, **kwargs: Any) -> Any:
+        inner_forward = getattr(self._inner, "forward", None)
+        target = inner_forward if callable(inner_forward) else self._inner
+        return self._invoke(target, args, kwargs)
+
+    def _invoke(self, target: Callable, args: tuple, kwargs: dict) -> Any:
+        """Keep tracing and observer boundaries identical for both entry points."""
         task_text = self._task_extractor(args, kwargs)
         invocation_id = uuid.uuid4().hex
         self._observer.add_subagent_start(
@@ -154,10 +152,23 @@ class SubAgentToolWrapper:
             invocation_id=invocation_id,
         )
         try:
-            inner_forward = getattr(self._inner, "forward", None)
-            if callable(inner_forward):
-                return inner_forward(*args, **kwargs)
-            return self._inner(*args, **kwargs)
+            manager = get_monitoring_manager()
+            parent = get_agent_monitoring_context() or AgentRunMetadata()
+            metadata = replace(
+                parent, agent_id=self._agent_id, agent_name=self._agent_name,
+                agent_display_name=getattr(self._inner, "display_name", None), query=task_text,
+            )
+            attributes = manager.build_agent_run_attributes(metadata, attributes={
+                "subagent.invocation_id": invocation_id,
+                **({"parent.agent.id": parent.agent_id} if parent.agent_id is not None else {}),
+                **({"parent.agent.name": parent.agent_name} if parent.agent_name is not None else {}),
+            })
+            with agent_monitoring_context(metadata), manager.trace_operation(
+                f"agent.subagent.{self._agent_name}", OPENINFERENCE_SPAN_KIND_AGENT, **attributes
+            ):
+                result = target(*args, **kwargs)
+                manager.set_openinference_output(result)
+                return result
         finally:
             self._observer.add_subagent_end(
                 agent_id=self._agent_id,

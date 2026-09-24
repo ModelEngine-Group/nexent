@@ -1727,6 +1727,7 @@ async def create_agent_config(
 
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
+        display_name=agent_info.get("display_name"),
         description="undefined" if agent_info["description"] is None else agent_info["description"],
         prompt_templates=await prepare_prompt_templates(
             is_manager=len(managed_agents) > 0 or len(external_a2a_agents) > 0,

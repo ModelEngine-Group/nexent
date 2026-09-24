@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from jinja2 import StrictUndefined, Template
 from nexent.core.concurrency import run_blocking
+from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, MessageRequest, MessageUnit
@@ -46,13 +47,13 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from database.model_management_db import get_model_by_model_id
-from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.model_gateway_service import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
 
 logger = logging.getLogger("conversation_management_service")
+monitoring_manager = get_monitoring_manager()
 
 
 def save_message(request: MessageRequest, user_id: str, tenant_id: str,
@@ -1045,6 +1046,7 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
         }
 
 
+@monitoring_manager.monitor_endpoint("conversation.generate_title", include_params=False)
 async def generate_conversation_title_service(conversation_id: int, question: str, user_id: str, tenant_id: str,
                                               language: str = LANGUAGE["ZH"],
                                               model_id: Optional[int] = None) -> str:
@@ -1065,6 +1067,12 @@ async def generate_conversation_title_service(conversation_id: int, question: st
     Returns:
         str: Generated title
     """
+    monitoring_manager.set_span_attributes(**monitoring_manager.build_openinference_attributes(
+        span_kind="CHAIN",
+        input_value=question,
+        session_id=conversation_id,
+        attributes={"langfuse.trace.name": "生成会话标题", "tenant.id": tenant_id},
+    ))
     try:
         # Call LLM to generate title from question in a separate thread to avoid blocking
         title = await run_blocking(
@@ -1080,6 +1088,7 @@ async def generate_conversation_title_service(conversation_id: int, question: st
 
         # Update conversation title
         update_conversation_title(conversation_id, title, user_id)
+        monitoring_manager.set_openinference_output(title)
 
         return title
 

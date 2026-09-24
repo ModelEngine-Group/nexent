@@ -436,6 +436,7 @@ class CoreAgent(CodeAgent):
         **kwargs
     ):
         # Pop SDK-specific kwargs before passing the rest to smolagents' CodeAgent.
+        self.display_name: Optional[str] = kwargs.pop("display_name", None)
         self.enable_planning: bool = kwargs.pop("enable_planning", False)
         redis_client = kwargs.pop("redis_client", None)
         self.conversation_id = kwargs.pop("conversation_id", None)
@@ -1134,7 +1135,9 @@ Additional Args:
                 self.name,
                 {"code": code_action, "step_number": memory_step.step_number},
             ):
-                code_output = self.python_executor(code_action)
+                from .sandbox import _execute_with_tool_context
+
+                code_output = _execute_with_tool_context(self.python_executor, code_action)
                 monitoring_manager.set_tool_output({
                     "output": getattr(code_output, "output", None),
                     "is_final_answer": getattr(code_output, "is_final_answer", False),
