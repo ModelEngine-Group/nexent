@@ -524,23 +524,27 @@ export const ModelConfigSection = forwardRef<
         width: 110,
         render: (_: any, m: ModelOption) => (
           <Space size={4}>
-            <Tooltip title={t("common.edit", { defaultValue: "编辑" })}>
-              <Button
-                size="small"
-                type="text"
-                icon={<Edit3 size={14} />}
-                onClick={() => handleCardEdit(m)}
-              />
-            </Tooltip>
-            <Tooltip title={t("common.delete", { defaultValue: "删除" })}>
-              <Button
-                size="small"
-                type="text"
-                danger
-                icon={<Trash2 size={14} />}
-                onClick={() => handleCardDelete(m)}
-              />
-            </Tooltip>
+            <Can permission="model:update">
+              <Tooltip title={t("common.edit", { defaultValue: "编辑" })}>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<Edit3 size={14} />}
+                  onClick={() => handleCardEdit(m)}
+                />
+              </Tooltip>
+            </Can>
+            <Can permission="model:delete">
+              <Tooltip title={t("common.delete", { defaultValue: "删除" })}>
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<Trash2 size={14} />}
+                  onClick={() => handleCardDelete(m)}
+                />
+              </Tooltip>
+            </Can>
           </Space>
         ),
       },
@@ -1289,30 +1293,34 @@ export const ModelConfigSection = forwardRef<
             marginBottom: 16,
           }}
         >
-          <Button
-            type="primary"
-            size="middle"
-            icon={<SlidersHorizontal size={16} />}
-            onClick={() => setIsDefaultDialogOpen(true)}
-            ghost
-          >
-            <span className="button-text-full">
-              {t("modelConfig.button.setDefaultModels", {
-                defaultValue: "设置默认模型",
-              })}
-            </span>
-          </Button>
-          {modelEngineEnable && (
+          <Can permission="model:update">
             <Button
               type="primary"
               size="middle"
-              onClick={handleSyncModels}
-              icon={<RefreshCw size={16} />}
+              icon={<SlidersHorizontal size={16} />}
+              onClick={() => setIsDefaultDialogOpen(true)}
+              ghost
             >
               <span className="button-text-full">
-                {t("modelConfig.button.syncModelEngine")}
+                {t("modelConfig.button.setDefaultModels", {
+                  defaultValue: "设置默认模型",
+                })}
               </span>
             </Button>
+          </Can>
+          {modelEngineEnable && (
+            <Can permission="model:update">
+              <Button
+                type="primary"
+                size="middle"
+                onClick={handleSyncModels}
+                icon={<RefreshCw size={16} />}
+              >
+                <span className="button-text-full">
+                  {t("modelConfig.button.syncModelEngine")}
+                </span>
+              </Button>
+            </Can>
           )}
           {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
           <Can permission="model:create">
@@ -1329,17 +1337,19 @@ export const ModelConfigSection = forwardRef<
               </span>
             </Button>
           </Can>
-          <Button
-            type="primary"
-            size="middle"
-            icon={<ShieldCheck size={16} />}
-            onClick={verifyModels}
-            loading={isVerifying}
-          >
-            <span className="button-text-full">
-              {t("modelConfig.button.checkConnectivity")}
-            </span>
-          </Button>
+          <Can permission="model:update">
+            <Button
+              type="primary"
+              size="middle"
+              icon={<ShieldCheck size={16} />}
+              onClick={verifyModels}
+              loading={isVerifying}
+            >
+              <span className="button-text-full">
+                {t("modelConfig.button.checkConnectivity")}
+              </span>
+            </Button>
+          </Can>
         </div>
 
         {/* -------------------- Capacity coverage warning -------------------- */}

@@ -94,6 +94,7 @@ export const deriveModelOptions = (
     return {
       id,
       name: fallbackName,
+      reasoningCapability: capability,
       ...(supportsEffort
         ? {
             efforts: effortLevels.map((level) => ({ id: level, name: level })),
@@ -135,7 +136,7 @@ export const deriveModelOptions = (
     );
     const availableModelIds = new Set(
       availableModels
-        .filter((model) => model.connect_status === "available")
+        .filter((model) => model.connect_status !== "unavailable")
         .map((model) => String(model.id))
     );
     return configuredModels.filter((model) => availableModelIds.has(model.id));
@@ -145,7 +146,7 @@ export const deriveModelOptions = (
     .model_name;
   const modelIsAvailable = availableModels.some(
     (model) =>
-      model.connect_status === "available" &&
+      model.connect_status !== "unavailable" &&
       (model.displayName === modelName || model.name === modelName)
   );
   if (modelName && modelIsAvailable) {
@@ -158,7 +159,7 @@ export const deriveModelOptions = (
   const singleModel = (typedAgent as unknown as { model?: string }).model;
   const singleModelIsAvailable = availableModels.some(
     (model) =>
-      model.connect_status === "available" &&
+      model.connect_status !== "unavailable" &&
       (model.displayName === singleModel || model.name === singleModel)
   );
   if (singleModel && singleModelIsAvailable) {

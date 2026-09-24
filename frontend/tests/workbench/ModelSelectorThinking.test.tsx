@@ -114,3 +114,28 @@ it("lets Workbench control the same selector settings", async () => {
   await user.click(screen.getByText("High"));
   expect(onEffortChange).toHaveBeenCalledWith("high");
 });
+
+it("passes capability metadata without forcing reasoning when deep thinking is off", () => {
+  const capability = {
+    status: "supported" as const,
+    control: "effort" as const,
+    levels: ["low" as const, "high" as const],
+    source: "catalog" as const,
+  };
+  render(
+    <ModelSelector
+      models={[{ ...models[0], reasoningCapability: capability }]}
+      value="12"
+      deepThinking={false}
+    />
+  );
+  const config = (register.mock.lastCall?.[0].getModelContext() as {
+    config: Record<string, unknown>;
+  }).config;
+  expect(config).toMatchObject({
+    modelName: "12",
+    deepThinking: false,
+    reasoningCapability: capability,
+  });
+  expect(config).not.toHaveProperty("reasoningEffort");
+});

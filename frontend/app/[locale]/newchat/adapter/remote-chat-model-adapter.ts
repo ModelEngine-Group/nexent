@@ -1500,6 +1500,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const reasoningBudgetTokens = (
       context.config as { reasoningBudgetTokens?: number } | undefined
     )?.reasoningBudgetTokens;
+    const reasoningCapability = (
+      context.config as {
+        reasoningCapability?: {
+          status?: string;
+          controls?: Array<{ type?: string }>;
+          levels?: string[];
+          control?: string;
+        };
+      } | undefined
+    )?.reasoningCapability;
+    const reasoningSupported =
+      reasoningCapability?.status === "supported" &&
+      Boolean(
+        reasoningCapability.controls?.length ||
+          reasoningCapability.levels?.length ||
+          reasoningCapability.control === "toggle"
+      );
     const hasBudgetSelection =
       typeof reasoningBudgetTokens === "number" &&
       Number.isInteger(reasoningBudgetTokens) &&
@@ -1515,6 +1532,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
     if (
       !isResume &&
+      reasoningSupported &&
       !hasBudgetSelection &&
       typeof reasoningEffort === "string" &&
       reasoningEffort &&
@@ -1522,7 +1540,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     ) {
       requestBody.reasoning_effort = reasoningEffort;
     }
-    if (!isResume && hasBudgetSelection && reasoningBudgetTokens > 0) {
+    if (
+      !isResume &&
+      reasoningSupported &&
+      hasBudgetSelection &&
+      reasoningBudgetTokens > 0
+    ) {
       requestBody.reasoning_budget_tokens = reasoningBudgetTokens;
     }
 

@@ -312,7 +312,7 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "name": skill.skill_name,
         "tenant_id": skill.tenant_id,
         "description": skill.skill_description,
-        "tags": skill.skill_tags or [],
+        "tags": _normalize_skill_tags(skill.skill_tags),
         "content": skill.skill_content or "",
         "config_schemas": skill.config_schemas,
         "config_values": skill.config_values,
@@ -324,6 +324,17 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "updated_by": skill.updated_by,
         "update_time": skill.update_time.isoformat() if skill.update_time else None,
     }
+
+
+def _normalize_skill_tags(tags: Any) -> List[str]:
+    """Return skill tags as a string list, tolerating malformed persisted values."""
+    if isinstance(tags, list):
+        return [
+            tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()
+        ]
+    if isinstance(tags, str) and tags.strip():
+        return [tags.strip()]
+    return []
 
 
 def list_skills(tenant_id: str) -> List[Dict[str, Any]]:

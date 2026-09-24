@@ -67,7 +67,6 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
-import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
 import {
@@ -75,7 +74,6 @@ import {
   type ModelSelectionScope,
 } from "@/features/workbench/modelOptions";
 import type { ModelOption } from "../ui/model-selector";
-import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
@@ -114,26 +112,6 @@ type HistorySummaryData = {
   status?: "compacting" | "accepted";
   summary?: { markdown?: string } | string;
   covered_through_message_id?: number;
-};
-
-const resolveDefaultReasoningEffort = (
-  modelDefault: ReasoningEffort | undefined,
-  capability: ReasoningCapability | undefined,
-  levels: readonly ReasoningEffort[]
-): ReasoningEffort | undefined => {
-  if (modelDefault && levels.includes(modelDefault)) return modelDefault;
-  if (levels.includes("auto")) return "auto";
-  if (capability?.default && levels.includes(capability.default)) {
-    return capability.default;
-  }
-  if (levels.includes(DEFAULT_REASONING_EFFORT)) {
-    return DEFAULT_REASONING_EFFORT;
-  }
-  return levels[0];
-};
-
-const formatReasoningEffortName = (level: ReasoningEffort): string => {
-  return level;
 };
 
 const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {

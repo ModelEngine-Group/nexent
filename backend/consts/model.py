@@ -2437,6 +2437,9 @@ class ReasoningCapability(BaseModel):
     wire_format: Literal["reasoning_effort", "thinking_toggle", "thinking_budget"] = "reasoning_effort"
     effort_budgets: Dict[str, int] = Field(default_factory=dict)
     controls: List[ReasoningControl] = Field(default_factory=list)
+    provider_id: Optional[str] = None
+    budget_wire_format: Optional[Literal["thinking_object", "thinking_budget"]] = None
+    toggle_wire_format: Optional[Literal["thinking_object", "enable_thinking", "chat_template"]] = None
     matched_api: Optional[str] = None
     matched_model_id: Optional[str] = None
     source: Literal["catalog", "models_dev", "operator", "unknown"] = "unknown"

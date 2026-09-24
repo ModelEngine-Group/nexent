@@ -19,6 +19,7 @@ import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import type { ReasoningCapability } from "@/types/modelConfig";
 import {
   Popover,
   PopoverContent,
@@ -69,6 +70,7 @@ export type ModelOption = {
   budgetTokens?: { min: number; max: number };
   /** Persisted model/agent budget, when one was explicitly configured. */
   defaultBudgetTokens?: number;
+  reasoningCapability?: ReasoningCapability;
 };
 
 function getModelEfforts(
@@ -769,6 +771,7 @@ function ModelSelectorModelContext() {
       config: {
         modelName: value,
         ...(showDeepThinkingControl ? { deepThinking } : undefined),
+        reasoningCapability: selectedModel?.reasoningCapability,
         ...(deepThinking
           ? budgetPreferred
             ? budgetTokens !== undefined
@@ -790,6 +793,7 @@ function ModelSelectorModelContext() {
     effort,
     budgetPreferred,
     showDeepThinkingControl,
+    selectedModel?.reasoningCapability,
     value,
   ]);
 

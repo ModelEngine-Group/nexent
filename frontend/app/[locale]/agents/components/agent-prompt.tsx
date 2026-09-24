@@ -215,13 +215,15 @@ export default function AgentPrompt() {
       temperature: configuringModel.temperature,
       top_p: configuringModel.topP,
       extra_params: configuringModel.extraParams,
+      reasoning_capability: configuringModel.reasoningCapability,
     };
     const modelType = configuringModel.type ?? "llm";
     const hasOverride = Object.keys(overrideEntry).length > 0;
     const base = advancedSettingsValueFromRecord(
       (hasOverride ? overrideEntry : modelDefaultsRecord) as any,
       inferenceSpecs,
-      modelType
+      modelType,
+      configuringModel.reasoningCapability
     );
 
     // Reasoning is an agent-owned snapshot. For an existing partial override,
@@ -231,7 +233,8 @@ export default function AgentPrompt() {
       const modelReasoning = advancedSettingsValueFromRecord(
         modelDefaultsRecord as any,
         inferenceSpecs,
-        modelType
+        modelType,
+        configuringModel.reasoningCapability
       );
       if (
         base.enable_thinking === undefined &&
@@ -244,6 +247,12 @@ export default function AgentPrompt() {
         modelReasoning.reasoning_effort !== undefined
       ) {
         base.reasoning_effort = modelReasoning.reasoning_effort;
+      }
+      if (
+        base.reasoning_budget_tokens === undefined &&
+        modelReasoning.reasoning_budget_tokens !== undefined
+      ) {
+        base.reasoning_budget_tokens = modelReasoning.reasoning_budget_tokens;
       }
     }
 
@@ -261,7 +270,10 @@ export default function AgentPrompt() {
   }, [configuringModel, configuringModelId, inferenceSpecs]);
 
   const handleModelParamsOverrideChange = (modelId: number, next: ModelAdvancedSettingsValue) => {
-    const entry = buildModelOverrideEntry(next);
+    const entry = buildModelOverrideEntry(
+      next,
+      availableLlmModels.find((model) => model.id === modelId)?.reasoningCapability
+    );
     const updated: ModelOverrideMap = { ...modelParamsOverride };
     if (Object.keys(entry).length === 0) {
       delete updated[String(modelId)];
@@ -571,9 +583,11 @@ export default function AgentPrompt() {
                 temperature: (configuringModel as any).temperature,
                 top_p: (configuringModel as any).topP,
                 extra_params: (configuringModel as any).extraParams,
+                reasoning_capability: (configuringModel as any).reasoningCapability,
               },
               inferenceSpecs,
-              (configuringModel as any).type ?? "llm"
+              (configuringModel as any).type ?? "llm",
+              (configuringModel as any).reasoningCapability
             );
             const diffValue: ModelAdvancedSettingsValue = {};
             for (const [key, val] of Object.entries(editingOverrideValue)) {
@@ -582,7 +596,11 @@ export default function AgentPrompt() {
               if (key === "__custom__") continue;
               // Reasoning is an agent-owned snapshot under Scheme B. It must
               // not be compared with the current model-level setting.
-              if (key === "enable_thinking" || key === "reasoning_effort") {
+              if (
+                key === "enable_thinking" ||
+                key === "reasoning_effort" ||
+                key === "reasoning_budget_tokens"
+              ) {
                 diffValue[key] = val;
                 continue;
               }
@@ -628,7 +646,15 @@ export default function AgentPrompt() {
                   (specs as any[]).filter((s) => s.key !== "tokenizer_family"),
                 ])
               )}
-              value={editingOverrideValue ?? advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm")}
+              value={
+                editingOverrideValue ??
+                advancedSettingsValueFromRecord(
+                  {},
+                  inferenceSpecs,
+                  (configuringModel as any).type ?? "llm",
+                  (configuringModel as any).reasoningCapability
+                )
+              }
               onChange={(next) => setEditingOverrideValue(next)}
               mode="override"
               disabled={!canManage && !isSpeedMode}

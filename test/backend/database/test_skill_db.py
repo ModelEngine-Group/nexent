@@ -1067,6 +1067,44 @@ class TestToDict:
         assert result['config_schemas'] is None
         assert result['config_values'] is None
 
+    def test_to_dict_malformed_tags(self):
+        """Test that non-array persisted tags are normalized to a string list."""
+        string_skill = MockSkillInfo(
+            skill_id=1,
+            skill_name='skill_with_string_tags',
+            skill_tags='security',
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(string_skill)['tags'] == ['security']
+
+        object_skill = MockSkillInfo(
+            skill_id=2,
+            skill_name='skill_with_object_tags',
+            skill_tags={'key': 'value'},
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(object_skill)['tags'] == []
+
+        mixed_skill = MockSkillInfo(
+            skill_id=3,
+            skill_name='skill_with_mixed_tags',
+            skill_tags=['valid', 42, '', '  spaced  '],
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(mixed_skill)['tags'] == ['valid', 'spaced']
+
 
 # ===== list_skills Tests =====
 

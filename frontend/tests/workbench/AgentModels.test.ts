@@ -130,3 +130,31 @@ it("keeps single-agent model selection restricted to configured models", () => {
     { id: "11", name: "Configured Model" },
   ]);
 });
+
+it("preserves catalog reasoning capabilities for the shared model selector", () => {
+  const capability = {
+    status: "supported" as const,
+    control: "effort" as const,
+    levels: ["low" as const, "high" as const],
+    controls: [{ type: "effort" as const, values: ["low", "high"] }],
+    source: "catalog" as const,
+  };
+  const catalog = [{
+    id: 11,
+    name: "reasoning-model",
+    displayName: "Reasoning model",
+    type: "llm",
+    connect_status: "available",
+    enableThinking: true,
+    reasoningCapability: capability,
+  }] as ModelOption[];
+  const agent = { id: "7", model_ids: [11], model_names: ["Reasoning model"] } as Agent;
+
+  expect(deriveModelOptions(agent, catalog, "agent")[0]).toMatchObject({
+    reasoningCapability: capability,
+    efforts: [{ id: "auto" }, { id: "low" }, { id: "high" }],
+  });
+  expect(deriveModelOptions(agent, catalog, "tenant")[0]).toMatchObject({
+    reasoningCapability: capability,
+  });
+});
