@@ -36,8 +36,14 @@ from consts.const import (
     TENANT_NAME,
     IS_SPEED_MODE,
 )
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UserRegistrationException
-from services.skill_service import install_skills_from_zip_for_tenant
+from consts.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    UserRegistrationException,
+    ValidationError,
+)
+from management.services.skill.service import install_skills_from_zip_for_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +281,7 @@ def create_tenant(
                     f"Failed to install skills from ZIP for tenant {tenant_id}: {e}")
         elif skill_ids:
             try:
-                from services.skill_service import install_skills_for_tenant as install_by_ids
+                from management.services.skill.service import install_skills_for_tenant as install_by_ids
                 installed_by_ids = install_by_ids(
                     skill_ids=skill_ids,
                     tenant_id=tenant_id,
@@ -300,6 +306,8 @@ def create_tenant(
             f"Created tenant {tenant_id} with name '{tenant_name}' and default group {default_group_id}")
         return tenant_info
 
+    except TenantResourceLimitError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create tenant {tenant_id}: {str(e)}")
         raise ValidationError(f"Failed to create tenant: {str(e)}")

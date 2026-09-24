@@ -9,14 +9,10 @@ so the heavy smolagents machinery never runs.
 """
 
 import importlib.util
-import json
 import sys
-import types
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -215,6 +211,10 @@ contracts_mod.ContextRuntime = type("ContextRuntime", (), {})
 token_mod = _sdk_pkg("sdk.nexent.core.utils.token_estimation")
 token_mod.msg_token_count = lambda *a, **k: 0
 
+# context budget helper stub
+budget_mod = _sdk_pkg("sdk.nexent.core.agents.context.budget")
+budget_mod.message_role = lambda message: getattr(message, "role", "")
+
 # verification stub
 verification_mod = _sdk_pkg("sdk.nexent.core.agents.verification")
 
@@ -275,12 +275,24 @@ monitor_mod.get_monitoring_manager = MagicMock(return_value=MagicMock())
 
 
 # ---- Load core_agent under controlled sys.modules -----------------
+OUTPUT_PROTOCOL_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "output_protocol.py"
+OUTPUT_PROTOCOL_NAME = "sdk.nexent.core.agents.output_protocol"
+output_protocol_spec = importlib.util.spec_from_file_location(OUTPUT_PROTOCOL_NAME, OUTPUT_PROTOCOL_PATH)
+output_protocol_module = importlib.util.module_from_spec(output_protocol_spec)
+sys.modules[OUTPUT_PROTOCOL_NAME] = output_protocol_module
+agents_mod = sys.modules["sdk.nexent.core.agents"]
+# Let relative imports resolve real sibling modules such as clarification.
+agents_mod.__path__ = [str(OUTPUT_PROTOCOL_PATH.parent)]
+agents_mod.output_protocol = output_protocol_module
+assert output_protocol_spec and output_protocol_spec.loader
+output_protocol_spec.loader.exec_module(output_protocol_module)
+
 CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "core_agent.py"
 CORE_AGENT_NAME = "sdk.nexent.core.agents.core_agent"
+sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core")]
 spec = importlib.util.spec_from_file_location(CORE_AGENT_NAME, CORE_AGENT_PATH)
 core_agent_module = importlib.util.module_from_spec(spec)
 sys.modules[CORE_AGENT_NAME] = core_agent_module
-agents_mod = sys.modules["sdk.nexent.core.agents"]
 agents_mod.core_agent = core_agent_module
 assert spec and spec.loader
 spec.loader.exec_module(core_agent_module)

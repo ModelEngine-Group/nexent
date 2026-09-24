@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useTranslation } from "react-i18next";
 
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
+import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -59,6 +60,7 @@ import {
   StreamingMessage,
 } from "@/app/chat/streaming/chatStreamHandler";
 import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
+import { createConversationTitleRequest } from "@/lib/conversationTitle";
 
 import { Button, Checkbox, Input, Layout, message, Modal } from "antd";
 import log from "@/lib/logger";
@@ -134,6 +136,23 @@ const getI18nKeyByType = (type: string): string => {
   };
   return typeToKeyMap[type] || "";
 };
+
+function getSelectableAgentModels(
+  modelIds: number[] | undefined,
+  modelNames: string[] | undefined,
+  availableModels: { id: number; connect_status?: string }[]
+) {
+  const configuredModels = (modelIds || []).map((id, index) => ({
+    id,
+    name: modelNames?.[index] || String(id),
+  }));
+  const availableModelIds = new Set(
+    availableModels
+      .filter((model) => model.connect_status === "available")
+      .map((model) => model.id)
+  );
+  return configuredModels.filter((model) => availableModelIds.has(model.id));
+}
 
 export function ChatInterface() {
   const [input, setInput] = useState("");
@@ -215,6 +234,10 @@ export function ChatInterface() {
   const [selectedMessageId, setSelectedMessageId] = useState<
     string | undefined
   >();
+  const [selectedCitationKey, setSelectedCitationKey] = useState<
+    string | undefined
+  >();
+  const [selectedCitationContext, setSelectedCitationContext] = useState("");
 
   // Add force scroll to bottom state control
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
@@ -275,11 +298,16 @@ export function ChatInterface() {
       setSelectedAgentId(agentId);
       setAgentGreeting(greeting || null);
       setAgentExampleQuestions(exampleQuestions || []);
-      setAgentModelIds(modelIds || []);
-      setAgentModelNames(modelNames || []);
-      setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
+      const selectableModels = getSelectableAgentModels(
+        modelIds,
+        modelNames,
+        availableModels
+      );
+      setAgentModelIds(selectableModels.map((model) => model.id));
+      setAgentModelNames(selectableModels.map((model) => model.name));
+      setSelectedModelId(selectableModels[0]?.id ?? null);
     },
-    []
+    [availableModels]
   );
 
   const restoreConversationAgent = useCallback(
@@ -333,12 +361,24 @@ export function ChatInterface() {
 
     setAgentGreeting(agent.greeting_message || null);
     setAgentExampleQuestions(agent.example_questions || []);
-    setAgentModelIds(agent.model_ids || []);
-    setAgentModelNames(agent.model_names || []);
-    setSelectedModelId(
-      agent.model_ids && agent.model_ids.length > 0 ? agent.model_ids[0] : null
+    const selectableModels = getSelectableAgentModels(
+      agent.model_ids,
+      agent.model_names,
+      availableModels
     );
-  }, [handleAgentSelectWithGreeting, publishedAgents, selectedAgentId]);
+    setAgentModelIds(selectableModels.map((model) => model.id));
+    setAgentModelNames(selectableModels.map((model) => model.name));
+    setSelectedModelId((current) =>
+      selectableModels.some((model) => model.id === current)
+        ? current
+        : (selectableModels[0]?.id ?? null)
+    );
+  }, [
+    availableModels,
+    handleAgentSelectWithGreeting,
+    publishedAgents,
+    selectedAgentId,
+  ]);
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");
@@ -473,6 +513,7 @@ export function ChatInterface() {
     const selectedAgentIdForRun = selectedAgentId;
     const agentIdForRun =
       selectedAgentIdForRun !== null ? Number(selectedAgentIdForRun) : null;
+    const modelIdForRun = selectedModelId;
     let cid: number | null = null; // set after guard, used in try/catch/finally
 
     // Prepare attachment information
@@ -790,8 +831,8 @@ export function ChatInterface() {
       }
 
       // Add selected model_id for agent run
-      if (selectedModelId !== null) {
-        runAgentParams.model_id = selectedModelId;
+      if (modelIdForRun !== null) {
+        runAgentParams.model_id = modelIdForRun;
       }
 
       const reader = await conversationService.runAgent(
@@ -935,10 +976,13 @@ export function ChatInterface() {
           if (!titleGenerationConversationIdsRef.current.has(conversationId)) {
             titleGenerationConversationIdsRef.current.add(conversationId);
             void conversationService
-              .generateTitle({
-                conversation_id: conversationId,
-                question: userMessageContent,
-              })
+              .generateTitle(
+                createConversationTitleRequest(
+                  conversationId,
+                  userMessageContent,
+                  modelIdForRun
+                )
+              )
               .then((title) => {
                 if (title) {
                   conversationManagement.setConversationTitle(title);
@@ -1867,7 +1911,24 @@ export function ChatInterface() {
   const handleMessageSelect = useCallback((messageId: string) => {
     setShowRightPanel(true);
     setSelectedMessageId(messageId);
+    setSelectedCitationKey(undefined);
+    setSelectedCitationContext("");
   }, []);
+
+  const handleCitationClick = useCallback(
+    (messageId: string, citationKey: string, answerText: string) => {
+      // Clicking a citation marker always opens the panel and selects the
+      // matching source card; the flag only gates sentence-level highlight
+      // extraction from the cited answer context.
+      setShowRightPanel(true);
+      setSelectedMessageId(messageId);
+      setSelectedCitationKey(citationKey);
+      setSelectedCitationContext(
+        ENABLE_CITATION_CLICK_HIGHLIGHT ? answerText : ""
+      );
+    },
+    []
+  );
 
   const hydrateConversationMessageIds = useCallback(
     async (conversationId: number) => {
@@ -2240,6 +2301,7 @@ export function ChatInterface() {
               selectedAgentId={selectedAgentId}
               onAgentSelect={handleAgentSelectWithGreeting}
               onCitationHover={clearCompletedIndicator}
+              onCitationClick={handleCitationClick}
               onScroll={clearCompletedIndicator}
               agentGreeting={agentGreeting}
               agentExampleQuestions={agentExampleQuestions}
@@ -2261,6 +2323,8 @@ export function ChatInterface() {
             isVisible={showRightPanel}
             toggleRightPanel={toggleRightPanel}
             selectedMessageId={selectedMessageId}
+            selectedCitationKey={selectedCitationKey}
+            selectedCitationContext={selectedCitationContext}
           />
         </div>
       </Layout>

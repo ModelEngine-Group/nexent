@@ -33,7 +33,7 @@ sys.modules['services'] = services_pkg
 sys.modules['services.invitation_service'] = MagicMock()
 sys.modules['services.group_service'] = MagicMock()
 sys.modules['services.tool_configuration_service'] = MagicMock()
-sys.modules['services.skill_service'] = MagicMock()
+sys.modules['management.services.skill.service'] = MagicMock()
 
 asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 asset_owner_visibility_mock.filter_accessible_routes_for_asset_owner_feature = lambda routes: routes
@@ -47,6 +47,7 @@ from consts.exceptions import (
     UserRegistrationException,
     UnauthorizedError,
     AppException,
+    TenantResourceLimitError,
     ValidationError,
 )
 from consts.error_code import ErrorCode
@@ -94,8 +95,48 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         refresh_user_token,
         get_session_by_authorization,
         get_user_info,
-        format_role_permissions
+        format_role_permissions,
+        get_provider_username,
     )
+
+
+class TestGetProviderUsername(unittest.TestCase):
+    """Test provider username lookup for linked OAuth accounts."""
+
+    @patch('backend.services.user_management_service.list_oauth_accounts_by_user_id')
+    def test_returns_trimmed_username_for_matching_provider(self, mock_list_accounts):
+        """Return the stored username after trimming surrounding whitespace."""
+        mock_list_accounts.return_value = [
+            {"provider": "github", "provider_username": "github-user"},
+            {"provider": "cas", "provider_username": "  CAS User  "},
+        ]
+
+        result = get_provider_username("user123", "cas")
+
+        self.assertEqual(result, "CAS User")
+        mock_list_accounts.assert_called_once_with("user123")
+
+    @patch('backend.services.user_management_service.list_oauth_accounts_by_user_id')
+    def test_returns_none_when_username_is_missing_or_provider_does_not_match(self, mock_list_accounts):
+        """Return None when no linked account has a non-empty matching username."""
+        mock_list_accounts.return_value = [
+            {"provider": "github", "provider_username": "github-user"},
+            {"provider": "cas", "provider_username": "   "},
+        ]
+
+        result = get_provider_username("user123", "cas")
+
+        self.assertIsNone(result)
+
+    @patch('backend.services.user_management_service.list_oauth_accounts_by_user_id')
+    def test_returns_none_when_accounts_cannot_be_loaded(self, mock_list_accounts):
+        """Return None when the linked account lookup fails."""
+        mock_list_accounts.side_effect = RuntimeError("database unavailable")
+
+        result = get_provider_username("user123", "cas")
+
+        self.assertIsNone(result)
+        mock_list_accounts.assert_called_once_with("user123")
 
 
 class TestSetAuthTokenToClient(unittest.TestCase):
@@ -588,6 +629,33 @@ class TestCheckAuthServiceHealth(unittest.IsolatedAsyncioTestCase):
 
 class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
     """Test signup_user_with_invitation"""
+
+    async def test_signup_rolls_back_auth_user_when_tenant_limit_is_reached(self):
+        """A rejected tenant registration must not reserve the auth email."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.user.id = "user-limit"
+        mock_client.auth.sign_up.return_value = mock_response
+
+        with patch("backend.services.user_management_service.get_supabase_client", return_value=mock_client), \
+             patch("backend.services.user_management_service.check_invitation_available", return_value=True), \
+             patch(
+                 "backend.services.user_management_service.get_invitation_by_code",
+                 return_value={"code_type": "USER_INVITE", "tenant_id": "tenant-1"},
+             ), \
+             patch(
+                 "backend.services.user_management_service.insert_user_tenant",
+                 side_effect=TenantResourceLimitError(
+                     "Tenant user limit reached: maximum 1 users per tenant"
+                 ),
+             ), \
+             patch("backend.services.user_management_service.delete_supabase_user") as mock_delete:
+            with self.assertRaises(TenantResourceLimitError):
+                await signup_user_with_invitation(
+                    "limit@example.com", "Password123", invite_code="LIMIT1"
+                )
+
+        mock_delete.assert_called_once_with("user-limit")
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')

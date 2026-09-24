@@ -1,26 +1,24 @@
 # Agent Development
 
-Agent Development is the central workspace for building, configuring, and managing AI agents. Agents are the core of Nexent—they understand your needs and execute tasks on your behalf.
+On the Agent Development page, you can generate an agent from natural-language requirements or configure it manually, then debug, publish, and manage versions in the same workspace. An agent can combine models, tools, skills, knowledge bases, and collaborative agents to complete tasks.
 
 ## Quick Navigation
 
-This module contains the following four configuration pages:
+This module contains the following pages:
 
 | Page                                                                   | Description                                                                                                                            |
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | [Model Configuration](./agent-development/model-configuration)         | Connect and manage AI models, including LLMs, embedding models, vision-language models, rerank models, and speech models (TTS and STT) |
-| [Knowledge Configuration](./agent-development/knowledge-configuration) | Create knowledge bases and upload documents in various formats, enabling agents to retrieve your private data                          |
-| [Memory Configuration](./agent-development/memory-configuration)       | Configure the multi-level memory system for cross-conversation knowledge retention and personalized service                            |
-| [Agent Configuration](./agent-development/agent-configuration)         | Create agents, configure collaborative agents, select tools, write prompts, then debug and publish                                     |
+| [Knowledge Configuration](./agent-development/knowledge-configuration) | Create knowledge bases, check personal capacity, process documents, and manage chunks so agents can retrieve private data              |
+| [Memory Configuration](./agent-development/memory-configuration)       | Manage tenant, user, and agent memory, and use Dreaming to consolidate stable short-term memories into long-term memory                 |
+| [Agent Configuration](./agent-development/agent-configuration)         | Generate a complete configuration or optimize selected parts, adjust settings manually, bind resources, debug, publish, and manage versions |
+| [Add External A2A Agents](./agent-development/a2a-external)             | Discover third-party agents through URL or Nacos and use them for agent collaboration                                                   |
+| [Publish as A2A Agent](./agent-development/a2a-publish)                 | Make a published agent available for external systems to discover and call                                                             |
 
 ## Main Steps
 
-1. **Configure Models** – Add the AI models you need in Model Management
-2. **Prepare Knowledge Bases** – Create knowledge bases and upload relevant documents
-3. **Configure Memory** – Enable memory features so agents can remember important information
-4. **Build the Agent** – Create an agent, select tools and collaborative agents, write the business description
-5. **Debug and Publish** – Test the agent's performance, save when satisfied, and publish
-
-## Need Help?
-
-If you encounter any issues, refer to our **[FAQ](../quick-start/faq)** or ask in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+1. **Configure Models** – Connect the AI models required by the agent in Model Management
+2. **Prepare Knowledge Bases** – Create a knowledge base, upload documents, and confirm that their status is **Ready**
+3. **Configure Memory** – Enable memory and configure a Dreaming schedule when needed
+4. **Build the Agent** – Describe the business requirement and let Nexent recommend resources and generate the configuration, or fill in each setting manually
+5. **Debug and Publish** – Verify prompts, tools, and collaboration flows, then publish a version after validation

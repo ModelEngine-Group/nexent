@@ -36,7 +36,11 @@ import { USER_ROLES } from "@/const/auth";
  * compatibility.
  */
 type RcFileLike = File & { uid: string; lastModifiedDate: Date };
-import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
+import {
+  AIDP_ACCEPT_STRING,
+  AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
+} from "@/const/knowledgeBase";
+import { collectUploadedFileIds } from "@/lib/aidpDocumentStatus";
 import {
   partitionAidpFiles,
   validateAidpFiles,
@@ -77,7 +81,10 @@ interface AidpCreateKbModalProps {
   open: boolean;
   existingKbs: AidpKnowledgeBaseItem[];
   onCancel: () => void;
-  onSuccess: (knowledgeBase: AidpKnowledgeBaseItem) => void;
+  onSuccess: (
+    knowledgeBase: AidpKnowledgeBaseItem,
+    uploadedFileIds?: string[]
+  ) => void;
 }
 
 const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
@@ -270,6 +277,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
 
   const handleSubmit = async (skipUpload: boolean) => {
     let knowledgeBaseCreated = false;
+    // Files accepted by AIDP while creating the KB. Reported to the parent so
+    // it can keep refreshing the document list until they finish processing.
+    let uploadedFileIds: string[] = [];
     let createdKdsId = "";
     let createdKnowledgeBase: AidpKnowledgeBaseItem | null = null;
     try {
@@ -335,6 +345,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           created.kds_id,
           fileList
         );
+        uploadedFileIds = collectUploadedFileIds(result.success_list);
 
         const failureDetails = result.failed_list.map((item) => {
           const reason = i18n.language.startsWith("zh")
@@ -385,7 +396,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
 
       handleReset();
       if (createdKnowledgeBase) {
-        onSuccess(createdKnowledgeBase);
+        onSuccess(createdKnowledgeBase, uploadedFileIds);
       }
     } catch (error) {
       const reason =
@@ -402,7 +413,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       if (knowledgeBaseCreated) {
         handleReset();
         if (createdKnowledgeBase) {
-          onSuccess(createdKnowledgeBase);
+          onSuccess(createdKnowledgeBase, uploadedFileIds);
         }
       }
     } finally {
@@ -444,6 +455,10 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           label={t("aidpKnowledge.kbName")}
           rules={[
             { required: true, message: t("aidpKnowledge.kbNameRequired") },
+            {
+              pattern: AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
+              message: t("aidpKnowledge.kbNameInvalid"),
+            },
           ]}
         >
           <Input placeholder={t("aidpKnowledge.kbNamePlaceholder")} />

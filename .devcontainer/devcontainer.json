@@ -1,6 +1,6 @@
 {
   "name": "nexent-data-process",
-  "dockerComposeFile": "../docker/docker-compose.dev.yml",
+  "dockerComposeFile": "../deploy/docker/compose/docker-compose.dev.yml",
   "service": "nexent-data-process",
   "workspaceFolder": "/opt",
   "forwardPorts": [3000, 5012],

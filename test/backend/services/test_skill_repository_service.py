@@ -20,8 +20,9 @@ _MOCKED_MODULE_NAMES = [
     "database.skill_repository_db",
     "database.group_db",
     "database.skill_db",
+    "database.tag_management_db",
     "database.user_tenant_db",
-    "services.skill_service",
+    "management.services.skill.service",
     "services.notification_service",
     "utils.str_utils",
 ]
@@ -97,6 +98,16 @@ _skill_db_mock = MagicMock()
 _skill_db_mock.get_skill_by_name = MagicMock(return_value=None)
 sys.modules["database.skill_db"] = _skill_db_mock
 
+_tag_management_db_mock = types.ModuleType("database.tag_management_db")
+_tag_management_db_mock.TagManagementDB = MagicMock()
+_tag_management_db_mock.TagManagementDB.filter_authorized_resource_ids = MagicMock(
+    return_value=[]
+)
+_tag_management_db_mock.TagManagementDB.list_resource_assignment_display_values_by_ids = (
+    MagicMock(return_value={})
+)
+sys.modules["database.tag_management_db"] = _tag_management_db_mock
+
 _user_tenant_db_mock = MagicMock()
 _user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock()
 sys.modules["database.user_tenant_db"] = _user_tenant_db_mock
@@ -168,28 +179,9 @@ class _SkillServiceMock:
         )
 
 
-_skill_service_module_mock = MagicMock()
+_skill_service_module_mock = types.ModuleType("management.services.skill.service")
 _skill_service_module_mock.SkillService = _SkillServiceMock
-
-
-def _generate_available_copy_skill_name_mock(base_name, unavailable_names=None):
-    normalized_base = (base_name or "Skill").strip() or "Skill"
-    unavailable = unavailable_names or set()
-    if normalized_base not in unavailable:
-        return normalized_base
-    index = 1
-    while True:
-        suffix = " \u526f\u672c" if index == 1 else f" \u526f\u672c {index}"
-        max_base_length = max(100 - len(suffix), 1)
-        truncated_base = normalized_base[:max_base_length].rstrip() or normalized_base[:max_base_length]
-        candidate = f"{truncated_base}{suffix}"
-        if candidate not in unavailable:
-            return candidate
-        index += 1
-
-
-_skill_service_module_mock.generate_available_copy_skill_name = _generate_available_copy_skill_name_mock
-sys.modules["services.skill_service"] = _skill_service_module_mock
+sys.modules["management.services.skill.service"] = _skill_service_module_mock
 
 _notification_service_mock = MagicMock()
 sys.modules["services.notification_service"] = _notification_service_mock
@@ -260,6 +252,9 @@ def setup_function():
     _group_db_mock.query_group_ids_by_user.return_value = []
     _skill_db_mock.reset_mock()
     _skill_db_mock.get_skill_by_name.return_value = None
+    _tag_management_db_mock.TagManagementDB.reset_mock()
+    _tag_management_db_mock.TagManagementDB.filter_authorized_resource_ids.return_value = []
+    _tag_management_db_mock.TagManagementDB.list_resource_assignment_display_values_by_ids.return_value = {}
     _user_tenant_db_mock.reset_mock()
     _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
         "user_role": "DEV",

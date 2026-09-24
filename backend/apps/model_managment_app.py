@@ -7,17 +7,22 @@ layer contract:
 - Map domain/service exceptions to HTTP where necessary; avoid leaking internals.
 - Return structured responses consistent with existing patterns for backward compatibility.
 
-Authorization: The bearer token is retrieved via the `authorization` header and
-parsed with `utils.auth_utils.get_current_user_id`, then propagated as `user_id`
-and `tenant_id` to services/database helpers.
+Authorization: Mutating endpoints require RBAC permissions (model:create /
+model:update / model:delete) via ``permissions.depends.require``; read endpoints
+require ``model:read``. Cross-tenant ``/manage/*`` endpoints additionally
+require the SU role. Identity is resolved from the bearer token into a
+``CurrentUser`` and propagated as ``user_id`` / ``tenant_id`` to services.
 """
 
+import asyncio
 import logging
+import re
 
 from consts.model import (
     BatchCreateModelsRequest,
     CapacitySuggestionFields,
     ModelRequest,
+    ModelProbeRequest,
     ModelCapacitySuggestionRequest,
     ModelCapacitySuggestionResponse,
     ProviderModelRequest,
@@ -30,14 +35,15 @@ from consts.model import (
     ManageBatchCreateModelsRequest,
     ManageProviderModelListRequest,
     ManageProviderModelCreateRequest,
+    FIXED_INFERENCE_FIELDS_BY_TYPE,
 )
 from consts.const import CAPACITY_SUGGESTION_ENABLED
 
-from fastapi import APIRouter, Header, Query, HTTPException
+from fastapi import APIRouter, Depends, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 from services.model_health_service import (
     check_model_connectivity,
     verify_model_config_connectivity,
@@ -57,16 +63,113 @@ from services.model_management_service import (
     get_capacity_coverage,
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
+    get_model_reasoning_capability,
 )
+from permissions.depends import authenticate, require
+from permissions.models import CurrentUser
 from utils.auth_utils import get_current_user_id
 from consts.exceptions import TokenExpiredError
+from nexent.core.concurrency import run_blocking
+from database.model_management_db import get_model_by_model_id
+
+# Permission strings normalized by backend RBAC cache (lower-case type:subtype).
+MODEL_CREATE_PERMISSION = "model:create"
+MODEL_READ_PERMISSION = "model:read"
+MODEL_UPDATE_PERMISSION = "model:update"
+MODEL_DELETE_PERMISSION = "model:delete"
+# Cross-tenant manage endpoints are SU-only; ADMIN shares the same MODEL seeds
+# so permission strings cannot separate them.
+_MANAGE_ALLOWED_ROLES = ("SU",)
+
+# Model Catalog loader (with graceful fallback)
+try:
+    from configs.model_catalog_loader import (
+        list_catalog_providers,
+        list_models_by_provider,
+        get_model_profile as _catalog_get_model_profile,
+        dump_full_catalog,
+    )
+    _CATALOG_AVAILABLE = True
+except Exception as _exc:  # noqa: BLE001
+    logging.getLogger("model_management_app").warning(
+        "Model catalog unavailable: %s", _exc
+    )
+    _CATALOG_AVAILABLE = False
+
+    def list_catalog_providers():
+        return []
+
+    def list_models_by_provider(_p, _t=None):
+        return []
+
+    def _catalog_get_model_profile(_p, _m):
+        return None
+
+    def dump_full_catalog():
+        return {"version": "0.0.0", "metadata": {}, "providers": []}
 
 
 router = APIRouter(prefix="/model")
 logger = logging.getLogger("model_management_app")
 
+# Shared response message for every catalog endpoint's failure branch.
+_CATALOG_UNAVAILABLE_MESSAGE = "catalog unavailable"
 
-def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionResponse:
+# Control characters (including newlines/tabs) that must never reach a log
+# line: catalog lookups interpolate user-supplied provider/model names.
+_LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_model_credentials(payload: Any) -> Any:
+    """Remove model API keys before returning model data to HTTP clients.
+
+    Model records are also consumed by internal services, so credential
+    removal belongs at the HTTP response boundary rather than in the database
+    or model-management service layer. The presence of a configured key is
+    intentionally not returned; callers that need to update a model can omit
+    ``api_key`` to keep the existing value.
+    """
+    if isinstance(payload, list):
+        return [_sanitize_model_credentials(item) for item in payload]
+
+    if isinstance(payload, dict):
+        return {
+            key: _sanitize_model_credentials(value)
+            for key, value in payload.items()
+            if key != "api_key"
+        }
+
+    return payload
+
+
+def _log_safe(value: Any) -> str:
+    """Strip control characters so user input cannot forge log entries."""
+    return _LOG_UNSAFE_CHARS.sub("", str(value))
+
+
+def _require_manage_role(current_user: CurrentUser) -> None:
+    """Restrict cross-tenant manage endpoints to super admins."""
+    if current_user.normalized_role not in _MANAGE_ALLOWED_ROLES:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="This operation requires SU role",
+        )
+
+
+def _catalog_unavailable_response(status_code: HTTPStatus, **extra: Any) -> JSONResponse:
+    """Uniform failure response shared by every catalog endpoint."""
+    content: Dict[str, Any] = {
+        "message": _CATALOG_UNAVAILABLE_MESSAGE,
+        "catalog_available": False,
+    }
+    content.update(extra)
+    return JSONResponse(status_code=status_code, content=content)
+
+
+def _capacity_suggestion_response_to_model(
+    result,
+    reasoning_capability: Optional[dict] = None,
+) -> ModelCapacitySuggestionResponse:
     suggestions = None
     if result.suggestions is not None:
         suggestions = CapacitySuggestionFields(
@@ -79,6 +182,7 @@ def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionRes
 
     return ModelCapacitySuggestionResponse(
         suggestions=suggestions,
+        reasoning_capability=reasoning_capability,
         match_kind=result.match_kind.value,
         match_confidence=result.match_confidence.value if result.match_confidence else None,
         match_explanation=result.match_explanation,
@@ -95,10 +199,14 @@ def _suggest_capacity_for_request(request: ModelCapacitySuggestionRequest) -> Mo
         base_url=request.base_url,
         provider_hint=request.provider_hint,
         model_type=request.model_type,
-        api_key=request.api_key,
         enabled=CAPACITY_SUGGESTION_ENABLED,
     )
-    return _capacity_suggestion_response_to_model(result)
+    reasoning_capability = get_model_reasoning_capability(
+        model_name=request.model_name,
+        base_url=request.base_url,
+        provider_hint=request.provider_hint,
+    )
+    return _capacity_suggestion_response_to_model(result, reasoning_capability)
 
 
 def _capacity_suggestion_for_model_request(request: ModelRequest):
@@ -123,7 +231,10 @@ def _capacity_suggestion_for_model_request(request: ModelRequest):
 
 
 @router.post("/create")
-async def create_model(request: ModelRequest, authorization: Optional[str] = Header(None)):
+async def create_model(
+    request: ModelRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
     """Create a single model record for the current tenant.
 
     Responsibilities (App layer):
@@ -134,20 +245,20 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
 
     Args:
         request: Model configuration payload.
-        authorization: Bearer token header used to derive `user_id` and `tenant_id`.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         model_data = request.model_dump()
         accept_signal = pop_capacity_accept_signal(model_data)
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
-        await create_model_for_tenant(user_id, tenant_id, model_data)
+        create_result = await create_model_for_tenant(user_id, tenant_id, model_data)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
         return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully"
         })
     except ValueError as e:
@@ -166,7 +277,7 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
 @router.post("/suggest-capacity")
 async def suggest_model_capacity(
     request: ModelCapacitySuggestionRequest,
-    authorization: Optional[str] = Header(None),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
 ):
     """Return a non-mutating capacity suggestion for a model add/edit form.
 
@@ -177,7 +288,6 @@ async def suggest_model_capacity(
     `result.data` unconditionally.
     """
     try:
-        get_current_user_id(authorization)
         result = _suggest_capacity_for_request(request)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully suggested model capacity",
@@ -197,14 +307,16 @@ async def suggest_model_capacity(
 
 
 @router.get("/capacity-coverage")
-async def get_model_capacity_coverage(authorization: Optional[str] = Header(None)):
+async def get_model_capacity_coverage(
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
     """Return bare-capacity LLM/VLM coverage for the current tenant.
 
     Wrapped in the shared `{message, data}` envelope; see
     `suggest_model_capacity` for the same rationale.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         result = get_capacity_coverage(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model capacity coverage",
@@ -221,7 +333,10 @@ async def get_model_capacity_coverage(authorization: Optional[str] = Header(None
 
 
 @router.post("/provider/create")
-async def create_provider_model(request: ProviderModelRequest, authorization: Optional[str] = Header(None)):
+async def create_provider_model(
+    request: ProviderModelRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
     """Create or refresh provider models for the current tenant in memory only.
 
     This endpoint fetches models from the specified provider and merges existing
@@ -230,15 +345,14 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
 
     Args:
         request: Provider and model type information.
-        authorization: Bearer token header used to derive identity context.
     """
     try:
         provider_model_config = request.model_dump()
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         model_list = await create_provider_models_for_tenant(tenant_id, provider_model_config)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Provider model created successfully",
-            "data": model_list
+            "data": _sanitize_model_credentials(model_list)
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -250,7 +364,10 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
 
 
 @router.post("/provider/batch_create")
-async def batch_create_models(request: BatchCreateModelsRequest, authorization: Optional[str] = Header(None)):
+async def batch_create_models(
+    request: BatchCreateModelsRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
     """Synchronize provider models for a tenant by creating/updating/deleting records.
 
     The request includes the authoritative list of models for a provider/type.
@@ -259,11 +376,10 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
 
     Args:
         request: Batch payload with provider, type, models, and optional API key.
-        authorization: Bearer token header used to derive identity context.
 
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         batch_model_config = request.model_dump()
         # Strip W11 accept-signal fields off every model entry before the
         # batch reaches the service/DB layer. Same audit-only contract as
@@ -273,16 +389,22 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
             for model in batch_model_config.get("models", [])
             if (signal := pop_capacity_accept_signal(model)) is not None
         ]
-        await batch_create_models_for_tenant(user_id, tenant_id, batch_model_config)
+        batch_result = await batch_create_models_for_tenant(user_id, tenant_id, batch_model_config)
         provider = batch_model_config.get("provider")
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], provider)
         return JSONResponse(status_code=HTTPStatus.OK, content={
-            "message": "Batch create models successfully"
+            "message": "Batch create models successfully",
+            "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ValueError as e:
+        # Malformed batch entries are client errors, not server faults.
+        logging.error(f"Failed to batch create models: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -290,22 +412,24 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
 
 
 @router.post("/provider/list")
-async def get_provider_list(request: ProviderModelRequest, authorization: Optional[str] = Header(None)):
+async def get_provider_list(
+    request: ProviderModelRequest,
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
     """List persisted models for a provider and type for the current tenant.
 
     Args:
         request: Provider and model type to filter.
-        authorization: Bearer token header used to derive identity context.
 
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         model_list = await list_provider_models_for_tenant(
             tenant_id, request.provider, request.model_type
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved provider list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -320,7 +444,7 @@ async def get_provider_list(request: ProviderModelRequest, authorization: Option
 async def update_single_model(
     request: dict,
     display_name: str = Query(..., description="Current display name of the model to update"),
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Update a single model by its current `display_name`.
 
@@ -330,14 +454,13 @@ async def update_single_model(
     Args:
         request: Arbitrary model fields to update (may include new display_name).
         display_name: Current display name of the model (query parameter for lookup).
-        authorization: Bearer token header used to derive identity context.
 
     Raises:
         HTTPException: 404 if model not found, 409 if new `display_name` conflicts,
                        500 for unexpected errors.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         accept_signal = pop_capacity_accept_signal(request)
         await update_single_model_for_tenant(user_id, tenant_id, display_name, request)
         if accept_signal is not None:
@@ -365,15 +488,17 @@ async def update_single_model(
 
 
 @router.post("/batch_update")
-async def batch_update_models(request: List[dict], authorization: Optional[str] = Header(None)):
+async def batch_update_models(
+    request: List[dict],
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
+):
     """Batch update multiple models for the current tenant.
 
     Args:
         request: List of partial model payloads with `model_id` fields.
-        authorization: Bearer token header used to derive identity context.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         await batch_update_models_for_tenant(user_id, tenant_id, request)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch update models successfully"
@@ -388,7 +513,10 @@ async def batch_update_models(request: List[dict], authorization: Optional[str] 
 
 
 @router.post("/delete")
-async def delete_model(display_name: str = Query(..., embed=True), authorization: Optional[str] = Header(None)):
+async def delete_model(
+    display_name: str = Query(..., embed=True),
+    current_user: CurrentUser = Depends(require(MODEL_DELETE_PERMISSION)),
+):
     """Soft delete model(s) by `display_name` for the current tenant.
 
     Behavior:
@@ -397,10 +525,9 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
 
     Args:
         display_name: Display name of the model to delete (unique key).
-        authorization: Bearer token header used to derive identity context.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         logger.info(
             f"Start to delete model, user_id: {user_id}, tenant_id: {tenant_id}")
         model_name = await delete_model_for_tenant(user_id, tenant_id, display_name)
@@ -422,7 +549,9 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
 
 
 @router.get("/list")
-async def get_model_list(authorization: Optional[str] = Header(None)):
+async def get_model_list(
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
     """Get detailed information for all models for the current tenant.
 
     Returns each model enriched with repo-qualified `model_name` and a normalized
@@ -430,13 +559,13 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
     """
 
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         logger.debug(
-            f"Start to list models, user_id: {user_id}, tenant_id: {tenant_id}")
+            f"Start to list models, user_id: {current_user.user_id}, tenant_id: {tenant_id}")
         model_list = await list_models_for_tenant(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -448,14 +577,16 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
 
 
 @router.get("/llm_list")
-async def get_llm_model_list(authorization: Optional[str] = Header(None)):
+async def get_llm_model_list(
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
     """Get list of LLM models for the current tenant."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         llm_list = await list_llm_models_for_tenant(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved LLM list",
-            "data": jsonable_encoder(llm_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(llm_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -470,16 +601,15 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
 async def check_model_health(
         display_name: Annotated[str, Query(..., description="Display name to check")],
         model_type: Annotated[str, Query(..., description="...")],
-        authorization: Optional[str] = Header(None)
+        current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Check and update model connectivity, returning the latest status.
 
     Args:
         display_name: Display name of the model to check.
-        authorization: Bearer token header used to derive identity context.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         result = await check_model_connectivity(display_name, tenant_id, model_type)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully checked model connectivity",
@@ -504,22 +634,38 @@ async def check_model_health(
 
 @router.post("/temporary_healthcheck")
 async def check_temporary_model_health(
-    request: ModelRequest, authorization: Optional[str] = Header(None)
+    request: ModelProbeRequest,
+    current_user: CurrentUser = Depends(authenticate),
 ):
     """Verify connectivity for the provided model configuration without persisting it.
 
+    Authentication only: any tenant user may verify a candidate model config.
+
     Args:
         request: Model configuration to verify.
-        authorization: Bearer token header used to enforce authentication.
     """
     try:
-        get_current_user_id(authorization)
+        # Edit-dialog probes arrive without the api_key (the backend never
+        # returns the persisted key to the client, and the dialog leaves the
+        # field empty to "keep existing"). Fall back to the stored key so
+        # verifying does not require retyping it.
+        if request.probe_model_id is not None and request.api_key in (None, "", "sk-no-api-key"):
+            stored_model = get_model_by_model_id(request.probe_model_id, tenant_id=current_user.tenant_id)
+            if stored_model and stored_model.get("api_key"):
+                request.api_key = stored_model["api_key"]
         result = await verify_model_config_connectivity(request.model_dump())
-        result["capacity_suggestion"] = (
-            _capacity_suggestion_for_model_request(request)
-            if result.get("connectivity") is True
-            else None
-        )
+        if result.get("connectivity") is True:
+            # suggest_capacity may now issue an LLM self-report HTTP call
+            # (catalog miss → _llm_infer_capacity). Run it through the
+            # managed thread pool so the 15s probe budget does not block
+            # other requests.
+            result["capacity_suggestion"] = await run_blocking(
+                "model-capacity-suggestion",
+                _capacity_suggestion_for_model_request,
+                request,
+            )
+        else:
+            result["capacity_suggestion"] = None
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully verified model connectivity",
             "data": result
@@ -540,7 +686,7 @@ async def check_temporary_model_health(
 @router.post("/manage/healthcheck")
 async def manage_check_model_health(
     request: ManageTenantModelHealthcheckRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Check and update model connectivity for a specified tenant (admin/manage operation).
 
@@ -548,15 +694,14 @@ async def manage_check_model_health(
 
     Args:
         request: Query request with target tenant_id and model display_name.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Connectivity check result with updated status.
     """
+    _require_manage_role(current_user)
     try:
-        user_id, _ = get_current_user_id(authorization)
         logger.debug(
-            f"Start to check model connectivity for tenant, user_id: {user_id}, "
+            f"Start to check model connectivity for tenant, user_id: {current_user.user_id}, "
             f"target_tenant_id: {request.tenant_id}, display_name: {request.display_name}")
 
         result = await check_model_connectivity(
@@ -585,7 +730,7 @@ async def manage_check_model_health(
 @router.post("/manage/create")
 async def manage_create_model(
     request: ManageTenantModelCreateRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Create a model in a specified tenant (admin/manage operation).
 
@@ -593,13 +738,13 @@ async def manage_create_model(
 
     Args:
         request: Model configuration with target tenant_id.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Success message on successful creation.
     """
+    _require_manage_role(current_user)
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id = current_user.user_id
         logger.debug(
             f"Start to create model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}")
 
@@ -611,12 +756,13 @@ async def manage_create_model(
         # operator-accepted suggestions saved by SU/asset-owner via
         # /manage/* would silently miss the accept_total SLO numerator.
         accept_signal = pop_capacity_accept_signal(model_data)
-        await create_model_for_tenant(user_id, request.tenant_id, model_data)
+        create_result = await create_model_for_tenant(user_id, request.tenant_id, model_data)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
         return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully",
             "data": {"tenant_id": request.tenant_id}
         })
@@ -635,7 +781,7 @@ async def manage_create_model(
 @router.post("/manage/update")
 async def manage_update_model(
     request: ManageTenantModelUpdateRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Update a model in a specified tenant (admin/manage operation).
 
@@ -643,13 +789,13 @@ async def manage_update_model(
 
     Args:
         request: Update payload with target tenant_id and current display_name.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Success message on successful update.
     """
+    _require_manage_role(current_user)
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id = current_user.user_id
         logger.debug(
             f"Start to update model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
             f"current_display_name: {request.current_display_name}")
@@ -687,7 +833,7 @@ async def manage_update_model(
 @router.post("/manage/delete")
 async def manage_delete_model(
     request: ManageTenantModelDeleteRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_DELETE_PERMISSION)),
 ):
     """Delete a model from a specified tenant (admin/manage operation).
 
@@ -695,13 +841,13 @@ async def manage_delete_model(
 
     Args:
         request: Delete request with target tenant_id and display_name.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Success message with deleted model name.
     """
+    _require_manage_role(current_user)
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id = current_user.user_id
         logger.debug(
             f"Start to delete model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
             f"display_name: {request.display_name}")
@@ -731,7 +877,7 @@ async def manage_delete_model(
 @router.post("/manage/batch_create")
 async def manage_batch_create_models(
     request: ManageBatchCreateModelsRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Batch create/update models in a specified tenant (admin/manage operation).
 
@@ -740,13 +886,13 @@ async def manage_batch_create_models(
 
     Args:
         request: Batch payload with target tenant_id, provider, type, api_key, and models list.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Success message on completion.
     """
+    _require_manage_role(current_user)
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id = current_user.user_id
         logger.debug(
             f"Start to batch create models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
             f"provider: {request.provider}, type: {request.type}, models count: {len(request.models)}")
@@ -760,11 +906,12 @@ async def manage_batch_create_models(
             for model in batch_model_config.get("models", [])
             if (signal := pop_capacity_accept_signal(model)) is not None
         ]
-        await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
+        batch_result = await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], request.provider)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully",
+            "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
             "data": {
                 "tenant_id": request.tenant_id,
                 "provider": request.provider,
@@ -783,7 +930,7 @@ async def manage_batch_create_models(
 @router.post("/manage/list", response_model=ManageTenantModelListResponse)
 async def manage_list_models(
     request: ManageTenantModelListRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
 ):
     """List models for a specified tenant (admin/manage operation).
 
@@ -791,15 +938,14 @@ async def manage_list_models(
 
     Args:
         request: Query request with target tenant_id and pagination params.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Paginated model list for the specified tenant.
     """
+    _require_manage_role(current_user)
     try:
-        user_id, _ = get_current_user_id(authorization)
         logger.debug(
-            f"Start to list models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"Start to list models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
             f"page: {request.page}, page_size: {request.page_size}")
 
         result = await list_models_for_admin(
@@ -810,7 +956,7 @@ async def manage_list_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model list",
-            "data": jsonable_encoder(result)
+            "data": jsonable_encoder(_sanitize_model_credentials(result))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -824,7 +970,7 @@ async def manage_list_models(
 @router.post("/manage/provider/list")
 async def manage_list_provider_models(
     request: ManageProviderModelListRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
 ):
     """List provider models for a specified tenant (admin/manage operation).
 
@@ -833,15 +979,14 @@ async def manage_list_provider_models(
 
     Args:
         request: Query request with target tenant_id, provider, model_type.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         List of available provider models for the specified tenant.
     """
+    _require_manage_role(current_user)
     try:
-        user_id, _ = get_current_user_id(authorization)
         logger.debug(
-            f"Start to list provider models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"Start to list provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
             f"provider: {request.provider}, model_type: {request.model_type}")
 
         model_list = await list_provider_models_for_tenant(
@@ -849,7 +994,7 @@ async def manage_list_provider_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved provider model list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -863,7 +1008,7 @@ async def manage_list_provider_models(
 @router.post("/manage/provider/create")
 async def manage_create_provider_models(
     request: ManageProviderModelCreateRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Create/fetch provider models for a specified tenant (admin/manage operation).
 
@@ -872,15 +1017,14 @@ async def manage_create_provider_models(
 
     Args:
         request: Query request with target tenant_id, provider, model_type, and optional api_key/base_url.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         List of available provider models for the specified tenant.
     """
+    _require_manage_role(current_user)
     try:
-        user_id, _ = get_current_user_id(authorization)
         logger.debug(
-            f"Start to create provider models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"Start to create provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
             f"provider: {request.provider}, model_type: {request.model_type}")
 
         # Build provider request dict for the service function
@@ -895,7 +1039,7 @@ async def manage_create_provider_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully created provider models",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -904,3 +1048,212 @@ async def manage_create_provider_models(
         logging.error(f"Failed to create provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail=str(e))
+
+
+# =============================================================================
+# Model Catalog (预置模型目录) - readonly endpoints for frontend autocompletion
+# =============================================================================
+
+
+@router.get("/catalog/all")
+async def get_model_catalog_all(
+    authorization: Optional[str] = Header(None),
+):
+    """Return the entire preset model catalog in a single HTTP call.
+
+    The payload contains every provider (display name + default base URL)
+    together with every model's full prefill profile.  The frontend performs
+    filtering, model list rendering and single-profile lookup locally without
+    issuing additional backend requests.
+
+    Authorization is accepted (for consistency) but not required.  The
+    catalog contains only public metadata.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        data = dump_full_catalog()
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Dumping full catalog failed: %s", e)
+        return _catalog_unavailable_response(
+            HTTPStatus.OK,
+            data={"version": "0.0.0", "metadata": {}, "providers": []},
+        )
+
+
+@router.get("/catalog/providers")
+async def list_model_catalog_providers(
+    authorization: Optional[str] = Header(None),
+):
+    """List all providers declared in the preset model catalog.
+
+    The response includes each provider's display name, default base URL,
+    supported model types and how many preset models it contains.  The
+    endpoint is intentionally lightweight so the frontend can decide which
+    providers to render a "From preset" entry-point for.
+
+    Authorization is accepted (for consistency) but not required.  The
+    catalog contains only public metadata.
+    """
+    try:
+        # Validate the caller is still a real user.  Failure here means the
+        # frontend is not logged in (rare for model-config page); we still
+        # return catalog data since it carries no tenant information.
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        providers = list_catalog_providers()
+        data = [p.model_dump(mode="json") for p in providers]
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Listing catalog providers failed: %s", e)
+        return _catalog_unavailable_response(HTTPStatus.OK, data=[])
+
+
+@router.get("/catalog/inference_field_specs")
+async def get_inference_field_specs(
+    authorization: Optional[str] = Header(None),
+):
+    """Return fixed inference field specifications grouped by model type.
+
+    v2.6.0: The frontend uses this to dynamically render the advanced-settings
+    form for each model type (LLM/Embedding/STT/TTS/...). Defining the field
+    set in one place (backend consts.model) avoids hardcoding two copies.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        data = {
+            model_type: [spec.model_dump(mode="json") for spec in specs]
+            for model_type, specs in FIXED_INFERENCE_FIELDS_BY_TYPE.items()
+        }
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Returning inference field specs failed: %s", e)
+        return JSONResponse(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            content={
+                "message": "failed to load inference field specs",
+                "data": {},
+            },
+        )
+
+
+@router.get("/catalog/{provider}/models")
+async def list_model_catalog_models(
+    provider: str,
+    model_type: Annotated[Optional[str], Query()] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """List preset models inside one specific provider (optionally filtered by type).
+
+    Returns a list of ``{model_name, profile}`` pairs.  ``profile`` contains
+    the exact fields the frontend needs to prefill the Add-Model dialog form.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        models = list_models_by_provider(provider, model_type)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "provider": provider,
+                "filter_model_type": model_type,
+                "data": models,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Listing catalog models for %s failed: %s", _log_safe(provider), e)
+        return _catalog_unavailable_response(
+            HTTPStatus.OK,
+            provider=provider,
+            filter_model_type=model_type,
+            data=[],
+        )
+
+
+@router.get("/catalog/{provider}/{model_name:path}")
+async def get_model_catalog_profile(
+    provider: str,
+    model_name: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Return the exact preset profile for a single (provider, model_name).
+
+    Used by the Add-Model dialog immediately after the operator selects a
+    preset entry from the dropdown -- the returned ``profile`` dict is the
+    source of truth for prefilling every field (base_url, context_window,
+    chunk sizes, tokenizer, ...).  ``model_name`` uses ``:path`` capture so
+    slashed identifiers like ``Qwen/Qwen3-8B`` round-trip correctly.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        profile = _catalog_get_model_profile(provider, model_name)
+        if profile is None:
+            return JSONResponse(
+                status_code=HTTPStatus.NOT_FOUND,
+                content={
+                    "message": f"No catalog profile for {provider}/{model_name}",
+                    "catalog_available": _CATALOG_AVAILABLE,
+                    "provider": provider,
+                    "model_name": model_name,
+                    "data": None,
+                },
+            )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "provider": provider,
+                "model_name": model_name,
+                "data": profile.model_dump(mode="json"),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Get catalog profile for %s/%s failed: %s",
+                       _log_safe(provider), _log_safe(model_name), e)
+        return _catalog_unavailable_response(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            provider=provider,
+            model_name=model_name,
+            data=None,
+        )

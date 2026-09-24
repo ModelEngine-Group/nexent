@@ -19,7 +19,7 @@ Targets
 The pattern mirrors ``test_evaluator_db.py``: sys.path injection, idempotent
 ``_register_package`` registration and permanent (never-uninstalled)
 ``sys.modules`` stubs for the module's transitive imports
-(``database.agent_db``, ``database.tool_db``, ``services.skill_service`` plus
+(``database.agent_db``, ``database.tool_db``, ``management.services.skill.service`` plus
 the lazy ``database.knowledge_db`` / ``database.client`` /
 ``database.db_models`` imports inside ``_fetch_knowledge_bases``).
 """
@@ -109,11 +109,11 @@ def _install_stubs():
     sys.modules["database.db_models"] = db_models
     db_pkg.db_models = db_models
 
-    # services.skill_service – SkillService is a (mock) class
+    # management.services.skill.service – SkillService is a (mock) class
     services_pkg = _register_package("services")
-    skill_service = types.ModuleType("services.skill_service")
+    skill_service = types.ModuleType("management.services.skill.service")
     skill_service.SkillService = MagicMock(name="SkillService")
-    sys.modules["services.skill_service"] = skill_service
+    sys.modules["management.services.skill.service"] = skill_service
     services_pkg.skill_service = skill_service
 
     return _StubBundle(agent_db, tool_db, knowledge_db, client, db_models, skill_service)

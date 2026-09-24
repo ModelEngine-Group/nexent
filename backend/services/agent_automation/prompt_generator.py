@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -7,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from jinja2 import StrictUndefined, Template
+from nexent.core.concurrency import run_blocking
 
 from consts.const import LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING
 from utils.prompt_template_utils import get_prompt_template
@@ -209,11 +209,14 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
     async def generate_task_content(self, context: AutomationPromptContext) -> AutomationTaskContent:
         fallback = await self._fallback.generate_task_content(context)
         try:
-            content = await asyncio.to_thread(
+            content = await run_blocking(
+                "automation-prompt-generation",
                 self._generate_sync,
                 context,
                 "TASK_CONTENT_SYSTEM_PROMPT",
                 "TASK_CONTENT_USER_PROMPT",
+                lane="model-tool-io",
+                owner="config",
             )
             return _normalize_task_content(content, fallback, context.instruction)
         except Exception as exc:

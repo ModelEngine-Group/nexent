@@ -16,6 +16,7 @@ import threading
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
+from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +248,7 @@ def _load_core_agent_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent"].__path__ = []
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
-    sys.modules["sdk.nexent.core"].__path__ = []
+    sys.modules["sdk.nexent.core"].__path__ = [os.path.join(project_root, "sdk", "nexent", "core")]
     agents_pkg = ModuleType("sdk.nexent.core.agents")
     agents_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "agents")]
     sys.modules["sdk.nexent.core.agents"] = agents_pkg
@@ -255,6 +256,18 @@ def _load_core_agent_module():
     utils_pkg = ModuleType("sdk.nexent.core.utils")
     utils_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "utils")]
     sys.modules["sdk.nexent.core.utils"] = utils_pkg
+
+    models_pkg = ModuleType("sdk.nexent.core.models")
+    models_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "models")]
+    sys.modules["sdk.nexent.core.models"] = models_pkg
+
+    capacity_budget_mod = ModuleType("sdk.nexent.core.models.capacity_budget")
+
+    class ContextBudgetSnapshot(BaseModel):
+        pass
+
+    capacity_budget_mod.ContextBudgetSnapshot = ContextBudgetSnapshot
+    sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget_mod
 
     observer_mod = ModuleType("sdk.nexent.core.utils.observer")
     observer_mod.MessageObserver = MagicMock()
@@ -307,9 +320,27 @@ ProcessType = _module_mocks["sdk.nexent.core.utils.observer"].ProcessType
 MessageObserver = _module_mocks["sdk.nexent.core.utils.observer"].MessageObserver
 
 
+def test_remove_parallel_executor_import_removes_injected_tool_import():
+    code = (
+        "from nexent.core.tools.parallel_executor import parallel_executor\n"
+        "result = parallel_executor(tasks=[])"
+    )
+
+    assert core_agent_module._remove_parallel_executor_import(code) == (
+        "result = parallel_executor(tasks=[])"
+    )
+
+
+def test_remove_parallel_executor_import_preserves_unrelated_code():
+    code = "from other_module import parallel_executor_helper\nprint(parallel_executor_helper)"
+
+    assert core_agent_module._remove_parallel_executor_import(code) == code
+
+
 def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = object.__new__(module.CoreAgent)
+    agent.stop_event = threading.Event()
     agent.context_runtime = MagicMock()
     agent.stop_event = MagicMock()
     agent.stop_event.is_set.return_value = False
@@ -324,6 +355,7 @@ def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
 
 def test_get_context_summary_returns_runtime_context_manager_summary():
     agent = object.__new__(core_agent_module.CoreAgent)
+    agent.stop_event = threading.Event()
     context_manager = MagicMock()
     context_manager.get_summary.return_value = "compressed summary"
     agent.context_runtime = SimpleNamespace(context_manager=context_manager)
@@ -334,6 +366,7 @@ def test_get_context_summary_returns_runtime_context_manager_summary():
 
 def test_get_context_summary_returns_none_when_manager_is_unavailable():
     agent = object.__new__(core_agent_module.CoreAgent)
+    agent.stop_event = threading.Event()
     agent.context_runtime = SimpleNamespace()
 
     assert agent._get_context_summary() is None
@@ -341,6 +374,7 @@ def test_get_context_summary_returns_none_when_manager_is_unavailable():
 
 def test_get_context_summary_returns_none_when_manager_summary_fails():
     agent = object.__new__(core_agent_module.CoreAgent)
+    agent.stop_event = threading.Event()
     context_manager = MagicMock()
     context_manager.get_summary.side_effect = RuntimeError("summary unavailable")
     agent.context_runtime = SimpleNamespace(context_manager=context_manager)
@@ -349,57 +383,27 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
     context_manager.get_summary.assert_called_once_with()
 
 
+def test_provider_overflow_recovery_is_disabled_after_a_tool_call():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    agent.stop_event = threading.Event()
+    agent._history_step_count = 1
+    agent.memory = SimpleNamespace(steps=[
+        SimpleNamespace(tool_calls=["previous-run-tool"]),
+        SimpleNamespace(tool_calls=None),
+    ])
+
+    assert agent._provider_overflow_recovery_safe() is True
+
+    agent.memory.steps.append(SimpleNamespace(tool_calls=["current-run-tool"]))
+    assert agent._provider_overflow_recovery_safe() is False
+
+
 
 
 
 # ----------------------------------------------------------------------------
 # Tests for parse_code_blobs function
 # ----------------------------------------------------------------------------
-
-
-def test_incomplete_action_preamble_is_not_a_final_answer():
-    output = "思考：我需要先调用 knowledge_base_search 检索当前选择的知识库。"
-
-    assert core_agent_module._looks_like_incomplete_action_output(
-        output,
-        available_tool_names={"knowledge_base_search"},
-    ) is True
-
-
-def test_complete_answer_that_names_tool_is_not_misclassified():
-    output = "knowledge_base_search 是用于检索知识库的工具。"
-
-    assert core_agent_module._looks_like_incomplete_action_output(
-        output,
-        available_tool_names={"knowledge_base_search"},
-    ) is False
-
-
-@pytest.mark.parametrize(
-    "output",
-    [
-        (
-            "思考：工具调用成功。根据策略，我需要用 `final_answer` 返回工具结果。\n\n"
-            "最终回答：\n定时任务提案已生成，请核对任务内容和执行时间后确认创建。"
-        ),
-        (
-            "Analysis: The tool call succeeded, so I will use `final_answer` to return the result.\n\n"
-            "Final answer:\nThe scheduled-task proposal is ready for confirmation."
-        ),
-    ],
-)
-def test_complete_explicit_final_answer_is_not_misclassified(output):
-    assert core_agent_module._looks_like_incomplete_action_output(
-        output,
-        available_tool_names={"final_answer", "create_scheduled_task_proposal"},
-    ) is False
-
-
-def test_length_truncated_non_code_output_is_not_a_final_answer():
-    assert core_agent_module._looks_like_incomplete_action_output(
-        "这是一个尚未完成的回答",
-        finish_reason="length",
-    ) is True
 
 
 def test_parse_code_blobs_run_format():
@@ -996,60 +1000,16 @@ Some text after"""
 
 
 # ----------------------------------------------------------------------------
-# Tests for FinalAnswerError exception class
+# Tests for trusted runtime final answers
 # ----------------------------------------------------------------------------
 
-def test_final_answer_error_creation():
-    """Test FinalAnswerError can be created and raised."""
-    error = core_agent_module.FinalAnswerError()
-    assert isinstance(error, Exception)
-    with pytest.raises(core_agent_module.FinalAnswerError):
+def test_runtime_final_answer_creation():
+    """Trusted runtime final answers carry their content and source."""
+    error = core_agent_module.RuntimeFinalAnswer("refusal", "guardrail_input")
+    assert error.answer == "refusal"
+    assert error.source == "guardrail_input"
+    with pytest.raises(core_agent_module.RuntimeFinalAnswer):
         raise error
-
-
-@pytest.mark.parametrize(
-    "output",
-    [
-        "Step 2:\nCalled tool 'python_interpreter'()",
-        "### Step 2:\n- Called tool 'python_interpreter'()",
-        "Observation: previous result",
-        '{"tool_calls":[{"name":"python_interpreter","arguments":"print(1)"}]}',
-        '```json\n{"action":"search","arguments":{"q":"GAIA"}}\n```',
-        "<code>print('missing closing tag')",
-    ],
-)
-def test_action_like_non_executable_output_is_not_a_final_answer(output):
-    assert core_agent_module._looks_like_invalid_action_output(output) is True
-
-
-@pytest.mark.parametrize(
-    "output",
-    [
-        None,
-        42,
-        "",
-        "   ",
-        "The answer is 42.",
-        "I could not find enough evidence to answer.",
-        '{"answer":"42"}',
-        "{not valid json",
-        "```json```",
-        '["not an action record"]',
-    ],
-)
-def test_plain_answer_does_not_look_like_invalid_action(output):
-    assert core_agent_module._looks_like_invalid_action_output(output) is False
-
-
-@pytest.mark.parametrize(
-    "output",
-    [
-        "```<RUN>print('missing closing fence')",
-        '[{"action":"search","arguments":{"q":"GAIA"}}]',
-    ],
-)
-def test_additional_action_protocol_variants_are_invalid(output):
-    assert core_agent_module._looks_like_invalid_action_output(output) is True
 
 
 # ----------------------------------------------------------------------------
@@ -1899,6 +1859,8 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(core_agent_module, "handle_agent_output_types", lambda output: output)
 
         agent = object.__new__(core_agent_module.CoreAgent)
+
+        agent.stop_event = threading.Event()
         defaults = {
             "agent_name": "test_agent",
             "name": "test_agent",
@@ -2087,15 +2049,9 @@ class TestRunStreamRealExecution:
             for name, module in original_modules.items():
                 sys.modules[name] = module
 
-    def test_rejects_context_over_hard_budget_before_model_call(self):
+    def test_local_context_measurement_does_not_define_a_rejection_hook(self):
         module = self._load_core_agent_in_isolation()
-        final_context = MagicMock()
-        final_context.evidence.over_hard_budget = True
-        final_context.evidence.final_token_estimate = 120
-        final_context.evidence.hard_budget = 100
-
-        with pytest.raises(ValueError, match="120 > 100"):
-            module.CoreAgent._ensure_context_within_hard_budget(final_context)
+        assert not hasattr(module.CoreAgent, "_ensure_context_within_hard_budget")
 
     def test_run_stream_max_steps_path_real_execution(self):
         """Test that actually executes _run_stream and covers max_steps path lines."""
@@ -2155,6 +2111,7 @@ class TestRunStreamRealExecution:
 
         # Create agent instance
         agent = object.__new__(CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.observer.add_message = mock_add_message
@@ -2210,6 +2167,8 @@ class TestRunStreamRealExecution:
         module.get_monitoring_manager = MagicMock(return_value=fake_monitoring_manager)
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.step_metrics = []
         agent._last_uncompressed_est = 110
         agent.context_runtime = self._context_runtime_mock(
@@ -2247,6 +2206,8 @@ class TestRunStreamRealExecution:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2280,10 +2241,58 @@ class TestRunStreamRealExecution:
         generator = agent._step_stream(action_step)
         try:
             next(generator)
-        except (StopIteration, ValueError):
+        except (StopIteration, ValueError, module.ModelOutputProtocolError):
             pass
 
         assert agent._last_uncompressed_est == 5000
+
+    def test_step_stream_provider_overflow_callback_rebuilds_from_runtime(self):
+        """The model receives a callback that records and returns rebuilt context."""
+        module = self._load_core_agent_in_isolation()
+        agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 2
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.memory.system_prompt = None
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        agent.context_runtime.chars_per_token = 1.0
+        initial_context = MagicMock(messages=[MagicMock()])
+        rebuilt_context = MagicMock(messages=[MagicMock()])
+        agent.context_runtime.prepare_step.return_value = initial_context
+        agent.context_runtime.recover_step.return_value = rebuilt_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._ephemeral_system_messages = None
+
+        response = MagicMock(content="ok", token_usage=None)
+
+        def invoke_rebuild(messages, **kwargs):
+            assert messages is initial_context.messages
+            assert kwargs["context_rebuild"]() is rebuilt_context
+            return response
+
+        agent.model = MagicMock(side_effect=invoke_rebuild)
+        action_step = MagicMock()
+
+        stream = agent._step_stream(action_step)
+        try:
+            list(stream)
+        except (ValueError, TypeError, module.ModelOutputProtocolError):
+            # Parsing the synthetic response is outside this callback contract test.
+            pass
+
+        agent.context_runtime.recover_step.assert_called_once_with(
+            model=agent.model,
+            memory=agent.memory,
+            current_run_start_idx=0,
+            tools=[],
+        )
+        assert module.get_monitoring_manager().record_final_context_evidence.call_count >= 2
 
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""
@@ -2291,6 +2300,8 @@ class TestRunStreamRealExecution:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2320,7 +2331,7 @@ class TestRunStreamRealExecution:
         generator = agent._step_stream(action_step)
         try:
             next(generator)
-        except (StopIteration, ValueError):
+        except (StopIteration, ValueError, module.ModelOutputProtocolError):
             pass
 
         # When the runtime has no raw count, fall back to msg_token_count.
@@ -2334,6 +2345,8 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1
@@ -2356,10 +2369,175 @@ class TestRunStreamRealExecution:
 
         action_step = MagicMock()
         stream = agent._step_stream(action_step)
-        with pytest.raises(Exception, match="empty or whitespace-only output"):
+        with pytest.raises(module.ModelOutputProtocolError) as exc_info:
             next(stream)
 
+        assert exc_info.value.reason == module.ProtocolErrorReason.EMPTY_VISIBLE_CONTENT
         assert action_step.model_output == "   \n\t"
+
+    def test_step_stream_turns_exhausted_empty_response_into_silent_protocol_repair(
+        self, monkeypatch
+    ):
+        """Physical empty retries hand off to the hidden semantic repair loop."""
+        module = core_agent_module
+        CoreAgent = module.CoreAgent
+        monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
+
+        agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[])
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent.output_protocol = "code_action"
+        agent.verification_controller = None
+        terminal = module.ModelInvocationTerminalError(
+            module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED,
+            5,
+            cause=RuntimeError("provider detail"),
+        )
+        agent.model = MagicMock(side_effect=terminal)
+
+        action_step = MagicMock(model_output=None)
+        with pytest.raises(module.ModelOutputProtocolError) as exc_info:
+            next(agent._step_stream(action_step))
+
+        assert exc_info.value.reason == module.ProtocolErrorReason.EMPTY_VISIBLE_CONTENT
+        assert exc_info.value.__cause__ is terminal
+
+    def test_step_stream_closed_protocol_omits_legacy_provider_stop_sequences(
+        self, monkeypatch
+    ):
+        """Provider-side stops cannot erase a reasoning model's opening prefix."""
+        module = core_agent_module
+        agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[])
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._protocol_repair_messages = []
+        agent.output_protocol = "final_answer_envelope"
+        agent.verification_controller = None
+        response = SimpleNamespace(
+            content="<FINAL_ANSWER>ok</FINAL_ANSWER>",
+            token_usage=None,
+        )
+        agent.model = MagicMock(return_value=response)
+
+        next(agent._step_stream(MagicMock(model_output=None)))
+
+        assert agent.model.call_args.kwargs["stop_sequences"] is None
+
+    def test_step_stream_opens_turn_after_completed_assistant_action(self, monkeypatch):
+        """A completed action cannot leave chat completion ending in assistant."""
+        module = core_agent_module
+        agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 2
+        agent.memory = MagicMock(steps=[])
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "content": "completed action"},
+        ]
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._protocol_repair_messages = []
+        agent.output_protocol = "final_answer_envelope"
+        agent.verification_controller = None
+        agent.model = MagicMock(
+            return_value=SimpleNamespace(
+                content="<FINAL_ANSWER>ok</FINAL_ANSWER>",
+                token_usage=None,
+            )
+        )
+
+        next(agent._step_stream(MagicMock(model_output=None)))
+
+        actual_messages = agent.model.call_args.args[0]
+        assert len(actual_messages) == 3
+        continuation = module.ChatMessage.call_args.kwargs["content"][0]["text"]
+        assert "Do not repeat any completed action" in continuation
+        assert "<FINAL_ANSWER>" in continuation
+
+    def test_step_stream_rolls_back_interstitial_text_before_protocol_repair(self):
+        """Text between executable blocks is rolled back before protocol repair."""
+        module = core_agent_module
+        agent = object.__new__(module.CoreAgent)
+        agent.stop_event = threading.Event()
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[])
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._protocol_repair_messages = []
+        agent.output_protocol = "code_action"
+        agent.verification_controller = None
+
+        response = SimpleNamespace(
+            content='<code>print("first")</code>explanation<code>final_answer("ok")</code>',
+            token_usage=None,
+            model_attempt_id="semantic-attempt",
+            model_attempt_number=1,
+            model_attempt_commit_deferred=True,
+        )
+        model = MagicMock(return_value=response)
+        model.supports_deferred_attempt_commit = True
+        model.last_finish_reason = "stop"
+        model.last_response_diagnostics = {"finish_reason": "stop"}
+        agent.model = model
+
+        action_step = SimpleNamespace(
+            model_output=None,
+            model_output_message=None,
+            token_usage=None,
+            model_input_messages=None,
+        )
+
+        with pytest.raises(module.ModelOutputProtocolError):
+            list(agent._step_stream(action_step))
+
+        assert model.call_args.kwargs["_defer_attempt_commit"] is True
+        agent.observer.rollback_model_attempt.assert_called_once_with(
+            "semantic-attempt", 1
+        )
+        agent.observer.commit_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+        assert all(
+            call_.args[1] is not module.ProcessType.STEP_COUNT
+            for call_ in agent.observer.add_message.call_args_list
+        )
 
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
@@ -2397,6 +2575,7 @@ class TestRunStreamRealExecution:
 
         # Create agent
         agent = object.__new__(CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.observer.add_message = lambda *args: observer_calls.append(args)
@@ -2468,6 +2647,7 @@ class TestRunStreamRealExecution:
 
         # Create agent
         agent = object.__new__(CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.observer.add_message = lambda *args: observer_calls.append(args)
@@ -2503,95 +2683,23 @@ class TestRunStreamRealExecution:
         max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
         assert len(max_steps_calls) == 0
 
-    def test_run_stream_final_answer_error_path(self):
-        """Test _run_stream when FinalAnswerError is raised."""
-        # This covers the code path where the model outputs non-code text (FinalAnswerError)
+    def test_run_stream_trusted_runtime_final_path(self, monkeypatch):
+        """A trusted runtime refusal terminates without model-final verification."""
+        module = core_agent_module
+        agent = self._create_canonical_run_agent(monkeypatch)
+        agent.verification_controller = MagicMock()
 
-        # Create ProcessType
-        class TestProcessType:
-            MAX_STEPS_REACHED = "MAX_STEPS_REACHED"
-
-        # Track observer calls
-        observer_calls = []
-
-        # Load CoreAgent
-        module = self._load_core_agent_in_isolation()
-        CoreAgent = module.CoreAgent
-
-        # Verify it's a real class
-        assert not isinstance(CoreAgent, MagicMock)
-
-        # Get FinalAnswerError from the loaded module
-        FinalAnswerError = module.FinalAnswerError
-
-        # Create mock memory
-        mock_memory = MagicMock()
-        mock_memory.steps = []
-
-        # Create stop_event not set
-        stop_event = MagicMock()
-        stop_event.is_set = lambda: False
-
-        # Track step_stream calls
-        step_stream_calls = [0]
-
-        # Create mock ActionStep with model_output
-        mock_action_step = MagicMock()
-        mock_action_step.model_output = "This is my final answer"
-        mock_action_step.is_final_answer = True
-
-        # Create step_stream that raises FinalAnswerError
-        def mock_step_stream(action_step):
-            step_stream_calls[0] += 1
-            # Return the mock action step that has model_output
-            yield mock_action_step
-            # Then raise FinalAnswerError to trigger the except block
-            raise FinalAnswerError()
-
-        # Create agent
-        agent = object.__new__(CoreAgent)
-        agent.agent_name = "test_agent"
-        agent.observer = MagicMock()
-        agent.observer.add_message = lambda *args: observer_calls.append(args)
-        agent.stop_event = stop_event
-        agent.step_number = 1
-        agent.memory = mock_memory
-        agent.logger = MagicMock()
-        agent.logger.log = lambda *args, **kwargs: None
-        agent.monitor = MagicMock()
-        agent.max_steps = 10
-        agent.name = "test_agent"
-        agent.task = "test task"
-        agent.state = {}
-        agent.final_answer_checks = None
-        agent.return_full_result = False
-        agent.python_executor = MagicMock()
-        agent.model = MagicMock()
-        agent.prompt_templates = {}
-        agent.tools = {}
-        agent.managed_agents = {}
-        agent.provide_run_summary = False
-        agent._use_structured_outputs_internally = False
-        agent.context_runtime = self._context_runtime_mock()
-        agent.step_metrics = []
+        def mock_step_stream(_action_step):
+            if False:
+                yield None
+            raise module.RuntimeFinalAnswer("refusal", "guardrail_input")
 
         agent._step_stream = mock_step_stream
-        agent._handle_max_steps_reached = MagicMock(return_value="Max steps")
-        agent._finalize_step = lambda x: None
+        results = list(agent._run_stream("test task", max_steps=3))
 
-        # Call _run_stream
-        generator = agent._run_stream("test task", max_steps=10)
-
-        # Consume the generator
-        try:
-            results = list(generator)
-        except FinalAnswerError:
-            # The generator may raise FinalAnswerError - that's okay
-            pass
-
-        # FinalAnswerError path should prevent MAX_STEPS_REACHED
-        max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
-        assert len(max_steps_calls) == 0
+        assert results[-1].output == "refusal"
+        assert len(agent.memory.steps) == 1
+        agent.verification_controller.verify_final_answer.assert_not_called()
 
     def test_run_stream_retries_empty_final_answer_tool_result(self, monkeypatch):
         """An empty final_answer tool result must not end the run successfully."""
@@ -2627,17 +2735,91 @@ class TestRunStreamRealExecution:
         results = list(agent._run_stream("test task", max_steps=2))
 
         assert results[-1].output == "valid answer"
-        assert len(agent.memory.steps) == 2
-        assert agent.memory.steps[0].error is not None
+        assert len(agent.memory.steps) == 1
+        assert getattr(agent.memory.steps[0], "error", None) is None
+        assert agent.memory.steps[0].step_number == 1
 
-    def test_planning_run_retries_empty_direct_answer_then_verifies_valid_answer(self, monkeypatch):
-        """Planning runs reset state, retry an empty answer, and verify the next answer."""
+    def test_protocol_repair_retains_executed_action_without_user_warning(self, monkeypatch):
+        """A post-execution protocol error keeps tool evidence to prevent replay."""
+        module = core_agent_module
+
+        class FakeAgentError(Exception):
+            pass
+
+        class FakeActionOutput:
+            def __init__(self, output, is_final_answer):
+                self.output = output
+                self.is_final_answer = is_final_answer
+
+        monkeypatch.setattr(module, "AgentError", FakeAgentError)
+        monkeypatch.setattr(module, "ActionOutput", FakeActionOutput)
+        agent = self._create_canonical_run_agent(monkeypatch)
+        calls = 0
+
+        def mock_step_stream(action_step):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                action_step.tool_calls = [SimpleNamespace(id="executed")]
+                raise module.ModelOutputProtocolError(
+                    module.ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
+                    "code_action",
+                )
+            yield FakeActionOutput(output="done", is_final_answer=True)
+
+        agent._step_stream = mock_step_stream
+        results = list(agent._run_stream("test task", max_steps=2))
+
+        assert results[-1].output == "done"
+        assert len(agent.memory.steps) == 2
+        assert agent.memory.steps[0].tool_calls[0].id == "executed"
+        assert agent.memory.steps[0]._suppress_user_error is True
+        assert agent.memory.steps[1].step_number == 2
+
+    def test_cmsr_004_terminal_model_error_stops_react_without_memory_append(
+        self, monkeypatch
+    ):
+        """A depleted model budget must not become another recoverable ReAct step."""
+
+        class FakeAgentError(Exception):
+            pass
+
+        monkeypatch.setattr(core_agent_module, "AgentError", FakeAgentError)
+        agent = self._create_canonical_run_agent(monkeypatch)
+        terminal = core_agent_module.ModelInvocationTerminalError(
+            SimpleNamespace(value="model_timeout"),
+            5,
+            cause=TimeoutError("provider detail"),
+        )
+        physical_steps = 0
+
+        def failing_step(_action_step):
+            nonlocal physical_steps
+            physical_steps += 1
+            if False:
+                yield None
+            raise terminal
+
+        agent._step_stream = failing_step
+
+        with pytest.raises(core_agent_module.ModelInvocationTerminalError) as exc_info:
+            list(agent._run_stream("test task", max_steps=10))
+
+        assert exc_info.value is terminal
+        assert physical_steps == 1
+        assert agent.step_number == 1
+        assert agent.memory.steps == []
+        agent._finalize_step.assert_not_called()
+        agent._collect_step_metrics.assert_not_called()
+
+    def test_planning_run_stops_after_three_protocol_errors(self, monkeypatch):
+        """Planning state resets and three invalid generations fail safely."""
         module = core_agent_module
 
         agent = self._create_canonical_run_agent(
             monkeypatch,
             enable_planning=True,
-            model=MagicMock(last_response_diagnostics={"finish_reason": "length"}),
+            model=MagicMock(last_response_diagnostics={"finish_reason": "stop"}),
             verification_config=SimpleNamespace(
                 enabled=True,
                 final_verification_enabled=True,
@@ -2647,32 +2829,25 @@ class TestRunStreamRealExecution:
         agent.current_plan = "stale plan"
         agent.current_step_index = 99
         agent.verification_controller = MagicMock()
-        agent.verification_controller.verify_final_answer.return_value = SimpleNamespace(
-            passed=True
-        )
-        agent._build_verification_memory_summary = MagicMock(return_value="summary")
-
-        direct_answers = iter([" \n", "valid direct answer"])
-
         def mock_step_stream(action_step):
-            action_step.model_output = next(direct_answers)
+            action_step.model_output = "bare text"
             if False:
                 yield None
-            raise module.FinalAnswerError()
+            raise module.ModelOutputProtocolError(
+                module.ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION,
+                "code_action",
+            )
 
         agent._step_stream = mock_step_stream
 
-        results = list(agent._run_stream("test task", max_steps=2))
+        with pytest.raises(module.ModelOutputProtocolExhaustedError, match="failed to follow"):
+            list(agent._run_stream("test task", max_steps=5))
 
-        assert results[-1].output == "valid direct answer"
+        assert agent._consecutive_protocol_errors == 3
         assert agent.current_plan is None
         assert agent.current_step_index == 0
-        assert len(agent.memory.steps) == 2
-        assert agent.memory.steps[0].error is not None
-        agent.verification_controller.verify_final_answer.assert_called_once()
-        assert agent.verification_controller.verify_final_answer.call_args.kwargs[
-            "candidate"
-        ] == "valid direct answer"
+        assert agent.memory.steps == []
+        agent.verification_controller.verify_final_answer.assert_not_called()
 
 # ----------------------------------------------------------------------------
 # Tests for _handle_max_steps_reached method
@@ -2687,6 +2862,8 @@ class TestHandleMaxStepsReached:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.observer.add_message = MagicMock()
@@ -2795,6 +2972,22 @@ class TestHandleMaxStepsReached:
             if call[1].get("level") and "ERROR" in str(call[1].get("level"))
         ]
         assert len(error_calls) >= 1
+
+    def test_cmsr_004_max_steps_propagates_terminal_model_error(self):
+        agent, module = self._create_agent_for_handle_max_steps_test()
+        terminal = module.ModelInvocationTerminalError(
+            SimpleNamespace(value="model_timeout"),
+            5,
+            cause=TimeoutError("provider detail"),
+        )
+        agent.model = MagicMock(side_effect=terminal)
+        agent._finalize_step = MagicMock()
+
+        with pytest.raises(module.ModelInvocationTerminalError) as exc_info:
+            agent._handle_max_steps_reached("original task")
+
+        assert exc_info.value is terminal
+        agent._finalize_step.assert_not_called()
 
     def test_handle_max_steps_reached_empty_content_uses_fallback(self, caplog, monkeypatch):
         """Empty max-step synthesis returns a visible fallback and records why."""
@@ -2949,6 +3142,8 @@ class TestLogModelCallParameters:
         CoreAgent = module.CoreAgent
 
         agent = object.__new__(CoreAgent)
+
+        agent.stop_event = threading.Event()
         agent.agent_name = "test_agent"
         agent.observer = MagicMock()
         agent.stop_event = threading.Event()

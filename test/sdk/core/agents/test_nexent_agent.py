@@ -120,6 +120,7 @@ class _MockProcessType:
     TOKEN_COUNT = "token_count"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
+    WARNING = "warning"
     NL2A = "nl2a"
     FILE_ARTIFACT = "file_artifact"
 
@@ -198,6 +199,8 @@ mock_sdk_agent_context_domain_module.__path__ = [
 mock_sdk_agent_context_domain_module.ContextManager = _MockContextManager
 mock_sdk_agent_context_domain_module.ContextManagerConfig = _MockContextManagerConfig
 mock_sdk_agent_context_domain_module.ManagedContextRuntime = _MockManagedContextRuntime
+mock_sdk_agent_context_domain_module.ContextItemInput = MagicMock()
+mock_sdk_agent_context_domain_module.ContextItemType = types.SimpleNamespace(SYSTEM="system")
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
@@ -688,6 +691,7 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         max_output_tokens=mock_model_config.max_tokens,
         timeout_seconds=mock_model_config.timeout_seconds,
         prompt_cache=mock_model_config.prompt_cache,
+        reasoning_capability=None,
     )
 
     # Verify stop_event was set
@@ -722,10 +726,29 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         max_output_tokens=mock_deep_thinking_model_config.max_tokens,
         timeout_seconds=mock_deep_thinking_model_config.timeout_seconds,
         prompt_cache=mock_deep_thinking_model_config.prompt_cache,
+        reasoning_capability=None,
     )
 
     # Verify stop_event was set
     assert result.stop_event == nexent_agent_with_models.stop_event
+
+
+def test_create_model_passes_enabled_reasoning_configuration(
+    nexent_agent_with_models, mock_model_config, monkeypatch
+):
+    mock_model_config.enable_thinking = True
+    mock_model_config.reasoning_effort = "high"
+    mock_model_config.reasoning_capability = {
+        "status": "supported",
+        "levels": ["low", "high"],
+    }
+    monkeypatch.setattr(mock_openai_model_class, "return_value", MagicMock())
+
+    nexent_agent_with_models.create_model("test_model")
+
+    call_kwargs = mock_openai_model_class.call_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "high"
+    assert call_kwargs["reasoning_capability"] == mock_model_config.reasoning_capability
 
 
 def test_create_model_not_found(nexent_agent_with_models):
@@ -1754,7 +1777,7 @@ def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instanc
         context_manager=context_manager,
         token_threshold=24576,
         context_window_tokens=32768,
-        hard_input_budget_tokens=28672,
+        effective_input_limit_tokens=28672,
         processing_mode="adaptive_compact",
     )
 
@@ -1955,9 +1978,31 @@ def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_
     # Execute
     nexent_agent_instance.agent_run_with_observer("test query")
 
-    # Verify error message was added
+    # Recoverable action-step errors must not imply that the run terminated.
     mock_core_agent.observer.add_message.assert_any_call(
-        "", ProcessType.ERROR, "Test error occurred")
+        "", ProcessType.WARNING, "Test error occurred")
+
+
+def test_agent_run_with_observer_suppresses_internal_protocol_repair_warning(
+    nexent_agent_instance, mock_core_agent
+):
+    """A retained safety step may guide the model without leaking repair text."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock(duration=1.0)
+    mock_action_step.step_number = 1
+    mock_action_step.error = "internal repair"
+    mock_action_step._suppress_user_error = True
+    mock_action_step.output = "Final answer"
+    mock_core_agent.run.return_value = [mock_action_step]
+
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    assert not any(
+        call_.args[1:3] == (ProcessType.WARNING, "internal repair")
+        for call_ in mock_core_agent.observer.add_message.call_args_list
+    )
 
 
 def test_agent_run_with_observer_skips_non_action_step(nexent_agent_instance, mock_core_agent):
@@ -2007,7 +2052,7 @@ def test_agent_run_with_observer_with_stop_event_set(nexent_agent_instance, mock
 
     # Verify stop event message was added
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.ERROR, "Agent execution interrupted by external stop signal"
+        "test_agent", ProcessType.WARNING, "Agent execution interrupted by external stop signal"
     )
 
 
@@ -2024,6 +2069,32 @@ def test_agent_run_with_observer_with_exception(nexent_agent_instance, mock_core
     # Verify error message was added to observer
     mock_core_agent.observer.add_message.assert_called_once_with(
         agent_name="test_agent", process_type=ProcessType.ERROR, content="Error in interaction: Test execution error"
+    )
+
+
+def test_cmsr_004_terminal_model_error_emits_one_safe_error(
+    nexent_agent_instance, mock_core_agent
+):
+    nexent_agent_instance.agent = mock_core_agent
+    terminal_error_type = nexent_agent.ModelInvocationTerminalError
+    model_error_code = terminal_error_type.safe_message.__globals__["ModelErrorCode"]
+    terminal = terminal_error_type(
+        model_error_code.SERVICE_UNAVAILABLE,
+        5,
+        cause=RuntimeError("private provider body"),
+    )
+    mock_core_agent.run.side_effect = terminal
+
+    with pytest.raises(terminal_error_type) as exc_info:
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    assert exc_info.value is terminal
+    mock_core_agent.observer.add_message.assert_called_once_with(
+        agent_name="test_agent",
+        process_type=ProcessType.ERROR,
+        content="The model service is temporarily unavailable. Please try again later.",
+        error_code="model_service_unavailable",
+        retryable=False,
     )
 
 
@@ -3752,6 +3823,7 @@ class TestCreateSingleAgent:
             tools=[],
             max_steps=5,
             model_name="test_model",
+            output_protocol="final_answer_envelope",
         )
 
         with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
@@ -3763,6 +3835,7 @@ class TestCreateSingleAgent:
         context_runtime = mock_core_agent_fn.call_args.kwargs["context_runtime"]
         assert result is mock_core_agent
         assert context_runtime.items == [context_item]
+        assert mock_core_agent_fn.call_args.kwargs["output_protocol"] == "final_answer_envelope"
 
     def test_create_single_agent_with_prompt_templates(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent correctly passes prompt_templates."""
@@ -4239,6 +4312,7 @@ class TestSandboxWarmUp:
             managed_agents_exist=False,
             host_tools_exist=False,
             session_container_group=None,
+            cancellation_scope=None,
         )
 
 
@@ -4483,6 +4557,7 @@ class TestCreateBuiltinTool:
                 tenant_id="tenant_456",
                 version_no=1,
                 observer=nexent_agent_instance.observer,
+                authorized_skill_names=None,
             )
 
 
@@ -4627,6 +4702,9 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         assert "Run workspace" in result
         assert "Use bare relative paths" in result
         assert "not 'outputs/report.pdf'" in result
+        assert "script_path='outputs/build.js'" in result
+        assert "Direct subprocess, os.system, and shell calls" in result
+        assert "sys.executable -m pip install" in result
         push.assert_called_once_with()
 
     def test_initialize_sandbox_workspaces_sets_cwd_for_every_docker_kernel(
@@ -4799,7 +4877,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         else:
             grant.assert_not_called()
 
-    def test_grant_sandbox_output_access_uses_sandbox_group(self, tmp_path):
+    def test_grant_sandbox_output_access_grants_parent_traversal(self, tmp_path):
         workspace = tmp_path / "tenant" / "user" / "run-1"
         input_dir = workspace / "inputs"
         output_dir = workspace / "outputs"
@@ -4811,12 +4889,16 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             MagicMock(exit_code=0, output=b""),
             MagicMock(exit_code=0, output=b""),
             MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
+            MagicMock(exit_code=0, output=b""),
         ]
 
         NexentAgent._grant_sandbox_output_access(container, workspace)
 
         assert container.exec_run.call_args_list == [
             call(["id", "-g"]),
+            call(["chgrp", "1000", str(workspace.parent)], user="0"),
+            call(["chmod", "g+xs", str(workspace.parent)], user="0"),
             call(["chgrp", "-R", "1000", str(workspace)], user="0"),
             call(["chmod", "-R", "g+rwX", str(workspace)], user="0"),
             call(
@@ -4982,7 +5064,18 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         skill_file = workspace / "skills" / "probe" / "scripts" / "probe.py"
         uploaded_file = workspace / "outputs" / "uploaded.txt"
         failed_file = workspace / "outputs" / "failed.txt"
-        for path in (input_file, skill_file, uploaded_file, failed_file):
+        dependency_file = workspace / "outputs" / "app" / "node_modules" / "pkg" / "index.js"
+        cache_file = workspace / "outputs" / "app" / ".parcel-cache" / "state"
+        virtualenv_file = workspace / "outputs" / ".venv" / "lib" / "module.py"
+        for path in (
+            input_file,
+            skill_file,
+            uploaded_file,
+            failed_file,
+            dependency_file,
+            cache_file,
+            virtualenv_file,
+        ):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("data", encoding="utf-8")
         upload_tool = MagicMock()
@@ -4998,7 +5091,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
 
         upload_tool.forward.assert_called_once_with(str(failed_file), "outputs/failed.txt")
         assert any(
-            call_args.args[1] == ProcessType.ERROR
+            call_args.args[1] == ProcessType.WARNING
             for call_args in nexent_agent_instance.observer.add_message.call_args_list
         )
 
@@ -6506,6 +6599,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         mock_sandbox_config.level = SandboxLevel(level_value)
         mock_sandbox_config.scope = MagicMock()
         mock_sandbox_config.scope.value = scope_value
+        mock_sandbox_config.network_disabled = True
         return mock_sandbox_config
 
     def test_sandbox_build_local_level_skips_warmup(self, nexent_agent_instance, mock_model_config, mock_core_agent):
@@ -6643,6 +6737,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             executor,
             timeout_seconds=300,
             workspace_path=nexent_agent_instance.workspace_path,
+            network_enabled=False,
         )
         tool.bind_execution_backend.assert_called_once_with(
             runner,

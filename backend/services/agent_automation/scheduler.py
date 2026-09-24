@@ -14,6 +14,7 @@ from consts.const import (
 )
 from database import agent_automation_db
 from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig
+from nexent.core.concurrency import run_blocking
 
 from .models import ScheduleTrigger
 from .runner import agent_automation_runner
@@ -36,8 +37,18 @@ class AgentAutomationLeaseStore:
 
     async def recover(self) -> None:
         recovery_time = _utcnow()
-        await asyncio.to_thread(agent_automation_db.recover_orphaned_runs)
-        await asyncio.to_thread(agent_automation_db.release_expired_locks)
+        await run_blocking(
+            "automation-recover-runs",
+            agent_automation_db.recover_orphaned_runs,
+            lane="control-io",
+            owner="runtime",
+        )
+        await run_blocking(
+            "automation-release-locks",
+            agent_automation_db.release_all_task_locks,
+            lane="control-io",
+            owner="runtime",
+        )
         self._recovery_time = recovery_time
 
     async def claim_due(
@@ -46,11 +57,14 @@ class AgentAutomationLeaseStore:
         limit: int,
         lease_seconds: float,
     ) -> list[ClaimedJob[Dict[str, Any]]]:
-        tasks = await asyncio.to_thread(
+        tasks = await run_blocking(
+            "automation-claim-due",
             agent_automation_db.claim_due_tasks,
             owner_id,
             limit,
             lease_seconds,
+            lane="control-io",
+            owner="runtime",
         )
         runnable_tasks = []
         for task in tasks:
@@ -102,13 +116,16 @@ class AgentAutomationLeaseStore:
         if last_error is not None:
             task_values["last_error"] = last_error
 
-        updated = await asyncio.to_thread(
+        updated = await run_blocking(
+            "automation-update-misfire",
             agent_automation_db.update_task_if_lock_owner,
             task["task_id"],
             task["tenant_id"],
             task["user_id"],
             owner_id,
             task_values,
+            lane="control-io",
+            owner="runtime",
         )
         if not updated:
             logger.warning(
@@ -119,18 +136,24 @@ class AgentAutomationLeaseStore:
         return True
 
     async def renew(self, job_id: Hashable, owner_id: str, lease_seconds: float) -> bool:
-        return await asyncio.to_thread(
+        return await run_blocking(
+            "automation-renew-lock",
             agent_automation_db.renew_task_lock,
             int(job_id),
             owner_id,
             lease_seconds,
+            lane="control-io",
+            owner="runtime",
         )
 
     async def release(self, job_id: Hashable, owner_id: str) -> bool:
-        return await asyncio.to_thread(
+        return await run_blocking(
+            "automation-release-lock",
             agent_automation_db.release_task_lock,
             int(job_id),
             owner_id,
+            lane="control-io",
+            owner="runtime",
         )
 
 

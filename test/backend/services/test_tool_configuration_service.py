@@ -204,7 +204,7 @@ sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
-# Mock nexent.core.utils.observer before services.skill_service is imported
+# Mock nexent.core.utils.observer before management.services.skill.service is imported
 nexent_core_utils = _create_package_mock('nexent.core.utils')
 sys.modules['nexent.core.utils'] = nexent_core_utils
 nexent_core_utils_observer = types.ModuleType('nexent.core.utils.observer')
@@ -421,10 +421,14 @@ services_modules = {
     },
 }
 for service_name, attrs in services_modules.items():
-    service_module = types.ModuleType(f'services.{service_name}')
+    module_name = (
+        'management.services.knowledge_base.service'
+        if service_name == 'vectordatabase_service' else f'services.{service_name}'
+    )
+    service_module = types.ModuleType(module_name)
     for attr_name, attr_value in attrs.items():
         setattr(service_module, attr_name, attr_value)
-    sys.modules[f'services.{service_name}'] = service_module
+    sys.modules[module_name] = service_module
     # Expose on parent package for patch resolution
     setattr(sys.modules['services'], service_name, service_module)
 
@@ -457,12 +461,20 @@ services_modules = {
     },
 }
 for service_name, attrs in services_modules.items():
-    service_module = types.ModuleType(f'services.{service_name}')
+    module_name = (
+        'management.services.knowledge_base.service'
+        if service_name == 'vectordatabase_service' else f'services.{service_name}'
+    )
+    service_module = types.ModuleType(module_name)
     for attr_name, attr_value in attrs.items():
         setattr(service_module, attr_name, attr_value)
-    sys.modules[f'services.{service_name}'] = service_module
+    sys.modules[module_name] = service_module
     # Expose on parent package for patch resolution
     setattr(sys.modules['services'], service_name, service_module)
+
+model_resolver_module = types.ModuleType("management.services.model.resolver")
+model_resolver_module.get_rerank_model = MagicMock()
+sys.modules["management.services.model.resolver"] = model_resolver_module
 
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402
@@ -580,8 +592,8 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 # Patch tool_configuration_service imports to avoid triggering actual imports during patch
 # Note: These patches use the import path as seen in tool_configuration_service.py
 # NOTE: get_llm_model is NOT patched here because TestGetLlmModel tests it directly
-patch('services.vectordatabase_service.get_embedding_model', MagicMock()).start()
-patch('services.vectordatabase_service.get_vector_db_core', MagicMock()).start()
+patch('management.services.knowledge_base.service.get_embedding_model', MagicMock()).start()
+patch('management.services.knowledge_base.service.get_vector_db_core', MagicMock()).start()
 patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock()).start()
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
@@ -1156,6 +1168,10 @@ class TestListAllToolsWithLabels:
              "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
             {"tool_id": 4, "name": "postgres_database", "description": "d4", "source": "local",
              "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 5, "name": "download_from_s3", "description": "d5", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 6, "name": "upload_to_s3", "description": "d6", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
         ]
         mock_descriptions.return_value = {}
 
@@ -1165,6 +1181,8 @@ class TestListAllToolsWithLabels:
         result_names = [t["name"] for t in result]
         assert "store_memory" not in result_names
         assert "search_memory" not in result_names
+        assert "download_from_s3" not in result_names
+        assert "upload_to_s3" not in result_names
         assert "tavily_search" in result_names
         assert "postgres_database" in result_names
         assert len(result) == 2
@@ -4334,6 +4352,117 @@ class TestGetLocalToolsDescriptionZhCoverage:
         import json
         inputs = json.loads(result[0].inputs)
         assert inputs == {"query": "string"}
+
+    @pytest.mark.parametrize(
+        ("enable_aidp_knowledge", "expected_selectability"),
+        [
+            (
+                True,
+                {
+                    "knowledge_base_search": False,
+                    "aidp_search": False,
+                    "ind_aidp_search": False,
+                },
+            ),
+            (
+                False,
+                {
+                    "knowledge_base_search": False,
+                    "aidp_search": False,
+                    "ind_aidp_search": True,
+                },
+            ),
+        ],
+    )
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_get_local_tools_applies_knowledge_tool_selectability_by_deployment(
+        self,
+        mock_get_classes,
+        monkeypatch,
+        enable_aidp_knowledge,
+        expected_selectability,
+    ):
+        class KnowledgeTool:
+            name = "knowledge_base_search"
+            description = "Knowledge search"
+            output_type = "string"
+            category = "knowledge-base"
+            inputs = {}
+
+            def __init__(self):
+                pass
+
+        class AidpTool(KnowledgeTool):
+            name = "aidp_search"
+            is_user_selectable = False
+
+        class IndependentAidpTool(KnowledgeTool):
+            name = "ind_aidp_search"
+
+        mock_get_classes.return_value = [
+            KnowledgeTool,
+            AidpTool,
+            IndependentAidpTool,
+        ]
+        monkeypatch.setattr(
+            _tool_cfg_service,
+            "ENABLE_AIDP_KNOWLEDGE",
+            enable_aidp_knowledge,
+        )
+
+        result = _tool_cfg_service.get_local_tools()
+
+        assert {
+            tool.name: tool.is_user_selectable
+            for tool in result
+        } == expected_selectability
+
+    @pytest.mark.parametrize(
+        ("enable_aidp_knowledge", "expected_selectability"),
+        [
+            (True, [False, False, False]),
+            (False, [False, False, True]),
+        ],
+    )
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @pytest.mark.asyncio
+    async def test_list_all_tools_applies_deployment_selectability_to_stale_records(
+        self,
+        mock_query,
+        mock_get_descriptions,
+        monkeypatch,
+        enable_aidp_knowledge,
+        expected_selectability,
+    ):
+        mock_query.return_value = [
+            {
+                "tool_id": tool_id,
+                "name": name,
+                "description": "Knowledge search",
+                "source": "local",
+                "is_available": True,
+                "is_user_selectable": True,
+            }
+            for tool_id, name in enumerate(
+                (
+                    "knowledge_base_search",
+                    "aidp_search",
+                    "ind_aidp_search",
+                ),
+                start=1,
+            )
+        ]
+        mock_get_descriptions.return_value = {}
+        monkeypatch.setattr(
+            _tool_cfg_service,
+            "ENABLE_AIDP_KNOWLEDGE",
+            enable_aidp_knowledge,
+        )
+
+        result = await _tool_cfg_service.list_all_tools("tenant-a")
+
+        assert [tool["is_user_selectable"] for tool in result] == expected_selectability
 
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')

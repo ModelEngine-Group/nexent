@@ -12,7 +12,8 @@ from consts.model import (
     ConvertStateRequest,
     TaskRequest,
 )
-from data_process.tasks import process_and_forward, process_sync
+from data_process.tasks import process_sync, submit_process_forward_chain
+from data_process.utils import get_task_details as get_task_details_util
 from services.data_process_service import get_data_process_service
 
 
@@ -47,11 +48,9 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
     Returns task ID immediately. Processing happens in the background.
     Tasks are forwarded to Elasticsearch when complete.
     """
-    # Create task using the new process_and_forward task
-
     logger.info(
         f"Creating task with source_type: {request.source_type}, model_id: {request.embedding_model_id}")
-    task_result = process_and_forward.delay(
+    task_id = submit_process_forward_chain(
         source=request.source,
         source_type=request.source_type,
         chunking_strategy=request.chunking_strategy,
@@ -63,7 +62,12 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
         file_id=getattr(request, "file_id", None),
         telemetry_context=getattr(request, "telemetry_context", {}) or {},
     )
-    return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_result.id})
+    if not task_id:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Failed to enqueue data processing task",
+        )
+    return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_id})
 
 
 @router.post("/process")
@@ -232,7 +236,7 @@ async def get_index_tasks(index_name: str):
 @router.get("/{task_id}/details")
 async def get_task_details(task_id: str):
     """Get detailed information about a task, including results"""
-    task = await service.get_task_details(task_id)
+    task = await get_task_details_util(task_id)
     if not task:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                             detail="Task not found")

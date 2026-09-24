@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
   type FC,
-  type ReactNode,
 } from "react";
 import {
   AssistantRuntimeProvider,
@@ -29,10 +28,10 @@ import {
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
-import { compositeAttachmentAdapter } from "./adapter/attachment-adapter";
+import { createNewChatAttachmentAdapter } from "./adapter/attachment-adapter";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Layout, message } from "antd";
+import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
@@ -52,9 +51,14 @@ import type {
 function useLocalChatRuntime(
   dictationAdapter: ServerDictationAdapter
 ): AssistantRuntime {
+  const attachmentAdapter = useMemo(
+    () => createNewChatAttachmentAdapter(),
+    []
+  );
+
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
-      attachments: compositeAttachmentAdapter,
+      attachments: attachmentAdapter,
       dictation: dictationAdapter,
     },
   });
@@ -91,7 +95,9 @@ const PersistentChatHome: FC = () => {
   }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
-    runtimeHook: () => useLocalChatRuntime(dictationAdapter),
+    runtimeHook: function useChatRuntime() {
+      return useLocalChatRuntime(dictationAdapter);
+    },
     adapter: conversationThreadListAdapter,
     threadId: requestedThreadId,
   });
@@ -536,6 +542,7 @@ const HomeContent: FC<{
         onRuntimeMetadataSent: handleRuntimeMetadataSent,
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         onGenerationStopped: handleGenerationStopped,
+
         enablePlan: chatMode === "planning",
         ...(activeThreadId
           ? {
@@ -680,10 +687,11 @@ const HomeContent: FC<{
     return () => setServerConversationIdState(null);
   }, [serverConversationIdsRef, activeThreadId]);
 
-  const handleThreadBack = useCallback(() => {
+  const handleThreadBack = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
+    await runtime.threads.switchToNewThread();
     onBack();
-  }, [onBack]);
+  }, [onBack, runtime]);
 
   const handlePrepareNewConversation = useCallback(() => {
     // Do not restore the agent from the thread that is being left.
@@ -700,6 +708,11 @@ const HomeContent: FC<{
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
       await runtime.threads.switchToNewThread();
+      const thread = runtime.threads.getItemById(
+        runtime.threads.getState().mainThreadId
+      );
+      await thread.initialize();
+      await thread.updateCustom({ agentId: agent.id });
       onAgentSelected(agent);
     },
     [runtime, onAgentSelected]
@@ -726,30 +739,32 @@ const HomeContent: FC<{
         </SidebarProvider>
       </div>
 
-      <div className="flex-1 min-w-0">
-        <Chat
-          generatedTitle={
-            activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-          }
-          conversationId={
-            activeConversationId && Number(activeConversationId) > 0
-              ? Number(activeConversationId)
-              : undefined
-          }
-          isLoadingAgents={isLoadingAgents}
-          selectedAgent={selectedAgent}
-          onAgentSelected={handleAgentSelectedFromLanding}
-          onBack={handleThreadBack}
-          chatMode={chatMode}
-          onChatModeChange={handleChatModeChange}
-          isDictationConfigured={isDictationConfigured}
-          knowledgeScope={knowledgeScope}
-          knowledgePreview={knowledgePreview}
-          knowledgeCapabilities={knowledgeCapabilities}
-          onKnowledgeScopeChange={handleKnowledgeScopeChange}
-          runtimeMetadata={runtimeMetadata}
-          onRuntimeMetadataChange={handleRuntimeMetadataChange}
-        />
+      <div className="flex min-h-0 flex-1 min-w-0 flex-col">
+        <div className="min-h-0 flex-1">
+          <Chat
+            generatedTitle={
+              activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+            }
+            conversationId={
+              activeConversationId && Number(activeConversationId) > 0
+                ? Number(activeConversationId)
+                : undefined
+            }
+            isLoadingAgents={isLoadingAgents}
+            selectedAgent={selectedAgent}
+            onAgentSelected={handleAgentSelectedFromLanding}
+            onBack={handleThreadBack}
+            chatMode={chatMode}
+            onChatModeChange={handleChatModeChange}
+            isDictationConfigured={isDictationConfigured}
+            knowledgeScope={knowledgeScope}
+            knowledgePreview={knowledgePreview}
+            knowledgeCapabilities={knowledgeCapabilities}
+            onKnowledgeScopeChange={handleKnowledgeScopeChange}
+            runtimeMetadata={runtimeMetadata}
+            onRuntimeMetadataChange={handleRuntimeMetadataChange}
+          />
+        </div>
       </div>
     </div>
   );

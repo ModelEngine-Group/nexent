@@ -347,7 +347,11 @@ if [ "$LOAD_IMAGES" = "true" ] && [ "$PUSH_IMAGES" != "true" ]; then
     fi
     exit 1
   fi
-  bash "$LOAD_SCRIPT"
+  if ! DEPLOYMENT_TARGET="$(detect_deployment_target)"; then
+    echo "Error: --load-images requires a docker or k8s deployment target." >&2
+    exit 1
+  fi
+  bash "$LOAD_SCRIPT" "$DEPLOYMENT_TARGET"
 fi
 
 if [ "$PUSH_IMAGES" = "true" ]; then

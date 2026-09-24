@@ -14,6 +14,55 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
+# The app imports lightweight test doubles for several project packages. Keep
+# that temporary module graph out of sibling database and service tests.
+_MODULE_ROOTS = (
+    "boto3",
+    "botocore",
+    "consts",
+    "database",
+    "middleware",
+    "services",
+    "utils",
+)
+
+
+def _owns_module(name: str) -> bool:
+    return name in _MODULE_ROOTS or any(
+        name.startswith(f"{root}.") for root in _MODULE_ROOTS
+    )
+
+
+def _capture_module_state():
+    """Capture modules and package attributes under the app-test roots."""
+    modules = {name: module for name, module in sys.modules.items() if _owns_module(name)}
+    package_attrs = {
+        name: dict(module.__dict__)
+        for name, module in modules.items()
+        if isinstance(module, types.ModuleType) and hasattr(module, "__path__")
+    }
+    return modules, package_attrs
+
+
+def _apply_module_state(state) -> None:
+    """Restore a previously captured module graph."""
+    modules, package_attrs = state
+    current_names = [name for name in sys.modules if _owns_module(name)]
+    for name in current_names:
+        if name not in modules:
+            sys.modules.pop(name, None)
+    sys.modules.update(modules)
+    for name, attrs in package_attrs.items():
+        package = sys.modules.get(name)
+        if not isinstance(package, types.ModuleType):
+            continue
+        for key in set(package.__dict__) - set(attrs):
+            package.__dict__.pop(key, None)
+        package.__dict__.update(attrs)
+
+
+_BASE_MODULE_STATE = _capture_module_state()
+
 # Pre-stub heavy SDK dependencies BEFORE any module imports.
 sys.modules["boto3"] = MagicMock()
 sys.modules["botocore"] = MagicMock()
@@ -43,6 +92,7 @@ for _name in (
     "services",
     "services.agent_evaluation_service",
     "services.evaluation_report_service",
+    "services.runtime_proxy_service",
     "database",
     "database.agent_evaluation_db",
     "utils",
@@ -51,6 +101,7 @@ for _name in (
     _register_package(_name)
 sys.modules["services.agent_evaluation_service"] = MagicMock(name="agent_eval_svc")
 sys.modules["services.evaluation_report_service"] = MagicMock(name="report_svc")
+sys.modules["services.runtime_proxy_service"] = MagicMock(name="runtime_proxy_svc")
 sys.modules["database.agent_evaluation_db"] = MagicMock(name="agent_eval_db")
 sys.modules["utils.auth_utils"] = MagicMock(name="auth_utils")
 
@@ -65,6 +116,23 @@ _spec = importlib.util.spec_from_file_location(
 agent_evaluation_app = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = agent_evaluation_app
 _spec.loader.exec_module(agent_evaluation_app)
+
+# Keep the app dependency graph as a snapshot, but restore the process state
+# immediately after collection. The autouse fixture below reinstalls these
+# stubs only while an app test is running.
+_STUB_MODULE_STATE = _capture_module_state()
+_apply_module_state(_BASE_MODULE_STATE)
+
+
+@pytest.fixture(autouse=True)
+def _app_module_state():
+    """Scope app-test import doubles to each test function."""
+    previous_module_state = _capture_module_state()
+    _apply_module_state(_STUB_MODULE_STATE)
+    try:
+        yield
+    finally:
+        _apply_module_state(previous_module_state)
 
 
 def _exc(error_code, message):
@@ -113,7 +181,7 @@ def _mock_impls(**overrides):
             return_value={"items": [], "total": 0}
         ),
         "list_agent_evaluations_by_agent_impl": MagicMock(return_value=[{"id": 1}]),
-        "trial_run_evaluator_impl": AsyncMock(return_value={"result": "ok"}),
+        "forward_agent_evaluation_trial_run": AsyncMock(return_value={"result": "ok"}),
         "generate_agent_evaluation_report_impl": MagicMock(
             return_value=(b"%PDF-1.4 fake", 0)
         ),
@@ -195,11 +263,35 @@ class TestCreateEvaluation:
 
 
 class TestListEvaluations:
-    def test_returns_list(self, client):
-        _mock_impls()
-        response = client.get("/agent-evaluations?agent_id=1&limit=10&offset=0")
+    def test_returns_all_tenant_evaluations_without_agent_filter(self, client):
+        app = _mock_impls()
+        response = client.get("/agent-evaluations?limit=10&offset=0")
         assert response.status_code == 200
         assert response.json()["data"] == [{"id": 1}]
+        assert app.list_agent_evaluations_by_agent_impl.call_args.kwargs == {
+            "agent_ids": [],
+            "tenant_id": "t1",
+            "limit": 10,
+            "offset": 0,
+        }
+
+    def test_filters_by_json_agent_id_list_and_deduplicates(self, client):
+        app = _mock_impls()
+        response = client.get("/agent-evaluations?agent_ids=%5B7%2C9%2C7%5D")
+        assert response.status_code == 200
+        assert app.list_agent_evaluations_by_agent_impl.call_args.kwargs["agent_ids"] == [7, 9]
+
+    def test_filters_by_single_agent_id_list(self, client):
+        app = _mock_impls()
+        response = client.get("/agent-evaluations?agent_ids=%5B9%5D")
+        assert response.status_code == 200
+        assert app.list_agent_evaluations_by_agent_impl.call_args.kwargs["agent_ids"] == [9]
+
+    def test_rejects_non_integer_json_agent_id_list(self, client):
+        app = _mock_impls()
+        response = client.get("/agent-evaluations?agent_ids=%5B7%2C%22nine%22%5D")
+        assert response.status_code == 400
+        app.list_agent_evaluations_by_agent_impl.assert_not_called()
 
     def test_500_on_exception(self, client):
         _mock_impls(
@@ -207,14 +299,14 @@ class TestListEvaluations:
                 side_effect=RuntimeError("boom")
             )
         )
-        response = client.get("/agent-evaluations?agent_id=1")
+        response = client.get("/agent-evaluations?agent_ids=%5B1%5D")
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
         from consts.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
-        response = client.get("/agent-evaluations?agent_id=1")
+        response = client.get("/agent-evaluations?agent_ids=%5B1%5D")
         assert response.status_code == 401
 
     def test_app_exception_propagates(self, client):
@@ -223,7 +315,7 @@ class TestListEvaluations:
                 side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "missing")
             )
         )
-        response = client.get("/agent-evaluations?agent_id=1")
+        response = client.get("/agent-evaluations?agent_ids=%5B1%5D")
         assert response.status_code == 404
 
 
@@ -527,7 +619,7 @@ class TestTrialRun:
         )
         assert response.status_code == 200
         assert response.json()["data"] == {"result": "ok"}
-        assert app.trial_run_evaluator_impl.call_args.kwargs["query"] == "hello"
+        assert app.forward_agent_evaluation_trial_run.call_args.kwargs["query"] == "hello"
 
     def test_401_on_unauthorized(self, client):
         from consts.exceptions import UnauthorizedError
@@ -541,7 +633,7 @@ class TestTrialRun:
 
     def test_500_on_exception(self, client):
         _mock_impls(
-            trial_run_evaluator_impl=AsyncMock(side_effect=RuntimeError("boom"))
+            forward_agent_evaluation_trial_run=AsyncMock(side_effect=RuntimeError("boom"))
         )
         response = client.post(
             "/agent-evaluations/trial-run",
@@ -551,7 +643,7 @@ class TestTrialRun:
 
     def test_app_exception_propagates(self, client):
         _mock_impls(
-            trial_run_evaluator_impl=AsyncMock(
+            forward_agent_evaluation_trial_run=AsyncMock(
                 side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "missing")
             )
         )

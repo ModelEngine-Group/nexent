@@ -19,6 +19,7 @@ def create_nl2skill_agent_config(
         tools=[],
         max_steps=5,
         model_name=model_name,
+        output_protocol="final_answer_envelope",
         provide_run_summary=False,
         instructions=system_prompt,
         enable_planning=False,

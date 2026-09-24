@@ -1,0 +1,2103 @@
+-- Nexent merged SQL migrations: v2.6.0
+-- Previous release tag: v2.5.1
+-- Source bodies are embedded byte-for-byte in deployment order.
+-- Do not reorder or rewrite sections without equivalence validation.
+
+-- Source migration: v2.5.0_0813_conversation_source_search_citation.sql
+-- Source SHA-256: 3e966de142e02a5cb4e42b20a267026583802f116cf2bc38338fe2c9c2de9fcf
+
+-- Citation support for conversation source search records:
+-- 1. Preserve exact lexical retrieval terms so source-card highlighting survives
+--    conversation history reloads without changing the search index or query count.
+-- 2. Elasticsearch accurate-search scores are raw relevance scores and may exceed
+--    9.999999, so widen score_overall before saving conversation source records.
+
+SET search_path TO nexent;
+
+ALTER TABLE nexent.conversation_source_search_t
+    ADD COLUMN IF NOT EXISTS retrieval_highlight_terms JSONB;
+
+COMMENT ON COLUMN nexent.conversation_source_search_t.retrieval_highlight_terms IS
+    'Exact lexical terms returned by retrieval for source highlighting.';
+
+ALTER TABLE nexent.conversation_source_search_t
+    ALTER COLUMN score_overall TYPE numeric(14, 6);
+
+-- Source migration: v2.5.0_0904_external_memory_provider.sql
+-- Source SHA-256: 4dabed00c7e17b84f75ecbe1f0cd2a716f81302c8dc84bf143086137614364e8
+
+-- Phase 3: External Memory Provider schema
+-- Provider configuration, EAV parameters, and ingest event logging.
+
+-- 7.1 Provider configuration main table
+CREATE TABLE IF NOT EXISTS nexent.memory_provider_config_t (
+    provider_config_id  SERIAL PRIMARY KEY,
+    tenant_id           VARCHAR(100) NOT NULL,
+    provider_name       VARCHAR(100) NOT NULL,
+    connection_type     VARCHAR(20)  NOT NULL DEFAULT 'plugin',
+    enabled             BOOLEAN      NOT NULL DEFAULT FALSE,
+    timeout_seconds     INTEGER      NOT NULL DEFAULT 30,
+    last_error_code     VARCHAR(50),
+    create_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    created_by          VARCHAR(100),
+    updated_by          VARCHAR(100),
+    delete_flag         VARCHAR(1)   NOT NULL DEFAULT 'N'
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_provider_config_tenant_name
+    ON nexent.memory_provider_config_t (tenant_id, provider_name)
+    WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_memory_provider_config_enabled
+    ON nexent.memory_provider_config_t (tenant_id, enabled)
+    WHERE delete_flag = 'N';
+
+COMMENT ON TABLE nexent.memory_provider_config_t IS 'External memory provider configuration';
+COMMENT ON COLUMN nexent.memory_provider_config_t.provider_config_id IS 'Provider configuration ID';
+COMMENT ON COLUMN nexent.memory_provider_config_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.memory_provider_config_t.provider_name IS 'Provider name, unique per tenant';
+COMMENT ON COLUMN nexent.memory_provider_config_t.connection_type IS 'Connection type: plugin (Phase 3)';
+COMMENT ON COLUMN nexent.memory_provider_config_t.enabled IS 'Whether this provider is enabled';
+COMMENT ON COLUMN nexent.memory_provider_config_t.timeout_seconds IS 'Request timeout in seconds';
+COMMENT ON COLUMN nexent.memory_provider_config_t.last_error_code IS 'Last error code from test-search or test-ingest';
+COMMENT ON COLUMN nexent.memory_provider_config_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.memory_provider_config_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.memory_provider_config_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.memory_provider_config_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.memory_provider_config_t.delete_flag IS 'Soft delete flag: Y/N';
+
+-- 7.2 Provider configuration parameter table (EAV)
+CREATE TABLE IF NOT EXISTS nexent.memory_provider_config_param_t (
+    param_id            SERIAL PRIMARY KEY,
+    provider_config_id  INTEGER      NOT NULL,
+    param_name          VARCHAR(200) NOT NULL,
+    param_value         TEXT,
+    create_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    created_by          VARCHAR(100),
+    updated_by          VARCHAR(100),
+    delete_flag         VARCHAR(1)   NOT NULL DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_config_param_provider
+    ON nexent.memory_provider_config_param_t (provider_config_id)
+    WHERE delete_flag = 'N';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_config_param_name
+    ON nexent.memory_provider_config_param_t (provider_config_id, param_name)
+    WHERE delete_flag = 'N';
+
+COMMENT ON TABLE nexent.memory_provider_config_param_t IS 'External memory provider configuration parameters (EAV)';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.param_id IS 'Parameter ID';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.provider_config_id IS 'Foreign key to memory_provider_config_t';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.param_name IS 'Parameter name';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.param_value IS 'Parameter value';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.delete_flag IS 'Soft delete flag: Y/N';
+
+-- 7.3 Ingest event log table
+CREATE TABLE IF NOT EXISTS nexent.memory_external_ingest_event_log_t (
+    log_id              SERIAL PRIMARY KEY,
+    provider            VARCHAR(100),
+    tenant_id           VARCHAR(100),
+    user_id             VARCHAR(100),
+    agent_id            VARCHAR(100),
+    conversation_id     VARCHAR(100),
+    event_id            VARCHAR(255),
+    idempotency_key     TEXT,
+    unit_ids            TEXT,
+    response_status     VARCHAR(30),
+    response_summary    TEXT,
+    sent_at             TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    create_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    created_by          VARCHAR(100),
+    updated_by          VARCHAR(100),
+    delete_flag         VARCHAR(1)   NOT NULL DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_ingest_log_tenant
+    ON nexent.memory_external_ingest_event_log_t (tenant_id, user_id, agent_id, sent_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ingest_log_idem
+    ON nexent.memory_external_ingest_event_log_t (idempotency_key)
+    WHERE delete_flag = 'N';
+
+COMMENT ON TABLE nexent.memory_external_ingest_event_log_t IS 'External memory ingest event log';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.log_id IS 'Log ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.provider IS 'Provider name';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.user_id IS 'User ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.agent_id IS 'Agent ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.conversation_id IS 'Conversation ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.event_id IS 'Event ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.idempotency_key IS 'Idempotency key for deduplication';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.unit_ids IS 'Comma-separated unit ID list';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.response_status IS 'Response status';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.response_summary IS 'Response summary';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.sent_at IS 'Timestamp when the event was sent';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.delete_flag IS 'Soft delete flag: Y/N';
+
+-- 8. Permission seed data: MEM.PROVIDER (CREATE, READ, UPDATE, DELETE)
+-- Granted to ADMIN and SPEED roles only (per Functional Design §14.5)
+INSERT INTO nexent.role_permission_t (
+    role_permission_id, user_role, permission_category, permission_type, permission_subtype
+) VALUES
+    (1122, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'CREATE'),
+    (1119, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'READ'),
+    (1120, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'UPDATE'),
+    (1121, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'DELETE'),
+    (1415, 'SPEED', 'RESOURCE', 'MEM.PROVIDER', 'CREATE'),
+    (1416, 'SPEED', 'RESOURCE', 'MEM.PROVIDER', 'READ'),
+    (1417, 'SPEED', 'RESOURCE', 'MEM.PROVIDER', 'UPDATE'),
+    (1418, 'SPEED', 'RESOURCE', 'MEM.PROVIDER', 'DELETE')
+ON CONFLICT (role_permission_id) DO UPDATE SET
+    user_role = EXCLUDED.user_role, permission_category = EXCLUDED.permission_category,
+    permission_type = EXCLUDED.permission_type, permission_subtype = EXCLUDED.permission_subtype;
+
+-- Source migration: v2.5.1_001_human_interaction.sql
+-- Source SHA-256: 69b0587b10d497a4546136ac70dc4a56c832f1ac056f2baeed9afd2cc9559e49
+
+-- Human interaction schema for a new database.
+-- Technical keys and internal references use INT4; public identifiers use UUID strings.
+-- Services validate business states, references and uniqueness under transaction locks.
+
+CREATE TABLE IF NOT EXISTS nexent.human_run_t (
+    run_record_id SERIAL PRIMARY KEY,
+    run_id VARCHAR(36) NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    conversation_id INTEGER NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    request_payload TEXT NOT NULL,
+    checkpoint TEXT,
+    catalog_digest VARCHAR(64),
+    executor_digest VARCHAR(64),
+    plan TEXT,
+    plan_version INTEGER DEFAULT 0 NOT NULL,
+    fence INTEGER DEFAULT 0 NOT NULL,
+    lock_owner VARCHAR(200),
+    lock_until TIMESTAMP WITH TIME ZONE,
+    pause_requested INTEGER DEFAULT 0 NOT NULL,
+    event_seq BIGINT DEFAULT 0 NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS nexent.human_request_t (
+    request_record_id SERIAL PRIMARY KEY,
+    request_id VARCHAR(36) NOT NULL,
+    run_record_id INTEGER NOT NULL,
+    kind VARCHAR(30) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    version INTEGER DEFAULT 1 NOT NULL,
+    slot VARCHAR(100) NOT NULL,
+    digest VARCHAR(64) NOT NULL,
+    payload TEXT NOT NULL,
+    decision TEXT,
+    idempotency_key VARCHAR(100),
+    decision_digest VARCHAR(64),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS nexent.human_execution_t (
+    execution_id SERIAL PRIMARY KEY,
+    run_record_id INTEGER NOT NULL,
+    slot VARCHAR(100) NOT NULL,
+    tool VARCHAR(200) NOT NULL,
+    digest VARCHAR(64) NOT NULL,
+    arguments TEXT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    result TEXT,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS nexent.human_event_t (
+    event_id SERIAL PRIMARY KEY,
+    run_record_id INTEGER NOT NULL,
+    seq BIGINT NOT NULL,
+    payload JSONB NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
+);
+
+-- Keep raw SQL and ORM updates consistent; callers supply the updating actor.
+DO $create_function$
+BEGIN
+    IF to_regprocedure('nexent.human_interaction_audit_timestamp()') IS NULL THEN
+        CREATE FUNCTION nexent.human_interaction_audit_timestamp()
+        RETURNS TRIGGER LANGUAGE plpgsql AS $function$
+        BEGIN
+            IF TG_OP = 'INSERT' THEN
+                NEW.create_time := COALESCE(NEW.create_time, timezone('UTC', clock_timestamp()));
+            ELSE
+                NEW.create_time := OLD.create_time;
+                NEW.created_by := OLD.created_by;
+            END IF;
+            NEW.update_time := timezone('UTC', clock_timestamp());
+            RETURN NEW;
+        END;
+        $function$;
+    END IF;
+END;
+$create_function$;
+
+DO $create_triggers$
+DECLARE
+    target_table REGCLASS;
+BEGIN
+    FOREACH target_table IN ARRAY ARRAY[
+        'nexent.human_run_t'::regclass,
+        'nexent.human_request_t'::regclass,
+        'nexent.human_execution_t'::regclass,
+        'nexent.human_event_t'::regclass
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+            WHERE tgrelid = target_table AND tgname = 'human_audit_timestamp'
+        ) THEN
+            EXECUTE format(
+                'CREATE TRIGGER human_audit_timestamp BEFORE INSERT OR UPDATE ON %s '
+                'FOR EACH ROW EXECUTE FUNCTION nexent.human_interaction_audit_timestamp()',
+                target_table
+            );
+        END IF;
+    END LOOP;
+END;
+$create_triggers$;
+
+-- Non-unique indexes support public lookup, owner conversation history,
+-- scheduler claims, pending requests, call-slot replay and ordered SSE pagination.
+-- Advisory locks protect creation; the parent row lock protects dependent writes.
+
+CREATE INDEX IF NOT EXISTS human_run_claim_idx ON nexent.human_run_t (status, lock_until, create_time) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_run_conversation_idx ON nexent.human_run_t (tenant_id, user_id, conversation_id, create_time) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_run_public_id_idx ON nexent.human_run_t (run_id);
+COMMENT ON COLUMN nexent.human_run_t.run_record_id IS 'Technical run record identifier';
+COMMENT ON COLUMN nexent.human_run_t.run_id IS 'Public UUID retained by HTTP, checkpoints and event payloads; service enforces uniqueness';
+COMMENT ON COLUMN nexent.human_run_t.tenant_id IS 'Tenant owning this run and its dependent records';
+COMMENT ON COLUMN nexent.human_run_t.user_id IS 'User owning this run within the tenant';
+COMMENT ON COLUMN nexent.human_run_t.conversation_id IS 'Logical conversation_record_t.conversation_id; service validates the active owner';
+COMMENT ON COLUMN nexent.human_run_t.status IS 'Run lifecycle state validated by the human interaction service';
+COMMENT ON COLUMN nexent.human_run_t.request_payload IS 'Fernet encrypted JSON run input and context snapshot; private service-owned payload';
+COMMENT ON COLUMN nexent.human_run_t.checkpoint IS 'Fernet encrypted SDK checkpoint; null until the first durable boundary';
+COMMENT ON COLUMN nexent.human_run_t.catalog_digest IS 'SHA-256 identity of the agent, model and tool catalog';
+COMMENT ON COLUMN nexent.human_run_t.executor_digest IS 'SHA-256 identity of the registered executor implementation';
+COMMENT ON COLUMN nexent.human_run_t.plan IS 'Fernet encrypted SDK plan snapshot; null when no plan exists';
+COMMENT ON COLUMN nexent.human_run_t.plan_version IS 'Monotonic revision of the saved plan';
+COMMENT ON COLUMN nexent.human_run_t.fence IS 'Lease generation rejecting stale worker writes';
+COMMENT ON COLUMN nexent.human_run_t.lock_owner IS 'Scheduler worker identity, bounded to 200 characters';
+COMMENT ON COLUMN nexent.human_run_t.lock_until IS 'UTC lease deadline; null when no worker owns the run';
+COMMENT ON COLUMN nexent.human_run_t.pause_requested IS 'Pause request marker: 0 or 1, validated by the service';
+COMMENT ON COLUMN nexent.human_run_t.event_seq IS '64-bit SSE event counter; not a record identifier, allocated under the run lock';
+COMMENT ON COLUMN nexent.human_run_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.human_run_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.human_run_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.human_run_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.human_run_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+CREATE INDEX IF NOT EXISTS human_request_run_idx ON nexent.human_request_t (run_record_id, status) WHERE delete_flag = 'N';
+COMMENT ON COLUMN nexent.human_request_t.request_record_id IS 'Technical human request record identifier';
+COMMENT ON COLUMN nexent.human_request_t.request_id IS 'Public request UUID; uniqueness is scoped to the owning run by the service';
+COMMENT ON COLUMN nexent.human_request_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
+COMMENT ON COLUMN nexent.human_request_t.kind IS 'CLARIFICATION, ACTION_APPROVAL or USER_STEERING; service validated';
+COMMENT ON COLUMN nexent.human_request_t.status IS 'PENDING, DECIDED, CANCELLED or EXPIRED; service validated';
+COMMENT ON COLUMN nexent.human_request_t.version IS 'Positive request revision used for decision compare-and-set';
+COMMENT ON COLUMN nexent.human_request_t.slot IS 'SDK action slot or composer guidance identity within the run';
+COMMENT ON COLUMN nexent.human_request_t.digest IS 'SHA-256 action identity required when submitting a decision';
+COMMENT ON COLUMN nexent.human_request_t.payload IS 'Fernet encrypted clarification, approval or steering payload, validated by the service';
+COMMENT ON COLUMN nexent.human_request_t.decision IS 'Fernet encrypted validated DecisionCommand or composer decision; null before a decision';
+COMMENT ON COLUMN nexent.human_request_t.idempotency_key IS 'Decision retry key scoped to this request, or composer message identity scoped to the run';
+COMMENT ON COLUMN nexent.human_request_t.decision_digest IS 'SHA-256 of the accepted decision, detecting conflicting retries';
+COMMENT ON COLUMN nexent.human_request_t.expires_at IS 'UTC deadline after which a pending decision cannot authorize execution';
+COMMENT ON COLUMN nexent.human_request_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.human_request_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.human_request_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.human_request_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.human_request_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+CREATE INDEX IF NOT EXISTS human_execution_slot_idx ON nexent.human_execution_t (run_record_id, slot) WHERE delete_flag = 'N';
+COMMENT ON COLUMN nexent.human_execution_t.execution_id IS 'Technical execution receipt identifier';
+COMMENT ON COLUMN nexent.human_execution_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
+COMMENT ON COLUMN nexent.human_execution_t.slot IS 'Stable SDK call slot; one active receipt per run and slot is enforced by the service';
+COMMENT ON COLUMN nexent.human_execution_t.tool IS 'Registered tool name, bounded to 200 characters';
+COMMENT ON COLUMN nexent.human_execution_t.digest IS 'HMAC-SHA-256 of the frozen action and execution context';
+COMMENT ON COLUMN nexent.human_execution_t.arguments IS 'Fernet encrypted frozen tool arguments; variable SDK-owned JSON structure';
+COMMENT ON COLUMN nexent.human_execution_t.status IS 'PREPARED, STARTED, SUCCEEDED, REJECTED or UNKNOWN; service validated';
+COMMENT ON COLUMN nexent.human_execution_t.result IS 'Fernet encrypted result or rejection; null before a conclusive receipt';
+COMMENT ON COLUMN nexent.human_execution_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.human_execution_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.human_execution_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.human_execution_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.human_execution_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+CREATE INDEX IF NOT EXISTS human_event_replay_idx ON nexent.human_event_t (run_record_id, seq) WHERE delete_flag = 'N';
+COMMENT ON COLUMN nexent.human_event_t.event_id IS 'Technical replay event identifier';
+COMMENT ON COLUMN nexent.human_event_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
+COMMENT ON COLUMN nexent.human_event_t.seq IS '64-bit SSE cursor allocated from the owning run event_seq under its row lock';
+COMMENT ON COLUMN nexent.human_event_t.payload IS 'Service-owned event envelope: either chunk_cipher string or type string and content object; no plaintext stream chunks';
+COMMENT ON COLUMN nexent.human_event_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.human_event_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.human_event_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.human_event_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.human_event_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+-- Source migration: v2.5.1_upload_owner_service.sql
+-- Source SHA-256: 759eb21f32c9dd696f723452c504e3fa93e5565a128945435688ac99c3405d3e
+
+-- Scope interrupted-upload recovery to the service that created the upload.
+
+ALTER TABLE nexent.knowledge_file_lifecycle_t
+    ADD COLUMN IF NOT EXISTS upload_owner_service VARCHAR(32);
+
+COMMENT ON COLUMN nexent.knowledge_file_lifecycle_t.upload_owner_service IS
+    'Service responsible for recovering an in-progress upload';
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_file_lifecycle_upload_recovery
+    ON nexent.knowledge_file_lifecycle_t (upload_owner_service, create_time)
+    WHERE delete_flag = 'N' AND status = 'UPLOADING';
+
+-- Source migration: v2.5.2_unified_tag_management.sql
+-- Source SHA-256: 3cecfb180ff2efd54d808f00de5e00e93df1626ffa388d4ea9421e2ebddd5f00
+
+BEGIN;
+
+-- Unified tag management migration for Nexent v2.5.2.
+-- Consolidates all SQL introduced by PR #3809 in its original execution order.
+
+-- -----------------------------------------------------------------------------
+-- Consolidated from v2.5.0_0817_unified_tag_management.sql
+-- -----------------------------------------------------------------------------
+
+SET LOCAL search_path TO nexent, public;
+
+CREATE TABLE IF NOT EXISTS nexent.tag_bucket (
+    bucket_id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL CHECK (btrim(tenant_id) <> ''),
+    bucket_key VARCHAR(100) NOT NULL,
+    bucket_name VARCHAR(255) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) NOT NULL DEFAULT 'N' CHECK (delete_flag IN ('N', 'Y')),
+    CONSTRAINT uq_tag_bucket_tenant_id UNIQUE (tenant_id, bucket_id),
+    CONSTRAINT uq_tag_bucket_tenant_key UNIQUE (tenant_id, bucket_key)
+);
+
+CREATE TABLE IF NOT EXISTS nexent.tag_bucket_resource_type (
+    bucket_resource_type_id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL CHECK (btrim(tenant_id) <> ''),
+    bucket_id BIGINT NOT NULL,
+    resource_type VARCHAR(50) NOT NULL CHECK (
+        resource_type IN ('agent', 'skill', 'tool', 'mcp_service', 'knowledge_base', 'knowledge_document')
+    ),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) NOT NULL DEFAULT 'N' CHECK (delete_flag IN ('N', 'Y')),
+    CONSTRAINT uq_tag_bucket_resource_type_tenant_id UNIQUE (tenant_id, bucket_resource_type_id),
+    CONSTRAINT uq_tag_bucket_resource_type UNIQUE (tenant_id, bucket_id, resource_type),
+    CONSTRAINT fk_tag_bucket_resource_type_bucket
+        FOREIGN KEY (tenant_id, bucket_id)
+        REFERENCES nexent.tag_bucket (tenant_id, bucket_id)
+);
+
+CREATE TABLE IF NOT EXISTS nexent.tag_definition (
+    definition_id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL CHECK (btrim(tenant_id) <> ''),
+    bucket_id BIGINT NOT NULL,
+    definition_key VARCHAR(100) NOT NULL,
+    definition_name VARCHAR(255) NOT NULL,
+    normalized_name TEXT COLLATE "C" GENERATED ALWAYS AS (
+        lower(btrim(definition_name) COLLATE "C")
+    ) STORED,
+    selection_mode VARCHAR(20) NOT NULL CHECK (selection_mode IN ('single_select', 'multi_select')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) NOT NULL DEFAULT 'N' CHECK (delete_flag IN ('N', 'Y')),
+    CONSTRAINT uq_tag_definition_tenant_id UNIQUE (tenant_id, definition_id),
+    CONSTRAINT fk_tag_definition_bucket
+        FOREIGN KEY (tenant_id, bucket_id)
+        REFERENCES nexent.tag_bucket (tenant_id, bucket_id)
+);
+
+CREATE TABLE IF NOT EXISTS nexent.tag_value (
+    value_id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL CHECK (btrim(tenant_id) <> ''),
+    definition_id BIGINT NOT NULL,
+    normalized_value TEXT NOT NULL CHECK (btrim(normalized_value) <> ''),
+    display_value TEXT NOT NULL CHECK (btrim(display_value) <> ''),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) NOT NULL DEFAULT 'N' CHECK (delete_flag IN ('N', 'Y')),
+    CONSTRAINT uq_tag_value_tenant_id_definition UNIQUE (tenant_id, value_id, definition_id),
+    CONSTRAINT fk_tag_value_definition
+        FOREIGN KEY (tenant_id, definition_id)
+        REFERENCES nexent.tag_definition (tenant_id, definition_id)
+);
+
+CREATE TABLE IF NOT EXISTS nexent.resource_tag_assignment (
+    assignment_id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL CHECK (btrim(tenant_id) <> ''),
+    resource_type VARCHAR(50) NOT NULL CHECK (
+        resource_type IN ('agent', 'skill', 'tool', 'mcp_service', 'knowledge_base', 'knowledge_document')
+    ),
+    resource_id TEXT NOT NULL CHECK (btrim(resource_id) <> ''),
+    definition_id BIGINT NOT NULL,
+    value_id BIGINT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) NOT NULL DEFAULT 'N' CHECK (delete_flag IN ('N', 'Y')),
+    CONSTRAINT uq_resource_tag_assignment_tenant_id UNIQUE (tenant_id, assignment_id),
+    CONSTRAINT uq_resource_tag_assignment_resource_value
+        UNIQUE (tenant_id, resource_type, resource_id, value_id),
+    CONSTRAINT fk_resource_tag_assignment_definition
+        FOREIGN KEY (tenant_id, definition_id)
+        REFERENCES nexent.tag_definition (tenant_id, definition_id),
+    CONSTRAINT fk_resource_tag_assignment_value_definition
+        FOREIGN KEY (tenant_id, value_id, definition_id)
+        REFERENCES nexent.tag_value (tenant_id, value_id, definition_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_definition_bucket
+    ON nexent.tag_definition (tenant_id, bucket_id, delete_flag);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tag_definition_active_key
+    ON nexent.tag_definition (tenant_id, bucket_id, definition_key)
+    WHERE delete_flag = 'N';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tag_definition_active_normalized_name
+    ON nexent.tag_definition (tenant_id, bucket_id, normalized_name)
+    WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS idx_tag_value_definition
+    ON nexent.tag_value (tenant_id, definition_id, delete_flag);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tag_value_active_normalized_value
+    ON nexent.tag_value (tenant_id, definition_id, normalized_value)
+    WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS idx_resource_tag_assignment_resource
+    ON nexent.resource_tag_assignment (tenant_id, resource_type, resource_id, delete_flag);
+CREATE INDEX IF NOT EXISTS idx_resource_tag_assignment_definition
+    ON nexent.resource_tag_assignment (tenant_id, definition_id, delete_flag);
+
+CREATE OR REPLACE FUNCTION nexent.provision_unified_tag_management(
+    p_tenant_id VARCHAR,
+    p_actor VARCHAR DEFAULT 'system'
+)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_default_bucket_id BIGINT;
+    v_document_bucket_id BIGINT;
+BEGIN
+    IF p_tenant_id IS NULL OR btrim(p_tenant_id) = '' THEN
+        RAISE EXCEPTION 'Cannot provision unified tags for an empty tenant';
+    END IF;
+
+    INSERT INTO nexent.tag_bucket (
+        tenant_id, bucket_key, bucket_name, status, created_by, updated_by, delete_flag
+    ) VALUES (
+        p_tenant_id, 'default_resource', 'Default Resource', 'active', p_actor, p_actor, 'N'
+    )
+    ON CONFLICT (tenant_id, bucket_key) DO UPDATE
+    SET bucket_name = EXCLUDED.bucket_name,
+        status = 'active',
+        update_time = CURRENT_TIMESTAMP,
+        updated_by = EXCLUDED.updated_by,
+        delete_flag = 'N'
+    RETURNING bucket_id INTO v_default_bucket_id;
+
+    INSERT INTO nexent.tag_bucket (
+        tenant_id, bucket_key, bucket_name, status, created_by, updated_by, delete_flag
+    ) VALUES (
+        p_tenant_id, 'knowledge_content', 'Knowledge Content', 'active', p_actor, p_actor, 'N'
+    )
+    ON CONFLICT (tenant_id, bucket_key) DO UPDATE
+    SET bucket_name = EXCLUDED.bucket_name,
+        status = 'active',
+        update_time = CURRENT_TIMESTAMP,
+        updated_by = EXCLUDED.updated_by,
+        delete_flag = 'N'
+    RETURNING bucket_id INTO v_document_bucket_id;
+
+    INSERT INTO nexent.tag_bucket_resource_type (
+        tenant_id, bucket_id, resource_type, status, created_by, updated_by, delete_flag
+    )
+    SELECT p_tenant_id, v_default_bucket_id, resource_type, 'active', p_actor, p_actor, 'N'
+    FROM (VALUES ('agent'), ('skill'), ('tool'), ('mcp_service'), ('knowledge_base')) AS types(resource_type)
+    ON CONFLICT (tenant_id, bucket_id, resource_type) DO UPDATE
+    SET status = 'active', update_time = CURRENT_TIMESTAMP, updated_by = EXCLUDED.updated_by, delete_flag = 'N';
+
+    INSERT INTO nexent.tag_bucket_resource_type (
+        tenant_id, bucket_id, resource_type, status, created_by, updated_by, delete_flag
+    ) VALUES (
+        p_tenant_id, v_document_bucket_id, 'knowledge_document', 'active', p_actor, p_actor, 'N'
+    )
+    ON CONFLICT (tenant_id, bucket_id, resource_type) DO UPDATE
+    SET status = 'active', update_time = CURRENT_TIMESTAMP, updated_by = EXCLUDED.updated_by, delete_flag = 'N';
+
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION nexent.provision_unified_tag_management_after_user_tenant_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF COALESCE(NEW.delete_flag, 'N') <> 'Y' THEN
+        PERFORM nexent.provision_unified_tag_management(NEW.tenant_id, COALESCE(NEW.created_by, 'system'));
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION nexent.enforce_tag_definition_limit()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_count INTEGER;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended('tag-definition:' || NEW.tenant_id || ':' || NEW.bucket_id, 0));
+    IF NEW.delete_flag <> 'Y' THEN
+        SELECT count(*) INTO v_count
+        FROM nexent.tag_definition
+        WHERE tenant_id = NEW.tenant_id
+          AND bucket_id = NEW.bucket_id
+          AND delete_flag <> 'Y'
+          AND definition_id <> COALESCE(NEW.definition_id, -1);
+        IF v_count >= 100 THEN
+            RAISE EXCEPTION 'Tag definition limit exceeded for tenant %, bucket % (maximum 100)',
+                NEW.tenant_id, NEW.bucket_id;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION nexent.enforce_tag_value_limit()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_count INTEGER;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended('tag-value:' || NEW.tenant_id || ':' || NEW.definition_id, 0));
+    IF NEW.delete_flag <> 'Y' THEN
+        SELECT count(*) INTO v_count
+        FROM nexent.tag_value
+        WHERE tenant_id = NEW.tenant_id
+          AND definition_id = NEW.definition_id
+          AND delete_flag <> 'Y'
+          AND value_id <> COALESCE(NEW.value_id, -1);
+        IF v_count >= 1000 THEN
+            RAISE EXCEPTION 'Tag value limit exceeded for tenant %, definition % (maximum 1000)',
+                NEW.tenant_id, NEW.definition_id;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION nexent.enforce_resource_tag_assignment_rules()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_count INTEGER;
+    v_selection_mode VARCHAR(20);
+    v_bucket_id BIGINT;
+    v_validate_active_reference BOOLEAN;
+BEGIN
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended('tag-assignment:' || NEW.tenant_id || ':' || NEW.resource_type || ':' || NEW.resource_id, 0)
+    );
+
+    IF TG_OP = 'INSERT' THEN
+        v_validate_active_reference := TRUE;
+    ELSIF NEW.delete_flag <> 'Y' THEN
+        v_validate_active_reference := OLD.delete_flag = 'Y'
+                OR OLD.tenant_id IS DISTINCT FROM NEW.tenant_id
+                OR OLD.resource_type IS DISTINCT FROM NEW.resource_type
+                OR OLD.resource_id IS DISTINCT FROM NEW.resource_id
+                OR OLD.definition_id IS DISTINCT FROM NEW.definition_id
+                OR OLD.value_id IS DISTINCT FROM NEW.value_id;
+    ELSE
+        v_validate_active_reference := FALSE;
+    END IF;
+
+    IF TG_OP = 'INSERT' OR NEW.delete_flag <> 'Y' THEN
+        SELECT definition.selection_mode, definition.bucket_id
+        INTO v_selection_mode, v_bucket_id
+        FROM nexent.tag_definition AS definition
+        JOIN nexent.tag_value AS value
+          ON value.tenant_id = definition.tenant_id
+         AND value.definition_id = definition.definition_id
+         AND value.value_id = NEW.value_id
+        WHERE definition.tenant_id = NEW.tenant_id
+          AND definition.definition_id = NEW.definition_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Assignment references a mismatched definition/value for tenant %', NEW.tenant_id;
+        END IF;
+
+        IF v_validate_active_reference THEN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM nexent.tag_definition AS definition
+                JOIN nexent.tag_value AS value
+                  ON value.tenant_id = definition.tenant_id
+                 AND value.definition_id = definition.definition_id
+                 AND value.value_id = NEW.value_id
+                 AND value.status = 'active'
+                 AND value.delete_flag = 'N'
+                WHERE definition.tenant_id = NEW.tenant_id
+                  AND definition.definition_id = NEW.definition_id
+                  AND definition.status = 'active'
+                  AND definition.delete_flag = 'N'
+            ) THEN
+                RAISE EXCEPTION 'New assignment requires an active definition/value for tenant %', NEW.tenant_id;
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1
+                FROM nexent.tag_bucket_resource_type
+                WHERE tenant_id = NEW.tenant_id
+                  AND bucket_id = v_bucket_id
+                  AND resource_type = NEW.resource_type
+                  AND status = 'active'
+                  AND delete_flag = 'N'
+            ) THEN
+                RAISE EXCEPTION 'Resource type % requires an active binding to bucket % for tenant %',
+                    NEW.resource_type, v_bucket_id, NEW.tenant_id;
+            END IF;
+        END IF;
+    END IF;
+
+    IF NEW.delete_flag <> 'Y' THEN
+        SELECT count(*) INTO v_count
+        FROM nexent.resource_tag_assignment
+        WHERE tenant_id = NEW.tenant_id
+          AND resource_type = NEW.resource_type
+          AND resource_id = NEW.resource_id
+          AND delete_flag <> 'Y'
+          AND assignment_id <> COALESCE(NEW.assignment_id, -1);
+        IF v_count >= 100 THEN
+            RAISE EXCEPTION 'Tag assignment limit exceeded for tenant %, resource %/% (maximum 100)',
+                NEW.tenant_id, NEW.resource_type, NEW.resource_id;
+        END IF;
+
+        IF v_selection_mode = 'single_select' AND EXISTS (
+            SELECT 1
+            FROM nexent.resource_tag_assignment
+            WHERE tenant_id = NEW.tenant_id
+              AND resource_type = NEW.resource_type
+              AND resource_id = NEW.resource_id
+              AND definition_id = NEW.definition_id
+              AND delete_flag <> 'Y'
+              AND assignment_id <> COALESCE(NEW.assignment_id, -1)
+        ) THEN
+            RAISE EXCEPTION 'single_select definition % already has a value for tenant %, resource %/%',
+                NEW.definition_id, NEW.tenant_id, NEW.resource_type, NEW.resource_id;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS enforce_tag_definition_limit_trigger ON nexent.tag_definition;
+DROP TRIGGER IF EXISTS enforce_tag_value_limit_trigger ON nexent.tag_value;
+DROP TRIGGER IF EXISTS enforce_resource_tag_assignment_rules_trigger ON nexent.resource_tag_assignment;
+DROP TRIGGER IF EXISTS provision_unified_tag_management_trigger ON nexent.user_tenant_t;
+
+CREATE TEMP TABLE utm_legacy_source (
+    source_name TEXT NOT NULL,
+    source_row_id TEXT NOT NULL,
+    tenant_id VARCHAR(100),
+    resource_type VARCHAR(50) NOT NULL,
+    resource_id TEXT,
+    payload JSONB NOT NULL,
+    payload_kind VARCHAR(10) NOT NULL,
+    canonical_match_count INTEGER NOT NULL,
+    legacy_delete_flag VARCHAR(1) NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO utm_legacy_source
+SELECT 'tool.labels', tool.tool_id::TEXT, tool.author, 'tool', tool.tool_id::TEXT,
+       tool.labels, 'json', 1, COALESCE(tool.delete_flag, 'N')
+FROM nexent.ag_tool_info_t AS tool
+WHERE tool.labels IS NOT NULL AND tool.labels <> '[]'::JSONB;
+
+INSERT INTO utm_legacy_source
+SELECT 'skill.skill_tags', skill.skill_id::TEXT, skill.tenant_id, 'skill', skill.skill_id::TEXT,
+       skill.skill_tags::JSONB, 'json', 1, COALESCE(skill.delete_flag, 'N')
+FROM nexent.ag_skill_info_t AS skill
+WHERE skill.skill_tags IS NOT NULL AND skill.skill_tags::JSONB <> '[]'::JSONB;
+
+INSERT INTO utm_legacy_source
+SELECT 'agent_repository.tags', repository.agent_repository_id::TEXT,
+       repository.publisher_tenant_id, 'agent', repository.agent_id::TEXT,
+       to_jsonb(repository.tags), 'text_array',
+       CASE WHEN EXISTS (
+           SELECT 1 FROM nexent.ag_tenant_agent_t AS agent
+           WHERE agent.agent_id = repository.agent_id
+             AND agent.tenant_id = repository.publisher_tenant_id
+       ) THEN 1 ELSE 0 END,
+       COALESCE(repository.delete_flag, 'N')
+FROM nexent.ag_agent_repository_t AS repository
+WHERE COALESCE(cardinality(repository.tags), 0) > 0;
+
+INSERT INTO utm_legacy_source
+SELECT 'skill_repository.tags', repository.skill_repository_id::TEXT,
+       repository.publisher_tenant_id, 'skill', repository.skill_id::TEXT,
+       to_jsonb(repository.tags), 'text_array',
+       (SELECT count(*) FROM nexent.ag_skill_info_t AS skill
+        WHERE skill.skill_id = repository.skill_id
+          AND skill.tenant_id = repository.publisher_tenant_id),
+       COALESCE(repository.delete_flag, 'N')
+FROM nexent.ag_skill_repository_t AS repository
+WHERE COALESCE(cardinality(repository.tags), 0) > 0;
+
+INSERT INTO utm_legacy_source
+SELECT 'mcp_record.tags', mcp.mcp_id::TEXT, mcp.tenant_id, 'mcp_service', mcp.mcp_id::TEXT,
+       to_jsonb(mcp.tags), 'text_array', 1, COALESCE(mcp.delete_flag, 'N')
+FROM nexent.mcp_record_t AS mcp
+WHERE COALESCE(cardinality(mcp.tags), 0) > 0;
+
+INSERT INTO utm_legacy_source
+SELECT 'mcp_community.tags', community.community_id::TEXT, community.tenant_id,
+       'mcp_service', NULL::TEXT, to_jsonb(community.tags), 'text_array', 0,
+       COALESCE(community.delete_flag, 'N')
+FROM nexent.mcp_community_record_t AS community
+WHERE COALESCE(cardinality(community.tags), 0) > 0;
+
+INSERT INTO utm_legacy_source
+SELECT 'mcp_market.tags', market.market_id::TEXT, market.tenant_id,
+       'mcp_service', market.source_mcp_id::TEXT, to_jsonb(market.tags), 'text_array',
+       (SELECT count(*) FROM nexent.mcp_record_t AS mcp
+        WHERE mcp.mcp_id = market.source_mcp_id
+          AND mcp.tenant_id = market.tenant_id),
+       COALESCE(market.delete_flag, 'N')
+FROM nexent.mcp_market_record_t AS market
+WHERE COALESCE(cardinality(market.tags), 0) > 0;
+
+CREATE TEMP TABLE utm_conflict (
+    source_name TEXT NOT NULL,
+    source_row_id TEXT,
+    tenant_id VARCHAR(100),
+    resource TEXT,
+    reason TEXT NOT NULL,
+    conflict_count BIGINT NOT NULL DEFAULT 1,
+    sample JSONB
+) ON COMMIT DROP;
+
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, sample)
+SELECT source_name, source_row_id, tenant_id, resource_type || '/' || COALESCE(resource_id, '?'),
+       'null_or_empty_tenant', to_jsonb(source)
+FROM utm_legacy_source AS source
+WHERE (tenant_id IS NULL OR btrim(tenant_id) = '')
+  AND source_name NOT IN ('skill.skill_tags', 'mcp_community.tags');
+
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, sample)
+SELECT source_name, source_row_id, tenant_id, resource_type || '/' || COALESCE(resource_id, '?'),
+       'json_is_not_an_array', payload
+FROM utm_legacy_source
+WHERE payload_kind = 'json' AND jsonb_typeof(payload) NOT IN ('array', 'null');
+
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
+SELECT source.source_name, source.source_row_id, source.tenant_id,
+       source.resource_type || '/' || COALESCE(source.resource_id, '?'),
+       'json_array_contains_non_string', count(*), jsonb_agg(element.value)
+FROM utm_legacy_source AS source
+CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(source.payload) = 'array' THEN source.payload ELSE '[]'::JSONB END
+) AS element(value)
+WHERE source.payload_kind = 'json' AND jsonb_typeof(element.value) <> 'string'
+GROUP BY source.source_name, source.source_row_id, source.tenant_id,
+         source.resource_type, source.resource_id;
+
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
+SELECT source_name, source_row_id, tenant_id,
+       resource_type || '/' || COALESCE(resource_id, '?'),
+       CASE WHEN source_name = 'mcp_community.tags'
+            THEN 'community_canonical_source_unprovable'
+            ELSE 'canonical_source_missing_or_tenant_mismatch' END,
+       canonical_match_count, to_jsonb(source)
+FROM utm_legacy_source AS source
+WHERE canonical_match_count = 0
+  AND source_name NOT IN ('agent_repository.tags', 'mcp_community.tags');
+
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
+SELECT source_name, source_row_id, tenant_id,
+       resource_type || '/' || COALESCE(resource_id, '?'),
+       'canonical_source_ambiguous', canonical_match_count, to_jsonb(source)
+FROM utm_legacy_source AS source
+WHERE canonical_match_count > 1;
+
+CREATE TEMP TABLE utm_normalized_source ON COMMIT DROP AS
+SELECT source.source_name,
+       source.source_row_id,
+       source.tenant_id,
+       source.resource_type,
+       source.resource_id,
+       lower(btrim(element.value #>> '{}') COLLATE "C") AS normalized_value,
+       btrim(element.value #>> '{}') AS display_value,
+       source.legacy_delete_flag
+FROM utm_legacy_source AS source
+CROSS JOIN LATERAL jsonb_array_elements(
+    CASE WHEN jsonb_typeof(source.payload) = 'array' THEN source.payload ELSE '[]'::JSONB END
+) AS element(value)
+WHERE jsonb_typeof(element.value) = 'string'
+  AND NULLIF(btrim(element.value #>> '{}'), '') IS NOT NULL
+  AND source.tenant_id IS NOT NULL
+  AND btrim(source.tenant_id) <> ''
+  AND source.resource_id IS NOT NULL
+  AND source.canonical_match_count = 1;
+
+SELECT nexent.provision_unified_tag_management(tenant_id, 'migration:v2.5.0')
+FROM (
+    SELECT DISTINCT tenant_id
+    FROM nexent.user_tenant_t
+    WHERE tenant_id IS NOT NULL
+      AND btrim(tenant_id) <> ''
+      AND COALESCE(delete_flag, 'N') <> 'Y'
+    -- Historical resources can outlive every user-to-tenant membership. Keep
+    -- their tags isolated under the recorded tenant instead of discarding them.
+    UNION
+    SELECT DISTINCT tenant_id
+    FROM utm_normalized_source
+) AS tenants;
+
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
+SELECT 'Keywords', definition.definition_id::TEXT, definition.tenant_id,
+       'tag_definition/' || definition.definition_id,
+       'keywords_definition_mismatch', 1,
+       jsonb_build_object(
+           'definition_key', definition.definition_key,
+           'definition_name', definition.definition_name,
+           'selection_mode', definition.selection_mode
+       )
+FROM nexent.tag_definition AS definition
+JOIN nexent.tag_bucket AS bucket
+  ON bucket.tenant_id = definition.tenant_id
+ AND bucket.bucket_id = definition.bucket_id
+ AND bucket.bucket_key = 'default_resource'
+WHERE definition.delete_flag = 'N'
+  AND (
+      (definition.definition_key = 'keywords'
+       AND (definition.normalized_name <> 'keywords' OR definition.selection_mode <> 'multi_select'))
+      OR
+      (definition.normalized_name = 'keywords'
+       AND (definition.definition_key <> 'keywords' OR definition.selection_mode <> 'multi_select'))
+  );
+
+WITH legacy_tenants AS (
+    SELECT DISTINCT tenant_id FROM utm_normalized_source
+), projected AS (
+    SELECT bucket.tenant_id, bucket.bucket_id,
+           (SELECT count(*)
+            FROM nexent.tag_definition AS definition
+            WHERE definition.tenant_id = bucket.tenant_id
+              AND definition.bucket_id = bucket.bucket_id
+              AND definition.delete_flag = 'N')
+           +
+           CASE WHEN EXISTS (
+               SELECT 1 FROM nexent.tag_definition AS definition
+               WHERE definition.tenant_id = bucket.tenant_id
+                 AND definition.bucket_id = bucket.bucket_id
+                 AND definition.definition_key = 'keywords'
+                 AND definition.delete_flag = 'N'
+           ) THEN 0 ELSE 1 END AS projected_count
+    FROM legacy_tenants AS tenant
+    JOIN nexent.tag_bucket AS bucket
+      ON bucket.tenant_id = tenant.tenant_id
+     AND bucket.bucket_key = 'default_resource'
+)
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
+SELECT 'tag_definition', bucket_id::TEXT, tenant_id, 'default_resource',
+       'definition_capacity_exceeded', projected_count, jsonb_build_object('maximum', 100)
+FROM projected
+WHERE projected_count > 100;
+
+WITH legacy_tenants AS (
+    SELECT DISTINCT tenant_id FROM utm_normalized_source
+), projected AS (
+    SELECT tenant.tenant_id,
+           definition.definition_id,
+           COALESCE((
+               SELECT count(*)
+               FROM nexent.tag_value AS value
+               WHERE value.tenant_id = tenant.tenant_id
+                 AND value.definition_id = definition.definition_id
+                 AND value.delete_flag = 'N'
+           ), 0)
+           +
+           (SELECT count(DISTINCT source.normalized_value)
+            FROM utm_normalized_source AS source
+            WHERE source.tenant_id = tenant.tenant_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM nexent.tag_value AS existing
+                  WHERE existing.tenant_id = tenant.tenant_id
+                    AND existing.definition_id = definition.definition_id
+                    AND existing.normalized_value = source.normalized_value
+                    AND existing.delete_flag = 'N'
+              )) AS projected_count
+    FROM legacy_tenants AS tenant
+    JOIN nexent.tag_bucket AS bucket
+      ON bucket.tenant_id = tenant.tenant_id
+     AND bucket.bucket_key = 'default_resource'
+    LEFT JOIN nexent.tag_definition AS definition
+      ON definition.tenant_id = bucket.tenant_id
+     AND definition.bucket_id = bucket.bucket_id
+     AND definition.definition_key = 'keywords'
+     AND definition.delete_flag = 'N'
+)
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
+SELECT 'Keywords', COALESCE(definition_id::TEXT, 'projected'), tenant_id,
+       'tag_definition/' || COALESCE(definition_id::TEXT, 'projected'),
+       'value_capacity_exceeded', projected_count, jsonb_build_object('maximum', 1000)
+FROM projected
+WHERE projected_count > 1000;
+
+WITH resources AS (
+    SELECT DISTINCT tenant_id, resource_type, resource_id
+    FROM utm_normalized_source
+    WHERE legacy_delete_flag <> 'Y'
+), projected AS (
+    SELECT resource.tenant_id, resource.resource_type, resource.resource_id,
+           (SELECT count(*)
+            FROM nexent.resource_tag_assignment AS assignment
+            WHERE assignment.tenant_id = resource.tenant_id
+              AND assignment.resource_type = resource.resource_type
+              AND assignment.resource_id = resource.resource_id
+              AND assignment.delete_flag <> 'Y')
+           +
+           (SELECT count(DISTINCT source.normalized_value)
+            FROM utm_normalized_source AS source
+            WHERE source.tenant_id = resource.tenant_id
+              AND source.resource_type = resource.resource_type
+              AND source.resource_id = resource.resource_id
+              AND source.legacy_delete_flag <> 'Y'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM nexent.resource_tag_assignment AS assignment
+                  JOIN nexent.tag_definition AS definition
+                    ON definition.tenant_id = assignment.tenant_id
+                   AND definition.definition_id = assignment.definition_id
+                   AND definition.definition_key = 'keywords'
+                   AND definition.delete_flag = 'N'
+                  JOIN nexent.tag_value AS value
+                    ON value.tenant_id = assignment.tenant_id
+                   AND value.value_id = assignment.value_id
+                   AND value.definition_id = assignment.definition_id
+                  WHERE assignment.tenant_id = source.tenant_id
+                    AND assignment.resource_type = source.resource_type
+                    AND assignment.resource_id = source.resource_id
+                    AND value.normalized_value = source.normalized_value
+                    AND assignment.delete_flag <> 'Y'
+              )) AS projected_count
+    FROM resources AS resource
+)
+INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
+SELECT 'resource_assignment', resource_id, tenant_id,
+       resource_type || '/' || resource_id,
+       'assignment_capacity_exceeded', projected_count, jsonb_build_object('maximum', 100)
+FROM projected
+WHERE projected_count > 100;
+
+DO $$
+DECLARE
+    v_conflict_count BIGINT;
+    v_sample JSONB;
+BEGIN
+    SELECT count(*) INTO v_conflict_count FROM utm_conflict;
+    IF v_conflict_count > 0 THEN
+        SELECT jsonb_agg(to_jsonb(conflict)) INTO v_sample
+        FROM (SELECT * FROM utm_conflict ORDER BY source_name, source_row_id LIMIT 20) AS conflict;
+        RAISE EXCEPTION 'Unified tag migration blocked by % conflict(s): %', v_conflict_count, v_sample;
+    END IF;
+END;
+$$;
+
+CREATE TRIGGER enforce_tag_definition_limit_trigger
+BEFORE INSERT OR UPDATE ON nexent.tag_definition
+FOR EACH ROW EXECUTE FUNCTION nexent.enforce_tag_definition_limit();
+
+CREATE TRIGGER enforce_tag_value_limit_trigger
+BEFORE INSERT OR UPDATE ON nexent.tag_value
+FOR EACH ROW EXECUTE FUNCTION nexent.enforce_tag_value_limit();
+
+CREATE TRIGGER enforce_resource_tag_assignment_rules_trigger
+BEFORE INSERT OR UPDATE ON nexent.resource_tag_assignment
+FOR EACH ROW EXECUTE FUNCTION nexent.enforce_resource_tag_assignment_rules();
+
+CREATE TRIGGER provision_unified_tag_management_trigger
+AFTER INSERT ON nexent.user_tenant_t
+FOR EACH ROW EXECUTE FUNCTION nexent.provision_unified_tag_management_after_user_tenant_insert();
+
+INSERT INTO nexent.tag_definition (
+    tenant_id, bucket_id, definition_key, definition_name, selection_mode, sort_order,
+    status, created_by, updated_by, delete_flag
+)
+SELECT DISTINCT source.tenant_id, bucket.bucket_id,
+       'keywords', 'Keywords', 'multi_select', 0,
+       'active', 'migration:v2.5.0', 'migration:v2.5.0', 'N'
+FROM utm_normalized_source AS source
+JOIN nexent.tag_bucket AS bucket
+  ON bucket.tenant_id = source.tenant_id
+ AND bucket.bucket_key = 'default_resource'
+ON CONFLICT (tenant_id, bucket_id, definition_key) WHERE delete_flag = 'N' DO UPDATE
+SET definition_name = 'Keywords',
+    selection_mode = 'multi_select',
+    status = 'active',
+    sort_order = EXCLUDED.sort_order,
+    update_time = CURRENT_TIMESTAMP,
+    updated_by = EXCLUDED.updated_by;
+
+WITH aggregated_values AS (
+    SELECT source.tenant_id, definition.definition_id, source.normalized_value,
+           min(source.display_value COLLATE "C") AS display_value
+    FROM utm_normalized_source AS source
+    JOIN nexent.tag_bucket AS bucket
+      ON bucket.tenant_id = source.tenant_id
+     AND bucket.bucket_key = 'default_resource'
+    JOIN nexent.tag_definition AS definition
+      ON definition.tenant_id = bucket.tenant_id
+     AND definition.bucket_id = bucket.bucket_id
+     AND definition.definition_key = 'keywords'
+     AND definition.delete_flag = 'N'
+    GROUP BY source.tenant_id, definition.definition_id, source.normalized_value
+)
+INSERT INTO nexent.tag_value (
+    tenant_id, definition_id, normalized_value, display_value, sort_order,
+    status, created_by, updated_by, delete_flag
+)
+SELECT tenant_id, definition_id, normalized_value, display_value, 0,
+       'active', 'migration:v2.5.0', 'migration:v2.5.0', 'N'
+FROM aggregated_values
+ON CONFLICT (tenant_id, definition_id, normalized_value) WHERE delete_flag = 'N' DO UPDATE
+SET display_value = EXCLUDED.display_value,
+    status = 'active',
+    sort_order = EXCLUDED.sort_order,
+    update_time = CURRENT_TIMESTAMP,
+    updated_by = EXCLUDED.updated_by;
+
+CREATE TEMP TABLE utm_projected_assignment ON COMMIT DROP AS
+WITH projected_assignments AS (
+    SELECT source.tenant_id, source.resource_type, source.resource_id,
+           definition.definition_id, value.value_id,
+           CASE WHEN bool_or(source.legacy_delete_flag <> 'Y') THEN 'N' ELSE 'Y' END AS delete_flag
+    FROM utm_normalized_source AS source
+    JOIN nexent.tag_bucket AS bucket
+      ON bucket.tenant_id = source.tenant_id
+     AND bucket.bucket_key = 'default_resource'
+    JOIN nexent.tag_definition AS definition
+      ON definition.tenant_id = bucket.tenant_id
+     AND definition.bucket_id = bucket.bucket_id
+     AND definition.definition_key = 'keywords'
+    JOIN nexent.tag_value AS value
+      ON value.tenant_id = definition.tenant_id
+     AND value.definition_id = definition.definition_id
+     AND value.normalized_value = source.normalized_value
+    GROUP BY source.tenant_id, source.resource_type, source.resource_id,
+             definition.definition_id, value.value_id
+)
+SELECT * FROM projected_assignments;
+
+-- Assignment capacity is validated above. The validation trigger acquires one
+-- advisory lock per inserted row, which exhausts max_locks_per_transaction on
+-- large migration datasets. Disable it only for this migration transaction and
+-- restore it before commit; the complete migration remains all-or-nothing.
+ALTER TABLE nexent.resource_tag_assignment
+    DISABLE TRIGGER enforce_resource_tag_assignment_rules_trigger;
+
+INSERT INTO nexent.resource_tag_assignment (
+    tenant_id, resource_type, resource_id, definition_id, value_id,
+    status, created_by, updated_by, delete_flag
+)
+SELECT tenant_id, resource_type, resource_id, definition_id, value_id,
+       'active', 'migration:v2.5.0', 'migration:v2.5.0', delete_flag
+FROM utm_projected_assignment
+ON CONFLICT (tenant_id, resource_type, resource_id, value_id) DO UPDATE
+SET status = CASE
+        WHEN nexent.resource_tag_assignment.status = 'active' THEN 'active'
+        ELSE EXCLUDED.status
+    END,
+    update_time = CURRENT_TIMESTAMP,
+    updated_by = EXCLUDED.updated_by,
+    delete_flag = CASE
+        WHEN nexent.resource_tag_assignment.delete_flag = 'N'
+             OR EXCLUDED.delete_flag = 'N' THEN 'N'
+        ELSE 'Y'
+    END;
+
+ALTER TABLE nexent.resource_tag_assignment
+    ENABLE TRIGGER enforce_resource_tag_assignment_rules_trigger;
+
+-- -----------------------------------------------------------------------------
+-- Consolidated from v2.5.1_0817_tag_library_permissions.sql
+-- -----------------------------------------------------------------------------
+SET LOCAL search_path TO nexent, public;
+
+-- tag-library-permission-seed:start
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM nexent.role_permission_t
+        WHERE permission_category = 'RESOURCE'
+          AND permission_type = 'TAG_LIBRARY'
+          AND permission_subtype = 'MANAGE'
+          AND user_role NOT IN ('SU', 'ADMIN', 'SPEED', 'ASSET_OWNER')
+    ) THEN
+        RAISE EXCEPTION 'TAG_LIBRARY/MANAGE is assigned to a role outside the approved set';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM nexent.role_permission_t
+        WHERE permission_category = 'RESOURCE'
+          AND permission_type = 'TAG_LIBRARY'
+          AND permission_subtype = 'MANAGE'
+        GROUP BY user_role
+        HAVING count(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'TAG_LIBRARY/MANAGE contains duplicate role grants';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM nexent.role_permission_t AS existing
+        JOIN (
+            VALUES
+                (41, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+                (92, 'ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+                (229, 'SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+                (230, 'ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')
+        ) AS required_grants(
+            role_permission_id,
+            user_role,
+            permission_category,
+            permission_type,
+            permission_subtype
+        ) ON existing.role_permission_id = required_grants.role_permission_id
+        WHERE existing.user_role IS DISTINCT FROM required_grants.user_role
+           OR existing.permission_category IS DISTINCT FROM required_grants.permission_category
+           OR existing.permission_type IS DISTINCT FROM required_grants.permission_type
+           OR existing.permission_subtype IS DISTINCT FROM required_grants.permission_subtype
+    ) THEN
+        RAISE EXCEPTION 'Unified tag migration blocked: tag_library_permission_id_conflict; a reserved permission ID is already in use';
+    END IF;
+END;
+$$;
+
+WITH required_grants (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+) AS (
+    VALUES
+        (41, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (92, 'ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (229, 'SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (230, 'ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')
+)
+UPDATE nexent.role_permission_t AS existing
+SET role_permission_id = required_grants.role_permission_id
+FROM required_grants
+WHERE existing.user_role = required_grants.user_role
+  AND existing.permission_category = required_grants.permission_category
+  AND existing.permission_type = required_grants.permission_type
+  AND existing.permission_subtype = required_grants.permission_subtype
+  AND existing.role_permission_id <> required_grants.role_permission_id;
+
+WITH required_grants (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+) AS (
+    VALUES
+        (41, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (92, 'ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (229, 'SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (230, 'ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')
+)
+INSERT INTO nexent.role_permission_t (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+)
+SELECT
+    required_grants.role_permission_id,
+    required_grants.user_role,
+    required_grants.permission_category,
+    required_grants.permission_type,
+    required_grants.permission_subtype
+FROM required_grants
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM nexent.role_permission_t AS existing
+    WHERE existing.user_role = required_grants.user_role
+      AND existing.permission_category = required_grants.permission_category
+      AND existing.permission_type = required_grants.permission_type
+      AND existing.permission_subtype = required_grants.permission_subtype
+);
+
+-- Explicit primary keys do not advance a SERIAL sequence. Synchronize it after
+-- inserting and normalizing the grants so later default IDs cannot collide.
+SELECT setval(
+    pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id'),
+    COALESCE(MAX(role_permission_id), 1),
+    MAX(role_permission_id) IS NOT NULL
+)
+FROM nexent.role_permission_t;
+-- tag-library-permission-seed:end
+
+-- -----------------------------------------------------------------------------
+-- Consolidated from v2.5.2_0818_document_tag_projection.sql
+-- -----------------------------------------------------------------------------
+-- Document tag retrieval projection ledger.
+--
+-- Canonical knowledge_document assignments live in resource_tag_assignment and
+-- must never be rolled back when a retrieval provider rejects or delays a
+-- projection. This table tracks the provider-facing projection state
+-- (pending/synced/failed/unsupported), a monotonic version, the exact payload
+-- snapshot keyed by stable definition/value ids, and retry metadata so
+-- retrieval filtering never claims success before the provider confirmed it.
+
+CREATE TABLE IF NOT EXISTS nexent.document_tag_projection (
+    projection_id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL CHECK (btrim(tenant_id) <> ''),
+    provider VARCHAR(20) NOT NULL CHECK (provider IN ('local', 'aidp')),
+    knowledge_base_id VARCHAR(255) NOT NULL CHECK (btrim(knowledge_base_id) <> ''),
+    provider_document_id VARCHAR(512) NOT NULL CHECK (btrim(provider_document_id) <> ''),
+    resource_id TEXT NOT NULL CHECK (btrim(resource_id) <> ''),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'synced', 'failed', 'unsupported')),
+    version BIGINT NOT NULL DEFAULT 0,
+    payload JSONB NOT NULL DEFAULT '[]'::JSONB,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    last_attempt_at TIMESTAMP WITH TIME ZONE,
+    next_attempt_at TIMESTAMP WITH TIME ZONE,
+    create_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    CONSTRAINT uq_document_tag_projection_identity
+        UNIQUE (tenant_id, provider, knowledge_base_id, provider_document_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_tag_projection_tenant_status
+    ON nexent.document_tag_projection (tenant_id, status, next_attempt_at);
+
+CREATE INDEX IF NOT EXISTS idx_document_tag_projection_kb
+    ON nexent.document_tag_projection (tenant_id, provider, knowledge_base_id);
+
+CREATE INDEX IF NOT EXISTS idx_document_tag_projection_resource
+    ON nexent.document_tag_projection (tenant_id, resource_id);
+
+-- -----------------------------------------------------------------------------
+-- Consolidated from v2.5.3_0819_agent_category_preset_tags.sql
+-- -----------------------------------------------------------------------------
+
+SET LOCAL search_path TO nexent, public;
+
+-- Seed an "Agent Category" definition in every tenant's default_resource tag
+-- library and populate it with the 20 preset tags previously hardcoded in the
+-- Agent repository publish flow (frontend const/agentRepository.ts). Stable keys
+-- are stored as normalized_value/display_value so the frontend can still resolve
+-- localized labels via i18n while marketplace persistence stays locale-stable.
+-- Idempotent: safe to rerun; existing values are kept active and re-ordered.
+
+INSERT INTO nexent.tag_definition (
+    tenant_id, bucket_id, definition_key, definition_name, selection_mode,
+    sort_order, status, created_by, updated_by, delete_flag
+)
+SELECT bucket.tenant_id, bucket.bucket_id,
+       'agent_category', 'Agent Category', 'multi_select', 1,
+       'active', 'migration:v2.5.3', 'migration:v2.5.3', 'N'
+FROM nexent.tag_bucket AS bucket
+WHERE bucket.bucket_key = 'default_resource'
+  AND bucket.delete_flag = 'N'
+ON CONFLICT (tenant_id, bucket_id, definition_key) WHERE delete_flag = 'N' DO UPDATE
+SET definition_name = 'Agent Category',
+    selection_mode = 'multi_select',
+    status = 'active',
+    sort_order = EXCLUDED.sort_order,
+    update_time = CURRENT_TIMESTAMP,
+    updated_by = EXCLUDED.updated_by;
+
+INSERT INTO nexent.tag_value (
+    tenant_id, definition_id, normalized_value, display_value, sort_order,
+    status, created_by, updated_by, delete_flag
+)
+SELECT bucket.tenant_id, definition.definition_id, preset.normalized_value,
+       preset.display_value, preset.sort_order,
+       'active', 'migration:v2.5.3', 'migration:v2.5.3', 'N'
+FROM nexent.tag_bucket AS bucket
+JOIN nexent.tag_definition AS definition
+  ON definition.tenant_id = bucket.tenant_id
+ AND definition.bucket_id = bucket.bucket_id
+ AND definition.definition_key = 'agent_category'
+ AND definition.delete_flag = 'N'
+CROSS JOIN (VALUES
+        ('marketing', 'marketing', 0),
+        ('copywriting', 'copywriting', 1),
+        ('content_creation', 'content_creation', 2),
+        ('code_review', 'code_review', 3),
+        ('quality', 'quality', 4),
+        ('devops', 'devops', 5),
+        ('data', 'data', 6),
+        ('visualization', 'visualization', 7),
+        ('bi', 'bi', 8),
+        ('customer_service', 'customer_service', 9),
+        ('ticket', 'ticket', 10),
+        ('automation', 'automation', 11),
+        ('meeting', 'meeting', 12),
+        ('minutes', 'minutes', 13),
+        ('productivity', 'productivity', 14),
+        ('design', 'design', 15),
+        ('color_scheme', 'color_scheme', 16),
+        ('inspiration', 'inspiration', 17),
+        ('spreadsheet', 'spreadsheet', 18),
+        ('office', 'office', 19)
+) AS preset(normalized_value, display_value, sort_order)
+WHERE bucket.bucket_key = 'default_resource'
+  AND bucket.delete_flag = 'N'
+ON CONFLICT (tenant_id, definition_id, normalized_value) WHERE delete_flag = 'N' DO UPDATE
+SET display_value = EXCLUDED.display_value,
+    status = 'active',
+    sort_order = EXCLUDED.sort_order,
+    update_time = CURRENT_TIMESTAMP,
+    updated_by = EXCLUDED.updated_by;
+
+-- -----------------------------------------------------------------------------
+-- Consolidated from v2.5.4_0820_tag_value_usage_index.sql
+-- -----------------------------------------------------------------------------
+-- v2.5.4 Tag value usage-count covering index (redesign-unified-tag-management task 12.4)
+--
+-- Benchmark at the documented capacity limits (100 definitions / 1,000 values each /
+-- 100 assignments per resource) showed that TagManagementDB._value_usage_count performs
+-- a sequential scan of the tenant's assignments because no index starts with
+-- (tenant_id, value_id). The definition-keyed path is already covered by
+-- idx_resource_tag_assignment_definition; this partial index covers the value-keyed
+-- path used when deleting / disabling a tag value and when reporting usage counts.
+--
+-- Partial (delete_flag = 'N') keeps the index small and matches the active-row filter
+-- every caller applies. Idempotent via IF NOT EXISTS.
+
+CREATE INDEX IF NOT EXISTS idx_resource_tag_assignment_value
+    ON nexent.resource_tag_assignment (tenant_id, value_id, delete_flag)
+    WHERE delete_flag = 'N';
+
+-- -----------------------------------------------------------------------------
+-- Consolidated from v2.5.5_0829_agent_category_compatibility.sql
+-- -----------------------------------------------------------------------------
+
+SET LOCAL search_path TO nexent, public;
+
+-- Restore the final tenant provisioning function after v2.5.0 has replaced the
+-- init.sql definition with its older bucket-only implementation. This forward
+-- migration intentionally leaves Keywords creation to the legacy-data backfill.
+CREATE OR REPLACE FUNCTION nexent.provision_unified_tag_management(
+    p_tenant_id VARCHAR,
+    p_actor VARCHAR DEFAULT 'system'
+)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_default_bucket_id BIGINT;
+    v_document_bucket_id BIGINT;
+BEGIN
+    IF p_tenant_id IS NULL OR btrim(p_tenant_id) = '' THEN
+        RAISE EXCEPTION 'Cannot provision unified tags for an empty tenant';
+    END IF;
+
+    INSERT INTO nexent.tag_bucket (
+        tenant_id, bucket_key, bucket_name, status, created_by, updated_by, delete_flag
+    ) VALUES (
+        p_tenant_id, 'default_resource', 'Default Resource', 'active', p_actor, p_actor, 'N'
+    )
+    ON CONFLICT (tenant_id, bucket_key) DO UPDATE
+    SET bucket_name = EXCLUDED.bucket_name,
+        status = 'active',
+        update_time = CURRENT_TIMESTAMP,
+        updated_by = EXCLUDED.updated_by,
+        delete_flag = 'N'
+    RETURNING bucket_id INTO v_default_bucket_id;
+
+    INSERT INTO nexent.tag_bucket (
+        tenant_id, bucket_key, bucket_name, status, created_by, updated_by, delete_flag
+    ) VALUES (
+        p_tenant_id, 'knowledge_content', 'Knowledge Content', 'active', p_actor, p_actor, 'N'
+    )
+    ON CONFLICT (tenant_id, bucket_key) DO UPDATE
+    SET bucket_name = EXCLUDED.bucket_name,
+        status = 'active',
+        update_time = CURRENT_TIMESTAMP,
+        updated_by = EXCLUDED.updated_by,
+        delete_flag = 'N'
+    RETURNING bucket_id INTO v_document_bucket_id;
+
+    INSERT INTO nexent.tag_bucket_resource_type (
+        tenant_id, bucket_id, resource_type, status, created_by, updated_by, delete_flag
+    )
+    SELECT p_tenant_id, v_default_bucket_id, resource_type, 'active', p_actor, p_actor, 'N'
+    FROM (VALUES ('agent'), ('skill'), ('tool'), ('mcp_service'), ('knowledge_base')) AS types(resource_type)
+    ON CONFLICT (tenant_id, bucket_id, resource_type) DO UPDATE
+    SET status = 'active', update_time = CURRENT_TIMESTAMP, updated_by = EXCLUDED.updated_by, delete_flag = 'N';
+
+    INSERT INTO nexent.tag_bucket_resource_type (
+        tenant_id, bucket_id, resource_type, status, created_by, updated_by, delete_flag
+    ) VALUES (
+        p_tenant_id, v_document_bucket_id, 'knowledge_document', 'active', p_actor, p_actor, 'N'
+    )
+    ON CONFLICT (tenant_id, bucket_id, resource_type) DO UPDATE
+    SET status = 'active', update_time = CURRENT_TIMESTAMP, updated_by = EXCLUDED.updated_by, delete_flag = 'N';
+
+    INSERT INTO nexent.tag_definition (
+        tenant_id, bucket_id, definition_key, definition_name, selection_mode,
+        sort_order, status, created_by, updated_by, delete_flag
+    ) VALUES (
+        p_tenant_id, v_default_bucket_id, 'agent_category', 'Agent Category',
+        'multi_select', 1, 'active', p_actor, p_actor, 'N'
+    )
+    ON CONFLICT (tenant_id, bucket_id, definition_key) WHERE delete_flag = 'N' DO UPDATE
+    SET definition_name = EXCLUDED.definition_name,
+        selection_mode = EXCLUDED.selection_mode,
+        status = 'active',
+        sort_order = EXCLUDED.sort_order,
+        update_time = CURRENT_TIMESTAMP,
+        updated_by = EXCLUDED.updated_by,
+        delete_flag = 'N';
+
+    INSERT INTO nexent.tag_value (
+        tenant_id, definition_id, normalized_value, display_value, sort_order,
+        status, created_by, updated_by, delete_flag
+    )
+    SELECT p_tenant_id, definition.definition_id, preset.normalized_value,
+           preset.display_value, preset.sort_order, 'active', p_actor, p_actor, 'N'
+    FROM nexent.tag_definition AS definition
+    CROSS JOIN (VALUES
+        ('marketing', 'marketing', 0),
+        ('copywriting', 'copywriting', 1),
+        ('content_creation', 'content_creation', 2),
+        ('code_review', 'code_review', 3),
+        ('quality', 'quality', 4),
+        ('devops', 'devops', 5),
+        ('data', 'data', 6),
+        ('visualization', 'visualization', 7),
+        ('bi', 'bi', 8),
+        ('customer_service', 'customer_service', 9),
+        ('ticket', 'ticket', 10),
+        ('automation', 'automation', 11),
+        ('meeting', 'meeting', 12),
+        ('minutes', 'minutes', 13),
+        ('productivity', 'productivity', 14),
+        ('design', 'design', 15),
+        ('color_scheme', 'color_scheme', 16),
+        ('inspiration', 'inspiration', 17),
+        ('spreadsheet', 'spreadsheet', 18),
+        ('office', 'office', 19)
+    ) AS preset(normalized_value, display_value, sort_order)
+    WHERE definition.tenant_id = p_tenant_id
+      AND definition.bucket_id = v_default_bucket_id
+      AND definition.definition_key = 'agent_category'
+      AND definition.delete_flag = 'N'
+    ON CONFLICT (tenant_id, definition_id, normalized_value) WHERE delete_flag = 'N' DO UPDATE
+    SET display_value = EXCLUDED.display_value,
+        status = 'active',
+        sort_order = EXCLUDED.sort_order,
+        update_time = CURRENT_TIMESTAMP,
+        updated_by = EXCLUDED.updated_by,
+        delete_flag = 'N';
+END;
+$$;
+
+-- Heal every active tenant and every historical tenant that already owns a tag
+-- bucket. The UNION keeps provisioning idempotent and does not recreate user
+-- membership rows for historical tenants.
+SELECT nexent.provision_unified_tag_management(tenant_id, 'migration:v2.5.5')
+FROM (
+    SELECT DISTINCT tenant_id
+    FROM nexent.user_tenant_t
+    WHERE tenant_id IS NOT NULL
+      AND btrim(tenant_id) <> ''
+      AND COALESCE(delete_flag, 'N') <> 'Y'
+    UNION
+    SELECT DISTINCT tenant_id
+    FROM nexent.tag_bucket
+    WHERE tenant_id IS NOT NULL
+      AND btrim(tenant_id) <> ''
+      AND delete_flag = 'N'
+) AS tenants;
+
+-- Known aliases are intentionally finite. Unknown/custom historical strings
+-- remain under Keywords and are not inferred as Agent categories.
+CREATE TEMP TABLE utm_agent_category_alias (
+    normalized_alias TEXT PRIMARY KEY,
+    category_key TEXT NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO utm_agent_category_alias (normalized_alias, category_key) VALUES
+    ('marketing', 'marketing'), ('营销', 'marketing'),
+    ('copywriting', 'copywriting'), ('文案', 'copywriting'),
+    ('content_creation', 'content_creation'), ('content creation', 'content_creation'),
+    ('内容创作', 'content_creation'),
+    ('code_review', 'code_review'), ('code review', 'code_review'), ('代码审查', 'code_review'),
+    ('quality', 'quality'), ('质量', 'quality'),
+    ('devops', 'devops'),
+    ('data', 'data'), ('数据', 'data'),
+    ('visualization', 'visualization'), ('可视化', 'visualization'),
+    ('bi', 'bi'),
+    ('customer_service', 'customer_service'), ('customer support', 'customer_service'),
+    ('customer service', 'customer_service'), ('客服', 'customer_service'),
+    ('ticket', 'ticket'), ('ticketing', 'ticket'), ('工单', 'ticket'),
+    ('automation', 'automation'), ('自动化', 'automation'),
+    ('meeting', 'meeting'), ('会议', 'meeting'),
+    ('minutes', 'minutes'), ('纪要', 'minutes'),
+    ('productivity', 'productivity'), ('效率', 'productivity'),
+    ('design', 'design'), ('设计', 'design'),
+    ('color_scheme', 'color_scheme'), ('color scheme', 'color_scheme'), ('配色', 'color_scheme'),
+    ('inspiration', 'inspiration'), ('灵感', 'inspiration'),
+    ('spreadsheet', 'spreadsheet'), ('表格', 'spreadsheet'),
+    ('office', 'office'), ('办公', 'office');
+
+CREATE TEMP TABLE utm_agent_category_source (
+    source_row_id TEXT NOT NULL,
+    tenant_id VARCHAR(100),
+    resource_id TEXT,
+    category_key TEXT NOT NULL,
+    canonical_match_count INTEGER NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO utm_agent_category_source
+SELECT repository.agent_repository_id::TEXT,
+       repository.publisher_tenant_id,
+       repository.agent_id::TEXT,
+       aliases.category_key,
+       CASE WHEN EXISTS (
+           SELECT 1
+           FROM nexent.ag_tenant_agent_t AS agent
+           WHERE agent.agent_id = repository.agent_id
+             AND agent.tenant_id = repository.publisher_tenant_id
+       ) THEN 1 ELSE 0 END
+FROM nexent.ag_agent_repository_t AS repository
+CROSS JOIN LATERAL unnest(repository.tags) AS expanded(raw_value)
+JOIN utm_agent_category_alias AS aliases
+  ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
+WHERE COALESCE(cardinality(repository.tags), 0) > 0
+  AND COALESCE(repository.delete_flag, 'N') <> 'Y'
+  AND EXISTS (
+      SELECT 1
+      FROM nexent.ag_tenant_agent_t AS agent
+      WHERE agent.agent_id = repository.agent_id
+        AND agent.tenant_id = repository.publisher_tenant_id
+  );
+
+DO $$
+DECLARE
+    v_conflict_count BIGINT;
+    v_sample JSONB;
+BEGIN
+    SELECT count(*) INTO v_conflict_count
+    FROM utm_agent_category_source
+    WHERE tenant_id IS NULL
+       OR btrim(tenant_id) = ''
+       OR resource_id IS NULL
+       OR canonical_match_count < 1;
+
+    IF v_conflict_count > 0 THEN
+        SELECT jsonb_agg(to_jsonb(conflict)) INTO v_sample
+        FROM (
+            SELECT source_row_id, tenant_id, resource_id, category_key, canonical_match_count
+            FROM utm_agent_category_source
+            WHERE tenant_id IS NULL
+               OR btrim(tenant_id) = ''
+               OR resource_id IS NULL
+               OR canonical_match_count < 1
+            ORDER BY source_row_id, category_key
+            LIMIT 20
+        ) AS conflict;
+        RAISE EXCEPTION 'Agent category migration blocked by % canonical-source conflict(s): %',
+            v_conflict_count, v_sample;
+    END IF;
+END;
+$$;
+
+CREATE TEMP TABLE utm_agent_category_projection ON COMMIT DROP AS
+SELECT DISTINCT source.tenant_id,
+       'agent'::VARCHAR(50) AS resource_type,
+       source.resource_id,
+       definition.definition_id,
+       value.value_id
+FROM utm_agent_category_source AS source
+JOIN nexent.tag_bucket AS bucket
+  ON bucket.tenant_id = source.tenant_id
+ AND bucket.bucket_key = 'default_resource'
+ AND bucket.delete_flag = 'N'
+JOIN nexent.tag_definition AS definition
+  ON definition.tenant_id = bucket.tenant_id
+ AND definition.bucket_id = bucket.bucket_id
+ AND definition.definition_key = 'agent_category'
+ AND definition.delete_flag = 'N'
+JOIN nexent.tag_value AS value
+  ON value.tenant_id = definition.tenant_id
+ AND value.definition_id = definition.definition_id
+ AND value.normalized_value = source.category_key
+ AND value.delete_flag = 'N';
+
+DO $$
+DECLARE
+    v_missing_count BIGINT;
+BEGIN
+    SELECT count(*) INTO v_missing_count
+    FROM (
+        SELECT DISTINCT tenant_id, resource_id, category_key
+        FROM utm_agent_category_source
+    ) AS source
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM nexent.tag_bucket AS bucket
+        JOIN nexent.tag_definition AS definition
+          ON definition.tenant_id = bucket.tenant_id
+         AND definition.bucket_id = bucket.bucket_id
+         AND definition.definition_key = 'agent_category'
+         AND definition.delete_flag = 'N'
+        JOIN nexent.tag_value AS value
+          ON value.tenant_id = definition.tenant_id
+         AND value.definition_id = definition.definition_id
+         AND value.normalized_value = source.category_key
+         AND value.delete_flag = 'N'
+        WHERE bucket.tenant_id = source.tenant_id
+          AND bucket.bucket_key = 'default_resource'
+          AND bucket.delete_flag = 'N'
+    );
+
+    IF v_missing_count > 0 THEN
+        RAISE EXCEPTION 'Agent category migration blocked because % preset value(s) were not provisioned',
+            v_missing_count;
+    END IF;
+END;
+$$;
+
+DO $$
+DECLARE
+    v_conflict_count BIGINT;
+    v_sample JSONB;
+BEGIN
+    WITH new_assignments AS (
+        SELECT projection.*
+        FROM utm_agent_category_projection AS projection
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM nexent.resource_tag_assignment AS assignment
+            WHERE assignment.tenant_id = projection.tenant_id
+              AND assignment.resource_type = projection.resource_type
+              AND assignment.resource_id = projection.resource_id
+              AND assignment.value_id = projection.value_id
+              AND assignment.delete_flag = 'N'
+        )
+    ), projected AS (
+        SELECT new_assignment.tenant_id,
+               new_assignment.resource_id,
+               count(*) AS new_count,
+               (SELECT count(*)
+                FROM nexent.resource_tag_assignment AS assignment
+                WHERE assignment.tenant_id = new_assignment.tenant_id
+                  AND assignment.resource_type = 'agent'
+                  AND assignment.resource_id = new_assignment.resource_id
+                  AND assignment.delete_flag = 'N') AS current_count
+        FROM new_assignments AS new_assignment
+        GROUP BY new_assignment.tenant_id, new_assignment.resource_id
+    )
+    SELECT count(*), jsonb_agg(to_jsonb(conflict))
+    INTO v_conflict_count, v_sample
+    FROM (
+        SELECT tenant_id, resource_id, current_count, new_count,
+               current_count + new_count AS projected_count
+        FROM projected
+        WHERE current_count + new_count > 100
+        ORDER BY tenant_id, resource_id
+        LIMIT 20
+    ) AS conflict;
+
+    IF v_conflict_count > 0 THEN
+        RAISE EXCEPTION 'Agent category migration blocked by % assignment-capacity conflict(s): %',
+            v_conflict_count, v_sample;
+    END IF;
+END;
+$$;
+
+ALTER TABLE nexent.resource_tag_assignment
+    DISABLE TRIGGER enforce_resource_tag_assignment_rules_trigger;
+
+INSERT INTO nexent.resource_tag_assignment (
+    tenant_id, resource_type, resource_id, definition_id, value_id,
+    status, created_by, updated_by, delete_flag
+)
+SELECT tenant_id, resource_type, resource_id, definition_id, value_id,
+       'active', 'migration:v2.5.5', 'migration:v2.5.5', 'N'
+FROM utm_agent_category_projection
+ON CONFLICT (tenant_id, resource_type, resource_id, value_id) DO UPDATE
+SET status = 'active',
+    update_time = CURRENT_TIMESTAMP,
+    updated_by = EXCLUDED.updated_by,
+    delete_flag = 'N';
+
+ALTER TABLE nexent.resource_tag_assignment
+    ENABLE TRIGGER enforce_resource_tag_assignment_rules_trigger;
+
+-- -----------------------------------------------------------------------------
+-- Consolidated from v2.5.6_0829_document_tag_projection_delete_flag.sql
+-- -----------------------------------------------------------------------------
+-- Add missing delete_flag column to document_tag_projection.
+-- The table was created from a hand-written DDL that omitted this column,
+-- but the SQLAlchemy model inherits TableBase which defines delete_flag.
+
+ALTER TABLE nexent.document_tag_projection
+    ADD COLUMN IF NOT EXISTS delete_flag VARCHAR(1) NOT NULL DEFAULT 'N';
+
+-- -----------------------------------------------------------------------------
+-- Consolidated from v2.5.7_0831_no_value_tag_definitions.sql
+-- -----------------------------------------------------------------------------
+-- Support no-value tag definitions while preserving existing value-backed tags.
+-- Legacy flat tags continue to use the existing keywords definition.
+
+ALTER TABLE nexent.tag_definition
+    DROP CONSTRAINT IF EXISTS tag_definition_selection_mode_check;
+
+ALTER TABLE nexent.tag_definition
+    ADD CONSTRAINT tag_definition_selection_mode_check
+    CHECK (selection_mode IN ('single_select', 'multi_select', 'no_value'));
+
+COMMIT;
+
+-- Source migration: v2.5.3_database_bootstrap_idempotency.sql
+-- Source SHA-256: 80024a28cda73853a96b124aff695db65d7f92e09335bfe2976cbc10ba21fe72
+
+BEGIN;
+
+-- Explicit seeded IDs do not advance SERIAL sequences. Re-synchronize the
+-- sequence after every currently shipped migration and keep re-runs safe.
+SELECT setval(
+    pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id'),
+    COALESCE(MAX(role_permission_id), 1),
+    MAX(role_permission_id) IS NOT NULL
+)
+FROM nexent.role_permission_t;
+
+-- The platform super-admin mapping intentionally uses an empty tenant ID. It
+-- is not a tenant to provision, so ignore only that reserved mapping while
+-- retaining normal provisioning for active tenant rows.
+CREATE OR REPLACE FUNCTION nexent.provision_unified_tag_management_after_user_tenant_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF COALESCE(NEW.delete_flag, 'N') <> 'Y'
+       AND NULLIF(btrim(NEW.tenant_id), '') IS NOT NULL THEN
+        PERFORM nexent.provision_unified_tag_management(
+            NEW.tenant_id,
+            COALESCE(NEW.created_by, 'system')
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+COMMIT;
+
+-- Source migration: v2.5.4_0910_context_budget_v2.sql
+-- Source SHA-256: e7dde0d222911eb12752b9e276bc98d6dd629673d6a57dfd23ea6499d4241cdc
+
+-- Context Budget V2 final-state migration.
+-- Deployment contract: stop all application instances before applying this file.
+BEGIN;
+
+DO $$
+DECLARE
+    table_exists BOOLEAN;
+    schema_name CONSTANT TEXT := 'nexent';
+    monitoring_table_name CONSTANT TEXT := 'model_monitoring_record_t';
+BEGIN
+    SELECT to_regclass('nexent.model_monitoring_record_t') IS NOT NULL
+      INTO table_exists;
+    IF NOT table_exists THEN
+        RAISE EXCEPTION 'nexent.model_monitoring_record_t must exist before Context Budget V2 migration';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'provider_input_limit_tokens'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'effective_input_limit_tokens'
+    ) THEN
+        ALTER TABLE nexent.model_monitoring_record_t
+            RENAME COLUMN provider_input_limit_tokens TO effective_input_limit_tokens;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_provider_input_limit_tokens'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_effective_input_limit_tokens'
+    ) THEN
+        ALTER TABLE nexent.model_monitoring_record_t
+            RENAME COLUMN budget_provider_input_limit_tokens
+            TO budget_effective_input_limit_tokens;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_soft_limit_ratio'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_compaction_trigger_ratio'
+    ) THEN
+        ALTER TABLE nexent.model_monitoring_record_t
+            RENAME COLUMN budget_soft_limit_ratio
+            TO budget_compaction_trigger_ratio;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_soft_input_budget_tokens'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_compaction_trigger_threshold_tokens'
+    ) THEN
+        ALTER TABLE nexent.model_monitoring_record_t
+            RENAME COLUMN budget_soft_input_budget_tokens
+            TO budget_compaction_trigger_threshold_tokens;
+    END IF;
+END $$;
+
+-- Fresh installs create the final columns in init.sql, while historical
+-- migrations may subsequently add the legacy columns. Merge and remove those
+-- duplicate legacy columns before backfilling the V2 metadata.
+DO $$
+DECLARE
+    schema_name CONSTANT TEXT := 'nexent';
+    monitoring_table_name CONSTANT TEXT := 'model_monitoring_record_t';
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='provider_input_limit_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='effective_input_limit_tokens') THEN
+        UPDATE nexent.model_monitoring_record_t
+           SET effective_input_limit_tokens = provider_input_limit_tokens
+         WHERE effective_input_limit_tokens IS NULL
+           AND provider_input_limit_tokens IS NOT NULL;
+        ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN provider_input_limit_tokens;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_provider_input_limit_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_effective_input_limit_tokens') THEN
+        UPDATE nexent.model_monitoring_record_t
+           SET budget_effective_input_limit_tokens = budget_provider_input_limit_tokens
+         WHERE budget_effective_input_limit_tokens IS NULL
+           AND budget_provider_input_limit_tokens IS NOT NULL;
+        ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_provider_input_limit_tokens;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_soft_limit_ratio')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_compaction_trigger_ratio') THEN
+        UPDATE nexent.model_monitoring_record_t
+           SET budget_compaction_trigger_ratio = budget_soft_limit_ratio
+         WHERE budget_compaction_trigger_ratio IS NULL
+           AND budget_soft_limit_ratio IS NOT NULL;
+        ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_soft_limit_ratio;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_soft_input_budget_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_compaction_trigger_threshold_tokens') THEN
+        UPDATE nexent.model_monitoring_record_t
+           SET budget_compaction_trigger_threshold_tokens = budget_soft_input_budget_tokens
+         WHERE budget_compaction_trigger_threshold_tokens IS NULL
+           AND budget_soft_input_budget_tokens IS NOT NULL;
+        ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_soft_input_budget_tokens;
+    END IF;
+END $$;
+
+ALTER TABLE nexent.model_monitoring_record_t
+    ADD COLUMN IF NOT EXISTS budget_schema_version INTEGER,
+    ADD COLUMN IF NOT EXISTS budget_compaction_trigger_ratio_source VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS budget_compaction_target_ratio FLOAT,
+    ADD COLUMN IF NOT EXISTS budget_compaction_target_ratio_source VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS budget_compaction_target_tokens INTEGER;
+
+UPDATE nexent.model_monitoring_record_t
+SET budget_schema_version = COALESCE(budget_schema_version, 1),
+    budget_compaction_trigger_ratio_source = COALESCE(
+        budget_compaction_trigger_ratio_source,
+        'legacy_payload'
+    ),
+    budget_compaction_target_ratio = COALESCE(budget_compaction_target_ratio, 0.6),
+    budget_compaction_target_ratio_source = COALESCE(
+        budget_compaction_target_ratio_source,
+        'code_default'
+    ),
+    budget_compaction_target_tokens = COALESCE(
+        budget_compaction_target_tokens,
+        FLOOR(budget_effective_input_limit_tokens * 0.6)::INTEGER
+    )
+WHERE budget_schema_version IS NULL
+  AND (
+      budget_fingerprint IS NOT NULL
+      OR budget_effective_input_limit_tokens IS NOT NULL
+      OR budget_compaction_trigger_threshold_tokens IS NOT NULL
+  );
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM nexent.model_monitoring_record_t
+        WHERE budget_schema_version = 1
+          AND (budget_fingerprint IS NOT NULL
+            OR budget_effective_input_limit_tokens IS NOT NULL
+            OR budget_compaction_trigger_threshold_tokens IS NOT NULL)
+          AND (
+              budget_schema_version IS NULL
+              OR budget_compaction_target_ratio IS DISTINCT FROM 0.6
+              OR (
+                  budget_effective_input_limit_tokens IS NOT NULL
+                  AND budget_compaction_target_tokens IS DISTINCT FROM
+                      FLOOR(budget_effective_input_limit_tokens * 0.6)::INTEGER
+              )
+          )
+    ) THEN
+        RAISE EXCEPTION 'Context Budget V2 historical backfill consistency check failed';
+    END IF;
+END $$;
+
+ALTER TABLE nexent.model_monitoring_record_t
+    DROP COLUMN IF EXISTS budget_hard_input_budget_tokens;
+
+COMMENT ON COLUMN nexent.model_monitoring_record_t.effective_input_limit_tokens
+    IS 'Resolved effective provider input-token limit used by context management';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_schema_version
+    IS 'Persisted context-budget contract schema version; 1 denotes migrated V1 history';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_effective_input_limit_tokens
+    IS 'Effective Input Limit after applying the output reserve';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_trigger_ratio
+    IS 'Compaction Trigger Threshold ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_trigger_ratio_source
+    IS 'Source of the Compaction Trigger Threshold ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_trigger_threshold_tokens
+    IS 'Effective input token threshold that triggers compaction';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_target_ratio
+    IS 'Compaction Target ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_target_ratio_source
+    IS 'Source of the Compaction Target ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_target_tokens
+    IS 'Desired effective input token count after compaction';
+
+COMMIT;
+
+-- Source migration: v2.6.0_0806_add_model_inference_params.sql
+-- Source SHA-256: d7b4d7303b68e6f3a6c29212e919e70ced3172c27a82cc79ca8d433f1991b78d
+
+-- Migration kind: REQUIRED_SCHEMA
+-- Required for: model inference params (temperature/top_p) defaults on model_record_t
+--                + extra_params JSONB for fixed inference params without dedicated columns
+--                and per-agent model param overrides on ag_tenant_agent_t.
+-- Reason: new code reads/writes these inference parameter columns and per-agent overrides.
+
+SET search_path TO nexent;
+
+-- ============================================================
+-- model_record_t: 推理参数默认值（常用，独立列便于校验/查询）
+-- ============================================================
+
+ALTER TABLE nexent.model_record_t
+ADD COLUMN IF NOT EXISTS temperature FLOAT DEFAULT NULL;
+
+ALTER TABLE nexent.model_record_t
+ADD COLUMN IF NOT EXISTS top_p FLOAT DEFAULT NULL;
+
+COMMENT ON COLUMN nexent.model_record_t.temperature IS
+  'Default sampling temperature for LLM/VLM models. NULL means provider default. Nullable.';
+COMMENT ON COLUMN nexent.model_record_t.top_p IS
+  'Default nucleus sampling probability for LLM/VLM models. NULL means provider default. Nullable.';
+
+-- ============================================================
+-- model_record_t: 其他固定推理参数（frequency_penalty/presence_penalty/stop/seed/voice/speed 等）
+-- 无独立列的固定字段统一收纳到此 JSONB 列，键集合由后端 FIXED_INFERENCE_FIELDS_BY_TYPE 约束
+-- ============================================================
+
+ALTER TABLE nexent.model_record_t
+ADD COLUMN IF NOT EXISTS extra_params JSONB DEFAULT NULL;
+
+COMMENT ON COLUMN nexent.model_record_t.extra_params IS
+  'Fixed inference params without dedicated columns (key-value pairs constrained by '
+  'FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.';
+
+-- ============================================================
+-- ag_tenant_agent_t: per-agent 模型参数覆盖（含预定义字段与 extra_params）
+-- Shape: {"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}
+-- ============================================================
+
+ALTER TABLE nexent.ag_tenant_agent_t
+ADD COLUMN IF NOT EXISTS model_params_override JSONB DEFAULT NULL;
+
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.model_params_override IS
+  'Per-agent overrides for model inference params. Shape: '
+  '{"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}. '
+  'NULL means inherit model defaults.';

@@ -1048,6 +1048,44 @@ class TestToDict:
         assert result['config_schemas'] is None
         assert result['config_values'] is None
 
+    def test_to_dict_malformed_tags(self):
+        """Test that non-array persisted tags are normalized to a string list."""
+        string_skill = MockSkillInfo(
+            skill_id=1,
+            skill_name='skill_with_string_tags',
+            skill_tags='security',
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(string_skill)['tags'] == ['security']
+
+        object_skill = MockSkillInfo(
+            skill_id=2,
+            skill_name='skill_with_object_tags',
+            skill_tags={'key': 'value'},
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(object_skill)['tags'] == []
+
+        mixed_skill = MockSkillInfo(
+            skill_id=3,
+            skill_name='skill_with_mixed_tags',
+            skill_tags=['valid', 42, '', '  spaced  '],
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(mixed_skill)['tags'] == ['valid', 'spaced']
+
 
 # ===== list_skills Tests =====
 
@@ -1311,6 +1349,31 @@ class TestCreateSkill:
 
         session.add.assert_called()
         session.commit.assert_called()
+
+    def test_create_skill_truncates_description_to_database_limit(self, monkeypatch, mock_session):
+        """Long third-party descriptions must not make skill uploads fail."""
+        session, _ = mock_session
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        created = []
+
+        class MockSkillInfoClass:
+            def __init__(self, **kwargs):
+                self.skill_id = 1
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+        monkeypatch.setattr("backend.database.skill_db.SkillInfo", MockSkillInfoClass)
+        session.add = lambda value: created.append(value)
+        session.flush = MagicMock()
+        session.commit = MagicMock()
+
+        create_skill({"name": "long-description", "description": "x" * 1001}, "tenant1")
+
+        assert len(created[0].skill_description) == 1000
 
     def test_create_skill_with_tool_ids(self, monkeypatch, mock_session):
         """Test creating a skill with associated tool IDs."""
