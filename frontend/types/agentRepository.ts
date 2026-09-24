@@ -55,6 +55,7 @@ export interface AgentRepositoryListingListParams {
 export interface AgentRepositoryListingDetail {
   agent_repository_id: number;
   agent_id?: number | null;
+  version_no?: number | null;
   name: string;
   display_name?: string | null;
   description?: string | null;

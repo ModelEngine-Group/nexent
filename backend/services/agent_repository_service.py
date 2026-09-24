@@ -824,6 +824,7 @@ def get_agent_repository_listing_detail_impl(
     return {
         "agent_repository_id": record.get("agent_repository_id"),
         "agent_id": agent_id,
+        "version_no": record.get("version_no"),
         "name": record.get("name"),
         "display_name": record.get("display_name"),
         "description": record.get("description"),

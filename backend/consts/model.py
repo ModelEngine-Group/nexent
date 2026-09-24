@@ -1362,6 +1362,7 @@ class AgentRepositoryListingDetailResponse(BaseModel):
     """Detailed marketplace listing payload for repository detail view."""
     agent_repository_id: int
     agent_id: Optional[int] = None
+    version_no: Optional[int] = None
     name: str
     display_name: Optional[str] = None
     description: Optional[str] = None

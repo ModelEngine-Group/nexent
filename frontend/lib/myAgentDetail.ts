@@ -1,5 +1,8 @@
 import type { AgentVersionDetail } from "@/services/agentVersionService";
-import type { MyEditableAgentItem } from "@/types/agentRepository";
+import type {
+  AgentRepositoryListingDetail,
+  MyEditableAgentItem,
+} from "@/types/agentRepository";
 import type { Agent, Skill, Tool } from "@/types/agentConfig";
 
 export interface MyAgentDetailView {
@@ -13,6 +16,10 @@ export interface MyAgentDetailView {
   knowledgeBases: string[];
   subAgents: string[];
   tags: string[];
+  repositoryInfo?: {
+    downloads: number;
+    createdAt: string | null;
+  };
 }
 
 function uniqueNames(values: Array<string | null | undefined>): string[] {
@@ -100,5 +107,23 @@ export function mapAgentInfoDetail(agent: Agent): MyAgentDetailView {
       agent.sub_agent_relations?.map((relation) => relation.agent_name) ?? []
     ),
     tags: uniqueNames(agent.tags ?? []),
+  };
+}
+
+export function mapRepositoryAgentDetail(
+  versionDetail: AgentVersionDetail,
+  listingDetail: AgentRepositoryListingDetail,
+  tags: string[] = [],
+  resources?: {
+    tools?: Pick<Tool, "id" | "name" | "origin_name">[];
+    skills?: Pick<Skill, "skill_id" | "name">[];
+  }
+): MyAgentDetailView {
+  return {
+    ...mapMyAgentDetail(versionDetail, { tags }, resources),
+    repositoryInfo: {
+      downloads: listingDetail.downloads ?? 0,
+      createdAt: listingDetail.created_at ?? null,
+    },
   };
 }

@@ -4,7 +4,9 @@ import { Button, Spin } from "antd";
 import {
   BookOpen,
   Bot,
+  Calendar,
   Cpu,
+  Download,
   Pencil,
   Sparkles,
   Tag as TagIcon,
@@ -25,10 +27,16 @@ interface AgentDetailProps {
   agentIcon?: ReactNode;
   published: boolean;
   status?: AgentRepositoryListingStatus;
+  showRepositoryInfo?: boolean;
   isLoading?: boolean;
   isError?: boolean;
   isFetching?: boolean;
   onRetry?: () => void;
+}
+
+function formatCreatedAt(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
 }
 
 function DetailSection({
@@ -79,6 +87,7 @@ export function AgentDetail({
   agentIcon,
   published,
   status,
+  showRepositoryInfo = false,
   isLoading = false,
   isError = false,
   isFetching = false,
@@ -162,6 +171,23 @@ export function AgentDetail({
               <p className="mt-5 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">
                 {detail.description || t("agentRepository.card.noDescription")}
               </p>
+
+              {showRepositoryInfo && detail.repositoryInfo ? (
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="inline-flex items-center gap-1">
+                    <Download className="size-3.5" aria-hidden />
+                    {t("agentRepository.detail.downloads", {
+                      count: detail.repositoryInfo.downloads.toLocaleString(),
+                    })}
+                  </span>
+                  {detail.repositoryInfo.createdAt ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Calendar className="size-3.5" aria-hidden />
+                      {formatCreatedAt(detail.repositoryInfo.createdAt)}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
 
               {detail.author || detail.modelName ? (
                 <div className="mt-4 space-y-2 rounded-xl bg-slate-50 px-3 py-3 text-sm dark:bg-slate-800/60">

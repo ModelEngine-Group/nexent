@@ -1571,6 +1571,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
         },
         "icon_url": None,
         "version_name": "v1",
+        "version_no": 3,
         "downloads": 0,
         "create_time": None,
     }
@@ -1584,6 +1585,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
 
     mock_get.assert_called_once_with(42, "tenant_a")
     assert result["agent_repository_id"] == 42
+    assert result["version_no"] == 3
 
 
 def test_get_agent_repository_listing_detail_impl_not_found_for_other_tenant():

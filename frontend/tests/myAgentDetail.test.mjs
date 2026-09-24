@@ -1,7 +1,43 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mapAgentInfoDetail, mapMyAgentDetail } from "../lib/myAgentDetail.ts";
+import {
+  mapAgentInfoDetail,
+  mapMyAgentDetail,
+  mapRepositoryAgentDetail,
+} from "../lib/myAgentDetail.ts";
+
+test("maps a repository listing with its published version and repository metadata", () => {
+  const view = mapRepositoryAgentDetail(
+    {
+      display_name: "Published Agent",
+      version: { version_name: "V2" },
+      tools: [{ tool_id: 42, enabled: true }],
+      skills: [{ skill_id: 7, enabled: true }],
+    },
+    {
+      agent_repository_id: 22,
+      name: "Published Agent",
+      status: "shared",
+      downloads: 5,
+      created_at: "2026-09-20",
+    },
+    ["Research"],
+    {
+      tools: [{ id: "42", name: "Search", origin_name: "Web Search" }],
+      skills: [{ skill_id: 7, name: "Summarize" }],
+    }
+  );
+
+  assert.equal(view.versionLabel, "V2");
+  assert.deepEqual(view.tools, ["Web Search"]);
+  assert.deepEqual(view.skills, ["Summarize"]);
+  assert.deepEqual(view.tags, ["Research"]);
+  assert.deepEqual(view.repositoryInfo, {
+    downloads: 5,
+    createdAt: "2026-09-20",
+  });
+});
 
 test("resolves tool and skill names from version instance IDs", () => {
   const detail = {
