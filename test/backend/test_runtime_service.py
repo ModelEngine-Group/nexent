@@ -108,6 +108,7 @@ base_app_mod.app = MagicMock()
 logging_utils_mod = types.ModuleType("utils.logging_utils")
 logging_utils_mod.configure_logging = MagicMock()
 logging_utils_mod.configure_elasticsearch_logging = MagicMock()
+logging_utils_mod.configure_runtime_uvicorn_logging = MagicMock()
 logging_utils_mod.get_uvicorn_logging_config = MagicMock(
     return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
 )
@@ -138,14 +139,14 @@ class TestMainServiceModuleIntegration:
     """Integration tests for runtime_service module dependencies"""
 
     @patch('runtime_service.get_uvicorn_logging_config')
-    @patch('runtime_service.configure_elasticsearch_logging')
-    def test_logging_configuration_called_on_import(self, mock_configure_es, mock_get_uvicorn_config):
+    @patch('runtime_service.configure_runtime_uvicorn_logging')
+    def test_logging_configuration_called_on_import(self, mock_configure_runtime, mock_get_uvicorn_config):
         """
         Test that logging configuration functions are called when module is imported.
 
         This test verifies that:
         1. get_uvicorn_logging_config is called to build the dict config
-        2. configure_elasticsearch_logging is called
+        2. configure_runtime_uvicorn_logging is available for module initialization
         """
         # Note: This test checks that logging configuration happens during module import.
         # The mocks should have been called when the module was imported.

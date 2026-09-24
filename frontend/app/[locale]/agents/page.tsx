@@ -20,7 +20,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import AgentSelectorHeader from "./agent-selector-header";
 import AgentConfig from "./agent-config";
@@ -41,6 +41,7 @@ import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import log from "@/lib/logger";
+import { buildAgentUsageGuidePath } from "@/lib/agentUsageGuide";
 import type {
   Nl2AgentDraftField,
   Nl2AgentStateEvent,
@@ -112,6 +113,9 @@ function PanelCard({
 function AgentSetupContent() {
   const { t } = useTranslation("common");
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale || "en";
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
@@ -287,7 +291,8 @@ function AgentSetupContent() {
         error,
       });
     });
-  }, [currentAgentId, queryClient, refetchAgentInfo]);
+    router.push(buildAgentUsageGuidePath(locale, currentAgentId));
+  }, [currentAgentId, locale, queryClient, refetchAgentInfo, router]);
 
   useEffect(() => {
     if (

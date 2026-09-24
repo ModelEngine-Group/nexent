@@ -15,10 +15,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.utils import logging_utils
 from backend.utils.logging_utils import (
     ColorFormatter,
     HybridRotatingFileHandler,
     configure_elasticsearch_logging,
+    configure_runtime_uvicorn_logging,
     configure_logging,
     get_uvicorn_logging_config,
 )
@@ -289,6 +291,31 @@ class TestGetUvicornLoggingConfig:
         assert file_h["filename"].replace("\\", "/").endswith("my_cat/nexent_my_cat.log")
         assert file_h["encoding"] == "utf-8"
         assert file_h["class"].endswith("HybridRotatingFileHandler")
+
+    def test_configures_one_handler_per_category(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        cfg = get_uvicorn_logging_config(categories=["runtime"])
+
+        assert set(cfg["handlers"]) == {"console", "file_runtime"}
+        assert cfg["loggers"]["uvicorn.access"] == {
+            "handlers": ["console", "file_runtime"],
+            "level": cfg["root"]["level"],
+            "propagate": False,
+        }
+
+
+class TestConfigureRuntimeUvicornLogging:
+    """Runtime logging applies the shared handler configuration."""
+
+    def test_applies_runtime_config_and_quiets_elasticsearch(self, mocker):
+        dict_config = mocker.patch("backend.utils.logging_utils.logging.config.dictConfig")
+        quiet_elasticsearch = mocker.patch("backend.utils.logging_utils.configure_elasticsearch_logging")
+
+        configure_runtime_uvicorn_logging()
+
+        applied_config = dict_config.call_args.args[0]
+        assert applied_config["loggers"]["uvicorn.access"]["handlers"] == ["console", "file_runtime"]
+        quiet_elasticsearch.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

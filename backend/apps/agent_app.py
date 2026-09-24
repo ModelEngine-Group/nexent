@@ -5,7 +5,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
-from nexent.core.concurrency import run_blocking
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID
@@ -38,6 +37,7 @@ from consts.exceptions import (
     RuntimeQueueTimeoutError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
+from management.services.agent.run_identity import AgentRunIdentityContext
 
 from management.services.agent.service import (
     get_agent_info_impl,
@@ -82,10 +82,9 @@ from utils.auth_utils import (
     get_current_user_id,
     verify_internal_runtime_jwt,
 )
-
+logger = logging.getLogger("agent_app")
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
-logger = logging.getLogger("agent_app")
 
 
 def _runtime_overload_response(exc: Exception) -> JSONResponse:

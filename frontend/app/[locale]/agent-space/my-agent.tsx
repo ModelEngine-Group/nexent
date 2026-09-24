@@ -21,7 +21,13 @@ import {
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
+import { parseAgentUsageGuideParams } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
+import {
+  getAgentUsageGuideOpenAction,
+  parseAgentUsageGuideTargetParams,
+  resolveAgentUsageGuideTarget,
+} from "@/lib/agentUsageGuide";
 import {
   isCancelableRepositoryStatus,
   isTakeDownableRepositoryStatus,
@@ -38,6 +44,7 @@ import {
 } from "@/types/agentRepository";
 import { MineApplyListingModal } from "./components/MineApplyListingModal";
 import { MineReviewStatusModal } from "./components/MineReviewStatusModal";
+import { AgentUsageGuideModal } from "./components/AgentUsageGuideModal";
 import { CreateNewAgentCard } from "./components/CreateNewAgentCard";
 import { MyAgentCard } from "./components/MyAgentCard";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
@@ -162,16 +169,24 @@ export function MyAgent({ active }: { active: boolean }) {
     () => parseReviewDeepLinkParams(searchParams),
     [searchParams]
   );
+  const usageGuideDeepLink = useMemo(
+    () => parseAgentUsageGuideParams(searchParams),
+    [searchParams]
+  );
+  const usageGuideTarget = useMemo(
+    () => parseAgentUsageGuideTargetParams(searchParams),
+    [searchParams]
+  );
   const { data: deepLinkMineData, isLoading: deepLinkFallbackLoading } =
     useMyEditableAgents(
       {
         ownership: "all",
-        agent_id: reviewDeepLink?.agentId,
+        agent_id: reviewDeepLink?.agentId ?? usageGuideTarget?.agentId,
         page: 1,
         page_size: 1,
         new_agent_padding: false,
       },
-      active && reviewDeepLink != null
+      active && (reviewDeepLink != null || usageGuideTarget != null)
     );
   const deepLinkFallbackAgent = useMemo(() => {
     const item = deepLinkMineData?.items?.[0];
@@ -180,6 +195,12 @@ export function MyAgent({ active }: { active: boolean }) {
   const onReviewDeepLinkConsumed = useCallback(() => {
     router.replace(`/${locale}/agent-space?tab=mine`);
   }, [locale, router]);
+  const onUsageGuideDeepLinkConsumed = useCallback(() => {
+    if (!usageGuideTarget) return;
+    router.replace(
+      `/${locale}/agent-space?tab=mine&agent_id=${usageGuideTarget.agentId}`
+    );
+  }, [locale, router, usageGuideTarget]);
   const onOwnershipChange = (value: MineOwnershipFilter) => {
     setOwnership(value);
     setPage(1);
@@ -229,7 +250,13 @@ export function MyAgent({ active }: { active: boolean }) {
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
+  const [usageGuideAgent, setUsageGuideAgent] =
+    useState<MyEditableAgentItem | null>(null);
+  const [guidedMenuAgentId, setGuidedMenuAgentId] = useState<number | null>(
+    null
+  );
   const consumedDeepLinkRef = useRef<number | null>(null);
+  const consumedUsageGuideRef = useRef<number | null>(null);
 
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
@@ -238,6 +265,50 @@ export function MyAgent({ active }: { active: boolean }) {
   });
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  const usageGuideTargetState = useMemo(
+    () =>
+      usageGuideTarget
+        ? resolveAgentUsageGuideTarget({
+            agentId: usageGuideTarget.agentId,
+            agents,
+            fallbackAgent: deepLinkFallbackAgent,
+            isListLoading: isLoading,
+            isFallbackLoading: deepLinkFallbackLoading,
+            isActive: active,
+            getAgentId: (agent) =>
+              isNewAgentPaddingItem(agent) ? null : agent.agent_id,
+          })
+        : null,
+    [
+      agents,
+      deepLinkFallbackAgent,
+      deepLinkFallbackLoading,
+      isLoading,
+      usageGuideTarget,
+    ]
+  );
+  const displayedAgents = useMemo(() => {
+    if (usageGuideTargetState?.state !== "found") {
+      return agents;
+    }
+    const targetAgent = usageGuideTargetState.agent;
+    if (
+      isNewAgentPaddingItem(targetAgent) ||
+      agents.some(
+        (agent) =>
+          !isNewAgentPaddingItem(agent) &&
+          agent.agent_id === targetAgent.agent_id
+      )
+    ) {
+      return agents;
+    }
+    return [targetAgent, ...agents];
+  }, [agents, usageGuideTargetState]);
+  const highlightedAgentId =
+    usageGuideTargetState?.state === "found" &&
+    !isNewAgentPaddingItem(usageGuideTargetState.agent)
+      ? usageGuideTargetState.agent.agent_id
+      : null;
 
   const handleCreateAgent = () => {
     setCreateAgentModalVisible(true);
@@ -439,6 +510,47 @@ export function MyAgent({ active }: { active: boolean }) {
     t,
   ]);
 
+  useEffect(() => {
+    if (!usageGuideDeepLink) {
+      consumedUsageGuideRef.current = null;
+      return;
+    }
+
+    if (!usageGuideTargetState) {
+      return;
+    }
+    const openAction = getAgentUsageGuideOpenAction({
+      agentId: usageGuideDeepLink.agentId,
+      consumedAgentId: consumedUsageGuideRef.current,
+      target: usageGuideTargetState,
+    });
+    if (openAction.action === "ignore" || openAction.action === "wait") {
+      return;
+    }
+    if (openAction.action === "missing") {
+      message.error(t("notifications.usageGuide.agentNotFound"));
+      consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
+      onUsageGuideDeepLinkConsumed?.();
+      return;
+    }
+
+    if (isNewAgentPaddingItem(openAction.agent)) {
+      return;
+    }
+    setGuidedMenuAgentId(openAction.agent.agent_id);
+    consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
+    onUsageGuideDeepLinkConsumed?.();
+  }, [
+    onUsageGuideDeepLinkConsumed,
+    t,
+    usageGuideDeepLink,
+    usageGuideTargetState,
+  ]);
+
+  const closeUsageGuide = () => {
+    setUsageGuideAgent(null);
+  };
+
   const handleSetNotShared = async () => {
     if (!reviewModalInfo) {
       return;
@@ -561,7 +673,7 @@ export function MyAgent({ active }: { active: boolean }) {
         ) : (
           <>
             <ResourceCardGrid
-              items={agents}
+              items={displayedAgents}
               columns={columns}
               rows={rows}
               gridHeight={gridHeight}
@@ -591,6 +703,19 @@ export function MyAgent({ active }: { active: boolean }) {
                     onViewReview={(mode) => handleViewReview(agent, mode)}
                     onDelete={() => handleDeleteAgent(agent)}
                     onEvaluate={() => handleEvaluate(agent)}
+                    onUsageGuide={() => {
+                      setGuidedMenuAgentId(null);
+                      setUsageGuideAgent(agent);
+                    }}
+                    highlighted={highlightedAgentId === agent.agent_id}
+                    guideMenuOpen={
+                      guidedMenuAgentId === agent.agent_id ? true : undefined
+                    }
+                    onGuideMenuOpenChange={(open) => {
+                      if (!open && guidedMenuAgentId === agent.agent_id) {
+                        setGuidedMenuAgentId(null);
+                      }
+                    }}
                     isApplying={
                       applyingAgentId === agent.agent_id &&
                       createListingMutation.isPending
@@ -623,6 +748,13 @@ export function MyAgent({ active }: { active: boolean }) {
         isUpdatingStatus={updateStatusMutation.isPending}
         onClose={closeReviewModal}
         onSetNotShared={handleSetNotShared}
+      />
+
+      <AgentUsageGuideModal
+        agent={usageGuideAgent}
+        locale={locale}
+        open={usageGuideAgent !== null}
+        onClose={closeUsageGuide}
       />
 
       <CreateAgentModal

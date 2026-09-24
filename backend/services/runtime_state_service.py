@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 import socket
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -86,6 +87,13 @@ class RuntimeStateService:
 
     def _rate_key(self, tenant_id: str, minute_bucket: str) -> str:
         return f"northbound:rate:{tenant_id}:{minute_bucket}"
+
+    def _scoped_rate_key(self, namespace: str, scope_digest: str, minute_bucket: str) -> str:
+        if not re.fullmatch(r"[0-9a-f]{64}", scope_digest):
+            raise ValueError("rate limit scope must be a SHA-256 digest")
+        if not re.fullmatch(r"[a-z0-9-]+", namespace):
+            raise ValueError("rate limit namespace is invalid")
+        return f"runtime:rate:{namespace}:{scope_digest}:{minute_bucket}"
 
     def _expire_completed_runtime_keys(self, user_id: str, conversation_id: int) -> None:
         ttl = max(1, RUNTIME_COMPLETED_TTL_SECONDS)
@@ -357,6 +365,20 @@ class RuntimeStateService:
     def consume_rate_limit(self, tenant_id: str, limit_per_minute: int) -> int:
         minute_bucket = str(int(time.time() // 60))
         key = self._rate_key(tenant_id, minute_bucket)
+        return self._consume_rate_limit_key(key, limit_per_minute)
+
+    def consume_scoped_rate_limit(
+        self,
+        namespace: str,
+        scope_digest: str,
+        limit_per_minute: int,
+    ) -> int:
+        """Consume a rate limit whose key uses a caller-provided SHA-256 digest only."""
+        minute_bucket = str(int(time.time() // 60))
+        key = self._scoped_rate_key(namespace, scope_digest, minute_bucket)
+        return self._consume_rate_limit_key(key, limit_per_minute)
+
+    def _consume_rate_limit_key(self, key: str, limit_per_minute: int) -> int:
         pipe = self.client.pipeline()
         pipe.incr(key)
         pipe.expire(key, 120)
@@ -371,6 +393,20 @@ class RuntimeStateService:
             "runtime-state-consume-rate-limit",
             self.consume_rate_limit,
             tenant_id,
+            limit_per_minute,
+        )
+
+    async def consume_scoped_rate_limit_async(
+        self,
+        namespace: str,
+        scope_digest: str,
+        limit_per_minute: int,
+    ) -> int:
+        return await self._run_managed(
+            "runtime-state-consume-scoped-rate-limit",
+            self.consume_scoped_rate_limit,
+            namespace,
+            scope_digest,
             limit_per_minute,
         )
 

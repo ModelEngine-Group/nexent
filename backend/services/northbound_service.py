@@ -471,6 +471,8 @@ async def start_streaming_chat(
         raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
+    except LookupError:
+        raise
     except AppException:
         raise
     except Exception as e:

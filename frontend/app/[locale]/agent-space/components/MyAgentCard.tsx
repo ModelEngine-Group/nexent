@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { getAgentUsageGuideAccess } from "@/lib/agentUsageGuide";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import {
   formatMineDate,
@@ -32,6 +33,10 @@ interface MyAgentCardProps {
   onViewReview: (mode: "review" | "reviewUpdate") => void;
   onDelete: () => void;
   onEvaluate: () => void;
+  onUsageGuide: () => void;
+  highlighted?: boolean;
+  guideMenuOpen?: boolean;
+  onGuideMenuOpenChange?: (open: boolean) => void;
   isApplying?: boolean;
   isDeleting?: boolean;
 }
@@ -57,6 +62,10 @@ export function MyAgentCard({
   onViewReview,
   onDelete,
   onEvaluate,
+  onUsageGuide,
+  highlighted = false,
+  guideMenuOpen,
+  onGuideMenuOpenChange,
   isApplying = false,
   isDeleting = false,
 }: MyAgentCardProps) {
@@ -66,7 +75,10 @@ export function MyAgentCard({
   const description =
     agent.description?.trim() || t("agentRepository.card.noDescription");
   const tags = agent.tags?.filter((tag) => tag.trim()) ?? [];
-  const published = (agent.current_version_no ?? 0) > 0;
+  const { canOpen: published } = getAgentUsageGuideAccess({
+    currentVersionNo: agent.current_version_no,
+    permission: agent.permission,
+  });
   const repositoryInfo = agent.repository_info ?? [];
   const repositoryStatusBadge =
     getMineCardRepositoryStatusBadge(repositoryInfo);
@@ -113,6 +125,16 @@ export function MyAgentCard({
     menuItems.push({ type: "divider" });
   }
 
+  if (published) {
+    menuItems.push({
+      key: "usageGuide",
+      icon: <Share2 className="size-3.5" aria-hidden />,
+      label: t("agentRepository.mine.menu.usageGuide"),
+      className: guideMenuOpen ? "font-semibold" : undefined,
+      onClick: onUsageGuide,
+    });
+  }
+
   if (canEdit) {
     menuItems.push({
       key: "delete",
@@ -125,7 +147,13 @@ export function MyAgentCard({
   }
 
   return (
-    <ResourceCard title={title} className="h-full">
+    <ResourceCard
+      title={title}
+      className={`h-full ${
+        highlighted ? "rounded-xl ring-2 ring-primary ring-offset-2" : ""
+      }`}
+      aria-current={highlighted ? "true" : undefined}
+    >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -155,13 +183,19 @@ export function MyAgentCard({
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {menuItems.length > 0 ? (
-            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+            <Dropdown
+              menu={{ items: menuItems }}
+              open={guideMenuOpen}
+              onOpenChange={onGuideMenuOpenChange}
+              trigger={["click"]}
+            >
               <Button
                 type="text"
                 size="small"
                 className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
                 icon={<MoreHorizontal className="size-4" aria-hidden />}
                 aria-label={t("agentRepository.mine.menu.more")}
+                aria-haspopup="menu"
               />
             </Dropdown>
           ) : null}

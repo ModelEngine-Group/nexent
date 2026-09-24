@@ -945,6 +945,16 @@ def get_agent_by_name_impl(agent_name: str, tenant_id: str) -> dict:
         raise Exception("agent_name required")
     try:
         agent_id = search_agent_id_by_agent_name(agent_name, tenant_id)
+    except ValueError as exc:
+        logger.info("Agent '%s' was not found in tenant %s", agent_name, tenant_id)
+        raise LookupError("agent not found") from exc
+    except Exception as exc:
+        logger.error(
+            "Failed to resolve agent '%s' in tenant %s", agent_name, tenant_id, exc_info=True
+        )
+        raise Exception("agent not found") from exc
+
+    try:
         versions = query_version_list(agent_id, tenant_id)
         latest_version = versions[0]["version_no"] if versions else None
         return {"agent_id": agent_id, "latest_version_no": latest_version}

@@ -4,6 +4,7 @@ Unit tests for backend.apps.agent_app module.
 Tests all agent management API endpoints including runtime and configuration operations.
 """
 import atexit
+import logging
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
 import importlib.machinery
@@ -25,6 +26,7 @@ from consts.exceptions import (
     ForbiddenError,
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
+    TokenExpiredError,
     UnauthorizedError,
     ValidationError,
 )
@@ -159,7 +161,6 @@ runtime_client = TestClient(runtime_app)
 config_app = FastAPI()
 config_app.include_router(agent_config_router)
 config_client = TestClient(config_app)
-
 
 @pytest.fixture
 def mock_auth_header():

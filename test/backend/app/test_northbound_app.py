@@ -1142,6 +1142,27 @@ def test_run_chat_value_error():
         assert resp.status_code == 400
 
 
+def test_run_chat_returns_404_when_agent_is_not_in_api_key_tenant():
+    """A valid API Key must not turn an unavailable Agent into a server error."""
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.start_streaming_chat', new_callable=AsyncMock) as mock_run:
+
+        mock_ctx.return_value = MagicMock()
+        mock_run.side_effect = LookupError("agent not found")
+
+        resp = client.post(
+            "/nb/v1/chat/run",
+            json={
+                "agent_name": "general-assistant",
+                "query": "Hello",
+            },
+            headers=_build_headers(),
+        )
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Agent not found in the API Key tenant."
+
+
 # =============================================================================
 # Stop Chat Error Tests
 # =============================================================================

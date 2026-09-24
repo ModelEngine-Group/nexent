@@ -427,6 +427,12 @@ async def run_chat(
     except PermissionError as e:
         logging.error(f"Permission denied while running northbound chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except LookupError as e:
+        logging.info("Northbound Agent was not found in the API Key tenant: %s", e)
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Agent not found in the API Key tenant.",
+        ) from e
     except RuntimeServiceTimeoutError as e:
         raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
     except RuntimeServiceUnavailableError as e:

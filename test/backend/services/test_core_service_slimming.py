@@ -216,6 +216,36 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
     assert context.metadata.extra_metadata == {"agent_share_option": "private", "background": True}
 
 
+def test_disabling_personal_memory_skips_personal_memory_loading(monkeypatch):
+    calls = []
+    dependency(monkeypatch, "nexent.monitor", AgentRunMetadata=types.SimpleNamespace)
+
+    def memory(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("personal-memory-disabled runs must not load personal memory")
+
+    dependency(monkeypatch, "services.memory_config_service", build_memory_context=memory)
+    dependency(monkeypatch, "utils.monitoring", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
+    module = load_source(monkeypatch, "backend/management/services/agent/run_context.py", "share_run_context")
+    request = types.SimpleNamespace(
+        agent_id=3, conversation_id=4, query="hello", is_debug=False, history=[1], minio_files=[]
+    )
+
+    context = module.build_agent_run_context(
+        request,
+        "owner-a",
+        "owner-tenant",
+        "en",
+        extra_metadata={"entrypoint": "northbound"},
+        disable_personal_memory=True,
+    )
+
+    assert calls == []
+    assert context.enable_memory is False
+    assert context.metadata.memory_enabled is False
+    assert context.metadata.extra_metadata == {"entrypoint": "northbound"}
+
+
 @pytest.fixture
 def model_resolver(monkeypatch):
     status = types.SimpleNamespace(

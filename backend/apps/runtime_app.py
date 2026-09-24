@@ -18,6 +18,7 @@ from apps.file_management_app import (
 from apps.skill_app import skill_creator_router
 from consts.const import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from middleware.exception_handler import ExceptionHandlerMiddleware
+from utils.logging_utils import configure_runtime_uvicorn_logging
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
@@ -27,6 +28,8 @@ from nexent.core.concurrency import (
 from services.thread_lifecycle_service import runtime_thread_manager
 from services.runtime_state_service import runtime_state_service
 
+
+configure_runtime_uvicorn_logging()
 logger = logging.getLogger("runtime_app")
 
 

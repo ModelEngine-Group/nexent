@@ -273,8 +273,10 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     Note: conversation_message_unit_t only stores assistant message content.
     User messages do not need unit records.
     """
-    user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
+    user_role_count = sum(
+        1 for item in (getattr(request, "history", None) or [])
+        if item.role == MESSAGE_ROLE["USER"]
+    )
 
     # Strip the [Current time: ...] prefix before persisting so historical
     # messages do not show the time marker. The prefix is injected by

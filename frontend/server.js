@@ -10,11 +10,13 @@ import path from "node:path";
 import multiparty from "multiparty";
 import dotenv from "dotenv";
 import { BASE_PATH } from "./base-path.mjs";
+import { isRuntimeApiPath } from "./proxy-routing.mjs";
 import {
   ensureDir,
   readLocaleConfig,
   saveLocaleConfig,
 } from "./build-config.js";
+import { buildPublicFrontendConfig } from "./runtime-frontend-config.mjs";
 
 const { createProxyServer } = httpProxy;
 const __filename = fileURLToPath(import.meta.url);
@@ -54,9 +56,9 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
+const NORTHBOUND_HTTP_BACKEND =
+  process.env.NORTHBOUND_HTTP_BACKEND || "http://localhost:5013"; // northbound
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
-const SHARE_BASE_URL =
-  process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
 
 const BUILT_IN_PUBLIC_DIR = path.resolve(__dirname, "./public");
 const PROJECT_CONFIG_DIR = path.resolve(
@@ -587,6 +589,7 @@ app.prepare().then(() => {
 
     const isProxyRequest =
       internalPathname.startsWith("/api/") ||
+      internalPathname.startsWith("/nb/") ||
       (internalPathname.includes("/attachments/") &&
         !internalPathname.startsWith("/api/"));
     if (isProxyRequest && BASE_PATH) {
@@ -598,6 +601,7 @@ app.prepare().then(() => {
     if (handleProjectConfigAsset(internalPathname, req, res)) return;
     if (await handleProjectConfigApi(internalPathname, req, res)) return;
     if (handleAttachmentProxy(internalPathname, req, res)) return;
+    if (handleNorthboundProxy(internalPathname, req, res)) return;
     if (handleAllApiProxy(internalPathname, req, res)) return;
 
     // Fallback: let Next.js render pages and framework resources with basePath intact.
@@ -648,7 +652,7 @@ function handleFrontendConfigApi(pathname, req, res) {
   if (pathname !== "/api/frontend-config") return false;
 
   res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify({ shareBaseUrl: SHARE_BASE_URL }));
+  res.end(JSON.stringify(buildPublicFrontendConfig(process.env)));
   return true;
 }
 
@@ -718,6 +722,21 @@ function handleAttachmentProxy(pathname, req, res) {
 }
 
 /**
+ * Keep northbound calls on the same public origin as the web application.
+ */
+function handleNorthboundProxy(pathname, req, res) {
+  if (!pathname.startsWith("/nb/")) return false;
+
+  proxy.web(req, res, {
+    target: NORTHBOUND_HTTP_BACKEND,
+    changeOrigin: true,
+    proxyTimeout: SSE_PROXY_TIMEOUT_MS,
+    timeout: SSE_PROXY_TIMEOUT_MS,
+  });
+  return true;
+}
+
+/**
  * 统一处理所有 /api/ 代理转发逻辑
  */
 function handleAllApiProxy(pathname, req, res) {
@@ -730,21 +749,7 @@ function handleAllApiProxy(pathname, req, res) {
   }
 
   // 2. 判断是否为 runtime 运行时接口
-  const runtimePathPrefixes = [
-    "/api/agent/run",
-    "/api/agent/nl2agent/run",
-    "/api/agent/human-interactions",
-    "/api/skills/nl2skill/run",
-    "/api/agent/stop",
-    "/api/agent/automations",
-    "/api/conversation/",
-    "/api/share/",
-    "/api/file/storage",
-    "/api/file/preprocess",
-  ];
-  const isRuntime = runtimePathPrefixes.some((prefix) =>
-    pathname.startsWith(prefix)
-  );
+  const isRuntime = isRuntimeApiPath(pathname);
 
   // 3. skills 特殊接口
   // 分发代理目标

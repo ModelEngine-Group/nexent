@@ -648,6 +648,7 @@ async def list_my_editable_agents_impl(
             {
                 "agent_id": agent.get("agent_id"),
                 "name": agent.get("display_name") or agent.get("name"),
+                "internal_name": agent.get("name"),
                 "description": agent.get("description"),
                 "current_version_no": meta.get("current_version_no"),
                 "version_label": meta.get("version_name"),

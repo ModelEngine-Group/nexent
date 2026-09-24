@@ -205,8 +205,21 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
         "formatters": formatters,
         "handlers": {**{"console": console_handler}, **file_handlers},
         "root": {"level": level, "handlers": handler_names},
+        "loggers": {
+            "uvicorn.access": {
+                "handlers": handler_names,
+                "level": level,
+                "propagate": False,
+            }
+        },
     }
     return config
+
+
+def configure_runtime_uvicorn_logging():
+    """Apply the runtime Uvicorn logging configuration before serving requests."""
+    logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime"]))
+    configure_elasticsearch_logging()
 
 
 def configure_elasticsearch_logging():

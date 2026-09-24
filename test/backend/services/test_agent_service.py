@@ -4627,6 +4627,43 @@ async def test_prepare_agent_run_can_disable_automation_tool(
     )
 
 
+@pytest.mark.asyncio
+@patch('management.services.agent.run.build_memory_context')
+@patch('management.services.agent.run.create_agent_run_info', new_callable=AsyncMock)
+@patch('management.services.agent.run.agent_run_manager')
+async def test_prepare_agent_run_disables_personal_memory_for_share_context(
+    mock_agent_run_manager,
+    mock_create_run_info,
+    mock_build_memory_context,
+    mock_agent_request,
+):
+    mock_run_info = MagicMock()
+    mock_run_info.agent_config.context_items = []
+    mock_run_info.agent_config.context_manager_config.policy_layers = {
+        "platform": {"processing_mode": "passthrough"}
+    }
+    mock_run_info.history = []
+    mock_create_run_info.return_value = mock_run_info
+
+    _, memory_context = await prepare_agent_run(
+        mock_agent_request,
+        user_id="owner-a",
+        tenant_id="owner-tenant",
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-tenant",
+        disable_personal_memory=True,
+    )
+
+    assert memory_context is None
+    mock_build_memory_context.assert_not_called()
+    assert mock_create_run_info.await_args.kwargs["disable_personal_memory"] is True
+    mock_agent_run_manager.register_agent_run.assert_called_once_with(
+        123,
+        mock_run_info,
+        "visitor-a",
+    )
+
+
 @patch("management.services.agent.run.save_conversation_user")
 def test_save_messages(mock_save_user, mock_agent_request):
     """Test save_messages function."""
@@ -4782,6 +4819,243 @@ async def test_ut_be_tlm_033_agent_id_capacity_rejects_before_managed_execution(
         agent_run_service.RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
     )
     submit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_separates_share_resource_and_conversation_identities(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    from management.services.agent.run_identity import AgentRunIdentityContext
+
+    identity = AgentRunIdentityContext(
+        resource_actor_user_id="owner-a",
+        resource_tenant_id="owner-tenant",
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-tenant",
+        entrypoint="northbound",
+        disable_personal_memory=True,
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "_resolve_user_tenant_language",
+        lambda **kwargs: ("visitor-a", "visitor-tenant", "en"),
+    )
+    conversation_lookup = MagicMock(
+        return_value={"runtime_metadata": {}, "runtime_metadata_version": 0}
+    )
+    save_user_message = MagicMock()
+    build_context = MagicMock(
+        return_value=MagicMock(enable_memory=False, metadata=MagicMock())
+    )
+    reset_stream = AsyncMock()
+    channel = MagicMock()
+    get_channel = AsyncMock(return_value=channel)
+    generate_stream = MagicMock()
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    generate_stream.return_value = stream_chunks()
+    monkeypatch.setattr(
+        agent_run_service, "get_conversation_service", conversation_lookup
+    )
+    monkeypatch.setattr(agent_run_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_run_service, "build_agent_run_context", build_context)
+    monkeypatch.setattr(
+        agent_run_service.runtime_state_service, "reset_stream_async", reset_stream
+    )
+    monkeypatch.setattr(
+        agent_run_service.streaming_channel_manager,
+        "get_or_create_channel",
+        get_channel,
+    )
+    monkeypatch.setattr(agent_run_service, "generate_stream", generate_stream)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+        identity_context=identity,
+        timezone="Asia/Shanghai",
+    )
+
+    assert isinstance(response, StreamingResponse)
+    conversation_lookup.assert_called_once_with(
+        conversation_id=123,
+        user_id="visitor-a",
+        tenant_id="visitor-tenant",
+    )
+    save_user_message.assert_called_once_with(
+        mock_agent_request,
+        target="user",
+        user_id="visitor-a",
+        tenant_id="visitor-tenant",
+    )
+    build_context.assert_called_once_with(
+        mock_agent_request,
+        "owner-a",
+        "owner-tenant",
+        "en",
+        extra_metadata={
+            "skip_user_save": False,
+            "has_override_user_id": False,
+            "has_override_tenant_id": False,
+        },
+        disable_personal_memory=True,
+    )
+    generate_stream.assert_called_once_with(
+        mock_agent_request,
+        user_id="owner-a",
+        tenant_id="owner-tenant",
+        language="en",
+        enable_memory=False,
+        reservation_token=ANY,
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-tenant",
+        disable_personal_memory=True,
+        execution=ANY,
+        deferred_run=ANY,
+        channel=channel,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_isolates_share_conversation_locks_and_channels(
+    monkeypatch,
+    mock_http_request,
+):
+    """Share visitors must keep independent run, channel, and persistence scopes."""
+    from management.services.agent.run_identity import AgentRunIdentityContext
+
+    visitor_a_request = AgentRequest(
+        agent_id=1,
+        conversation_id=123,
+        query="visitor A question",
+        history=[],
+        minio_files=[],
+        requested_output_tokens=4096,
+        is_debug=False,
+    )
+    visitor_b_request = AgentRequest(
+        agent_id=1,
+        conversation_id=456,
+        query="visitor B question",
+        history=[],
+        minio_files=[],
+        requested_output_tokens=4096,
+        is_debug=False,
+    )
+    visitor_a_identity = AgentRunIdentityContext(
+        resource_actor_user_id="owner-a",
+        resource_tenant_id="owner-tenant",
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-a-tenant",
+        entrypoint="northbound",
+        disable_personal_memory=True,
+    )
+    visitor_b_identity = AgentRunIdentityContext(
+        resource_actor_user_id="owner-a",
+        resource_tenant_id="owner-tenant",
+        conversation_owner_user_id="visitor-b",
+        conversation_owner_tenant_id="visitor-b-tenant",
+        entrypoint="northbound",
+        disable_personal_memory=True,
+    )
+    channel_a = MagicMock()
+    channel_b = MagicMock()
+    reserve_run = MagicMock(side_effect=["reservation-a", "reservation-b"])
+    get_channel = AsyncMock(side_effect=[channel_a, channel_b])
+    reset_stream = AsyncMock()
+    save_user_message = MagicMock()
+    build_context = MagicMock(
+        return_value=MagicMock(enable_memory=False, metadata=MagicMock())
+    )
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    monkeypatch.setattr(
+        agent_run_service,
+        "_resolve_user_tenant_language",
+        lambda **_kwargs: ("unexpected-user", "unexpected-tenant", "en"),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_conversation_service",
+        MagicMock(
+            return_value={"runtime_metadata": {}, "runtime_metadata_version": 0}
+        ),
+    )
+    monkeypatch.setattr(
+        agent_run_service.agent_run_manager, "reserve_agent_run", reserve_run
+    )
+    monkeypatch.setattr(agent_run_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_run_service, "build_agent_run_context", build_context)
+    monkeypatch.setattr(
+        agent_run_service.runtime_state_service, "reset_stream_async", reset_stream
+    )
+    monkeypatch.setattr(
+        agent_run_service.streaming_channel_manager, "get_or_create_channel", get_channel
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "generate_stream",
+        MagicMock(side_effect=[stream_chunks(), stream_chunks()]),
+    )
+
+    responses = await asyncio.gather(
+        run_agent_stream(
+            visitor_a_request,
+            mock_http_request,
+            "Bearer token",
+            identity_context=visitor_a_identity,
+        ),
+        run_agent_stream(
+            visitor_b_request,
+            mock_http_request,
+            "Bearer token",
+            identity_context=visitor_b_identity,
+        ),
+    )
+
+    assert all(isinstance(response, StreamingResponse) for response in responses)
+    reserve_run.assert_has_calls(
+        [call(123, "visitor-a"), call(456, "visitor-b")],
+        any_order=True,
+    )
+    reset_stream.assert_has_awaits(
+        [
+            call(user_id="visitor-a", conversation_id=123),
+            call(user_id="visitor-b", conversation_id=456),
+        ],
+        any_order=True,
+    )
+    get_channel.assert_has_awaits(
+        [
+            call(conversation_id=123, user_id="visitor-a"),
+            call(conversation_id=456, user_id="visitor-b"),
+        ],
+        any_order=True,
+    )
+    save_user_message.assert_has_calls(
+        [
+            call(
+                visitor_a_request,
+                target="user",
+                user_id="visitor-a",
+                tenant_id="visitor-a-tenant",
+            ),
+            call(
+                visitor_b_request,
+                target="user",
+                user_id="visitor-b",
+                tenant_id="visitor-b-tenant",
+            ),
+        ],
+        any_order=True,
+    )
 
 
 @pytest.mark.asyncio
@@ -10672,6 +10946,16 @@ def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
 
     with pytest.raises(Exception, match="agent not found"):
         get_agent_by_name_impl("nonexistent_agent", "tenant_1")
+
+
+@patch("management.services.agent.management.query_version_list")
+@patch("management.services.agent.management.search_agent_id_by_agent_name")
+def test_get_agent_by_name_impl_uses_lookup_error_for_missing_agent(mock_search, mock_query_versions):
+    """Preserve the missing-Agent condition for HTTP callers to map to 404."""
+    mock_search.side_effect = ValueError("agent not found")
+
+    with pytest.raises(LookupError, match="agent not found"):
+        get_agent_by_name_impl("missing_agent", "tenant_1")
 
 
 @patch("management.services.agent.management.query_version_list")
