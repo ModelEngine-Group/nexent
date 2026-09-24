@@ -190,7 +190,7 @@ export const ModelEditDialog = ({
         apiKey: apiKey.trim() || undefined,
         modelId: model.id,
         modelFactory: model.source || "OpenAI-API-Compatible",
-        ...buildInferenceParamsPayload(advanced),
+        ...buildInferenceParamsPayload(advanced, reasoningCapability),
       });
       setProbe(result.connectivity ? "available" : "unavailable");
     } catch {
@@ -209,7 +209,7 @@ export const ModelEditDialog = ({
         url: baseUrl.trim(),
         modelFactory: model.source || "OpenAI-API-Compatible",
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        ...buildInferenceParamsPayload(advanced),
+        ...buildInferenceParamsPayload(advanced, reasoningCapability),
       };
       if (typeChanged) {
         params.type = type;

@@ -74,16 +74,42 @@ export function ModelAdvancedConfig({
 }) {
   const { t } = useTranslation();
 
-  // LLMs expose the thinking switch regardless of whether the catalog has
-  // declared a provider-specific reasoning control. Materialize the default
-  // (true) into the value — the payload builder treats an undefined
-  // enable_thinking as "thinking off" and would silently drop any stored
-  // reasoning_effort / budget (same seed ModelAdvancedSettings applies).
+  // ---- Reasoning controls (shared resolution, see ModelAdvancedSettings) ----
+  // develop #4009: the thinking UI is LLM-only AND requires a declared
+  // capability; unsupported models render nothing and legacy stored reasoning
+  // values are stripped so an unchanged save cannot re-submit them.
+  const {
+    budgetControl,
+    effectiveEffortControl,
+    reasoningLevels,
+    hasDeclaredControls,
+  } = resolveReasoningControls(reasoningCapability);
+  const reasoningControlVisible = modelType === "llm" && hasDeclaredControls;
+
   useEffect(() => {
-    if (modelType === "llm" && value.enable_thinking === undefined) {
+    if (
+      modelType === "llm" &&
+      !reasoningControlVisible &&
+      (value.enable_thinking !== undefined ||
+        value.reasoning_effort !== undefined ||
+        value.reasoning_budget_tokens !== undefined)
+    ) {
+      const next = { ...value };
+      delete next.enable_thinking;
+      delete next.reasoning_effort;
+      delete next.reasoning_budget_tokens;
+      onChange(next);
+    }
+  }, [modelType, onChange, reasoningControlVisible, value]);
+
+  // Materialize the default (true) into the value — the payload builder
+  // treats an undefined enable_thinking as "thinking off" and would silently
+  // drop any stored reasoning_effort / budget.
+  useEffect(() => {
+    if (reasoningControlVisible && value.enable_thinking === undefined) {
       onChange({ ...value, enable_thinking: true });
     }
-  }, [modelType, value, onChange]);
+  }, [reasoningControlVisible, value, onChange]);
 
   const setNumberField = (key: string, raw: string) =>
     onChange({ ...value, [key]: raw === "" ? undefined : Number(raw) });
@@ -94,11 +120,7 @@ export function ModelAdvancedConfig({
   const setCustoms = (next: [string, string][]) =>
     onChange({ ...value, __custom__: next });
 
-  // ---- Reasoning controls (shared resolution, see ModelAdvancedSettings) ----
-  const reasoningControlVisible = modelType === "llm";
   const thinkingEnabled = value.enable_thinking !== false;
-  const { budgetControl, effectiveEffortControl, reasoningLevels } =
-    resolveReasoningControls(reasoningCapability);
   const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
   const reasoningDefault = resolveReasoningDefault(
     reasoningEffort,
@@ -150,111 +172,116 @@ export function ModelAdvancedConfig({
         />
       </div>
 
-      {/* Deep thinking toggle + reasoning controls */}
-      <div className="mt-4 rounded-lg border px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <Label className="text-sm">
-              {t("modelConfig.advancedConfig.enableThinking", {
-                defaultValue: "深度思考",
-              })}
-            </Label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t("modelConfig.advancedConfig.enableThinkingHint", {
-                defaultValue: "允许模型在回答前进行显式推理",
-              })}
-            </p>
-          </div>
-          <Switch
-            checked={value.enable_thinking !== false}
-            onCheckedChange={(checked) =>
-              onChange({
-                ...value,
-                enable_thinking: checked,
-                // Same semantics as ModelAdvancedSettings: toggling on seeds
-                // the resolved default effort (preserves a valid stored one);
-                // toggling off clears both so the payload builder drops them.
-                reasoning_effort:
-                  checked && effectiveEffortControl?.type === "effort"
-                    ? reasoningDefault
-                    : undefined,
-                reasoning_budget_tokens: checked
-                  ? value.reasoning_budget_tokens
-                  : undefined,
-              })
-            }
-          />
-        </div>
-        {reasoningControlVisible &&
-          thinkingEnabled &&
-          effectiveEffortControl?.type === "effort" && (
-            <div className="mt-3 space-y-1.5">
+      {/* Deep thinking toggle + reasoning controls (capability-gated, #4009) */}
+      {reasoningControlVisible && (
+        <div className="mt-4 rounded-lg border px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div>
               <Label className="text-sm">
-                {t("model.advanced.reasoningEffort", {
-                  defaultValue: "思考挡位",
+                {t("modelConfig.advancedConfig.enableThinking", {
+                  defaultValue: "深度思考",
                 })}
               </Label>
-              <Select
-                value={
-                  reasoningEffort && reasoningLevels.includes(reasoningEffort)
-                    ? reasoningEffort
-                    : (reasoningDefault ?? "auto")
-                }
-                onValueChange={(next) =>
-                  onChange({
-                    ...value,
-                    reasoning_effort: next as ReasoningEffort,
-                  })
-                }
-              >
-                <SelectTrigger className="h-8 w-full bg-card text-sm font-normal">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {reasoningLevels.map((level) => (
-                    <SelectItem key={level} value={level} className="text-xs">
-                      {level}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        {reasoningControlVisible &&
-          thinkingEnabled &&
-          budgetControl?.type === "budget_tokens" && (
-            <div className="mt-3 space-y-1.5">
-              <Label className="text-sm">
-                {t("model.advanced.reasoningBudget", {
-                  defaultValue: "预算 tokens",
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t("modelConfig.advancedConfig.enableThinkingHint", {
+                  defaultValue: "允许模型在回答前进行显式推理",
                 })}
-              </Label>
-              <Input
-                type="number"
-                value={reasoningBudget?.toString() ?? ""}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === "") {
-                    onChange({ ...value, reasoning_budget_tokens: undefined });
-                    return;
-                  }
-                  onChange({
-                    ...value,
-                    reasoning_budget_tokens: clampReasoningBudget(
-                      budgetControl,
-                      Number(raw)
-                    ),
-                  });
-                }}
-                placeholder="auto"
-                className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              />
-              <p className="text-xs text-muted-foreground">
-                {`${budgetControl.min} ~ ${budgetControl.max}`}
               </p>
             </div>
-          )}
-      </div>
+            <Switch
+              checked={value.enable_thinking !== false}
+              onCheckedChange={(checked) =>
+                onChange({
+                  ...value,
+                  enable_thinking: checked,
+                  // Same semantics as ModelAdvancedSettings: toggling on seeds
+                  // the resolved default effort (preserves a valid stored one);
+                  // toggling off clears both so the payload builder drops them.
+                  reasoning_effort:
+                    checked && effectiveEffortControl?.type === "effort"
+                      ? reasoningDefault
+                      : undefined,
+                  reasoning_budget_tokens: checked
+                    ? value.reasoning_budget_tokens
+                    : undefined,
+                })
+              }
+            />
+          </div>
+          {reasoningControlVisible &&
+            thinkingEnabled &&
+            effectiveEffortControl?.type === "effort" && (
+              <div className="mt-3 space-y-1.5">
+                <Label className="text-sm">
+                  {t("model.advanced.reasoningEffort", {
+                    defaultValue: "思考挡位",
+                  })}
+                </Label>
+                <Select
+                  value={
+                    reasoningEffort && reasoningLevels.includes(reasoningEffort)
+                      ? reasoningEffort
+                      : (reasoningDefault ?? "auto")
+                  }
+                  onValueChange={(next) =>
+                    onChange({
+                      ...value,
+                      reasoning_effort: next as ReasoningEffort,
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-8 w-full bg-card text-sm font-normal">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reasoningLevels.map((level) => (
+                      <SelectItem key={level} value={level} className="text-xs">
+                        {level}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          {reasoningControlVisible &&
+            thinkingEnabled &&
+            budgetControl?.type === "budget_tokens" && (
+              <div className="mt-3 space-y-1.5">
+                <Label className="text-sm">
+                  {t("model.advanced.reasoningBudget", {
+                    defaultValue: "预算 tokens",
+                  })}
+                </Label>
+                <Input
+                  type="number"
+                  value={reasoningBudget?.toString() ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw === "") {
+                      onChange({
+                        ...value,
+                        reasoning_budget_tokens: undefined,
+                      });
+                      return;
+                    }
+                    onChange({
+                      ...value,
+                      reasoning_budget_tokens: clampReasoningBudget(
+                        budgetControl,
+                        Number(raw)
+                      ),
+                    });
+                  }}
+                  placeholder="auto"
+                  className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {`${budgetControl.min} ~ ${budgetControl.max}`}
+                </p>
+              </div>
+            )}
+        </div>
+      )}
 
       {/* Custom params */}
       <div className="mt-4">

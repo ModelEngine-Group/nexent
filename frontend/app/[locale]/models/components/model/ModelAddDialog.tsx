@@ -295,9 +295,10 @@ async function createModel(
  */
 function applyAdvancedSettingsToParams(
   params: Record<string, any>,
-  settings: ModelAdvancedSettingsValue
+  settings: ModelAdvancedSettingsValue,
+  reasoningCapability?: ReasoningCapability
 ) {
-  const payload = buildInferenceParamsPayload(settings);
+  const payload = buildInferenceParamsPayload(settings, reasoningCapability);
   Object.assign(params, payload);
   const hasCapacity =
     payload.context_window_tokens != null ||
@@ -490,7 +491,7 @@ function SingleAddForm({
         connectStatus: "available",
       };
       if (effective?.settings) {
-        applyAdvancedSettingsToParams(params, effective.settings);
+        applyAdvancedSettingsToParams(params, effective.settings, capability);
       }
       await createModel(tenantId, params);
       onSuccess({ name: name.trim(), type });
@@ -1019,7 +1020,11 @@ function BatchAddForm({
           connectStatus: "available",
         };
         if (override?.settings) {
-          applyAdvancedSettingsToParams(params, override.settings);
+          applyAdvancedSettingsToParams(
+            params,
+            override.settings,
+            rowCapabilities[row.id]
+          );
         }
         await createModel(tenantId, params);
         created++;
