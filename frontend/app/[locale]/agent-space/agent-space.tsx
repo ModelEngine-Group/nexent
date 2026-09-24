@@ -12,7 +12,7 @@ import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import ResourceCard from "@/components/resource/ResourceCard";
-import { AgentDetail } from "@/components/agents/agent-detail";
+import { AgentDetail } from "@/components/agent/agent-detail";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import type { TagResourcePredicate } from "@/types/tagManagement";

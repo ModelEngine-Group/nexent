@@ -31,7 +31,7 @@ import log from "@/lib/logger";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
-import { AgentDetail } from "@/components/agents/agent-detail";
+import { AgentDetail } from "@/components/agent/agent-detail";
 import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
 
 import AgentConfigActions from "./components/agent-config-actions";

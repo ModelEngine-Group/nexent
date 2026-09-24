@@ -5,7 +5,7 @@ import { App, Button, Empty, Spin } from "antd";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { AgentDetail } from "@/components/agents/agent-detail";
+import { AgentDetail } from "@/components/agent/agent-detail";
 import { USER_ROLES } from "@/const/auth";
 import {
   useAgentRepositoryListings,

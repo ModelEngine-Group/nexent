@@ -17,7 +17,7 @@ import type {
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
-import { SkillDetail } from "@/components/skills/skill-detail";
+import { SkillDetail } from "@/components/skill/skill-detail";
 import { RepositoryView } from "./components/RepositoryView";
 import { getSkillRepositoryStatusLabel } from "./components/skillRepositoryShared";
 

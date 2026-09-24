@@ -12,7 +12,7 @@ import type {
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
-import { SkillDetail } from "@/components/skills/skill-detail";
+import { SkillDetail } from "@/components/skill/skill-detail";
 import { ReviewSkillList } from "./components/ReviewSkillList";
 import {
   SkillRepositoryReviewConfirmModal,

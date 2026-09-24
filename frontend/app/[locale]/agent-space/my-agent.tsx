@@ -53,7 +53,7 @@ import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { mapMyAgentDetail } from "@/lib/myAgentDetail";
-import { AgentDetail } from "@/components/agents/agent-detail";
+import { AgentDetail } from "@/components/agent/agent-detail";
 import { MyAgentIcon } from "./components/MyAgentIcon";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
