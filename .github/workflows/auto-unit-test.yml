@@ -62,6 +62,9 @@ jobs:
           bash deploy/tests/test_k8s_backup.sh
           bash deploy/tests/test_sql_migrations.sh
           bash deploy/tests/test_super_admin_init.sh
+          bash deploy/tests/test_docker_deploy_workflow.sh
+          bash deploy/tests/test_images_build.sh
+          bash deploy/tests/test_load_images.sh
           bash deploy/tests/test_build_offline_package.sh
 
       - name: Set up Python

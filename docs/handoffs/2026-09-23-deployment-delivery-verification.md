@@ -84,3 +84,17 @@ version/source/prefix. Preserve default lightweight mode otherwise.
 
 Rollback by reverting the corresponding change and rebuilding its artifacts. No
 database migration, existing SQL edit or application API change is introduced.
+
+## Follow-up review — 2026-09-24
+
+The automatic unit-test workflow already ran offline package tests, but did not
+invoke the new CI tag regression or the existing image build/loader suites. Added
+all three to its deployment script test step. Its existing pull-request/push path
+filters cover deployment tests and workflow changes, so these regressions now run
+automatically on the configured target branches.
+
+Re-executed the three newly wired suites successfully. Validated the modified
+workflow YAML, exact test invocation list, trigger paths and embedded shell syntax;
+`git diff --check` also passed. No production script changed during this follow-up.
+The previously recorded live-environment acceptance blockers remain unresolved;
+no declined Docker/Kubernetes operation was retried.
