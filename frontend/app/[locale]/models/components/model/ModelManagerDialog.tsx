@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 import { ModelOption, ModelSource } from "@/types/modelConfig";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { TYPE_LABEL_KEY_MAP } from "./modelTypeUi";
 
 /**
@@ -371,6 +372,7 @@ function DeleteGroupContent({
   onDone: () => void;
 }) {
   const { t } = useTranslation();
+  const { confirm } = useConfirmModal();
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -556,9 +558,28 @@ function DeleteGroupContent({
           <Button
             variant="destructive"
             disabled={selectedModels.length === 0 || deleting}
-            onClick={async () => {
-              await onDeleteModels(selectedModels);
-              onDone();
+            onClick={() => {
+              // One explicit confirmation for the destructive batch: the
+              // action soft-deletes every selected model and vacates their
+              // default slots.
+              confirm({
+                title: t("modelConfig.batchDelete.confirmTitle", {
+                  defaultValue: "确认批量删除？",
+                }),
+                content: t("modelConfig.batchDelete.confirmContent", {
+                  count: selectedModels.length,
+                  defaultValue: `将删除 ${selectedModels.length} 个模型，被删除的默认模型槽位将一并清空。`,
+                }),
+                okText: t("modelConfig.batchDelete.confirm", {
+                  count: selectedModels.length,
+                  defaultValue: `删除 ${selectedModels.length} 个模型`,
+                }),
+                cancelText: t("common.cancel", { defaultValue: "取消" }),
+                onOk: async () => {
+                  await onDeleteModels(selectedModels);
+                  onDone();
+                },
+              });
             }}
           >
             {deleting && <Loader2 className="size-4 animate-spin" />}

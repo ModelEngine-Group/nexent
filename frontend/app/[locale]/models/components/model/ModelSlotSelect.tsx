@@ -171,6 +171,8 @@ export function ModelSlotSelect({
     [models, slot.modelType]
   );
   const selected = options.find((m) => m.displayName === value) ?? null;
+  // Associate the visible label with the select trigger for screen readers.
+  const selectId = `model-slot-${slot.fieldKey}`;
 
   return (
     <div
@@ -179,7 +181,10 @@ export function ModelSlotSelect({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5">
-          <label className="truncate text-sm font-medium text-foreground">
+          <label
+            htmlFor={selectId}
+            className="truncate text-sm font-medium text-foreground"
+          >
             {slot.label}
           </label>
           {slot.priority !== "optional" && (
@@ -218,6 +223,7 @@ export function ModelSlotSelect({
         disabled={disabled}
       >
         <SelectTrigger
+          id={selectId}
           className={cn(
             "w-full bg-card",
             error && "border-destructive ring-destructive/20",

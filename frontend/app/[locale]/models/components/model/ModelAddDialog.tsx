@@ -1037,9 +1037,18 @@ function BatchAddForm({
           })
         );
       }
+      onSuccess();
+      onDone();
+      return;
     }
-    onSuccess();
-    onDone();
+    // All creates failed: keep the dialog open so the operator can fix the
+    // cause (key / URL / names) without re-entering everything.
+    message.error(
+      t("modelConfig.addDialog.batchAllFailed", {
+        defaultValue: `全部 ${failed.length} 个模型添加失败，请检查后重试`,
+        failed: failed.length,
+      })
+    );
   }
 
   return (
@@ -1063,8 +1072,13 @@ function BatchAddForm({
             <Input
               type="password"
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                // Stored probe results were measured with the previous key.
+                setRowCheck({});
+              }}
               placeholder="sk-..."
+              autoComplete="new-password"
             />
           </div>
           <div className="col-span-2 space-y-2">
@@ -1074,8 +1088,14 @@ function BatchAddForm({
             <div className="flex gap-2">
               <Input
                 value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  // Stored probe results were measured against the previous
+                  // endpoint.
+                  setRowCheck({});
+                }}
                 placeholder="https://api.example.com/v1"
+                autoComplete="off"
               />
               <Button
                 variant="outline"
@@ -1155,13 +1175,24 @@ function BatchAddForm({
                 const on = !!selected[row.id];
                 return (
                   <li key={row.id}>
-                    <button
-                      type="button"
+                    {/* A div (not a button): the row hosts a Select and icon
+                        Buttons, and nesting interactive elements inside a
+                        <button> is invalid HTML. The row keeps click-to-toggle
+                        semantics via the handler below. */}
+                    <div
+                      role="button"
+                      tabIndex={0}
                       onClick={() =>
                         setSelected((s) => ({ ...s, [row.id]: !s[row.id] }))
                       }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelected((s) => ({ ...s, [row.id]: !s[row.id] }));
+                        }
+                      }}
                       className={cn(
-                        "flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-secondary/40",
+                        "flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-secondary/40",
                         on && "bg-secondary/30"
                       )}
                     >
@@ -1254,7 +1285,7 @@ function BatchAddForm({
                           <Settings2 className="size-3.5" />
                         </Button>
                       </span>
-                    </button>
+                    </div>
                   </li>
                 );
               })}

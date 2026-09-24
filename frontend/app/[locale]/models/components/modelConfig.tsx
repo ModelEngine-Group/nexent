@@ -33,7 +33,6 @@ import { usePermission } from "@/hooks/permission/usePermission";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
 import {
-  CapacityCoverage,
   ModelOption,
   ModelType,
   ModelConnectStatus,
@@ -93,8 +92,6 @@ export const ModelConfigSection = forwardRef<
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [capacityCoverage, setCapacityCoverage] =
-    useState<CapacityCoverage | null>(null);
 
   // v2.6.1 redesign: add-model dialog (single/batch tab)
   const [addDialogTab, setAddDialogTab] = useState<"single" | "batch">(
@@ -125,7 +122,6 @@ export const ModelConfigSection = forwardRef<
   const abortControllerRef = useRef<AbortController | null>(null);
   const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const capacityCoverageRequestIdRef = useRef(0);
 
   const scheduleAutoSave = () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -452,21 +448,6 @@ export const ModelConfigSection = forwardRef<
     if (!cfg) return;
     try {
       await invalidate();
-
-      // Capacity coverage only drives the warning banner, so keep it off the
-      // critical path for rendering the model table.
-      const coverageRequestId = ++capacityCoverageRequestIdRef.current;
-      setCapacityCoverage(null);
-      void modelService
-        .getCapacityCoverage()
-        .then((coverage) => {
-          if (coverageRequestId === capacityCoverageRequestIdRef.current) {
-            setCapacityCoverage(coverage);
-          }
-        })
-        .catch((error) => {
-          log.warn("Failed to apply model capacity coverage:", error);
-        });
 
       const allModels = await modelService.getAllModels();
       setModels(allModels);
