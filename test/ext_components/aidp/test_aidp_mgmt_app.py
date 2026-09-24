@@ -1861,6 +1861,52 @@ class TestListDocumentsHistory:
         assert response.json()["total_count"] == 1
         assert mock_history.call_count == 1
 
+    def test_minimal_history_entry_keeps_listing_metadata(self):
+        """A history row without metadata must not blank the name/time columns.
+
+        The regression this guards: a build whose history payload carries only
+        the ids and the status replaced the listing row wholesale, so a file
+        listed by both sources rendered with an empty creation time as soon as
+        the history was read.
+        """
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_uuid": "uuid-1", "file_ino_no": "f-1", "status": "COMPLETED"},
+            ]
+        }
+        listed = {
+            "value": [
+                {"file_uuid": "uuid-1", "file_ino_no": "f-1", "file_name": "a.txt",
+                 "file_size": 2048, "created_at": "2024-06-10T06:13:20Z"},
+            ]
+        }
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value=listed):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        row = response.json()["value"][0]
+        # The status comes from the history, everything the history omits stays
+        # as the listing reported it.
+        assert row["status"] == "COMPLETED"
+        assert row["file_name"] == "a.txt"
+        assert row["file_size"] == 2048
+        assert row["created_at"] == "2024-06-10T06:13:20Z"
+
     @pytest.mark.parametrize("page,expected_count,expected_has_more", [
         (1, 10, True),
         (2, 2, False),
@@ -1929,6 +1975,129 @@ class TestListDocumentsHistory:
         assert [item["file_ino_no"] for item in response.json()["value"]] == [
             "timestamped", "no-time",
         ]
+
+    def test_files_still_processing_sort_before_finished_ones(self):
+        """The row carrying an upload's progress must be the first one.
+
+        The user uploads a file and opens the list right away, so the file that
+        is still walking UPLOADING/EXTRACTING has to be visible without paging
+        past the files that were already ingested, even when those are newer.
+        """
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_ino_no": "f-done-new", "file_name": "done-new.txt",
+                 "first_upload_time": 1718000900, "status": "COMPLETED"},
+                {"file_ino_no": "f-uploading", "file_name": "uploading.txt",
+                 "first_upload_time": 1718000100, "status": "UPLOADING"},
+                {"file_ino_no": "f-extracting", "file_name": "extracting.txt",
+                 "first_upload_time": 1718000200, "status": "EXTRACTING"},
+                {"file_ino_no": "f-done-old", "file_name": "done-old.txt",
+                 "first_upload_time": 1718000000, "status": "COMPLETED"},
+            ]
+        }
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        # The open stages come first (newest of that group on top), then the
+        # finished files, also newest first.
+        assert [item["file_ino_no"] for item in body["value"]] == [
+            "f-extracting", "f-uploading", "f-done-new", "f-done-old",
+        ]
+        assert body["processing_count"] == 2
+
+    def test_first_page_keeps_processing_files_under_a_finished_burst(self):
+        """Newer ingested files must not push an in-progress upload off page 1."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        finished = [
+            {"file_ino_no": f"done-{index}", "file_name": f"done-{index}.txt",
+             "first_upload_time": 1718001000 + index, "status": "COMPLETED"}
+            for index in range(12)
+        ]
+        history = {
+            "value": finished + [
+                {"file_ino_no": "f-uploading", "file_name": "uploading.txt",
+                 "first_upload_time": 1718000000, "status": "UPLOADING"},
+                {"file_ino_no": "f-extracting", "file_name": "extracting.txt",
+                 "first_upload_time": 1718000100, "status": "EXTRACTING"},
+            ]
+        }
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents?page=1&page_size=10",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert [item["file_ino_no"] for item in body["value"]][:2] == [
+            "f-extracting", "f-uploading",
+        ]
+        assert body["total_count"] == 14
+        assert body["has_more"] is True
+        assert body["processing_count"] == 2
+
+    def test_unrecognised_stage_stays_pinned_and_keeps_polling(self):
+        """A stage this build does not know yet is open, not finished."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_ino_no": "f-done", "file_name": "done.txt",
+                 "first_upload_time": 1718000900, "status": "COMPLETED"},
+                {"file_ino_no": "f-queued", "file_name": "queued.txt",
+                 "first_upload_time": 1718000000, "status": "CHUNKING"},
+            ]
+        }
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=self._CHANNELS), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"value": []}):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert [item["file_ino_no"] for item in body["value"]] == [
+            "f-queued", "f-done",
+        ]
+        assert body["processing_count"] == 1
 
     def test_history_source_ignores_non_dict_items(self):
         client = _client()
@@ -2047,8 +2216,10 @@ class TestListDocumentsHistory:
         assert response.status_code == HTTPStatus.OK
         body = response.json()
         assert body["processing_count"] == 3
+        # The three open stages hold the top of the list (newest of them first)
+        # and the finished file follows.
         assert [item["status"] for item in body["value"]] == [
-            "COMPLETED", "PROCESSING", "EXTRACTING", "UPLOADING",
+            "PROCESSING", "EXTRACTING", "UPLOADING", "COMPLETED",
         ]
 
     def test_unexpected_history_error_falls_back_to_completed_listing(self):

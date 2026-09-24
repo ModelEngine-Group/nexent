@@ -566,30 +566,53 @@ async def _load_doc_history(
         return None
 
 
-def _history_sort_key(item: dict) -> tuple:
-    """Sort key placing the most recently uploaded file first.
+def _is_processing_status(status: object) -> bool:
+    """Whether a reported status still walks the ingestion stages.
 
-    Numeric upload timestamps sort above entries that only expose an ISO
-    ``created_at`` string, and entries with neither sink to the bottom — the
-    ordering is only ever used to bring fresh uploads to the top of page 1.
+    ``UPLOADING``, ``PROCESSING`` and ``EXTRACTING`` are the open stages and
+    ``COMPLETED``/``FAILED`` the terminal ones. An unrecognised stage counts as
+    open as well: a build reporting a status this module does not know yet must
+    not be mistaken for a finished file, which would both stop the polling and
+    drop the row behind the ingested ones.
     """
+    return (
+        isinstance(status, str)
+        and status.strip().upper() not in _TERMINAL_DOC_STATUSES
+    )
+
+
+def _history_sort_key(item: dict) -> tuple:
+    """Sort key placing files still being processed above finished ones.
+
+    A freshly accepted upload reports ``UPLOADING``/``EXTRACTING``/``PROCESSING``
+    before it is ingested, and that row is what the user is looking for right
+    after an upload because it carries the progress of the file they just added.
+    Those files therefore sort above the finished ones whatever their timestamps
+    say. Inside each group files are ordered newest first, with numeric upload
+    timestamps above entries that only expose an ISO ``created_at`` string and
+    entries with neither sinking to the bottom.
+    """
+    in_progress = 1 if _is_processing_status(item.get("status")) else 0
     raw = item.get("first_upload_time")
     if raw is None:
         raw = item.get("create_time")
     try:
-        return (1, float(raw))
+        return (in_progress, 1, float(raw))
     except (TypeError, ValueError):
         created_at = item.get("created_at")
-        return (0, created_at) if isinstance(created_at, str) else (0, "")
+        if isinstance(created_at, str):
+            return (in_progress, 0, created_at)
+        return (in_progress, 0, "")
 
 
 def _paginate_history_documents(result: dict, page: int, page_size: int) -> dict:
     """Slice an all-status history payload into one page.
 
     The history API returns the whole channel directory in one response, so the
-    total is exact and the document Count endpoint is not needed. Newest files
-    come first so an upload shows up at the top of page 1 as soon as it is
-    accepted, instead of only after ingestion completes.
+    total is exact and the document Count endpoint is not needed. Files that are
+    still uploading or extracting come first, because the user has to see the
+    progress of the file they just added; the finished files follow, newest
+    first, so a completed upload stays near the top of its own group.
 
     ``processing_count`` covers the WHOLE directory, not just the returned page:
     the frontend keeps polling while it is non-zero, so a file still being
@@ -607,10 +630,7 @@ def _paginate_history_documents(result: dict, page: int, page_size: int) -> dict
     # Count every non-terminal status, so a file that is uploading or extracting
     # keeps the frontend polling exactly like one that is being chunked.
     processing_count = sum(
-        1
-        for item in ordered
-        if isinstance(item.get("status"), str)
-        and item["status"].strip().upper() not in _TERMINAL_DOC_STATUSES
+        1 for item in ordered if _is_processing_status(item.get("status"))
     )
     return {
         "value": ordered[start:end],
@@ -674,10 +694,13 @@ def _merge_document_sources(
     listing hides uploads that are still being processed, which is what the
     history is there for.
 
-    Merging keeps both visible: the listing guarantees membership, the history
-    supplies the live statuses, and a file only the history knows about (still
-    uploading, or failed before ingestion) is kept exactly as reported. Items
-    are matched through every identity they expose, so a file that one payload
+    Merging keeps both visible: the listing guarantees membership and carries
+    the file metadata, the history supplies the live statuses, and a file only
+    the history knows about (still uploading, or failed before ingestion) is
+    kept exactly as reported. A file present in both is combined field by field,
+    so a history build whose payload omits the metadata fields cannot blank out
+    the name, size or creation time the listing already describes. Items are
+    matched through every identity they expose, so a file that one payload
     describes with a uuid and the other with an ino number is still one row.
     """
     merged: dict[str, dict] = {}
@@ -699,8 +722,23 @@ def _merge_document_sources(
         if not identities:
             continue
         key = _matching_key(identities, known_ids)
-        # The history wins: it reports the status of the file right now.
-        merged[key] = item
+        listed = merged.get(key)
+        if listed is None:
+            # The file is not ingested yet (or was ingested into another
+            # directory), so the history entry is all there is to show.
+            merged[key] = item
+        else:
+            # The history reports the status of the file right now, but its
+            # payload may be minimal: replacing the listing row wholesale would
+            # blank out every metadata field the history does not carry, which
+            # the user sees as an empty name or creation time. Only the fields
+            # the history actually reports win, the rest stays as listed.
+            reported = {
+                field: value
+                for field, value in item.items()
+                if value is not None and value != ""
+            }
+            merged[key] = {**listed, **reported}
         for value in identities:
             known_ids[value] = key
     return list(merged.values())
