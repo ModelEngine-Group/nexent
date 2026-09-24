@@ -21,8 +21,8 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
     TOKEN,
-    get_tenant_local_mcp_server,
 )
+from utils.mcp_url_utils import get_tenant_local_mcp_server
 from consts.error_message import ErrorMessage
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest

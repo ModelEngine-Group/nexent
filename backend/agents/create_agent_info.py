@@ -69,6 +69,7 @@ from utils.memory_tool_prompt import build_memory_tool_policy
 from utils.automation_tool_prompt import build_automation_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.http_client_utils import create_httpx_client
+from utils.mcp_url_utils import get_tenant_local_mcp_server
 from utils.redis_utils import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
@@ -79,7 +80,6 @@ from consts.const import (
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
-    get_tenant_local_mcp_server,
     TOKEN,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,

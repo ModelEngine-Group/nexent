@@ -30,11 +30,11 @@ from agents.create_agent_info import (
 from agents.nl2agent_agent import create_nl2agent_agent_config
 from consts.const import (
     TOKEN, 
-    get_tenant_local_mcp_server,
     ENABLE_AIDP_KNOWLEDGE,
     LOCAL_MCP_SERVER,
     MODEL_CONFIG_MAPPING,
 )
+from utils.mcp_url_utils import get_tenant_local_mcp_server
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import (
     query_all_agent_info_by_tenant_id,
