@@ -3,7 +3,7 @@ import time
 from contextlib import asynccontextmanager
 
 from apps.app_factory import create_app
-from apps.agent_app import agent_runtime_router as agent_router, agent_share_router
+from apps.agent_app import agent_runtime_router as agent_router
 from apps.agent_automation_app import (
     conversation_automation_router,
     router as agent_automation_router,
@@ -111,7 +111,6 @@ async def thread_capacity():
 app.add_middleware(ExceptionHandlerMiddleware)
 
 app.include_router(agent_router)
-app.include_router(agent_share_router)
 app.include_router(agent_evaluation_runtime_router)
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)

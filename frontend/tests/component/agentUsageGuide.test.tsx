@@ -198,7 +198,7 @@ describe("Agent usage guide component coverage", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not expose the legacy standalone Agent share path from the guide", async () => {
+  it("exposes the in-app Agent conversation deep link from the guide", async () => {
     renderWithProviders(
       <AgentUsageGuideModal
         agent={editableAgent}
@@ -210,7 +210,6 @@ describe("Agent usage guide component coverage", () => {
     expect(
       await screen.findByText(/\/en\/newchat\?agent_id=41/)
     ).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain("/share/agent/");
   });
 
   it("UT-FE-AGUG-009 copies the deterministic Agent deep link", async () => {

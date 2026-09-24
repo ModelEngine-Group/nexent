@@ -404,7 +404,6 @@ def create_new_conversation(
     chat_mode: Optional[str] = None,
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
-    is_agent_share: bool = False,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -422,7 +421,6 @@ def create_new_conversation(
         create_kwargs = {
             "agent_id": agent_id,
             "chat_mode": chat_mode,
-            "is_agent_share": is_agent_share,
         }
         if knowledge_scope is not None:
             create_kwargs["knowledge_scope"] = knowledge_scope

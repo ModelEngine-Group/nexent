@@ -10,7 +10,6 @@ import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import {
   buildAuthenticationReturnPath,
-  isAgentSharePath,
   isAnonymousConversationSharePath,
 } from "@/lib/agentUsageGuide";
 import { authEvents, authEventUtils } from "@/lib/authEvents";
@@ -39,13 +38,10 @@ export function useAuthenticationUI({
   const { message } = App.useApp();
   const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
-  // Static conversation snapshots remain public. Agent share links use the
-  // same navigation-free shell, but require a signed-in visitor.
+  // Static conversation snapshots remain public while preserving the return path.
   const isAnonymousConversationSharePage =
     isAnonymousConversationSharePath(effectivePath);
-  const isAgentSharePage = isAgentSharePath(effectivePath);
-  const preservesShareReturnPath =
-    isAnonymousConversationSharePage || isAgentSharePage;
+  const preservesShareReturnPath = isAnonymousConversationSharePage;
   const authenticationReturnPath = buildAuthenticationReturnPath(
     pathname || "/",
     searchParams.toString()

@@ -22,7 +22,7 @@ const authenticationContext = {
 };
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/zh/share/agent/signed-token",
+  usePathname: () => "/zh/share/snapshot-id",
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ push: routerPush, replace: vi.fn() }),
 }));
@@ -91,21 +91,21 @@ function LoginTransitionHarness() {
   );
 }
 
-describe("Agent share layout authentication", () => {
-  it("renders the global login prompt for an unauthenticated Agent share route", () => {
+describe("conversation share layout authentication", () => {
+  it("renders the global login prompt for an unauthenticated conversation share route", () => {
     render(
       <ClientLayout>
-        <main>Shared Agent</main>
+        <main>Shared conversation</main>
       </ClientLayout>
     );
 
-    expect(screen.getByText("Shared Agent")).toBeInTheDocument();
+    expect(screen.getByText("Shared conversation")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "page.loginPrompt.login" })
     ).toBeInTheDocument();
   });
 
-  it("keeps the Agent share return address when continuing from the login prompt", async () => {
+  it("keeps the conversation share return address when continuing from the login prompt", async () => {
     const user = userEvent.setup();
     render(
       <App>

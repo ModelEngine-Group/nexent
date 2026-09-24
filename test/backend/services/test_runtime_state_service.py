@@ -405,14 +405,14 @@ def test_consume_scoped_rate_limit_uses_only_a_precomputed_digest(monkeypatch):
     service = TestRuntimeStateService(client)
     digest = "a" * 64
 
-    assert service.consume_scoped_rate_limit("agent-share", digest, 2) == 1
+    assert service.consume_scoped_rate_limit("runtime-scope", digest, 2) == 1
     assert client.pipelines[-1].operations[0] == (
         "incr",
-        "runtime:rate:agent-share:" + digest + ":2",
+        "runtime:rate:runtime-scope:" + digest + ":2",
     )
 
     with pytest.raises(ValueError, match="SHA-256 digest"):
-        service.consume_scoped_rate_limit("agent-share", "raw-token", 2)
+        service.consume_scoped_rate_limit("runtime-scope", "raw-token", 2)
 
 
 def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
@@ -471,7 +471,7 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
         assert await service.acquire_idempotency_async("request-key", 60) is True
         await service.release_idempotency_async("request-key")
         assert await service.consume_rate_limit_async("tenant-1", 2) == 1
-        assert await service.consume_scoped_rate_limit_async("agent-share", "a" * 64, 2) == 1
+        assert await service.consume_scoped_rate_limit_async("runtime-scope", "a" * 64, 2) == 1
 
     asyncio.run(run_checks())
     assert len(managed_calls) == 11

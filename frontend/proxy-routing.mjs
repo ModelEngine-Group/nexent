@@ -1,7 +1,6 @@
 const RUNTIME_API_PATH_PREFIXES = [
   "/api/agent/run",
   "/api/agent/nl2agent/run",
-  "/api/agent-share/",
   "/api/skills/nl2skill/run",
   "/api/agent/stop",
   "/api/agent/automations",

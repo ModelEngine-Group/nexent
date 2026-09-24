@@ -191,12 +191,8 @@ export function buildCopyAriaLabel(
   return `${copyLabel} ${fieldLabel}`;
 }
 
-export function isAgentSharePath(pathname: string): boolean {
-  return /^\/share\/agent\/[^/]+\/?$/.test(pathname);
-}
-
 export function isAnonymousConversationSharePath(pathname: string): boolean {
-  return pathname.startsWith("/share/") && !isAgentSharePath(pathname);
+  return pathname.startsWith("/share/");
 }
 
 export function buildNorthboundRunUrl(

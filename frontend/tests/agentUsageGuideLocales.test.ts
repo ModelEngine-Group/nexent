@@ -13,7 +13,7 @@ function loadLocale(locale: "en" | "zh"): Record<string, string> {
 test("keeps Agent usage guide locale keys aligned and complete", () => {
   const english = loadLocale("en");
   const chinese = loadLocale("zh");
-  const prefix = /^(agentUsageGuide|agentSharePage)\./;
+  const prefix = /^agentUsageGuide\./;
   const englishKeys = Object.keys(english)
     .filter((key) => prefix.test(key))
     .sort();
@@ -22,17 +22,4 @@ test("keeps Agent usage guide locale keys aligned and complete", () => {
     .sort();
 
   assert.deepEqual(chineseKeys, englishKeys);
-  assert.deepEqual(
-    [
-      "agentSharePage.inputPlaceholder",
-      "agentSharePage.unavailable",
-      "agentSharePage.noAnswer",
-      "agentSharePage.runFailed",
-      "agentSharePage.rateLimited",
-      "agentSharePage.stopFailed",
-      "agentSharePage.stopResponse",
-      "agentSharePage.sendMessage",
-    ].sort(),
-    englishKeys.filter((key) => key.startsWith("agentSharePage.")).sort()
-  );
 });

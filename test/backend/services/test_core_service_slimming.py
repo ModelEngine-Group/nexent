@@ -216,13 +216,13 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
     assert context.metadata.extra_metadata == {"agent_share_option": "private", "background": True}
 
 
-def test_agent_share_run_context_skips_personal_memory_loading(monkeypatch):
+def test_disabling_personal_memory_skips_personal_memory_loading(monkeypatch):
     calls = []
     dependency(monkeypatch, "nexent.monitor", AgentRunMetadata=types.SimpleNamespace)
 
     def memory(*args, **kwargs):
         calls.append((args, kwargs))
-        raise AssertionError("share runs must not load personal memory")
+        raise AssertionError("personal-memory-disabled runs must not load personal memory")
 
     dependency(monkeypatch, "services.memory_config_service", build_memory_context=memory)
     dependency(monkeypatch, "utils.monitoring", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
@@ -236,14 +236,14 @@ def test_agent_share_run_context_skips_personal_memory_loading(monkeypatch):
         "owner-a",
         "owner-tenant",
         "en",
-        extra_metadata={"entrypoint": "agent-share"},
+        extra_metadata={"entrypoint": "northbound"},
         disable_personal_memory=True,
     )
 
     assert calls == []
     assert context.enable_memory is False
     assert context.metadata.memory_enabled is False
-    assert context.metadata.extra_metadata == {"entrypoint": "agent-share"}
+    assert context.metadata.extra_metadata == {"entrypoint": "northbound"}
 
 
 @pytest.fixture

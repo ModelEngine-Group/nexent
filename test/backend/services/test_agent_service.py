@@ -4834,7 +4834,7 @@ async def test_run_agent_stream_separates_share_resource_and_conversation_identi
         resource_tenant_id="owner-tenant",
         conversation_owner_user_id="visitor-a",
         conversation_owner_tenant_id="visitor-tenant",
-        entrypoint="agent-share",
+        entrypoint="northbound",
         disable_personal_memory=True,
     )
     monkeypatch.setattr(
@@ -4952,7 +4952,7 @@ async def test_run_agent_stream_isolates_share_conversation_locks_and_channels(
         resource_tenant_id="owner-tenant",
         conversation_owner_user_id="visitor-a",
         conversation_owner_tenant_id="visitor-a-tenant",
-        entrypoint="agent-share",
+        entrypoint="northbound",
         disable_personal_memory=True,
     )
     visitor_b_identity = AgentRunIdentityContext(
@@ -4960,7 +4960,7 @@ async def test_run_agent_stream_isolates_share_conversation_locks_and_channels(
         resource_tenant_id="owner-tenant",
         conversation_owner_user_id="visitor-b",
         conversation_owner_tenant_id="visitor-b-tenant",
-        entrypoint="agent-share",
+        entrypoint="northbound",
         disable_personal_memory=True,
     )
     channel_a = MagicMock()

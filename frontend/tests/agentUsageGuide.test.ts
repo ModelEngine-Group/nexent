@@ -15,13 +15,11 @@ import {
   getAgentUsageGuideAccess,
   getAgentPublishCompletion,
   getA2AGuideState,
-  reduceAgentShareGuideState,
   resolveAgentDeepLinkAction,
   buildDefaultAgentVersionName,
   resolveAgentUsageGuideTarget,
   parseAgentUsageGuideTargetParams,
   parseAgentUsageGuideParams,
-  isAgentSharePath,
   isAnonymousConversationSharePath,
   // @ts-ignore -- Node's built-in TypeScript runner needs the extension.
 } from "../lib/agentUsageGuide.ts";
@@ -45,28 +43,8 @@ test("completes ordinary and A2A publishes but keeps failed publishes in the edi
   assert.equal(getAgentPublishCompletion({ success: false }), "stay");
 });
 
-test("requires login only for interactive Agent share links", () => {
-  assert.equal(isAgentSharePath("/share/agent/signed-token"), true);
-  assert.equal(isAgentSharePath("/share/agent/"), false);
+test("keeps conversation snapshot shares anonymous", () => {
   assert.equal(isAnonymousConversationSharePath("/share/snapshot-id"), true);
-  assert.equal(
-    isAnonymousConversationSharePath("/share/agent/signed-token"),
-    false
-  );
-});
-
-test("preserves the complete localized Agent share return path", () => {
-  assert.equal(
-    buildAuthenticationReturnPath(
-      "/zh/share/agent/signed-token",
-      "source=invite"
-    ),
-    "/zh/share/agent/signed-token?source=invite"
-  );
-  assert.equal(
-    buildAuthenticationReturnPath("/en/share/agent/signed-token", ""),
-    "/en/share/agent/signed-token"
-  );
 });
 
 test("separates persistent Agent targeting from one-time menu onboarding", () => {
@@ -235,17 +213,6 @@ test("shows usage guidance only for published Agents and protects share manageme
     }),
     { canOpen: true, canManageShare: false }
   );
-});
-
-test("replaces rotated share links and removes revoked links immediately", () => {
-  const original = { share_token: "old-token" };
-  const rotated = { share_token: "new-token" };
-
-  assert.equal(
-    reduceAgentShareGuideState(original, { type: "saved", share: rotated }),
-    rotated
-  );
-  assert.equal(reduceAgentShareGuideState(rotated, { type: "revoked" }), null);
 });
 
 test("builds safe share and northbound API examples", () => {

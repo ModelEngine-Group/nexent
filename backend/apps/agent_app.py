@@ -5,14 +5,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
-from fastapi.routing import APIRoute
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import (
     AgentRequest,
-    AgentShareRunRequest,
     AgentInfoRequest,
     AgentIDRequest,
     ConversationResponse,
@@ -40,6 +37,7 @@ from consts.exceptions import (
     RuntimeQueueTimeoutError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
+from management.services.agent.run_identity import AgentRunIdentityContext
 
 from management.services.agent.service import (
     get_agent_info_impl,
@@ -64,22 +62,6 @@ from management.services.agent.service import (
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
 from services.agent_draft_permission_service import AgentDraftEditError
-from services.agent_share_service import (
-    AgentShareError,
-    AgentShareRateLimitExceededError,
-    AgentShareRateLimitUnavailableError,
-    consume_agent_share_rate_limits,
-    enable_agent_share,
-    get_agent_share_history,
-    get_agent_share_link,
-    get_agent_share_metadata,
-    revoke_agent_share_link,
-    resolve_agent_share_session,
-    resolve_agent_share_context,
-    resolve_existing_agent_share_session,
-    resolve_agent_share_run_context,
-    rotate_agent_share_link,
-)
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from services.agent_version_service import (
     publish_version_impl,
@@ -100,49 +82,9 @@ from utils.auth_utils import (
     get_current_user_id,
     verify_internal_runtime_jwt,
 )
-from management.services.agent.run_identity import AgentRunIdentityContext
-
-AGENT_SHARE_SECURITY_HEADERS = {
-    "Cache-Control": "no-store",
-    "Referrer-Policy": "no-referrer",
-}
 logger = logging.getLogger("agent_app")
-
-
-class AgentShareRoute(APIRoute):
-    """Apply privacy headers even when request validation rejects a share call."""
-
-    def get_route_handler(self):
-        original_handler = super().get_route_handler()
-
-        async def agent_share_route_handler(request: Request) -> Response:
-            try:
-                response = await original_handler(request)
-            except HTTPException as exc:
-                exc.headers = {**(exc.headers or {}), **AGENT_SHARE_SECURITY_HEADERS}
-                raise
-            except RequestValidationError as exc:
-                return JSONResponse(
-                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-                    content={"detail": jsonable_encoder(exc.errors())},
-                    headers=AGENT_SHARE_SECURITY_HEADERS,
-                )
-            except Exception as exc:
-                logger.error("Agent share request failed: %s", type(exc).__name__)
-                return JSONResponse(
-                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                    content={"detail": "Agent share is unavailable."},
-                    headers=AGENT_SHARE_SECURITY_HEADERS,
-                )
-            response.headers.update(AGENT_SHARE_SECURITY_HEADERS)
-            return response
-
-        return agent_share_route_handler
-
-
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
-agent_share_router = APIRouter(prefix="/agent-share", route_class=AgentShareRoute)
 
 
 def _runtime_overload_response(exc: Exception) -> JSONResponse:
@@ -728,246 +670,6 @@ async def get_agent_call_relationship_api(agent_id: int, authorization: Optional
 
 # Agent Version Management APIs
 # ---------------------------------------------------------------------------
-
-
-def _agent_share_management_error(exc: AgentShareError) -> HTTPException:
-    error_code = str(exc)
-    if error_code in {"agent_not_found", "agent_not_draft", "agent_deleted", "agent_read_only"}:
-        return HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=error_code)
-    if error_code in {"agent_not_published", "agent_share_not_found", "agent_share_unavailable"}:
-        return HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=error_code)
-    return HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="agent_share_unavailable")
-
-
-@agent_config_router.get("/{agent_id}/share")
-async def get_agent_share_api(agent_id: int, authorization: str = Header(None)):
-    """Return the active Agent share link for its editable owner."""
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        return get_agent_share_link(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
-    except AgentShareError as exc:
-        raise _agent_share_management_error(exc) from exc
-
-
-@agent_config_router.post("/{agent_id}/share")
-async def enable_agent_share_api(agent_id: int, authorization: str = Header(None)):
-    """Enable one login-gated share link for a published Agent."""
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        return enable_agent_share(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
-    except AgentShareError as exc:
-        raise _agent_share_management_error(exc) from exc
-
-
-@agent_config_router.post("/{agent_id}/share/rotate")
-async def rotate_agent_share_api(agent_id: int, authorization: str = Header(None)):
-    """Invalidate the current share token and return its replacement."""
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        return rotate_agent_share_link(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
-    except AgentShareError as exc:
-        raise _agent_share_management_error(exc) from exc
-
-
-@agent_config_router.delete("/{agent_id}/share", status_code=HTTPStatus.NO_CONTENT)
-async def revoke_agent_share_api(agent_id: int, authorization: str = Header(None)):
-    """Disable the active Agent share link."""
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        revoke_agent_share_link(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
-        return Response(status_code=HTTPStatus.NO_CONTENT)
-    except AgentShareError as exc:
-        raise _agent_share_management_error(exc) from exc
-
-
-@agent_runtime_router.post("/share/{share_token}/run")
-async def share_agent_run_api(
-    share_token: str,
-    agent_request: AgentRequest,
-    http_request: Request,
-    authorization: str = Header(None),
-):
-    """Run an Agent through a login-gated share link and isolated session."""
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        share_session = resolve_agent_share_session(share_token, visitor_user_id=user_id)
-        agent_request.agent_id = share_session["agent_id"]
-        agent_request.conversation_id = share_session["conversation_id"]
-        agent_request.version_no = share_session["agent_version_no"]
-        return await run_agent_stream(
-            agent_request=agent_request,
-            http_request=http_request,
-            authorization=authorization,
-            user_id=user_id,
-            tenant_id=tenant_id,
-        )
-    except AgentShareError as exc:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent share is unavailable.") from exc
-    except ForbiddenError as exc:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
-
-
-def _agent_share_authentication_error(exc: UnauthorizedError) -> HTTPException:
-    return HTTPException(
-        status_code=HTTPStatus.UNAUTHORIZED,
-        detail="Authentication is required.",
-        headers=AGENT_SHARE_SECURITY_HEADERS,
-    )
-
-
-def _agent_share_unavailable_error(exc: AgentShareError) -> HTTPException:
-    return HTTPException(
-        status_code=HTTPStatus.NOT_FOUND,
-        detail="Agent share is unavailable.",
-        headers=AGENT_SHARE_SECURITY_HEADERS,
-    )
-
-
-def _set_agent_share_security_headers(response: Response) -> None:
-    response.headers.update(AGENT_SHARE_SECURITY_HEADERS)
-
-
-@agent_share_router.get("/{share_token}")
-async def get_agent_share_metadata_api(
-    share_token: str,
-    response: Response,
-    authorization: Optional[str] = Header(None),
-):
-    """Return safe Agent display metadata only after visitor authentication."""
-    try:
-        visitor_user_id, _ = get_current_user_id(authorization)
-        _set_agent_share_security_headers(response)
-        return get_agent_share_metadata(share_token, visitor_user_id=visitor_user_id)
-    except UnauthorizedError as exc:
-        raise _agent_share_authentication_error(exc) from exc
-    except AgentShareError as exc:
-        raise _agent_share_unavailable_error(exc) from exc
-
-
-@agent_share_router.post("/{share_token}/session")
-async def create_or_restore_agent_share_session_api(
-    share_token: str,
-    response: Response,
-    authorization: Optional[str] = Header(None),
-):
-    """Create or restore one hidden conversation after an explicit visitor action."""
-    try:
-        visitor_user_id, _ = get_current_user_id(authorization)
-        session = resolve_agent_share_session(share_token, visitor_user_id=visitor_user_id)
-        _set_agent_share_security_headers(response)
-        return {
-            "agent_version_no": session["agent_version_no"],
-            "session_recoverable": True,
-        }
-    except UnauthorizedError as exc:
-        raise _agent_share_authentication_error(exc) from exc
-    except AgentShareError as exc:
-        raise _agent_share_unavailable_error(exc) from exc
-
-
-@agent_share_router.get("/{share_token}/history")
-async def get_agent_share_history_api(
-    share_token: str,
-    response: Response,
-    authorization: Optional[str] = Header(None),
-):
-    """Read only the authenticated visitor's history for this share link."""
-    try:
-        visitor_user_id, _ = get_current_user_id(authorization)
-        _set_agent_share_security_headers(response)
-        return get_agent_share_history(share_token, visitor_user_id=visitor_user_id)
-    except UnauthorizedError as exc:
-        raise _agent_share_authentication_error(exc) from exc
-    except AgentShareError as exc:
-        raise _agent_share_unavailable_error(exc) from exc
-
-
-@agent_share_router.post("/{share_token}/run")
-async def run_agent_share_api(
-    share_token: str,
-    share_request: AgentShareRunRequest,
-    http_request: Request,
-    authorization: Optional[str] = Header(None),
-):
-    """Run only the Agent and session resolved from the authenticated share link."""
-    stage = "authenticate_visitor"
-    try:
-        visitor_user_id, visitor_tenant_id = get_current_user_id(authorization)
-        stage = "resolve_share"
-        share_resource = resolve_agent_share_context(share_token)
-        stage = "consume_rate_limit"
-        await consume_agent_share_rate_limits(
-            agent_share_id=share_resource["agent_share_id"],
-            visitor_user_id=visitor_user_id,
-        )
-        stage = "resolve_session"
-        share_context = resolve_agent_share_run_context(share_token, visitor_user_id=visitor_user_id)
-        stage = "build_agent_request"
-        agent_request = AgentRequest(
-            query=share_request.query,
-            agent_id=share_context["agent_id"],
-            conversation_id=share_context["conversation_id"],
-            version_no=share_context["agent_version_no"],
-            enable_automation_tool=False,
-        )
-        identity_context = AgentRunIdentityContext(
-            resource_actor_user_id=share_context["owner_user_id"],
-            resource_tenant_id=share_context["tenant_id"],
-            conversation_owner_user_id=visitor_user_id,
-            conversation_owner_tenant_id=visitor_tenant_id,
-            entrypoint="agent-share",
-            disable_personal_memory=True,
-        )
-        stage = "start_agent_stream"
-        response = await run_agent_stream(
-            agent_request=agent_request,
-            http_request=http_request,
-            authorization=authorization,
-            identity_context=identity_context,
-            timezone=share_request.timezone,
-        )
-        if isinstance(response, StreamingResponse) and response.headers.get("X-Stream-Status") == "conflict":
-            response.status_code = HTTPStatus.CONFLICT
-        if isinstance(response, Response):
-            _set_agent_share_security_headers(response)
-        return response
-    except UnauthorizedError as exc:
-        raise _agent_share_authentication_error(exc) from exc
-    except AgentShareRateLimitExceededError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.TOO_MANY_REQUESTS,
-            detail="Too Many Requests: rate limit exceeded",
-        ) from exc
-    except AgentShareRateLimitUnavailableError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail="Agent share rate limit is unavailable.",
-        ) from exc
-    except AgentShareError as exc:
-        raise _agent_share_unavailable_error(exc) from exc
-    except ForbiddenError as exc:
-        raise _agent_share_unavailable_error(AgentShareError("agent_share_unavailable")) from exc
-    except Exception as exc:
-        logger.error("Agent share run failed at %s: %s", stage, type(exc).__name__)
-        raise
-
-
-@agent_share_router.post("/{share_token}/stop")
-async def stop_agent_share_api(
-    share_token: str,
-    response: Response,
-    authorization: Optional[str] = Header(None),
-):
-    """Stop only the current visitor's active run for this share link."""
-    try:
-        visitor_user_id, _ = get_current_user_id(authorization)
-        session = resolve_existing_agent_share_session(share_token, visitor_user_id=visitor_user_id)
-        _set_agent_share_security_headers(response)
-        return stop_agent_tasks(session["conversation_id"], visitor_user_id)
-    except UnauthorizedError as exc:
-        raise _agent_share_authentication_error(exc) from exc
-    except AgentShareError as exc:
-        raise _agent_share_unavailable_error(exc) from exc
 
 
 @agent_config_router.post("/{agent_id}/publish")

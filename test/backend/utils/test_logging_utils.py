@@ -26,40 +26,6 @@ from backend.utils.logging_utils import (
 )
 
 
-class TestAgentShareAccessLogFilter:
-    """Agent share Tokens must never appear in Uvicorn access logs."""
-
-    def test_redacts_token_from_agent_share_path(self):
-        token = "public-id.1.signature"
-        record = logging.LogRecord(
-            "uvicorn.access",
-            logging.INFO,
-            "",
-            0,
-            '%s - "%s %s HTTP/%s" %d',
-            ("127.0.0.1:1234", "GET", f"/api/agent-share/{token}/history", "1.1", 200),
-            None,
-        )
-
-        assert logging_utils.AgentShareAccessLogFilter().filter(record)
-        assert token not in record.getMessage()
-        assert "/api/agent-share/[redacted]/history" in record.getMessage()
-
-    def test_keeps_non_share_paths_unchanged(self):
-        record = logging.LogRecord(
-            "uvicorn.access",
-            logging.INFO,
-            "",
-            0,
-            '%s - "%s %s HTTP/%s" %d',
-            ("127.0.0.1:1234", "GET", "/api/health", "1.1", 200),
-            None,
-        )
-
-        assert logging_utils.AgentShareAccessLogFilter().filter(record)
-        assert "/api/health" in record.getMessage()
-
-
 # ---------------------------------------------------------------------------
 # ColorFormatter
 # ---------------------------------------------------------------------------
@@ -326,13 +292,11 @@ class TestGetUvicornLoggingConfig:
         assert file_h["encoding"] == "utf-8"
         assert file_h["class"].endswith("HybridRotatingFileHandler")
 
-    def test_all_handlers_redact_agent_share_tokens(self, tmp_path, monkeypatch):
+    def test_configures_one_handler_per_category(self, tmp_path, monkeypatch):
         monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         cfg = get_uvicorn_logging_config(categories=["runtime"])
 
-        assert cfg["filters"]["redact_agent_share_token"]["()"].endswith("AgentShareAccessLogFilter")
-        for handler in cfg["handlers"].values():
-            assert "redact_agent_share_token" in handler["filters"]
+        assert set(cfg["handlers"]) == {"console", "file_runtime"}
         assert cfg["loggers"]["uvicorn.access"] == {
             "handlers": ["console", "file_runtime"],
             "level": cfg["root"]["level"],
@@ -341,7 +305,7 @@ class TestGetUvicornLoggingConfig:
 
 
 class TestConfigureRuntimeUvicornLogging:
-    """Runtime logging must apply the access-log token redaction configuration."""
+    """Runtime logging applies the shared handler configuration."""
 
     def test_applies_runtime_config_and_quiets_elasticsearch(self, mocker):
         dict_config = mocker.patch("backend.utils.logging_utils.logging.config.dictConfig")
