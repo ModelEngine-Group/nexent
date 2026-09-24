@@ -8,7 +8,7 @@ import mcp.types
 import mcpadapt.core
 import pytest
 from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
-from nexent.core.agents.mcp_errors import MCPToolTimeoutError
+from nexent.consts.mcp_errors import MCPToolTimeoutError
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 
 

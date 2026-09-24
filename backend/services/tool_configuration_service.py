@@ -94,12 +94,6 @@ def _get_deployment_user_selectability(
     return default
 
 
-def _get_mcp_request_timeout_seconds() -> int | float:
-    """Return the configured MCP timeout, tolerating lightweight test stubs."""
-    timeout = MCP_REQUEST_TIMEOUT_SECONDS
-    return timeout if isinstance(timeout, (int, float)) and timeout > 0 else 10
-
-
 def _parse_kds_list(value: Any) -> list[str]:
     """Normalize legacy JSON strings and list values into ordered string IDs."""
     if isinstance(value, str):
@@ -711,12 +705,12 @@ async def get_tool_from_remote_mcp_server(
 
     try:
         transport = _create_mcp_transport(remote_mcp_server, authorization_token, custom_headers)
-        client = Client(transport=transport, timeout=_get_mcp_request_timeout_seconds())
+        client = Client(transport=transport, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
         async with client:
             # List available operations
             tools = await asyncio.wait_for(
                 client.list_tools(),
-                timeout=_get_mcp_request_timeout_seconds(),
+                timeout=MCP_REQUEST_TIMEOUT_SECONDS,
             )
 
             for tool in tools:
@@ -953,7 +947,7 @@ async def _call_mcp_tool(
         MCPConnectionError: If MCP connection fails
     """
     transport = _create_mcp_transport(mcp_url, authorization_token, custom_headers)
-    client = Client(transport=transport, timeout=_get_mcp_request_timeout_seconds())
+    client = Client(transport=transport, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
     async with client:
         # Check if connected
         if not client.is_connected():
@@ -967,11 +961,11 @@ async def _call_mcp_tool(
                     name=tool_name,
                     arguments=inputs,
                 ),
-                timeout=_get_mcp_request_timeout_seconds(),
+                timeout=MCP_REQUEST_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError as exc:
             raise MCPConnectionError(
-                f"MCP request timed out after {_get_mcp_request_timeout_seconds()} seconds"
+                f"MCP request timed out after {MCP_REQUEST_TIMEOUT_SECONDS} seconds"
             ) from exc
         return result.content[0].text
 

@@ -242,7 +242,7 @@ class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
                 return []
 
         with patch("backend.services.remote_mcp_service.Client", return_value=SlowConnectClient()), \
-             patch("backend.services.remote_mcp_service.MCP_HEALTH_CHECK_TIMEOUT_SECONDS", 0.001):
+             patch("backend.services.remote_mcp_service.MCP_REQUEST_TIMEOUT_SECONDS", 0.001):
             with self.assertRaises(MCPConnectionError) as context:
                 await _mcp_protocol_health_check("http://example.com/mcp", {})
 

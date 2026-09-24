@@ -21,7 +21,7 @@ from ..concurrency.cancellation import RunTerminated
 from ..model_errors import ModelInvocationTerminalError
 from .agent_model import AgentRunInfo
 from .managed_mcp import ManagedMCPToolCollection
-from .mcp_errors import is_mcp_timeout_error
+from ...consts.mcp_errors import is_mcp_timeout_error
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 from .output_protocol import ModelOutputProtocolExhaustedError
 

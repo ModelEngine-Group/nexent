@@ -3,6 +3,13 @@ from enum import Enum
 from pathlib import Path
 from dotenv import load_dotenv
 
+try:
+    from backend.utils.config_validation import parse_positive_float, parse_positive_int
+except ModuleNotFoundError:
+    # The production service runs with ``backend`` as the working directory,
+    # where backend-local modules are imported from the top-level package.
+    from utils.config_validation import parse_positive_float, parse_positive_int
+
 # Load environment variables
 # Explicitly sourced deployment variables take precedence over a nearby
 # developer .env file. This is required for tmux/K8s-local verification and
@@ -10,27 +17,6 @@ from dotenv import load_dotenv
 load_dotenv(override=False)
 
 
-def _positive_int_env(name: str, default: int) -> int:
-    """Read a positive integer configuration value with a clear validation error."""
-    raw_value = os.getenv(name, str(default))
-    try:
-        value = int(raw_value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
-    if value <= 0:
-        raise ValueError(f"{name} must be a positive integer")
-    return value
-
-def _positive_float_env(name: str, default: float) -> float:
-    """Read a positive floating-point configuration value with validation."""
-    raw_value = os.getenv(name, str(default))
-    try:
-        value = float(raw_value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive number") from exc
-    if value <= 0:
-        raise ValueError(f"{name} must be a positive number")
-    return value
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
 TEST_VOICE_PATH = os.path.join(os.path.dirname(
@@ -222,11 +208,11 @@ DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
 # Tenant resource hard limits. Environment variables override these defaults.
-MAX_TENANT_COUNT = _positive_int_env("MAX_TENANT_COUNT", 100)
-MAX_USERS_PER_TENANT = _positive_int_env("MAX_USERS_PER_TENANT", 10_000)
-MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
-MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
-MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
+MAX_TENANT_COUNT = parse_positive_int(os.getenv("MAX_TENANT_COUNT"), "MAX_TENANT_COUNT", 100)
+MAX_USERS_PER_TENANT = parse_positive_int(os.getenv("MAX_USERS_PER_TENANT"), "MAX_USERS_PER_TENANT", 10_000)
+MAX_GROUPS_PER_TENANT = parse_positive_int(os.getenv("MAX_GROUPS_PER_TENANT"), "MAX_GROUPS_PER_TENANT", 1_000)
+MAX_SUPER_ADMIN_COUNT = parse_positive_int(os.getenv("MAX_SUPER_ADMIN_COUNT"), "MAX_SUPER_ADMIN_COUNT", 1)
+MAX_ADMINS_PER_TENANT = parse_positive_int(os.getenv("MAX_ADMINS_PER_TENANT"), "MAX_ADMINS_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -532,9 +518,17 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
 MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
 # Maximum number of configured MCP services per tenant.
-MAX_MCP_SERVICES_PER_TENANT = _positive_int_env("MAX_MCP_SERVICES_PER_TENANT", 1_000)
+MAX_MCP_SERVICES_PER_TENANT = parse_positive_int(
+    os.getenv("MAX_MCP_SERVICES_PER_TENANT"),
+    "MAX_MCP_SERVICES_PER_TENANT",
+    1_000,
+)
 # Hard timeout for a request made to a configured MCP service at runtime.
-MCP_REQUEST_TIMEOUT_SECONDS = _positive_float_env("MCP_REQUEST_TIMEOUT_SECONDS", 10)
+MCP_REQUEST_TIMEOUT_SECONDS = parse_positive_float(
+    os.getenv("MCP_REQUEST_TIMEOUT_SECONDS"),
+    "MCP_REQUEST_TIMEOUT_SECONDS",
+    10,
+)
 
 
 # Invite code

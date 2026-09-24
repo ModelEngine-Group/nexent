@@ -370,7 +370,7 @@ with patch.dict("sys.modules", module_mocks):
         _build_tool_input, _wrap_tool_with_monitoring, _tool_name,
         SAFE_PYTHON_INTERPRETER_IMPORTS, get_local_python_authorized_imports,
     )
-    from sdk.nexent.core.agents.mcp_errors import MCPToolTimeoutError
+    from sdk.nexent.consts.mcp_errors import MCPToolTimeoutError
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory, ExternalA2AAgentConfig
 
     # Clean up after import

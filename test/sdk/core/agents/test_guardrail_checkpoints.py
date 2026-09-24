@@ -16,7 +16,7 @@ from nexent.core.agents.agent_model import (
     GuardrailRule,
 )
 from nexent.core.agents.core_agent import CoreAgent, ToolInputBlockedError
-from nexent.core.agents.mcp_errors import MCPToolTimeoutError
+from nexent.consts.mcp_errors import MCPToolTimeoutError
 from nexent.core.agents.verification import VerificationController
 
 KEYWORD = "机密信息"

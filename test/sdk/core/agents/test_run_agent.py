@@ -312,7 +312,7 @@ with patch.dict("sys.modules", module_mocks):
         ToolConfig,
     )  # noqa: E402
     import sdk.nexent.core.agents.run_agent as run_agent  # noqa: E402
-    from sdk.nexent.core.agents.mcp_errors import (  # noqa: E402
+    from sdk.nexent.consts.mcp_errors import (  # noqa: E402
         MCPToolTimeoutError,
         is_mcp_timeout_error,
         propagate_mcp_timeout,
