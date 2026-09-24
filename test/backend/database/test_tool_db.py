@@ -2,6 +2,16 @@ import sys
 import pytest
 from unittest.mock import patch, MagicMock
 
+
+@pytest.fixture(autouse=True)
+def _default_to_ordinary_agent(monkeypatch):
+    """Keep general ToolInstance tests scoped to an ordinary Agent."""
+    monkeypatch.setattr(
+        sys.modules["backend.database.agent_db"],
+        "is_system_agent",
+        lambda *_args, **_kwargs: False,
+    )
+
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -1272,6 +1282,18 @@ def test_delete_tools_by_agent_id_success(monkeypatch, mock_session):
     delete_tools_by_agent_id(1, "tenant1", "user1")
 
     mock_update.assert_called_once()
+
+
+def test_delete_tools_by_agent_id_rejects_system_agent(monkeypatch):
+    """UT-BE-SAL-012."""
+    monkeypatch.setattr(
+        sys.modules["backend.database.agent_db"],
+        "is_system_agent",
+        lambda *_args, **_kwargs: True,
+    )
+
+    with pytest.raises(ValueError, match="managed by the platform"):
+        delete_tools_by_agent_id(1, "tenant1", "user1")
 
 
 def test_search_last_tool_instance_by_tool_id_found(monkeypatch, mock_session):

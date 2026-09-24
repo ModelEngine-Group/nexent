@@ -29,12 +29,14 @@ interface ThreadListSidebarProps extends SidebarProps {
   generatedTitles?: ReadonlyMap<string, string>;
   onPrepareNewConversation?: () => void;
   onNewConversation?: () => void | Promise<void>;
+  showLegacySwitch?: boolean;
 }
 
 export function ThreadListSidebar({
   generatedTitles,
   onPrepareNewConversation,
   onNewConversation,
+  showLegacySwitch = true,
   ...props
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
@@ -77,18 +79,20 @@ export function ThreadListSidebar({
             </div>
           </SidebarHeader>
           <SidebarContent />
-          <SidebarFooter>
-            <TooltipIconButton
-              tooltip={t("chat.sidebar.switchToLegacy")}
-              side="right"
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              onClick={() => router.push("/chat")}
-            >
-              <Repeat2Icon className="size-4" />
-            </TooltipIconButton>
-          </SidebarFooter>
+          {showLegacySwitch && (
+            <SidebarFooter>
+              <TooltipIconButton
+                tooltip={t("chat.sidebar.switchToLegacy")}
+                side="right"
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                onClick={() => router.push("/chat")}
+              >
+                <Repeat2Icon className="size-4" />
+              </TooltipIconButton>
+            </SidebarFooter>
+          )}
         </Sidebar>
       </div>
     );
@@ -125,7 +129,9 @@ export function ThreadListSidebar({
             </SidebarContent>
             <SidebarFooter>
               <BatchSidebarFooter
-                onSwitchToLegacy={() => router.push("/chat")}
+                onSwitchToLegacy={
+                  showLegacySwitch ? () => router.push("/chat") : undefined
+                }
               />
             </SidebarFooter>
           </Sidebar>

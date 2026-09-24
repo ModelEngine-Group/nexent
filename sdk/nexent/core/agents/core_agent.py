@@ -45,6 +45,8 @@ from .output_protocol import (
     ExecutableAction,
     ExplicitFinalAnswer,
     ModelOutputProtocolError,
+    ModelOutputProtocolExhaustedError,
+
     ProtocolErrorReason,
     RuntimeFinalAnswer,
     classify_model_output,
@@ -54,7 +56,9 @@ from .output_protocol import (
 from .context.budget import message_role
 from ..utils.token_estimation import msg_token_count
 from .plan_repo import PlanRepo
-from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated, StepSteered
+from ..concurrency.cancellation import RunTerminated
+from .clarification import ClarificationForm, choose_clarification_tool_name, clarification_policy, render_question_text
+from .output_protocol import extract_clarification_form
 
 
 # Model-call scoped logger routed to nexent_model_call.log by the runtime
@@ -444,7 +448,13 @@ class CoreAgent(CodeAgent):
         if self.output_protocol not in ("code_action", "final_answer_envelope"):
             raise ValueError(f"Unsupported output protocol: {self.output_protocol}")
         self._consecutive_protocol_errors = 0
-        self.human_interaction = None
+        self.clarification_tool_name = None
+        if kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action":
+            occupied = {
+                tool.name for tool in [*kwargs.get("tools", []), *kwargs.get("managed_agents", [])]
+            }
+            self.clarification_tool_name = choose_clarification_tool_name(occupied)
+
 
         context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
@@ -485,6 +495,28 @@ class CoreAgent(CodeAgent):
 
         if self.enable_planning:
             self.plan_repo = PlanRepo(redis_client=redis_client)
+
+    def initialize_system_prompt(self) -> str:
+        prompt = super().initialize_system_prompt()
+        if self.clarification_tool_name:
+            prompt += "\n\n" + clarification_policy(self.clarification_tool_name)
+        return prompt
+
+    def _screen_clarification(self, form: ClarificationForm) -> ClarificationForm:
+        """Apply the existing content filter to the form before publishing it."""
+        controller = getattr(self, "verification_controller", None)
+        engine = getattr(controller, "guardrail_engine", None)
+        if not engine:
+            return form
+        try:
+            payload = _screened_tool_forward(
+                engine, self.clarification_tool_name, controller, self.logger,
+                lambda **kwargs: kwargs, **form.model_dump(),
+            )
+        except ToolInputBlockedError as exc:
+            controller.pending_tool_block_refusal = None
+            raise RuntimeFinalAnswer(exc.refusal, "guardrail_clarification") from exc
+        return ClarificationForm.model_validate(payload)
 
     def _verification_tool_names(self) -> List[str]:
         names = set()
@@ -788,7 +820,9 @@ Additional Args:
         monitoring_manager.add_span_event("agent.output_protocol", attributes)
 
     def _controlled_protocol_failure(self) -> str:
-        if str(getattr(self, "lang", "en")).lower().startswith("zh"):
+        lang = getattr(getattr(self, "observer", None), "lang", getattr(self, "lang", "en"))
+        if str(lang).lower().startswith("zh"):
+
             return "模型连续未遵循 Agent 输出协议，本次运行已安全终止。请重试或更换模型。"
         return (
             "The model repeatedly failed to follow the Agent output protocol, "
@@ -862,141 +896,142 @@ Additional Args:
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
         Returns None if the step is not final.
         """
-        hitl = getattr(self, "human_interaction", None)
-        suppress_repair_generation_stream = False
-        if hitl is not None and memory_step.model_output is not None:
-            model_output = memory_step.model_output
+        final_context = self.context_runtime.prepare_step(
+            model=self.model,
+            memory=self.memory,
+            current_run_start_idx=self._history_step_count,
+            tools=self._context_tools(),
+        )
+        get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
+        self._emit_history_summary_event()
+        input_messages = final_context.messages
+        chars_per_token = self.context_runtime.chars_per_token
+        # Baseline for the per-step compression ratio. ``final_context.messages``
+        # is already the compressed payload, so use the ContextManager's raw
+        # memory token count when compression produced one. When compression is
+        # disabled, the final input size is the correct zero-savings baseline.
+        uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
+        if uncompressed_tokens:
+            self._last_uncompressed_est = uncompressed_tokens
         else:
-            final_context = self.context_runtime.prepare_step(
-                model=self.model,
-                memory=self.memory,
-                current_run_start_idx=self._history_step_count,
-                tools=self._context_tools(),
+            self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
+        # Add new step in logs
+        memory_step.model_input_messages = input_messages
+        # Closed output protocols must receive the complete generation.
+        # Legacy CodeAgent stop strings can match a reasoning model's first
+        # tokens; providers then strip the match and return an apparently
+        # successful empty stream (finish_reason=stop). Strict classification
+        # below already rejects fabricated observations and protocol prefixes.
+        stop_sequences: list[str] | None = None
+
+        # Prepare additional arguments
+        additional_args: dict[str, Any] = {}
+        if self._use_structured_outputs_internally:
+            additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
+        if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
+            additional_args["_defer_attempt_commit"] = True
+
+        repair_messages = getattr(self, "_protocol_repair_messages", [])
+        if repair_messages:
+            input_messages = [*input_messages, *repair_messages]
+        input_messages = self._ensure_open_model_turn(input_messages)
+        memory_step.model_input_messages = input_messages
+
+        # Log model call parameters before execution
+        self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+
+        # Guardrail checkpoint ①: screen LLM input per-message; terminate -> end run, mask -> redact, pass -> continue.
+        guardrail_engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
+        if guardrail_engine:
+            decision = guardrail_engine.check_input(
+                input_messages=input_messages,
             )
-            get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
-            self._emit_history_summary_event()
-            input_messages = final_context.messages
-            chars_per_token = self.context_runtime.chars_per_token
-            # Baseline for the per-step compression ratio. ``final_context.messages``
-            # is already the compressed payload, so use the ContextManager's raw
-            # memory token count when compression produced one. When compression is
-            # disabled, the final input size is the correct zero-savings baseline.
-            uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
-            if uncompressed_tokens:
-                self._last_uncompressed_est = uncompressed_tokens
-            else:
-                self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
-            # Add new step in logs
-            memory_step.model_input_messages = input_messages
-            # Closed output protocols must receive the complete generation.
-            # Legacy CodeAgent stop strings can match a reasoning model's first
-            # tokens; providers then strip the match and return an apparently
-            # successful empty stream (finish_reason=stop). Strict classification
-            # below already rejects fabricated observations and protocol prefixes.
-            stop_sequences: list[str] | None = None
+            self.verification_controller.emit(
+                decision.verification_result, message=decision.message
+            )
+            if decision.effective_action == "terminate":
+                self._append_verification_feedback(memory_step, decision.verification_result)
+                refusal = render_guardrail_refusal(decision, input_messages)
+                memory_step.model_output = refusal
+                raise RuntimeFinalAnswer(refusal, "guardrail_input")
+            if decision.effective_action == "mask" and decision.masked_messages is not None:
+                input_messages = decision.masked_messages
+                self._append_verification_feedback(memory_step, decision.verification_result)
 
-            # Prepare additional arguments
-            additional_args: dict[str, Any] = {}
-            if self._use_structured_outputs_internally:
-                additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
-            if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
-                additional_args["_defer_attempt_commit"] = True
 
-            repair_messages = getattr(self, "_protocol_repair_messages", [])
-            if repair_messages:
-                suppress_repair_generation_stream = True
-                if (
-                    getattr(self.model, "supports_suppressed_attempt_stream", False)
-                    is True
-                ):
-                    additional_args["_suppress_attempt_stream"] = True
-                input_messages = [*input_messages, *repair_messages]
-            input_messages = self._ensure_open_model_turn(input_messages)
-            memory_step.model_input_messages = input_messages
-
-            # Log model call parameters before execution
-            self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
-
-            # Guardrail checkpoint ①: screen LLM input per-message; terminate -> end run, mask -> redact, pass -> continue.
-            guardrail_engine = getattr(getattr(self, "verification_controller", None), "guardrail_engine", None)
-            if guardrail_engine:
-                decision = guardrail_engine.check_input(
-                    input_messages=input_messages,
+        try:
+            def rebuild_after_provider_overflow():
+                rebuilt = self.context_runtime.recover_step(
+                    model=self.model,
+                    memory=self.memory,
+                    current_run_start_idx=self._history_step_count,
+                    tools=self._context_tools(),
                 )
-                self.verification_controller.emit(
-                    decision.verification_result, message=decision.message
+                get_monitoring_manager().record_final_context_evidence(
+                    rebuilt.evidence, step_number=self.step_number
                 )
-                if decision.effective_action == "terminate":
-                    self._append_verification_feedback(memory_step, decision.verification_result)
-                    refusal = render_guardrail_refusal(decision, input_messages)
-                    memory_step.model_output = refusal
-                    raise RuntimeFinalAnswer(refusal, "guardrail_input")
-                if decision.effective_action == "mask" and decision.masked_messages is not None:
-                    input_messages = decision.masked_messages
-                    self._append_verification_feedback(memory_step, decision.verification_result)
+                self._emit_history_summary_event()
+                return rebuilt
 
-            try:
-                def rebuild_after_provider_overflow():
-                    rebuilt = self.context_runtime.recover_step(
-                        model=self.model,
-                        memory=self.memory,
-                        current_run_start_idx=self._history_step_count,
-                        tools=self._context_tools(),
-                    )
-                    get_monitoring_manager().record_final_context_evidence(
-                        rebuilt.evidence, step_number=self.step_number
-                    )
-                    self._emit_history_summary_event()
-                    return rebuilt
-
-                chat_message: ChatMessage = self.model(
-                    input_messages,
-                    stop_sequences=stop_sequences,
-                    context_rebuild=(
-                        rebuild_after_provider_overflow
-                        if self._provider_overflow_recovery_safe()
-                        else None
-                    ),
-                    **additional_args,
-                )
-                memory_step.model_output_message = chat_message
-                model_output = chat_message.content
-                memory_step.token_usage = chat_message.token_usage
-                memory_step.model_output = model_output
-            except ModelInvocationTerminalError as terminal_error:
-                if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED:
-                    raise ModelOutputProtocolError(
-                        reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
-                        protocol=getattr(self, "output_protocol", "code_action"),
-                        logger=self.logger,
-                    ) from terminal_error
-                raise
-            except Exception as e:
-                if self.stop_event.is_set():
-                    raise RunTerminated() from e
-                raise AgentGenerationError(
-                    f"Error in generating model output:\n{e}", self.logger) from e
-
-            self.logger.log(
-                "Model output received "
-                f"(length={len(str(model_output or ''))}, "
-                f"unicode_categories={unicode_category_summary(model_output)})",
-                level=LogLevel.DEBUG,
+            chat_message: ChatMessage = self.model(
+                input_messages,
+                stop_sequences=stop_sequences,
+                context_rebuild=(
+                    rebuild_after_provider_overflow
+                    if self._provider_overflow_recovery_safe()
+                    else None
+                ),
+                **additional_args,
             )
             logger.debug(
                 "MODEL OUTPUT\n%s",
                 truncate_content(str(model_output or ""), max_length=1000),
             )
+            memory_step.model_output_message = chat_message
+            model_output = chat_message.content
+            memory_step.token_usage = chat_message.token_usage
+            memory_step.model_output = model_output
+        except ModelInvocationTerminalError as terminal_error:
+            if self.stop_event.is_set():
+                raise RunTerminated() from terminal_error
+            if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED:
+                raise ModelOutputProtocolError(
+                    reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
+                    protocol=getattr(self, "output_protocol", "code_action"),
+                    logger=self.logger,
+                ) from terminal_error
+            raise
+        except Exception as e:
+            if self.stop_event.is_set():
+                raise RunTerminated() from e
+            raise AgentGenerationError(
+                f"Error in generating model output:\n{e}", self.logger) from e
 
-            if hitl is not None:
-                hitl.generated(memory_step)
+        self.logger.log(
+            "Model output received "
+            f"(length={len(str(model_output or ''))}, "
+            f"unicode_categories={unicode_category_summary(model_output)})",
+            level=LogLevel.DEBUG,
+        )
+
+
+        if self.stop_event.is_set():
+            raise RunTerminated()
 
         # Parse using the configured closed output protocol.
         try:
             if self._use_structured_outputs_internally:
                 code_action = json.loads(model_output)["code"]
-                code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
-                classified_output = ExecutableAction(code=str(code_action))
+                if not isinstance(code_action, str):
+                    raise ValueError("Structured code must be a string")
+                stripped_code = code_action.strip()
+                classified_output = classify_model_output(
+                    stripped_code if stripped_code.startswith(("<code>", "```<RUN>")) else f"<code>{code_action}</code>",
+                    protocol="code_action",
+                    finish_reason=getattr(self.model, "last_finish_reason", None),
+                    logger=self.logger,
+                )
+
             else:
                 finish_reason = getattr(self.model, "last_finish_reason", None)
                 if finish_reason is None:
@@ -1009,10 +1044,8 @@ Additional Args:
                     logger=self.logger,
                 )
             if isinstance(classified_output, ExplicitFinalAnswer):
-                self._resolve_deferred_model_attempt(
-                    memory_step.model_output_message,
-                    accepted=not suppress_repair_generation_stream,
-                )
+                self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+
                 getattr(self, "_protocol_repair_messages", []).clear()
                 self._consecutive_protocol_errors = 0
                 self._record_output_protocol("explicit_final_answer")
@@ -1023,13 +1056,27 @@ Additional Args:
                 return
 
             code_action = classified_output.code
+            form = None
+            if getattr(self, "clarification_tool_name", None):
+                form = extract_clarification_form(code_action, self.clarification_tool_name)
+            if form is not None:
+                form = self._screen_clarification(form)
+                if self.stop_event.is_set():
+                    raise RunTerminated()
+                self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+                getattr(self, "_protocol_repair_messages", []).clear()
+                self._consecutive_protocol_errors = 0
+                self.observer.add_message(self.agent_name, ProcessType.STEP_COUNT, self.step_number)
+                self.observer.add_message(
+                    self.agent_name, ProcessType.HUMAN_INTERACTION,
+                    {"schema_version": 1, **form.model_dump(mode="json")},
+                )
+                raise RuntimeFinalAnswer(render_question_text(form), source="clarification")
             code_action = fix_final_answer_code(code_action)
             code_action = _remove_parallel_executor_import(code_action)
             memory_step.code_action = code_action
-            self._resolve_deferred_model_attempt(
-                memory_step.model_output_message,
-                accepted=not suppress_repair_generation_stream,
-            )
+            self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+
             getattr(self, "_protocol_repair_messages", []).clear()
             self._consecutive_protocol_errors = 0
             self._record_output_protocol(
@@ -1054,6 +1101,12 @@ Additional Args:
                         self.logger,
                     )
 
+        except RuntimeFinalAnswer as terminal:
+            if terminal.source == "guardrail_clarification":
+                self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
+                memory_step.model_output = str(terminal.answer)
+            raise
+
         except ModelOutputProtocolError:
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
@@ -1066,6 +1119,10 @@ Additional Args:
                 protocol=self.output_protocol,
                 logger=self.logger,
             )
+
+        if self.stop_event.is_set():
+            raise RunTerminated()
+
 
         tool_call = ToolCall(
             name="python_interpreter",
@@ -1111,12 +1168,8 @@ Additional Args:
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
             # Guardrail ③ block: end the run with the stashed refusal (no retry loop).
-            if hitl is not None and getattr(hitl, "steering_interrupt", False):
-                hitl.steering_interrupt = False
-                hitl.safe_boundary()
-                raise StepSteered() from e
-            if hitl is not None and hitl.block_has_receipts:
-                raise RecoveryRequired("Execution failed after a persisted receipt; automatic block repair is unsafe") from e
+            if self.stop_event.is_set():
+                raise RunTerminated() from e
             # The executor re-wraps exceptions, so isinstance(e, ToolInputBlockedError) may miss.
             pending_refusal = getattr(getattr(self, "verification_controller", None), "pending_tool_block_refusal", None)
             if pending_refusal or isinstance(e, ToolInputBlockedError):
@@ -1162,6 +1215,8 @@ Additional Args:
         memory_step.observations = observation
 
         verification_controller = getattr(self, "verification_controller", None)
+        if self.stop_event.is_set():
+            raise RunTerminated()
         if verification_controller:
             postcheck = verification_controller.verify_after_tool_call(
                 code_action=code_action,
@@ -1171,8 +1226,6 @@ Additional Args:
             )
             if not postcheck.passed and postcheck.severity == "blocking":
                 self._append_verification_feedback(memory_step, postcheck)
-                if hitl is not None and not hitl.preserves_executor:
-                    raise RecoveryRequired("An executed result failed validation; automatic action repair is unsafe")
                 raise AgentExecutionError(
                     postcheck.repair_instruction or postcheck.user_visible_note or "Action result failed verification.",
                     self.logger,
@@ -1209,7 +1262,7 @@ Additional Args:
         # if the LLM skipped the tool on the final step before final_answer,
         # we still want to flip the current row from in_progress to completed
         # so the UI does not get stuck on a half-finished plan.
-        if self.enable_planning and (hitl is None or hitl.preserves_executor):
+        if self.enable_planning and not self.stop_event.is_set():
             self._implicit_advance_step()
 
         yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
@@ -1293,20 +1346,11 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         self.memory.steps.append(TaskStep(task=self.task, task_images=images))
 
         if getattr(self, "python_executor", None):
-            if (getattr(self, "human_interaction", None) is None
-                    or getattr(self.human_interaction, "preserves_executor", False)):
-                self._guardrail_wrap_tools()
+            self._guardrail_wrap_tools()
             self._wrap_visible_tool_events()
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
                 {**self.tools, **self.managed_agents})
-
-        hitl = getattr(self, "human_interaction", None)
-        if hitl is not None:
-            if not hitl.restore():
-                if not hitl.preserves_executor:
-                    hitl.initial_state = deepcopy(self.python_executor.state)
-                self.memory.steps.append(TaskStep(task=hitl.instructions))
 
         if stream:
             # The steps are returned as they are executed through a generator to iterate on.
@@ -1370,14 +1414,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         try:
             yield from self._run_stream(task=task, max_steps=max_steps, images=images)
             status = "cancelled" if self.stop_event.is_set() else "completed"
-        except AttemptSuspended:
-            status = "waiting_human"
-            raise
         except RunTerminated:
             status = "cancelled"
-            raise
-        except RecoveryRequired:
-            status = "recovery_required"
             raise
         except GeneratorExit:
             status = "cancelled"
@@ -1448,20 +1486,12 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
     ) -> Generator[ActionStep | PlanningStep | FinalAnswerStep]:
         final_answer = None
         action_step = None
-        hitl = getattr(self, "human_interaction", None)
-        if hitl is not None and hitl.restored and hitl.completed_output is not None:
-            self._record_output_protocol(
-                "runtime_final_answer",
-                final_answer_source="hitl_restored",
-            )
-            yield FinalAnswerStep(handle_agent_output_types(hitl.completed_output))
-            return
-        if hitl is None or not hitl.restored:
-            self.step_number = 1
+        self.step_number = 1
         returned_final_answer = False
         self._consecutive_protocol_errors = 0
         self._protocol_repair_messages: list[ChatMessage] = []
-        final_verification_round = hitl.final_verification_round if hitl is not None else 0
+        final_verification_round = 0
+
         verification_config = getattr(
             self,
             "verification_config",
@@ -1473,26 +1503,25 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             else 1
         )
 
-        if self.enable_planning and (hitl is None or not hitl.restored):
+        if self.enable_planning:
             # v1.4: Plan creation happens lazily via the create_plan tool
             # during the first LLM code block. No upfront planning step here.
             self.current_plan = None
             self.current_step_index = 0
 
         while not returned_final_answer and self.step_number <= max_steps and not self.stop_event.is_set():
-            if hitl is not None:
-                hitl.safe_boundary()
             step_start_time = time.time()
             interrupted = False
 
-            action_step = (hitl.pending_step if hitl is not None else None) or ActionStep(
+            action_step = ActionStep(
                 step_number=self.step_number, timing=Timing(start_time=step_start_time), observations_images=images
             )
             try:
-                if hitl is not None:
-                    hitl.start_step(action_step)
                 for output in self._step_stream(action_step):
                     yield output
+
+                if self.stop_event.is_set():
+                    raise RunTerminated()
 
                 if isinstance(output, ActionOutput) and output.is_final_answer:
                     candidate_answer = output.output
@@ -1572,6 +1601,9 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 )
 
             except ModelOutputProtocolError as protocol_error:
+                if self.stop_event.is_set():
+                    raise RunTerminated()
+
                 self._consecutive_protocol_errors += 1
                 self._record_output_protocol(
                     "protocol_error",
@@ -1598,32 +1630,23 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                     self._protocol_repair_messages.clear()
                     action_step.model_output = None
                     action_step.model_output_message = None
-                    final_answer = self._controlled_protocol_failure()
-                    returned_final_answer = True
-                    action_step.is_final_answer = True
-                    action_step.action_output = final_answer
+                    interrupted = True
+
                     self._record_output_protocol(
                         "controlled_protocol_failure",
                         reason=protocol_error.reason.value,
                         final_answer_source="protocol_error_limit",
                     )
+                    raise ModelOutputProtocolExhaustedError(self._controlled_protocol_failure()) from protocol_error
+
                 else:
                     self._append_protocol_repair_context(protocol_error)
                     action_step.model_output = None
                     action_step.model_output_message = None
                     action_step.token_usage = None
                     interrupted = True
-                    if hitl is not None:
-                        hitl.completed_step(final_verification_round, None)
                     continue
 
-            except StepSteered:
-                self._resolve_deferred_model_attempt(
-                    getattr(action_step, "model_output_message", None),
-                    accepted=False,
-                )
-                interrupted = True
-                continue
             except ModelInvocationTerminalError:
                 # The model adapter has already exhausted its complete physical
                 # call budget (or classified the failure as non-retryable).
@@ -1631,7 +1654,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 # turn it into a subsequent model invocation.
                 interrupted = True
                 raise
-            except (AttemptSuspended, RecoveryRequired, RunTerminated):
+            except RunTerminated:
+
                 self._resolve_deferred_model_attempt(
                     getattr(action_step, "model_output_message", None),
                     accepted=False,
@@ -1642,28 +1666,23 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 action_step.error = e
 
             finally:
-                if not interrupted and returned_final_answer and hitl is not None:
-                    if not hitl.prepare_completion():
-                        returned_final_answer = False
-                        final_answer = None
-                        interrupted = True
                 if not interrupted:
                     self._finalize_step(action_step)
                     self._collect_step_metrics(action_step)
                     self.memory.steps.append(action_step)
                     yield action_step
                     self.step_number += 1
-                    if hitl is not None:
-                        hitl.completed_step(final_verification_round, final_answer if returned_final_answer else None)
 
         if self.stop_event.is_set():
-            final_answer = "<user_break>"
+            if final_answer is None:
+                final_answer = "<user_break>"
+
             self._record_output_protocol(
                 "runtime_final_answer",
                 final_answer_source="user_stop",
             )
 
-        if not returned_final_answer and self.step_number == max_steps + 1:
+        if not returned_final_answer and not self.stop_event.is_set() and self.step_number == max_steps + 1:
             max_steps_data = json.dumps({
                 "completedSteps": self.step_number - 1,
                 "maxSteps": max_steps,
@@ -1680,8 +1699,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 "runtime_final_answer",
                 final_answer_source="max_steps",
             )
-        if hitl is not None:
-            hitl.complete_run(final_answer)
+
         yield FinalAnswerStep(handle_agent_output_types(final_answer))
 
         # Persist the final plan state for the whole conversation. The entry

@@ -47,6 +47,7 @@ class ProcessType(Enum):
     EXECUTION_LOGS = "execution_logs"  # code execution result
     AGENT_NEW_RUN = "agent_new_run"  # Agent basic information
     AGENT_FINISH = "agent_finish"  # sub-agent end of run mark, mainly used for front-end display
+    HUMAN_INTERACTION = "human_interaction"  # terminal question form in an ordinary assistant message
     FINAL_ANSWER = "final_answer"  # final summary
     ERROR = "error"  # error field
     WARNING = "warning"  # recoverable issue; execution can continue
@@ -241,6 +242,7 @@ class MessageObserver:
             ProcessType.PICTURE_WEB: default_transformer,
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,
+            ProcessType.HUMAN_INTERACTION: default_transformer,
             ProcessType.TOOL: default_transformer,
             ProcessType.NL2A: default_transformer,
             ProcessType.NL2A_STATE: default_transformer,
@@ -672,7 +674,8 @@ class MessageObserver:
             self._tool_call_id.reset(token)
 
     def add_subagent_start(self, agent_id, agent_name, task=None,
-                           invocation_id=None):
+                           invocation_id=None, invocation_name=None,
+                           runtime_ref=None, version_no=None, display_name=None, origin=None):
         """Emit a subagent_start boundary and push the nesting depth.
 
         A unique ``invocation_id`` is generated (or used when supplied) so that
@@ -698,15 +701,19 @@ class MessageObserver:
         stack = self._subagent_stack.get()
         self._subagent_stack.set(stack + ((invocation_id, agent_id, agent_name),))
         self._current_invocation_id.set(invocation_id)
-        payload = json.dumps(
-            {
-                "agent_id": agent_id,
-                "agent_name": agent_name,
-                "task": task if task is not None else "",
-                "invocation_id": invocation_id,
-            },
-            ensure_ascii=False,
-        )
+        payload_data = {
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "task": task if task is not None else "",
+            "invocation_id": invocation_id,
+        }
+        if invocation_name is not None:
+            payload_data["invocation_name"] = invocation_name
+        payload_data.update({key: value for key, value in {
+            "runtime_ref": runtime_ref, "version_no": version_no,
+            "display_name": display_name, "origin": origin,
+        }.items() if value is not None})
+        payload = json.dumps(payload_data, ensure_ascii=False)
         self._append_message(
             Message(
                 ProcessType.SUBAGENT_START,
@@ -718,7 +725,9 @@ class MessageObserver:
             ).to_json()
         )
 
-    def add_subagent_end(self, agent_id, agent_name, invocation_id=None):
+    def add_subagent_end(self, agent_id, agent_name, invocation_id=None,
+                         invocation_name=None,
+                         runtime_ref=None, version_no=None, display_name=None, origin=None):
         """Emit a subagent_end boundary and pop the nesting depth.
 
         When ``invocation_id`` is supplied it is used to pop the matching entry
@@ -752,14 +761,18 @@ class MessageObserver:
         self._subagent_stack.set(new_stack)
         # Update invocation id to the new top (or None)
         self._current_invocation_id.set(new_stack[-1][0] if new_stack else None)
-        payload = json.dumps(
-            {
-                "agent_id": agent_id,
-                "agent_name": agent_name,
-                "invocation_id": resolved_invocation,
-            },
-            ensure_ascii=False,
-        )
+        payload_data = {
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "invocation_id": resolved_invocation,
+        }
+        if invocation_name is not None:
+            payload_data["invocation_name"] = invocation_name
+        payload_data.update({key: value for key, value in {
+            "runtime_ref": runtime_ref, "version_no": version_no,
+            "display_name": display_name, "origin": origin,
+        }.items() if value is not None})
+        payload = json.dumps(payload_data, ensure_ascii=False)
         self._append_message(
             Message(
                 ProcessType.SUBAGENT_END,

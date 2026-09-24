@@ -556,9 +556,14 @@ async def upload_files_impl(
                 existing = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
                 existing_files = existing.get(
                     "files", []) if isinstance(existing, dict) else []
-                # Prefer 'file' field; fall back to 'filename' if present
+                # list_files merges durable lifecycle rows, including this
+                # batch's own -- exclude them or every first upload renames
+                # itself to <name>_1 (only merged rows carry a file_id).
+                own_file_ids = {r["file_id"] for r in lifecycle_records if r.get("file_id")}
                 existing_names = set()
                 for item in existing_files:
+                    if item.get("file_id") in own_file_ids:
+                        continue
                     name = (item.get("file") or item.get(
                         "filename") or "").strip()
                     if name:

@@ -61,6 +61,34 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
         return agent.agent_id
 
 
+def search_system_agent(
+    tenant_id: str,
+    system_key: str,
+    version_no: int = 0,
+) -> Optional[dict]:
+    """Return one active platform-owned Agent for the tenant and key."""
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.system_key == system_key,
+            AgentInfo.agent_origin == "SYSTEM",
+            AgentInfo.version_no == version_no,
+            AgentInfo.delete_flag != "Y",
+        ).first()
+        return as_dict(agent) if agent else None
+
+
+def is_system_agent(agent_id: int, tenant_id: str) -> bool:
+    """Return whether an Agent identity is owned and protected by the platform."""
+    with get_db_session() as session:
+        return session.query(AgentInfo.agent_id).filter(
+            AgentInfo.agent_id == agent_id,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.agent_origin == "SYSTEM",
+            AgentInfo.delete_flag != "Y",
+        ).first() is not None
+
+
 def search_blank_sub_agent_by_main_agent_id(tenant_id: str, version_no: int = 0):
     """
     Search blank sub agent by main agent id.
@@ -221,6 +249,9 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "agent_id": new_agent.agent_id,
             "tenant_id": new_agent.tenant_id,
             "name": new_agent.name,
+            "system_key": getattr(new_agent, "system_key", None),
+            "agent_origin": getattr(new_agent, "agent_origin", "USER"),
+            "system_revision": getattr(new_agent, "system_revision", None),
             "display_name": new_agent.display_name,
             "description": new_agent.description,
             "author": new_agent.author,
@@ -257,7 +288,35 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         return result
 
 
-def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
+def update_system_agent_revision(
+    *,
+    agent_id: int,
+    tenant_id: str,
+    system_revision: str,
+    user_id: str,
+) -> None:
+    """Record the applied release revision on the protected system draft."""
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.agent_id == agent_id,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == 0,
+            AgentInfo.agent_origin == "SYSTEM",
+            AgentInfo.delete_flag != "Y",
+        ).first()
+        if not agent:
+            raise ValueError("System Agent draft not found")
+        agent.system_revision = system_revision
+        agent.updated_by = user_id
+
+
+def update_agent(
+    agent_id,
+    agent_info,
+    user_id,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Update an existing agent in the database.
     Default version_no=0 updates the draft version.
@@ -280,6 +339,8 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
         ).first()
         if not agent:
             raise ValueError("ag_tenant_agent_t Agent not found")
+        if getattr(agent, "agent_origin", "USER") == "SYSTEM" and not allow_system:
+            raise ValueError("System Agent is managed by the platform")
 
         agent_data = dict(agent_info.__dict__)
         fields_set = getattr(agent_info, "model_fields_set", None)
@@ -423,7 +484,25 @@ def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> di
         return {a.agent_id: (a.display_name or a.name) for a in agents}
 
 
-def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0, selected_agent_version_no: Optional[int] = None) -> bool:
+def _ensure_system_relation_mutation_allowed(
+    parent_agent_id: int,
+    tenant_id: str,
+    allow_system: bool,
+) -> None:
+    """Reject ordinary relation writes targeting a platform Agent."""
+    if not allow_system and is_system_agent(parent_agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
+
+
+def insert_related_agent(
+    parent_agent_id: int,
+    child_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    selected_agent_version_no: Optional[int] = None,
+    allow_system: bool = False,
+) -> bool:
     """
     Insert a related agent.
     Default version_no=0 creates the draft version.
@@ -436,6 +515,9 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         version_no: Parent agent version number. Default 0 = draft/editing state
         selected_agent_version_no: Pinned version of child agent. None = runtime fallback to child current_version_no
     """
+    _ensure_system_relation_mutation_allowed(
+        parent_agent_id, tenant_id, allow_system
+    )
     try:
         relation_info = {
             "parent_agent_id": parent_agent_id,
@@ -457,7 +539,14 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         return False
 
 
-def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0) -> bool:
+def delete_related_agent(
+    parent_agent_id: int,
+    child_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+) -> bool:
     """
     Delete a related agent.
     Default version_no=0 deletes the draft version.
@@ -469,6 +558,9 @@ def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         user_id: User ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    _ensure_system_relation_mutation_allowed(
+        parent_agent_id, tenant_id, allow_system
+    )
     try:
         with get_db_session() as session:
             session.query(AgentRelation).filter(
@@ -537,6 +629,7 @@ def update_related_agents(
     user_id: str,
     related_agents: Optional[List[dict]] = None,
     version_no: int = 0,
+    allow_system: bool = False,
 ):
     """
     Update related agents for a parent agent by replacing all existing relations.
@@ -552,6 +645,9 @@ def update_related_agents(
         related_agents: List of dicts with 'agent_id' and optional 'version_no' keys
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    _ensure_system_relation_mutation_allowed(
+        parent_agent_id, tenant_id, allow_system
+    )
     new_related_ids, version_map = _parse_related_agents(related_agents)
 
     with get_db_session() as session:
@@ -586,7 +682,13 @@ def update_related_agents(
         _update_existing_relations(current_relations, ids_to_update, version_map, user_id)
 
 
-def delete_agent_relationship(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):
+def delete_agent_relationship(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Delete all relationships for an agent.
     Default version_no=0 deletes the draft version.
@@ -597,6 +699,7 @@ def delete_agent_relationship(agent_id: int, tenant_id: str, user_id: str, versi
         user_id: User ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    _ensure_system_relation_mutation_allowed(agent_id, tenant_id, allow_system)
     with get_db_session() as session:
         session.query(AgentRelation).filter(
             AgentRelation.parent_agent_id == agent_id,

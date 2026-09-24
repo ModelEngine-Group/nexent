@@ -9,6 +9,7 @@ import {
   type ClarificationAnswer,
 } from "@/components/interaction/clarification-card";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
 import type {
   Nl2AgentCardAction,
   Nl2aRequirementClarificationPayload,
@@ -45,6 +46,10 @@ export const RequirementClarificationCard: FC<{
     };
 
     aui.thread().append({
+      runConfig: nl2AgentCardRunConfig(
+        aui.thread().composer().getState().runConfig,
+        payload.agent_id
+      ),
       role: "user",
       content: [
         {

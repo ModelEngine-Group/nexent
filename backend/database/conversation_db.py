@@ -8,6 +8,8 @@ from sqlalchemy import asc, desc, func, insert, select, update
 from consts.exceptions import (
     ConversationNotFoundError,
     RuntimeMetadataVersionConflict,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
 )
 
 from .client import as_dict, db_client, get_db_session
@@ -38,6 +40,12 @@ def _serialize_unit_content(content: Any) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
+def _optional_conversation_column(name: str, fallback: Any):
+    """Keep rolling-schema and unit-test stubs readable during migration."""
+    column = getattr(ConversationRecord, name, None)
+    return column if column is not None else fallback
+
+
 class SearchRecord(TypedDict):
     message_id: int
     source_type: str
@@ -66,6 +74,8 @@ class ConversationHistory(TypedDict):
     knowledge_scope: Optional[Dict[str, Any]]
     runtime_metadata: Dict[str, Any]
     runtime_metadata_version: int
+    workbench_config: Optional[Dict[str, Any]]
+    workbench_config_version: int
     create_time: int
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
@@ -117,7 +127,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         agent_id: Optional[int] = None,
                         chat_mode: Optional[str] = None,
                         knowledge_scope: Optional[Dict[str, Any]] = None,
-                        runtime_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        runtime_metadata: Optional[Dict[str, Any]] = None,
+                        workbench_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -143,6 +154,9 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
         if runtime_metadata is not None:
             data["runtime_metadata"] = deepcopy(runtime_metadata)
             data["runtime_metadata_version"] = 1
+        if workbench_config is not None:
+            data["workbench_config"] = deepcopy(workbench_config)
+            data["workbench_config_version"] = 1
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -154,6 +168,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             ConversationRecord.knowledge_scope,
             ConversationRecord.runtime_metadata,
             ConversationRecord.runtime_metadata_version,
+            _optional_conversation_column("workbench_config", None),
+            _optional_conversation_column("workbench_config_version", 0),
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -171,6 +187,16 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             "knowledge_scope": record.knowledge_scope,
             "runtime_metadata": record.runtime_metadata or {},
             "runtime_metadata_version": record.runtime_metadata_version or 0,
+            "workbench_config": (
+                record.workbench_config
+                if isinstance(getattr(record, "workbench_config", None), dict)
+                else None
+            ),
+            "workbench_config_version": (
+                record.workbench_config_version
+                if isinstance(getattr(record, "workbench_config_version", None), int)
+                else 0
+            ),
             "create_time": int(record.create_time),
             "update_time": int(record.update_time)
         }
@@ -299,7 +325,7 @@ def persist_assistant_run_batch(
     Returns:
         Mapping from unit_index to the generated unit_id.
     """
-    if terminal_status not in {"completed", "failed", "stopped", "waiting_human", "recovery_required"}:
+    if terminal_status not in {"completed", "failed", "stopped"}:
         raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
 
     message_id = int(message_id)
@@ -725,6 +751,131 @@ def resolve_conversation_runtime_metadata(
         }
 
 
+def _assert_workbench_topology(record, config: Dict[str, Any]) -> None:
+    """Keep entrypoint and creation workflows stable while allowing chat mounts to change."""
+    current = record.workbench_config
+    if not isinstance(current, dict) or current.get("schema_version") != 3:
+        raise WorkbenchError("WORKBENCH_CONVERSATION_REQUIRED", status_code=409)
+    creation_modes = {"skill_create", "agent_create"}
+    if current.get("mode") in creation_modes or config.get("mode") in creation_modes:
+        if current.get("mode") != config.get("mode"):
+            raise WorkbenchError("WORKBENCH_TOPOLOGY_LOCKED")
+
+
+def replace_conversation_workbench_config(
+    conversation_id: int,
+    user_id: str,
+    config: Dict[str, Any],
+    expected_version: int,
+    only_if_changed: bool = False,
+) -> Dict[str, Any]:
+    """Atomically replace canonical Workbench config and compatibility projections."""
+
+    with get_db_session() as session:
+        stmt = (
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N',
+            )
+            .with_for_update()
+        )
+        record = session.scalars(stmt).first()
+        if record is None:
+            raise ConversationNotFoundError("Conversation not found")
+
+        current_version = int(record.workbench_config_version or 0)
+        if expected_version != current_version:
+            raise WorkbenchConfigVersionConflict(
+                current_version,
+                deepcopy(record.workbench_config),
+            )
+
+        _assert_workbench_topology(record, config)
+        normalized = deepcopy(config)
+        if only_if_changed and normalized == record.workbench_config:
+            return {
+                "workbench_config": deepcopy(record.workbench_config),
+                "workbench_config_version": current_version,
+                "agent_id": record.agent_id,
+                "knowledge_scope": deepcopy(record.knowledge_scope),
+            }
+        projected_scope = deepcopy(normalized.get("knowledge_scope"))
+
+        record.workbench_config = normalized
+        record.workbench_config_version = current_version + 1
+        record.knowledge_scope = projected_scope
+        record.updated_by = user_id
+        record.update_time = func.current_timestamp()
+        session.flush()
+
+        return {
+            "workbench_config": deepcopy(record.workbench_config),
+            "workbench_config_version": int(record.workbench_config_version),
+            "agent_id": record.agent_id,
+            "knowledge_scope": deepcopy(record.knowledge_scope),
+        }
+
+
+def replace_conversation_workbench_and_metadata(
+    conversation_id: int,
+    user_id: str,
+    config: Dict[str, Any],
+    expected_config_version: int,
+    metadata: Dict[str, Any],
+    expected_metadata_version: Optional[int],
+) -> Dict[str, Any]:
+    """Preflight and replace both independent runtime declarations atomically."""
+
+    with get_db_session() as session:
+        stmt = (
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N',
+            )
+            .with_for_update()
+        )
+        record = session.scalars(stmt).first()
+        if record is None:
+            raise ConversationNotFoundError("Conversation not found")
+
+        current_config_version = int(record.workbench_config_version or 0)
+        current_metadata_version = int(record.runtime_metadata_version or 0)
+        if expected_config_version != current_config_version:
+            raise WorkbenchConfigVersionConflict(
+                current_config_version,
+                deepcopy(record.workbench_config),
+            )
+        if (
+            expected_metadata_version is not None
+            and expected_metadata_version != current_metadata_version
+        ):
+            raise RuntimeMetadataVersionConflict(current_metadata_version)
+
+        _assert_workbench_topology(record, config)
+        normalized = deepcopy(config)
+        config_changed = normalized != record.workbench_config
+        record.workbench_config = normalized
+        record.workbench_config_version = current_config_version + int(config_changed)
+        record.knowledge_scope = deepcopy(normalized.get("knowledge_scope"))
+        record.runtime_metadata = deepcopy(metadata)
+        record.runtime_metadata_version = current_metadata_version + 1
+        record.updated_by = user_id
+        record.update_time = func.current_timestamp()
+        session.flush()
+        return {
+            "workbench_config": deepcopy(record.workbench_config),
+            "workbench_config_version": int(record.workbench_config_version),
+            "agent_id": record.agent_id,
+            "knowledge_scope": deepcopy(record.knowledge_scope),
+            "runtime_metadata": deepcopy(record.runtime_metadata),
+            "runtime_metadata_version": int(record.runtime_metadata_version),
+        }
+
+
 def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
     """
     Get all messages in a conversation
@@ -880,8 +1031,11 @@ def get_conversation_list_page(
     week_start_ms: int,
     limit: Optional[int] = None,
     offset: int = 0,
+    conversation_type: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Return one conversation page and its bucket counts in one query."""
+    """Return a conversation page and bucket counts, optionally scoped by origin."""
+    if conversation_type not in (None, "agent_chat", "workbench"):
+        raise ValueError("Invalid conversation type")
     with get_db_session() as session:
         created_ms = func.extract('epoch', ConversationRecord.create_time) * 1000
         stmt = select(
@@ -905,6 +1059,10 @@ def get_conversation_list_page(
             desc(ConversationRecord.create_time),
             desc(ConversationRecord.conversation_id),
         )
+        if conversation_type == "workbench":
+            stmt = stmt.where(ConversationRecord.workbench_config.is_not(None))
+        elif conversation_type == "agent_chat":
+            stmt = stmt.where(ConversationRecord.workbench_config.is_(None))
         if limit is not None:
             stmt = stmt.limit(limit)
         if offset:
@@ -958,6 +1116,24 @@ def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: O
 
         result = session.execute(stmt)
         return result.rowcount > 0
+
+
+def rebind_conversation_agent_id(
+    conversation_id: int, expected_agent_id: int, agent_id: int, user_id: str
+) -> bool:
+    """Rebind an owned creation conversation only if its Agent has not changed."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.agent_id == expected_agent_id,
+                ConversationRecord.delete_flag == 'N',
+            )
+            .values(agent_id=agent_id, update_time=func.current_timestamp(), updated_by=user_id)
+        )
+        return result.rowcount == 1
 
 
 # Allowed values for conversation_record_t.chat_mode. Anything outside this set
@@ -1337,6 +1513,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationRecord.knowledge_scope,
             ConversationRecord.runtime_metadata,
             ConversationRecord.runtime_metadata_version,
+            _optional_conversation_column("workbench_config", None),
+            _optional_conversation_column("workbench_config_version", 0),
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time')
         ).where(
@@ -1444,6 +1622,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             'knowledge_scope': conversation.get('knowledge_scope'),
             'runtime_metadata': conversation.get('runtime_metadata') or {},
             'runtime_metadata_version': int(conversation.get('runtime_metadata_version') or 0),
+            'workbench_config': conversation.get('workbench_config'),
+            'workbench_config_version': int(conversation.get('workbench_config_version') or 0),
             'create_time': int(conversation['create_time']),
             'message_records': message_list,
             'search_records': [as_dict(record) for record in search_records],
@@ -2132,11 +2312,58 @@ def save_history_summary(
             ConversationMessageUnit.unit_id)).scalar_one()
 
 
+_STOPPED_CONTEXT_NOTE = "上一轮已由用户停止，以下内容为已保存的部分结果。"
+_UNANSWERED_CONTEXT_NOTE = "该轮未生成有效回复。"
+_PARTIAL_CONTEXT_MAX_CHARS = 16000
+
+
+def _stopped_history_text(message, session, conversation_id: int) -> str:
+    """Project saved readable output only; never replay code or infer tool success."""
+    body = (message.message_content or "").replace("<user_break>", "").strip()
+    if body in {"已停止", "Stopped"}:
+        body = ""
+    if not body:
+        units = session.execute(select(
+            ConversationMessageUnit.unit_content,
+        ).where(
+            ConversationMessageUnit.conversation_id == conversation_id,
+            ConversationMessageUnit.message_id == message.message_id,
+            ConversationMessageUnit.unit_type == "execution_logs",
+            ConversationMessageUnit.unit_status == "completed",
+            ConversationMessageUnit.delete_flag == "N",
+        ).order_by(desc(ConversationMessageUnit.unit_index)).limit(16)).all()
+        body = "\n".join(unit.unit_content or "" for unit in reversed(units))
+    files = message.minio_files
+    if isinstance(files, str):
+        try:
+            files = json.loads(files)
+        except (ValueError, TypeError):
+            files = None
+    if isinstance(files, list):
+        references = [
+            str(item.get("url") or item.get("s3_url") or "")
+            for item in files if isinstance(item, dict)
+        ]
+        body += "\n" + "\n".join(ref for ref in references if ref)
+    body = body.strip()[:_PARTIAL_CONTEXT_MAX_CHARS]
+    return _STOPPED_CONTEXT_NOTE + ("\n" + body if body else "")
+
+
+def _history_turn(user, assistant_text: str, assistant_id=None) -> Dict[str, Any]:
+    return {
+        "user_message": user.message_content or "",
+        "assistant_final_answer": assistant_text,
+        "attachments": user.minio_files,
+        "user_message_id": user.message_id,
+        "assistant_message_id": assistant_id if assistant_id is not None else -user.message_id,
+    }
+
+
 def get_historical_context(
     conversation_id: int, current_user_message_id: int,
     user_id: str, tenant_id: str,
 ) -> Optional[Dict[str, Any]]:
-    """Load the authorized latest checkpoint and completed turns before a run."""
+    """Load authorized completed and stopped turns after the latest valid checkpoint."""
     if not user_id or not tenant_id:
         return None
     user_tenant = _get_user_tenant(user_id)
@@ -2204,11 +2431,12 @@ def get_historical_context(
             ConversationMessage.message_role,
             ConversationMessage.message_content,
             ConversationMessage.minio_files,
+            ConversationMessage.status,
         ).where(
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.message_index > boundary_index,
             ConversationMessage.message_index < current.message_index,
-            ConversationMessage.status == 'completed',
+            ConversationMessage.status.in_(['completed', 'stopped']),
             ConversationMessage.delete_flag == 'N',
             ConversationMessage.message_role.in_(['user', 'assistant']),
         ).order_by(asc(ConversationMessage.message_index))).all()
@@ -2217,16 +2445,18 @@ def get_historical_context(
         pending_user = None
         for message in messages:
             if message.message_role == 'user':
+                if pending_user is not None:
+                    turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
                 pending_user = message
             elif pending_user is not None:
-                turns.append({
-                    "user_message": pending_user.message_content or "",
-                    "assistant_final_answer": message.message_content or "",
-                    "attachments": pending_user.minio_files,
-                    "user_message_id": pending_user.message_id,
-                    "assistant_message_id": message.message_id,
-                })
+                answer = (
+                    _stopped_history_text(message, session, conversation_id)
+                    if message.status == 'stopped' else message.message_content or ""
+                )
+                turns.append(_history_turn(pending_user, answer, message.message_id))
                 pending_user = None
+        if pending_user is not None:
+            turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
 
         summary_result = None
         if summary_record and summary_payload:

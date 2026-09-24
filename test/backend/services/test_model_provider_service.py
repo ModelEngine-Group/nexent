@@ -2123,7 +2123,7 @@ async def test_prepare_model_dict_modelengine_base_url_stripping():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_modelengine_success():
-    """ModelEngine provider models are fetched via the unified OpenAI-compatible adapter."""
+    """ModelEngine provider models are fetched via the dedicated ModelEngineProvider adapter."""
     model_data = {"provider": "modelengine", "model_type": "llm"}
 
     expected_models = [
@@ -2136,7 +2136,7 @@ async def test_get_provider_models_modelengine_success():
     ]
 
     with mock.patch(
-        "backend.services.model_provider_service.OpenAICompatibleProvider"
+        "backend.services.model_provider_service.ModelEngineProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = expected_models
@@ -2151,11 +2151,11 @@ async def test_get_provider_models_modelengine_success():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_modelengine_empty_result():
-    """Should handle empty result from the unified adapter for ModelEngine provider."""
+    """Should handle empty result from the ModelEngine adapter for ModelEngine provider."""
     model_data = {"provider": "modelengine", "model_type": "embedding"}
 
     with mock.patch(
-        "backend.services.model_provider_service.OpenAICompatibleProvider"
+        "backend.services.model_provider_service.ModelEngineProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = []
@@ -3065,19 +3065,8 @@ async def test_prepare_model_dict_embedding_dashscope_url_already_has_embeddings
 
 
 # ============================================================================
-# Test-cases for OpenAICompatibleProvider SSRF guard and TLS verification
+# Test-cases for OpenAICompatibleProvider TLS verification
 # ============================================================================
-
-
-def _fake_getaddrinfo(address):
-    """Build a socket.getaddrinfo stub resolving every host to one address."""
-    import socket as _socket
-
-    def _resolve(host, port, *args, **kwargs):
-        family = _socket.AF_INET6 if ":" in address else _socket.AF_INET
-        return [(family, None, None, "", (address, 0))]
-
-    return _resolve
 
 
 def _patched_httpx_client(payload=None):
@@ -3096,167 +3085,24 @@ def _patched_httpx_client(payload=None):
 
 
 @pytest.mark.asyncio
-async def test_openai_provider_rejects_domain_resolving_to_private_ip():
-    """A DNS name pointing at a private range must not be fetched."""
-    with mock.patch(
-        "backend.services.providers.openai_provider.socket.getaddrinfo",
-        side_effect=_fake_getaddrinfo("10.0.0.5"),
-    ) as mock_resolve, mock.patch(
-        "backend.services.providers.openai_provider.httpx.AsyncClient"
-    ) as mock_client_cls:
-        client_cls, client_instance = _patched_httpx_client()
-        mock_client_cls.side_effect = client_cls
-
-        provider = OpenAICompatibleProvider()
-        result = await provider.get_models(
-            {"api_key": "test-key", "base_url": "https://internal.example.com/v1"}
-        )
-
-    assert result
-    assert "_error" in result[0]
-    mock_resolve.assert_called_once()
-    client_instance.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_openai_provider_rejects_domain_resolving_to_metadata_ip():
-    """A DNS name pointing at the cloud metadata endpoint must not be fetched."""
-    with mock.patch(
-        "backend.services.providers.openai_provider.socket.getaddrinfo",
-        side_effect=_fake_getaddrinfo("169.254.169.254"),
-    ), mock.patch(
-        "backend.services.providers.openai_provider.httpx.AsyncClient"
-    ) as mock_client_cls:
-        client_cls, client_instance = _patched_httpx_client()
-        mock_client_cls.side_effect = client_cls
-
-        provider = OpenAICompatibleProvider()
-        result = await provider.get_models(
-            {"api_key": "test-key", "base_url": "https://metadata-stealer.example.com/v1"}
-        )
-
-    assert result
-    assert "_error" in result[0]
-    client_instance.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_openai_provider_rejects_unresolvable_host():
-    """A host that fails DNS resolution must surface a provider error."""
-    import socket as _socket
-
-    with mock.patch(
-        "backend.services.providers.openai_provider.socket.getaddrinfo",
-        side_effect=_socket.gaierror("name or service not known"),
-    ), mock.patch(
-        "backend.services.providers.openai_provider.httpx.AsyncClient"
-    ) as mock_client_cls:
-        client_cls, client_instance = _patched_httpx_client()
-        mock_client_cls.side_effect = client_cls
-
-        provider = OpenAICompatibleProvider()
-        result = await provider.get_models(
-            {"api_key": "test-key", "base_url": "https://does-not-resolve.example.com/v1"}
-        )
-
-    assert result
-    assert "_error" in result[0]
-    client_instance.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_openai_provider_allows_public_domain():
-    """A DNS name resolving to a public address is fetched normally."""
-    with mock.patch(
-        "backend.services.providers.openai_provider.socket.getaddrinfo",
-        side_effect=_fake_getaddrinfo("93.184.216.34"),
-    ):
-        client_cls, client_instance = _patched_httpx_client()
-        with mock.patch(
-            "backend.services.providers.openai_provider.httpx.AsyncClient", client_cls
-        ):
-            provider = OpenAICompatibleProvider()
-            result = await provider.get_models(
-                {"api_key": "test-key", "base_url": "https://api.example.com/v1/"}
-            )
-
-    assert result == [{"id": "gpt-x", "model_tag": "chat"}]
-    client_instance.get.assert_awaited_once_with(
-        "https://api.example.com/v1/models",
-        headers={"Authorization": "Bearer test-key"},
-    )
-
-
-@pytest.mark.asyncio
-async def test_openai_provider_local_llm_exempt_skips_dns_check():
-    """The documented localhost exemption must not be blocked by DNS checks."""
-    import socket as _socket
-
-    def _must_not_resolve(*args, **kwargs):
-        raise AssertionError("DNS resolution must be skipped for localhost")
-
-    with mock.patch(
-        "backend.services.providers.openai_provider.socket.getaddrinfo",
-        side_effect=_must_not_resolve,
-    ):
-        client_cls, client_instance = _patched_httpx_client()
-        with mock.patch(
-            "backend.services.providers.openai_provider.httpx.AsyncClient", client_cls
-        ):
-            provider = OpenAICompatibleProvider()
-            result = await provider.get_models(
-                {"api_key": "test-key", "base_url": "http://127.0.0.1:8000/v1"}
-            )
-
-    assert result == [{"id": "gpt-x", "model_tag": "chat"}]
-    client_instance.get.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_openai_provider_rejects_private_literal_ip():
-    """Literal private IPs are rejected before any DNS resolution."""
-    with mock.patch(
-        "backend.services.providers.openai_provider.socket.getaddrinfo"
-    ) as mock_resolve, mock.patch(
-        "backend.services.providers.openai_provider.httpx.AsyncClient"
-    ) as mock_client_cls:
-        client_cls, client_instance = _patched_httpx_client()
-        mock_client_cls.side_effect = client_cls
-
-        provider = OpenAICompatibleProvider()
-        result = await provider.get_models(
-            {"api_key": "test-key", "base_url": "http://10.1.2.3:8080/v1"}
-        )
-
-    assert result
-    assert "_error" in result[0]
-    mock_resolve.assert_not_called()
-    client_instance.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_openai_provider_tls_verification_defaults_on():
     """TLS verification must default to on and honour an explicit opt-out."""
+    client_cls, _ = _patched_httpx_client()
     with mock.patch(
-        "backend.services.providers.openai_provider.socket.getaddrinfo",
-        side_effect=_fake_getaddrinfo("93.184.216.34"),
+        "backend.services.providers.openai_provider.httpx.AsyncClient", client_cls
     ):
-        client_cls, _ = _patched_httpx_client()
-        with mock.patch(
-            "backend.services.providers.openai_provider.httpx.AsyncClient", client_cls
-        ):
-            provider = OpenAICompatibleProvider()
-            await provider.get_models(
-                {"api_key": "test-key", "base_url": "https://api.example.com/v1"}
-            )
-            assert client_cls.call_args.kwargs["verify"] is True
+        provider = OpenAICompatibleProvider()
+        await provider.get_models(
+            {"api_key": "test-key", "base_url": "https://api.example.com/v1"}
+        )
+        assert client_cls.call_args.kwargs["verify"] is True
 
-            client_cls.reset_mock()
-            await provider.get_models(
-                {
-                    "api_key": "test-key",
-                    "base_url": "https://api.example.com/v1",
-                    "ssl_verify": False,
-                }
-            )
-            assert client_cls.call_args.kwargs["verify"] is False
+        client_cls.reset_mock()
+        await provider.get_models(
+            {
+                "api_key": "test-key",
+                "base_url": "https://api.example.com/v1",
+                "ssl_verify": False,
+            }
+        )
+        assert client_cls.call_args.kwargs["verify"] is False

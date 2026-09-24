@@ -96,7 +96,8 @@ SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
     "Always pass the current agent_id and only whitelisted fields, never null. "
     "The name field may be set only when the existing draft name is empty; "
-    "display_name is immutable. Call the tool as "
+    "display_name may be set only alongside the first name on an empty Workbench Draft; "
+    "all other display names are immutable. Call the tool as "
     f"`result = {SAVE_AGENT_DRAFT_FIELDS_NAME}(...)`, then use `print(result)` exactly once."
 )
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
@@ -113,7 +114,7 @@ _NL2AGENT_PROMPT_FIELDS = frozenset(
 )
 _NL2AGENT_FINAL_PROMPT_BATCH = frozenset({"greeting_message", "example_questions"})
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
-    {"name", "description", *_NL2AGENT_PROMPT_FIELDS}
+    {"name", "display_name", "description", *_NL2AGENT_PROMPT_FIELDS}
 )
 NL2A_SUBTYPES = Literal[
     "requirement_clarification",
@@ -375,6 +376,7 @@ class AgentDraftFields(BaseModel):
         max_length=30,
         pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*_assistant$",
     )
+    display_name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
     duty_prompt: str | None = None
     constraint_prompt: str | None = None
@@ -447,6 +449,7 @@ class SaveAgentDraftFieldsError(BaseModel):
         "draft_save_failed",
         "agent_name_already_set",
         "agent_name_duplicate",
+        "agent_display_name_immutable",
         "draft_fields_incomplete",
         "prompt_fields_incomplete",
         "unauthorized",

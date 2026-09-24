@@ -22,6 +22,7 @@ from database.model_management_db import (
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import query_all_tools
 from utils.skill_import_utils import generate_available_copy_skill_name
+from utils.agent_transfer_utils import AgentToolImportError, validate_import_tool_params
 
 _KB_TOOL_CLASS_NAMES = frozenset({
     "KnowledgeBaseSearchTool",
@@ -328,6 +329,18 @@ def build_repository_import_precheck(
             source,
             tenant_tools,
         )
+        if available:
+            try:
+                for agent in snapshot.agent_info.values():
+                    for tool in _agent_dict(agent).get("tools") or []:
+                        data = _tool_dict(tool)
+                        if data.get("class_name") == class_name and data.get("source") == source:
+                            validate_import_tool_params(
+                                class_name, source, data.get("params"),
+                                tenant_tools.get(_tool_lookup_key(class_name, source)),
+                            )
+            except AgentToolImportError:
+                available, reason = False, "tool_params_incompatible"
         items.append(RepositoryImportRequirementItem(
             type="tool",
             key=key,

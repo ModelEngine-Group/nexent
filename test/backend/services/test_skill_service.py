@@ -4857,6 +4857,48 @@ class TestUploadZipFilesWithZipError:
         assert "author: Example Author\n" in override
         assert override.endswith("# Instructions\n\nBody stays unchanged.\n")
 
+    def test_refresh_official_alias_rewrites_skill_identity(self):
+        """Refreshing an official alias keeps its directory and frontmatter aligned."""
+        import zipfile
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr(
+                "docx/SKILL.md",
+                "---\nname: docx\ndescription: Official DOCX\n---\nbody",
+            )
+
+        service = create_test_service()
+        service.skill_manager = MagicMock()
+        service._enrich_configs_from_yaml = lambda result: result
+
+        with patch.object(
+            skill_service.skill_db,
+            "get_skill_by_name",
+            return_value={"skill_id": 42, "name": "docx_1", "source": "official"},
+        ), patch.object(
+            skill_service.skill_db,
+            "update_skill",
+            return_value={"skill_id": 42, "name": "docx_1"},
+        ), patch.object(
+            service,
+            "_delete_local_skill_files",
+        ), patch.object(service, "_upload_zip_files") as mock_upload:
+            result = service.update_skill_from_file(
+                skill_name="docx_1",
+                file_content=zip_buffer.getvalue(),
+                file_type="zip",
+                tenant_id="test-tenant",
+                rewrite_name=True,
+            )
+
+        assert result["name"] == "docx_1"
+        assert mock_upload.call_args.args[1:3] == ("docx_1", "docx")
+        override = mock_upload.call_args.kwargs["file_overrides"][
+            "docx/SKILL.md"
+        ].decode("utf-8")
+        assert 'name: "docx_1"\n' in override
+
     def test_upload_zip_renamed_root_does_not_nest_target_dir(self, tmp_path):
         """Test ZIP root rename writes files directly under the target skill directory."""
         import zipfile
@@ -6994,7 +7036,7 @@ class TestSkillServiceReportedCoverageGaps:
             "user-1",
         )
 
-        assert result == ["official", "custom", "new"]
+        assert result == ["official", "custom_1", "new"]
         service.update_skill_from_file.assert_called_once_with(
             skill_name="official",
             file_content=b"official",
@@ -7002,7 +7044,52 @@ class TestSkillServiceReportedCoverageGaps:
             tenant_id="tenant-1",
             user_id=None,
         )
-        service.create_skill_from_file.assert_called_once()
+        service.create_skill_from_file.assert_called_once_with(
+            file_content=b"new",
+            skill_name="new",
+            file_type="zip",
+            source="official",
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+        service.create_skill_from_zip_bytes.assert_called_once_with(
+            zip_bytes=b"custom",
+            skill_name="custom_1",
+            source="official",
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+    def test_install_skills_from_zip_reuses_existing_official_alias(self, mocker, tmp_path):
+        (tmp_path / "docx.zip").write_bytes(b"docx")
+        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(
+            skill_service.skill_db,
+            "get_skill_by_name",
+            side_effect=lambda name, tenant: {
+                "skill_id": 1 if name == "docx" else 2,
+                "source": "custom" if name == "docx" else "official",
+            },
+        )
+        service = MagicMock()
+        mocker.patch.object(skill_service, "SkillService", return_value=service)
+
+        result = skill_service.install_skills_from_zip_for_tenant(
+            ["docx"],
+            "tenant-1",
+            "user-1",
+        )
+
+        assert result == ["docx_1"]
+        service.update_skill_from_file.assert_called_once_with(
+            skill_name="docx_1",
+            file_content=b"docx",
+            file_type="zip",
+            tenant_id="tenant-1",
+            user_id=None,
+            rewrite_name=True,
+        )
+        service.create_skill_from_zip_bytes.assert_not_called()
 
     def test_install_skills_from_zip_handles_missing_directory_and_scan_error(self, mocker, tmp_path):
         missing = tmp_path / "missing"

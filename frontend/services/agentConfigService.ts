@@ -12,7 +12,11 @@ import log from "@/lib/logger";
 import yaml from "js-yaml";
 import type { SkillFileNode } from "@/types/skill";
 
-/** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
+/**
+ * Normalize tags field into a string array.
+ * Ant Design mode="tags" sends a string when only one tag is entered, and
+ * malformed/persisted skill data may also carry a non-array tags value.
+ */
 function normalizeTags(tags: unknown): string[] {
   if (Array.isArray(tags)) return tags;
   if (typeof tags === "string" && tags.trim() !== "") return [tags.trim()];
@@ -182,7 +186,9 @@ export const fetchAgentList = async (tenantId?: string) => {
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
+      tags: normalizeTags(agent.tags),
     }));
 
     return {
@@ -238,6 +244,7 @@ export const fetchPublishedAgentList = async () => {
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
     }));
 
@@ -1184,7 +1191,7 @@ export const fetchSkills = async (tenantId?: string | null) => {
       name: skill.name,
       description: skill.description || "",
       source: skill.source || "custom",
-      tags: skill.tags || [],
+      tags: normalizeTags(skill.tags),
       content: skill.content || "",
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,

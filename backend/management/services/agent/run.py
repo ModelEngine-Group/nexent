@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from http import HTTPStatus
 import json
 import logging
@@ -30,6 +31,7 @@ from agents.preprocess_manager import preprocess_manager
 from consts.const import (
     DEFAULT_EN_TITLE,
     DEFAULT_ZH_TITLE,
+    ENABLE_AGENT_WORKBENCH,
     LANGUAGE,
     MESSAGE_ROLE,
     MODEL_CONFIG_MAPPING,
@@ -46,6 +48,8 @@ from consts.exceptions import (
     RuntimeMetadataVersionConflict,
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
+    ValidationError,
+    WorkbenchError,
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from nexent.core.utils.observer import ProcessType
@@ -84,6 +88,8 @@ from services.conversation_management_service import (
     update_conversation_knowledge_scope_service,
     update_message_status,
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
+    update_conversation_workbench_config_service,
+    update_conversation_workbench_and_metadata_service,
 )
 from services.memory_config_service import build_memory_context
 from services.memory_backend_adapter import _build_ingestion_event_service
@@ -130,7 +136,6 @@ _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
 _fa_extraction_tasks: set[asyncio.Task[None]] = set()
-
 
 def _unregister_agent_run_after_execution(
     conversation_id: int | str,
@@ -245,7 +250,7 @@ async def _consume_agent_stream_producer(
         )
         if not channel.is_completed:
             try:
-                await channel.publish(_safe_agent_stream_error_chunk())
+                await channel.publish(_safe_agent_stream_error_chunk(stream_exc))
             except Exception:
                 logger.exception(
                     "Failed to publish producer error conversation=%s",
@@ -483,19 +488,13 @@ async def _stream_agent_chunks(
             execution=execution,
             deferred_run=deferred_run,
         )
-        interaction = getattr(agent_run_info, "human_interaction", None)
-        port = getattr(interaction, "port", None)
-        if callable(getattr(port, "visible_guidance", None)):
-            from services.human_interaction.stream import stream_with_guidance
-
-            source = stream_with_guidance(source, port)
         async for agent_chunk in source:
             yield agent_chunk
 
     try:
         async for chunk in _iter_run_chunks():
             chunk_type: Optional[str] = None
-            chunk_content: str = ""
+            chunk_content: Any = ""
             try:
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
@@ -790,8 +789,8 @@ async def _stream_agent_chunks(
         stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        await channel.publish(_safe_agent_stream_error_chunk(run_exc))
+        yield _safe_agent_stream_error_chunk(run_exc)
     finally:
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
@@ -808,13 +807,8 @@ async def _stream_agent_chunks(
             else "failed"
         )
         outcome = getattr(agent_run_info, "attempt_outcome", None)
-        if (
-            getattr(agent_run_info, "human_interaction", None) is not None
-            and isinstance(outcome, str)
-        ):
-            terminal_status = outcome if stream_completed_normally else "recovery_required"
-            agent_run_info.attempt_outcome = terminal_status
-        elif outcome in {"failed", "stopped"}:
+        if outcome in {"failed", "stopped"}:
+
             # A typed terminal model error is delivered as a normal observer
             # ``error`` chunk, so the async iterator can finish normally while
             # the worker outcome still authoritatively marks the run failed.
@@ -931,8 +925,7 @@ async def _stream_agent_chunks(
             except Exception:
                 persistence_failed = True
                 terminal_status = "failed"
-                if getattr(agent_run_info, "human_interaction", None) is not None:
-                    agent_run_info.attempt_outcome = "recovery_required"
+                agent_run_info.attempt_outcome = "failed"
                 logger.exception(
                     "Failed to persist assistant stream batch conversation=%s message=%s",
                     agent_request.conversation_id,
@@ -1118,6 +1111,53 @@ def _agent_run_identifier(agent_request: AgentRequest) -> int | str | None:
     return agent_request.conversation_id
 
 
+def apply_workbench_runtime_plan(
+    agent_request: AgentRequest, canonical_workbench, resolved_plan, tenant_id: str
+) -> None:
+    """Attach a validated Workbench plan to one in-memory run request."""
+    from services.knowledge_scope_service import snapshot_runtime_knowledge_tree
+    from services.workbench_service import attach_runtime_knowledge_tree, runtime_skill_snapshot
+
+    knowledge_tree = snapshot_runtime_knowledge_tree(
+        int(resolved_plan.root.identity.agent_id),
+        tenant_id,
+        int(resolved_plan.root.identity.version_no),
+    )
+    if canonical_workbench.knowledge_scope is not None:
+        from services.runtime_knowledge_mount import mount_knowledge_records
+
+        knowledge_tree = knowledge_tree[:1]
+        knowledge_tree[0]["tools"] = mount_knowledge_records(
+            knowledge_tree[0]["tools"], canonical_workbench.knowledge_scope, tenant_id
+        )
+        agent_request.__dict__["_runtime_knowledge_tools"] = knowledge_tree[0]["tools"]
+    resolved_plan = attach_runtime_knowledge_tree(resolved_plan, knowledge_tree)
+    root_identity = resolved_plan.root.identity
+    agent_request.workbench = canonical_workbench
+    agent_request.agent_id = root_identity.agent_id
+    agent_request.version_no = root_identity.version_no
+    if resolved_plan.overlay.model_id is not None:
+        agent_request.model_id = resolved_plan.overlay.model_id
+    if resolved_plan.overlay.requested_output_tokens is not None:
+        agent_request.requested_output_tokens = (
+            resolved_plan.overlay.requested_output_tokens
+        )
+    agent_request.knowledge_scope = canonical_workbench.knowledge_scope
+    agent_request.__dict__["_runtime_skill_snapshot"] = runtime_skill_snapshot(resolved_plan)
+    agent_request.__dict__["_runtime_mount_plan"] = resolved_plan
+    agent_request.__dict__["_runtime_root_identity"] = {
+        "agent_id": root_identity.agent_id,
+        "version_no": root_identity.version_no,
+        "runtime_ref": root_identity.runtime_ref,
+        "invocation_name": root_identity.invocation_name,
+        "display_name": root_identity.display_name,
+        "origin": root_identity.origin,
+    }
+    agent_request.__dict__["_runtime_generation_config"] = (
+        canonical_workbench.generation_config.model_dump(mode="json")
+    )
+
+
 # Helper function for run_agent_stream, used to prepare context for an agent run
 async def prepare_agent_run(
     agent_request: AgentRequest,
@@ -1147,6 +1187,8 @@ async def prepare_agent_run(
         "is_debug": agent_request.is_debug,
         "override_version_no": agent_request.version_no,
         "override_model_id": agent_request.model_id,
+        "reasoning_effort": agent_request.reasoning_effort,
+        "reasoning_budget_tokens": agent_request.reasoning_budget_tokens,
         "requested_output_tokens": agent_request.requested_output_tokens,
         "tool_params": agent_request.tool_params,
         "conversation_id": agent_request.conversation_id,
@@ -1158,11 +1200,39 @@ async def prepare_agent_run(
     )
     if isinstance(runtime_knowledge_context, dict):
         create_run_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
+    runtime_skill_snapshot = getattr(agent_request, "_runtime_skill_snapshot", None)
+    runtime_knowledge_tools = getattr(agent_request, "_runtime_knowledge_tools", None)
+    if runtime_knowledge_tools is not None:
+        create_run_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
+    if runtime_skill_snapshot is not None:
+        create_run_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
+    runtime_generation_config = getattr(agent_request, "_runtime_generation_config", None)
+    if runtime_generation_config is None and agent_request.generation_config is not None:
+        runtime_generation_config = agent_request.generation_config.model_dump(mode="json")
+    if runtime_generation_config is not None:
+        create_run_kwargs["runtime_generation_config"] = runtime_generation_config
+    runtime_mount_plan = getattr(agent_request, "_runtime_mount_plan", None)
+    if runtime_mount_plan is not None:
+        create_run_kwargs["runtime_sub_agent_mounts"] = [
+            {
+                "agent_id": child.agent_id,
+                "version_no": child.version_no,
+                "runtime_ref": child.runtime_ref,
+                "invocation_name": child.invocation_name,
+                "display_name": child.display_name,
+            }
+            for child in runtime_mount_plan.child_mounts
+        ]
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )
+    if runtime_mount_plan is not None:
+        from services.workbench_service import compile_runtime_mount_plan
+
+        executable_tree = compile_runtime_mount_plan(runtime_mount_plan, agent_run_info.agent_config)
+        agent_run_info.agent_config = executable_tree.root.agent_config
     agent_run_info.runtime_metadata = dict(
         getattr(agent_request, "_runtime_metadata_snapshot", {}) or {}
     )
@@ -1347,12 +1417,16 @@ async def generate_stream(
                 agent_run_info=agent_run_info,
             )
         raise
-    except MemoryPreparationException:
+    except MemoryPreparationException as prep_error:
         if not enable_memory:
             # No-memory path has no fallback; surface the failure cleanly.
-            logger.error("Agent run error without memory: %r", None, exc_info=True)
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            logger.error(
+                "Agent run preparation failed without memory: %s", type(prep_error.__cause__ or prep_error).__name__, exc_info=True
+            )
+            error_chunk = _safe_agent_stream_error_chunk()
+            if channel is not None:
+                await channel.publish(error_chunk)
+            yield error_chunk
             return
 
         try:
@@ -1376,8 +1450,10 @@ async def generate_stream(
                 run_exc,
                 exc_info=True,
             )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            error_chunk = _safe_agent_stream_error_chunk(run_exc)
+            if channel is not None:
+                await channel.publish(error_chunk)
+            yield error_chunk
             return
     except Exception as stream_exc:
         logger.error(
@@ -1385,8 +1461,10 @@ async def generate_stream(
             stream_exc,
             exc_info=True,
         )
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        error_chunk = _safe_agent_stream_error_chunk(stream_exc)
+        if channel is not None:
+            await channel.publish(error_chunk)
+        yield error_chunk
         return
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
@@ -1502,38 +1580,15 @@ async def run_agent_stream(
     Args:
         resume: If True, check for existing streaming message and continue from where it left off
     """
+    if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
+        raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+
     resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
         authorization=authorization,
         http_request=http_request,
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    if isinstance(agent_request.hitl_run_id, str) and agent_request.hitl_run_id:
-        from services.human_interaction.application import stream_run
-
-        return await stream_run(
-            agent_request.hitl_run_id,
-            resolved_tenant_id,
-            resolved_user_id,
-            after=agent_request.hitl_after_event,
-        )
-
-    from consts.const import HITL_ENABLED
-
-    if HITL_ENABLED and not agent_request.is_debug and agent_request.conversation_id:
-        from services.human_interaction.application import get_service, stream_run
-        from services.human_interaction.models import InteractionError
-
-        active_hitl = await run_blocking(
-            "hitl-get_service-repository-latest", get_service().repository.latest, resolved_tenant_id,
-            resolved_user_id, agent_request.conversation_id, active_only=True, lane="control-io",
-            owner=__name__,
-        )
-        if active_hitl:
-            if resume:
-                return await stream_run(active_hitl, resolved_tenant_id, resolved_user_id)
-            raise InteractionError("This conversation has a paused or active human interaction run")
-
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -1558,6 +1613,47 @@ async def run_agent_stream(
         if conversation is None:
             raise ForbiddenError(
                 "Conversation is not accessible to the current identity"
+            )
+        if not ENABLE_AGENT_WORKBENCH and conversation.get("workbench_config"):
+            raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+        if not resume:
+            is_workbench_conversation = isinstance(conversation.get("workbench_config"), dict)
+            if is_workbench_conversation != (agent_request.entrypoint == "workbench"):
+                raise ForbiddenError("Conversation belongs to a different chat entrypoint")
+
+    canonical_workbench = None
+    if agent_request.entrypoint == "workbench" and not resume:
+        from services.workbench_service import assert_workbench_version, resolve_workbench_config
+
+        requested_workbench = agent_request.workbench
+        if conversation is not None:
+            assert_workbench_version(conversation, agent_request.expected_workbench_config_version)
+            if requested_workbench is None and isinstance(conversation.get("workbench_config"), dict):
+                from consts.model import WorkbenchSessionConfig
+
+                requested_workbench = WorkbenchSessionConfig.model_validate(conversation["workbench_config"])
+            if agent_request.metadata is not None and agent_request.expected_metadata_version is not None:
+                current_metadata_version = int(conversation.get("runtime_metadata_version") or 0)
+                if agent_request.expected_metadata_version != current_metadata_version:
+                    raise AppException(
+                        ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                        details={"current_version": current_metadata_version},
+                    )
+        if requested_workbench is None:
+            raise ValidationError("Workbench configuration is required")
+        canonical_workbench, resolved_tree = resolve_workbench_config(
+            requested_workbench,
+            tenant_id=resolved_tenant_id,
+            is_debug=bool(agent_request.is_debug),
+            user_id=resolved_user_id,
+        )
+        apply_workbench_runtime_plan(
+            agent_request, canonical_workbench, resolved_tree, resolved_tenant_id
+        )
+        if conversation is not None:
+            assert_workbench_version(
+                conversation,
+                agent_request.expected_workbench_config_version,
             )
 
     metadata_supplied = "metadata" in agent_request.model_fields_set
@@ -1598,7 +1694,11 @@ async def run_agent_stream(
         )
     else:
         request_scope = None
-    stored_scope = conversation.get("knowledge_scope") if conversation else None
+    stored_scope = (
+        conversation.get("knowledge_scope")
+        if conversation and canonical_workbench is None
+        else None
+    )
     if not isinstance(stored_scope, dict):
         stored_scope = None
     source_scope = request_scope
@@ -1609,6 +1709,18 @@ async def run_agent_stream(
     if source_scope is not None and not resume:
         if agent_request.agent_id is None:
             raise ValueError("agent_id is required when knowledge_scope is set")
+        runtime_knowledge_tree = [
+            deepcopy(dict(node))
+            for node in getattr(
+                getattr(agent_request, "_runtime_mount_plan", None),
+                "knowledge_tree",
+                (),
+            )
+        ]
+        resolve_scope_kwargs = {}
+        if runtime_knowledge_tree:
+            resolve_scope_kwargs["runtime_agent_tree"] = runtime_knowledge_tree
+
         resolved_scope = resolve_knowledge_scope(
             scope=source_scope,
             agent_id=agent_request.agent_id,
@@ -1617,6 +1729,7 @@ async def run_agent_stream(
             version_no=agent_request.version_no,
             is_debug=bool(agent_request.is_debug),
             request_tool_params=agent_request.tool_params,
+            **resolve_scope_kwargs,
         )
         agent_request.tool_params = resolved_scope.tool_params
         agent_request.__dict__["_runtime_knowledge_context"] = {
@@ -1663,6 +1776,10 @@ async def run_agent_stream(
             "agent_id": agent_request.agent_id,
             "chat_mode": "planning" if agent_request.enable_plan else "execution",
         }
+        if canonical_workbench is not None:
+            conversation_kwargs["workbench_config"] = canonical_workbench.model_dump(
+                mode="json"
+            )
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
         if metadata_update_requested:
@@ -1677,6 +1794,46 @@ async def run_agent_stream(
         )
 
     if not resume:
+        joint_runtime_state = None
+        if (
+            canonical_workbench is not None
+            and not is_new_conversation
+            and metadata_update_requested
+            and not agent_request.is_debug
+        ):
+            try:
+                joint_runtime_state = update_conversation_workbench_and_metadata_service(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=resolved_user_id,
+                    config=canonical_workbench.model_dump(mode="json"),
+                    expected_config_version=agent_request.expected_workbench_config_version,
+                    metadata=agent_request.metadata or {},
+                    expected_metadata_version=agent_request.expected_metadata_version,
+                )
+            except RuntimeMetadataVersionConflict as exc:
+                raise AppException(
+                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                    details={"current_version": exc.current_version},
+                ) from exc
+            conversation = {**(conversation or {}), **joint_runtime_state}
+        elif canonical_workbench is not None and not is_new_conversation and not agent_request.is_debug:
+            updated = update_conversation_workbench_config_service(
+                conversation_id=agent_request.conversation_id,
+                user_id=resolved_user_id,
+                config=canonical_workbench.model_dump(mode="json"),
+                expected_version=agent_request.expected_workbench_config_version,
+                only_if_changed=True,
+            )
+            conversation = {**(conversation or {}), **updated}
+
+        if canonical_workbench is not None and not agent_request.is_debug:
+            workbench_state = (
+                conversation_data if is_new_conversation else (conversation or {})
+            )
+            agent_request.__dict__["_workbench_config_version"] = int(
+                workbench_state.get("workbench_config_version") or 0
+            )
+
         if agent_request.is_debug:
             metadata_snapshot = (
                 dict(agent_request.metadata or {}) if metadata_update_requested else {}
@@ -1697,6 +1854,9 @@ async def run_agent_stream(
                 )
                 or 0
             )
+        elif joint_runtime_state is not None:
+            metadata_snapshot = dict(joint_runtime_state["runtime_metadata"] or {})
+            metadata_version = int(joint_runtime_state["runtime_metadata_version"])
         elif not metadata_update_requested:
             metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
             metadata_version = int(
@@ -1744,6 +1904,7 @@ async def run_agent_stream(
         and not resume
         and not is_new_conversation
         and agent_request.conversation_id is not None
+        and agent_request.entrypoint != "workbench"
     ):
         update_conversation_knowledge_scope_service(
             conversation_id=agent_request.conversation_id,
@@ -1758,21 +1919,13 @@ async def run_agent_stream(
         and not is_new_conversation
         and agent_request.conversation_id is not None
         and agent_request.agent_id is not None
+        and agent_request.entrypoint != "workbench"
     ):
         update_conversation_agent_id_service(
             conversation_id=agent_request.conversation_id,
             agent_id=agent_request.agent_id,
             user_id=resolved_user_id,
         )
-
-    if agent_request.enable_hitl is True and not resume:
-        from services.human_interaction.application import start_run
-
-        human_response = await start_run(
-            agent_request, resolved_tenant_id, resolved_user_id, language, skip_user_save=skip_user_save,
-        )
-        if human_response is not None:
-            return human_response
 
     # Resume mode: check for existing streaming message
     if resume:
@@ -2140,6 +2293,16 @@ async def run_agent_stream(
             scope_event = getattr(
                 agent_request, "_resolved_knowledge_scope_event", None
             )
+            if canonical_workbench is not None:
+                yield "data: " + json.dumps({
+                    "type": "workbench_config_resolved",
+                    "content": {
+                        "config_version": getattr(agent_request, "_workbench_config_version", 0),
+                        "schema_version": 3,
+                        "mode": canonical_workbench.mode,
+                        "agent_mounts": [mount.model_dump(mode="json") for mount in canonical_workbench.agent_mounts],
+                    },
+                }, ensure_ascii=False) + "\n\n"
             if scope_event is not None:
                 yield (
                     "data: "
@@ -2165,7 +2328,7 @@ async def run_agent_stream(
                 stream_exc,
                 exc_info=True,
             )
-            yield _safe_agent_stream_error_chunk()
+            yield _safe_agent_stream_error_chunk(stream_exc)
         finally:
             if channel is None and not execution.future.done():
                 deferred_run.cancel()
@@ -2190,6 +2353,11 @@ async def run_agent_stream(
     runtime_metadata_version = getattr(agent_request, "_runtime_metadata_version", None)
     if runtime_metadata_version is not None:
         headers["X-Runtime-Metadata-Version"] = str(runtime_metadata_version)
+    workbench_config_version = getattr(
+        agent_request, "_workbench_config_version", None
+    )
+    if workbench_config_version is not None:
+        headers["X-Workbench-Config-Version"] = str(workbench_config_version)
 
     return StreamingResponse(
         stream_with_agent_context(),
@@ -2288,13 +2456,4 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str):
 
 
 def is_agent_running(conversation_id: int, user_id: str) -> bool:
-    if agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None:
-        return True
-
-    from consts.const import HITL_ENABLED
-
-    if not HITL_ENABLED:
-        return False
-    from services.human_interaction.application import is_conversation_running
-
-    return is_conversation_running(conversation_id, user_id)
+    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None

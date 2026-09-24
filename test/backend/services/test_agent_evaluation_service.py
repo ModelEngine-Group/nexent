@@ -251,6 +251,14 @@ _evaluator_db_mock.get_evaluator = MagicMock(return_value={"evaluator_id": 1, "p
 sys.modules["database.evaluator_db"] = _evaluator_db_mock
 _db_pkg.evaluator_db = _evaluator_db_mock
 
+# ---- 补齐 user_tenant_db（service：from database.user_tenant_db import get_user_tenant_by_user_id）----
+# Default role is USER (fail-closed) so existing creator-only rejection tests
+# keep their semantics; the delete-permission tests override the role per case.
+_user_tenant_db_mock = MagicMock()
+_user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(return_value={"user_role": "USER"})
+sys.modules["database.user_tenant_db"] = _user_tenant_db_mock
+_db_pkg.user_tenant_db = _user_tenant_db_mock
+
 # database.client / database.db_models are imported by both service modules.
 _db_client_module = MagicMock()
 _db_client_module.get_db_session = MagicMock()
@@ -448,6 +456,7 @@ _thread_lifecycle_service_module = types.ModuleType(
     "services.thread_lifecycle_service"
 )
 _thread_lifecycle_service_module.runtime_thread_manager = MagicMock()
+_thread_lifecycle_service_module.config_thread_manager = MagicMock()
 sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_service_module
 _services_pkg.thread_lifecycle_service = _thread_lifecycle_service_module
 
@@ -641,6 +650,60 @@ def test_delete_agent_evaluation_run_only_creator_allowed(service_module):
     with pytest.raises(AppException):
         service_module.delete_agent_evaluation_run_impl(1, "t1", "u2")
     service_module.soft_delete_agent_evaluation.assert_not_called()
+
+
+def test_delete_agent_evaluation_run_admin_can_delete_others(service_module):
+    from consts.exceptions import AppException
+    # Shared mocks keep their call history across tests in this module; reset
+    # before acting so assert_called/assert_not_called see only this test.
+    service_module.hard_delete_agent_evaluation.reset_mock()
+    service_module.soft_delete_agent_evaluation.reset_mock()
+    service_module.get_agent_evaluation.return_value = {
+        "agent_evaluation_id": 1,
+        "tenant_id": "t1",
+        "created_by": "u1",
+    }
+    service_module.get_user_tenant_by_user_id.return_value = {"user_role": "ADMIN"}
+
+    service_module.delete_agent_evaluation_run_impl(1, "t1", "u2")
+    service_module.hard_delete_agent_evaluation.assert_called_once_with(agent_evaluation_id=1, tenant_id="t1")
+    service_module.soft_delete_agent_evaluation.assert_not_called()
+
+
+def test_delete_agent_evaluation_run_dev_cannot_delete_others(service_module):
+    from consts.exceptions import AppException
+    # Shared mocks keep their call history across tests in this module; reset
+    # before acting so assert_called/assert_not_called see only this test.
+    service_module.hard_delete_agent_evaluation.reset_mock()
+    service_module.soft_delete_agent_evaluation.reset_mock()
+    service_module.get_agent_evaluation.return_value = {
+        "agent_evaluation_id": 1,
+        "tenant_id": "t1",
+        "created_by": "u1",
+    }
+    service_module.get_user_tenant_by_user_id.return_value = {"user_role": "DEV"}
+
+    with pytest.raises(AppException):
+        service_module.delete_agent_evaluation_run_impl(1, "t1", "u2")
+    service_module.hard_delete_agent_evaluation.assert_not_called()
+
+
+def test_delete_agent_evaluation_run_unknown_role_rejected(service_module):
+    from consts.exceptions import AppException
+    # Shared mocks keep their call history across tests in this module; reset
+    # before acting so assert_called/assert_not_called see only this test.
+    service_module.hard_delete_agent_evaluation.reset_mock()
+    service_module.soft_delete_agent_evaluation.reset_mock()
+    service_module.get_agent_evaluation.return_value = {
+        "agent_evaluation_id": 1,
+        "tenant_id": "t1",
+        "created_by": "u1",
+    }
+    service_module.get_user_tenant_by_user_id.return_value = None
+
+    with pytest.raises(AppException):
+        service_module.delete_agent_evaluation_run_impl(1, "t1", "u2")
+    service_module.hard_delete_agent_evaluation.assert_not_called()
 
 
 @pytest.mark.skip(reason="generate_analysis_report_impl returns Dict (LLM analysis), not (bytes, fail_count) tuple; old Excel report test is obsolete")
@@ -1150,7 +1213,7 @@ def test_create_agent_evaluation_run_happy_path(service_module):
     pool_mock = MagicMock()
     future = MagicMock()
     pool_mock.submit.return_value = types.SimpleNamespace(future=future)
-    service_module.runtime_thread_manager = pool_mock
+    service_module.config_thread_manager = pool_mock
 
     run = service_module.create_agent_evaluation_run_impl(
         tenant_id="t1",
@@ -1179,6 +1242,7 @@ def test_create_agent_evaluation_run_happy_path(service_module):
     assert len(kwargs["set_cases"]) == 3
 
     pool_mock.submit.assert_called_once()
+    service_module.runtime_thread_manager.submit.assert_not_called()
     future.add_done_callback.assert_called_once()
     # Done-callback signature should be a callable wrapping the run id + tenant.
     callback = future.add_done_callback.call_args.args[0]
@@ -1207,8 +1271,8 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
     """The published version number flows from ``resolve_latest_published_version_no``."""
     create_mock = _wire_full_db_module(service_module)
     service_module.resolve_latest_published_version_no.return_value = 13
-    service_module.runtime_thread_manager = MagicMock()
-    service_module.runtime_thread_manager.submit.return_value = types.SimpleNamespace(
+    service_module.config_thread_manager = MagicMock()
+    service_module.config_thread_manager.submit.return_value = types.SimpleNamespace(
         future=MagicMock()
     )
 

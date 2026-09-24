@@ -37,6 +37,7 @@ class ContentClassifier:
         self._known_tags = {
             FINAL_ANSWER_OPEN_TAG,
             FINAL_ANSWER_CLOSE_TAG,
+
             "<SKILL>",
             "</SKILL>",
             "<SUMMARY>",
@@ -113,6 +114,7 @@ class ContentClassifier:
                 content_after_tag
                 and not content_after_tag.startswith(("\n", "\r\n"))
                 and matched not in {FINAL_ANSWER_OPEN_TAG, FINAL_ANSWER_CLOSE_TAG}
+
             ):
                 return self._emit_potential_tag_start()
             results.extend(self._handle_matched_tag(gt_pos, potential_tag, matched))
@@ -269,6 +271,7 @@ class ContentClassifier:
     def _handle_tag(self, tag: str) -> Optional[Dict[str, Any]]:
         """Handle matched tag and update state."""
         if tag in {FINAL_ANSWER_OPEN_TAG, FINAL_ANSWER_CLOSE_TAG}:
+
             self.saw_control_tag = True
             return None
 
