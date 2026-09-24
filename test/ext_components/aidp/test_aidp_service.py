@@ -946,6 +946,26 @@ class TestNormalizeAidpDoc:
         assert result["created_at"] == "2024-06-10T06:20:00Z"
         assert result["status"] == "UPLOADING"
 
+    def test_empty_create_time_does_not_hide_a_reported_created_at(self, normalize):
+        """A blank ``create_time`` means "not reported", not a value to keep."""
+        result = normalize({
+            "create_time": "",
+            "created_at": "2024-06-10T06:20:00Z",
+            "update_time": 1700000000,
+        })
+        assert result["created_at"] == "2024-06-10T06:20:00Z"
+        assert "2023-11-14" in result["updated_at"]
+
+    def test_empty_first_upload_time_does_not_hide_create_time(self, normalize):
+        result = normalize({"first_upload_time": "", "create_time": 1700000000})
+        assert "2023-11-14" in result["created_at"]
+
+    def test_falls_back_to_update_time_when_no_creation_time_is_reported(self, normalize):
+        """A file AIDP has not registered yet reports only its update time."""
+        result = normalize({"update_time": 1700000000})
+        assert result["created_at"] is not None
+        assert result["created_at"] == result["updated_at"]
+
     def test_uses_update_time_for_updated_at(self, normalize):
         result = normalize({"update_time": 1700000000, "first_upload_time": 1600000000})
         assert result["updated_at"] is not None

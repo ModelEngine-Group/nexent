@@ -263,27 +263,46 @@ def _timestamp_or_iso(value: Any) -> str | None:
     return _timestamp_to_iso(value)
 
 
+# Spellings AIDP uses for a document timestamp, in priority order. The history
+# endpoint sends the canonical ``created_at``, the listing reports the upload
+# stamp, and ``update_time`` closes the chain because a file AIDP has not
+# finished registering yet reports no creation time at all — for a freshly
+# uploaded file the update stamp is the moment it was accepted, which beats
+# leaving the column empty.
+_CREATED_AT_KEYS = ("first_upload_time", "create_time", "created_at", "update_time")
+_UPDATED_AT_KEYS = ("update_time", "updated_at")
+
+
+def _first_reported(raw: Dict[str, Any], keys: tuple[str, ...]) -> Any:
+    """Return the first value ``raw`` reports for ``keys``, skipping blanks.
+
+    ``None``, an empty string and ``False`` all mean "not reported": AIDP sends
+    any of them for unset fields. Treating the blank spelling as a value would
+    shadow the next key in the chain, which is how an empty ``create_time`` hid a
+    populated ``created_at`` and left the creation time null.
+    """
+    for key in keys:
+        value = raw.get(key)
+        if value is None or value == "" or value is False:
+            continue
+        return value
+    return None
+
+
 def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Map an AIDP document item to the shape the frontend expects.
 
-    AIDP returns ``first_upload_time`` / ``create_time`` as the creation timestamp
-    and ``update_time`` as the last-modified timestamp. The frontend schema
-    expects ``created_at`` (ISO string). This mapper performs that conversion and
-    carries through all other fields unchanged — including a ``created_at`` /
-    ``updated_at`` that the payload already reports, which is what the history
-    endpoint does: overwriting those with a conversion that cannot read the
-    canonical name is what left the creation time empty for history rows.
+    AIDP spells the timestamps several ways: the document listing reports
+    ``first_upload_time`` / ``create_time`` as Unix seconds, while the
+    knowledge-file history already sends the canonical ``created_at`` as an ISO
+    string, and either side may send an unset field as ``""``. Both spellings
+    therefore have to be accepted, and blank ones skipped, so a history row keeps
+    the creation time instead of losing it here. All other fields are carried
+    through unchanged.
     """
     out = dict(raw)
-    created_raw = raw.get("first_upload_time") or raw.get("create_time")
-    if created_raw is None:
-        created_raw = raw.get("created_at")
-    out["created_at"] = _timestamp_or_iso(created_raw)
-
-    updated_raw = raw.get("update_time")
-    if updated_raw is None:
-        updated_raw = raw.get("updated_at")
-    out["updated_at"] = _timestamp_or_iso(updated_raw)
+    out["created_at"] = _timestamp_or_iso(_first_reported(raw, _CREATED_AT_KEYS))
+    out["updated_at"] = _timestamp_or_iso(_first_reported(raw, _UPDATED_AT_KEYS))
     return out
 
 
