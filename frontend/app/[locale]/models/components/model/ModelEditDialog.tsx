@@ -75,13 +75,15 @@ export const ModelEditDialog = ({
   const [advanced, setAdvanced] = useState<ModelAdvancedSettingsValue>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [name, setName] = useState("");
   // In-dialog connectivity probe. "available" is only meaningful for the
-  // current form values — any type/URL/key change resets it to "idle".
+  // current form values — any name/type/URL/key change resets it to "idle".
   const [probe, setProbe] = useState<
     "idle" | "checking" | "available" | "unavailable"
   >("idle");
-  // Catalog-driven reasoning capability; refreshed (debounced) when the URL
-  // or type changes so the effort/budget controls track the target model.
+  // Catalog-driven reasoning capability; refreshed (debounced) when the
+  // name, URL or type changes so the effort/budget controls track the
+  // target model.
   const [reasoningCapability, setReasoningCapability] = useState<
     ReasoningCapability | undefined
   >(undefined);
@@ -91,6 +93,7 @@ export const ModelEditDialog = ({
   useEffect(() => {
     if (!model) return;
     setDisplayName(model.displayName || model.name);
+    setName(model.name);
     setApiKey(model.apiKey || "");
     setBaseUrl(model.apiUrl || "");
     setType(model.type);
@@ -135,18 +138,21 @@ export const ModelEditDialog = ({
     setAdvanced(next);
   }, [model]);
 
-  // Refresh the reasoning capability from the catalog when the URL or type
-  // changes (the model name is readonly here, so the record value is the
-  // right starting point). Mirrors the edit-dialog behaviour of #3953.
+  // Refresh the reasoning capability from the catalog when the name, URL or
+  // type changes so the effort/budget controls track the target model.
+  // Mirrors the edit-dialog behaviour of #3953.
   useEffect(() => {
-    if (!model || !baseUrl.trim()) return;
+    if (!name.trim() || !baseUrl.trim()) {
+      setReasoningCapability(undefined);
+      return;
+    }
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         const suggestion = await modelService.suggestCapacity({
-          modelName: model.name,
+          modelName: name.trim(),
           baseUrl: baseUrl.trim(),
-          providerHint: model.source || undefined,
+          providerHint: model?.source || undefined,
           modelType: type,
         });
         if (!cancelled) {
@@ -160,7 +166,7 @@ export const ModelEditDialog = ({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [model, baseUrl, type]);
+  }, [model, name, baseUrl, type]);
 
   const typeOptions = useTypeOptions();
 
@@ -173,7 +179,11 @@ export const ModelEditDialog = ({
     model.type === MODEL_TYPES.EMBEDDING ||
     model.type === MODEL_TYPES.MULTI_EMBEDDING;
 
-  const canSubmit = displayName.trim().length > 0 && baseUrl.trim().length > 0;
+  const nameChanged = name.trim() !== model.name;
+  const canSubmit =
+    name.trim().length > 0 &&
+    displayName.trim().length > 0 &&
+    baseUrl.trim().length > 0;
 
   async function handleCheck() {
     if (!model || probe === "checking") return;
@@ -184,7 +194,7 @@ export const ModelEditDialog = ({
       // __custom__) ride along so an invalid custom param fails the probe
       // here instead of at runtime — same contract as the backend probe.
       const result = await modelService.verifyModelConfigConnectivity({
-        modelName: model.name,
+        modelName: name.trim(),
         modelType: type,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim() || undefined,
@@ -211,14 +221,17 @@ export const ModelEditDialog = ({
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         ...buildInferenceParamsPayload(advanced, reasoningCapability),
       };
+      if (nameChanged) {
+        params.name = name.trim();
+      }
       if (typeChanged) {
         params.type = type;
       }
       if (probe === "available") {
         // The in-dialog probe passed with the exact values being saved.
         params.connectStatus = "available";
-      } else if (typeChanged) {
-        // No passing probe for the new type; reset so the row must be
+      } else if (typeChanged || nameChanged) {
+        // No passing probe for the new identity; reset so the row must be
         // re-checked before it counts as available.
         params.connectStatus = "not_detected";
       }
@@ -298,8 +311,22 @@ export const ModelEditDialog = ({
                 {t("modelConfig.editDialog.modelName", {
                   defaultValue: "模型名称",
                 })}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {t("modelConfig.editDialog.modelNameHint", {
+                    defaultValue: "服务商提供的模型 ID",
+                  })}
+                </span>
               </Label>
-              <Input value={model.name} disabled className="font-mono" />
+              <Input
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setProbe("idle");
+                  setReasoningCapability(undefined);
+                }}
+                className="font-mono"
+                autoComplete="off"
+              />
             </div>
             <div className="flex items-center gap-2">
               <Select
