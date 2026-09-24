@@ -298,6 +298,7 @@ const useAgentModels = (
       return {
         id,
         name: fallbackName,
+        reasoningCapability: capability,
         ...(supportsEffort
           ? {
               efforts: effortLevels.map((level) => ({
