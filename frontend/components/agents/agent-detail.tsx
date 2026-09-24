@@ -16,15 +16,13 @@ import { useTranslation } from "react-i18next";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import type { MyAgentDetailView } from "@/lib/myAgentDetail";
 import type { AgentRepositoryListingStatus } from "@/types/agentRepository";
-import type { MyEditableAgentItem } from "@/types/agentRepository";
-import { MyAgentIcon } from "./MyAgentIcon";
 
-interface MyAgentDetailModalProps {
+interface AgentDetailProps {
   open: boolean;
   onClose: () => void;
   onEdit?: () => void;
   detail: MyAgentDetailView | null | undefined;
-  agent: Pick<MyEditableAgentItem, "agent_id" | "icon_url"> | null;
+  agentIcon?: ReactNode;
   published: boolean;
   status?: AgentRepositoryListingStatus;
   isLoading: boolean;
@@ -73,19 +71,19 @@ function DetailSection({
   );
 }
 
-export function MyAgentDetailModal({
+export function AgentDetail({
   open,
   onClose,
   onEdit,
   detail,
-  agent,
+  agentIcon,
   published,
   status,
   isLoading,
   isError,
   isFetching,
   onRetry,
-}: MyAgentDetailModalProps) {
+}: AgentDetailProps) {
   const { t } = useTranslation("common");
 
   return (
@@ -93,11 +91,11 @@ export function MyAgentDetailModal({
       open={open}
       onClose={onClose}
       width={560}
-      className="my-agent-detail-modal [&_.ant-modal-close]:!z-20 [&_.ant-modal-content]:!overflow-hidden [&_.ant-modal-content]:!rounded-2xl [&_.ant-modal-content]:!p-0"
+      className="agent-detail-modal [&_.ant-modal-close]:!z-20 [&_.ant-modal-content]:!overflow-hidden [&_.ant-modal-content]:!rounded-2xl [&_.ant-modal-content]:!p-0"
       bodyStyle={{ padding: 0 }}
     >
       <div className="flex max-h-[min(740px,calc(100dvh-3rem))] flex-col overflow-hidden">
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5 pt-6 sm:px-7">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-5 sm:px-5">
           {isLoading ? (
             <div className="flex min-h-64 items-center justify-center">
               <Spin size="large" />
@@ -114,9 +112,7 @@ export function MyAgentDetailModal({
           ) : detail ? (
             <>
               <div className="flex items-start gap-3 pr-6">
-                {agent ? (
-                  <MyAgentIcon agent={agent} size={48} iconSize={24} />
-                ) : null}
+                {agentIcon}
                 <div className="min-w-0 flex-1">
                   <h2 className="break-words text-lg font-semibold leading-7 text-slate-900 dark:text-slate-100">
                     {detail.title || t("agentRepository.card.untitled")}
@@ -168,19 +164,29 @@ export function MyAgentDetailModal({
               {detail.author || detail.modelName ? (
                 <div className="mt-4 space-y-2 rounded-xl bg-slate-50 px-3 py-3 text-sm dark:bg-slate-800/60">
                   {detail.author ? (
-                    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                    <div className="flex min-w-0 items-center gap-2 text-slate-500 dark:text-slate-400">
                       <UserRound className="size-4 shrink-0" aria-hidden />
-                      <span>{t("agentRepository.mine.detail.author")}</span>
-                      <span className="ml-auto min-w-0 truncate font-medium text-slate-900 dark:text-slate-100">
+                      <span className="shrink-0 whitespace-nowrap">
+                        {t("agentRepository.mine.detail.author")}
+                      </span>
+                      <span
+                        className="ml-auto min-w-0 flex-1 truncate text-right font-medium text-slate-900 dark:text-slate-100"
+                        title={detail.author}
+                      >
                         {detail.author}
                       </span>
                     </div>
                   ) : null}
                   {detail.modelName ? (
-                    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                    <div className="flex min-w-0 items-center gap-2 text-slate-500 dark:text-slate-400">
                       <Cpu className="size-4 shrink-0" aria-hidden />
-                      <span>{t("agentRepository.mine.detail.model")}</span>
-                      <span className="ml-auto min-w-0 truncate font-medium text-slate-900 dark:text-slate-100">
+                      <span className="shrink-0 whitespace-nowrap">
+                        {t("agentRepository.mine.detail.model")}
+                      </span>
+                      <span
+                        className="ml-auto min-w-0 flex-1 truncate text-right font-medium text-slate-900 dark:text-slate-100"
+                        title={detail.modelName}
+                      >
                         {detail.modelName}
                       </span>
                     </div>
@@ -219,7 +225,7 @@ export function MyAgentDetailModal({
             </>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/60 px-6 py-4 dark:border-slate-700 dark:bg-slate-900/60 sm:px-7">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/60 px-4 py-4 dark:border-slate-700 dark:bg-slate-900/60 sm:px-5">
           <Button onClick={onClose}>{t("common.close")}</Button>
           {onEdit && detail && !isError ? (
             <Button

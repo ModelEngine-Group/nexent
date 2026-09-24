@@ -51,7 +51,8 @@ import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { mapMyAgentDetail } from "@/lib/myAgentDetail";
-import { MyAgentDetailModal } from "./components/MyAgentDetailModal";
+import { AgentDetail } from "@/components/agents/agent-detail";
+import { MyAgentIcon } from "./components/MyAgentIcon";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -686,7 +687,7 @@ export function MyAgent({
         onCancel={() => setCreateAgentModalVisible(false)}
         onCreated={handleAgentCreated}
       />
-      <MyAgentDetailModal
+      <AgentDetail
         open={active && detailTarget != null}
         onClose={() => setDetailTarget(null)}
         onEdit={
@@ -701,7 +702,11 @@ export function MyAgent({
               : undefined
         }
         detail={detail}
-        agent={detailTarget?.agent ?? null}
+        agentIcon={
+          detailTarget ? (
+            <MyAgentIcon agent={detailTarget.agent} size={48} iconSize={24} />
+          ) : undefined
+        }
         published={(detailTarget?.versionNo ?? 0) > 0}
         status={detail?.status}
         isLoading={isDetailLoading || isDetailListingsLoading}
