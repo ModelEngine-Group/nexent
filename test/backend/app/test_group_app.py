@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
+import logging
 from typing import Optional
 
 # Add path for correct imports
@@ -181,6 +182,31 @@ class TestGroupCreation:
             assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
             data = response.json()
             assert data["detail"] == "Failed to create group"
+
+
+    def test_create_success_records_audit_entry(self, caplog):
+        """Test successful group creation records a security audit entry"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.create_group') as mock_create:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_create.return_value = {"group_id": 7, "group_name": "QA"}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/groups",
+                    headers={"Authorization": "Bearer token"},
+                    json={"tenant_id": "tenant-1", "group_name": "QA"},
+                )
+
+        assert response.status_code == HTTPStatus.CREATED
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"tenant_id":"tenant-1","group_name":"QA"}' in messages[0]
 
 
 class TestGroupRetrieval:
@@ -547,6 +573,29 @@ class TestGroupUpdate:
             assert "Invalid token" in data["detail"]
 
 
+    def test_update_success_records_audit_entry(self, caplog):
+        """Test successful group update records a security audit entry with the changed field names"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.update_group') as mock_update:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_update.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    "/groups/7",
+                    headers={"Authorization": "Bearer token"},
+                    json={"group_name": "Renamed"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_update" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"group_id":7,"updated_fields":["group_name"]}' in messages[0]
+
+
 class TestGroupDeletion:
     """Test group deletion endpoint"""
 
@@ -592,6 +641,26 @@ class TestGroupDeletion:
             assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
             assert "Cannot delete group with active members" in data["detail"]
+
+
+    def test_delete_success_records_audit_entry(self, caplog):
+        """Test successful group deletion records a security audit entry"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.delete_group') as mock_delete:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_delete.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.delete("/groups/7", headers={"Authorization": "Bearer token"})
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_delete" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"group_id":7}' in messages[0]
 
 
 class TestGroupMembership:
@@ -809,6 +878,72 @@ class TestGroupMembership:
             assert data["detail"] == "Failed to update group members"
 
 
+    def test_add_member_success_records_audit_entry(self, caplog):
+        """Test successful member addition records who added which user to which group"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.add_user_to_single_group') as mock_add_user:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_add_user.return_value = {"added": True}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/groups/7/members",
+                    headers={"Authorization": "Bearer token"},
+                    json={"user_id": "user-9"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_member_add" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"target_user_id":"user-9","group_id":7}' in messages[0]
+
+    def test_remove_member_success_records_audit_entry(self, caplog):
+        """Test successful member removal records who removed which user from which group"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.remove_user_from_single_group') as mock_remove_user:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_remove_user.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.delete(
+                    "/groups/7/members/user-9",
+                    headers={"Authorization": "Bearer token"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_member_remove" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"target_user_id":"user-9","group_id":7}' in messages[0]
+
+    def test_update_members_success_records_audit_entry(self, caplog):
+        """Test setting the exact member list records the group and the bounded user ids"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.update_group_members') as mock_update_members:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_update_members.return_value = {"added": 2, "removed": 1}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    "/groups/7/members",
+                    headers={"Authorization": "Bearer token"},
+                    json={"user_ids": ["u-1", "u-2"]},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_member_update" in messages[0]
+        assert 'details={"group_id":7,"user_count":2,"user_ids":["u-1","u-2"]}' in messages[0]
+
+
 class TestBatchGroupMembership:
     """Test batch group membership endpoint"""
 
@@ -865,6 +1000,29 @@ class TestBatchGroupMembership:
             assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
             assert "Invalid group IDs" in data["detail"]
+
+
+    def test_batch_add_success_records_audit_entry(self, caplog):
+        """Test batch membership addition records the user and the bounded group ids"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.add_user_to_groups') as mock_add_user_groups:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_add_user_groups.return_value = [{"added": True}, {"added": True}]
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/groups/members/batch",
+                    headers={"Authorization": "Bearer token"},
+                    json={"user_id": "user-9", "group_ids": [3, 4]},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_member_batch_add" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"target_user_id":"user-9","group_count":2,"group_ids":[3,4]}' in messages[0]
 
 
 class TestDefaultGroupManagement:
@@ -943,3 +1101,26 @@ class TestDefaultGroupManagement:
             assert response.status_code == HTTPStatus.NOT_FOUND
             data = response.json()
             assert "Tenant not found" in data["detail"]
+
+    def test_set_default_success_records_audit_entry(self, caplog):
+        """Test setting the tenant default group records a security audit entry"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.set_tenant_default_group_id') as mock_set_default:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_set_default.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    "/groups/tenants/tenant-1/default",
+                    headers={"Authorization": "Bearer token"},
+                    json={"default_group_id": 7},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_default_set" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"tenant_id":"tenant-1","default_group_id":7}' in messages[0]
