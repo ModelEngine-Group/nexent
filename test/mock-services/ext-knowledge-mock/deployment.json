@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "ext-knowledge",
+  "aliases": ["ext-knowledge-mock"],
+  "project": "nexent-mock-ext-knowledge",
+  "compose_files": ["test/compose/compose.ext-knowledge.yaml"],
+  "product_network_files": ["test/compose/compose.ext-knowledge.product-network.yaml"],
+  "services": ["ext-knowledge"],
+  "oneshot_services": [],
+  "networks": [],
+  "readiness": [
+    {
+      "url": "http://127.0.0.1:30090/health",
+      "json_equals": {"status": "ok"}
+    }
+  ]
+}

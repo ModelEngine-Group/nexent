@@ -1,0 +1,43 @@
+{
+  "knowledge_sets": [
+    {
+      "name": "军事知识集",
+      "knowledge_bases": [
+        {"dify_dataset_id": "ht-ds-001", "name": "装备手册"},
+        {"dify_dataset_id": "null", "name": "未关联知识库"}
+      ]
+    },
+    {
+      "name": "民用知识集",
+      "knowledge_bases": [
+        {"dify_dataset_id": "ht-ds-101", "name": "民航规章"}
+      ]
+    }
+  ],
+  "chunks_by_dataset": {
+    "ht-ds-001": [
+      {
+        "document_id": "ht-doc-001",
+        "document_name": "装备手册-通信系统.pdf",
+        "content": "Haotian equipment manual: communication system maintenance window is 02:00-04:00.",
+        "score": 0.87
+      }
+    ],
+    "ht-ds-101": [
+      {
+        "document_id": "ht-doc-101",
+        "document_name": "民航规章-总则.md",
+        "content": "民航规章总则：所有飞行活动必须遵守空域管理规定。",
+        "score": 0.83
+      }
+    ],
+    "a8d68fbf-bd6e-5461-a9d1-cf1bb3522e38": [
+      {
+        "document_id": "ht-doc-default",
+        "document_name": "default-dataset-doc.txt",
+        "content": "Content reachable through the default dataset id after the product replaces a 'null' dify_dataset_id.",
+        "score": 0.8
+      }
+    ]
+  }
+}
