@@ -145,9 +145,7 @@ export function MyAgent({
     () => getTagSearchPredicates(tagDefinitions, searchQuery, t),
     [tagDefinitions, searchQuery, t]
   );
-  const showCreateCard =
-    ownership === "all" && !searchQuery.trim() && tagPredicates.length === 0;
-  const createCardInGrid = showCreateCard && gridSlots > 1;
+  const createCardInGrid = gridSlots > 1;
   const pageSize = Math.max(1, gridSlots - (createCardInGrid ? 1 : 0));
   const listParams = useMemo(
     (): AgentListFilters => ({
@@ -601,7 +599,7 @@ export function MyAgent({
       </div>
 
       <div ref={gridRegionRef} className="min-h-0">
-        {showCreateCard && !createCardInGrid && page === 1 ? (
+        {!createCardInGrid ? (
           <div className="mb-5">
             <CreateNewAgentCard onClick={handleCreateAgent} />
           </div>
@@ -623,30 +621,28 @@ export function MyAgent({
               {t("repository.common.retry")}
             </Button>
           </div>
-        ) : showFilteredEmpty ? (
-          <Empty
-            className="py-16"
-            description={
-              hasActiveFilter
-                ? t("agentRepository.mine.emptyFiltered")
-                : t("agentRepository.mine.empty")
-            }
-          />
         ) : (
           <>
             <ResourceCardGrid
               items={agents}
               columns={columns}
               rows={rows}
-              gridHeight={gridHeight}
+              gridHeight={showFilteredEmpty ? undefined : gridHeight}
               page={page}
               total={total}
               onPageChange={setPage}
               paginateItems={false}
               showToolbar={false}
+              emptyState={
+                showFilteredEmpty ? (
+                  <Empty
+                    description={t("agentRepository.mine.emptyFiltered")}
+                  />
+                ) : undefined
+              }
               showCreateCard={createCardInGrid}
               createCard={
-                createCardInGrid && page === 1 ? (
+                createCardInGrid ? (
                   <CreateNewAgentCard onClick={handleCreateAgent} />
                 ) : undefined
               }
@@ -677,6 +673,12 @@ export function MyAgent({
                 />
               )}
             />
+            {showFilteredEmpty && createCardInGrid ? (
+              <Empty
+                className="py-16"
+                description={t("agentRepository.mine.emptyFiltered")}
+              />
+            ) : null}
           </>
         )}
       </div>
