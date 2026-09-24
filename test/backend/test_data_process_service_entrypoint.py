@@ -1,4 +1,4 @@
-"""Isolated unit tests for the data-process service entrypoint."""
+"""Unit tests for the Celery-prefork data-process service entrypoint."""
 
 import importlib.util
 import signal
@@ -12,15 +12,8 @@ import pytest
 
 @pytest.fixture()
 def service_module(monkeypatch):
-    """Load the entrypoint with its runtime dependencies replaced by stubs."""
     uvicorn = types.ModuleType("uvicorn")
     uvicorn.run = MagicMock()
-    ray = types.ModuleType("ray")
-    ray.is_initialized = MagicMock(return_value=False)
-    ray.shutdown = MagicMock()
-    ray.cluster_resources = MagicMock(return_value={})
-    ray.get_runtime_context = MagicMock(return_value=types.SimpleNamespace(gcs_address=""))
-
     dotenv = types.ModuleType("dotenv")
     dotenv.load_dotenv = MagicMock()
     fastapi = types.ModuleType("fastapi")
@@ -34,37 +27,31 @@ def service_module(monkeypatch):
             self.routers.append(router)
 
     fastapi.FastAPI = FakeFastAPI
-    ray_config = types.ModuleType("data_process.ray_config")
-    ray_config.RayConfig = types.SimpleNamespace(init_ray_for_service=MagicMock(return_value=True))
     logging_utils = types.ModuleType("utils.logging_utils")
     logging_utils.configure_logging = MagicMock()
-    logging_utils.configure_elasticsearch_logging = MagicMock()
-    logging_utils.get_uvicorn_logging_config = MagicMock(
-        return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
-    )
+    logging_utils.get_uvicorn_logging_config = MagicMock(return_value={})
     constants = types.ModuleType("consts.const")
     constants.REDIS_URL = "redis://test:6379/0"
+    constants.REDIS_BACKEND_URL = "redis://test:6379/1"
     constants.REDIS_PORT = 6379
     constants.FLOWER_PORT = 5555
-    constants.RAY_DASHBOARD_PORT = 8265
-    constants.RAY_DASHBOARD_HOST = "127.0.0.1"
-    constants.RAY_ACTOR_NUM_CPUS = 1
-    constants.RAY_NUM_CPUS = "2"
-    constants.DISABLE_RAY_DASHBOARD = False
     constants.DISABLE_CELERY_FLOWER = False
     constants.DOCKER_ENVIRONMENT = False
-    constants.RAY_OBJECT_STORE_MEMORY_GB = 1
-    constants.RAY_preallocate_plasma = False
-    constants.RAY_TEMP_DIR = "/tmp/ray"
-    constants.DP_PART_PROCESSOR_COUNT = 2
+    constants.DP_PARSE_MAX_PROCESSES = 3
+    constants.DP_PARSE_MIN_PROCESSES = 1
+    constants.DP_PARSE_THREADS_PER_PROCESS = 2
+    constants.DP_PARSE_MAX_TASKS_PER_CHILD = 1000
+    constants.DP_PRELOAD_MODELS = "unstructured_default"
+    constants.DP_PARSER_STARTUP_TIMEOUT_S = 1
 
-    monkeypatch.setitem(sys.modules, "uvicorn", uvicorn)
-    monkeypatch.setitem(sys.modules, "ray", ray)
-    monkeypatch.setitem(sys.modules, "dotenv", dotenv)
-    monkeypatch.setitem(sys.modules, "fastapi", fastapi)
-    monkeypatch.setitem(sys.modules, "data_process.ray_config", ray_config)
-    monkeypatch.setitem(sys.modules, "utils.logging_utils", logging_utils)
-    monkeypatch.setitem(sys.modules, "consts.const", constants)
+    for name, module in {
+        "uvicorn": uvicorn,
+        "dotenv": dotenv,
+        "fastapi": fastapi,
+        "utils.logging_utils": logging_utils,
+        "consts.const": constants,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
 
     module_name = "backend.data_process_service"
     spec = importlib.util.spec_from_file_location(
@@ -77,140 +64,39 @@ def service_module(monkeypatch):
     return module
 
 
-def test_service_manager_merges_disable_flags(service_module, monkeypatch):
-    monkeypatch.setattr(service_module, "DISABLE_RAY_DASHBOARD", True)
-    monkeypatch.setattr(service_module, "DISABLE_CELERY_FLOWER", True)
-
-    manager = service_module.ServiceManager(
-        {"disable_ray_dashboard": False, "disable_celery_flower": False}
-    )
-
-    assert manager.config["disable_ray_dashboard"] is True
-    assert manager.config["start_flower"] is False
-    assert manager.redis_port == 6379
-
-
-def test_start_ray_cluster_returns_when_disabled(service_module):
-    manager = service_module.ServiceManager({"start_ray": False})
-
-    assert manager.start_ray_cluster() is True
-    service_module.RayConfig.init_ray_for_service.assert_not_called()
-
-
-def test_worker_configs_isolate_forward_parent_parts_and_aggregate(service_module):
+def test_worker_configs_use_prefork_for_parser_and_threads_for_other_stages(service_module):
     configs = service_module.ServiceManager._build_worker_configs(4)
 
+    assert configs[0]["queue"] == "parse_q"
+    assert configs[0]["concurrency"] == 3
+    assert all("pool" not in config for config in configs)
     assert [config["queue"] for config in configs] == [
-        "process_q",
-        "process_part_q",
-        "forward_q",
-        "forward_part_q",
-        "forward_aggregate_q",
+        "parse_q", "process_q", "forward_q", "forward_part_q", "forward_aggregate_q"
     ]
-    assert configs[0]["concurrency"] == configs[1]["concurrency"] == 2
-    assert configs[2]["concurrency"] == configs[3]["concurrency"] == 8
-    assert configs[4]["concurrency"] == 2
 
 
-def test_start_workers_launches_each_isolated_queue(service_module, monkeypatch):
-    launched = []
+def test_parser_readiness_uses_result_backend(service_module, monkeypatch):
+    redis_module = types.ModuleType("redis")
+    redis_client = MagicMock()
+    redis_client.get.return_value = "1"
+    redis_module.from_url = MagicMock(return_value=redis_client)
+    monkeypatch.setitem(sys.modules, "redis", redis_module)
 
-    class _Process:
-        def __init__(self, command, **kwargs):
-            self.pid = len(launched) + 100
-            self.stdout = types.SimpleNamespace(readline=lambda: "")
-            launched.append((command, kwargs))
-
-    monkeypatch.setattr(service_module, "RAY_NUM_CPUS", "4")
-    monkeypatch.setattr(service_module, "RAY_ACTOR_NUM_CPUS", 2)
-    monkeypatch.setattr(service_module.subprocess, "Popen", _Process)
-    monkeypatch.setattr(service_module.threading, "Thread", lambda **kwargs: types.SimpleNamespace(start=lambda: None))
-
-    service_module.service_processes["workers"] = []
-    manager = service_module.ServiceManager({"start_workers": True})
-
-    assert manager.start_workers() is True
-    assert [row["queue"] for row in service_module.service_processes["workers"]] == [
-        "process_q",
-        "process_part_q",
-        "forward_q",
-        "forward_part_q",
-        "forward_aggregate_q",
-    ]
-    assert len(launched) == 5
-    service_module.service_processes["workers"] = []
-
-
-def test_start_all_services_starts_enabled_services_in_order(service_module, monkeypatch):
-    scheduler = types.SimpleNamespace(start=MagicMock())
-    scheduler_module = types.ModuleType("services.auto_summary_scheduler")
-    scheduler_module.auto_summary_scheduler = scheduler
-    monkeypatch.setitem(sys.modules, "services.auto_summary_scheduler", scheduler_module)
-    recovery = MagicMock()
-    recovery_module = types.ModuleType("services.startup_recovery_service")
-    recovery_module.recover_data_process_tasks = recovery
-    monkeypatch.setitem(sys.modules, "services.startup_recovery_service", recovery_module)
-
-    manager = service_module.ServiceManager(
-        {"start_redis": True, "start_ray": True, "start_workers": False, "disable_celery_flower": True}
-    )
-    started = []
-    manager.start_redis = lambda: started.append("redis") or True
-    manager.start_ray_cluster = lambda: started.append("ray") or True
-    manager.log_service_info = MagicMock()
-
-    assert manager.start_all_services() is True
-    assert started == ["redis", "ray"]
-    recovery.assert_called_once_with()
-    manager.log_service_info.assert_called_once()
-    scheduler.start.assert_called_once()
-
-
-def test_start_all_services_reports_failure(service_module, monkeypatch):
-    scheduler_module = types.ModuleType("services.auto_summary_scheduler")
-    scheduler_module.auto_summary_scheduler = types.SimpleNamespace(start=MagicMock())
-    monkeypatch.setitem(sys.modules, "services.auto_summary_scheduler", scheduler_module)
-    recovery = MagicMock()
-    recovery_module = types.ModuleType("services.startup_recovery_service")
-    recovery_module.recover_data_process_tasks = recovery
-    monkeypatch.setitem(sys.modules, "services.startup_recovery_service", recovery_module)
-
-    manager = service_module.ServiceManager(
-        {"start_redis": True, "start_ray": False, "start_workers": False, "disable_celery_flower": True}
-    )
-    manager.start_redis = MagicMock(return_value=False)
-    manager.log_service_info = MagicMock()
-
-    assert manager.start_all_services() is False
-    recovery.assert_called_once_with()
-    manager.log_service_info.assert_not_called()
-
-
-def test_stop_all_services_stops_workers_scheduler_and_redis(service_module, monkeypatch):
-    scheduler = types.SimpleNamespace(stop=MagicMock())
-    scheduler_module = types.ModuleType("services.auto_summary_scheduler")
-    scheduler_module.auto_summary_scheduler = scheduler
-    monkeypatch.setitem(sys.modules, "services.auto_summary_scheduler", scheduler_module)
-
-    worker = MagicMock()
-    worker.poll.return_value = None
-    redis_process = MagicMock()
-    service_module.service_processes.update(
-        {"workers": [{"process": worker, "name": "worker", "queue": "queue"}], "redis": redis_process, "flower": None}
-    )
     manager = service_module.ServiceManager({})
+    manager.parser_generation = "generation"
+    manager._wait_for_parser_ready()
 
-    manager.stop_all_services()
+    redis_module.from_url.assert_called_once_with(
+        "redis://test:6379/1", decode_responses=True, socket_connect_timeout=5, socket_timeout=2
+    )
 
-    worker.terminate.assert_called_once()
-    worker.wait.assert_called_once_with(timeout=10)
-    redis_process.terminate.assert_called_once()
-    redis_process.wait.assert_called_once_with(timeout=5)
-    scheduler.stop.assert_called_once()
-    assert service_module.service_processes["workers"] == []
-    assert service_module.service_processes["redis"] is None
-    manager.stop_all_services()
-    assert scheduler.stop.call_count == 1
+
+def test_parse_arguments_exposes_supported_service_flags(service_module, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["data_process_service.py", "--no-workers", "--disable-celery-flower"])
+    args = service_module.parse_arguments()
+
+    assert args.no_workers is True
+    assert args.disable_celery_flower is True
 
 
 def test_create_app_registers_data_process_router(service_module, monkeypatch):
@@ -224,104 +110,134 @@ def test_create_app_registers_data_process_router(service_module, monkeypatch):
     assert app.routers == [app_module.router]
 
 
-def test_check_redis_connection_handles_success_import_error_and_runtime_error(service_module, monkeypatch):
-    manager = service_module.ServiceManager({})
-    redis_client = MagicMock()
+def test_start_workers_launches_parser_with_readiness_barrier(service_module, monkeypatch):
+    class FakeStdout:
+        def readline(self):
+            return ""
+
+    class FakeProcess:
+        pid = 123
+        stdout = FakeStdout()
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return None
+
+    configs = [{
+        "name": "parser-worker",
+        "queue": "parse_q",
+        "pool": "prefork",
+        "concurrency": 3,
+        "min_processes": 1,
+        "max_tasks_per_child": 1000,
+    }]
+    manager = service_module.ServiceManager({"start_workers": True})
+    monkeypatch.setattr(manager, "_build_worker_configs", lambda _cpus: configs)
+    monkeypatch.setattr(manager, "_wait_for_parser_ready", lambda: None)
+    monkeypatch.setattr(service_module.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(service_module.threading, "Thread", lambda *args, **kwargs: types.SimpleNamespace(start=lambda: None))
+    service_module.service_processes["workers"].clear()
+
+    assert manager.start_workers() is True
+    assert service_module.service_processes["workers"][0]["queue"] == "parse_q"
+    service_module.service_processes["workers"].clear()
+
+
+def test_start_workers_cleans_up_partial_launches(service_module, monkeypatch):
+    class FakeProcess:
+        pid = 456
+        stdout = None
+        terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 0
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            return None
+
+        def kill(self):
+            self.terminated = True
+
+    process = FakeProcess()
+    configs = [
+        {"name": "parser-worker", "queue": "parse_q", "pool": "prefork", "concurrency": 3, "min_processes": 1, "max_tasks_per_child": 1000},
+        {"name": "forward-worker", "queue": "forward_q", "pool": "threads", "concurrency": 2},
+    ]
+    manager = service_module.ServiceManager({"start_workers": True})
+    monkeypatch.setattr(manager, "_build_worker_configs", lambda _cpus: configs)
+    monkeypatch.setattr(manager, "_wait_for_parser_ready", lambda: None)
+    popen_calls = iter([process, RuntimeError("launch failed")])
+
+    def popen(*args, **kwargs):
+        value = next(popen_calls)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(service_module.subprocess, "Popen", popen)
+    monkeypatch.setattr(service_module.threading, "Thread", lambda *args, **kwargs: types.SimpleNamespace(start=lambda: None))
+    service_module.service_processes["workers"].clear()
+
+    assert manager.start_workers() is False
+    assert process.terminated is True
+    assert service_module.service_processes["workers"] == []
+
+
+def test_parser_readiness_reports_worker_exit_and_timeout(service_module, monkeypatch):
     redis_module = types.ModuleType("redis")
-    redis_module.from_url = MagicMock(return_value=redis_client)
-    redis_service = types.ModuleType("services.redis_service")
-    redis_service.get_redis_service = MagicMock(return_value=types.SimpleNamespace(cleanup_error_info_keys=lambda: {"removed": 1}))
+    redis_client = types.SimpleNamespace(get=lambda _key: None)
+    redis_module.from_url = lambda *args, **kwargs: redis_client
     monkeypatch.setitem(sys.modules, "redis", redis_module)
-    monkeypatch.setitem(sys.modules, "services.redis_service", redis_service)
-
-    assert manager._check_redis_connection("redis://ignored") is True
-    redis_client.ping.assert_called_once()
-
-    monkeypatch.delitem(sys.modules, "redis")
-    assert manager._check_redis_connection("redis://ignored") is False
-
-    redis_module.from_url.side_effect = RuntimeError("unreachable")
-    monkeypatch.setitem(sys.modules, "redis", redis_module)
-    assert manager._check_redis_connection("redis://ignored") is False
-
-
-def test_start_ray_cluster_tracks_new_cluster_and_ray_address(service_module, monkeypatch):
-    manager = service_module.ServiceManager({"start_ray": True})
-    service_module.ray.is_initialized.return_value = False
-    service_module.ray.get_runtime_context.return_value = types.SimpleNamespace(gcs_address="ray://cluster")
-
-    assert manager.start_ray_cluster() is True
-
-    service_module.RayConfig.init_ray_for_service.assert_called_once_with(
-        num_cpus=2,
-        dashboard_port=8265,
-        try_connect_first=True,
-        include_dashboard=True,
-    )
-    assert manager._ray_cluster_started is True
-    assert manager.config["ray_address"] == "ray://cluster"
-    assert service_module.service_processes["ray_cluster"] is True
-    monkeypatch.delenv("RAY_ADDRESS", raising=False)
-
-
-def test_start_ray_cluster_uses_direct_fallback_when_helper_fails(service_module):
-    manager = service_module.ServiceManager({"start_ray": True, "disable_ray_dashboard": True})
-    service_module.RayConfig.init_ray_for_service.return_value = False
-    service_module.ray.is_initialized.return_value = False
-    service_module.ray.init = MagicMock()
-
-    assert manager.start_ray_cluster() is True
-
-    service_module.ray.init.assert_called_once()
-    assert manager._ray_cluster_started is True
-
-
-def test_parse_arguments_and_lifespan_shutdown(service_module, monkeypatch):
-    monkeypatch.setattr(sys, "argv", [
-        "data_process_service.py",
-        "--no-workers",
-        "--no-ray",
-        "--disable-celery-flower",
-        "--disable-ray-dashboard",
-        "--redis-port", "6380",
-        "--api-port", "5013",
-    ])
-    args = service_module.parse_arguments()
-    assert args.no_workers is True
-    assert args.no_ray is True
-    assert args.redis_port == 6380
-    assert args.api_port == 5013
-
-    manager = MagicMock()
-    manager._shutdown_called = False
-    service_module.service_manager = manager
-    lifecycle = service_module.lifespan(object())
-
-    import asyncio
-
-    async def run_lifespan():
-        async with lifecycle:
-            pass
-
-    asyncio.run(run_lifespan())
-    manager.stop_all_services.assert_called_once()
-
-
-def test_stop_all_services_kills_timed_out_worker_and_stops_ray(service_module, monkeypatch):
-    scheduler_module = types.ModuleType("services.auto_summary_scheduler")
-    scheduler_module.auto_summary_scheduler = types.SimpleNamespace(stop=MagicMock())
-    monkeypatch.setitem(sys.modules, "services.auto_summary_scheduler", scheduler_module)
-    worker = MagicMock()
-    worker.poll.return_value = None
-    worker.wait.side_effect = [service_module.subprocess.TimeoutExpired("worker", 10), None]
-    service_module.ray.is_initialized.return_value = True
-    service_module.service_processes.update({"workers": [{"process": worker, "name": "worker", "queue": "queue"}], "redis": None, "flower": None})
     manager = service_module.ServiceManager({})
-    manager._ray_cluster_started = True
-    monkeypatch.setattr(service_module.time, "sleep", lambda seconds: None)
+    service_module.service_processes["workers"] = [{
+        "queue": "parse_q",
+        "process": types.SimpleNamespace(poll=lambda: 1, returncode=9),
+    }]
+    monkeypatch.setattr(service_module, "DP_PARSER_STARTUP_TIMEOUT_S", 1)
+    monkeypatch.setattr(service_module.time, "time", lambda: 0)
+    with pytest.raises(RuntimeError, match="exited during bootstrap"):
+        manager._wait_for_parser_ready()
 
-    manager.stop_all_services()
+    service_module.service_processes["workers"] = []
+    times = iter([0, 2])
+    monkeypatch.setattr(service_module.time, "time", lambda: next(times))
+    monkeypatch.setattr(service_module.time, "sleep", lambda _seconds: None)
+    with pytest.raises(TimeoutError, match="readiness timed out"):
+        manager._wait_for_parser_ready()
 
-    worker.kill.assert_called_once()
-    service_module.ray.shutdown.assert_called_once()
-    assert manager._ray_cluster_started is False
+
+def test_main_exits_when_service_dependencies_fail(service_module, monkeypatch):
+    args = types.SimpleNamespace(
+        no_workers=False,
+        disable_celery_flower=False,
+        redis_port=6379,
+        flower_port=5555,
+        api_host="0.0.0.0",
+        api_port=8080,
+    )
+    stopped = []
+
+    class FailedManager:
+        def __init__(self, config):
+            self.config = config
+            self._shutdown_called = False
+
+        def start_all_services(self):
+            return False
+
+        def stop_all_services(self):
+            stopped.append(True)
+
+    monkeypatch.setattr(service_module, "parse_arguments", lambda: args)
+    monkeypatch.setattr(service_module, "ServiceManager", FailedManager)
+    with pytest.raises(SystemExit):
+        service_module.main()
+    assert stopped == [True]
