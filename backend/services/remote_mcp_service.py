@@ -7,7 +7,13 @@ import random
 from typing import Awaitable, Callable
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
+from consts.const import (
+    CAN_EDIT_ALL_USER_ROLES,
+    MCP_REQUEST_TIMEOUT_SECONDS,
+    NEXENT_MCP_DOCKER_IMAGE,
+    PERMISSION_EDIT,
+    PERMISSION_READ,
+)
 from consts.exceptions import (
     MCPConnectionError,
     MCPNameIllegal,
@@ -47,9 +53,6 @@ from services.mcp_container_service import MCPContainerManager
 from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger("remote_mcp_service")
-
-MCP_HEALTH_CHECK_TIMEOUT_SECONDS = 10
-
 
 def _iter_exception_chain(exc: BaseException):
     seen: set[int] = set()
@@ -128,7 +131,7 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
             )
 
         async def list_mcp_tools() -> list:
-            client = Client(transport=transport)
+            client = Client(transport=transport, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
             async with client:
                 # Verify the server can actually serve tools.
                 # This exercises API key validation and end-to-end connectivity,
@@ -137,7 +140,7 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
 
         tools_result = await asyncio.wait_for(
             list_mcp_tools(),
-            timeout=MCP_HEALTH_CHECK_TIMEOUT_SECONDS,
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
         )
         return [t.name for t in tools_result] if tools_result else []
     except BaseException as e:
@@ -175,9 +178,15 @@ async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
                 httpx_client_factory=create_httpx_client,
             )
 
-        client = Client(transport=transport)
-        async with client:
-            return client.is_connected()
+        async def connect_client() -> bool:
+            client = Client(transport=transport, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
+            async with client:
+                return client.is_connected()
+
+        return await asyncio.wait_for(
+            connect_client(),
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+        )
     except Exception as e:
         logger.debug(f"MCP protocol connect handshake failed: {e}")
         return False

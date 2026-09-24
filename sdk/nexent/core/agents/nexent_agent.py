@@ -28,6 +28,7 @@ from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
+from ...consts.mcp_errors import is_mcp_timeout_error
 from .output_protocol import ModelOutputProtocolExhaustedError
 from .tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,
@@ -1263,6 +1264,8 @@ class NexentAgent:
                     )
                     raise
                 except Exception as e:
+                    if is_mcp_timeout_error(e):
+                        raise
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
                     raise ValueError(f"Error in interaction: {str(e)}")

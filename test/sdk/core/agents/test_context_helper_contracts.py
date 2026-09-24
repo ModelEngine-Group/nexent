@@ -183,7 +183,9 @@ def test_formatting_empty_and_tool_variants():
     )
     zh_description = _format_tools_description({"search": tool}, language="zh", is_manager=False)
     en_description = _format_tools_description({"search": tool}, language="en", is_manager=False)
-    assert "[MCP] search" in zh_description
+    assert "search [MCP]" in zh_description
+    assert "不要把 `[MCP]` 写入代码" in zh_description
+    assert "do not include `[MCP]` in code" in en_description
     assert "presigned_url" in zh_description
     assert "Accepts input" in en_description
     assert "presigned_url" in en_description

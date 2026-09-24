@@ -10,6 +10,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Callable
 
 from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
+from ...consts.mcp_errors import MCPToolTimeoutError
 
 
 logger = logging.getLogger("managed_mcp")
@@ -26,6 +27,7 @@ class ManagedMCPToolCollection:
         cancellation_scope: RunCancellationScope,
         tool_timeout_seconds: float,
         close_timeout_seconds: float,
+        request_timeout_seconds: float | None = None,
         connect_timeout_seconds: float = 30.0,
         session_context_factory: Callable[..., Any] | None = None,
         tool_adapter_factory: Callable[[], Any] | None = None,
@@ -36,11 +38,14 @@ class ManagedMCPToolCollection:
             raise ValueError("MCP close timeout must be greater than zero")
         if connect_timeout_seconds <= 0:
             raise ValueError("MCP connect timeout must be greater than zero")
+        if request_timeout_seconds is not None and request_timeout_seconds <= 0:
+            raise ValueError("MCP request timeout must be greater than zero")
         self.manager = manager
         self.server_parameters = server_parameters
         self.cancellation_scope = cancellation_scope
         self.tool_timeout_seconds = tool_timeout_seconds
         self.close_timeout_seconds = close_timeout_seconds
+        self.request_timeout_seconds = request_timeout_seconds
         self.connect_timeout_seconds = connect_timeout_seconds
         self._session_context_factory = session_context_factory
         self._tool_adapter_factory = tool_adapter_factory
@@ -112,7 +117,7 @@ class ManagedMCPToolCollection:
                 connection = await stack.enter_async_context(
                     session_factory(
                         parameters,
-                        client_session_timeout_seconds=None,
+                        client_session_timeout_seconds=self.request_timeout_seconds,
                     )
                 )
                 connections.append(connection)
@@ -167,7 +172,7 @@ class ManagedMCPToolCollection:
                 )
                 try:
                     return execution.future.result(timeout=self.tool_timeout_seconds)
-                except FutureTimeoutError:
+                except FutureTimeoutError as exc:
                     logger.warning(
                         "event=mcp_tool_timeout tool_name=%s timeout_seconds=%.3f execution_id=%s error_type=%s",
                         __tool_name,
@@ -182,7 +187,14 @@ class ManagedMCPToolCollection:
                         wait_timeout=self.close_timeout_seconds,
                         mark_stuck_on_timeout=True,
                     )
-                    raise
+                    timeout_label = (
+                        f"{self.request_timeout_seconds:g}"
+                        if self.request_timeout_seconds is not None
+                        else f"{self.tool_timeout_seconds:g}"
+                    )
+                    raise MCPToolTimeoutError(
+                        f"MCP tool request timed out after {timeout_label} seconds"
+                    ) from exc
 
             tool.forward = managed_forward
         return tools

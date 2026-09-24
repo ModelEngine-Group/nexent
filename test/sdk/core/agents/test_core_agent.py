@@ -234,6 +234,13 @@ for name, module in _module_mocks.items():
 # Load core_agent module directly
 # ---------------------------------------------------------------------------
 
+
+def _register_sdk_consts_package(project_root):
+    """Register the SDK consts package for isolated CoreAgent imports."""
+    consts_pkg = sys.modules.setdefault("sdk.nexent.consts", ModuleType("sdk.nexent.consts"))
+    consts_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "consts")]
+
+
 def _load_core_agent_module():
     """Load core_agent module directly without going through __init__.py."""
     # Use cross-platform path construction
@@ -247,6 +254,7 @@ def _load_core_agent_module():
     sys.modules["sdk"].__path__ = []
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent"].__path__ = []
+    _register_sdk_consts_package(project_root)
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core"].__path__ = [os.path.join(project_root, "sdk", "nexent", "core")]
     agents_pkg = ModuleType("sdk.nexent.core.agents")
@@ -2033,6 +2041,7 @@ class TestRunStreamRealExecution:
             test_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(test_dir))))
             core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "core_agent.py")
+            _register_sdk_consts_package(project_root)
 
             # Load the module
             spec = importlib.util.spec_from_file_location("core_agent_test", core_agent_path)

@@ -1,10 +1,19 @@
 import logging
 from typing import Any, Dict, List
 
+from sqlalchemy import text
+
+from consts.const import MAX_MCP_SERVICES_PER_TENANT
+from consts.exceptions import TenantResourceLimitError
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import McpRecord
 
 logger = logging.getLogger("remote_mcp_db")
+_MCP_SERVICE_LIMIT = (
+    MAX_MCP_SERVICES_PER_TENANT
+    if isinstance(MAX_MCP_SERVICES_PER_TENANT, int)
+    else 1_000
+)
 
 
 def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
@@ -33,6 +42,27 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str):
         "delete_flag": "N"
     })
     with get_db_session() as session:
+        # Serialize the count-and-insert sequence per tenant.  Without the
+        # advisory lock, concurrent requests could both observe a free slot
+        # and exceed the hard tenant quota.
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"tenant-mcp-limit:{tenant_id}"},
+        )
+        mcp_count = session.query(McpRecord).filter(
+            getattr(McpRecord, "tenant_id", None) == tenant_id,
+            getattr(McpRecord, "delete_flag", None) != "Y",
+        ).count()
+        mcp_count = mcp_count if isinstance(mcp_count, int) else 0
+        if mcp_count >= _MCP_SERVICE_LIMIT:
+            raise TenantResourceLimitError(
+                "MCP service tenant limit reached: "
+                f"maximum {_MCP_SERVICE_LIMIT} MCP services per tenant",
+                resource="mcp_services",
+                scope="tenant",
+                limit=_MCP_SERVICE_LIMIT,
+                current_count=mcp_count,
+            )
         new_mcp = McpRecord(**filtered_data)
         session.add(new_mcp)
 

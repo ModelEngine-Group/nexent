@@ -144,6 +144,7 @@ logging.config = logging_config_mod  # patch the actual logging module too
 
 # Stub utils
 stub_utils = types.ModuleType("utils")
+stub_utils.__path__ = [os.path.abspath(os.path.join(current_dir, "../../../backend/utils"))]
 stub_utils.logging_utils = types.ModuleType("utils.logging_utils")
 stub_utils.logging_utils.configure_logging = MagicMock()
 stub_utils.logging_utils.configure_elasticsearch_logging = MagicMock()
@@ -611,7 +612,7 @@ class TestRegisterOpenapiService:
         assert result is True
         mock_async_client.assert_called_once_with(
             base_url="https://api.example.com",
-            timeout=120.0,
+            timeout=10,
             headers=headers_template
         )
         mock_fastmcp.from_openapi.assert_called_once()
