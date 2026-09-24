@@ -10,6 +10,7 @@ The standalone functions (parse_code_blobs, convert_code_format) are fully teste
 import pytest
 import importlib.util
 import json
+import logging
 import os
 import sys
 import threading
@@ -2370,6 +2371,43 @@ class TestRunStreamRealExecution:
         assert exc_info.value.reason == module.ProtocolErrorReason.EMPTY_VISIBLE_CONTENT
         assert action_step.model_output == "   \n\t"
 
+    def test_step_stream_records_model_output_into_model_call_log(self, monkeypatch, caplog):
+        """The MODEL OUTPUT body is written to the model_call file record at DEBUG."""
+        module = core_agent_module
+        CoreAgent = module.CoreAgent
+        monkeypatch.setattr(module, "AgentExecutionError", type("AgentExecutionError", (Exception,), {}))
+        monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        final_context.evidence.over_hard_budget = False
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+
+        response = MagicMock()
+        response.content = "   \n\t"
+        response.token_usage = None
+        agent.model = MagicMock(return_value=response)
+
+        caplog.set_level(logging.DEBUG, logger="model_call.core_agent")
+        action_step = MagicMock()
+        stream = agent._step_stream(action_step)
+        with pytest.raises(module.ModelOutputProtocolError):
+            next(stream)
+
+        records = [r for r in caplog.records if r.name == "model_call.core_agent"]
+        assert any(r.getMessage().startswith("MODEL OUTPUT") for r in records)
+
     def test_step_stream_turns_exhausted_empty_response_into_silent_protocol_repair(
         self, monkeypatch
     ):
@@ -3216,9 +3254,12 @@ class TestLogModelCallParameters:
         stop_sequences = ["Observation:"]
         additional_args = {"temperature": 0.7}
 
-        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+        with patch.object(module, "logger") as mock_logger:
+            agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
-        # Verify logger was called
+        # Both sinks are asserted: the file-bound DEBUG record and the console panel.
+        mock_logger.debug.assert_called_once()
+        assert "test" in mock_logger.debug.call_args[0][1]
         agent.logger.log_markdown.assert_called_once()
 
     def test_log_model_call_parameters_with_dict(self):
@@ -3234,8 +3275,10 @@ class TestLogModelCallParameters:
         stop_sequences = []
         additional_args = {}
 
-        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+        with patch.object(module, "logger") as mock_logger:
+            agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
+        mock_logger.debug.assert_called_once()
         agent.logger.log_markdown.assert_called_once()
 
     def test_log_model_call_parameters_with_fallback_str(self):
@@ -3251,15 +3294,16 @@ class TestLogModelCallParameters:
         stop_sequences = ["stop"]
         additional_args = {"api_key": "secret123"}
 
-        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+        with patch.object(module, "logger") as mock_logger:
+            agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
-        # Verify sensitive data was redacted
-        call_args = agent.logger.log_markdown.call_args
-        content = call_args[1]["content"]
-        assert "REDACTED" in content
+        # Verify sensitive data was redacted in both the file record and the panel
+        file_content = mock_logger.debug.call_args[0][1]
+        assert "REDACTED" in file_content
+        assert "REDACTED" in agent.logger.log_markdown.call_args.kwargs["content"]
 
     def test_log_model_call_parameters_redacts_runtime_metadata(self):
-        agent, _ = self._create_agent_for_log_params_test()
+        agent, module = self._create_agent_for_log_params_test()
         mock_msg = MagicMock()
         mock_msg.model_dump.return_value = {
             "role": "user",
@@ -3269,15 +3313,26 @@ class TestLogModelCallParameters:
             ),
         }
 
-        agent._log_model_call_parameters(
-            [mock_msg],
-            [],
-            {"metadata": {"secret": "must-not-leak"}},
-        )
+        with patch.object(module, "logger") as mock_logger:
+            agent._log_model_call_parameters(
+                [mock_msg],
+                [],
+                {"metadata": {"secret": "must-not-leak"}},
+            )
 
-        content = agent.logger.log_markdown.call_args.kwargs["content"]
+        content = mock_logger.debug.call_args[0][1]
         assert "must-not-leak" not in content
         assert "REDACTED" in content
+        panel_content = agent.logger.log_markdown.call_args.kwargs["content"]
+        assert "must-not-leak" not in panel_content
+        assert "REDACTED" in panel_content
+
+    def test_module_logger_stays_in_model_call_namespace(self):
+        """core_agent records must keep the model_call.core_agent name so the
+        runtime whitelist routes them into nexent_model_call.log."""
+        _, module = self._create_agent_for_log_params_test()
+
+        assert module.logger.name == "model_call.core_agent"
 
     def test_log_model_call_parameters_exception_handling(self):
         """Test _log_model_call_parameters handles exceptions gracefully."""
@@ -3600,6 +3655,18 @@ def test_run_injects_current_time_when_missing():
 
     assert agent.task.startswith("[Current time:")
     assert "What time is it?" in agent.task
+
+
+def test_run_records_task_echo_into_model_call_log(caplog):
+    """The run task echo is written to the model_call file record at DEBUG."""
+    agent = _create_minimal_core_agent_for_time_tests()
+    caplog.set_level(logging.DEBUG, logger="model_call.core_agent")
+
+    list(agent.run(task="你好", stream=True))
+
+    records = [r for r in caplog.records if r.name == "model_call.core_agent"]
+    assert any("NEW RUN TASK" in r.getMessage() for r in records)
+    assert any("你好" in r.getMessage() for r in records)
 
 
 def test_managed_agent_call_injects_workspace_instructions(tmp_path):

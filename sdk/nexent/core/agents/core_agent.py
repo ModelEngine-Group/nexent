@@ -1281,6 +1281,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             fallback_system_prompt=self.system_prompt,
         )
 
+        logger.debug("NEW RUN TASK\n%s", truncate_content(display_task.strip(), max_length=1000))
         self.logger.log_task(content=display_task.strip(),
                              subtitle=f"{type(self.model).__name__} - {(self.model.model_id if hasattr(self.model, 'model_id') else '')}",
                              level=LogLevel.INFO, title=self.name if hasattr(self, "name") else None, )
