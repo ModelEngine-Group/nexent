@@ -1,8 +1,10 @@
 import os
 import sys
 import asyncio
+import logging
+import runpy
 import types
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, call
 
 import pytest
 
@@ -137,20 +139,43 @@ setattr(apps_pkg, "runtime_app", base_app_mod)
 class TestMainServiceModuleIntegration:
     """Integration tests for runtime_service module dependencies"""
 
-    @patch('runtime_service.get_uvicorn_logging_config')
-    @patch('runtime_service.configure_elasticsearch_logging')
-    def test_logging_configuration_called_on_import(self, mock_configure_es, mock_get_uvicorn_config):
-        """
-        Test that logging configuration functions are called when module is imported.
+    RUNTIME_LOGGING_CONFIG = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {},
+        "handlers": {},
+        "root": {"level": "INFO", "handlers": []},
+    }
 
-        This test verifies that:
-        1. get_uvicorn_logging_config is called to build the dict config
-        2. configure_elasticsearch_logging is called
+    def test_logging_configuration_wires_runtime_and_model_call_categories(self):
+        """Both logging call sites must request the model_call category.
+
+        Model-layer loggers are routed to nexent_model_call.log only when the
+        service passes categories=["runtime", "model_call"]; dropping it would
+        silently send model I/O records nowhere. Covers the import-time
+        dictConfig and the uvicorn.run log_config.
         """
-        # Note: This test checks that logging configuration happens during module import.
-        # The mocks should have been called when the module was imported.
-        # In a real scenario, you might need to reload the module to test this properly.
-        pass
+        root = logging.getLogger()
+        saved_handlers = list(root.handlers)
+        saved_level = root.level
+        expected_call = call(categories=["runtime", "model_call"])
+        try:
+            with patch(
+                'utils.logging_utils.get_uvicorn_logging_config',
+                return_value=self.RUNTIME_LOGGING_CONFIG,
+            ) as mock_get_config, patch(
+                'utils.logging_utils.configure_elasticsearch_logging'
+            ) as mock_configure_es, patch('uvicorn.run') as mock_uvicorn_run:
+                runpy.run_module("runtime_service", run_name="__main__")
+        finally:
+            # The executed module reconfigures the root logger; restore it so
+            # this test does not leak logging state into the rest of the suite.
+            root.handlers[:] = saved_handlers
+            root.setLevel(saved_level)
+
+        assert mock_get_config.call_args_list.count(expected_call) == 2
+        mock_configure_es.assert_called_once_with()
+        assert mock_uvicorn_run.call_args.kwargs["log_config"] is self.RUNTIME_LOGGING_CONFIG
 
 
 if __name__ == '__main__':

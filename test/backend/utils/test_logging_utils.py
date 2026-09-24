@@ -6,10 +6,13 @@ Covers:
   - HybridRotatingFileHandler: rotation triggers (time vs size) and stream-error fallback
   - configure_logging: IS_DEBUG override of LOG_LEVEL, explicit level passthrough, default categories
   - get_uvicorn_logging_config: dictConfig contract, IS_DEBUG override, custom categories
+  - model_call routing: whitelisted SDK model-layer loggers write to the dedicated
+    model_call file and stop propagating to the service category files
   - configure_elasticsearch_logging: noisy client loggers demoted to WARNING
 """
 
 import logging
+import logging.config
 from logging.handlers import TimedRotatingFileHandler
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +21,7 @@ import pytest
 from backend.utils.logging_utils import (
     ColorFormatter,
     HybridRotatingFileHandler,
+    MODEL_CALL_LOGGERS,
     configure_elasticsearch_logging,
     configure_logging,
     get_uvicorn_logging_config,
@@ -180,12 +184,14 @@ class TestConfigureLogging:
         monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging()
         root = logging.getLogger()
-        # One StreamHandler (console) + one file handler per default category.
+        # One StreamHandler (console) + one file handler per default category,
+        # except model_call: its file handler is bound only to the whitelisted
+        # model-layer loggers, never to root.
         default_cats = ["config", "runtime", "northbound", "data_process", "model_call"]
-        assert len(root.handlers) == len(default_cats) + 1
+        assert len(root.handlers) == len(default_cats)  # console + 4 category files
         handler_classes = [type(h).__name__ for h in root.handlers]
         assert handler_classes.count("StreamHandler") == 1
-        assert handler_classes.count("HybridRotatingFileHandler") == len(default_cats)
+        assert handler_classes.count("HybridRotatingFileHandler") == len(default_cats) - 1
 
     def test_explicit_level_overrides_effective_level(self, reset_root_logger, tmp_path, monkeypatch):
         monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
@@ -289,6 +295,190 @@ class TestGetUvicornLoggingConfig:
         assert file_h["filename"].replace("\\", "/").endswith("my_cat/nexent_my_cat.log")
         assert file_h["encoding"] == "utf-8"
         assert file_h["class"].endswith("HybridRotatingFileHandler")
+
+
+# ---------------------------------------------------------------------------
+# model_call routing
+# ---------------------------------------------------------------------------
+
+
+def _cleanup_routing_state():
+    """Close test-created root handlers and unbind model_call loggers.
+
+    The console instance is shared between root and the model_call loggers, so
+    handlers attached to the named loggers are removed without closing (they
+    were already closed via root). Levels are reset too so the DEBUG pin does
+    not leak into unrelated tests.
+    """
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        root.removeHandler(h)
+        h.close()
+    for name in MODEL_CALL_LOGGERS:
+        named = logging.getLogger(name)
+        for h in list(named.handlers):
+            named.removeHandler(h)
+        named.propagate = True
+        named.setLevel(logging.NOTSET)
+
+
+def _read(tmp_path, category: str) -> str:
+    return (tmp_path / category / f"nexent_{category}.log").read_text(encoding="utf-8")
+
+
+def _apply_dictconfig(monkeypatch, tmp_path):
+    """Wire logging through the dictConfig path used by the service entrypoints."""
+    monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+    logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime", "model_call"]))
+
+
+def _apply_configure_logging(monkeypatch, tmp_path):
+    """Wire logging through the programmatic configure_logging path."""
+    monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+    configure_logging(categories=["runtime", "model_call"])
+
+
+class TestModelCallRouting:
+    """When model_call is among the categories, whitelisted model-layer loggers
+    write to the dedicated model_call file and stop propagating."""
+
+    def test_loggers_section_only_when_model_call_included(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        cfg_with = get_uvicorn_logging_config(categories=["runtime", "model_call"])
+        assert "loggers" in cfg_with
+        # Other services must keep their current behaviour untouched.
+        cfg_without = get_uvicorn_logging_config(categories=["config"])
+        assert "loggers" not in cfg_without
+
+    def test_named_loggers_bound_to_model_call_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        cfg = get_uvicorn_logging_config(categories=["runtime", "model_call"])
+        for name in MODEL_CALL_LOGGERS:
+            entry = cfg["loggers"][name]
+            assert entry["handlers"] == ["console", "file_model_call"]
+            assert entry["propagate"] is False
+            # DEBUG pin: model-layer debug records must be emitted even when
+            # the root logger stays at INFO.
+            assert entry["level"] == "DEBUG"
+        # file_model_call must pass DEBUG records through the handler gate;
+        # it is bound only to the whitelisted loggers, so nothing can leak in.
+        assert cfg["handlers"]["file_model_call"]["level"] == "DEBUG"
+        # Console itself stays unfiltered (docker logs behaviour unchanged).
+        assert "filters" not in cfg["handlers"]["console"]
+        assert "filters" not in cfg["handlers"]["file_runtime"]
+
+    def test_whitelist_covers_sdk_model_loggers(self):
+        assert set(MODEL_CALL_LOGGERS) >= {
+            "openai_llm",
+            "openai_long_context_model",
+            "nexent.core.models.openai_vlm",
+            "nexent.core.models.ali_stt_model",
+            "nexent.core.models.ali_tts_model",
+            "volc_stt_model",
+            "volc_tts_model",
+            "model_call",
+            "context_evidence",
+        }
+
+    def test_config_is_dictconfig_instantiable(self, reset_root_logger, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        cfg = get_uvicorn_logging_config(categories=["runtime", "model_call"])
+        logging.config.dictConfig(cfg)  # must not raise
+        _cleanup_routing_state()
+
+    def _log_and_assert_routing(self, tmp_path):
+        try:
+            logging.getLogger("openai_llm").info("llm event")
+            logging.getLogger("context_evidence").info("context evidence event")
+            logging.getLogger("runtime_service").info("system event")
+            for h in logging.getLogger().handlers:
+                h.flush()
+            model_log = _read(tmp_path, "model_call")
+            runtime_log = _read(tmp_path, "runtime")
+            assert "llm event" in model_log
+            assert "context evidence event" in model_log
+            assert "system event" not in model_log
+            assert "system event" in runtime_log
+            assert "llm event" not in runtime_log
+            assert "context evidence event" not in runtime_log
+        finally:
+            _cleanup_routing_state()
+
+    @pytest.mark.parametrize(
+        "apply_config",
+        [_apply_dictconfig, _apply_configure_logging],
+        ids=["dictconfig", "configure_logging"],
+    )
+    def test_routes_model_records_to_dedicated_file(
+        self, reset_root_logger, tmp_path, monkeypatch, apply_config
+    ):
+        apply_config(monkeypatch, tmp_path)
+        self._log_and_assert_routing(tmp_path)
+
+    @pytest.mark.parametrize(
+        "apply_config",
+        [_apply_dictconfig, _apply_configure_logging],
+        ids=["dictconfig", "configure_logging"],
+    )
+    def test_debug_records_reach_model_call_file(
+        self, reset_root_logger, tmp_path, monkeypatch, apply_config
+    ):
+        """Regression: MODEL INPUT PARAMETERS is logged at DEBUG on
+        model_call.core_agent; with the whitelist left at NOTSET it inherited
+        the root INFO level and was silently dropped before reaching the file.
+        """
+        apply_config(monkeypatch, tmp_path)
+        try:
+            assert logging.getLogger("model_call.core_agent").isEnabledFor(logging.DEBUG)
+            logging.getLogger("model_call.core_agent").debug("MODEL INPUT PARAMETERS probe")
+            logging.getLogger("openai_llm").debug("debug probe from openai_llm")
+            for h in logging.getLogger().handlers:
+                h.flush()
+            model_log = _read(tmp_path, "model_call")
+            runtime_log = _read(tmp_path, "runtime")
+            assert "MODEL INPUT PARAMETERS probe" in model_log
+            assert "debug probe from openai_llm" in model_log
+            assert "MODEL INPUT PARAMETERS probe" not in runtime_log
+            assert "debug probe from openai_llm" not in runtime_log
+        finally:
+            _cleanup_routing_state()
+
+    def test_whitelist_pinned_to_debug_level(self, reset_root_logger, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        configure_logging(categories=["runtime", "model_call"])
+        try:
+            for name in MODEL_CALL_LOGGERS:
+                assert logging.getLogger(name).level == logging.DEBUG
+        finally:
+            _cleanup_routing_state()
+
+    def test_unbind_resets_whitelist_levels(self, reset_root_logger, tmp_path, monkeypatch):
+        """Without the model_call category the whitelist returns to its
+        pre-branch behaviour: no handlers, propagate on, level inherited."""
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        configure_logging(categories=["runtime", "model_call"])
+        configure_logging(categories=["runtime"])
+        try:
+            for name in MODEL_CALL_LOGGERS:
+                named = logging.getLogger(name)
+                assert named.level == logging.NOTSET
+                assert named.handlers == []
+                assert named.propagate is True
+        finally:
+            _cleanup_routing_state()
+
+    def test_named_loggers_do_not_accumulate_handlers(
+        self, reset_root_logger, tmp_path, monkeypatch
+    ):
+        """Calling configure_logging twice must not stack handlers on named loggers."""
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        configure_logging(categories=["runtime", "model_call"])
+        configure_logging(categories=["runtime", "model_call"])
+        try:
+            for name in MODEL_CALL_LOGGERS:
+                assert len(logging.getLogger(name).handlers) == 2
+        finally:
+            _cleanup_routing_state()
 
 
 # ---------------------------------------------------------------------------
