@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections import deque
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import Header
 from nexent.core.concurrency import run_blocking
@@ -215,7 +216,7 @@ async def upload_agent_icon_impl(
     object_name = _agent_icon_object_name(agent_id, owner_tenant_id)
     content_type = upload_icon_image(content, object_name)
 
-    icon_url = f"/api/agent/{agent_id}/icon"
+    icon_url = f"/api/agent/{agent_id}/icon?v={uuid4().hex}"
     update_agent_icon(
         agent_id=agent_id,
         tenant_id=owner_tenant_id,

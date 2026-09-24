@@ -58,3 +58,8 @@ export function getAgentUploadedIconId(agent: {
     ? agent.agent_id
     : null;
 }
+
+export function getAgentUploadedIconRevision(iconUrl?: string | null): string | null {
+  const query = iconUrl?.split("?", 2)[1];
+  return query ? new URLSearchParams(query).get("v") : null;
+}

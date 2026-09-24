@@ -3,7 +3,7 @@
 import { createElement } from "react";
 import { Avatar } from "antd";
 
-import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { getAgentIcon, getAgentUploadedIconRevision } from "@/lib/chat/agentIconUtils";
 import { API_ENDPOINTS } from "@/services/api";
 import type { Agent } from "@/types/agentConfig";
 
@@ -25,7 +25,10 @@ export default function AgentAvatar({
   const agentId = Number(agent.id);
   const iconSource =
     agent.icon_url?.trim() && Number.isInteger(agentId) && agentId > 0
-      ? API_ENDPOINTS.agent.icon(agentId)
+      ? API_ENDPOINTS.agent.icon(
+          agentId,
+          getAgentUploadedIconRevision(agent.icon_url)
+        )
       : undefined;
 
   return (

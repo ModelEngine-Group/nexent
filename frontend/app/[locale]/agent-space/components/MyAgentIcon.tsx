@@ -5,6 +5,7 @@ import { createElement } from "react";
 import {
   getAgentIcon,
   getAgentUploadedIconId,
+  getAgentUploadedIconRevision,
 } from "@/lib/chat/agentIconUtils";
 import { API_ENDPOINTS } from "@/services/api";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
@@ -32,7 +33,10 @@ export function MyAgentIcon({ agent, size, iconSize }: MyAgentIconProps) {
       src={
         uploadedIconId === null
           ? undefined
-          : API_ENDPOINTS.agent.icon(uploadedIconId)
+          : API_ENDPOINTS.agent.icon(
+              uploadedIconId,
+              getAgentUploadedIconRevision(agent.icon_url)
+            )
       }
       icon={fallbackIcon}
       className="!shrink-0 !rounded-xl !bg-primary/10 !text-primary"

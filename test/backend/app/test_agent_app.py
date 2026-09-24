@@ -2855,7 +2855,7 @@ def test_get_agent_icon_api_success(mocker, mock_auth_header):
         return_value=(b"image-bytes", "image/webp"),
     )
 
-    response = config_client.get("/agent/7/icon", headers=mock_auth_header)
+    response = config_client.get("/agent/7/icon?v=new-revision", headers=mock_auth_header)
 
     assert response.status_code == 200
     assert response.content == b"image-bytes"

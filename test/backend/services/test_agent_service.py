@@ -19818,15 +19818,33 @@ async def test_upload_agent_icon_impl_success(mocker):
 
     result = await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
 
-    assert result == {"icon_url": "/api/agent/123/icon", "content_type": "image/png"}
+    assert result["content_type"] == "image/png"
+    assert result["icon_url"].startswith("/api/agent/123/icon?v=")
+    assert len(result["icon_url"].split("?v=", 1)[1]) == 32
     upload.assert_called_once()
     assert upload.call_args.args[1] == "agent-icons/owner-tenant/123/icon"
     update.assert_called_once_with(
         agent_id=123,
         tenant_id="owner-tenant",
-        icon_url="/api/agent/123/icon",
+        icon_url=result["icon_url"],
         user_id="user",
     )
+
+
+@pytest.mark.asyncio
+async def test_upload_agent_icon_impl_changes_url_on_reupload(mocker):
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"permission": "EDIT", "tenant_id": "owner-tenant"},
+    )
+    mocker.patch.object(agent_service, "upload_icon_image", return_value="image/png")
+    mocker.patch.object(agent_service, "update_agent_icon")
+
+    first = await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
+    second = await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
+
+    assert first["icon_url"] != second["icon_url"]
 
 
 @pytest.mark.asyncio

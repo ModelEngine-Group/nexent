@@ -27,7 +27,7 @@ import {
 } from "@/hooks/agent/useSaveGuard";
 import { API_ENDPOINTS } from "@/services/api";
 import { fetchWithAuth } from "@/lib/auth";
-import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { getAgentIcon, getAgentUploadedIconRevision } from "@/lib/chat/agentIconUtils";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
@@ -53,7 +53,6 @@ export default function AgentInfo() {
   const isReadOnly = useAgentReadOnly();
   const [uploading, setUploading] = useState(false);
   const [iconLoadError, setIconLoadError] = useState(false);
-  const [iconVersion, setIconVersion] = useState(0);
   const [assignTagsOpen, setAssignTagsOpen] = useState(false);
   const [tagManagementOpen, setTagManagementOpen] = useState(false);
   const [tagPreviewRefreshKey, setTagPreviewRefreshKey] = useState(0);
@@ -75,7 +74,10 @@ export default function AgentInfo() {
   );
   const iconSource =
     agentId !== null && editedAgent.icon_url && !iconLoadError
-      ? `${API_ENDPOINTS.agent.icon(agentId)}?v=${iconVersion}`
+      ? API_ENDPOINTS.agent.icon(
+          agentId,
+          getAgentUploadedIconRevision(editedAgent.icon_url)
+        )
       : undefined;
 
   const uploadProps: UploadProps = {
@@ -101,7 +103,6 @@ export default function AgentInfo() {
         );
         const data = await response.json();
         setIconLoadError(false);
-        setIconVersion(Date.now());
         updateDraft({ icon_url: data.icon_url });
         void queryClient.invalidateQueries({ queryKey: ["agents"] });
         message.success(t("agent.iconUploadSuccess"));
