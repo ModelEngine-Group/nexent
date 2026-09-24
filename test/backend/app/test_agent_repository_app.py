@@ -35,8 +35,14 @@ class _SkillResolution(BaseModel):
     new_name: Optional[str] = None
 
 
+class _KnowledgeBaseResolution(BaseModel):
+    knowledge_name: str
+    action: str
+
+
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
 consts_model.SkillResolution = _SkillResolution
+consts_model.KnowledgeBaseResolution = _KnowledgeBaseResolution
 
 class _TagAssignmentFilter(BaseModel):
     definition_id: int
@@ -928,6 +934,10 @@ def test_import_agent_from_repository_api_passes_tenant_id(
         tenant_id="test_tenant_id",
         authorization=mock_auth_header["Authorization"],
         skill_resolutions=None,
+        model_ids=None,
+        embedding_model_ids=None,
+        knowledge_base_resolutions=None,
+        user_id="test_user_id",
     )
 
 

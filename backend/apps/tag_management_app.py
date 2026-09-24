@@ -52,6 +52,11 @@ def _require_manage_context(authorization: str | None) -> tuple[str, str, str]:
     return user_id, tenant_id, role
 
 
+def _require_read_context(authorization: str | None) -> tuple[str, str, str]:
+    """Return the authenticated tenant context for read-only tag metadata."""
+    return get_current_user_context(authorization)
+
+
 def _assignment_caller(authorization: str | None) -> AuthenticatedCaller:
     user_id, tenant_id, role = get_current_user_context(authorization)
     return AuthenticatedCaller(
@@ -285,7 +290,7 @@ async def replace_resource_tag_assignments(
 
 @router.get("", response_model=list[TagLibraryResponse])
 def list_tag_libraries(authorization: str | None = Header(None)):
-    _, tenant_id, _ = _require_manage_context(authorization)
+    _, tenant_id, _ = _require_read_context(authorization)
     try:
         return TagManagementService.list_libraries(tenant_id)
     except TagManagementNotFoundError as error:
@@ -301,7 +306,7 @@ def list_tag_libraries(authorization: str | None = Header(None)):
 
 @router.get("/{bucket_id}/definitions", response_model=list[TagDefinitionResponse])
 def list_tag_definitions(bucket_id: int, authorization: str | None = Header(None)):
-    _, tenant_id, _ = _require_manage_context(authorization)
+    _, tenant_id, _ = _require_read_context(authorization)
     try:
         return TagManagementService.list_definitions(tenant_id, bucket_id)
     except TagManagementNotFoundError as error:

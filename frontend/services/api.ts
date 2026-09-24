@@ -619,6 +619,11 @@ export const API_ENDPOINTS = {
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    official: `${API_BASE_URL}/repository/agent/official`,
+    officialInstall: `${API_BASE_URL}/repository/agent/official/install`,
+    officialManagement: `${API_BASE_URL}/repository/agent/official/management`,
+    officialManagementItem: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/official/management/${agentRepositoryId}`,
     tagStats: `${API_BASE_URL}/repository/agent/tags`,
     importPrecheck: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,

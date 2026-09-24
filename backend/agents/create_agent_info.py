@@ -69,6 +69,7 @@ from utils.memory_tool_prompt import build_memory_tool_policy
 from utils.automation_tool_prompt import build_automation_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.http_client_utils import create_httpx_client
+from utils.mcp_url_utils import get_tenant_local_mcp_server
 from utils.redis_utils import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
@@ -79,6 +80,7 @@ from consts.const import (
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
+    TOKEN,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
@@ -2600,7 +2602,7 @@ async def create_agent_run_info(
         selected_config.reasoning_budget_tokens = reasoning_budget_tokens
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
-    default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     remote_mcp_list.append({
         "remote_mcp_server_name": "outer-apis",
         "remote_mcp_server": default_mcp_url,
@@ -2629,6 +2631,10 @@ async def create_agent_run_info(
             }
             if url == default_mcp_url:
                 mcp_config["httpx_client_factory"] = create_httpx_client
+                mcp_config["headers"] = {
+                    "X-Tenant-ID": str(tenant_id),
+                    "X-Nexent-Internal-Token": TOKEN,
+                }
             headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:

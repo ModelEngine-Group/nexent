@@ -61,6 +61,21 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
         return agent.agent_id
 
 
+def find_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: int = 0):
+    """Return an Agent ID by name, or ``None`` when no Agent exists.
+
+    This non-raising variant is intended for idempotent provisioning flows
+    where a missing Agent is an expected branch, not an error condition.
+    """
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.name == agent_name,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == version_no,
+            AgentInfo.delete_flag != 'Y').first()
+        return agent.agent_id if agent else None
+
+
 def search_blank_sub_agent_by_main_agent_id(tenant_id: str, version_no: int = 0):
     """
     Search blank sub agent by main agent id.
@@ -306,6 +321,24 @@ def update_agent_icon(agent_id: int, tenant_id: str, icon_url: str, user_id: str
                 AgentInfo.delete_flag == "N",
             )
             .values(icon_url=icon_url, updated_by=user_id)
+        )
+        if result.rowcount == 0:
+            raise ValueError("ag_tenant_agent_t Agent not found")
+
+
+def update_agent_display_name(
+    agent_id: int, tenant_id: str, display_name: str, user_id: str
+) -> None:
+    """Update the display name on every active version of an agent."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.delete_flag == "N",
+            )
+            .values(display_name=display_name, updated_by=user_id)
         )
         if result.rowcount == 0:
             raise ValueError("ag_tenant_agent_t Agent not found")

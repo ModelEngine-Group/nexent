@@ -5,7 +5,7 @@ import types
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from pydantic import BaseModel
@@ -59,6 +59,8 @@ class _RepositoryImportRequirementItem(BaseModel):
     available: bool
     reason_code: str | None = None
     suggested_new_name: str | None = None
+    resolution_required: bool = False
+    existing_index_name: str | None = None
 
 
 class _RepositoryImportPrecheckResponse(BaseModel):
@@ -89,6 +91,7 @@ sys.modules["consts.model"] = _consts_model
 sys.modules.setdefault("services.model_gateway_service", MagicMock())
 sys.modules.setdefault("utils.config_utils", MagicMock())
 
+from services import repository_import_precheck as precheck_service
 from services.repository_import_precheck import build_repository_import_precheck
 
 
@@ -313,3 +316,100 @@ def test_build_precheck_skill_duplicate(
     assert len(skill_items) == 1
     assert skill_items[0].available is False
     assert skill_items[0].reason_code == "skill_duplicate"
+
+
+@pytest.mark.parametrize(
+    ("record", "model", "expected_available"),
+    [
+        ({}, None, False),
+        ({"embedding_model_id": 7}, None, False),
+        ({"embedding_model_id": 7}, {"connect_status": "unavailable"}, False),
+        ({"embedding_model_id": 7}, {"connect_status": "available"}, True),
+    ],
+)
+def test_check_kb_embedding_available_checks_model_id_and_status(
+    record, model, expected_available
+):
+    with patch.object(
+        precheck_service, "get_model_by_model_id", return_value=model
+    ) as get_model:
+        available, reason = precheck_service._check_kb_embedding_available(
+            record, "tenant_a"
+        )
+
+    assert available is expected_available
+    if expected_available:
+        assert reason is None
+        get_model.assert_called_once_with(7, "tenant_a")
+    else:
+        assert reason == "model_unavailable"
+        if record.get("embedding_model_id"):
+            get_model.assert_called_once_with(record["embedding_model_id"], "tenant_a")
+        else:
+            get_model.assert_not_called()
+
+
+@patch("services.repository_import_precheck.skill_db.list_skills", return_value=[])
+@patch("services.repository_import_precheck.query_all_tools", return_value=[])
+@patch("services.repository_import_precheck.get_model_by_model_id")
+@patch("services.repository_import_precheck.get_model_id_by_display_name", return_value=7)
+@patch("services.repository_import_precheck.get_knowledge_record")
+@patch(
+    "services.repository_import_precheck.get_knowledge_name_map_by_index_names",
+    return_value={},
+)
+def test_build_precheck_falls_back_to_bundle_knowledge_name_and_checks_embedding(
+    mock_kb_name_map,
+    mock_kb_record,
+    mock_get_model_id,
+    mock_get_model_by_id,
+    mock_query_tools,
+    mock_list_skills,
+):
+    mock_kb_record.return_value = {
+        "knowledge_id": 9,
+        "knowledge_describe": "Official guidance",
+        "embedding_model_id": 7,
+        "index_name": "42-abc",
+    }
+    mock_get_model_by_id.return_value = {"connect_status": "available"}
+    snapshot = _snapshot(
+        tools=[
+            {
+                "class_name": "KnowledgeBaseSearchTool",
+                "source": "local",
+                "name": "knowledge_base_search",
+                "params": {"index_names": ["kb_index"]},
+            }
+        ]
+    )
+    snapshot.knowledge_bases = [
+        SimpleNamespace(
+            logical_index_name="kb_index",
+            display_name="Official KB",
+            description="Bundle description",
+        )
+    ]
+
+    result = build_repository_import_precheck(
+        agent_repository_id=42,
+        display_name="Writer",
+        snapshot=snapshot,
+        tenant_id="tenant_a",
+        require_kb_embedding_model=True,
+    )
+
+    kb_items = [item for item in result.items if item.type == "knowledge_base"]
+    assert len(kb_items) == 1
+    assert kb_items[0].available is True
+    assert kb_items[0].description == "Official guidance"
+    assert mock_kb_record.call_args_list == [
+        call({"knowledge_name": "Official KB", "tenant_id": "tenant_a"}),
+    ]
+    assert mock_get_model_by_id.call_count == 2
+    assert mock_get_model_by_id.call_args_list == [
+        call(7, "tenant_a"),
+        call(7, "tenant_a"),
+    ]
+    assert kb_items[0].resolution_required is True
+    assert kb_items[0].existing_index_name == "42-abc"

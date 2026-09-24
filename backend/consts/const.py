@@ -109,7 +109,18 @@ AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 
 # Container-internal official skills ZIP directory
-OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
+OFFICIAL_SKILLS_ZIP_PATH = os.getenv(
+    "OFFICIAL_SKILLS_ZIP_PATH", "/mnt/nexent/official-skills-zip"
+)
+
+# Container-internal official agents bundle directory (one JSON per agent)
+OFFICIAL_AGENTS_PATH = os.getenv(
+    "OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents"
+)
+
+OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "")
+SYSTEM_TENANT_ID = "system"
+SYSTEM_USER_ID = "system"
 
 
 # Preview Configuration
