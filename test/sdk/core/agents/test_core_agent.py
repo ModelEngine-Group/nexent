@@ -2384,6 +2384,7 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
 
         agent = object.__new__(CoreAgent)
+        agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.observer = MagicMock()
         agent.step_number = 1

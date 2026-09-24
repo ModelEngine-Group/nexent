@@ -983,14 +983,15 @@ Additional Args:
                 ),
                 **additional_args,
             )
-            logger.debug(
-                "MODEL OUTPUT\n%s",
-                truncate_content(str(model_output or ""), max_length=1000),
-            )
             memory_step.model_output_message = chat_message
             model_output = chat_message.content
             memory_step.token_usage = chat_message.token_usage
             memory_step.model_output = model_output
+            # Must stay after the assignment above: the record reads model_output.
+            logger.debug(
+                "MODEL OUTPUT\n%s",
+                truncate_content(str(model_output or ""), max_length=1000),
+            )
         except ModelInvocationTerminalError as terminal_error:
             if self.stop_event.is_set():
                 raise RunTerminated() from terminal_error
