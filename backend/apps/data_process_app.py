@@ -13,6 +13,7 @@ from consts.model import (
 )
 from data_process.parse_tasks import load_chunks_from_redis
 from data_process.tasks import process_sync, submit_process_forward_chain
+from data_process.utils import get_task_details as get_task_details_util
 from services.data_process_service import get_data_process_service
 
 
@@ -227,7 +228,7 @@ async def get_index_tasks(index_name: str):
 @router.get("/{task_id}/details")
 async def get_task_details(task_id: str):
     """Get detailed information about a task, including results"""
-    task = await service.get_task_details(task_id)
+    task = await get_task_details_util(task_id)
     if not task:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                             detail="Task not found")

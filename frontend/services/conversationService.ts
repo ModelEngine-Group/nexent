@@ -1015,13 +1015,20 @@ export const conversationService = {
       }>;
       agent_id?: number; // Add agent_id parameter
       model_id?: number; // Optional model override
+      reasoning_effort?:
+        | "auto"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max";
+      reasoning_budget_tokens?: number;
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
-      enable_hitl?: boolean;
-      hitl_run_id?: string;
-      hitl_after_event?: number;
       knowledge_scope?: ConversationKnowledgeScope;
       metadata?: Record<string, unknown> | null;
       expected_metadata_version?: number;
@@ -1046,9 +1053,6 @@ export const conversationService = {
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
-        enable_hitl: params.enable_hitl === true,
-        hitl_run_id: params.hitl_run_id,
-        hitl_after_event: params.hitl_after_event ?? 0,
       };
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
@@ -1070,6 +1074,25 @@ export const conversationService = {
       }
       if (params.model_id !== undefined && params.model_id !== null) {
         requestParams.model_id = params.model_id;
+      }
+      const budgetTokens = params.reasoning_budget_tokens;
+      const hasBudgetSelection =
+        typeof budgetTokens === "number" &&
+        Number.isInteger(budgetTokens) &&
+        budgetTokens >= 0;
+      if (
+        !hasBudgetSelection &&
+        params.reasoning_effort !== undefined &&
+        params.reasoning_effort !== "auto"
+      ) {
+        requestParams.reasoning_effort = params.reasoning_effort;
+      }
+      if (
+        hasBudgetSelection &&
+        budgetTokens !== undefined &&
+        budgetTokens > 0
+      ) {
+        requestParams.reasoning_budget_tokens = budgetTokens;
       }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;
@@ -1106,6 +1129,11 @@ export const conversationService = {
         body: JSON.stringify(requestParams),
         signal,
       });
+
+      if (response.headers.get("X-Stream-Status") === "conflict") {
+        await response.body?.cancel();
+        throw new Error("agent_run_conflict");
+      }
 
       const conversationId = response.headers.get("conversation_id");
       if (conversationId && onConversationId) {

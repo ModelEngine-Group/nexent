@@ -308,7 +308,15 @@ export function QuotaSettingsModal({
     : null;
   const kbCount = usageData?.kb_count || 0;
   const fairShareGb =
-    hardLimitGb && kbCount > 0 ? Math.round(hardLimitGb / kbCount) : null;
+    hardLimitGb && kbCount > 0 ? hardLimitGb / kbCount : null;
+  // Keep sub-GB fair share meaningful (e.g. 0.17 GB/KB) instead of rounding
+  // to 0, which previously leaked a bare "0" into the JSX below.
+  const fairShareDisplay =
+    fairShareGb == null
+      ? null
+      : Number.isInteger(fairShareGb)
+        ? fairShareGb.toString()
+        : fairShareGb.toFixed(2);
 
   // Per-KB breakdown columns
   const breakdownColumns = [
@@ -575,13 +583,13 @@ export function QuotaSettingsModal({
       )}
 
       {/* Fair Share Reference */}
-      {fairShareGb && (
+      {fairShareDisplay != null && (
         <Row style={{ marginBottom: 12 }}>
           <Col>
             <Text type="secondary">
               <InfoCircleOutlined style={{ marginRight: 4 }} />
               {t("quota.fairShare", "Fair Share Reference")}: {hardLimitGb} GB
-              &divide; {kbCount} KBs = {fairShareGb} GB/KB
+              &divide; {kbCount} KBs = {fairShareDisplay} GB/KB
             </Text>
           </Col>
         </Row>
@@ -598,7 +606,12 @@ export function QuotaSettingsModal({
             columns={breakdownColumns}
             rowKey="knowledge_id"
             size="small"
-            pagination={false}
+            pagination={{
+              pageSize: 10,
+              size: "small",
+              showSizeChanger: false,
+              showTotal: (total) => t("quota.breakdownTotal", { total }),
+            }}
             style={{ marginBottom: 16 }}
           />
           <Text type="secondary">

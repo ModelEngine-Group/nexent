@@ -46,13 +46,22 @@ def client(mocker):
 
         services_vdb_mod.get_vector_db_core = _get_vector_db_core
         _sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
-    
+
     # Import after mocking (only backend path is required by app imports)
     from backend.apps.model_managment_app import router
-    
+    from permissions.depends import authenticate
+    from permissions.models import CurrentUser
+
+    # Grant all model permissions so existing business-logic tests pass
+    # without touching the RBAC database; RBAC behavior is covered by
+    # test_model_rbac.py.
+    mocker.patch('permissions.depends.has_permission', return_value=True)
+
     # Create test client
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[authenticate] = lambda: CurrentUser(
+        user_id="test_user", tenant_id="test_tenant", role="SU")
     return TestClient(app)
 
 
@@ -128,6 +137,47 @@ async def test_suggest_capacity_success(client, auth_header, user_credentials, m
     assert data["suggestions"]["context_window_tokens"] == 128000
     assert data["suggested_provider"] == "openai"
     mock_suggest.assert_called_once()
+
+
+def test_suggest_capacity_includes_reasoning_capability(mocker):
+    """The shared model/base-URL lookup is returned to custom-access callers."""
+    from backend.apps.model_managment_app import _suggest_capacity_for_request
+    from backend.consts.model import ModelCapacitySuggestionRequest
+    from backend.services.model_capacity_suggestion_service import (
+        CapacitySuggestionMatchKind,
+        CapacitySuggestionResult,
+    )
+
+    mocker.patch(
+        "backend.apps.model_managment_app.suggest_capacity",
+        return_value=CapacitySuggestionResult(
+            suggestions=None,
+            match_kind=CapacitySuggestionMatchKind.NONE,
+            match_confidence=None,
+            match_explanation="No capacity profile",
+        ),
+    )
+    mocker.patch(
+        "backend.apps.model_managment_app.get_model_reasoning_capability",
+        return_value={
+            "status": "supported",
+            "control": "effort",
+            "levels": ["high", "max"],
+            "default": "auto",
+            "wire_format": "reasoning_effort",
+            "source": "models_dev",
+        },
+    )
+
+    response = _suggest_capacity_for_request(
+        ModelCapacitySuggestionRequest(
+            model_name="deepseek-v4-pro",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+    )
+
+    assert response.reasoning_capability is not None
+    assert response.reasoning_capability.levels == ["high", "max"]
 
 
 @pytest.mark.asyncio
@@ -1886,14 +1936,27 @@ MODEL_TOKEN_EXPIRED_ENDPOINTS = [
 
 @pytest.mark.parametrize("method,url,kwargs", MODEL_TOKEN_EXPIRED_ENDPOINTS)
 def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker, method, url, kwargs):
-    """Expired token maps to 401 on every authenticated model endpoint."""
-    from consts.exceptions import TokenExpiredError
+    """Expired token maps to 401 on every authenticated model endpoint.
 
-    mocker.patch(
-        "backend.apps.model_managment_app.get_current_user_id",
-        side_effect=TokenExpiredError("expired"),
-    )
-    response = getattr(client, method)(url, headers=auth_header, **kwargs)
+    In production the global TokenExpiredError handler (app_factory) maps the
+    exception raised inside ``authenticate`` to 401; the bare test app has no
+    such handler, so emulate the same mapping here.
+    """
+    from fastapi import HTTPException as FastAPIHTTPException
+    from permissions.depends import authenticate
+
+    def _expired_user():
+        raise FastAPIHTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED, detail="expired")
+
+    client.app.dependency_overrides[authenticate] = _expired_user
+    try:
+        response = getattr(client, method)(url, headers=auth_header, **kwargs)
+    finally:
+        # Restore the default override for other tests using this client.
+        from permissions.models import CurrentUser
+        client.app.dependency_overrides[authenticate] = lambda: CurrentUser(
+            user_id="test_user", tenant_id="test_tenant", role="SU")
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]
