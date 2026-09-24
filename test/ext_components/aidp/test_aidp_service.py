@@ -914,6 +914,38 @@ class TestNormalizeAidpDoc:
         result = normalize({"create_time": 1700000000})
         assert result["created_at"] is not None
 
+    def test_keeps_an_iso_created_at_the_payload_reports(self, normalize):
+        """The history endpoint already spells the creation time ``created_at``."""
+        result = normalize({"created_at": "2024-06-10T06:20:00Z", "file_name": "a.txt"})
+        assert result["created_at"] == "2024-06-10T06:20:00Z"
+        assert result["file_name"] == "a.txt"
+
+    def test_keeps_an_iso_updated_at_the_payload_reports(self, normalize):
+        result = normalize({"updated_at": "2024-06-10T06:20:00Z"})
+        assert result["updated_at"] == "2024-06-10T06:20:00Z"
+
+    def test_numeric_upload_time_wins_over_a_reported_created_at(self, normalize):
+        """A listing row reports both; the upload timestamp stays authoritative."""
+        result = normalize({
+            "first_upload_time": 1700000000,
+            "created_at": "2024-06-10T06:20:00Z",
+        })
+        assert "2023-11-14" in result["created_at"]
+
+    def test_numeric_string_timestamp_is_converted(self, normalize):
+        result = normalize({"created_at": "1700000000"})
+        assert "2023-11-14" in result["created_at"]
+
+    def test_history_item_keeps_its_created_at(self, aidp_service_module):
+        """Regression: the history's ``created_at`` used to be blanked to null."""
+        result = aidp_service_module._normalize_history_doc({
+            "file_uuid": "uuid-1",
+            "created_at": "2024-06-10T06:20:00Z",
+            "status": "uploading",
+        })
+        assert result["created_at"] == "2024-06-10T06:20:00Z"
+        assert result["status"] == "UPLOADING"
+
     def test_uses_update_time_for_updated_at(self, normalize):
         result = normalize({"update_time": 1700000000, "first_upload_time": 1600000000})
         assert result["updated_at"] is not None

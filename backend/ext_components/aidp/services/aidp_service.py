@@ -241,20 +241,49 @@ def _extract_list_payload(payload: Any) -> list | None:
     return None
 
 
+def _timestamp_or_iso(value: Any) -> str | None:
+    """Return an ISO-8601 string for a Unix timestamp or an already-ISO value.
+
+    AIDP spells the creation time two ways: the document listing reports
+    ``first_upload_time`` / ``create_time`` as Unix seconds, while the
+    knowledge-file history already sends the canonical ``created_at`` as an ISO
+    string. Both spellings have to survive normalization, otherwise the history
+    rows lose a column the listing rows keep.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            float(text)
+        except ValueError:
+            # Already an ISO-8601 string: keep it verbatim.
+            return text
+        value = text
+    return _timestamp_to_iso(value)
+
+
 def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Map an AIDP document item to the shape the frontend expects.
 
     AIDP returns ``first_upload_time`` / ``create_time`` as the creation timestamp
     and ``update_time`` as the last-modified timestamp. The frontend schema
-    expects ``created_at`` (ISO string). This mapper performs that conversion
-    and carries through all other fields unchanged.
+    expects ``created_at`` (ISO string). This mapper performs that conversion and
+    carries through all other fields unchanged — including a ``created_at`` /
+    ``updated_at`` that the payload already reports, which is what the history
+    endpoint does: overwriting those with a conversion that cannot read the
+    canonical name is what left the creation time empty for history rows.
     """
     out = dict(raw)
     created_raw = raw.get("first_upload_time") or raw.get("create_time")
-    out["created_at"] = _timestamp_to_iso(created_raw)
+    if created_raw is None:
+        created_raw = raw.get("created_at")
+    out["created_at"] = _timestamp_or_iso(created_raw)
 
     updated_raw = raw.get("update_time")
-    out["updated_at"] = _timestamp_to_iso(updated_raw)
+    if updated_raw is None:
+        updated_raw = raw.get("updated_at")
+    out["updated_at"] = _timestamp_or_iso(updated_raw)
     return out
 
 
