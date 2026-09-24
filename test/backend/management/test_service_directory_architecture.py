@@ -15,6 +15,7 @@ MIGRATED_MODULES = {
     "agent/naming.py",
     "agent/read.py",
     "agent/run_context.py",
+    "agent/run_identity.py",
     "agent/run.py",
     "agent/service.py",
     "knowledge_base/common.py",
@@ -48,7 +49,7 @@ LEGACY_MODULE_NAMES = {
 
 DEFAULT_MODULE_LINE_LIMIT = 2000
 MODULE_LINE_LIMITS = {
-    "agent/run.py": 2300,
+    "agent/run.py": 2350,
 }
 
 

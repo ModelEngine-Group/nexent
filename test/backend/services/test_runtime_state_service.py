@@ -428,8 +428,6 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
 
     service.set_thread_manager(FakeThreadManager())
 
-    async def fake_to_thread(func, *args, **kwargs):
-        return func(*args, **kwargs)
     monkeypatch.setattr(
         service,
         "reset_stream",
@@ -474,5 +472,5 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
         assert await service.consume_scoped_rate_limit_async("runtime-scope", "a" * 64, 2) == 1
 
     asyncio.run(run_checks())
-    assert len(managed_calls) == 11
+    assert len(managed_calls) == 12
     assert {lane for lane, _ in managed_calls} == {"control-io"}

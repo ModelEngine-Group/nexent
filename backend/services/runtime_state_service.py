@@ -402,7 +402,8 @@ class RuntimeStateService:
         scope_digest: str,
         limit_per_minute: int,
     ) -> int:
-        return await asyncio.to_thread(
+        return await self._run_managed(
+            "runtime-state-consume-scoped-rate-limit",
             self.consume_scoped_rate_limit,
             namespace,
             scope_digest,
