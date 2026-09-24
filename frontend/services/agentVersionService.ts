@@ -15,6 +15,9 @@ export interface ToolInstance {
   enabled: boolean;
   version_no: number;
   delete_flag: string;
+  origin_name?: string;
+  name?: string;
+  display_names?: string[];
 }
 
 export interface Agent {
@@ -46,6 +49,8 @@ export interface Agent {
   is_available?: boolean;
   unavailable_reasons?: string[];
   tools: ToolInstance[];
+  skills?: Array<{ skill_id: number; name?: string }>;
+  sub_agent_relations?: Array<{ agent_id: number; agent_name?: string }>;
 }
 
 export interface AgentVersion { 

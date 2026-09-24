@@ -124,6 +124,11 @@ export default function RepositoryMcpCard({
         <Button
           type="text"
           size="small"
+          className={
+            installed
+              ? undefined
+              : "!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+          }
           disabled={installed}
           icon={<Download className="size-3.5" />}
           onClick={() => onInstall(service)}

@@ -1,11 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
-import { App, Button, Modal, Tooltip } from "antd";
+import { App, Button, Dropdown, Modal, Tooltip } from "antd";
+import type { MenuProps } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, FileOutput, Globe, Network, Trash2 } from "lucide-react";
+import {
+  Copy,
+  FileOutput,
+  Globe,
+  GitBranch,
+  MoreHorizontal,
+  Network,
+  Trash2,
+} from "lucide-react";
 
 import A2AServerSettingsPanel from "./a2a/A2AServerSettingsPanel";
 import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationshipModal";
@@ -22,20 +31,32 @@ import {
 } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 
-export default function AgentConfigActions() {
+export default function AgentConfigActions({
+  agentId: agentIdProp,
+  readOnly,
+  variant = "buttons",
+  onManageVersions,
+}: {
+  agentId?: number | null;
+  readOnly?: boolean;
+  variant?: "buttons" | "menu";
+  onManageVersions?: (agentId: number) => void;
+}) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const confirm = useConfirmModal();
   const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const agentId = useAgentStore((state) => state.agentId);
+  const { agentId: routeAgentId } = useParams<{ agentId?: string }>();
+  const storeAgentId = useAgentStore((state) => state.agentId);
+  const agentId = agentIdProp ?? storeAgentId;
   const editedAgent = useAgentStore((state) => state.editedAgent);
-  const isReadOnly = useAgentStore((state) => state.isReadOnly);
+  const storeIsReadOnly = useAgentStore((state) => state.isReadOnly);
+  const isReadOnly = readOnly ?? storeIsReadOnly;
   const reset = useAgentStore((state) => state.reset);
   const agentName = editedAgent?.display_name || editedAgent?.name || "agent";
-  const { agentInfo } = useAgentInfo(agentId);
+  const { agentInfo } = useAgentInfo(variant === "buttons" ? agentId : null);
   const [isRelationshipVisible, setIsRelationshipVisible] = useState(false);
   const [isA2ASettingsVisible, setIsA2ASettingsVisible] = useState(false);
   const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
@@ -139,14 +160,17 @@ export default function AgentConfigActions() {
         duty_prompt: detail.duty_prompt,
         constraint_prompt: detail.constraint_prompt,
         few_shots_prompt: detail.few_shots_prompt,
-        business_logic_model_name: detail.business_logic_model_name ?? undefined,
+        business_logic_model_name:
+          detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: subAgentIds,
       });
 
       if (!createResult.success || !createResult.data?.agent_id) {
-        message.error(createResult.message || t("agentConfig.agents.copyFailed"));
+        message.error(
+          createResult.message || t("agentConfig.agents.copyFailed")
+        );
         return;
       }
       const newAgentId = Number(createResult.data.agent_id);
@@ -196,12 +220,16 @@ export default function AgentConfigActions() {
     deleteAgentMutation.mutate(agentId, {
       onSuccess: () => {
         message.success(
-          t("businessLogic.config.error.agentDeleteSuccess", { name: agentName })
+          t("businessLogic.config.error.agentDeleteSuccess", {
+            name: agentName,
+          })
         );
-        const nextSearchParams = new URLSearchParams(searchParams.toString());
-        nextSearchParams.delete("agent_id");
-        const query = nextSearchParams.toString();
-        router.replace(query ? `${pathname}?${query}` : pathname);
+        const routeAgentIdNumber = Number(routeAgentId);
+        const agentsPath =
+          Number.isInteger(routeAgentIdNumber) && routeAgentIdNumber > 0
+            ? pathname.replace(/\/[^/]+$/, "")
+            : pathname;
+        router.replace(agentsPath);
         reset();
         queryClient.invalidateQueries({ queryKey: ["agents"] });
         queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
@@ -213,85 +241,152 @@ export default function AgentConfigActions() {
   };
 
   const disabled = agentId === null;
+  const menuItems: MenuProps["items"] = [
+    {
+      key: "copy",
+      icon: <Copy className="size-3.5" />,
+      label: t("agent.contextMenu.copy"),
+      disabled,
+      onClick: () =>
+        confirm.confirm({
+          title: t("agentConfig.agents.copyConfirmTitle"),
+          content: t("agentConfig.agents.copyConfirmContent", {
+            name: agentName,
+          }),
+          onOk: handleCopy,
+        }),
+    },
+    {
+      key: "relationship",
+      icon: <Network className="size-3.5" />,
+      label: t("agent.action.viewCallRelationship"),
+      disabled,
+      onClick: () => setIsRelationshipVisible(true),
+    },
+    {
+      key: "versions",
+      icon: <GitBranch className="size-3.5" />,
+      label: t("agent.version.manage"),
+      disabled,
+      onClick: () => {
+        if (agentId !== null) onManageVersions?.(agentId);
+      },
+    },
+    {
+      key: "export",
+      icon: <FileOutput className="size-3.5" />,
+      label: t("agent.contextMenu.export"),
+      disabled,
+      onClick: handleExport,
+    },
+    { type: "divider" },
+    {
+      key: "delete",
+      danger: true,
+      icon: <Trash2 className="size-3.5" />,
+      label: t("agent.contextMenu.delete"),
+      disabled: disabled || isReadOnly,
+      onClick: () =>
+        confirm.confirm({
+          title: t("businessLogic.config.modal.deleteTitle"),
+          content: t("businessLogic.config.modal.deleteContent", {
+            name: agentName,
+          }),
+          onOk: handleDelete,
+        }),
+    },
+  ];
 
   return (
     <>
-      <div className="flex items-center gap-1">
-        {(agentInfo as { is_a2a?: boolean } | null)?.is_a2a && (
-          <Tooltip title={t("a2a.agent.viewA2ASettings")}>
+      {variant === "menu" ? (
+        <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+          <Button
+            type="text"
+            size="small"
+            className="size-8 text-slate-400 hover:text-slate-600"
+            icon={<MoreHorizontal className="size-4" />}
+            aria-label={t("agentRepository.mine.menu.more")}
+          />
+        </Dropdown>
+      ) : (
+        <div className="flex items-center gap-1">
+          {(agentInfo as { is_a2a?: boolean } | null)?.is_a2a && (
+            <Tooltip title={t("a2a.agent.viewA2ASettings")}>
+              <Button
+                type="text"
+                size="small"
+                icon={<Globe className="h-4 w-4" />}
+                disabled={disabled}
+                className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+                onClick={() => setIsA2ASettingsVisible(true)}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title={t("agent.contextMenu.copy")}>
             <Button
               type="text"
               size="small"
-              icon={<Globe className="h-4 w-4" />}
+              icon={<Copy className="h-4 w-4" />}
               disabled={disabled}
               className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
-              onClick={() => setIsA2ASettingsVisible(true)}
+              onClick={() =>
+                confirm.confirm({
+                  title: t("agentConfig.agents.copyConfirmTitle"),
+                  content: t("agentConfig.agents.copyConfirmContent", {
+                    name: agentName,
+                  }),
+                  onOk: handleCopy,
+                })
+              }
             />
           </Tooltip>
-        )}
-        <Tooltip title={t("agent.contextMenu.copy")}>
-          <Button
-            type="text"
-            size="small"
-            icon={<Copy className="h-4 w-4" />}
-            disabled={disabled}
-            className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
-            onClick={() =>
-              confirm.confirm({
-                title: t("agentConfig.agents.copyConfirmTitle"),
-                content: t("agentConfig.agents.copyConfirmContent", {
-                  name: agentName,
-                }),
-                onOk: handleCopy,
-              })
+          <Tooltip title={t("agent.action.viewCallRelationship")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<Network className="h-4 w-4" />}
+              disabled={disabled}
+              className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+              onClick={() => setIsRelationshipVisible(true)}
+            />
+          </Tooltip>
+          <Tooltip title={t("agent.contextMenu.export")}>
+            <Button
+              type="text"
+              size="small"
+              icon={<FileOutput className="h-4 w-4" />}
+              disabled={disabled}
+              className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+              onClick={handleExport}
+            />
+          </Tooltip>
+          <Tooltip
+            title={
+              isReadOnly
+                ? t("agent.noEditPermission")
+                : t("agent.contextMenu.delete")
             }
-          />
-        </Tooltip>
-        <Tooltip title={t("agent.action.viewCallRelationship")}>
-          <Button
-            type="text"
-            size="small"
-            icon={<Network className="h-4 w-4" />}
-            disabled={disabled}
-            className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
-            onClick={() => setIsRelationshipVisible(true)}
-          />
-        </Tooltip>
-        <Tooltip title={t("agent.contextMenu.export")}>
-          <Button
-            type="text"
-            size="small"
-            icon={<FileOutput className="h-4 w-4" />}
-            disabled={disabled}
-            className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
-            onClick={handleExport}
-          />
-        </Tooltip>
-        <Tooltip
-          title={
-            isReadOnly
-              ? t("agent.noEditPermission")
-              : t("agent.contextMenu.delete")
-          }
-        >
-          <Button
-            type="text"
-            size="small"
-            icon={<Trash2 className="h-4 w-4" />}
-            disabled={disabled || isReadOnly}
-            className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
-            onClick={() =>
-              confirm.confirm({
-                title: t("businessLogic.config.modal.deleteTitle"),
-                content: t("businessLogic.config.modal.deleteContent", {
-                  name: agentName,
-                }),
-                onOk: handleDelete,
-              })
-            }
-          />
-        </Tooltip>
-      </div>
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<Trash2 className="h-4 w-4" />}
+              disabled={disabled || isReadOnly}
+              className="flex h-8 w-8 items-center justify-center rounded-md !text-muted-foreground hover:!bg-muted hover:!text-foreground disabled:!opacity-30"
+              onClick={() =>
+                confirm.confirm({
+                  title: t("businessLogic.config.modal.deleteTitle"),
+                  content: t("businessLogic.config.modal.deleteContent", {
+                    name: agentName,
+                  }),
+                  onOk: handleDelete,
+                })
+              }
+            />
+          </Tooltip>
+        </div>
+      )}
       {agentId !== null && (
         <AgentCallRelationshipModal
           visible={isRelationshipVisible}
@@ -316,7 +411,9 @@ export default function AgentConfigActions() {
             supportedInterfaces={a2aSettingsData.data.supported_interfaces}
           />
         ) : (
-          <div style={{ textAlign: "center", padding: "40px 0", color: "#999" }}>
+          <div
+            style={{ textAlign: "center", padding: "40px 0", color: "#999" }}
+          >
             {t(
               "a2a.service.getServerSettingsFailed",
               "Failed to load A2A settings"

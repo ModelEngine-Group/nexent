@@ -119,6 +119,7 @@ export function RepositoryView({
                     <Button
                       type="text"
                       size="small"
+                      className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
                       icon={<Copy className="size-3.5" />}
                       loading={
                         installingRepositoryId === listing.skill_repository_id

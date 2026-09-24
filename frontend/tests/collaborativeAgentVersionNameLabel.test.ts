@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const selectorPath = new URL(
-  "../app/[locale]/agents/components/advanced/collaborative-agent-selector-modal.tsx",
+  "../app/[locale]/agents/[agentId]/components/advanced/collaborative-agent-selector-modal.tsx",
   import.meta.url
 );
 const zhLocalePath = new URL(

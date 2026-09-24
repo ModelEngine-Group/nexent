@@ -504,4 +504,3 @@ def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm |
         ) from exc
     except (ValueError, TypeError, SyntaxError, RecursionError, MemoryError) as exc:
         raise ModelOutputProtocolError(ProtocolErrorReason.MALFORMED_ACTION, "code_action") from exc
-

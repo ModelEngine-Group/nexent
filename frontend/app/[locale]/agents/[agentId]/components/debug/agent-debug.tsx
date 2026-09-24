@@ -13,12 +13,12 @@ import { useConfig } from "@/hooks/useConfig";
 import { useAgentStore, type AgentDraft } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
 import type { STTModelConfig } from "@/types/modelConfig";
-import { compositeAttachmentAdapter } from "../newchat/adapter/attachment-adapter";
-import { ServerDictationAdapter } from "../newchat/adapter/server-dictation-adapter";
-import { remoteChatModelAdapter } from "../newchat/adapter/remote-chat-model-adapter";
-import { Chat } from "../newchat/assistant-ui/chat";
-import type { ChatMode } from "../newchat/assistant-ui/composer";
-import { AgentDebugComparePanel } from "./components/agentInfo/AgentDebugComparePanel";
+import { compositeAttachmentAdapter } from "../../../../newchat/adapter/attachment-adapter";
+import { ServerDictationAdapter } from "../../../../newchat/adapter/server-dictation-adapter";
+import { remoteChatModelAdapter } from "../../../../newchat/adapter/remote-chat-model-adapter";
+import { Chat } from "../../../../newchat/assistant-ui/chat";
+import type { ChatMode } from "../../../../newchat/assistant-ui/composer";
+import { AgentDebugComparePanel } from "./compare-panel";
 
 interface AgentDebugPanelProps {
   isCompareMode?: boolean;

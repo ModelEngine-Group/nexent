@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 
 import type { VersionCompareResponse } from "@/services/agentVersionService";
-import DebugMessageList from "../components/agentInfo/DebugMessageList";
-import { useCompareStream } from "../components/agentInfo/useCompareStream";
+import DebugMessageList from "./DebugMessageList";
+import { useCompareStream } from "./useCompareStream";
 
 const { Text } = Typography;
 

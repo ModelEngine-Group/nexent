@@ -31,7 +31,7 @@ _UPSERT_SNAPSHOT_FIELDS = frozenset({
     "tags",
     "tool_count",
     "version_name",
-    "icon",
+    "icon_url",
     "downloads",
     "agent_info_json",
 })
@@ -184,7 +184,7 @@ def list_agent_repository_summaries(
             AgentRepository.tags,
             AgentRepository.tool_count,
             AgentRepository.version_name,
-            AgentRepository.icon,
+            AgentRepository.icon_url,
             AgentRepository.downloads,
             AgentRepository.content,
         ).filter(
@@ -209,7 +209,7 @@ def list_agent_repository_summaries(
                 "tags": row.tags,
                 "tool_count": row.tool_count,
                 "version_name": row.version_name,
-                "icon": row.icon,
+                "icon_url": row.icon_url,
                 "downloads": row.downloads,
                 "content": row.content,
             }
@@ -233,7 +233,7 @@ def update_agent_repository_by_id(
         "tags",
         "tool_count",
         "version_name",
-        "icon",
+        "icon_url",
         "downloads",
         "version_no",
         "agent_info_json",

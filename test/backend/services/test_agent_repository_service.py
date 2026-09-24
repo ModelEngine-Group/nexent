@@ -454,24 +454,80 @@ def test_validate_card_fields_requires_structural_values():
         },
     }
 
-    with pytest.raises(ValueError, match="icon is required"):
-        ars._validate_create_payload(base)
-
     with pytest.raises(ValueError, match="tags is required"):
-        ars._validate_create_payload({**base, "icon": "🤖"})
+        ars._validate_create_payload({**base, "icon_url": None})
 
-    with pytest.raises(ValueError, match="non-empty string"):
+    with pytest.raises(ValueError, match="non-empty URL"):
         ars._validate_create_payload({
             **base,
-            "icon": "   ",
+            "icon_url": "   ",
             "tags": ["marketing"],
         })
 
     ars._validate_create_payload({
         **base,
-        "icon": "🤖",
+        "icon_url": None,
         "tags": ["marketing"],
     })
+
+
+def test_repository_icon_urls_are_scoped_to_agent_version_and_upload():
+    image_id = "d0b11a53-1808-4c79-9a04-e466f938f96a"
+    icon_url = ars._repository_icon_url(4, 2, image_id)
+    assert ars._repository_image_id(icon_url, 4, 2) == image_id
+    with pytest.raises(ValueError, match="Invalid repository icon URL"):
+        ars._repository_image_id(icon_url, 5, 2)
+    with pytest.raises(ValueError, match="Invalid repository icon URL"):
+        ars._repository_image_id(icon_url + "/other", 4, 2)
+
+
+def test_repository_icon_read_requires_matching_listing_url():
+    with patch.object(
+        ars, "get_agent_repository_by_agent_id", return_value={"icon_url": None}
+    ), patch.object(ars, "read_icon_image") as read_image:
+        with pytest.raises(FileNotFoundError):
+            ars.get_agent_repository_icon_impl(
+                4, 2, "d0b11a53-1808-4c79-9a04-e466f938f96a", "tenant_a"
+            )
+        read_image.assert_not_called()
+
+
+def test_repository_icon_read_returns_matching_listing_image():
+    image_id = "d0b11a53-1808-4c79-9a04-e466f938f96a"
+    with patch.object(
+        ars,
+        "get_agent_repository_by_agent_id",
+        return_value={"icon_url": ars._repository_icon_url(4, 2, image_id)},
+    ), patch.object(
+        ars, "read_icon_image", return_value=(b"image", "image/png")
+    ) as read_image:
+        result = ars.get_agent_repository_icon_impl(4, 2, image_id, "tenant_a")
+    assert result == (b"image", "image/png")
+    read_image.assert_called_once_with(
+        f"agent-repository-icons/tenant_a/4/2/{image_id}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_icon_upload_keeps_separate_object_and_agent_record():
+    image_id = "d0b11a53-1808-4c79-9a04-e466f938f96a"
+    with patch.object(
+        ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one"}
+    ), patch.object(
+        ars, "_validate_create_listing_permission"
+    ), patch.object(
+        ars.uuid, "uuid4", return_value=image_id
+    ), patch.object(
+        ars, "upload_icon_image", return_value="image/png"
+    ) as upload:
+        result = await ars.upload_agent_repository_icon_impl(
+            4, 2, "tenant_a", "user_a", b"image"
+        )
+
+    assert result["icon_url"] == ars._repository_icon_url(4, 2, image_id)
+    upload.assert_called_once_with(
+        b"image", f"agent-repository-icons/tenant_a/4/2/{image_id}"
+    )
 
 
 def _list_all_agent_record(
@@ -1513,8 +1569,9 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
             "agent_info": {"10": {"model_name": "gpt", "duty_prompt": "help", "tools": []}},
             "mcp_info": [],
         },
-        "icon": "🤖",
+        "icon_url": None,
         "version_name": "v1",
+        "version_no": 3,
         "downloads": 0,
         "create_time": None,
     }
@@ -1528,6 +1585,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
 
     mock_get.assert_called_once_with(42, "tenant_a")
     assert result["agent_repository_id"] == 42
+    assert result["version_no"] == 3
 
 
 def test_get_agent_repository_listing_detail_impl_not_found_for_other_tenant():
@@ -1593,7 +1651,7 @@ def test_count_tools_in_snapshot_invalid_input(snapshot):
 @pytest.mark.asyncio
 async def test_build_repository_data_from_agent_merges_card_fields():
     card_fields = {
-        "icon": "📊",
+        "icon_url": None,
         "tags": [" 数据 ", "数据", "自定义标签"],
         "downloads": 10,
     }
@@ -1620,7 +1678,7 @@ async def test_build_repository_data_from_agent_merges_card_fields():
             card_fields=card_fields,
         )
 
-    assert repository_data["icon"] == "📊"
+    assert repository_data["icon_url"] is None
     assert repository_data["tags"] == ["数据", "自定义标签"]
     assert repository_data["downloads"] == 10
     assert repository_data["tool_count"] == 0
@@ -1739,7 +1797,7 @@ async def test_create_agent_repository_listing_impl_success():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
-            "icon": "🤖",
+            "icon_url": None,
             "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
@@ -1814,7 +1872,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
-            "icon": "🤖",
+            "icon_url": None,
             "tags": ["营销"],
             "tool_count": 3,
         }
@@ -1851,7 +1909,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
         updates={
             "status": "pending_review",
             "content": "",
-            "icon": "🤖",
+            "icon_url": None,
             "tags": ["营销"],
             "tool_count": 3,
         },
@@ -1886,7 +1944,7 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
-            "icon": "🤖",
+            "icon_url": None,
             "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
@@ -2026,7 +2084,7 @@ def test_validate_create_payload_requires_agent_info_json():
         "agent_id": 1,
         "version_no": 1,
         "name": "agent_one",
-        "icon": "🤖",
+        "icon_url": None,
         "tags": ["营销"],
     }
 
@@ -2214,7 +2272,7 @@ def test_get_agent_repository_listing_detail_returns_agent_level_downloads():
             "agent_info": {"10": {"model_name": "gpt", "duty_prompt": "help", "tools": []}},
             "mcp_info": [],
         },
-        "icon": "🤖",
+        "icon_url": None,
         "version_name": "v1",
         "downloads": 2,
         "create_time": None,

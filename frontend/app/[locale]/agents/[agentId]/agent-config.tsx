@@ -35,7 +35,7 @@ import GuardrailConfigContent, {
 import KnowledgeBaseConfig, {
   KnowledgeBaseConfigActions,
 } from "./components/knowledge-base-search";
-import AgentVersionPubulishModal from "./versions/AgentVersionPubulishModal";
+import AgentVersionPubulishModal from "../versions/AgentVersionPubulishModal";
 
 import {
   ChevronRight,

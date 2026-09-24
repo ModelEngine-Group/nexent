@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { createElement, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Form,
   Button,
@@ -26,7 +27,7 @@ import {
 } from "@/hooks/agent/useSaveGuard";
 import { API_ENDPOINTS } from "@/services/api";
 import { fetchWithAuth } from "@/lib/auth";
-import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { getAgentIcon, getAgentUploadedIconRevision } from "@/lib/chat/agentIconUtils";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
@@ -35,6 +36,7 @@ import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 
 export default function AgentInfo() {
   const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
   const form = Form.useFormInstance();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
@@ -51,7 +53,6 @@ export default function AgentInfo() {
   const isReadOnly = useAgentReadOnly();
   const [uploading, setUploading] = useState(false);
   const [iconLoadError, setIconLoadError] = useState(false);
-  const [iconVersion, setIconVersion] = useState(0);
   const [assignTagsOpen, setAssignTagsOpen] = useState(false);
   const [tagManagementOpen, setTagManagementOpen] = useState(false);
   const [tagPreviewRefreshKey, setTagPreviewRefreshKey] = useState(0);
@@ -62,15 +63,21 @@ export default function AgentInfo() {
     ) ?? null;
   const { data: tagDefinitions, refresh: refreshTagDefinitions } =
     useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
-  const DefaultIcon = getAgentIcon({
-    id: String(agentId ?? 0),
-    agent_id: agentId ?? 0,
-    name: editedAgent.name,
-    description: editedAgent.description,
-  });
+  const defaultIcon = createElement(
+    getAgentIcon({
+      id: String(agentId ?? 0),
+      agent_id: agentId ?? 0,
+      name: editedAgent.name,
+      description: editedAgent.description,
+    }),
+    { size: 28 }
+  );
   const iconSource =
     agentId !== null && editedAgent.icon_url && !iconLoadError
-      ? `${API_ENDPOINTS.agent.icon(agentId)}?v=${iconVersion}`
+      ? API_ENDPOINTS.agent.icon(
+          agentId,
+          getAgentUploadedIconRevision(editedAgent.icon_url)
+        )
       : undefined;
 
   const uploadProps: UploadProps = {
@@ -96,8 +103,8 @@ export default function AgentInfo() {
         );
         const data = await response.json();
         setIconLoadError(false);
-        setIconVersion(Date.now());
         updateDraft({ icon_url: data.icon_url });
+        void queryClient.invalidateQueries({ queryKey: ["agents"] });
         message.success(t("agent.iconUploadSuccess"));
       } catch {
         message.error(t("agent.iconUploadFailed"));
@@ -298,7 +305,7 @@ export default function AgentInfo() {
                 <Avatar
                   size={72}
                   src={iconSource}
-                  icon={<DefaultIcon size={28} />}
+                  icon={defaultIcon}
                   onError={() => {
                     setIconLoadError(true);
                     return false;

@@ -30,11 +30,11 @@ import {
 } from "./components/MineSkillsView";
 
 const SkillBuildModal = dynamic(
-  () => import("../agents/components/agentConfig/SkillBuildModal"),
+  () => import("../agents/components/capability/SkillBuildModal"),
   { ssr: false }
 );
 const SkillDetailModal = dynamic(
-  () => import("../agents/components/agentConfig/SkillDetailModal"),
+  () => import("../agents/components/capability/SkillDetailModal"),
   { ssr: false }
 );
 const CARD_GAP = 20;

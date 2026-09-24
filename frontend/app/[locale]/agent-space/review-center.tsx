@@ -5,17 +5,17 @@ import { App, Button, Empty, Spin } from "antd";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { AgentDetail } from "@/components/agent/agent-detail";
 import { USER_ROLES } from "@/const/auth";
 import {
-  useAgentRepositoryListingDetail,
   useAgentRepositoryListings,
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
-import { mapRepositoryListingDetail } from "@/lib/agentRepositoryDetail";
+import { useRepositoryAgentDetail } from "@/hooks/agentRepository/useRepositoryAgentDetail";
 
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 import { ReviewAgentList } from "./components/ReviewAgentList";
-import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
+import { RepositoryAgentIcon } from "./components/RepositoryAgentIcon";
 import {
   AgentRepositoryReviewConfirmModal,
   type AgentRepositoryReviewAction,
@@ -43,26 +43,16 @@ export function ReviewCenter({ active }: { active: boolean }) {
   const updatingRepositoryId = updateStatusMutation.isPending
     ? (updateStatusMutation.variables?.agentRepositoryId ?? null)
     : null;
-  const [detailListingId, setDetailListingId] = useState<number | null>(null);
+  const [detailListing, setDetailListing] =
+    useState<AgentRepositoryListingItem | null>(null);
   const {
-    data: repositoryDetail,
+    detail,
+    repositoryDetail,
     isLoading: isDetailLoading,
     isError: isDetailError,
     isFetching: isDetailFetching,
-    refetch: refetchDetail,
-  } = useAgentRepositoryListingDetail(
-    detailListingId,
-    active && detailListingId != null
-  );
-  const detail = useMemo(
-    () =>
-      repositoryDetail
-        ? mapRepositoryListingDetail(repositoryDetail)
-        : detailListingId != null
-          ? undefined
-          : null,
-    [detailListingId, repositoryDetail]
-  );
+    retry: refetchDetail,
+  } = useRepositoryAgentDetail(detailListing, active);
   const [reviewAction, setReviewAction] =
     useState<AgentRepositoryReviewAction | null>(null);
   const [reviewListing, setReviewListing] =
@@ -129,9 +119,7 @@ export function ReviewCenter({ active }: { active: boolean }) {
             listings={listings}
             currentUserEmail={currentUserEmail}
             updatingRepositoryId={updatingRepositoryId}
-            onDetailClick={(listing) =>
-              setDetailListingId(listing.agent_repository_id)
-            }
+            onDetailClick={(listing) => setDetailListing(listing)}
             onApprove={(listing) => {
               setReviewListing(listing);
               setReviewAction("approve");
@@ -189,14 +177,27 @@ export function ReviewCenter({ active }: { active: boolean }) {
           ) : null}
         </>
       )}
-      <AgentRepositoryDetailModal
-        open={active && detailListingId != null}
-        onClose={() => setDetailListingId(null)}
+      <AgentDetail
+        open={active && detailListing != null}
+        onClose={() => setDetailListing(null)}
         detail={detail}
+        agentIcon={
+          detailListing ? (
+            <RepositoryAgentIcon
+              agentId={repositoryDetail?.agent_id ?? detailListing.agent_id}
+              iconUrl={repositoryDetail?.icon_url ?? detailListing.icon_url}
+              size={48}
+              iconSize={24}
+            />
+          ) : undefined
+        }
+        published
+        status={repositoryDetail?.status}
+        showRepositoryInfo
         isLoading={isDetailLoading}
         isError={isDetailError}
         isFetching={isDetailFetching}
-        onRetry={() => refetchDetail()}
+        onRetry={refetchDetail}
       />
     </div>
   );

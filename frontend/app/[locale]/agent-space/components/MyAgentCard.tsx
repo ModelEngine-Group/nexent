@@ -1,9 +1,10 @@
 "use client";
 
-import { Button, Dropdown } from "antd";
+import { Button, Dropdown, Spin, Tooltip } from "antd";
 import type { MenuProps } from "antd";
+import { useState } from "react";
+import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
-  Bot,
   ClipboardCheck,
   Clock,
   Eye,
@@ -15,21 +16,26 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import {
   formatMineDate,
   getMineCardMenuActions,
-  getMineCardRepositoryStatusBadge,
+  toMineRepositoryInfo,
   type MineCardMenuAction,
 } from "@/lib/agentRepositoryMine";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 import ResourceCard from "@/components/resource/ResourceCard";
+import { MyAgentIcon } from "./MyAgentIcon";
 
 interface MyAgentCardProps {
   agent: MyEditableAgentItem;
   onEdit: () => void;
   onView: () => void;
   onApplyListing: () => void;
-  onViewReview: (mode: "review" | "reviewUpdate") => void;
+  onViewReview: (
+    agent: MyEditableAgentItem,
+    mode: "review" | "reviewUpdate"
+  ) => void;
   onDelete: () => void;
   onEvaluate: () => void;
   isApplying?: boolean;
@@ -40,13 +46,6 @@ const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
   apply: "agentRepository.mine.menu.apply",
   review: "agentRepository.mine.menu.review",
   reviewUpdate: "agentRepository.mine.menu.reviewUpdate",
-};
-
-const STATUS_BADGE_CLASS: Record<"pending" | "shared" | "rejected", string> = {
-  pending:
-    "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
-  shared: "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary",
-  rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
 };
 
 export function MyAgentCard({
@@ -61,21 +60,36 @@ export function MyAgentCard({
   isDeleting = false,
 }: MyAgentCardProps) {
   const { t } = useTranslation("common");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const {
+    data: listingData,
+    isLoading: isListingLoading,
+    isError: isListingError,
+    refetch,
+  } = useAgentRepositoryListings(
+    { agent_id: agent.agent_id, page: 1, page_size: 100 },
+    menuOpen
+  );
 
   const title = agent.name?.trim() || t("agentRepository.card.untitled");
   const description =
     agent.description?.trim() || t("agentRepository.card.noDescription");
   const tags = agent.tags?.filter((tag) => tag.trim()) ?? [];
+  const unavailableReasonLabels = getUnavailableReasonLabels(
+    agent.unavailable_reasons ?? [],
+    t
+  );
   const published = (agent.current_version_no ?? 0) > 0;
-  const repositoryInfo = agent.repository_info ?? [];
-  const repositoryStatusBadge =
-    getMineCardRepositoryStatusBadge(repositoryInfo);
+  const repositoryInfo = toMineRepositoryInfo(listingData?.items ?? []);
+  const agentWithRepository = { ...agent, repository_info: repositoryInfo };
   const footerDate = formatMineDate(agent.version_create_time);
   const versionLabel = agent.version_label;
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
   const canEvaluate = canView;
-  const menuActions = getMineCardMenuActions(agent);
+  const menuActions = listingData
+    ? getMineCardMenuActions(agentWithRepository)
+    : [];
 
   const menuItems: MenuProps["items"] = menuActions.map((action) => {
     const icon =
@@ -95,10 +109,29 @@ export function MyAgentCard({
           onApplyListing();
           return;
         }
-        onViewReview(action === "reviewUpdate" ? "reviewUpdate" : "review");
+        onViewReview(
+          agentWithRepository,
+          action === "reviewUpdate" ? "reviewUpdate" : "review"
+        );
       },
     };
   });
+
+  if (isListingLoading) {
+    menuItems.unshift({
+      key: "loading",
+      label: <Spin size="small" />,
+      disabled: true,
+    });
+  } else if (isListingError) {
+    menuItems.unshift({
+      key: "retry",
+      label: t("repository.common.retry"),
+      onClick: () => {
+        void refetch();
+      },
+    });
+  }
 
   if (canEvaluate) {
     menuItems.push({
@@ -125,37 +158,48 @@ export function MyAgentCard({
   }
 
   return (
-    <ResourceCard title={title} className="h-full">
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Bot className="size-5" aria-hidden />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
-                {title}
-              </h3>
-            </div>
-            <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-              {versionLabel != null ? (
-                <span className="inline-flex items-center gap-1.5 truncate">
-                  <span
-                    className="size-1.5 shrink-0 rounded-full bg-primary"
-                    aria-hidden
-                  />
-                  {t("agentRepository.mine.currentVersion", {
-                    version: versionLabel,
-                  })}
-                </span>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
+    <ResourceCard
+      title={title}
+      className="h-full"
+      onClick={onView}
+      subtitle={
+        versionLabel != null ? (
+          <span className="inline-flex items-center gap-1.5 truncate">
+            <span
+              className="size-1.5 shrink-0 rounded-full bg-primary"
+              aria-hidden
+            />
+            {t("agentRepository.mine.currentVersion", {
+              version: versionLabel,
+            })}
+          </span>
+        ) : undefined
+      }
+      icon={<MyAgentIcon agent={agent} size={44} iconSize={20} />}
+      description={description}
+      descriptionLines={2}
+      tags={
+        tags.length > 0 ? (
+          <>
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                {getAgentRepositoryTagLabel(tag, t)}
+              </span>
+            ))}
+          </>
+        ) : undefined
+      }
+      headerActions={
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {menuItems.length > 0 ? (
-            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+            <Dropdown
+              menu={{ items: menuItems }}
+              trigger={["click"]}
+              onOpenChange={setMenuOpen}
+            >
               <Button
                 type="text"
                 size="small"
@@ -166,13 +210,21 @@ export function MyAgentCard({
             </Dropdown>
           ) : null}
           <div className="flex items-center gap-1.5">
-            {repositoryStatusBadge ? (
-              <span
-                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
+            {agent.is_available === false ? (
+              <Tooltip
+                title={
+                  unavailableReasonLabels.length > 0
+                    ? unavailableReasonLabels.join(", ")
+                    : t("agentSelector.agentUnavailable")
+                }
               >
-                {t(repositoryStatusBadge.labelKey)}{" "}
-                {repositoryStatusBadge.versionLabel}
-              </span>
+                <span
+                  className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                  aria-label={unavailableReasonLabels.join(", ") || t("agentSelector.agentUnavailable")}
+                >
+                  {t("mcpConfig.status.unavailable")}
+                </span>
+              </Tooltip>
             ) : null}
             <span
               className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
@@ -187,57 +239,44 @@ export function MyAgentCard({
             </span>
           </div>
         </div>
-      </div>
-
-      <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-        {description}
-      </p>
-
-      {tags.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              {getAgentRepositoryTagLabel(tag, t)}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        <div className="min-w-0">
-          {footerDate ? (
-            <span className="inline-flex items-center gap-1">
-              <Clock className="size-3.5" aria-hidden />
-              {footerDate}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {canEdit ? (
-            <Button
-              type="text"
-              size="small"
-              icon={<Pencil className="size-3.5" aria-hidden />}
-              onClick={onEdit}
-            >
-              {t("agentRepository.mine.edit")}
-            </Button>
-          ) : (
-            <Button
-              type="text"
-              size="small"
-              icon={<Eye className="size-3.5" aria-hidden />}
-              onClick={onView}
-              disabled={!canView}
-            >
-              {t("agentRepository.mine.view")}
-            </Button>
-          )}
-        </div>
-      </div>
-    </ResourceCard>
+      }
+      footerLayout="inline"
+      meta={
+        footerDate ? (
+          <span className="inline-flex items-center gap-1">
+            <Clock className="size-3.5" aria-hidden />
+            {footerDate}
+          </span>
+        ) : undefined
+      }
+      footer={
+        canEdit ? (
+          <Button
+            type="text"
+            size="small"
+            className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+            icon={<Pencil className="size-3.5" aria-hidden />}
+            onClick={onEdit}
+          >
+            {t("agentRepository.mine.edit")}
+          </Button>
+        ) : (
+          <Button
+            type="text"
+            size="small"
+            className={
+              canView
+                ? "!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                : undefined
+            }
+            icon={<Eye className="size-3.5" aria-hidden />}
+            onClick={onView}
+            disabled={!canView}
+          >
+            {t("agentRepository.mine.view")}
+          </Button>
+        )
+      }
+    />
   );
 }

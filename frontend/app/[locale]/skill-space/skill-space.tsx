@@ -17,7 +17,7 @@ import type {
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
-import { SkillRepositoryDetailModal } from "./components/SkillRepositoryDetailModal";
+import { SkillDetail } from "@/components/skill/skill-detail";
 import { RepositoryView } from "./components/RepositoryView";
 import { getSkillRepositoryStatusLabel } from "./components/skillRepositoryShared";
 
@@ -330,7 +330,7 @@ export function SkillSpace({ active }: { active: boolean }) {
           takingDownRepositoryId={updatingRepositoryId}
         />
       ) : null}
-      <SkillRepositoryDetailModal
+      <SkillDetail
         open={detailRepositoryId != null}
         detail={detailData}
         isLoading={isDetailLoading}

@@ -18,10 +18,12 @@ export interface AgentRepositoryListingItem {
   description?: string | null;
   author?: string | null;
   status: AgentRepositoryListingStatus;
-  icon?: string | null;
+  icon_url?: string | null;
   tags?: string[];
   tool_count?: number | null;
   version_label?: string | null;
+  version_no?: number | null;
+  create_time?: string | null;
   downloads?: number;
   submitted_by?: string | null;
   content?: string | null;
@@ -53,11 +55,12 @@ export interface AgentRepositoryListingListParams {
 export interface AgentRepositoryListingDetail {
   agent_repository_id: number;
   agent_id?: number | null;
+  version_no?: number | null;
   name: string;
   display_name?: string | null;
   description?: string | null;
   author?: string | null;
-  icon?: string | null;
+  icon_url?: string | null;
   status: AgentRepositoryListingStatus;
   version_label?: string | null;
   downloads?: number;
@@ -81,6 +84,9 @@ export interface MyAgentRepositoryInfoItem {
 
 export interface MyEditableAgentItem {
   agent_id: number;
+  icon_url?: string | null;
+  is_available?: boolean;
+  unavailable_reasons?: string[];
   name?: string | null;
   description?: string | null;
   current_version_no?: number | null;
@@ -141,7 +147,7 @@ export interface MyEditableAgentListResponse {
 }
 
 export interface AgentRepositoryListingCreatePayload {
-  icon: string;
+  icon_url: string | null;
   tags: string[];
   content?: string;
 }

@@ -85,6 +85,7 @@ export const API_ENDPOINTS = {
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    listPage: `${API_BASE_URL}/agent/list/page`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
     stop: (runId: string | number) =>
@@ -104,7 +105,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
     generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
-    icon: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/icon`,
+    icon: (agentId: number, revision?: string | null) =>
+      `${API_BASE_URL}/agent/${agentId}/icon${revision ? `?v=${encodeURIComponent(revision)}` : ""}`,
     versions: {
       version: (agentId: number, versionNo: number) =>
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
@@ -628,6 +630,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
+    icon: (agentId: number, versionNo: number) =>
+      `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}/icon`,
   },
   skillRepository: {
     listings: (params?: SkillRepositoryListingListParams) => {
