@@ -4021,6 +4021,7 @@
   "mcpTools.addModal.unsupportedTitle": "该添加方式暂未接入",
   "mcpTools.addModal.unsupportedDescription": "API 和本地镜像添加入口已预留，待后端接口完成后启用提交。",
   "mcpTools.repository.source": "来源：{{source}}",
+  "mcpTools.repository.sourceLabel": "来源",
   "mcpTools.repository.toolCount": "{{count}} 个工具",
   "mcpTools.repository.downloadCount": "下载次数",
   "mcpTools.repository.installed": "已安装",

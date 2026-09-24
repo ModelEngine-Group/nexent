@@ -2874,6 +2874,7 @@
   "mcpTools.repository.installed": "Installed",
   "mcpTools.repository.offline": "Take Down",
   "mcpTools.repository.source": "Source: {{source}}",
+  "mcpTools.repository.sourceLabel": "Source",
   "mcpTools.repository.toolCount": "{{count}} tools",
   "mcpTools.repository.authorFallback": "Community contributor",
   "mcpTools.repository.details": "View Details",
