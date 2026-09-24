@@ -892,6 +892,14 @@ class TagManagementDB:
                 if value_id not in target_value_ids:
                     session.delete(assignment)
 
+            # Flush deletes first: the unit of work emits INSERTs before
+            # DELETEs, so the capacity trigger would fire on a full replace.
+            if any(
+                value_id not in target_value_ids
+                for value_id in existing_by_value_id
+            ):
+                session.flush()
+
             assignments = [
                 ResourceTagAssignment(
                     tenant_id=tenant_id,

@@ -241,6 +241,7 @@ class RuntimeMetadataVersionConflict(ValueError):
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
+    code = ErrorCode.TENANT_RESOURCE_EXCEEDED.value
     def __init__(
         self,
         message: str,
@@ -250,17 +251,34 @@ class TenantResourceLimitError(ValidationError, ValueError):
         limit: int | None = None,
         current_count: int | None = None,
     ):
-        self.details = {
+        self.resource = resource
+        self.scope = scope
+        self.limit = limit
+        self.current_count = current_count
+        self.details = self.to_detail()
+        super().__init__(message)
+
+    def to_detail(self) -> dict:
+        """Return structured quota details for the standard API error contract."""
+        return {
             key: value
             for key, value in {
-                "resource": resource,
-                "scope": scope,
-                "limit": limit,
-                "current_count": current_count,
+                "resource": self.resource,
+                "scope": self.scope,
+                "limit": self.limit,
+                "current_count": self.current_count,
             }.items()
             if value is not None
         }
-        super().__init__(message)
+
+
+def tenant_resource_limit_error_payload(error: TenantResourceLimitError) -> dict:
+    """Build the standard API error payload for a tenant resource limit."""
+    return {
+        "code": ErrorCode.TENANT_RESOURCE_EXCEEDED.value,
+        "message": str(error),
+        "details": error.to_detail(),
+    }
 
 
 class NotFoundException(Exception):

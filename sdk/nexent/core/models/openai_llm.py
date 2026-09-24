@@ -11,10 +11,13 @@ from ..concurrency import RunCancellationScope, run_blocking
 import logging
 import threading
 import asyncio
+import importlib
 import time
 import json
 import httpx
+import uuid
 from typing import List, Optional, Dict, Any
+from urllib.parse import urlsplit
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
@@ -43,6 +46,8 @@ from .model_concurrency import ModelConcurrencyExceeded, model_concurrency_limit
 from .retry import (
     DEFAULT_MODEL_RETRY,
     ModelRetryConfig,
+    ModelErrorCode,
+    ModelInvocationTerminalError,
     classify_model_error,
     get_retry_after_seconds,
 )
@@ -74,6 +79,82 @@ class EmptyModelResponseError(RuntimeError):
     """Raised when a completed provider stream contains no user-visible content."""
 
 
+class ReasoningConfigurationError(RuntimeError):
+    """Raised when a provider rejects the configured reasoning parameters."""
+
+    is_reasoning_configuration_error = True
+
+
+_REASONING_ERROR_MARKERS = (
+    "reasoning_effort",
+    "reasoning effort",
+    "thinking",
+    "budget_tokens",
+    "thinking_budget",
+    "enable_thinking",
+)
+
+
+def _has_reasoning_parameters(completion_kwargs: Dict[str, Any]) -> bool:
+    """Return whether the request contains a reasoning-related wire field."""
+    if any(
+        key in completion_kwargs
+        for key in ("reasoning_effort", "thinking_budget", "reasoning_budget_tokens")
+    ):
+        return True
+    extra_body = completion_kwargs.get("extra_body")
+    return isinstance(extra_body, dict) and any(
+        key in extra_body
+        for key in ("thinking", "enable_thinking", "chat_template_kwargs")
+    )
+
+
+def _is_reasoning_parameter_error(
+    exc: Exception, completion_kwargs: Dict[str, Any]
+) -> bool:
+    """Identify a provider 400 that specifically rejects reasoning settings."""
+    error_type = _bad_request_error_type()
+    status_code = getattr(exc, "status_code", None)
+    is_bad_request = (
+        (error_type is not None and isinstance(exc, error_type))
+        or status_code == 400
+        or type(exc).__name__.lower() in {"badrequesterror", "badrequestexception"}
+    )
+    if not is_bad_request:
+        return False
+    if not _has_reasoning_parameters(completion_kwargs):
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _REASONING_ERROR_MARKERS)
+
+
+def _build_compatible_http_timeout(
+    default_http_client_type: type,
+    *,
+    connect: float,
+    read: float,
+    write: float,
+    pool: float,
+):
+    """Build a timeout owned by the HTTP implementation used by OpenAI.
+
+    OpenAI 3.x may use ``httpx2`` internally while Nexent still imports the
+    public ``httpx`` package for its own exception handling. Passing an
+    ``httpx.Timeout`` into an ``httpx2.Client`` nests incompatible timeout
+    objects and fails before the first provider request. Resolve the timeout
+    class from ``DefaultHttpxClient``'s public base class instead, falling
+    back to ``httpx`` for older OpenAI releases and test doubles.
+    """
+    for base in getattr(default_http_client_type, "__mro__", ()):
+        module_root = getattr(base, "__module__", "").partition(".")[0]
+        if not module_root.startswith("httpx"):
+            continue
+        timeout_type = getattr(importlib.import_module(module_root), "Timeout", None)
+        if timeout_type is not None:
+            return timeout_type(connect=connect, read=read, write=write, pool=pool)
+    return httpx.Timeout(connect=connect, read=read, write=write, pool=pool)
+
+
 def _is_timeout_error(exc: BaseException) -> bool:
     """Return whether an exception chain represents a network or caller timeout."""
     current: BaseException | None = exc
@@ -89,10 +170,17 @@ def _is_timeout_error(exc: BaseException) -> bool:
 
 
 class OpenAIModel(OpenAIServerModel):
+    supports_deferred_attempt_commit = True
+    supports_suppressed_attempt_stream = True
+
+
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-                 ssl_verify=True, model_factory: Optional[str] = None,
+                 ssl_verify=True, reasoning_effort: Optional[str] = None,
+                 reasoning_budget_tokens: Optional[int] = None,
+                 reasoning_capability: Optional[Dict[str, Any]] = None,
+                 model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_output_tokens: Optional[int] = None,
@@ -117,6 +205,10 @@ class OpenAIModel(OpenAIServerModel):
             observer: MessageObserver instance for tracking model output
             temperature: Sampling temperature (default: 0.2)
             top_p: Top-p sampling parameter (default: 0.95)
+            reasoning_effort: Optional canonical reasoning effort level declared
+                               by the selected model's capability profile.
+            reasoning_capability: Optional catalog metadata describing how the
+                                 canonical effort maps to the provider wire format.
             ssl_verify: Whether to verify SSL certificates (default: True).
                        Set to False for local services without SSL support.
             timeout_seconds: Timeout in seconds for HTTP requests (default: None, uses client default).
@@ -151,6 +243,10 @@ class OpenAIModel(OpenAIServerModel):
         self.observer = observer
         self.temperature = temperature
         self.top_p = top_p
+        self.reasoning_effort = reasoning_effort
+        self.reasoning_budget_tokens = reasoning_budget_tokens
+        self.reasoning_capability = reasoning_capability or None
+        self.api_base_url = kwargs.get("api_base")
         self.stop_event = (
             cancellation_scope.stop_event if cancellation_scope else threading.Event()
         )
@@ -188,13 +284,19 @@ class OpenAIModel(OpenAIServerModel):
         # Keep every streaming HTTP phase finite. Callers can still inject a
         # custom client through client_kwargs when they own its lifecycle.
         client_kwargs = kwargs.get("client_kwargs", {})
+        # The Agent retry budget counts physical provider requests. Disable
+        # the OpenAI client's hidden transport retries by default so one
+        # adapter attempt cannot fan out into multiple uncounted HTTP calls.
+        # A fully injected client remains under its caller's ownership, but
+        # clients constructed here must never exceed this adapter's budget.
+        client_kwargs["max_retries"] = 0
         if "http_client" not in client_kwargs:
             from openai import DefaultHttpxClient
-            from openai._base_client import httpx2
 
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=httpx2.Timeout(
+                timeout=_build_compatible_http_timeout(
+                    DefaultHttpxClient,
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,
@@ -240,6 +342,10 @@ class OpenAIModel(OpenAIServerModel):
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
                  _token_tracker=None, context_budget_snapshot: Optional[ContextBudgetSnapshot] = None,
                  context_rebuild=None, _overflow_recovery_ordinal: int = 0,
+                 _model_attempts_used: int = 0,
+                 _defer_attempt_commit: bool = False,
+                 _suppress_attempt_stream: bool = False,
+
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
@@ -282,6 +388,10 @@ class OpenAIModel(OpenAIServerModel):
                     context_budget_snapshot=context_budget_snapshot,
                     context_rebuild=context_rebuild,
                     _overflow_recovery_ordinal=_overflow_recovery_ordinal,
+                    _model_attempts_used=_model_attempts_used,
+                    _defer_attempt_commit=_defer_attempt_commit,
+                    _suppress_attempt_stream=_suppress_attempt_stream,
+
                     **kwargs,
                 )
 
@@ -352,6 +462,7 @@ class OpenAIModel(OpenAIServerModel):
             completion_kwargs["extra_body"] = self._translate_thinking_flag(
                 self.extra_body
             )
+        self._apply_reasoning_control(completion_kwargs)
 
         trusted_budget_snapshot = (
             context_budget_snapshot or self.context_budget_snapshot
@@ -413,13 +524,23 @@ class OpenAIModel(OpenAIServerModel):
                 }
             )
 
-        for attempt in range(1, self.retry_config.max_attempts + 1):
+        for attempt in range(_model_attempts_used + 1, self.retry_config.max_attempts + 1):
             first_token_received = False
             if self.stop_event.is_set():
                 if token_tracker:
                     self._monitoring.add_span_event("model_stopped", {
                         "reason": "stop_event_set"})
                 raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
+            attempt_id = uuid.uuid4().hex
+            begin_attempt = getattr(self.observer, "begin_model_attempt", None)
+            if callable(begin_attempt) and not _suppress_attempt_stream:
+
+                begin_attempt(attempt_id, attempt)
+            self._monitoring.add_span_event("model_attempt_begin", {
+                "attempt_id": attempt_id,
+                "attempt": attempt,
+                "max_attempts": self.retry_config.max_attempts,
+            })
             current_request = None
             stream_token = None
             close_stream_once = None
@@ -477,7 +598,8 @@ class OpenAIModel(OpenAIServerModel):
                 nonstandard_chunk_count = 0
 
                 # Reset output mode
-                self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
+                if not _suppress_attempt_stream:
+                    self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
 
                 # Track streaming metrics
                 stream_start_time = time.time()
@@ -514,8 +636,9 @@ class OpenAIModel(OpenAIServerModel):
                         if reasoning_content is not None:
                             reasoning_chunk_count += 1
                             reasoning_char_count += len(str(reasoning_content))
-                            self.observer.add_model_reasoning_content(
-                                reasoning_content)
+                            if not _suppress_attempt_stream:
+                                self.observer.add_model_reasoning_content(
+                                    reasoning_content)
                             if token_tracker and not first_token_received:
                                 token_tracker.record_first_token()
                                 first_token_received = True
@@ -531,7 +654,8 @@ class OpenAIModel(OpenAIServerModel):
                             if token_tracker:
                                 token_tracker.record_token(new_token)
 
-                            self.observer.add_model_new_token(new_token)
+                            if not _suppress_attempt_stream:
+                                self.observer.add_model_new_token(new_token)
                             token_join.append(new_token)
                             role = chunk.choices[0].delta.role
 
@@ -543,7 +667,8 @@ class OpenAIModel(OpenAIServerModel):
                             raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
 
                     # Send end marker
-                    self.observer.flush_remaining_tokens()
+                    if not _suppress_attempt_stream:
+                        self.observer.flush_remaining_tokens()
                     model_output = "".join(token_join)
                     self.last_finish_reason = finish_reason
                     if finish_reason == "length":
@@ -673,6 +798,27 @@ class OpenAIModel(OpenAIServerModel):
                         )
                     message.raw = current_request
                     message.role = MessageRole.ASSISTANT
+                    message.model_attempt_id = attempt_id
+                    message.model_attempt_number = attempt
+                    message.model_attempt_commit_deferred = (
+                        _defer_attempt_commit and not _suppress_attempt_stream
+                    )
+                    attempt_event = "model_attempt_stream_suppressed"
+                    if not _suppress_attempt_stream:
+                        attempt_event = (
+                            "model_attempt_commit_deferred"
+                            if _defer_attempt_commit
+                            else "model_attempt_commit"
+                        )
+                    if not _defer_attempt_commit and not _suppress_attempt_stream:
+
+                        commit_attempt = getattr(self.observer, "commit_model_attempt", None)
+                        if callable(commit_attempt):
+                            commit_attempt(attempt_id, attempt)
+                    self._monitoring.add_span_event(attempt_event, {
+                        "attempt_id": attempt_id,
+                        "attempt": attempt,
+                    })
                     return message
 
                 except Exception as e:
@@ -681,22 +827,30 @@ class OpenAIModel(OpenAIServerModel):
                             e).__name__, "error_message": str(e)})
 
                     raise e
-            except EmptyModelResponseError:
-                # Some reasoning-capable OpenAI-compatible providers
-                # occasionally finish with ``stop`` after emitting only
-                # reasoning chunks. Retry once inside the model adapter so an
-                # otherwise transient malformed stream does not consume a
-                # visible agent step. A ``length`` finish is deterministic
-                # truncation and must still surface immediately.
-                empty_retry_limit = min(self.retry_config.max_attempts, 2)
-                if self.last_finish_reason not in (None, "stop") or attempt >= empty_retry_limit:
-                    raise
+            except EmptyModelResponseError as empty_error:
+                rollback_attempt = getattr(self.observer, "rollback_model_attempt", None)
+                if callable(rollback_attempt) and not _suppress_attempt_stream:
+
+                    rollback_attempt(attempt_id, attempt)
+                self._monitoring.add_span_event("model_attempt_rollback", {
+                    "attempt_id": attempt_id,
+                    "attempt": attempt,
+                    "reason": "empty_response",
+                })
+                # Empty ``stop`` responses share the normal model attempt
+                # budget. Deterministic truncation (``length``) fails fast.
+                if self.last_finish_reason not in (None, "stop") or attempt >= self.retry_config.max_attempts:
+                    raise ModelInvocationTerminalError(
+                        ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED,
+                        attempt,
+                        cause=empty_error,
+                    ) from empty_error
                 backoff = self.retry_config.calculate_backoff(attempt)
                 logger.warning(
                     "event=retry_empty_model_response attempt=%d/%d finish_reason=%s "
                     "retrying_after_seconds=%.2f",
                     attempt,
-                    empty_retry_limit,
+                    self.retry_config.max_attempts,
                     self.last_finish_reason,
                     backoff,
                 )
@@ -706,6 +860,15 @@ class OpenAIModel(OpenAIServerModel):
                 self.stop_event.wait(backoff)
                 continue
             except Exception as e:
+                rollback_attempt = getattr(self.observer, "rollback_model_attempt", None)
+                if callable(rollback_attempt) and not _suppress_attempt_stream:
+
+                    rollback_attempt(attempt_id, attempt)
+                self._monitoring.add_span_event("model_attempt_rollback", {
+                    "attempt_id": attempt_id,
+                    "attempt": attempt,
+                    "error_type": type(e).__name__,
+                })
                 if self.stop_event.is_set() or self.cancellation_scope.cancelled:
                     raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE) from e
                 if isinstance(e, ModelConcurrencyExceeded):
@@ -717,13 +880,29 @@ class OpenAIModel(OpenAIServerModel):
                     })
                 if is_provider_context_overflow(e):
                     if first_token_received or context_rebuild is None:
-                        raise ProviderContextOverflowRetryUnsafe(
+                        overflow_error = ProviderContextOverflowRetryUnsafe(
                             "Provider context overflow cannot be safely rebuilt: "
                             f"{e}"
+                        )
+                        raise ModelInvocationTerminalError(
+                            ModelErrorCode.CONTEXT_OVERFLOW,
+                            attempt,
+                            cause=overflow_error,
+                        ) from e
+                    if attempt >= self.retry_config.max_attempts:
+                        raise ModelInvocationTerminalError(
+                            ModelErrorCode.CONTEXT_OVERFLOW,
+                            attempt,
+                            cause=e,
                         ) from e
                     if _overflow_recovery_ordinal >= 2:
-                        raise ProviderContextOverflowRetryExhausted(
+                        overflow_error = ProviderContextOverflowRetryExhausted(
                             "Provider context overflow persisted after two recovery dispatches"
+                        )
+                        raise ModelInvocationTerminalError(
+                            ModelErrorCode.CONTEXT_OVERFLOW,
+                            attempt,
+                            cause=overflow_error,
                         ) from e
                     rebuilt = context_rebuild()
                     rebuilt_messages = getattr(rebuilt, "messages", rebuilt)
@@ -752,6 +931,10 @@ class OpenAIModel(OpenAIServerModel):
                         context_budget_snapshot=trusted_budget_snapshot,
                         context_rebuild=context_rebuild,
                         _overflow_recovery_ordinal=_overflow_recovery_ordinal + 1,
+                        _model_attempts_used=attempt,
+                        _defer_attempt_commit=_defer_attempt_commit,
+                        _suppress_attempt_stream=_suppress_attempt_stream,
+
                         **kwargs,
                     )
                 is_timeout = _is_timeout_error(e)
@@ -769,15 +952,29 @@ class OpenAIModel(OpenAIServerModel):
                         received_chunk_count,
                         type(e).__name__,
                     )
-                if classify_model_error(e) != "retryable":
-                    raise
+                classification = classify_model_error(e)
+                if not classification.retryable:
+                    raise ModelInvocationTerminalError(
+                        classification.error_code,
+                        attempt,
+                        cause=e,
+                    ) from e
                 if attempt >= self.retry_config.max_attempts:
                     if not is_timeout:
-                        logging.exception(
-                            "Model call failed after %d attempts: %s",
-                            attempt, str(e),
+                        logger.exception(
+
+                            "event=model_retry_exhausted attempt=%d/%d "
+                            "error_type=%s error_code=%s",
+                            attempt,
+                            self.retry_config.max_attempts,
+                            type(e).__name__,
+                            classification.error_code.value,
                         )
-                    raise
+                    raise ModelInvocationTerminalError(
+                        classification.error_code,
+                        attempt,
+                        cause=e,
+                    ) from e
                 backoff = self.retry_config.calculate_backoff(attempt)
                 retry_after = get_retry_after_seconds(e)
                 if retry_after is not None:
@@ -796,9 +993,13 @@ class OpenAIModel(OpenAIServerModel):
                     )
                 else:
                     logger.warning(
-                        "Model call attempt %d/%d failed with retryable error (%s); "
-                        "retrying after %.2fs",
-                        attempt, self.retry_config.max_attempts, str(e), backoff,
+                        "event=model_retry attempt=%d/%d error_type=%s "
+                        "error_code=%s retrying_after_seconds=%.2f",
+                        attempt,
+                        self.retry_config.max_attempts,
+                        type(e).__name__,
+                        classification.error_code.value,
+                        backoff,
                     )
                 self.last_retry_count = attempt
                 if self.stop_event.is_set():
@@ -865,6 +1066,10 @@ class OpenAIModel(OpenAIServerModel):
         try:
             return self.client.chat.completions.create(**completion_kwargs)
         except Exception as exc:
+            if _is_reasoning_parameter_error(exc, completion_kwargs):
+                raise ReasoningConfigurationError(
+                    "The provider rejected the configured reasoning parameters"
+                ) from exc
             # Reasoning-only models (kimi-k3, o1-mini, ...) reject any
             # sampling value other than their enforced default, which makes
             # the instance-level default temperature/top_p (possibly just a
@@ -883,24 +1088,112 @@ class OpenAIModel(OpenAIServerModel):
             )
             return self.client.chat.completions.create(**retry_kwargs)
 
+    def _reasoning_wire_profile(self) -> Optional[Dict[str, Optional[str]]]:
+        """Return only an explicitly known provider wire mapping.
+
+        models.dev declares that a model has reasoning controls, but it does
+        not define a universal request field for every OpenAI-compatible
+        provider. Confirmed providers use their own adapter. For an unknown
+        provider, an enum effort falls back to OpenAI's public
+        ``reasoning_effort`` field; numeric budgets and toggles still require
+        an explicit provider adapter and are not guessed.
+        """
+        capability = self.reasoning_capability or {}
+        provider_id = str(
+            capability.get("provider_id") or self.model_factory or ""
+        ).lower()
+        api_url = str(
+            capability.get("matched_api") or self.api_base_url or ""
+        ).lower()
+        try:
+            api_hostname = (
+                urlsplit(api_url if "://" in api_url else f"//{api_url}").hostname
+                or ""
+            ).rstrip(".")
+        except ValueError:
+            api_hostname = ""
+        if api_hostname == "aliyuncs.com" or api_hostname.endswith(".aliyuncs.com"):
+            provider_id = "dashscope"
+        elif api_hostname == "api.deepseek.com":
+            provider_id = "deepseek"
+
+        if capability.get("source") == "models_dev":
+            if provider_id in {"alibaba", "alibaba-cn", "dashscope"}:
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": "thinking_budget",
+                    "toggle": "enable_thinking",
+                }
+            if provider_id == "deepseek":
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": "thinking_object",
+                }
+            if provider_id in {"openai", "google"}:
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": None,
+                }
+            if capability.get("wire_format") == "reasoning_effort":
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": None,
+                }
+            return {
+                "effort": "reasoning_effort",
+                "budget": None,
+                "toggle": None,
+            }
+
+        effort = capability.get("wire_format") or "reasoning_effort"
+        if effort not in {"reasoning_effort", "thinking_toggle", "thinking_budget"}:
+            # OpenAI-compatible endpoints have one public effort field. Use
+            # it as the conservative fallback for an unconfirmed provider;
+            # provider-specific budget/toggle fields are never inferred.
+            effort = "reasoning_effort"
+        budget = capability.get("budget_wire_format")
+        if budget is None and effort == "thinking_budget":
+            # Existing operator/catalog profiles explicitly using the
+            # thinking-budget wire format use the nested thinking object.
+            budget = "thinking_object"
+        toggle = capability.get("toggle_wire_format")
+        if toggle is None and provider_id == "deepseek":
+            toggle = "thinking_object"
+        if toggle is None and provider_id in {"alibaba", "alibaba-cn", "dashscope"}:
+            toggle = "enable_thinking"
+        return {"effort": effort, "budget": budget, "toggle": toggle}
+
     def _translate_thinking_flag(
         self, extra_body: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Translate the enable_thinking flag to the provider's wire format.
 
-        Qwen-family models (vLLM/SGLang deployments and DashScope alike) only
-        read it from ``chat_template_kwargs.enable_thinking``; a top-level
-        flag is silently ignored there. Other providers (DashScope
-        non-Qwen, DeepSeek, SiliconFlow DeepSeek-V3.x) read the top-level
-        ``enable_thinking``. An explicit False must therefore be wrapped for
-        Qwen and kept top-level for everyone else; an absent flag is passed
-        through untouched (model default applies).
+        Qwen-family self-hosted deployments read the flag from
+        ``chat_template_kwargs.enable_thinking``. DashScope's OpenAI-compatible
+        endpoint accepts the top-level ``enable_thinking`` extra field, so the
+        translation is selected by provider/API rather than model name alone.
         """
         if "enable_thinking" not in extra_body:
             return extra_body
         translated = dict(extra_body)
         thinking = translated.pop("enable_thinking")
-        if "qwen" in (self.model_id or "").lower():
+        wire_profile = self._reasoning_wire_profile()
+        toggle_format = wire_profile.get("toggle") if wire_profile else None
+        if toggle_format == "thinking_object":
+            translated["thinking"] = {
+                "type": "enabled" if thinking else "disabled"
+            }
+        elif toggle_format == "enable_thinking":
+            translated["enable_thinking"] = thinking
+        elif toggle_format == "chat_template" or (
+            toggle_format is None
+            and wire_profile is not None
+            and (self.reasoning_capability or {}).get("source") != "models_dev"
+            and "qwen" in (self.model_id or "").lower()
+        ):
             chat_kwargs = translated.get("chat_template_kwargs")
             if isinstance(chat_kwargs, dict):
                 translated["chat_template_kwargs"] = {
@@ -908,9 +1201,109 @@ class OpenAIModel(OpenAIServerModel):
                 }
             else:
                 translated["chat_template_kwargs"] = {"enable_thinking": thinking}
-        else:
-            translated["enable_thinking"] = thinking
+        # No confirmed adapter means the canonical toggle is deliberately
+        # omitted instead of being guessed as a top-level provider field.
         return translated
+
+    def _apply_reasoning_control(self, completion_kwargs: Dict[str, Any]) -> None:
+        """Apply the catalog's canonical effort using the provider wire format.
+
+        Most OpenAI-compatible endpoints accept a top-level
+        ``reasoning_effort``. A few providers expose the same concept as a
+        ``thinking`` object, so the catalog declares that translation instead
+        of making the runtime guess from a model name.
+        """
+        if (
+            (self.reasoning_effort is None or self.reasoning_effort == "auto")
+            and self.reasoning_budget_tokens is None
+        ):
+            return
+
+        capability = self.reasoning_capability or {}
+        if capability.get("status") == "unsupported":
+            return
+        wire_profile = self._reasoning_wire_profile()
+        if wire_profile is None:
+            logger.warning(
+                "event=reasoning_wire_adapter_missing model_id=%s provider=%s",
+                self.model_id,
+                capability.get("provider_id") or self.model_factory or "unknown",
+            )
+            return
+        wire_format = wire_profile.get("effort")
+
+        controls = capability.get("controls")
+        budget_control_declared = any(
+            isinstance(control, dict) and control.get("type") == "budget_tokens"
+            for control in controls or []
+        )
+        budget_wire_format = wire_profile.get("budget")
+
+        # Numeric budget and enum effort are alternative controls. If both are
+        # present in a historical/configured value, numeric budget wins.
+        has_budget = (
+            budget_control_declared
+            and isinstance(self.reasoning_budget_tokens, int)
+            and not isinstance(self.reasoning_budget_tokens, bool)
+            and self.reasoning_budget_tokens > 0
+        )
+        if has_budget:
+            completion_kwargs.pop("reasoning_effort", None)
+            if budget_wire_format == "thinking_budget":
+                extra_body = dict(completion_kwargs.get("extra_body") or {})
+                extra_body["thinking_budget"] = self.reasoning_budget_tokens
+                completion_kwargs["extra_body"] = self._translate_thinking_flag(extra_body)
+                return
+            if budget_wire_format is None:
+                logger.warning(
+                    "event=reasoning_budget_adapter_missing model_id=%s provider=%s",
+                    self.model_id,
+                    capability.get("provider_id") or self.model_factory or "unknown",
+                )
+                return
+        elif budget_control_declared:
+            # Auto means no provider reasoning parameter.
+            return
+
+        if wire_format == "reasoning_effort" and not has_budget:
+            if self.reasoning_effort is not None and self.reasoning_effort != "auto":
+                completion_kwargs["reasoning_effort"] = self.reasoning_effort
+            return
+
+        if wire_format is None:
+            logger.warning(
+                "event=reasoning_effort_adapter_missing model_id=%s provider=%s",
+                self.model_id,
+                capability.get("provider_id") or self.model_factory or "unknown",
+            )
+            return
+
+        if budget_control_declared and self.reasoning_budget_tokens is None:
+            return
+
+        extra_body = dict(completion_kwargs.get("extra_body") or {})
+        thinking = extra_body.get("thinking")
+        thinking = dict(thinking) if isinstance(thinking, dict) else {}
+
+        if self.reasoning_budget_tokens is not None:
+            thinking["type"] = "enabled"
+            thinking["budget_tokens"] = self.reasoning_budget_tokens
+        elif self.reasoning_effort == "none":
+            thinking["type"] = "disabled"
+            thinking.pop("budget_tokens", None)
+        else:
+            thinking["type"] = "enabled"
+            if wire_format == "thinking_budget":
+                budgets = capability.get("effort_budgets") or {}
+                budget = budgets.get(self.reasoning_effort)
+                if budget is None:
+                    raise ReasoningConfigurationError(
+                        f"Missing thinking budget for reasoning effort: {self.reasoning_effort}"
+                    )
+                thinking["budget_tokens"] = budget
+
+        extra_body["thinking"] = thinking
+        completion_kwargs["extra_body"] = self._translate_thinking_flag(extra_body)
 
     def _sampling_fallback_kwargs(
         self, exc: Exception, completion_kwargs: Dict[str, Any]
@@ -1038,7 +1431,10 @@ class OpenAIModel(OpenAIServerModel):
                 max_tokens=5,
             )
             if self.extra_body:
-                completion_kwargs["extra_body"] = self.extra_body
+                completion_kwargs["extra_body"] = self._translate_thinking_flag(
+                    self.extra_body
+                )
+            self._apply_reasoning_control(completion_kwargs)
 
             # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
             await run_blocking(
