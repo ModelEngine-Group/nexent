@@ -3007,6 +3007,7 @@
   "notifications.events.mcp_repository_review_pending": "MCP「{{name}}」待审核，上架说明：{{content}}",
   "notifications.events.emptyContent": "无",
   "notifications.deepLink.agentNotFound": "无法打开该智能体的审核状态。",
+  "notifications.usageGuide.agentNotFound": "无法打开该智能体的使用引导。",
   "notifications.deepLink.skillNotFound": "无法打开该 Skill 的审核状态。",
   "monitoring.dashboard.timeRange.24h": "最近 24 小时",
   "monitoring.dashboard.timeRange.7d": "最近 7 天",

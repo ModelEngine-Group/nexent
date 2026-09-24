@@ -49,6 +49,7 @@ export function resolveAgentUsageGuideTarget<T>({
   fallbackAgent,
   isListLoading,
   isFallbackLoading,
+  isActive,
   getAgentId,
 }: {
   agentId: number;
@@ -56,8 +57,12 @@ export function resolveAgentUsageGuideTarget<T>({
   fallbackAgent: T | null;
   isListLoading: boolean;
   isFallbackLoading: boolean;
+  isActive?: boolean;
   getAgentId: (agent: T) => number | null;
 }): AgentUsageGuideTargetState<T> {
+  if (isActive === false) {
+    return { state: "loading" };
+  }
   const agentFromList = agents.find((agent) => getAgentId(agent) === agentId);
   if (agentFromList) {
     return { state: "found", agent: agentFromList };

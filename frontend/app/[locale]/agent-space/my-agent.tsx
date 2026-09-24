@@ -274,6 +274,7 @@ export function MyAgent({ active }: { active: boolean }) {
             fallbackAgent: deepLinkFallbackAgent,
             isListLoading: isLoading,
             isFallbackLoading: deepLinkFallbackLoading,
+            isActive: active,
             getAgentId: (agent) =>
               isNewAgentPaddingItem(agent) ? null : agent.agent_id,
           })
@@ -527,7 +528,7 @@ export function MyAgent({ active }: { active: boolean }) {
       return;
     }
     if (openAction.action === "missing") {
-      message.error(t("notifications.deepLink.agentNotFound"));
+      message.error(t("notifications.usageGuide.agentNotFound"));
       consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
       onUsageGuideDeepLinkConsumed?.();
       return;

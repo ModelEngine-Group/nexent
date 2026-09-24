@@ -132,13 +132,28 @@ test("waits for guide target queries and rejects a mismatched fallback", () => {
   assert.deepEqual(
     resolveAgentUsageGuideTarget({
       agentId: 41,
-      agents: [],
+      agents: [] as Array<{ agent_id: number }>,
       fallbackAgent: { agent_id: 42 },
       isListLoading: false,
       isFallbackLoading: false,
       getAgentId: (agent) => agent.agent_id,
     }),
     { state: "missing" }
+  );
+});
+
+test("waits while the mine tab and guide target queries are inactive", () => {
+  assert.deepEqual(
+    resolveAgentUsageGuideTarget({
+      agentId: 41,
+      agents: [] as Array<{ agent_id: number }>,
+      fallbackAgent: null,
+      isListLoading: false,
+      isFallbackLoading: false,
+      isActive: false,
+      getAgentId: (agent) => agent.agent_id,
+    }),
+    { state: "loading" }
   );
 });
 

@@ -2976,6 +2976,7 @@
   "notifications.events.mcp_repository_review_pending": "MCP \"{{name}}\" is pending review, listing note: {{content}}",
   "notifications.events.emptyContent": "None",
   "notifications.deepLink.agentNotFound": "Unable to open review status for this agent.",
+  "notifications.usageGuide.agentNotFound": "Unable to open the usage guide for this agent.",
   "notifications.deepLink.skillNotFound": "Unable to open the review status for this skill.",
   "monitoring.dashboard.timeRange.24h": "Last 24h",
   "monitoring.dashboard.timeRange.7d": "Last 7d",
