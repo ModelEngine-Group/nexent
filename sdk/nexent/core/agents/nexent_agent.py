@@ -28,7 +28,7 @@ from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
-from .mcp_errors import is_mcp_timeout_error
+from ...consts.mcp_errors import is_mcp_timeout_error
 from .output_protocol import ModelOutputProtocolExhaustedError
 from .tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,

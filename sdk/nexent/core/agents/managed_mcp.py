@@ -10,7 +10,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Callable
 
 from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
-from .mcp_errors import MCPToolTimeoutError
+from ...consts.mcp_errors import MCPToolTimeoutError
 
 
 logger = logging.getLogger("managed_mcp")

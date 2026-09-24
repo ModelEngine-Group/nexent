@@ -54,16 +54,6 @@ from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger("remote_mcp_service")
 
-
-def _get_mcp_request_timeout_seconds() -> int | float:
-    """Return the configured MCP timeout, tolerating lightweight test stubs."""
-    timeout = MCP_REQUEST_TIMEOUT_SECONDS
-    return timeout if isinstance(timeout, (int, float)) and timeout > 0 else 10
-
-
-MCP_HEALTH_CHECK_TIMEOUT_SECONDS = _get_mcp_request_timeout_seconds()
-
-
 def _iter_exception_chain(exc: BaseException):
     seen: set[int] = set()
     current: BaseException | None = exc
@@ -141,7 +131,7 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
             )
 
         async def list_mcp_tools() -> list:
-            client = Client(transport=transport, timeout=_get_mcp_request_timeout_seconds())
+            client = Client(transport=transport, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
             async with client:
                 # Verify the server can actually serve tools.
                 # This exercises API key validation and end-to-end connectivity,
@@ -150,7 +140,7 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
 
         tools_result = await asyncio.wait_for(
             list_mcp_tools(),
-            timeout=MCP_HEALTH_CHECK_TIMEOUT_SECONDS,
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
         )
         return [t.name for t in tools_result] if tools_result else []
     except BaseException as e:
@@ -189,13 +179,13 @@ async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
             )
 
         async def connect_client() -> bool:
-            client = Client(transport=transport, timeout=_get_mcp_request_timeout_seconds())
+            client = Client(transport=transport, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
             async with client:
                 return client.is_connected()
 
         return await asyncio.wait_for(
             connect_client(),
-            timeout=_get_mcp_request_timeout_seconds(),
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
         )
     except Exception as e:
         logger.debug(f"MCP protocol connect handshake failed: {e}")

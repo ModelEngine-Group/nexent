@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_model import AgentVerificationConfig
-from .mcp_errors import is_mcp_timeout_error, propagate_mcp_timeout
+from ...consts.mcp_errors import is_mcp_timeout_error, propagate_mcp_timeout
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
 from .verification import (
     VerificationController,
