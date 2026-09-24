@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Dropdown, Spin } from "antd";
+import { Button, Dropdown, Spin, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useState } from "react";
 import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import {
   formatMineDate,
   getMineCardMenuActions,
@@ -74,6 +75,10 @@ export function MyAgentCard({
   const description =
     agent.description?.trim() || t("agentRepository.card.noDescription");
   const tags = agent.tags?.filter((tag) => tag.trim()) ?? [];
+  const unavailableReasonLabels = getUnavailableReasonLabels(
+    agent.unavailable_reasons ?? [],
+    t
+  );
   const published = (agent.current_version_no ?? 0) > 0;
   const repositoryInfo = toMineRepositoryInfo(listingData?.items ?? []);
   const agentWithRepository = { ...agent, repository_info: repositoryInfo };
@@ -205,6 +210,22 @@ export function MyAgentCard({
             </Dropdown>
           ) : null}
           <div className="flex items-center gap-1.5">
+            {agent.is_available === false ? (
+              <Tooltip
+                title={
+                  unavailableReasonLabels.length > 0
+                    ? unavailableReasonLabels.join(", ")
+                    : t("agentSelector.agentUnavailable")
+                }
+              >
+                <span
+                  className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                  aria-label={unavailableReasonLabels.join(", ") || t("agentSelector.agentUnavailable")}
+                >
+                  {t("mcpConfig.status.unavailable")}
+                </span>
+              </Tooltip>
+            ) : null}
             <span
               className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
                 published

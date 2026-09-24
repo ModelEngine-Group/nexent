@@ -398,6 +398,55 @@ def query_all_agent_info_by_tenant_id(tenant_id: str, version_no: int = 0):
         return [as_dict(agent) for agent in agents]
 
 
+def query_agent_list_candidates_by_tenant_id(
+    tenant_id: str, *, include_description: bool = False
+) -> list[dict]:
+    """Load only fields needed to filter and page visible draft agents."""
+    columns = [
+        AgentInfo.agent_id,
+        AgentInfo.tenant_id,
+        AgentInfo.name,
+        AgentInfo.display_name,
+        AgentInfo.created_by,
+        AgentInfo.create_time,
+        AgentInfo.group_ids,
+        AgentInfo.ingroup_permission,
+    ]
+    if include_description:
+        columns.append(AgentInfo.description)
+    with get_db_session() as session:
+        rows = (
+            session.query(*columns)
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != 'Y',
+                AgentInfo.enabled.is_(True),
+            )
+            .order_by(AgentInfo.create_time.desc(), AgentInfo.agent_id.desc())
+            .all()
+        )
+        return [dict(row._mapping) for row in rows]
+
+
+def query_agent_info_by_ids(tenant_id: str, agent_ids: list[int]) -> list[dict]:
+    """Load complete draft records for one already-authorized agent page."""
+    if not agent_ids:
+        return []
+    with get_db_session() as session:
+        agents = (
+            session.query(AgentInfo)
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != 'Y',
+                AgentInfo.agent_id.in_(agent_ids),
+            )
+            .all()
+        )
+        return [as_dict(agent) for agent in agents]
+
+
 def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> dict:
     """
     Batch query agent display names by agent IDs.

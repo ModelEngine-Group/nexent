@@ -745,6 +745,8 @@ function toMyAgentItem(agent: Agent): MyEditableAgentItem {
   return {
     agent_id: Number(agent.id),
     icon_url: agent.icon_url,
+    is_available: agent.is_available,
+    unavailable_reasons: agent.unavailable_reasons,
     name: agent.display_name || agent.name,
     description: agent.description,
     current_version_no: currentVersionNo,

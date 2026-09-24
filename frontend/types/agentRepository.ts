@@ -85,6 +85,8 @@ export interface MyAgentRepositoryInfoItem {
 export interface MyEditableAgentItem {
   agent_id: number;
   icon_url?: string | null;
+  is_available?: boolean;
+  unavailable_reasons?: string[];
   name?: string | null;
   description?: string | null;
   current_version_no?: number | null;
