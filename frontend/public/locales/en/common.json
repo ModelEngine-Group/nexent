@@ -4827,6 +4827,7 @@
   "agentEvaluation.genSetNameAutoPlaceholder": "Auto-use existing evaluation set name",
   "agentEvaluation.refDocLabel": "Upload Reference Documents",
   "agentEvaluation.refDocHint": "(upload reference documents to a knowledge base first)",
+  "agentEvaluation.genKbLoadFailed": "Failed to load the knowledge base list, please retry",
   "agentEvaluation.over10MB": "exceeds 10MB",
   "agentEvaluation.uploadButton": "Upload",
   "agentEvaluation.genButton": "Generate",

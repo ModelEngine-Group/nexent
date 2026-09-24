@@ -4841,6 +4841,7 @@
   "agentEvaluation.genSetNameAutoPlaceholder": "自动使用已有评测集名称",
   "agentEvaluation.refDocLabel": "上传参考文档",
   "agentEvaluation.refDocHint": "(参考文档请先上传至知识库)",
+  "agentEvaluation.genKbLoadFailed": "知识库列表加载失败，请重试",
   "agentEvaluation.over10MB": "超过 10MB",
   "agentEvaluation.uploadButton": "上传",
   "agentEvaluation.genButton": "生成",

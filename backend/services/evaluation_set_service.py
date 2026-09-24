@@ -6,7 +6,12 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from consts.const import ENABLE_AIDP_KNOWLEDGE
+from consts.const import (
+    AIDP_API_KEY,
+    AIDP_SERVER_URL,
+    AIDP_TENANT_ID,
+    ENABLE_AIDP_KNOWLEDGE,
+)
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import MAX_CASES_PER_SET
 from consts.evaluation_status import EvalRunStatus
@@ -663,8 +668,11 @@ def _resolve_aidp_kb_info(kb_ids, user_id, tenant_id):
     so resolution goes through the AIDP access snapshot, which intersects
     the remote catalog with the caller's permissions. Requested ids the
     user cannot access are dropped (never silently passed upstream).
+
+    A catalog fetch failure degrades to an empty result (warning logged) so
+    the generation run continues on scene/agent context alone, matching the
+    ES branch's tolerance for a broken KB backend.
     """
-    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
     from ext_components.aidp.services.aidp_access_service import (
         resolve_current_aidp_access,
     )
@@ -672,13 +680,21 @@ def _resolve_aidp_kb_info(kb_ids, user_id, tenant_id):
     wanted = {str(kb_id) for kb_id in kb_ids if str(kb_id).strip()}
     if not wanted:
         return []
-    snapshot = resolve_current_aidp_access(
-        server_url=AIDP_SERVER_URL,
-        api_key=AIDP_API_KEY,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        aidp_tenant_id=AIDP_TENANT_ID,
-    )
+    try:
+        snapshot = resolve_current_aidp_access(
+            server_url=AIDP_SERVER_URL,
+            api_key=AIDP_API_KEY,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            aidp_tenant_id=AIDP_TENANT_ID,
+        )
+    except Exception as exc:  # noqa: BLE001 — catalog outage must not fail the run
+        logger.warning(
+            "AIDP KB catalog unavailable for user %s, generating without KB context: %s",
+            user_id,
+            exc,
+        )
+        return []
     resolved = []
     for row in snapshot.accessible_rows:
         kds_id = str(row.get("kb_id") or row.get("kds_id") or "")
@@ -712,7 +728,6 @@ def _format_aidp_hit(record: dict, query: str) -> str:
         score = float(record.get("score") or 0.0)
     except (TypeError, ValueError):
         score = 0.0
-    score = max(0.0, min(1.0, score))
     return f"- [{query}] (score={score:.2f}) {text.strip()[:400]}"
 
 
@@ -723,7 +738,6 @@ def _execute_aidp_searches(kb_info, queries, tenant_id, top_k=3):
     list), so the upstream call count stays at len(queries). Returns the
     formatted hit lines, or ``""`` when nothing usable was retrieved.
     """
-    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
     from ext_components.aidp.services.aidp_service import fusion_search_impl
 
     if not kb_info or not queries:
@@ -746,7 +760,7 @@ def _execute_aidp_searches(kb_info, queries, tenant_id, top_k=3):
             continue
         parts.extend(
             line
-            for record in records[:top_k]
+            for record in records
             for line in [_format_aidp_hit(record, query)]
             if line
         )
@@ -771,19 +785,23 @@ def _update_generation_status(set_id, tenant_id, status, progress=0):
 # ── AI case generation (shared helpers) ──────────────────────────────
 
 
-def _do_kb_search(knowledge_base_names, description, model_id, tenant_id, user_id=None) -> str:
-    """Resolve KBs → plan queries → execute searches.  Returns KB context text.
+def _do_kb_search(knowledge_base_names, description, model_id, tenant_id, user_id=None):
+    """Resolve KBs → plan queries → execute searches.
 
     With ``ENABLE_AIDP_KNOWLEDGE`` the request carries AIDP kds_ids and
     retrieval goes through the AIDP FusionSearch API; otherwise the names are
     ES knowledge-base display names searched directly in Elasticsearch.
+
+    Returns ``(kb_context, resolved_display_names)`` — the resolved names let
+    the prompt fallback show human-readable KB names instead of raw kds_ids.
     """
     if not knowledge_base_names:
-        return ""
+        return "", []
     if ENABLE_AIDP_KNOWLEDGE:
         kb_info = _resolve_aidp_kb_info(knowledge_base_names, user_id, tenant_id)
+        display_names = [kb["display_name"] for kb in kb_info]
         if not kb_info:
-            return ""
+            return "", []
         queries = _plan_search_queries(
             kb_info,
             description,
@@ -792,21 +810,22 @@ def _do_kb_search(knowledge_base_names, description, model_id, tenant_id, user_i
             kb_desc_block=_build_aidp_kb_descriptions(kb_info),
         )
         if not queries:
-            return ""
+            return "", display_names
         kb_context = _execute_aidp_searches(kb_info, queries, tenant_id)
     else:
         kb_info = _resolve_kb_info(knowledge_base_names, tenant_id)
+        display_names = [kb["display_name"] for kb in kb_info]
         if not kb_info:
-            return ""
+            return "", []
         queries = _plan_search_queries(kb_info, description, model_id, tenant_id)
         if not queries:
-            return ""
+            return "", display_names
         kb_context = _execute_kb_searches(kb_info, queries, tenant_id)
     if kb_context:
         logger.info("KB search returned %d chars", len(kb_context))
     else:
         logger.warning("KB search returned no results")
-    return kb_context
+    return kb_context, display_names
 
 
 def _build_agent_context_block(agent_id, tenant_id) -> str:
@@ -865,8 +884,14 @@ def _build_case_gen_context_blocks(
     description,
     kb_context,
     knowledge_base_names,
+    resolved_kb_names=None,
 ):
-    """Build prompt context blocks for case generation.  Order: Agent → Scene → KB."""
+    """Build prompt context blocks for case generation.  Order: Agent → Scene → KB.
+
+    ``resolved_kb_names`` carries the human-readable names resolved from the
+    request; the KB fallback block prefers it over the raw request values so
+    AIDP kds_ids never surface verbatim in a prompt.
+    """
     context_blocks: list[str] = []
 
     agent_block = _build_agent_context_block(agent_id, tenant_id)
@@ -875,7 +900,11 @@ def _build_case_gen_context_blocks(
 
     context_blocks.append(f"## 场景描述\n{description}")
 
-    kb_block = _build_kb_context_block(kb_context, knowledge_base_names, tenant_id)
+    kb_block = _build_kb_context_block(
+        kb_context,
+        resolved_kb_names or knowledge_base_names,
+        tenant_id,
+    )
     if kb_block:
         context_blocks.append(kb_block)
 
@@ -1070,7 +1099,7 @@ def _generate_cases_async(
     try:
         _report_progress(set_id, tenant_id, 0)
 
-        kb_context = _do_kb_search(
+        kb_context, resolved_kb_names = _do_kb_search(
             knowledge_base_names, description, model_id, tenant_id, user_id
         )
         _report_progress(set_id, tenant_id, 8)
@@ -1081,6 +1110,7 @@ def _generate_cases_async(
             description,
             kb_context,
             knowledge_base_names,
+            resolved_kb_names,
         )
         user_prompt = _build_case_gen_user_prompt(
             context_blocks,

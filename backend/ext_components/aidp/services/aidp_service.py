@@ -1987,10 +1987,6 @@ def fusion_search_impl(
     Records come back as ``{title, text, score, file_url, chunk_type, ...}``.
     """
     normalized_url = _validate_params(server_url, api_key)
-    if not query or not query.strip():
-        raise AppException(ErrorCode.AIDP_CONFIG_INVALID, "AIDP search query is empty")
-    if not kds_list:
-        raise AppException(ErrorCode.AIDP_CONFIG_INVALID, "AIDP search requires kds_list")
 
     headers = {
         "Authorization": f"Bearer {api_key}",

@@ -2035,6 +2035,53 @@ function SetsTab() {
     if (!genSetModel && availableLlmModels.length > 0)
       setGenSetModel(availableLlmModels[0].id);
   }, [availableLlmModels]);
+  const loadKbOptions = async () => {
+    // Source the KB dropdown from the implementation selected by the
+    // deployment switch: AIDP kds_id-keyed KBs, or local ES display names.
+    try {
+      if (enableAidpKnowledge) {
+        // Pull every page so KBs beyond the first 100 stay selectable.
+        const items: any[] = [];
+        let page = 1;
+        let hasMore = true;
+        while (hasMore && page <= 10) {
+          const resp = await fetch(
+            `/api/aidp-mgmt/knowledge-bases?page=${page}&page_size=100`,
+            { headers: getAuthHeaders() }
+          );
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          items.push(...(Array.isArray(data?.value) ? data.value : []));
+          hasMore = Boolean(data?.has_more);
+          page += 1;
+        }
+        setKbList(
+          items
+            .filter((k: any) => k.kds_id)
+            .map((k: any) => ({
+              label: k.kds_name || k.kds_id,
+              value: k.kds_id,
+            }))
+        );
+      } else {
+        const resp = await fetch("/api/indices?include_stats=true", {
+          headers: getAuthHeaders(),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const info = data.indices_info || [];
+        setKbList(
+          info.map((x: any) => ({
+            label: x.display_name || x.name,
+            value: x.display_name || x.name,
+          }))
+        );
+      }
+    } catch {
+      setKbList([]);
+      message.warning(t("agentEvaluation.genKbLoadFailed"));
+    }
+  };
   const [editingCase, setEditingCase] = useState<any>(null);
   const [adding, setAdding] = useState(false);
   const [newQ, setNewQ] = useState("");
@@ -2920,44 +2967,7 @@ function SetsTab() {
                     onChange={setGenKbIds}
                     options={kbList}
                     onOpenChange={(open) => {
-                      if (!open) return;
-                      if (enableAidpKnowledge) {
-                        // AIDP mode: list AIDP knowledge bases (kds_id keyed).
-                        fetch(
-                          "/api/aidp-mgmt/knowledge-bases?page=1&page_size=100",
-                          { headers: getAuthHeaders() }
-                        )
-                          .then((r) => r.json())
-                          .then((d) => {
-                            const items = Array.isArray(d?.value)
-                              ? d.value
-                              : [];
-                            setKbList(
-                              items
-                                .filter((k: any) => k.kds_id)
-                                .map((k: any) => ({
-                                  label: k.kds_name || k.kds_id,
-                                  value: k.kds_id,
-                                }))
-                            );
-                          })
-                          .catch(() => setKbList([]));
-                      } else {
-                        fetch("/api/indices?include_stats=true", {
-                          headers: getAuthHeaders(),
-                        })
-                          .then((r) => r.json())
-                          .then((d) => {
-                            const info = d.indices_info || [];
-                            setKbList(
-                              info.map((x: any) => ({
-                                label: x.display_name || x.name,
-                                value: x.display_name || x.name,
-                              }))
-                            );
-                          })
-                          .catch(() => setKbList([]));
-                      }
+                      if (open) void loadKbOptions();
                     }}
                   />
                 </Flex>
@@ -3039,8 +3049,7 @@ function SetsTab() {
                       body.set_name = genSetName.trim();
                       if (genSetDesc) body.set_description = genSetDesc;
                     }
-                    let r: Response;
-                    r = await fetch(
+                    const r = await fetch(
                       "/api/evaluation-sets/generate-cases-async",
                       {
                         method: "POST",

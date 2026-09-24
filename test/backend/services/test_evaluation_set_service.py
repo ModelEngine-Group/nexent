@@ -1172,12 +1172,12 @@ class TestUpdateGenerationStatus:
 class TestDoKbSearch:
     def test_returns_empty_when_no_names(self, service_module, monkeypatch):
         service, _ = service_module
-        assert service._do_kb_search(None, "d", "m", "t1") == ""
+        assert service._do_kb_search(None, "d", "m", "t1") == ("", [])
 
     def test_returns_empty_when_no_kb_resolved(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(service, "_resolve_kb_info", MagicMock(return_value=[]))
-        assert service._do_kb_search(["kb1"], "d", "m", "t1") == ""
+        assert service._do_kb_search(["kb1"], "d", "m", "t1") == ("", [])
 
     def test_returns_empty_when_no_queries(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1185,7 +1185,7 @@ class TestDoKbSearch:
             service, "_resolve_kb_info", MagicMock(return_value=[{"display_name": "kb1"}])
         )
         monkeypatch.setattr(service, "_plan_search_queries", MagicMock(return_value=[]))
-        assert service._do_kb_search(["kb1"], "d", "m", "t1") == ""
+        assert service._do_kb_search(["kb1"], "d", "m", "t1") == ("", ["kb1"])
 
     def test_returns_kb_context(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1198,7 +1198,7 @@ class TestDoKbSearch:
         monkeypatch.setattr(
             service, "_execute_kb_searches", MagicMock(return_value="ctx")
         )
-        assert service._do_kb_search(["kb1"], "d", "m", "t1") == "ctx"
+        assert service._do_kb_search(["kb1"], "d", "m", "t1") == ("ctx", ["kb1"])
 
     def test_logs_warning_when_no_results(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1209,7 +1209,7 @@ class TestDoKbSearch:
             service, "_plan_search_queries", MagicMock(return_value=["q1"])
         )
         monkeypatch.setattr(service, "_execute_kb_searches", MagicMock(return_value=""))
-        assert service._do_kb_search(["kb1"], "d", "m", "t1") == ""
+        assert service._do_kb_search(["kb1"], "d", "m", "t1") == ("", ["kb1"])
 
 
 class _AidpSnapshot:
@@ -1223,10 +1223,10 @@ class TestFormatAidpHit:
         line = service._format_aidp_hit({"text": " hello ", "score": 0.87}, "q1")
         assert line == "- [q1] (score=0.87) hello"
 
-    def test_clamps_out_of_range_score(self, service_module):
+    def test_defaults_malformed_score_to_zero(self, service_module):
         service, _ = service_module
-        line = service._format_aidp_hit({"text": "x", "score": 5}, "q1")
-        assert "(score=1.00)" in line
+        line = service._format_aidp_hit({"text": "x", "score": "bad"}, "q1")
+        assert "(score=0.00)" in line
 
     def test_returns_empty_without_text(self, service_module):
         service, _ = service_module
@@ -1258,6 +1258,17 @@ class TestResolveAidpKbInfo:
             access_mod, "resolve_current_aidp_access", MagicMock(return_value=snapshot)
         )
         assert service._resolve_aidp_kb_info(["k9"], "u1", "t1") == []
+
+    def test_degrades_when_catalog_unavailable(self, service_module, monkeypatch):
+        # An AIDP outage must degrade to "no KB context", not fail the run.
+        service, _ = service_module
+        access_mod = sys.modules["ext_components.aidp.services.aidp_access_service"]
+        monkeypatch.setattr(
+            access_mod,
+            "resolve_current_aidp_access",
+            MagicMock(side_effect=RuntimeError("connection refused")),
+        )
+        assert service._resolve_aidp_kb_info(["k1"], "u1", "t1") == []
 
     def test_returns_empty_without_ids(self, service_module):
         service, _ = service_module
@@ -1315,7 +1326,8 @@ class TestDoKbSearchAidpBranch:
         )
         monkeypatch.setattr(service, "_execute_aidp_searches", execute)
         assert (
-            service._do_kb_search(["k1"], "d", "m", "t1", "u1") == "aidp ctx"
+            service._do_kb_search(["k1"], "d", "m", "t1", "u1")
+            == ("aidp ctx", ["KB One"])
         )
         resolve.assert_called_once_with(["k1"], "u1", "t1")
         execute.assert_called_once_with(
@@ -1330,7 +1342,7 @@ class TestDoKbSearchAidpBranch:
         monkeypatch.setattr(
             service, "_resolve_aidp_kb_info", MagicMock(return_value=[])
         )
-        assert service._do_kb_search(["k9"], "d", "m", "t1", "u1") == ""
+        assert service._do_kb_search(["k9"], "d", "m", "t1", "u1") == ("", [])
 
     def test_uses_es_path_when_disabled(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1342,7 +1354,7 @@ class TestDoKbSearchAidpBranch:
             service, "_plan_search_queries", MagicMock(return_value=["q1"])
         )
         monkeypatch.setattr(service, "_execute_kb_searches", execute)
-        assert service._do_kb_search(["kb1"], "d", "m", "t1", "u1") == "es ctx"
+        assert service._do_kb_search(["kb1"], "d", "m", "t1", "u1") == ("es ctx", ["kb1"])
         resolve.assert_called_once_with(["kb1"], "t1")
 
 
@@ -1436,6 +1448,20 @@ class TestBuildCaseGenContextBlocks:
             None, "t1", "scene", "", None
         )
         assert blocks == ["## 场景描述\nscene"]
+
+    def test_prefers_resolved_names_over_raw_request(self, service_module, monkeypatch):
+        # The KB fallback block must show human-readable names, never raw
+        # AIDP kds_ids from the request.
+        service, _ = service_module
+        monkeypatch.setattr(
+            service, "_build_agent_context_block", MagicMock(return_value="")
+        )
+        kb_block = MagicMock(return_value="kb")
+        monkeypatch.setattr(service, "_build_kb_context_block", kb_block)
+        service._build_case_gen_context_blocks(
+            None, "t1", "scene", "", ["aidp-kb-raw"], ["Resolved Name"]
+        )
+        kb_block.assert_called_once_with("", ["Resolved Name"], "t1")
 
 
 class TestBuildCaseGenUserPrompt:
@@ -1674,7 +1700,9 @@ class TestGenerateCasesAsync:
         service, _ = service_module
         progress = MagicMock()
         monkeypatch.setattr(service, "_report_progress", progress)
-        monkeypatch.setattr(service, "_do_kb_search", MagicMock(return_value="kbctx"))
+        monkeypatch.setattr(
+            service, "_do_kb_search", MagicMock(return_value=("kbctx", ["kb1"]))
+        )
         monkeypatch.setattr(
             service,
             "_build_case_gen_context_blocks",
@@ -1711,7 +1739,9 @@ class TestGenerateCasesAsync:
     def test_handles_failure(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(service, "_report_progress", MagicMock())
-        monkeypatch.setattr(service, "_do_kb_search", MagicMock(return_value="kbctx"))
+        monkeypatch.setattr(
+            service, "_do_kb_search", MagicMock(return_value=("kbctx", ["kb1"]))
+        )
         monkeypatch.setattr(
             service,
             "_build_case_gen_context_blocks",
