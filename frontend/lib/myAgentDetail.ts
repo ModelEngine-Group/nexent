@@ -1,5 +1,6 @@
 import type { AgentVersionDetail } from "@/services/agentVersionService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
+import type { Skill, Tool } from "@/types/agentConfig";
 
 export interface MyAgentDetailView {
   title: string;
@@ -26,8 +27,23 @@ function uniqueNames(values: Array<string | null | undefined>): string[] {
 
 export function mapMyAgentDetail(
   detail: AgentVersionDetail,
-  agent: Pick<MyEditableAgentItem, "tags">
+  agent: Pick<MyEditableAgentItem, "tags">,
+  resources?: {
+    tools?: Pick<Tool, "id" | "name" | "origin_name">[];
+    skills?: Pick<Skill, "skill_id" | "name">[];
+  }
 ): MyAgentDetailView {
+  const toolNames = new Map(
+    resources?.tools?.map((tool) => [
+      String(tool.id),
+      tool.origin_name || tool.name,
+    ]) ?? []
+  );
+  const skillNames = new Map(
+    resources?.skills?.map((skill) => [String(skill.skill_id), skill.name]) ??
+      []
+  );
+
   return {
     title: detail.display_name?.trim() || detail.name?.trim() || "",
     description: detail.description?.trim() || "",
@@ -38,9 +54,22 @@ export function mapMyAgentDetail(
       null,
     versionLabel: detail.version?.version_name?.trim() || null,
     tools: uniqueNames(
-      detail.tools?.map((tool) => tool.origin_name || tool.name) ?? []
+      detail.tools?.map(
+        (tool) =>
+          tool.origin_name ||
+          tool.name ||
+          toolNames.get(String(tool.tool_id)) ||
+          `#${tool.tool_id}`
+      ) ?? []
     ),
-    skills: uniqueNames(detail.skills?.map((skill) => skill.name) ?? []),
+    skills: uniqueNames(
+      detail.skills?.map(
+        (skill) =>
+          skill.name ||
+          skillNames.get(String(skill.skill_id)) ||
+          `#${skill.skill_id}`
+      ) ?? []
+    ),
     knowledgeBases: uniqueNames(
       detail.tools?.flatMap((tool) => tool.display_names ?? []) ?? []
     ),

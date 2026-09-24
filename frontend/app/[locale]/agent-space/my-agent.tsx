@@ -12,6 +12,8 @@ import CreateAgentModal, {
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useToolList } from "@/hooks/agent/useToolList";
+import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Agent } from "@/types/agentConfig";
 import type { AgentListFilters } from "@/services/agentConfigService";
 import { deleteAgent } from "@/services/agentConfigService";
@@ -255,6 +257,12 @@ export function MyAgent({
     detailTarget?.versionNo ?? null,
     active && detailTarget != null
   );
+  const { tools: availableTools } = useToolList({
+    enabled: active && detailTarget != null,
+  });
+  const { skills: availableSkills } = useSkillList({
+    enabled: active && detailTarget != null,
+  });
   const {
     data: detailListings,
     isLoading: isDetailListingsLoading,
@@ -274,10 +282,19 @@ export function MyAgent({
       toMineRepositoryInfo(detailListings?.items ?? [])
     );
     return {
-      ...mapMyAgentDetail(versionDetail, detailTarget.agent),
+      ...mapMyAgentDetail(versionDetail, detailTarget.agent, {
+        tools: availableTools,
+        skills: availableSkills,
+      }),
       status: repositoryInfo?.status,
     };
-  }, [detailTarget, detailListings, versionDetail]);
+  }, [
+    availableSkills,
+    availableTools,
+    detailTarget,
+    detailListings,
+    versionDetail,
+  ]);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
