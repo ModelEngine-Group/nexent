@@ -11,6 +11,7 @@ import {
   AIDP_SMALL_FILE_MAX_SIZE_BYTES,
   AIDP_SMALL_FILE_MAX_SIZE_MB,
   KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
 } from "@/const/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { AbortableError } from "@/types/knowledgeBase";
@@ -124,7 +125,11 @@ export const validateKnowledgeBaseFileSize = (
     return true;
   }
 
-  message.error(t("knowledgeBase.upload.fileTooLarge"));
+  message.error(
+    t("knowledgeBase.upload.fileTooLarge", {
+      limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+    })
+  );
   return false;
 };
 

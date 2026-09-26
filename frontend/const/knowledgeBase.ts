@@ -237,6 +237,14 @@ export const AIDP_SMALL_FILE_MAX_SIZE_BYTES =
 export const AIDP_OTHER_FILE_MAX_SIZE_BYTES =
   AIDP_OTHER_FILE_MAX_SIZE_MB * 1024 * 1024;
 
-export const KNOWLEDGE_BASE_MAX_FILE_SIZE_MB = 20;
+const parsePositiveIntegerEnv = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+export const KNOWLEDGE_BASE_MAX_FILE_SIZE_MB = parsePositiveIntegerEnv(
+  process.env.NEXT_PUBLIC_KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+  100
+);
 export const KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES =
   KNOWLEDGE_BASE_MAX_FILE_SIZE_MB * 1024 * 1024;
