@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
 import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
+import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -1085,7 +1086,9 @@ export function ChatInterface() {
           });
         } else {
           log.error(t("chatInterface.errorLabel"), error);
-          const errorMessage = t("chatInterface.errorProcessingRequest");
+          const errorMessage =
+            getConversationResourceLimitMessage(error, t) ||
+            t("chatInterface.errorProcessingRequest");
           setSessionMessages((prev) => {
             const newMessages = { ...prev };
             const lastMsg =

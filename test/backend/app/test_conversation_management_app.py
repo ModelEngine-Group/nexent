@@ -8,7 +8,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from consts.exceptions import ValidationError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, ValidationError
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -152,6 +153,31 @@ async def test_create_new_conversation_failure(conversation_mocks):
     assert exc_info.value.status_code == 500
     assert "creation error" in str(exc_info.value.detail)
     conversation_mocks['logging'].error.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_new_conversation_propagates_resource_limit(conversation_mocks):
+    """Conversation quota errors must reach the global AppException handler."""
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['create_new_convo'].side_effect = AppException(
+        ErrorCode.TENANT_RESOURCE_EXCEEDED,
+        "Conversation history limit reached: maximum 1 conversations per user",
+        details={
+            "resource": "conversations",
+            "scope": "user",
+            "limit": 1,
+            "current_count": 1,
+        },
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        await create_new_conversation_endpoint(
+            MagicMock(title="At limit"), authorization="Bearer test-token"
+        )
+
+    assert exc_info.value.http_status == 429
+    assert exc_info.value.error_code == ErrorCode.TENANT_RESOURCE_EXCEEDED
 
 
 @pytest.mark.asyncio

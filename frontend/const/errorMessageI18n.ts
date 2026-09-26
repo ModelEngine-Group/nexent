@@ -45,6 +45,78 @@ export const getTenantResourceLimitMessage = (
   });
 };
 
+const CONVERSATION_RESOURCE_LIMIT_KEYS: Record<string, string> = {
+  conversations: "chatInterface.conversationLimitExceeded",
+  conversation_turns: "chatInterface.turnLimitExceeded",
+};
+
+const CONVERSATION_RESOURCE_LIMIT_PATTERNS: Array<{
+  resource: keyof typeof CONVERSATION_RESOURCE_LIMIT_KEYS;
+  pattern: RegExp;
+}> = [
+  {
+    resource: "conversations",
+    pattern:
+      /Conversation history limit reached:\s*maximum\s+(\d+)\s+conversations?\s+per user/i,
+  },
+  {
+    resource: "conversation_turns",
+    pattern:
+      /Conversation turn limit reached:\s*maximum\s+(\d+)\s+turns?\s+per conversation/i,
+  },
+];
+
+/** Return a localized conversation quota message for structured or legacy errors. */
+export const getConversationResourceLimitMessage = (
+  error: unknown,
+  t: TFunction
+): string | null => {
+  const candidate =
+    error && typeof error === "object"
+      ? (error as {
+          code?: string | number;
+          message?: unknown;
+          details?: unknown;
+          data?: unknown;
+        })
+      : undefined;
+  const details =
+    candidate?.details && typeof candidate.details === "object"
+      ? (candidate.details as Record<string, unknown>)
+      : candidate?.data && typeof candidate.data === "object"
+        ? (candidate.data as Record<string, unknown>)
+        : undefined;
+  const resource = String(details?.resource || "");
+  const limit = details?.limit;
+  const translationKey = CONVERSATION_RESOURCE_LIMIT_KEYS[resource];
+  if (
+    String(candidate?.code) === TENANT_RESOURCE_LIMIT_CODE &&
+    translationKey &&
+    (typeof limit === "number" || typeof limit === "string")
+  ) {
+    return t(translationKey, { limit });
+  }
+
+  const messageText =
+    typeof error === "string"
+      ? error
+      : typeof candidate?.message === "string"
+        ? candidate.message
+        : error instanceof Error
+          ? error.message
+          : "";
+  for (const { resource: matchedResource, pattern } of CONVERSATION_RESOURCE_LIMIT_PATTERNS) {
+    const match = messageText.match(pattern);
+    if (match) {
+      return t(CONVERSATION_RESOURCE_LIMIT_KEYS[matchedResource], {
+        limit: match[1],
+      });
+    }
+  }
+
+  return null;
+};
+
 /**
  * Get error message by error code with i18n support.
  *

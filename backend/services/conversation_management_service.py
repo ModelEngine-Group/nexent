@@ -10,7 +10,7 @@ from nexent.core.concurrency import run_blocking
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, MessageRequest, MessageUnit
-from consts.exceptions import ConversationNotFoundError, ValidationError
+from consts.exceptions import AppException, ConversationNotFoundError, ValidationError
 from database.conversation_db import (
     CHAT_MODE_VALUES,
     create_conversation,
@@ -431,6 +431,8 @@ def create_new_conversation(
             create_kwargs["workbench_config"] = workbench_config
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
+    except AppException:
+        raise
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise Exception(str(e))

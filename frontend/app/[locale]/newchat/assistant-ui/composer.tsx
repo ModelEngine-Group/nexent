@@ -68,6 +68,7 @@ import {
 } from "../ui/skill-directives";
 import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
+import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export type ChatMode = "planning" | "execution";
 
@@ -254,7 +255,11 @@ export const Composer: FC<ComposerProps> = ({
       restoreDraft: true,
       onRejected: (error) => {
         if (runtime.threads.getState().mainThreadId === threadId) {
-          setSendError(ordinarySendError(error, i18n.language));
+          setSendError(
+            ordinarySendError(error, i18n.language, (value) =>
+              getConversationResourceLimitMessage(value, t)
+            )
+          );
         }
       },
     });
@@ -658,7 +663,10 @@ export const Composer: FC<ComposerProps> = ({
                     </Tooltip>
                   </AuiIf>
                 )}
-                <ComposerSendOrCancel onSend={prepareSend} disabled={disabled} />
+                <ComposerSendOrCancel
+                  onSend={prepareSend}
+                  disabled={disabled}
+                />
               </div>
             </div>
           </ComposerPrimitive.Root>
