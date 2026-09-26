@@ -510,7 +510,9 @@ build_one() {
 build_selected_image() {
   case "$1" in
     main) build_one nexent "$DOCKERFILE_DIR/main/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
-    web) build_one nexent-web "$DOCKERFILE_DIR/web/Dockerfile" "${WEB_MIRROR_ARGS[@]}" ;;
+    web) build_one nexent-web "$DOCKERFILE_DIR/web/Dockerfile" \
+      --build-arg MAX_KNOWLEDGE_FILE_SIZE_MB="${MAX_KNOWLEDGE_FILE_SIZE_MB:-100}" \
+      "${WEB_MIRROR_ARGS[@]}" ;;
     docs) build_one nexent-docs "$DOCKERFILE_DIR/docs/Dockerfile" "${WEB_MIRROR_ARGS[@]}" ;;
     data-process)
       local image_name="nexent-data-process"
