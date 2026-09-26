@@ -403,7 +403,8 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
         "embedding_model_name": "test_model",
         "knowledge_name": "test_knowledge",
         "group_ids": [1, 2, 3],
-        "ingroup_permission": "READ_ONLY"
+        "ingroup_permission": "READ_ONLY",
+        "quota_limit_bytes": 1024,
     }
 
     # Mock KnowledgeRecord constructor

@@ -266,6 +266,33 @@ class TestGetListIndices:
         assert "Error listing knowledge bases" in response.json()["detail"]
 
 
+class TestCreateIndex:
+    @pytest.mark.asyncio
+    async def test_app_exception_is_propagated(self, mock_northbound_context):
+        """Structured knowledge-limit errors must not be converted to generic errors."""
+        from apps.northbound_knowledge_app import create_new_index
+
+        mock_northbound_context.return_value = ASSET_CTX
+        app_exception = AppException("knowledge base limit reached")
+        with patch(
+            "apps.northbound_knowledge_app._require_asset_owner_context",
+            new_callable=AsyncMock,
+            return_value=ASSET_CTX,
+        ), patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.create_knowledge_base",
+            side_effect=app_exception,
+        ):
+            with pytest.raises(AppException) as exc_info:
+                await create_new_index(
+                    request=MagicMock(),
+                    index_name="kb1",
+                    embedding_dim=768,
+                    body={"embedding_model_id": 1},
+                )
+
+        assert exc_info.value is app_exception
+
+
 class TestUploadFiles:
     def test_missing_file_field_returns_client_error(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
