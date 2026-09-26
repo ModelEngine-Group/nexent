@@ -67,6 +67,7 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
+import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
 import {
@@ -1215,10 +1216,21 @@ const ThreadScrollToBottom: FC = () => {
 };
 
 const MessageError: FC = () => {
+  const { t } = useTranslation();
+  const rawError = useAuiState((state) => {
+    const status = state.message.status;
+    return status?.type === "incomplete" && status.reason === "error"
+      ? status.error
+      : undefined;
+  });
+  const localizedMessage = getConversationResourceLimitMessage(rawError, t);
+
   return (
     <MessagePrimitive.Error>
       <ErrorPrimitive.Root className="aui-message-error-root border-destructive bg-destructive/10 text-destructive dark:bg-destructive/5 mt-2 rounded-md border p-3 text-sm dark:text-red-200">
-        <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2" />
+        <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2">
+          {localizedMessage ?? undefined}
+        </ErrorPrimitive.Message>
       </ErrorPrimitive.Root>
     </MessagePrimitive.Error>
   );

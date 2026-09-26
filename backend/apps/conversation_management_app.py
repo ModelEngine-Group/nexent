@@ -17,6 +17,7 @@ from consts.model import (
     RenameRequest,
 )
 from consts.exceptions import (
+    AppException,
     ConversationNotFoundError,
     ValidationError,
     TokenExpiredError,
@@ -65,6 +66,8 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except AppException:
+        raise
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

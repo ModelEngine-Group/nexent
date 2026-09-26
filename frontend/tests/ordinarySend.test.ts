@@ -109,3 +109,19 @@ test("a card rejection leaves the independent composer draft intact", () => {
     /上一轮正在结束/
   );
 });
+
+test("ordinary send prefers a localized conversation limit message", () => {
+  const error = {
+    code: "120104",
+    message:
+      "Conversation turn limit reached: maximum 1 turns per conversation",
+    details: { resource: "conversation_turns", limit: 1 },
+  };
+  const localized = ordinarySendError(error, "zh-CN", (value) =>
+    (value as typeof error).details.resource === "conversation_turns"
+      ? "当前会话对话轮数已达到上限：每个会话最多 1 轮"
+      : null
+  );
+
+  assert.equal(localized, "当前会话对话轮数已达到上限：每个会话最多 1 轮");
+});
