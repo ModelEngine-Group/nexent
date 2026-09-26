@@ -127,6 +127,7 @@ from backend.database.agent_db import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
     create_agent,
+    _enforce_tenant_agent_limit,
     update_agent,
     delete_agent_by_id,
     query_all_agent_info_by_tenant_id,
@@ -455,6 +456,56 @@ def test_create_agent_rejects_when_tenant_quota_is_reached(monkeypatch, mock_ses
         "current_count": 1,
     }
     session.add.assert_not_called()
+
+
+def test_enforce_tenant_agent_limit_allows_below_quota(monkeypatch, mock_session):
+    """The quota helper should allow a tenant whose count is below the limit."""
+    session, query = mock_session
+    query.filter.return_value.count.return_value = 0
+    monkeypatch.setattr("backend.database.agent_db.MAX_AGENTS_PER_TENANT", 1)
+    monkeypatch.setattr(
+        "backend.database.agent_db.AgentInfo",
+        types.SimpleNamespace(
+            agent_id=literal_column("agent_id"),
+            tenant_id=literal_column("tenant_id"),
+            version_no=literal_column("version_no"),
+            delete_flag=literal_column("delete_flag"),
+            agent_origin=literal_column("agent_origin"),
+        ),
+    )
+
+    _enforce_tenant_agent_limit(session, "tenant1")
+
+    session.execute.assert_called_once()
+
+
+def test_create_system_agent_skips_tenant_quota(monkeypatch, mock_session):
+    """System Agent provisioning is not subject to the tenant Agent quota."""
+    session, _ = mock_session
+    session.add = MagicMock()
+    session.flush = MagicMock()
+    mock_agent = MockAgent()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("backend.database.agent_db.AgentInfo", lambda **kwargs: mock_agent)
+    enforce_limit = MagicMock()
+    monkeypatch.setattr("backend.database.agent_db._enforce_tenant_agent_limit", enforce_limit)
+
+    result = create_agent(
+        {"name": "system_agent", "agent_origin": "SYSTEM"},
+        "tenant1",
+        "user1",
+    )
+
+    assert result["agent_id"] == 1
+    enforce_limit.assert_not_called()
+    session.add.assert_called_once()
+
 
 def test_update_agent_success(monkeypatch, mock_session):
     """测试成功更新agent"""

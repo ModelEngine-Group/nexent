@@ -1503,6 +1503,50 @@ def test_import_agent_api_success_without_skills(mocker, mock_auth_header):
     }
 
 
+def test_import_agent_api_returns_agent_quota_error(mocker, mock_auth_header):
+    """Agent import quota failures must preserve the standard 429 error contract."""
+    limit_error = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant",
+        resource="agents",
+        scope="tenant",
+        limit=1000,
+        current_count=1000,
+    )
+    mock_import_agent = mocker.patch(
+        "apps.agent_app.import_agent_impl",
+        new_callable=AsyncMock,
+        side_effect=limit_error,
+    )
+
+    response = config_client.post(
+        "/agent/import",
+        json={
+            "agent_info": {
+                "agent_id": 123,
+                "agent_info": {
+                    "test_agent": {
+                        "agent_id": 123,
+                        "name": "ImportedAgent",
+                        "description": "Test description",
+                        "business_description": "Business desc",
+                        "max_steps": 10,
+                        "provide_run_summary": True,
+                        "enabled": True,
+                        "tools": [],
+                        "managed_agents": [],
+                    }
+                },
+                "mcp_info": [],
+            }
+        },
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+    assert response.json() == tenant_resource_limit_error_payload(limit_error)
+    mock_import_agent.assert_called_once()
+
+
 def test_import_agent_api_success_with_skills(mocker, mock_auth_header):
     """Test import_agent_api success case with skills."""
     mock_import_with_skills = mocker.patch(
