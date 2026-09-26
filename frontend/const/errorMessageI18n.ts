@@ -18,6 +18,7 @@ const TENANT_RESOURCE_LIMIT_KEYS: Record<string, string> = {
   tenants: "tenantResources.limit.tenants",
   users: "tenantResources.limit.users",
   groups: "tenantResources.limit.groups",
+  agents: "tenantResources.limit.agents",
   administrators: "tenantResources.limit.administrators",
   super_admins: "tenantResources.limit.superAdmins",
 };

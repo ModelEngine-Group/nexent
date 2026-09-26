@@ -4,6 +4,7 @@ Unit tests for backend.apps.agent_app module.
 Tests all agent management API endpoints including runtime and configuration operations.
 """
 import atexit
+from http import HTTPStatus
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
 import importlib.machinery
@@ -25,8 +26,10 @@ from consts.exceptions import (
     ForbiddenError,
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
+    TenantResourceLimitError,
     UnauthorizedError,
     ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from consts.model import NL2AgentRunRequest
 from services.agent_draft_permission_service import AgentDraftEditError
@@ -1204,6 +1207,31 @@ def test_update_agent_info_api_exception(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert "Agent update error" in response.json()["detail"]
+
+
+def test_update_agent_info_api_returns_agent_quota_error(mocker, mock_auth_header):
+    """Agent quota failures must preserve the standard 429 error contract."""
+    limit_error = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant",
+        resource="agents",
+        scope="tenant",
+        limit=1000,
+        current_count=1000,
+    )
+    mock_update_agent = mocker.patch(
+        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock,
+        side_effect=limit_error,
+    )
+
+    response = config_client.post(
+        "/agent/update",
+        json={"display_name": "New Agent"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+    assert response.json() == tenant_resource_limit_error_payload(limit_error)
+    mock_update_agent.assert_called_once()
 
 
 # delete_agent_api Tests

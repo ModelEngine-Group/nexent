@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agentStore";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
@@ -333,7 +334,10 @@ export default function AgentConfig({
       return;
     }
 
-    message.error(saveError);
+    message.error(
+      getTenantResourceLimitMessage(saveError, t) ||
+        (saveError instanceof Error ? saveError.message : saveError)
+    );
     clearSaveError();
   }, [clearSaveError, message, saveError]);
 
