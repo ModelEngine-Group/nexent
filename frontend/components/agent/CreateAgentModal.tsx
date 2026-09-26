@@ -11,6 +11,7 @@ import {
   isValidAgentDisplayName,
 } from "@/hooks/agent/useSaveGuard";
 import { updateAgentInfo } from "@/services/agentConfigService";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export interface CreatedAgentResult {
   agentId: number;
@@ -57,7 +58,9 @@ export default function CreateAgentModal({
 
     if (!result.success || !result.data?.agent_id) {
       message.error(
-        result.message || t("businessLogic.config.error.saveFailed")
+        getTenantResourceLimitMessage(result.error, t) ||
+          result.message ||
+          t("businessLogic.config.error.saveFailed")
       );
       return;
     }

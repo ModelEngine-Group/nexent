@@ -17,6 +17,7 @@ from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     AppException,
     ForbiddenError,
+    TenantResourceLimitError,
 )
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -776,6 +777,8 @@ async def update_agent_info_impl(
             request.prompt_template_name = prompt_template_name
             request.model_params_override = model_params_override
             update_agent(agent_id, request, user_id)
+    except TenantResourceLimitError:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")

@@ -2431,6 +2431,7 @@
   "tenantResources.limit.tenants": "租户数量已达到上限：最多 {{limit}} 个租户",
   "tenantResources.limit.users": "租户用户数量已达到上限：每个租户最多 {{limit}} 个用户",
   "tenantResources.limit.groups": "租户用户组数量已达到上限：每个租户最多 {{limit}} 个用户组",
+  "tenantResources.limit.agents": "租户智能体数量已达到上限：每个租户最多 {{limit}} 个智能体",
   "tenantResources.limit.administrators": "租户管理员数量已达到上限：每个租户最多 {{limit}} 个管理员",
   "tenantResources.limit.superAdmins": "超级管理员数量已达到上限：最多 {{limit}} 个超级管理员",
   "tenantResources.skills.installOfficialSkills": "安装官方技能",

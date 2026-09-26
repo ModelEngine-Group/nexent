@@ -1,8 +1,8 @@
 import {
   API_ENDPOINTS,
+  ApiError,
   fetchWithErrorHandling,
   toApiError,
-  type ApiError,
 } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
@@ -465,28 +465,30 @@ export interface UpdateAgentInfoPayload {
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.update, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.agent.update, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
     });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
     return {
       success: true,
       data: data,
       message: "Agent updated successfully",
+      error: undefined,
     };
   } catch (error) {
     log.error("Failed to update Agent:", error);
+    const apiError = toApiError(
+      error,
+      "Failed to update Agent, please try again later"
+    );
     return {
       success: false,
       data: null,
-      message: "Failed to update Agent, please try again later",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -690,17 +692,29 @@ export const importAgent = async (
       const errorData = await response.json().catch(() => ({}));
       const errMsg = errorData?.message ?? errorData?.detail;
       if (typeof errMsg === "object" && errMsg !== null) {
+        const apiError = new ApiError(
+          errorData?.code ?? response.status,
+          typeof errorData?.message === "string"
+            ? errorData.message
+            : errMsg?.type === "skill_duplicate"
+              ? "Skill name conflict detected"
+              : "Failed to import Agent, please try again later",
+          errorData?.details
+        );
         return {
           success: false,
           data: { detail: errMsg },
-          message:
-            errMsg?.type === "skill_duplicate"
-              ? "Skill name conflict detected"
-              : (errorData?.message ??
-                "Failed to import Agent, please try again later"),
+          message: apiError.message,
+          error: apiError,
         };
       }
-      const error = new Error(`Request failed: ${response.status}`);
+      const error = new ApiError(
+        errorData?.code ?? response.status,
+        typeof errMsg === "string"
+          ? errMsg
+          : `Request failed: ${response.status}`,
+        errorData?.details
+      );
       (error as any).detail = errMsg;
       throw error;
     }
@@ -710,13 +724,19 @@ export const importAgent = async (
       success: true,
       data: data,
       message: "Agent imported successfully",
+      error: undefined,
     };
   } catch (error) {
     log.error("Failed to import Agent:", error);
+    const apiError = toApiError(
+      error,
+      "Failed to import Agent, please try again later"
+    );
     return {
       success: false,
       data: (error as any).detail ? { detail: (error as any).detail } : null,
-      message: "Failed to import Agent, please try again later",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };

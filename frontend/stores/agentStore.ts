@@ -71,7 +71,7 @@ interface AgentStoreState {
   serverSnapshotRevision: number;
   queue: AgentSaveTask[];
   isGenerating: boolean;
-  saveError: string | null;
+  saveError: Error | string | null;
   lastSaveFailed: boolean;
   defaultLlmConfig: {
     id: number | null;
@@ -460,7 +460,7 @@ async function processSaveQueue(): Promise<void> {
           toAgentPayload(task.agentId, task.patch)
         );
         if (!result.success) {
-          throw new Error(result.message);
+          throw result.error ?? new Error(result.message);
         }
 
         const savedAgent = useAgentStore.getState().savedAgent;
@@ -501,7 +501,7 @@ async function processSaveQueue(): Promise<void> {
           lastSaveFailed: true,
           saveError:
             error instanceof Error
-              ? error.message
+              ? error
               : "Failed to save agent changes",
         }));
       }
