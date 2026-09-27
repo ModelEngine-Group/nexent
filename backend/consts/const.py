@@ -218,6 +218,11 @@ MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
 MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
 MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
 
+# Skill resource hard limits. Environment variables override these defaults.
+MAX_SKILLS_PER_TENANT = _positive_int_env("MAX_SKILLS_PER_TENANT", 1_000)
+MAX_SKILL_UPLOAD_SIZE_MB = _positive_int_env("MAX_SKILL_UPLOAD_SIZE_MB", 10)
+MAX_SKILL_UPLOAD_SIZE_BYTES = MAX_SKILL_UPLOAD_SIZE_MB * 1024 * 1024
+
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
 

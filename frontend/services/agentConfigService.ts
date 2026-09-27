@@ -6,7 +6,7 @@ import {
 } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { getAuthHeaders } from "@/lib/auth";
+import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 import yaml from "js-yaml";
@@ -1380,7 +1380,7 @@ export const createSkill = async (skillData: {
       requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
-    const response = await fetch(API_ENDPOINTS.skills.create, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.skills.create, {
       method: "POST",
       headers: {
         ...getAuthHeaders(),
@@ -1389,17 +1389,13 @@ export const createSkill = async (skillData: {
       body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Request failed: ${response.status}`);
-    }
-
     const data = await response.json();
 
     return {
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill:", error);
@@ -1408,6 +1404,7 @@ export const createSkill = async (skillData: {
       data: null,
       message:
         error instanceof Error ? error.message : "Failed to create skill",
+      error,
     };
   }
 };
@@ -1617,30 +1614,11 @@ export const createSkillFromFile = async (
       "User-Agent": "AgentFrontEnd/1.0",
     };
 
-    const response = await fetch(endpoint, {
+    const response = await fetchWithAuth(endpoint, {
       method: method,
       headers: headers,
       body: formData,
     });
-
-    if (!response.ok) {
-      let errorData: any = {};
-      try {
-        errorData = await response.json();
-      } catch {
-        // JSON parse failed
-      }
-
-      const errorMessage =
-        typeof errorData.detail === "string"
-          ? errorData.detail
-          : Array.isArray(errorData.detail)
-            ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
-            : JSON.stringify(errorData.detail);
-      throw new Error(errorMessage || `Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
 
@@ -1648,6 +1626,7 @@ export const createSkillFromFile = async (
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill from file:", error);
@@ -1658,6 +1637,7 @@ export const createSkillFromFile = async (
         error instanceof Error
           ? error.message
           : "Failed to create skill from file",
+      error,
     };
   }
 };

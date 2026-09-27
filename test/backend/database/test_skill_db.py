@@ -39,6 +39,22 @@ sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 sys.modules['consts.model'] = MagicMock()
 
+error_code_mock = types.ModuleType('consts.error_code')
+error_code_mock.ErrorCode = types.SimpleNamespace(
+    TENANT_RESOURCE_EXCEEDED="120104",
+    FILE_TOO_LARGE="000403",
+)
+exceptions_mock = types.ModuleType('consts.exceptions')
+
+class AppException(Exception):
+    def __init__(self, _error_code=None, message=None, details=None):
+        self.details = details or {}
+        super().__init__(message or _error_code)
+
+exceptions_mock.AppException = AppException
+sys.modules['consts.error_code'] = error_code_mock
+sys.modules['consts.exceptions'] = exceptions_mock
+
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()
 client_mock.PostgresClient = MagicMock()
@@ -1310,6 +1326,26 @@ class TestGetSkillById:
 
 class TestCreateSkill:
     """Tests for create_skill function."""
+
+    def test_create_skill_rejects_tenant_limit(self, monkeypatch, mock_session):
+        """Creating a Skill at the tenant quota returns structured limit details."""
+        session, query = mock_session
+        query.filter.return_value.count.return_value = 1
+        monkeypatch.setattr("backend.database.skill_db.MAX_SKILLS_PER_TENANT", 1)
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        with pytest.raises(Exception) as exc_info:
+            create_skill({"name": "blocked"}, "tenant1")
+
+        assert "Tenant skill limit reached" in str(exc_info.value)
+        assert getattr(exc_info.value, "details", {}).get("resource") == "skills"
+        assert getattr(exc_info.value, "details", {}).get("limit") == 1
+        session.add.assert_not_called()
 
     def test_create_skill_basic(self, monkeypatch, mock_session):
         """Test creating a basic skill."""

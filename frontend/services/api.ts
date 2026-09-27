@@ -925,9 +925,12 @@ export const fetchWithErrorHandling = async (
             throw error;
           }
         }
+        // Preserve structured FILE_TOO_LARGE responses so upload callers can
+        // display the configured limit from details.limit_mb.
         throw new ApiError(
-          ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit."
+          errorCode,
+          errorMessage || "File size exceeds limit.",
+          errorDetails
         );
       }
 

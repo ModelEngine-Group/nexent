@@ -11,7 +11,7 @@ import { DEFAULT_ERROR_MESSAGES } from "./errorMessage";
 import { handleSessionExpired } from "@/lib/session";
 import { isSessionExpired } from "./errorCode";
 import log from "@/lib/logger";
-import type { TFunction } from "i18next";
+type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const TENANT_RESOURCE_LIMIT_CODE = "120104";
 const TENANT_RESOURCE_LIMIT_KEYS: Record<string, string> = {
@@ -20,12 +20,13 @@ const TENANT_RESOURCE_LIMIT_KEYS: Record<string, string> = {
   groups: "tenantResources.limit.groups",
   administrators: "tenantResources.limit.administrators",
   super_admins: "tenantResources.limit.superAdmins",
+  skills: "tenantResources.limit.skills",
 };
 
 /** Return a localized tenant quota message while preserving the server limit. */
 export const getTenantResourceLimitMessage = (
   error: unknown,
-  t: TFunction
+  t: Translate
 ): string | null => {
   if (!error || typeof error !== "object") return null;
 
