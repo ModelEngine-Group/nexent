@@ -391,6 +391,42 @@ class TestUploadEvaluationSet:
         assert response.status_code == 400, response.text
         assert "Unsupported file type" in response.json()["message"]
 
+    def test_upload_rejects_oversized_file_before_parsing(self, client, mocker):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+        mocker.patch.object(evaluation_set_app, "MAX_EVALUATION_SET_FILE_SIZE_MB", 1)
+        mocker.patch.object(evaluation_set_app, "MAX_EVALUATION_SET_FILE_SIZE_BYTES", 3)
+        evaluation_set_app.parse_evaluation_cases_from_excel = MagicMock(
+            side_effect=AssertionError("oversized files must be rejected before parsing")
+        )
+
+        response = client.post(
+            "/evaluation-sets/upload",
+            data={"name": "test"},
+            files=[("files", ("set.xlsx", b"1234", "application/octet-stream"))],
+        )
+
+        assert response.status_code == 413, response.text
+        payload = response.json()
+        assert payload["code"] == "000403"
+        assert payload["details"] == {
+            "resource": "evaluation_set_file",
+            "filename": "set.xlsx",
+            "limit_mb": 1,
+            "limit_bytes": 3,
+            "actual_bytes": 4,
+        }
+        evaluation_set_app.parse_evaluation_cases_from_excel.assert_not_called()
+
+    def test_upload_config_returns_effective_file_size_limit(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.get("/evaluation-sets/config")
+
+        assert response.status_code == 200
+        assert response.json()["data"]["max_file_size_mb"] == 20
+
 
 # ---------------------------------------------------------------------------
 # GET /evaluation-sets/template
@@ -898,10 +934,12 @@ class TestValidateAndParseDocx:
             _app_mod()._validate_and_parse_docx(b"x", "a.pdf")
         assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
 
-    def test_rejects_oversized_file(self):
+    def test_rejects_oversized_file(self, monkeypatch):
+        monkeypatch.setattr(_app_mod(), "MAX_DOCX_FILE_SIZE", 1024 * 1024)
         with pytest.raises(Exception) as ei:
-            _app_mod()._validate_and_parse_docx(b"x" * (20 * 1024 * 1024 + 1), "a.docx")
+            _app_mod()._validate_and_parse_docx(b"x" * (1024 * 1024 + 1), "a.docx")
         assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
+        assert str(ei.value) == "File size exceeds 1MB limit"
 
     def test_parse_failure(self):
         with pytest.raises(AppException) as ei:

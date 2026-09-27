@@ -218,6 +218,12 @@ MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
 MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
 MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
 
+# Evaluation-set Excel uploads.
+MAX_EVALUATION_SET_FILE_SIZE_MB = _positive_int_env(
+    "MAX_EVALUATION_SET_FILE_SIZE_MB", 20
+)
+MAX_EVALUATION_SET_FILE_SIZE_BYTES = MAX_EVALUATION_SET_FILE_SIZE_MB * 1024 * 1024
+
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
 

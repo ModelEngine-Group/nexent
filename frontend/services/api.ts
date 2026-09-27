@@ -184,6 +184,7 @@ export const API_ENDPOINTS = {
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
+    config: `${API_BASE_URL}/evaluation-sets/config`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
