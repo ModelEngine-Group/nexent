@@ -35,6 +35,7 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.MAX_SKILLS_PER_TENANT = 1000
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 sys.modules['consts.model'] = MagicMock()
@@ -1407,7 +1408,8 @@ class TestCreateSkill:
 
     def test_create_skill_truncates_description_to_database_limit(self, monkeypatch, mock_session):
         """Long third-party descriptions must not make skill uploads fail."""
-        session, _ = mock_session
+        session, query = mock_session
+        query.filter.return_value.count.return_value = 0
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
@@ -1416,6 +1418,9 @@ class TestCreateSkill:
         created = []
 
         class MockSkillInfoClass:
+            tenant_id = MagicMock()
+            delete_flag = MagicMock()
+
             def __init__(self, **kwargs):
                 self.skill_id = 1
                 for key, value in kwargs.items():
