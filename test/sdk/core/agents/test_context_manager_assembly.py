@@ -100,7 +100,7 @@ def test_oc_013_oc_023_request_only_messages_are_budgeted_and_not_saved():
     system_reminder = {"role": "system", "content": [{"type": "text", "text": "format contract"}]}
     tail_reminder = {"role": "user", "content": [{"type": "text", "text": "format contract"}]}
     continuation = {"role": "user", "content": [{"type": "text", "text": "continue with action"}]}
-    kwargs = dict(model=None, memory=memory, current_run_start_idx=0, run_context=run_context)
+    kwargs = {"model": None, "memory": memory, "current_run_start_idx": 0, "run_context": run_context}
     baseline = manager.assemble_final_context(**kwargs)
     first = manager.assemble_final_context(
         **kwargs, request_system_messages=[system_reminder], request_tail_messages=[tail_reminder]
