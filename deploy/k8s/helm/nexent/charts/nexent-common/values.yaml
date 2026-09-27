@@ -74,6 +74,8 @@ config:
   skill:
     maxSkillsPerTenant: "1000"
     maxUploadSizeMb: "10"
+  evaluationSet:
+    maxFileSizeMb: "20"
   modelEngine:
     enabled: "false"
   voiceService:

@@ -156,6 +156,7 @@ data:
   LOG_DIR: {{ .Values.config.logDir | quote }}
   MAX_SKILLS_PER_TENANT: {{ .Values.config.skill.maxSkillsPerTenant | quote }}
   MAX_SKILL_UPLOAD_SIZE_MB: {{ .Values.config.skill.maxUploadSizeMb | quote }}
+  MAX_EVALUATION_SET_FILE_SIZE_MB: {{ .Values.config.evaluationSet.maxFileSizeMb | quote }}
 
   # MCP Container Image
   NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}

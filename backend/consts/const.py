@@ -259,6 +259,14 @@ MAX_SKILL_UPLOAD_SIZE_MB = parse_positive_int(
 )
 MAX_SKILL_UPLOAD_SIZE_BYTES = MAX_SKILL_UPLOAD_SIZE_MB * 1024 * 1024
 
+# Evaluation-set Excel uploads.
+MAX_EVALUATION_SET_FILE_SIZE_MB = parse_positive_int(
+    os.getenv("MAX_EVALUATION_SET_FILE_SIZE_MB"),
+    "MAX_EVALUATION_SET_FILE_SIZE_MB",
+    20,
+)
+MAX_EVALUATION_SET_FILE_SIZE_BYTES = MAX_EVALUATION_SET_FILE_SIZE_MB * 1024 * 1024
+
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
 

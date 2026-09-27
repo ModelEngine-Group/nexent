@@ -487,6 +487,8 @@ render_k8s_runtime_config_values() {
     echo "    skill:"
     printf '      maxSkillsPerTenant: %s\n' "$(yaml_quote "$(env_or_default MAX_SKILLS_PER_TENANT "1000")")"
     printf '      maxUploadSizeMb: %s\n' "$(yaml_quote "$(env_or_default MAX_SKILL_UPLOAD_SIZE_MB "10")")"
+    echo "    evaluationSet:"
+    printf '      maxFileSizeMb: %s\n' "$(yaml_quote "$(env_or_default MAX_EVALUATION_SET_FILE_SIZE_MB "20")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
     echo "    voiceService:"
