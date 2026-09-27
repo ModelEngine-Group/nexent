@@ -135,6 +135,9 @@ sys.modules["permissions.models"] = permissions_models_mock
 
 class SkillException(Exception):
     pass
+class AppException(Exception):
+    pass
+consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillException = SkillException
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
@@ -421,6 +424,24 @@ class TestListSkillsEndpoint:
 class TestCreateSkillEndpoint:
     """Test POST /skills endpoint."""
 
+    @pytest.mark.asyncio
+    async def test_create_skill_preserves_app_exception(self, mocker):
+        """Quota exceptions must reach the global AppException handler."""
+        mocker.patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user123", "tenant123"),
+        )
+        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service.create_skill.side_effect = AppException("quota", "limit reached")
+
+        request = skill_app.SkillCreateRequest(
+            name="skill",
+            description="description",
+            content="# Skill",
+        )
+        with pytest.raises(AppException):
+            await skill_app.create_skill(request=request, authorization="token")
+
     def test_create_skill_success(self, mocker):
         """Test successful skill creation."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
@@ -557,6 +578,22 @@ class TestCreateSkillEndpoint:
 # ===== Create Skill From File Endpoint Tests =====
 class TestCreateSkillFromFileEndpoint:
     """Test POST /skills/upload endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_upload_preserves_app_exception(self, mocker):
+        """Upload quota and file-size errors must not be converted to HTTP 500."""
+        mocker.patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user123", "tenant123"),
+        )
+        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service.create_skill_from_file.side_effect = AppException("quota", "limit reached")
+
+        from fastapi import UploadFile
+
+        upload = UploadFile(filename="skill.md", file=io.BytesIO(b"content"))
+        with pytest.raises(AppException):
+            await skill_app.create_skill_from_file(file=upload, authorization="token")
 
     def test_upload_md_file_success(self, mocker):
         """Test successful skill upload from MD file."""
@@ -920,6 +957,26 @@ class TestGetSkillFileContentEndpoint:
 # ===== Update Skill From File Endpoint Tests =====
 class TestUpdateSkillFromFileEndpoint:
     """Test PUT /skills/{skill_name}/upload endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_update_upload_preserves_app_exception(self, mocker):
+        """Update uploads must preserve structured file-size errors."""
+        mocker.patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user123", "tenant123"),
+        )
+        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service.update_skill_from_file.side_effect = AppException("file", "too large")
+
+        from fastapi import UploadFile
+
+        upload = UploadFile(filename="skill.md", file=io.BytesIO(b"content"))
+        with pytest.raises(AppException):
+            await skill_app.update_skill_from_file(
+                skill_name="skill",
+                file=upload,
+                authorization="token",
+            )
 
     def test_update_skill_from_md_success(self, mocker):
         """Test successful skill update from MD file."""
@@ -2368,6 +2425,22 @@ class TestListOfficialSkillsEndpoint:
 # ===== Install Skills Endpoint Tests =====
 class TestInstallSkillsEndpoint:
     """Test POST /skills/install endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_install_skills_preserves_app_exception(self, mocker):
+        """Official Skill installation must preserve tenant quota errors."""
+        mocker.patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user123", "tenant123"),
+        )
+        mocker.patch(
+            "backend.apps.skill_app.install_skills_from_zip_for_tenant",
+            side_effect=AppException("quota", "limit reached"),
+        )
+
+        request = skill_app.InstallSkillsRequest(skill_names=["skill"])
+        with pytest.raises(AppException):
+            await skill_app.install_skills(request=request, authorization="token")
 
     def test_install_skills_success(self, mocker):
         """Test successful skill installation."""

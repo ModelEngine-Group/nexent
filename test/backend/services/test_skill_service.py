@@ -172,6 +172,8 @@ TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp",
 consts_const_mock.CONTAINER_SKILLS_PATH = os.path.abspath(os.sep)
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
 consts_const_mock.ROOT_DIR = "/tmp"
+consts_const_mock.MAX_SKILL_UPLOAD_SIZE_MB = 10
+consts_const_mock.MAX_SKILL_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
 consts_const_mock.PERMISSION_EDIT = "EDIT"
 consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
@@ -185,7 +187,12 @@ consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 consts_exceptions_mock.NotFoundException = type('NotFoundException', (Exception,), {})
 consts_exceptions_mock.ValidationError = type('ValidationError', (Exception,), {})
-consts_exceptions_mock.AppException = type('AppException', (Exception,), {})
+class AppException(Exception):
+    def __init__(self, _error_code=None, message=None, details=None):
+        self.details = details or {}
+        super().__init__(message or _error_code)
+
+consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Exception,), {})
 
 sys.modules['consts'] = consts_mock
@@ -1106,6 +1113,41 @@ class TestSkillServiceCreateSkill:
 
 class TestSkillServiceCreateSkillFromFile:
     """Test SkillService.create_skill_from_file method."""
+
+    def test_upload_rejects_content_over_configured_limit(self, monkeypatch):
+        """Skill uploads larger than the configured byte limit fail before parsing."""
+        service = SkillService(tenant_id="tenant1")
+        monkeypatch.setattr(
+            skill_service, "MAX_SKILL_UPLOAD_SIZE_BYTES", 10
+        )
+        with pytest.raises(Exception, match="Skill upload exceeds"):
+            service.create_skill_from_file(b"12345678901", file_type="md")
+
+    def test_upload_accepts_content_at_configured_limit(self, monkeypatch):
+        """The exact configured byte limit remains valid."""
+        service = SkillService(tenant_id="tenant1")
+        monkeypatch.setattr(
+            skill_service, "MAX_SKILL_UPLOAD_SIZE_BYTES", 10
+        )
+        monkeypatch.setattr(
+            skill_service, "SkillLoader",
+            type("Loader", (), {"parse": staticmethod(lambda _content: {
+                "name": "boundary_skill",
+                "description": "",
+                "content": "",
+                "tags": [],
+                "allowed_tools": [],
+            })}),
+        )
+        monkeypatch.setattr(
+            skill_service.skill_db, "create_skill",
+            lambda data, _tenant_id: {"skill_id": 1, "name": data["name"]},
+        )
+        service.skill_manager = MagicMock()
+
+        result = service.create_skill_from_file(b"1234567890", file_type="md")
+
+        assert result["name"] == "boundary_skill"
 
     def test_create_skill_from_md_bytes(self, mocker):
         mock_repo = MagicMock()
