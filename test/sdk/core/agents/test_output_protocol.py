@@ -5,6 +5,7 @@ from nexent.core.agents.output_protocol import (
     ExecutableAction,
     ExplicitFinalAnswer,
     ModelOutputProtocolError,
+    NonterminalThought,
     ProtocolErrorReason,
     classify_model_output,
     has_meaningful_visible_content,
@@ -30,7 +31,6 @@ def test_ac_001_visible_content_is_meaningful(value):
         ("\u200b\u2060\ufeff", ProtocolErrorReason.EMPTY_VISIBLE_CONTENT),
         ("<Tag>unsupported</Tag>", ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT),
         ("<think></think>", ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT),
-        ("plain final answer", ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION),
         ("<code>print(1)", ProtocolErrorReason.MALFORMED_ACTION),
         ("<code>print(1)</code>suffix", ProtocolErrorReason.MALFORMED_ACTION),
         (
@@ -59,7 +59,6 @@ def test_ac_001_visible_content_is_meaningful(value):
             ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
         ),
         ("<|python_tag|>{}", ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT),
-        ("```python\nprint(1)\n```", ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION),
         (
             "<analysis>reason</analysis><code>print(1)</code>",
             ProtocolErrorReason.MALFORMED_ACTION,
@@ -83,6 +82,11 @@ def test_ac_001_ac_002_invalid_code_outputs_are_protocol_errors(output, reason):
         classify_model_output(output, protocol="code_action")
 
     assert exc_info.value.reason == reason
+
+
+@pytest.mark.parametrize("output", ["plain final answer", "```python\nprint(1)\n```", "思考：还需要查询"])
+def test_oc_022_bare_text_is_nonterminal(output):
+    assert isinstance(classify_model_output(output, protocol="code_action"), NonterminalThought)
 
 
 def test_ac_008_length_finish_reason_is_never_executable_or_final():
