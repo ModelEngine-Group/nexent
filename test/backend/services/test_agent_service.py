@@ -15,6 +15,58 @@ import pytest
 from fastapi.responses import StreamingResponse
 from fastapi import Request
 
+
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_hides_system_agent_before_capability_reads(monkeypatch):
+    """UT-BE-SAL-010: ordinary detail lookup must not disclose a system Agent."""
+    from backend.management.services.agent import service as agent_service
+
+    monkeypatch.setattr(
+        agent_service,
+        "search_agent_info_by_agent_id",
+        lambda *_args, **_kwargs: {
+            "agent_id": 7,
+            "tenant_id": "tenant-a",
+            "name": "workbench_main",
+            "agent_origin": "SYSTEM",
+            "system_key": "workbench_main",
+        },
+    )
+    tool_lookup = MagicMock()
+    monkeypatch.setattr(agent_service, "search_tools_for_sub_agent", tool_lookup)
+
+    with pytest.raises(agent_service.ForbiddenError, match="not accessible"):
+        await agent_service.get_agent_info_impl(
+            agent_id=7,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    tool_lookup.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_agent_with_skills_rejects_system_agent_before_skill_reads(monkeypatch):
+    """UT-BE-SAL-010 and UT-BE-SAL-011: reject before Skill reads."""
+    from backend.management.services.agent import management as agent_service
+
+    monkeypatch.setattr(
+        agent_service,
+        "get_current_user_info",
+        lambda _authorization: ("user-a", "tenant-a", "USER"),
+    )
+    monkeypatch.setattr(agent_service, "is_system_agent", lambda *_args: True)
+    skill_collector = MagicMock()
+    monkeypatch.setattr(agent_service, "collect_skill_zip_entries", skill_collector)
+
+    with pytest.raises(agent_service.ForbiddenError, match="cannot be exported"):
+        await agent_service.export_agent_with_skills_impl(
+            agent_id=7,
+            authorization="Bearer token",
+        )
+
+    skill_collector.assert_not_called()
+
 # =============================================================================
 # STEP 1: Set up ALL sys.modules mocks BEFORE any backend imports
 # =============================================================================
@@ -665,6 +717,14 @@ def reset_mocks():
     """Reset all mocks before each test to ensure a clean test environment."""
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
+    agent_run_service.get_conversation_service.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
+    agent_run_service.get_conversation_service.return_value = {
+        "conversation_id": 123,
+        "knowledge_scope": None,
+    }
     yield
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
@@ -3031,6 +3091,19 @@ async def test_list_all_agent_info_impl_success(
             "create_time": 2,
             "current_version_no": 1,  # Published
         },
+        {
+            "agent_id": 99,
+            "name": "workbench_main",
+            "display_name": "Nexent Workbench",
+            "description": "Protected system Agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "admin_user",
+            "create_time": 3,
+            "current_version_no": 1,
+            "agent_origin": "SYSTEM",
+            "system_key": "workbench_main",
+        },
     ]
 
     # Configure mocks
@@ -3050,6 +3123,8 @@ async def test_list_all_agent_info_impl_success(
 
     # Assert
     assert len(result) == 2
+    # UT-BE-SAL-009: ownership metadata cannot expose a system Agent.
+    assert {agent["agent_id"] for agent in result} == {1, 2}
     assert result[0]["agent_id"] == 1
     assert result[0]["name"] == "Agent 1"
     assert result[0]["display_name"] == "Display Agent 1"
@@ -3953,6 +4028,12 @@ async def test_export_agent_by_agent_id_success(
             usage="test_mcp_server",
         ),
     ]
+    mock_tools.append(ToolConfig(
+        class_name="AidpSearchTool", name="aidp_search", source="local",
+        params={"api_key": "secret", "server_url": "private", "tenant_id": "old", "kds_list": ["kb"]},
+        metadata={"allowed_kds_set": ["kb"], "kds_name_to_id_map": {"KB": "kb"}},
+        description="AIDP search", inputs="query", output_type="string", usage=None,
+    ))
     mock_create_tool_config.return_value = mock_tools
 
     mock_sub_agent_ids = [456, 789]
@@ -3971,7 +4052,10 @@ async def test_export_agent_by_agent_id_success(
     assert result.agent_id == 123
     assert result.tenant_id == "test_tenant"
     assert result.name == "Test Agent"
-    assert len(result.tools) == 5
+    assert len(result.tools) == 6
+    aidp_tool = next(tool for tool in result.tools if tool.class_name == "AidpSearchTool")
+    assert aidp_tool.params == {"kds_list": ["kb"]}
+    assert aidp_tool.metadata == {}
     assert result.managed_agents == mock_sub_agent_ids
 
     # Verify KnowledgeBaseSearchTool metadata is empty
@@ -6185,6 +6269,47 @@ async def test_generate_stream_unexpected_exception_emits_error(monkeypatch, cap
     assert "unexpected" not in out[0]
     assert "Generate stream error: Exception('unexpected')" in caplog.text
     assert "Traceback" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_without_channel_emits_preparation_error(monkeypatch):
+    """Debug/no-memory runs return a safe SSE error even without a channel."""
+    agent_request = AgentRequest(
+        agent_id=9,
+        conversation_id=9010,
+        query="q",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.prepare_agent_run",
+        AsyncMock(side_effect=TypeError("invalid persisted tool params")),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "AgentRunAlreadyActiveError",
+        type("AgentRunAlreadyActiveError", (Exception,), {}),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "MemoryPreparationException",
+        type("MemoryPreparationException", (Exception,), {}),
+    )
+
+    chunks = []
+    async for chunk in agent_run_service.generate_stream(
+        agent_request,
+        user_id="u",
+        tenant_id="t",
+        enable_memory=False,
+        channel=None,
+    ):
+        chunks.append(chunk)
+
+    assert len(chunks) == 1
+    assert '"type": "error"' in chunks[0]
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in chunks[0]
 
 
 async def test_generate_stream_registers_and_streams(monkeypatch):
@@ -11138,7 +11263,7 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
     mock_agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"], tools=[]),
         },
     )
 
@@ -11186,7 +11311,7 @@ async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
     mock_agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"], tools=[]),
         },
     )
 
@@ -11227,9 +11352,13 @@ async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_a
     agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["ExistingSkill"]),
+            "1": types.SimpleNamespace(
+                agent_id=1, skill_names=["ExistingSkill"], tools=[]
+            ),
             "2": types.SimpleNamespace(
-                agent_id=2, skill_names=["RenamedSkill", "NewSkill", "MissingSkill"]
+                agent_id=2,
+                skill_names=["RenamedSkill", "NewSkill", "MissingSkill"],
+                tools=[],
             ),
         },
     )
@@ -11865,7 +11994,7 @@ async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_
     mock_tool = MagicMock()
     mock_tool.class_name = "TestTool"
     mock_tool.source = "local"
-    mock_tool.params = ["param1", "param2"]
+    mock_tool.params = {"param1": "value1", "param2": "value2"}
     mock_tool.metadata = {}
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
@@ -20073,3 +20202,23 @@ def test_is_agent_running_returns_false_when_run_is_missing(mocker):
     )
 
     assert agent_run_service.is_agent_running(44, "user-id") is False
+
+
+@pytest.mark.asyncio
+async def test_import_agent_with_skills_rejects_parameters_before_dependency_writes(mocker):
+    from management.services.agent import management
+    from utils.agent_transfer_utils import AgentToolImportError
+
+    mocker.patch.object(management, "get_current_user_info", return_value=("user", "tenant", "en"))
+    mocker.patch.object(management, "query_all_tools", return_value=[{
+        "class_name": "AidpSearchTool", "source": "local", "params": [{"name": "kds_list"}],
+    }])
+    skill_service = mocker.patch.object(management, "SkillService")
+    import_agents = mocker.patch.object(management, "import_agent_impl", new_callable=AsyncMock)
+    snapshot = types.SimpleNamespace(agent_info={"1": types.SimpleNamespace(tools=[
+        types.SimpleNamespace(class_name="AidpSearchTool", source="local", params={"unknown": 1}),
+    ])})
+    with pytest.raises(AgentToolImportError, match="unknown"):
+        await management.import_agent_with_skills_impl(snapshot, [], "Bearer token")
+    skill_service.assert_not_called()
+    import_agents.assert_not_called()

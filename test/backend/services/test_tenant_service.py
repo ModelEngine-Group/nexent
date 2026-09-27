@@ -33,6 +33,7 @@ from consts.exceptions import (
     ValidationError,
 )
 from backend.services.tenant_service import (
+    backfill_workbench_main_agents,
     get_tenant_info,
     get_tenant_info_for_user,
     get_tenants_paginated,
@@ -400,20 +401,27 @@ class TestCreateTenant:
     """Test cases for create_tenant function"""
 
     def test_create_tenant_success(self, service_mocks):
-        """Test successfully creating a tenant"""
+        """UT-BE-SAL-004: tenant creation provisions the localized system Agent."""
         # Setup
         tenant_name = "New Tenant"
         user_id = "creator_user"
         group_id = 123
 
         service_mocks['create_tenant_with_default_group'].return_value = group_id
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
-            result = create_tenant(tenant_name, user_id)
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', True), \
+                patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
+                patch('backend.services.tenant_service.ensure_workbench_main_agent') as ensure:
+            result = create_tenant(tenant_name, user_id, locale="zh")
 
         assert result["tenant_name"] == tenant_name
         assert result["default_group_id"] == str(group_id)
         assert "tenant_id" in result
         service_mocks['create_tenant_with_default_group'].assert_called_once()
+        ensure.assert_called_once_with(
+            tenant_id=result["tenant_id"],
+            user_id=user_id,
+            locale="zh",
+        )
 
     def test_create_tenant_name_already_exists(self, service_mocks):
         """Test creating tenant with a name that already exists"""
@@ -504,6 +512,47 @@ class TestCreateTenant:
         # UUIDs are random and collision probability is astronomically low.
         # Keeping for reference - this scenario should never happen in practice.
         pass
+
+
+class TestWorkbenchMainBackfill:
+    """Test historical tenant bootstrap for the workbench system Agent."""
+
+    def test_backfill_filters_virtual_tenants_and_isolates_failures(self):
+        """UT-BE-SAL-006: one tenant failure does not block the batch."""
+        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+
+        tenant_ids = [
+            "tenant-a",
+            DEFAULT_TENANT_ID,
+            "",
+            ASSET_OWNER_TENANT_ID,
+            "tenant-b",
+        ]
+
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', True), patch(
+            "backend.services.tenant_service.get_all_tenant_ids",
+            return_value=tenant_ids,
+        ), patch(
+            "backend.services.tenant_service.ensure_workbench_main_agent",
+            side_effect=[MagicMock(), RuntimeError("tenant bootstrap failed")],
+        ) as ensure:
+            result = backfill_workbench_main_agents()
+
+        assert result == {"total": 2, "succeeded": 1, "failed": 1}
+        assert [call.kwargs["tenant_id"] for call in ensure.call_args_list] == [
+            "tenant-a",
+            "tenant-b",
+        ]
+        assert all(call.kwargs["user_id"] == "system" for call in ensure.call_args_list)
+
+    def test_workbench_backfill_skipped_when_disabled(self):
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', False), patch(
+            'backend.services.tenant_service.get_all_tenant_ids'
+        ) as tenants:
+            result = backfill_workbench_main_agents()
+
+        assert result == {"total": 0, "succeeded": 0, "failed": 0}
+        tenants.assert_not_called()
 
 
 class TestUpdateTenantInfo:

@@ -1128,10 +1128,12 @@ def test_nl2_agent_skill_requests():
     nl2_skill = model_consts.NL2SkillRunRequest(
         query="Build an automation",
         complexity="simple",
-        language="en"
+        language="en",
+        minio_files=[{"name": "requirements.pdf", "object_name": "files/1"}],
     )
     assert nl2_skill.complexity == "simple"
     assert nl2_skill.language == "en"
+    assert nl2_skill.minio_files[0]["name"] == "requirements.pdf"
 
 
 def test_export_import_requests():

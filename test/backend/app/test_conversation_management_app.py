@@ -220,6 +220,30 @@ async def test_list_conversations_forwards_pagination(conversation_mocks):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_type", ["agent_chat", "workbench"])
+async def test_list_conversations_filters_by_entrypoint(conversation_mocks, conversation_type):
+    """Each page requests only conversations owned by its entrypoint."""
+    conversation_mocks['get_current_user_id'].return_value = ("user_id", "tenant_id")
+    conversation_mocks['get_conversation_list'].return_value = {"items": [], "metadata": {}}
+
+    await list_conversations_endpoint(
+        authorization="Bearer test-token",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        conversation_type=conversation_type,
+    )
+
+    conversation_mocks['get_conversation_list'].assert_called_once_with(
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=None,
+        offset=0,
+        conversation_type=conversation_type,
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_conversations_forwards_offset_without_limit(conversation_mocks):
     """Verify offset remains effective for compatibility requests without a limit."""
     conversation_mocks['get_current_user_id'].return_value = (

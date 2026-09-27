@@ -188,6 +188,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
       model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
+      tags: normalizeTags(agent.tags),
     }));
 
     return {
