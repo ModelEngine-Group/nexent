@@ -46,6 +46,11 @@ class ExplicitFinalAnswer:
     answer: str
 
 
+@dataclass(frozen=True)
+class NonterminalThought:
+    """Complete visible text with no executable action or final signal."""
+
+
 class ModelOutputProtocolError(Exception):
     """A recoverable model-output protocol violation."""
 
@@ -85,6 +90,7 @@ _ACTION_PREAMBLE_RE = re.compile(
     r"[ \t]*(?:Code|代码)[ \t]*[:：])\s*(?P<action><code>[\s\S]*|```<RUN>[\s\S]*)\Z",
     re.IGNORECASE,
 )
+_CODE_LABEL_RE = re.compile(r"(?m)^[ \t]*(?:Code|代码)[ \t]*[:：]", re.IGNORECASE)
 _FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z")
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]{0,255}>")
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
@@ -369,7 +375,7 @@ def _classify_code_action(
     *,
     protocol: OutputProtocol,
     logger: Any,
-) -> ExecutableAction:
+) -> ExecutableAction | NonterminalThought:
     code_action = _parse_code_action(text, protocol=protocol, logger=logger)
     if code_action is not None:
         return code_action
@@ -385,17 +391,15 @@ def _classify_code_action(
 
     if any(marker in text for marker in ("<code>", "</code>", "```<RUN>")):
         _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+    if _CODE_LABEL_RE.search(text):
+        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
     if _TAG_RE.search(text) or _MODEL_CONTROL_TOKEN_RE.search(text):
         _raise_protocol_error(
             ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
             protocol,
             logger,
         )
-    _raise_protocol_error(
-        ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION,
-        protocol,
-        logger,
-    )
+    return NonterminalThought()
 
 
 def _classify_final_envelope(
@@ -422,7 +426,7 @@ def classify_model_output(
     protocol: OutputProtocol,
     finish_reason: str | None = None,
     logger: Any = None,
-) -> ExecutableAction | ExplicitFinalAnswer:
+) -> ExecutableAction | ExplicitFinalAnswer | NonterminalThought:
     """Classify one complete model response using a closed runtime protocol."""
 
     if protocol not in ("code_action", "final_answer_envelope"):

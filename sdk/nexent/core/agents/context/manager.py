@@ -123,7 +123,11 @@ class ContextManager:
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: ManagedRunContext | None = None,
         force_compaction: bool = False,
+        request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
     ) -> FinalContext:
+        if purpose != "step" and (request_system_messages or request_tail_messages):
+            raise ValueError("Request-only action messages require step purpose")
         run_context = run_context or self.prepare_run_context(memory, "")
         policy = resolve_policy(self.config.policy_layers)
         persisted_items = list(run_context.items)
@@ -145,6 +149,8 @@ class ContextManager:
             task=task,
             final_answer_templates=final_answer_templates,
         )
+        purpose_stable = [*purpose_stable, *request_system_messages]
+        purpose_dynamic = [*purpose_dynamic, *request_tail_messages]
         canonical_tools = self._canonical_tools(tools or ())
         raw_tokens = self._estimate_items(items, purpose_stable, purpose_dynamic, canonical_tools)
         final_items = list(items)
@@ -288,6 +294,7 @@ class ContextManager:
         # Stable item messages remain first for KV-cache reuse.
         stable = [message for message in rendered if message_role(message) in {"system", "developer"}]
         dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]
+        memory_messages = [*stable, *dynamic]
         messages = [*stable, *purpose_stable, *dynamic, *purpose_dynamic]
         final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
         self._last_uncompressed_token_count = raw_tokens
@@ -316,6 +323,7 @@ class ContextManager:
         history_messages = [message for message in messages if message_role(message) not in {"system", "developer"}]
         return FinalContext(
             messages=messages,
+            memory_messages=memory_messages,
             tools=canonical_tools,
             evidence=ContextEvidence(
                 purpose=purpose,

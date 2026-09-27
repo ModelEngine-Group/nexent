@@ -91,6 +91,43 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     assert final.tools == [{"name": "a"}, {"name": "z"}]
 
 
+def test_oc_013_oc_023_request_only_messages_are_budgeted_and_not_saved():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="")
+    memory.steps.append(TaskStep(task="current task"))
+    system_reminder = {"role": "system", "content": [{"type": "text", "text": "format contract"}]}
+    tail_reminder = {"role": "user", "content": [{"type": "text", "text": "format contract"}]}
+    continuation = {"role": "user", "content": [{"type": "text", "text": "continue with action"}]}
+    kwargs = dict(model=None, memory=memory, current_run_start_idx=0, run_context=run_context)
+    baseline = manager.assemble_final_context(**kwargs)
+    first = manager.assemble_final_context(
+        **kwargs, request_system_messages=[system_reminder], request_tail_messages=[tail_reminder]
+    )
+    continued = manager.assemble_final_context(
+        **kwargs, request_system_messages=[system_reminder],
+        request_tail_messages=[tail_reminder, continuation], force_compaction=True,
+    )
+
+    assert [_message_text(message) for message in first.messages] == [
+        "stable policy", "format contract", "current task", "format contract"
+    ]
+    assert [_message_text(message) for message in continued.messages][-2:] == [
+        "format contract", "continue with action"
+    ]
+    assert [_message_text(message) for message in continued.memory_messages] == [
+        "stable policy", "current task"
+    ]
+    assert first.evidence.final_token_estimate > baseline.evidence.final_token_estimate
+    assert continued.evidence.final_token_estimate > first.evidence.final_token_estimate
+    assert len(memory.steps) == 1
+    with pytest.raises(ValueError):
+        manager.assemble_final_context(
+            **kwargs, purpose="final_answer", request_tail_messages=[continuation]
+        )
+
+
 def test_context_fingerprint_bounds_cycles_and_excessive_depth():
     manager = ContextManager()
     cyclic = {}

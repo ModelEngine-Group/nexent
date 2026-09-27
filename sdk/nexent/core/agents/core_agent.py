@@ -50,6 +50,7 @@ from .output_protocol import (
     ExplicitFinalAnswer,
     ModelOutputProtocolError,
     ModelOutputProtocolExhaustedError,
+    NonterminalThought,
     ProtocolErrorReason,
     RuntimeFinalAnswer,
     classify_model_output,
@@ -65,6 +66,22 @@ from .output_protocol import extract_clarification_form
 
 
 logger = logging.getLogger(__name__)
+
+
+class NonterminalThoughtTurn(Exception):
+    """A model turn produced visible text without an executable action."""
+
+
+_ACTION_FORMAT_REMINDER = (
+    "For tool use, return a complete <code>...</code> Python action. "
+    "When the task is complete, call final_answer(...) as the last top-level statement "
+    "in the final code block. Never return a bare-text final answer."
+)
+_ACTION_FORMAT_REMINDER_ZH = (
+    "使用工具时，请输出完整的 <code>...</code> Python 动作。"
+    "任务完成时，在最后一个代码块的最后一条顶层语句调用 final_answer(...)。"
+    "不要直接输出裸文本最终答案。"
+)
 
 RUNTIME_METADATA_BLOCK_RE = re.compile(
     r'<runtime_metadata\b.*</runtime_metadata>',
@@ -1070,16 +1087,72 @@ Additional Args:
             ),
         ]
 
+    def _thought_continuation_message(self) -> ChatMessage:
+        """Build one request-only nudge from the current optional plan state."""
+
+        chinese = str(getattr(self, "lang", "en")).lower().startswith("zh")
+        instruction = (
+            "上一次生成只有文本：没有执行动作，也没有调用 final_answer。"
+            "如果还有工作，请用完整的 <code>...</code> 动作调用工具；"
+            "如果缺少必要信息，请使用已配置的独立 HITL ask 动作；"
+            "如果任务已经完成，请在完整代码块中调用 final_answer(...)。"
+            "不要再次只输出文本。"
+        ) if chinese else (
+            "The previous generation contained only text: no action ran and no final answer was called. "
+            "If work remains, return a complete <code>...</code> action to use a tool. "
+            "If essential information is missing, use the configured standalone HITL ask action. "
+            "If the task is complete, call final_answer(...) inside a complete code block. "
+            "Do not return only text again."
+        )
+        plan = getattr(self, "current_plan", None)
+        if plan is not None:
+            unfinished = [
+                step for step in getattr(plan, "steps", ())
+                if getattr(step, "status", None) in ("pending", "in_progress")
+            ]
+            if unfinished:
+                details = "; ".join(
+                    f"{str(step.title)[:160]} ({step.status})" for step in unfinished[:20]
+                )
+                instruction += (f" 未完成的计划步骤：{details}。" if chinese else
+                                f" Unfinished plan steps: {details}.")
+        return ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": instruction}])
+
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
         Returns None if the step is not final.
         """
+        strict_code_action = (
+            getattr(self, "output_protocol", "code_action") == "code_action"
+            and getattr(self, "enable_protocol_repair_retry", False)
+        )
+        reminder = (
+            _ACTION_FORMAT_REMINDER_ZH
+            if str(getattr(self, "lang", "en")).lower().startswith("zh")
+            else _ACTION_FORMAT_REMINDER
+        )
+        system_overlay = (
+            [ChatMessage(role=MessageRole.SYSTEM, content=[{"type": "text", "text": reminder}])]
+            if strict_code_action else []
+        )
+        tail_overlay = [*getattr(self, "_protocol_repair_messages", [])]
+        if strict_code_action:
+            tail_overlay.append(ChatMessage(
+                role=MessageRole.USER, content=[{"type": "text", "text": reminder}]
+            ))
+        if getattr(self, "_pending_thought_continuation", False):
+            tail_overlay.append(self._thought_continuation_message())
+        request_kwargs = (
+            {"request_system_messages": system_overlay, "request_tail_messages": tail_overlay}
+            if system_overlay or tail_overlay else {}
+        )
         final_context = self.context_runtime.prepare_step(
             model=self.model,
             memory=self.memory,
             current_run_start_idx=self._history_step_count,
             tools=self._context_tools(),
+            **request_kwargs,
         )
         get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
@@ -1095,7 +1168,10 @@ Additional Args:
         else:
             self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
         # Add new step in logs
-        memory_step.model_input_messages = input_messages
+        memory_step.model_input_messages = (
+            final_context.memory_messages
+            if final_context.memory_messages is not None else input_messages
+        )
         legacy_code_action = (
             not getattr(self, "enable_protocol_repair_retry", False)
             and getattr(self, "output_protocol", "code_action") == "code_action"
@@ -1113,11 +1189,9 @@ Additional Args:
         if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
             additional_args["_defer_attempt_commit"] = True
 
-        repair_messages = getattr(self, "_protocol_repair_messages", [])
-        if repair_messages:
-            input_messages = [*input_messages, *repair_messages]
         input_messages = self._ensure_open_model_turn(input_messages)
-        memory_step.model_input_messages = input_messages
+        if not request_kwargs:
+            memory_step.model_input_messages = input_messages
 
         # Log model call parameters before execution
         self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
@@ -1149,9 +1223,14 @@ Additional Args:
                     memory=self.memory,
                     current_run_start_idx=self._history_step_count,
                     tools=self._context_tools(),
+                    **request_kwargs,
                 )
                 get_monitoring_manager().record_final_context_evidence(
                     rebuilt.evidence, step_number=self.step_number
+                )
+                memory_step.model_input_messages = (
+                    rebuilt.memory_messages
+                    if rebuilt.memory_messages is not None else rebuilt.messages
                 )
                 self._emit_history_summary_event()
                 return rebuilt
@@ -1210,11 +1289,27 @@ Additional Args:
                     else:
                         code_action = parse_code_blobs(model_output)
                 except Exception:
-                    # A legacy parse error is a completed, visible Agent step,
-                    # not a failed attempt requiring semantic protocol repair.
-                    yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
-                    return
-                classified_output = ExecutableAction(code=code_action)
+                    if not has_meaningful_visible_content(model_output):
+                        yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
+                        return
+                    classified_output = classify_model_output(
+                        model_output,
+                        protocol="code_action",
+                        finish_reason=finish_reason,
+                        logger=self.logger,
+                    )
+                    if isinstance(classified_output, NonterminalThought):
+                        raise NonterminalThoughtTurn()
+                    code_action = classified_output.code
+                else:
+                    classified_output = ExecutableAction(code=code_action)
+                # Successfully extracting a legacy action accepts the model
+                # attempt. Everything after this boundary belongs to the old
+                # ReAct parse/execute flow and must never roll the streamed
+                # model output back as a strict protocol failure.
+                self._resolve_deferred_model_attempt(
+                    memory_step.model_output_message, accepted=True
+                )
             elif self._use_structured_outputs_internally:
                 code_action = json.loads(model_output)["code"]
                 if not isinstance(code_action, str):
@@ -1237,11 +1332,14 @@ Additional Args:
                     finish_reason=finish_reason,
                     logger=self.logger,
                 )
+            if isinstance(classified_output, NonterminalThought):
+                raise NonterminalThoughtTurn()
             if isinstance(classified_output, ExplicitFinalAnswer):
                 self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
                 self._log_protocol_repair_accepted(memory_step.model_output_message)
                 getattr(self, "_protocol_repair_messages", []).clear()
                 self._consecutive_protocol_errors = 0
+                self._pending_thought_continuation = False
                 self._record_output_protocol("explicit_final_answer")
                 memory_step.action_output = classified_output.answer
                 yield ActionOutput(output=classified_output.answer, is_final_answer=True)
@@ -1250,7 +1348,16 @@ Additional Args:
             code_action = classified_output.code
             form = None
             if getattr(self, "clarification_tool_name", None):
-                form = extract_clarification_form(code_action, self.clarification_tool_name)
+                try:
+                    form = extract_clarification_form(code_action, self.clarification_tool_name)
+                except ModelOutputProtocolError as protocol_error:
+                    if not legacy_code_action:
+                        raise
+                    raise AgentExecutionError(
+                        "Legacy code action could not be parsed for optional clarification: "
+                        f"{protocol_error.reason.value}",
+                        self.logger,
+                    ) from protocol_error
             if form is not None:
                 form = self._screen_clarification(form)
                 if self.stop_event.is_set():
@@ -1259,6 +1366,7 @@ Additional Args:
                 self._log_protocol_repair_accepted(memory_step.model_output_message)
                 getattr(self, "_protocol_repair_messages", []).clear()
                 self._consecutive_protocol_errors = 0
+                self._pending_thought_continuation = False
                 self.observer.add_message(
                     self.agent_name, ProcessType.HUMAN_INTERACTION,
                     {"schema_version": 1, **form.model_dump(mode="json")},
@@ -1271,6 +1379,7 @@ Additional Args:
             self._log_protocol_repair_accepted(memory_step.model_output_message)
             getattr(self, "_protocol_repair_messages", []).clear()
             self._consecutive_protocol_errors = 0
+            self._pending_thought_continuation = False
             self._record_output_protocol(
                 "legacy_executable_action" if classified_output.legacy_format else "executable_action"
             )
@@ -1291,20 +1400,37 @@ Additional Args:
                         self.logger,
                     )
 
+        except NonterminalThoughtTurn:
+            self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
+            raise
         except RuntimeFinalAnswer as terminal:
             if terminal.source == "guardrail_clarification":
                 self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
                 memory_step.model_output = str(terminal.answer)
             raise
-        except ModelOutputProtocolError:
+        except ModelOutputProtocolError as protocol_error:
+            if legacy_code_action:
+                # Defensive isolation: no strict protocol exception may escape
+                # a disabled CodeAgent after the legacy parser accepted the
+                # response. Keep the attempt and let the ordinary ReAct error
+                # path record the step instead of producing repair_disabled.
+                self._resolve_deferred_model_attempt(
+                    memory_step.model_output_message, accepted=True
+                )
+                raise AgentExecutionError(
+                    "Legacy code action failed during optional protocol handling: "
+                    f"{protocol_error.reason.value}",
+                    self.logger,
+                ) from protocol_error
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
         except (AgentExecutionError, AgentGenerationError):
             raise
         except Exception:
             if legacy_code_action:
-                yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
-                return
+                raise AgentExecutionError(
+                    "Legacy code action failed during parsing or normalization.", self.logger
+                )
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise ModelOutputProtocolError(
                 reason=ProtocolErrorReason.MALFORMED_ACTION,
@@ -1681,6 +1807,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         returned_final_answer = False
         self._consecutive_protocol_errors = 0
         self._protocol_repair_messages: list[ChatMessage] = []
+        self._pending_thought_continuation = False
         final_verification_round = 0
         verification_config = getattr(
             self,
@@ -1798,9 +1925,56 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                     final_answer_source=terminal.source,
                 )
 
+            except NonterminalThoughtTurn:
+                if self.stop_event.is_set():
+                    raise RunTerminated()
+                self._consecutive_protocol_errors += 1
+                self._protocol_repair_messages.clear()
+                plan = getattr(self, "current_plan", None)
+                unfinished_count = sum(
+                    getattr(step, "status", None) in ("pending", "in_progress")
+                    for step in getattr(plan, "steps", ())
+                )
+                with get_monitoring_manager().trace_agent_step(
+                    "agent.no_action_no_final",
+                    step_type="protocol",
+                    **{
+                        "agent.output_protocol": "code_action",
+                        "agent.model_output_classification": "no_action_no_final",
+                        "agent.continuation_ordinal": self._consecutive_protocol_errors,
+                        "agent.unfinished_plan_count": unfinished_count,
+                    },
+                ):
+                    pass
+                self._record_output_protocol(
+                    "no_action_no_final", reason="nonterminal_thought"
+                )
+                logger.info(
+                    "event=no_action_no_final step_number=%s continuation_ordinal=%s",
+                    self.step_number,
+                    self._consecutive_protocol_errors,
+                )
+                action_step.model_output = None
+                action_step.model_output_message = None
+                action_step.token_usage = None
+                interrupted = True
+                if self._consecutive_protocol_errors >= 3:
+                    self._pending_thought_continuation = False
+                    self._record_output_protocol(
+                        "controlled_protocol_failure",
+                        reason="no_progress_limit",
+                        final_answer_source="no_progress_limit",
+                    )
+                    raise ModelOutputProtocolExhaustedError(
+                        "Agent produced no executable action or final_answer after three generations."
+                    )
+                self._pending_thought_continuation = True
+                continue
+
             except ModelOutputProtocolError as protocol_error:
                 if self.stop_event.is_set():
                     raise RunTerminated()
+                self._pending_thought_continuation = False
                 self._consecutive_protocol_errors += 1
                 self._record_output_protocol(
                     "protocol_error",

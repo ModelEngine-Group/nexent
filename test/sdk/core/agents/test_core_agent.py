@@ -2242,7 +2242,7 @@ class TestRunStreamRealExecution:
         generator = agent._step_stream(action_step)
         try:
             next(generator)
-        except (StopIteration, ValueError, module.ModelOutputProtocolError):
+        except (StopIteration, ValueError, module.ModelOutputProtocolError, module.NonterminalThoughtTurn):
             pass
 
         assert agent._last_uncompressed_est == 5000
@@ -2264,6 +2264,8 @@ class TestRunStreamRealExecution:
         agent.context_runtime.chars_per_token = 1.0
         initial_context = MagicMock(messages=[MagicMock()])
         rebuilt_context = MagicMock(messages=[MagicMock()])
+        initial_context.memory_messages = ["original history"]
+        rebuilt_context.memory_messages = ["rebuilt history"]
         agent.context_runtime.prepare_step.return_value = initial_context
         agent.context_runtime.recover_step.return_value = rebuilt_context
         agent._history_step_count = 0
@@ -2284,7 +2286,7 @@ class TestRunStreamRealExecution:
         stream = agent._step_stream(action_step)
         try:
             list(stream)
-        except (ValueError, TypeError, module.ModelOutputProtocolError):
+        except (ValueError, TypeError, module.ModelOutputProtocolError, module.NonterminalThoughtTurn):
             # Parsing the synthetic response is outside this callback contract test.
             pass
 
@@ -2293,8 +2295,11 @@ class TestRunStreamRealExecution:
             memory=agent.memory,
             current_run_start_idx=0,
             tools=[],
+            request_system_messages=agent.context_runtime.prepare_step.call_args.kwargs["request_system_messages"],
+            request_tail_messages=agent.context_runtime.prepare_step.call_args.kwargs["request_tail_messages"],
         )
         assert module.get_monitoring_manager().record_final_context_evidence.call_count >= 2
+        assert action_step.model_input_messages == ["rebuilt history"]
 
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""
@@ -2334,7 +2339,7 @@ class TestRunStreamRealExecution:
         generator = agent._step_stream(action_step)
         try:
             next(generator)
-        except (StopIteration, ValueError, module.ModelOutputProtocolError):
+        except (StopIteration, ValueError, module.ModelOutputProtocolError, module.NonterminalThoughtTurn):
             pass
 
         # When the runtime has no raw count, fall back to msg_token_count.
@@ -2923,23 +2928,21 @@ class TestRunStreamRealExecution:
         return agent, action_step, response
 
     @pytest.mark.parametrize("content", ["答案是 4", "```python\nprint(4)\n```"])
-    def test_cmsr_007_disabled_plain_text_commits_direct_final_answer(self, monkeypatch, content):
-        """CMSR-007 / AC-020: legacy text is one accepted answer, not a protocol error."""
+    def test_oc_022_disabled_plain_text_is_nonterminal(self, monkeypatch, content):
+        """OC-022: bare text is never a final answer with repair disabled."""
         module = core_agent_module
         monkeypatch.setattr(module, "ActionOutput", lambda output, is_final_answer: SimpleNamespace(
             output=output, is_final_answer=is_final_answer,
         ))
         agent, action_step, response = self._create_cmsr_007_step_agent(content)
 
-        outputs = list(agent._step_stream(action_step))
+        with pytest.raises(module.NonterminalThoughtTurn):
+            list(agent._step_stream(action_step))
 
-        assert len(outputs) == 1
-        assert outputs[0].is_final_answer is True
-        assert outputs[0].output == content
-        assert action_step.action_output == content
+        assert action_step.action_output is None
         assert action_step.tool_calls is None
-        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
-        agent.observer.rollback_model_attempt.assert_not_called()
+        agent.observer.commit_model_attempt.assert_not_called()
+        agent.observer.rollback_model_attempt.assert_called_once_with("legacy-attempt", 1)
         assert response.model_attempt_commit_deferred is False
         agent.model.assert_called_once()
         assert agent.model.call_args.kwargs["stop_sequences"] == ["Observation:", "Calling tools:"]
@@ -2972,10 +2975,70 @@ class TestRunStreamRealExecution:
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
 
+    def test_cmsr_008_disabled_final_answer_with_clarification_enabled_executes_once(
+        self, monkeypatch
+    ):
+        """UT-SDK-CMSR-008-005: production clarification support cannot re-enable strict mode."""
+        module = core_agent_module
+        monkeypatch.setattr(module, "fix_final_answer_code", lambda code: code)
+        monkeypatch.setattr(module, "ActionOutput", lambda output, is_final_answer: SimpleNamespace(
+            output=output, is_final_answer=is_final_answer,
+        ))
+        agent, action_step, response = self._create_cmsr_007_step_agent(
+            '<code>final_answer("正常答案")</code>'
+        )
+        agent.clarification_tool_name = "ask_user"
+        agent.python_executor = MagicMock(return_value=SimpleNamespace(
+            output="正常答案", is_final_answer=True, logs="",
+        ))
+
+        outputs = list(agent._step_stream(action_step))
+
+        assert len(outputs) == 1
+        assert outputs[0].output == "正常答案"
+        assert outputs[0].is_final_answer is True
+        agent.python_executor.assert_called_once_with('final_answer("正常答案")')
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.rollback_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+
+    def test_cmsr_008_disabled_clarification_protocol_error_is_ordinary_step_error(
+        self, monkeypatch
+    ):
+        """UT-SDK-CMSR-008-006: no strict protocol exception may escape the legacy branch."""
+        module = core_agent_module
+
+        class LegacyExecutionError(Exception):
+            pass
+
+        class LegacyGenerationError(Exception):
+            pass
+
+        monkeypatch.setattr(module, "AgentExecutionError", LegacyExecutionError)
+        monkeypatch.setattr(module, "AgentGenerationError", LegacyGenerationError)
+        agent, action_step, response = self._create_cmsr_007_step_agent(
+            '<code>final_answer("正常答案")</code>'
+        )
+        agent.clarification_tool_name = "ask_user"
+        monkeypatch.setattr(
+            module,
+            "extract_clarification_form",
+            MagicMock(side_effect=module.ModelOutputProtocolError(
+                module.ProtocolErrorReason.MALFORMED_ACTION,
+                "code_action",
+            )),
+        )
+
+        with pytest.raises(LegacyExecutionError):
+            list(agent._step_stream(action_step))
+
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.rollback_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+
     @pytest.mark.parametrize("content,finish_reason,error_kind", [
         ("   ", "stop", "generation"),
         ("<code>final_answer(", "stop", "execution"),
-        ("I will call search next", "stop", "execution"),
         ("答案是 4", "length", "execution"),
     ])
     def test_cmsr_008_disabled_incomplete_output_is_ordinary_step_error(
@@ -3054,7 +3117,7 @@ class TestRunStreamRealExecution:
         agent, action_step, response = self._create_cmsr_007_step_agent("答案是 4")
         agent.enable_protocol_repair_retry = True
 
-        with pytest.raises(module.ModelOutputProtocolError):
+        with pytest.raises(module.NonterminalThoughtTurn):
             list(agent._step_stream(action_step))
 
         agent.observer.commit_model_attempt.assert_not_called()
@@ -3062,8 +3125,8 @@ class TestRunStreamRealExecution:
         assert response.model_attempt_commit_deferred is False
         assert agent.model.call_args.kwargs["stop_sequences"] is None
 
-    def test_cmsr_007_disabled_plain_text_completes_run_and_persists_step(self, monkeypatch):
-        """CMSR-007 / AC-020: accepted text reaches the normal final-step history path."""
+    def test_oc_022_disabled_plain_text_continues_then_explicit_final(self, monkeypatch):
+        """OC-022: a bare generation is discarded before an explicit final action."""
         module = core_agent_module
 
         class FakeActionOutput:
@@ -3076,6 +3139,15 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
         monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
         agent, _, response = self._create_cmsr_007_step_agent("答案是 4")
+        final_response = SimpleNamespace(
+            content='<code>final_answer("答案是 4")</code>', token_usage=None,
+            model_attempt_id="legacy-final", model_attempt_number=1,
+            model_attempt_commit_deferred=True,
+        )
+        agent.model.side_effect = [response, final_response]
+        agent.python_executor = MagicMock(return_value=SimpleNamespace(
+            output="答案是 4", is_final_answer=True, logs="",
+        ))
         agent.enable_planning = False
         agent.verification_config = SimpleNamespace(enabled=False, final_verification_enabled=False)
         agent.final_answer_checks = []
@@ -3087,12 +3159,13 @@ class TestRunStreamRealExecution:
 
         assert outputs[-1].output == "答案是 4"
         assert len(agent.memory.steps) == 1
-        assert agent.memory.steps[0].model_output == "答案是 4"
+        assert agent.memory.steps[0].model_output == final_response.content
         assert agent.memory.steps[0].is_final_answer is True
         agent._record_output_protocol.assert_called_with(
-            "legacy_direct_final_answer", final_answer_source="direct_model_output",
+            "explicit_final_answer", final_answer_source="final_answer_tool",
         )
-        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.rollback_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-final", 1)
         assert response.model_attempt_commit_deferred is False
 
     def test_cmsr_008_disabled_action_error_continues_as_next_react_step(self, monkeypatch):
@@ -3119,10 +3192,13 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
         agent, _, first_response = self._create_cmsr_007_step_agent("<code>final_answer(")
         second_response = SimpleNamespace(
-            content="答案是 4", token_usage=None, model_attempt_id="legacy-second",
+            content='<code>final_answer("答案是 4")</code>', token_usage=None, model_attempt_id="legacy-second",
             model_attempt_number=1, model_attempt_commit_deferred=True,
         )
         agent.model.side_effect = [first_response, second_response]
+        agent.python_executor = MagicMock(return_value=SimpleNamespace(
+            output="答案是 4", is_final_answer=True, logs="",
+        ))
         agent.enable_planning = False
         agent.verification_config = SimpleNamespace(enabled=False, final_verification_enabled=False)
         agent.final_answer_checks = []
