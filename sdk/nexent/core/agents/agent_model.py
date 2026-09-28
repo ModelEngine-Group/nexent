@@ -262,7 +262,6 @@ class AgentVerificationConfig(BaseModel):
 
 class AgentConfig(BaseModel):
     runtime_ref: Optional[str] = None
-    display_name: Optional[str] = None
     origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
     agent_id: Optional[Union[int, str]] = Field(
         description="Stable persisted Agent identity used for runtime events",
@@ -277,6 +276,7 @@ class AgentConfig(BaseModel):
         default=None,
     )
     name: str = Field(description="Agent name")
+    display_name: Optional[str] = Field(description="User-facing Agent name", default=None)
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")

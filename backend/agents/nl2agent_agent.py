@@ -65,6 +65,7 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
     )
     return AgentConfig(
         name=NL2AGENT_NAME,
+        display_name="创建智能体",
         description="Ephemeral natural-language agent builder",
         prompt_templates=None,
         tools=tools,

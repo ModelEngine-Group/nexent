@@ -494,6 +494,7 @@ build_one() {
   if [ -n "$PLATFORM" ]; then
     cmd+=(--platform "$PLATFORM")
   fi
+  cmd+=(--pull=false)
   if [ "$NO_CACHE" = true ] || { [ "$REGISTRY" = "mainland" ] && [ "$name" = "nexent-web" ]; }; then
     cmd+=(--no-cache)
   fi
