@@ -1310,7 +1310,7 @@ deployment_https_prepare || {
 }
 assert_contains "$DEPLOYMENT_HTTPS_KEY_PATH" "$HTTPS_TEST_DIR/custom-root/nginx/ssl/server.key" \
   "custom key path should point at the materialized copy"
-if ! openssl rsa -in "$DEPLOYMENT_HTTPS_KEY_PATH" -check -noout >/dev/null 2>&1; then
+if ! openssl pkey -in "$DEPLOYMENT_HTTPS_KEY_PATH" -noout >/dev/null 2>&1; then
   echo "FAIL: materialized key should load without a passphrase"
   exit 1
 fi

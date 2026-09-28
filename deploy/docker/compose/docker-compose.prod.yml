@@ -227,7 +227,7 @@ services:
 
 
   nexent-nginx:
-    image: nginx:alpine
+    image: ${NGINX_IMAGE:-nginx:alpine}
     container_name: nexent-nginx
     restart: always
     profiles:

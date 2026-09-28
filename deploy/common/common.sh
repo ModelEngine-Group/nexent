@@ -864,9 +864,11 @@ deployment_init_defaults() {
   DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT"
   DEPLOYMENT_APP_VERSION="${APP_VERSION:-latest}"
   DEPLOYMENT_MONITORING_PROVIDER="$DEPLOYMENT_MONITORING_PROVIDER_DEFAULT"
-  DEPLOYMENT_HTTPS_MODE="disabled"
-  DEPLOYMENT_HTTPS_CERT_FILE=""
-  DEPLOYMENT_HTTPS_KEY_FILE=""
+  # Seed from .env (sourced earlier) so pre-configured values are honored;
+  # CLI flags and saved deploy.options override these in deployment_prepare_config.
+  DEPLOYMENT_HTTPS_MODE="${NEXENT_HTTPS_MODE:-disabled}"
+  DEPLOYMENT_HTTPS_CERT_FILE="${NEXENT_HTTPS_CERT_FILE:-}"
+  DEPLOYMENT_HTTPS_KEY_FILE="${NEXENT_HTTPS_KEY_FILE:-}"
   DEPLOYMENT_HTTPS_KEY_PASSPHRASE="${NEXENT_HTTPS_KEY_PASSPHRASE:-}"
   DEPLOYMENT_HTTPS_SAN="${NEXENT_HTTPS_SAN:-}"
   DEPLOYMENT_USE_LOCAL_CONFIG="false"
@@ -1263,24 +1265,29 @@ deployment_validate() {
   fi
 }
 
-deployment_https_rsa_check() {
-  # Bash 3.2-safe RSA key check: builds -passin args only when a passphrase exists.
+deployment_https_key_check() {
+  # Bash 3.2-safe key check for any key type (RSA, EC, Ed25519...): builds
+  # -passin args only when a passphrase exists. Uses -check when available
+  # (OpenSSL; validates the key itself) and falls back to plain parsing on
+  # LibreSSL, where -check is unsupported for non-RSA keys.
   local key_file="$1"
   local passphrase="$2"
   if [ -n "$passphrase" ]; then
-    openssl rsa -in "$key_file" -check -noout -passin "pass:$passphrase" >/dev/null 2>&1
+    openssl pkey -in "$key_file" -check -noout -passin "pass:$passphrase" >/dev/null 2>&1 \
+      || openssl pkey -in "$key_file" -noout -passin "pass:$passphrase" >/dev/null 2>&1
   else
-    openssl rsa -in "$key_file" -check -noout >/dev/null 2>&1
+    openssl pkey -in "$key_file" -check -noout >/dev/null 2>&1 \
+      || openssl pkey -in "$key_file" -noout >/dev/null 2>&1
   fi
 }
 
-deployment_https_rsa_pubkey() {
+deployment_https_key_pubkey() {
   local key_file="$1"
   local passphrase="$2"
   if [ -n "$passphrase" ]; then
-    openssl rsa -in "$key_file" -pubout -passin "pass:$passphrase" 2>/dev/null
+    openssl pkey -in "$key_file" -pubout -passin "pass:$passphrase" 2>/dev/null
   else
-    openssl rsa -in "$key_file" -pubout 2>/dev/null
+    openssl pkey -in "$key_file" -pubout 2>/dev/null
   fi
 }
 
@@ -1297,12 +1304,12 @@ deployment_https_validate_cert_pair() {
     return 1
   fi
 
-  if ! deployment_https_rsa_check "$key_file" "$passphrase"; then
+  if ! deployment_https_key_check "$key_file" "$passphrase"; then
     if [ -n "$passphrase" ]; then
       deployment_error "$(deployment_i18n validation.https_passphrase_wrong)"
     else
       # A key that fails without a passphrase may be passphrase-protected.
-      if openssl rsa -in "$key_file" -check -noout -passin pass: >/dev/null 2>&1; then
+      if deployment_https_key_check "$key_file" "" >/dev/null 2>&1; then
         deployment_error "$(deployment_i18n validation.https_passphrase_required)"
       else
         deployment_error "$(deployment_i18n validation.https_key_invalid_pem "$key_file")"
@@ -1313,7 +1320,7 @@ deployment_https_validate_cert_pair() {
 
   local cert_pubkey key_pubkey
   cert_pubkey="$(openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null | openssl sha256 2>/dev/null || true)"
-  key_pubkey="$(deployment_https_rsa_pubkey "$key_file" "$passphrase" | openssl sha256 2>/dev/null || true)"
+  key_pubkey="$(deployment_https_key_pubkey "$key_file" "$passphrase" | openssl sha256 2>/dev/null || true)"
   if [ -z "$cert_pubkey" ] || [ -z "$key_pubkey" ] || [ "$cert_pubkey" != "$key_pubkey" ]; then
     deployment_error "$(deployment_i18n validation.https_pair_mismatch)"
     return 1
@@ -2170,6 +2177,8 @@ deployment_apply_image_source() {
   export POSTGRESQL_IMAGE="${POSTGRESQL_IMAGE:-postgres:15-alpine}"
   export REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
   export MINIO_IMAGE="${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z}"
+  # Nginx image for the optional HTTPS reverse proxy (docker and k8s).
+  export NGINX_IMAGE="${NGINX_IMAGE:-nginx:alpine}"
   export OPENSSH_SERVER_IMAGE="${OPENSSH_SERVER_IMAGE:-nexent/nexent-ubuntu-terminal:$version}"
   export SUPABASE_KONG="${SUPABASE_KONG:-kong:2.8.1}"
   export SUPABASE_GOTRUE="${SUPABASE_GOTRUE:-supabase/gotrue:v2.170.0}"
@@ -2198,6 +2207,7 @@ deployment_apply_image_source() {
       POSTGRESQL_IMAGE \
       REDIS_IMAGE \
       MINIO_IMAGE \
+      NGINX_IMAGE \
       OPENSSH_SERVER_IMAGE \
       SUPABASE_KONG \
       SUPABASE_GOTRUE \
@@ -2302,6 +2312,9 @@ deployment_render_docker_env() {
     printf 'LANGFUSE_REDIS_IMAGE="%s"\n' "$LANGFUSE_REDIS_IMAGE"
     printf 'LANGFUSE_POSTGRES_IMAGE="%s"\n' "$LANGFUSE_POSTGRES_IMAGE"
   } > "$output_file"
+  # Generated values may embed TLS private keys and other secrets; restrict
+  # permissions so the default umask does not leave them world-readable.
+  chmod 600 "$output_file"
 }
 
 deployment_render_component_values() {
@@ -2466,7 +2479,7 @@ deployment_render_helm_chart_values() {
   if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
     printf 'nexent-nginx:\n'
     printf '  enabled: true\n'
-    printf '  images:\n    nginx:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo nginx:alpine | cut -d: -f1)" "$(deployment_image_tag nginx:alpine)"
+    printf '  images:\n    nginx:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$NGINX_IMAGE")" "$(deployment_image_tag "$NGINX_IMAGE")"
     if [ -r "${DEPLOYMENT_HTTPS_CERT_PATH:-}" ] && [ -r "${DEPLOYMENT_HTTPS_KEY_PATH:-}" ]; then
       printf '  tls:\n'
       # Render PEM contents as a YAML literal block: multi-line certificates
@@ -2814,13 +2827,26 @@ deployment_https_detect_san_addresses() {
   # Auto-detect host NIC addresses (filter lo / docker0 / veth* / br-*) and hostname.
   local addresses=""
   local interface address
-  while IFS=' ' read -r interface address; do
-    [ -z "$interface" ] && continue
-    case "$interface" in
-      lo|docker0|veth*|br-*) continue ;;
-    esac
-    [ -n "$address" ] && addresses="$(deployment_join_csv "$addresses" "$address")"
-  done < <(ifconfig -a 2>/dev/null | awk -F': ' '/^[a-zA-Z0-9_-]+: /{iface=$1} /inet /{print iface" "$2}' | sed 's|/%.*||')
+  if command -v ip >/dev/null 2>&1; then
+    # Prefer the Linux-standard "ip" tool: one line per address, stable format.
+    while IFS=' ' read -r interface address; do
+      [ -z "$interface" ] && continue
+      case "$interface" in
+        lo|docker0|veth*|br-*|virbr*) continue ;;
+      esac
+      [ -n "$address" ] && addresses="$(deployment_join_csv "$addresses" "$address")"
+    done < <(ip -o -4 addr show 2>/dev/null | awk '{print $2, $4}' | sed 's|/.*||')
+  else
+    # ifconfig fallback; strip the optional "addr:" prefix (net-tools legacy
+    # format) so both "inet 1.2.3.4" and "inet addr:1.2.3.4" yield the address.
+    while IFS=' ' read -r interface address; do
+      [ -z "$interface" ] && continue
+      case "$interface" in
+        lo|docker0|veth*|br-*) continue ;;
+      esac
+      [ -n "$address" ] && addresses="$(deployment_join_csv "$addresses" "$address")"
+    done < <(ifconfig -a 2>/dev/null | awk '/^[a-zA-Z0-9_-]+: /{iface=$1} /inet /{sub(/addr:/,"",$2); print iface" "$2}' | sed 's|/.*||')
+  fi
   local hostname_addr
   hostname_addr="$(hostname 2>/dev/null || true)"
   [ -n "$hostname_addr" ] && addresses="$(deployment_join_csv "$addresses" "$hostname_addr")"
@@ -2866,10 +2892,21 @@ deployment_https_ensure_self_signed_cert() {
   DEPLOYMENT_HTTPS_SAN_RESOLVED="$san_input"
 
   if [ -r "$cert_file" ] && [ -r "$key_file" ]; then
-    if openssl x509 -in "$cert_file" -noout >/dev/null 2>&1 && openssl rsa -in "$key_file" -check -noout >/dev/null 2>&1; then
-      DEPLOYMENT_HTTPS_CERT_PATH="$cert_file"
-      DEPLOYMENT_HTTPS_KEY_PATH="$key_file"
-      return 0
+    # pkey supports RSA/EC keys; -check is unavailable on LibreSSL, so only
+    # verify the key parses successfully.
+    if openssl x509 -in "$cert_file" -noout >/dev/null 2>&1 && openssl pkey -in "$key_file" -noout >/dev/null 2>&1; then
+      local reused_cert_pubkey reused_key_pubkey reused_end_date reused_epoch_end
+      reused_cert_pubkey="$(openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null | openssl sha256 2>/dev/null || true)"
+      reused_key_pubkey="$(openssl pkey -in "$key_file" -pubout 2>/dev/null | openssl sha256 2>/dev/null || true)"
+      if [ -n "$reused_cert_pubkey" ] && [ "$reused_cert_pubkey" = "$reused_key_pubkey" ]; then
+        reused_end_date="$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)"
+        reused_epoch_end="$(date -j -f '%b %e %H:%M:%S %Y GMT' "$reused_end_date" +%s 2>/dev/null || date -d "$reused_end_date" +%s 2>/dev/null || true)"
+        if [ -z "$reused_epoch_end" ] || [ "$reused_epoch_end" -gt "$(date +%s)" ]; then
+          DEPLOYMENT_HTTPS_CERT_PATH="$cert_file"
+          DEPLOYMENT_HTTPS_KEY_PATH="$key_file"
+          return 0
+        fi
+      fi
     fi
   fi
 
@@ -2915,7 +2952,6 @@ EOF
   return 0
 }
 
-deployment_https_prepare() {
 deployment_https_materialize_custom_cert() {
   # Copy the custom cert/key into ROOT_DIR/nginx/ssl/, decrypting an
   # encrypted private key in the process. Official nginx images do not ship
@@ -2940,7 +2976,7 @@ deployment_https_materialize_custom_cert() {
 
   if [ -n "$passphrase" ]; then
     # Decrypt the key copy; the source file stays untouched.
-    if ! openssl rsa -in "$key_src" -out "$key_dst" -passin "pass:$passphrase" 2>/dev/null; then
+    if ! openssl pkey -in "$key_src" -out "$key_dst" -passin "pass:$passphrase" 2>/dev/null; then
       rm -f "$cert_dst"
       deployment_error "$(deployment_i18n validation.https_passphrase_wrong)"
       return 1
@@ -2959,6 +2995,7 @@ deployment_https_materialize_custom_cert() {
   return 0
 }
 
+deployment_https_prepare() {
   # Entry point: prepare certificates before deployment.
   case "$DEPLOYMENT_HTTPS_MODE" in
     disabled)
@@ -2977,6 +3014,10 @@ deployment_https_materialize_custom_cert() {
   if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
     deployment_update_env_var_file "$(deployment_env_dir)/.env" "NEXENT_HTTPS_MODE" "$DEPLOYMENT_HTTPS_MODE"
     [ -n "${DEPLOYMENT_HTTPS_SAN_RESOLVED:-}" ] && deployment_update_env_var_file "$(deployment_env_dir)/.env" "NEXENT_HTTPS_SAN" "$DEPLOYMENT_HTTPS_SAN_RESOLVED"
+    # Persist the passphrase so subsequent non-interactive runs can decrypt
+    # the same custom key without prompting again.
+    [ "$DEPLOYMENT_HTTPS_MODE" = "custom" ] && [ -n "${DEPLOYMENT_HTTPS_KEY_PASSPHRASE:-}" ] \
+      && deployment_update_env_var_file "$(deployment_env_dir)/.env" "NEXENT_HTTPS_KEY_PASSPHRASE" "$DEPLOYMENT_HTTPS_KEY_PASSPHRASE"
   fi
   return 0
 }
