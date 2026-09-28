@@ -16,10 +16,11 @@ from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
 )
-from utils.logging_utils import configure_logging
+from utils.logging_utils import get_uvicorn_logging_config
 
-configure_logging(logging.INFO)
-logger = logging.getLogger("mcp_service")
+
+logging.config.dictConfig(get_uvicorn_logging_config(categories=["mcp"]))
+logger = logging.getLogger("mcp")
 
 """
 hierarchical proxy architecture:
@@ -432,7 +433,7 @@ def run_mcp_server_with_management():
     def run_fastapi():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        uvicorn.run(app, host="0.0.0.0", port=5015, log_level="info")
+        uvicorn.run(app, host="0.0.0.0", port=5015, log_level="info", log_config=get_uvicorn_logging_config(categories=["mcp"]))
 
     fastapi_thread = Thread(target=run_fastapi, daemon=True)
     fastapi_thread.start()

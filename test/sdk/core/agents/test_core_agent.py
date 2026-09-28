@@ -2232,6 +2232,86 @@ class TestRunStreamRealExecution:
         # When the runtime has no raw count, fall back to msg_token_count.
         assert agent._last_uncompressed_est != 5000
 
+    def test_step_stream_records_model_output_into_model_call_log(self):
+        """The MODEL OUTPUT body is written to the model_call file record.
+
+        This branch raises no protocol error on a blank model response, so the
+        model returns a valid body and the record is asserted on the module
+        logger (the whitelist binds propagate=False, so caplog on the root
+        handler would not see these records).
+        """
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.memory.system_prompt = None
+        agent.logger = MagicMock()
+        agent.monitor = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        mock_context = MagicMock()
+        mock_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
+        agent.model = MagicMock()
+        response = MagicMock()
+        response.content = "hello"
+        agent.model.return_value = response
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._ephemeral_system_messages = None
+
+        action_step = MagicMock()
+        with patch.object(module, "logger") as mock_logger:
+            generator = agent._step_stream(action_step)
+            try:
+                next(generator)
+            except (StopIteration, ValueError):
+                pass
+
+        output_calls = [
+            c for c in mock_logger.info.call_args_list
+            if c.args and c.args[0] == "MODEL OUTPUT\n%s"
+        ]
+        assert output_calls, "MODEL OUTPUT record missing"
+        assert "hello" in output_calls[0].args[1]
+
+    def test_run_records_task_echo_into_model_call_log(self):
+        """run() echoes the task into the model_call file record (NEW RUN TASK)."""
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test_agent"
+        agent.observer = MagicMock()
+        agent.stop_event = threading.Event()
+        agent.max_steps = 3
+        agent.state = {}
+        agent.memory = MagicMock()
+        agent.monitor = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        agent.system_prompt = "system prompt"
+        agent.model = MagicMock()
+        agent.name = "test_agent"
+        agent.logger = MagicMock()
+        agent.python_executor = None
+        agent._run_stream = MagicMock(return_value=iter([]))
+
+        with patch.object(module, "logger") as mock_logger:
+            results = list(agent.run(task="你好", stream=True))
+
+        assert results == []
+        echo_calls = [
+            c for c in mock_logger.info.call_args_list
+            if c.args and c.args[0] == "NEW RUN TASK\n%s"
+        ]
+        assert echo_calls, "NEW RUN TASK record missing"
+        assert "你好" in echo_calls[0].args[1]
+
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
         import threading
@@ -2746,9 +2826,12 @@ class TestLogModelCallParameters:
         stop_sequences = ["Observation:"]
         additional_args = {"temperature": 0.7}
 
-        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+        with patch.object(module, "logger") as mock_logger:
+            agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
-        # Verify logger was called
+        # Both sinks are asserted: the file-bound INFO record and the console panel.
+        mock_logger.info.assert_called_once()
+        assert "test" in mock_logger.info.call_args[0][1]
         agent.logger.log_markdown.assert_called_once()
 
     def test_log_model_call_parameters_with_dict(self):
@@ -2764,8 +2847,10 @@ class TestLogModelCallParameters:
         stop_sequences = []
         additional_args = {}
 
-        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+        with patch.object(module, "logger") as mock_logger:
+            agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
+        mock_logger.info.assert_called_once()
         agent.logger.log_markdown.assert_called_once()
 
     def test_log_model_call_parameters_with_fallback_str(self):
@@ -2781,12 +2866,20 @@ class TestLogModelCallParameters:
         stop_sequences = ["stop"]
         additional_args = {"api_key": "secret123"}
 
-        agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+        with patch.object(module, "logger") as mock_logger:
+            agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
-        # Verify sensitive data was redacted
-        call_args = agent.logger.log_markdown.call_args
-        content = call_args[1]["content"]
-        assert "REDACTED" in content
+        # Verify sensitive data was redacted in both the file record and the panel
+        file_content = mock_logger.info.call_args[0][1]
+        assert "REDACTED" in file_content
+        assert "REDACTED" in agent.logger.log_markdown.call_args.kwargs["content"]
+
+    def test_module_logger_stays_in_model_call_namespace(self):
+        """core_agent records must keep the model_call.core_agent name so the
+        runtime whitelist routes them into nexent_model_call.log."""
+        _, module = self._create_agent_for_log_params_test()
+
+        assert module.logger.name == "model_call.core_agent"
 
     def test_log_model_call_parameters_exception_handling(self):
         """Test _log_model_call_parameters handles exceptions gracefully."""

@@ -28,6 +28,7 @@ from services.northbound_service import (
 )
 from services.tenant_service import create_tenant
 from services.user_management_service import create_token
+from services.audit_service import record_security_event
 from utils.auth_utils import validate_bearer_token, get_user_and_tenant_by_access_key
 
 from .file_management_app import build_content_disposition_header
@@ -596,6 +597,12 @@ async def create_user(
 
         logging.info(f"Successfully created user {payload.email} in tenant {ctx.tenant_id}")
 
+        record_security_event("northbound_api_users_batch_create", request=request,
+                              user_id=ctx.user_id, tenant_id=ctx.tenant_id,
+                              details={"target_user_id": (user_data or {}).get("user_id"),
+                                       "target_email": payload.email,
+                                       "role": payload.role,
+                                       "request_id": ctx.request_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

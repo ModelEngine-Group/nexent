@@ -41,6 +41,12 @@ from .verification import (
 from ..utils.token_estimation import msg_token_count
 from .plan_repo import PlanRepo
 
+# Model-call scoped logger routed to nexent_model_call.log by the runtime
+# service: the MODEL_CALL_LOGGERS whitelist binds the "model_call" namespace,
+# so every core-agent record lands in the model_call file, not runtime.
+logger = logging.getLogger("model_call.core_agent")
+
+
 def parse_code_blobs(text: str) -> str:
     """Extract code blocks from the LLM's output for execution.
 
@@ -704,6 +710,9 @@ Stop Sequences: [{stop_seq_str}]
 Additional Args:
 {args_str}"""
 
+            # INFO by design: the model_call loggers follow the root LOG_LEVEL,
+            # so DEBUG records would be dropped at LOG_LEVEL=INFO.
+            logger.info("MODEL INPUT PARAMETERS\n%s", log_content)
             self.logger.log_markdown(
                 content=log_content,
                 title="MODEL INPUT PARAMETERS",
@@ -799,6 +808,12 @@ Additional Args:
             model_output = chat_message.content
             memory_step.token_usage = chat_message.token_usage
             memory_step.model_output = model_output
+            # Must stay after the assignment above: the record reads model_output.
+            # INFO by design so it survives the default root LOG_LEVEL=INFO.
+            logger.info(
+                "MODEL OUTPUT\n%s",
+                truncate_content(str(model_output or ""), max_length=1000),
+            )
 
             self.logger.log_markdown(
                 content=model_output, title="MODEL OUTPUT", level=LogLevel.INFO)
@@ -1026,6 +1041,8 @@ You have been provided with these additional arguments, that you can access usin
             fallback_system_prompt=self.system_prompt,
         )
 
+        # File-only record of the run task, same text as the console panel below.
+        logger.info("NEW RUN TASK\n%s", truncate_content(self.task.strip(), max_length=1000))
         self.logger.log_task(content=self.task.strip(),
                              subtitle=f"{type(self.model).__name__} - {(self.model.model_id if hasattr(self.model, 'model_id') else '')}",
                              level=LogLevel.INFO, title=self.name if hasattr(self, "name") else None, )
