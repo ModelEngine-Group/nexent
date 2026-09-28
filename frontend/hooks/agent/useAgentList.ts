@@ -29,7 +29,9 @@ export function useAgentList(input: UseAgentListInput) {
       : undefined;
 
   const query = useQuery({
-    queryKey: ["agents", legacyInput ? "legacy" : filters],
+    queryKey: legacyInput
+      ? ["agents", "legacy", apiTenantId]
+      : ["agents", filters],
     queryFn: async () => {
       if (!legacyInput) {
         const res = await fetchPagedAgentList(filters);
