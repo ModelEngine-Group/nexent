@@ -10,12 +10,12 @@ import path from "node:path";
 import multiparty from "multiparty";
 import dotenv from "dotenv";
 import { BASE_PATH } from "./base-path.mjs";
+import { buildPublicFrontendConfig } from "./base-path.mjs";
 import {
   ensureDir,
   readLocaleConfig,
   saveLocaleConfig,
 } from "./build-config.js";
-import { buildPublicFrontendConfig } from "./runtime-frontend-config.mjs";
 
 const { createProxyServer } = httpProxy;
 const __filename = fileURLToPath(import.meta.url);
@@ -55,8 +55,10 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
-const NORTHBOUND_HTTP_BACKEND =
-  process.env.NORTHBOUND_HTTP_BACKEND || "http://localhost:5013"; // northbound
+// Reuse the existing northbound service address, which conventionally ends with /api.
+const NORTHBOUND_HTTP_BACKEND = (
+  process.env.NORTHBOUND_API_SERVER || "http://localhost:5013"
+).replace(/\/api$/, ""); // northbound
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
 
 const BUILT_IN_PUBLIC_DIR = path.resolve(__dirname, "./public");
@@ -574,6 +576,13 @@ proxy.on("proxyReq", (proxyReq, req) => {
       `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`
     );
   }
+});
+
+proxy.on("error", (err, req, res) => {
+  console.error("[Proxy] Forward error:", err.message);
+  if (!res || res.headersSent || res.destroyed) return;
+  res.writeHead(502, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ detail: "Backend unavailable" }));
 });
 
 // ============================================================================

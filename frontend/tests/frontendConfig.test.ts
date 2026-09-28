@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildPublicFrontendConfig } from "../runtime-frontend-config.mjs";
+import { buildPublicFrontendConfig } from "../base-path.mjs";
 
 test("exposes only configured public frontend addresses", () => {
   assert.deepEqual(
