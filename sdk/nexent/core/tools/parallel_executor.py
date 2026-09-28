@@ -1,4 +1,5 @@
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from copy import deepcopy
 import threading
 from typing import Any, Dict
 
@@ -82,7 +83,27 @@ class ParallelExecutorTool(Tool):
     }
     output_type = "any"
 
-    def forward(self, tasks, timeout: int = 120, max_workers: int = 4):
+    @classmethod
+    def inputs_for_timeout(cls, default_timeout_seconds: int) -> dict:
+        inputs = deepcopy(cls.inputs)
+        inputs["timeout"]["default"] = default_timeout_seconds
+        inputs["timeout"]["description"] = f"Per-task timeout in seconds (default {default_timeout_seconds})"
+        inputs["timeout"]["description_zh"] = f"单个任务超时秒数（默认{default_timeout_seconds}）"
+        return inputs
+
+    def __init__(self, default_timeout_seconds: int = 120):
+        if (
+            isinstance(default_timeout_seconds, bool)
+            or not isinstance(default_timeout_seconds, int)
+            or default_timeout_seconds <= 0
+        ):
+            raise ValueError("default_timeout_seconds must be a positive integer")
+        super().__init__()
+        self.default_timeout_seconds = default_timeout_seconds
+        self.inputs = self.inputs_for_timeout(default_timeout_seconds)
+        self.description_zh = self.description_zh.replace("默认120秒", f"默认{default_timeout_seconds}秒")
+
+    def forward(self, tasks, timeout: int | None = None, max_workers: int = 4):
         """Execute the tasks in parallel.
 
         ``tasks`` is a list where each element is a 2-tuple
@@ -91,7 +112,8 @@ class ParallelExecutorTool(Tool):
 
         Returns a list (all 2-tuples) or dict (all 3-tuples).
         """
-        return _parallel_executor(tasks, timeout=timeout, max_workers=max_workers)
+        effective_timeout = self.default_timeout_seconds if timeout is None else timeout
+        return _parallel_executor(tasks, timeout=effective_timeout, max_workers=max_workers)
 
 
 # ---------------------------------------------------------------------------
