@@ -1,8 +1,9 @@
 import sys
 import types
 import pytest
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
-from sqlalchemy import literal_column
+from sqlalchemy import Boolean, Integer, String, column, literal_column, table
 
 # 首先模拟consts模块，避免ModuleNotFoundError
 consts_mock = MagicMock()
@@ -683,6 +684,110 @@ def test_query_all_agent_info_by_tenant_id(monkeypatch, mock_session):
 
     assert len(result) == 1
     assert result[0]["agent_id"] == 1
+
+
+@pytest.fixture
+def agent_list_info_columns(monkeypatch):
+    fields = {
+        "agent_id": Integer,
+        "tenant_id": String,
+        "name": String,
+        "display_name": String,
+        "created_by": String,
+        "create_time": String,
+        "group_ids": String,
+        "ingroup_permission": String,
+        "description": String,
+        "version_no": Integer,
+        "delete_flag": String,
+        "enabled": Boolean,
+    }
+    agent_table = table(
+        "agent_info", *(column(name, kind) for name, kind in fields.items())
+    )
+    agent_info = SimpleNamespace(
+        **{name: agent_table.c[name] for name in fields}
+    )
+    monkeypatch.setattr("backend.database.agent_db.AgentInfo", agent_info)
+    return agent_info
+
+
+def _sql(expression):
+    return str(expression.compile(compile_kwargs={"literal_binds": True}))
+
+
+@pytest.mark.parametrize("include_description", [False, True])
+def test_query_agent_list_candidates_by_tenant_id(
+    monkeypatch, mock_session, agent_list_info_columns, include_description
+):
+    from backend.database.agent_db import query_agent_list_candidates_by_tenant_id
+
+    session, query = mock_session
+    query.filter.return_value.order_by.return_value.all.return_value = [
+        SimpleNamespace(_mapping={"agent_id": 7, "name": "Agent 7"})
+    ]
+    db_session = MagicMock()
+    db_session.__enter__.return_value = session
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: db_session)
+
+    result = query_agent_list_candidates_by_tenant_id(
+        "tenant1", include_description=include_description
+    )
+
+    expected_columns = [
+        "agent_id", "tenant_id", "name", "display_name", "created_by",
+        "create_time", "group_ids", "ingroup_permission",
+    ]
+    if include_description:
+        expected_columns.append("description")
+    assert [field.name for field in session.query.call_args.args] == expected_columns
+    assert [_sql(condition) for condition in query.filter.call_args.args] == [
+        "agent_info.tenant_id = 'tenant1'",
+        "agent_info.version_no = 0",
+        "agent_info.delete_flag != 'Y'",
+        "agent_info.enabled IS true",
+    ]
+    assert [_sql(order) for order in query.filter.return_value.order_by.call_args.args] == [
+        "agent_info.create_time DESC", "agent_info.agent_id DESC",
+    ]
+    assert result == [{"agent_id": 7, "name": "Agent 7"}]
+
+
+def test_query_agent_info_by_ids_skips_empty_ids(monkeypatch):
+    from backend.database.agent_db import query_agent_info_by_ids
+
+    get_session = MagicMock()
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", get_session)
+
+    assert query_agent_info_by_ids("tenant1", []) == []
+    get_session.assert_not_called()
+
+
+def test_query_agent_info_by_ids_filters_and_converts(
+    monkeypatch, mock_session, agent_list_info_columns
+):
+    from backend.database.agent_db import query_agent_info_by_ids
+
+    session, query = mock_session
+    agents = [SimpleNamespace(agent_id=3), SimpleNamespace(agent_id=5)]
+    query.filter.return_value.all.return_value = agents
+    db_session = MagicMock()
+    db_session.__enter__.return_value = session
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: db_session)
+    to_dict = MagicMock(side_effect=lambda agent: {"agent_id": agent.agent_id})
+    monkeypatch.setattr("backend.database.agent_db.as_dict", to_dict)
+
+    result = query_agent_info_by_ids("tenant1", [3, 5])
+
+    session.query.assert_called_once_with(agent_list_info_columns)
+    assert [_sql(condition) for condition in query.filter.call_args.args] == [
+        "agent_info.tenant_id = 'tenant1'",
+        "agent_info.version_no = 0",
+        "agent_info.delete_flag != 'Y'",
+        "agent_info.agent_id IN (3, 5)",
+    ]
+    assert result == [{"agent_id": 3}, {"agent_id": 5}]
+    assert [call.args[0] for call in to_dict.call_args_list] == agents
 
 def test_insert_related_agent_success(monkeypatch, mock_session):
     """测试成功插入相关agent"""

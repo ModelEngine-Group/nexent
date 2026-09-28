@@ -30,8 +30,8 @@ import {
   buildModelOverrideEntry,
   diffCustomParamsForSave,
   mergeCustomParamsForEditing,
-} from "../../models/components/model/ModelAdvancedSettings";
-import type { ModelOverrideMap } from "../../models/components/model/ModelOverrideModal";
+} from "../../../models/components/model/ModelAdvancedSettings";
+import type { ModelOverrideMap } from "../../../models/components/model/ModelOverrideModal";
 import { canManageModels } from "@/lib/auth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";

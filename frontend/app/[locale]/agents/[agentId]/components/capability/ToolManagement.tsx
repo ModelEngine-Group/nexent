@@ -11,7 +11,7 @@ import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
-import ToolConfigModal from "./tool/ToolConfigModal";
+import ToolConfigModal from "../../../components/capability/tool/ToolConfigModal";
 import { useMergedToolParams } from "./tool/useMergedToolParams";
 import {
   TOOLS_REQUIRING_EMBEDDING,
@@ -21,7 +21,7 @@ import {
   getToolKbType,
   getToolLabels,
   mergeCanonicalTool,
-} from "./tool/utils";
+} from "../../../components/capability/tool/utils";
 
 // --- Local tool helpers (not in utils) ---
 

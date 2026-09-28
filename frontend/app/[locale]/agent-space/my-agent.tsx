@@ -10,12 +10,19 @@ import CreateAgentModal, {
   type CreatedAgentResult,
 } from "@/components/agent/CreateAgentModal";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useToolList } from "@/hooks/agent/useToolList";
+import { useSkillList } from "@/hooks/agent/useSkillList";
+import type { Agent } from "@/types/agentConfig";
+import type { AgentListFilters } from "@/services/agentConfigService";
 import { deleteAgent } from "@/services/agentConfigService";
 import {
   AGENTS_LIST_QUERY_KEY,
   invalidateAgentRepositoryCaches,
   useCreateAgentRepositoryListing,
   useMyEditableAgents,
+  useAgentRepositoryListings,
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
@@ -28,6 +35,7 @@ import {
   findRepositoryInfoById,
   pickReviewDisplayRepositoryInfo,
   resolveReviewModalMode,
+  toMineRepositoryInfo,
 } from "@/lib/agentRepositoryMine";
 import {
   isNewAgentPaddingItem,
@@ -44,8 +52,9 @@ import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
-import { mapAgentVersionDetail } from "@/lib/agentRepositoryDetail";
-import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
+import { mapMyAgentDetail } from "@/lib/myAgentDetail";
+import { AgentDetail } from "@/components/agent/agent-detail";
+import { MyAgentIcon } from "./components/MyAgentIcon";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -56,10 +65,17 @@ const CARD_GAP = 20;
 const MIN_CARD_HEIGHT = 240;
 const PAGINATION_HEIGHT = 60;
 
-export function MyAgent({ active }: { active: boolean }) {
+export function MyAgent({
+  active,
+  onTotalChange,
+}: {
+  active: boolean;
+  onTotalChange?: (total: number) => void;
+}) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
+  const { user } = useAuthorizationContext();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
@@ -83,7 +99,7 @@ export function MyAgent({ active }: { active: boolean }) {
   const rows = getRowCount(
     Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
   );
-  const pageSize = columns * rows;
+  const gridSlots = columns * rows;
   const measureGridHeight = useCallback(() => {
     if (!active || !gridRegionRef.current) return;
 
@@ -129,31 +145,52 @@ export function MyAgent({ active }: { active: boolean }) {
     () => getTagSearchPredicates(tagDefinitions, searchQuery, t),
     [tagDefinitions, searchQuery, t]
   );
+  const createCardInGrid = gridSlots > 1;
+  const pageSize = Math.max(1, gridSlots - (createCardInGrid ? 1 : 0));
   const listParams = useMemo(
-    () => ({
+    (): AgentListFilters => ({
+      tenantId: user?.tenantId ?? null,
+      enabled: active,
+      page,
+      pageSize,
+      search: searchQuery.trim() || undefined,
+      tagPredicates,
+      searchTagPredicates,
+      createdBy: ownership === "created" ? user?.id : undefined,
+      createdByNot: ownership === "others" ? user?.id : undefined,
+    }),
+    [
+      active,
+      user?.tenantId,
+      user?.id,
       ownership,
       page,
-      page_size: pageSize,
-      ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
-      ...(tagPredicates.length > 0 ? { tag_predicates: tagPredicates } : {}),
-      ...(searchTagPredicates.length > 0
-        ? { search_tag_predicates: searchTagPredicates }
-        : {}),
-      ...(ownership === "all" &&
-      !searchQuery.trim() &&
-      tagPredicates.length === 0
-        ? { new_agent_padding: true }
-        : {}),
-    }),
-    [ownership, page, pageSize, searchQuery, tagPredicates, searchTagPredicates]
+      pageSize,
+      searchQuery,
+      tagPredicates,
+      searchTagPredicates,
+    ]
   );
-  const { data, isLoading, isError, isFetching, refetch } = useMyEditableAgents(
-    listParams,
-    active
+  const {
+    agents: listedAgents,
+    creatorCounts,
+    pagination,
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+  } = useAgentList(listParams);
+  const agents: MyEditableAgentItem[] = useMemo(
+    () => listedAgents.map(toMyAgentItem),
+    [listedAgents]
   );
-  const agents = useMemo(() => data?.items ?? [], [data?.items]);
-  const counts = data?.counts ?? { all: 0, created: 0, others: 0 };
-  const total = data?.pagination?.total ?? 0;
+  const counts = creatorCounts ?? { all: 0, created: 0, others: 0 };
+  const total = pagination?.total ?? 0;
+  useEffect(() => {
+    if (active && creatorCounts && tagPredicates.length === 0) {
+      onTotalChange?.(creatorCounts.all);
+    }
+  }, [active, creatorCounts, onTotalChange, tagPredicates.length]);
   const gridHeight =
     availableGridHeight === null
       ? undefined
@@ -205,6 +242,7 @@ export function MyAgent({ active }: { active: boolean }) {
   const [detailTarget, setDetailTarget] = useState<{
     agentId: number;
     versionNo: number;
+    agent: MyEditableAgentItem;
   } | null>(null);
   const {
     data: versionDetail,
@@ -217,15 +255,44 @@ export function MyAgent({ active }: { active: boolean }) {
     detailTarget?.versionNo ?? null,
     active && detailTarget != null
   );
-  const detail = useMemo(
-    () =>
-      versionDetail
-        ? mapAgentVersionDetail(versionDetail)
-        : detailTarget
-          ? undefined
-          : null,
-    [detailTarget, versionDetail]
+  const { tools: availableTools } = useToolList({
+    enabled: active && detailTarget != null,
+  });
+  const { skills: availableSkills } = useSkillList({
+    enabled: active && detailTarget != null,
+  });
+  const {
+    data: detailListings,
+    isLoading: isDetailListingsLoading,
+    isError: isDetailListingsError,
+    isFetching: isDetailListingsFetching,
+    refetch: refetchDetailListings,
+  } = useAgentRepositoryListings(
+    detailTarget
+      ? { agent_id: detailTarget.agentId, page: 1, page_size: 100 }
+      : undefined,
+    active && detailTarget != null
   );
+  const detail = useMemo(() => {
+    if (!detailTarget) return null;
+    if (!versionDetail) return undefined;
+    const repositoryInfo = pickReviewDisplayRepositoryInfo(
+      toMineRepositoryInfo(detailListings?.items ?? [])
+    );
+    return {
+      ...mapMyAgentDetail(versionDetail, detailTarget.agent, {
+        tools: availableTools,
+        skills: availableSkills,
+      }),
+      status: repositoryInfo?.status,
+    };
+  }, [
+    availableSkills,
+    availableTools,
+    detailTarget,
+    detailListings,
+    versionDetail,
+  ]);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
@@ -393,10 +460,9 @@ export function MyAgent({ active }: { active: boolean }) {
     }
 
     const agentFromList = agents.find(
-      (item): item is MyEditableAgentItem =>
-        !isNewAgentPaddingItem(item) && item.agent_id === reviewDeepLink.agentId
+      (item) => item.agent_id === reviewDeepLink.agentId
     );
-    const agent = agentFromList ?? deepLinkFallbackAgent;
+    const agent = deepLinkFallbackAgent ?? agentFromList;
 
     if (!agent) {
       if (listStillLoading || fallbackStillLoading) {
@@ -484,7 +550,8 @@ export function MyAgent({ active }: { active: boolean }) {
     ownership !== "all" ||
     normalizedQuery.length > 0 ||
     tagPredicates.length > 0;
-  const showFilteredEmpty = !isLoading && !isError && agents.length === 0;
+  const showFilteredEmpty =
+    !isLoading && !isError && agents.length === 0 && hasActiveFilter;
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -532,6 +599,11 @@ export function MyAgent({ active }: { active: boolean }) {
       </div>
 
       <div ref={gridRegionRef} className="min-h-0">
+        {!createCardInGrid ? (
+          <div className="mb-5">
+            <CreateNewAgentCard onClick={handleCreateAgent} />
+          </div>
+        ) : null}
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <Spin size="large" />
@@ -549,60 +621,64 @@ export function MyAgent({ active }: { active: boolean }) {
               {t("repository.common.retry")}
             </Button>
           </div>
-        ) : showFilteredEmpty ? (
-          <Empty
-            className="py-16"
-            description={
-              hasActiveFilter
-                ? t("agentRepository.mine.emptyFiltered")
-                : t("agentRepository.mine.empty")
-            }
-          />
         ) : (
           <>
             <ResourceCardGrid
               items={agents}
               columns={columns}
               rows={rows}
-              gridHeight={gridHeight}
+              gridHeight={showFilteredEmpty ? undefined : gridHeight}
               page={page}
               total={total}
               onPageChange={setPage}
               paginateItems={false}
               showToolbar={false}
-              renderItem={(agent) =>
-                isNewAgentPaddingItem(agent) ? (
-                  <CreateNewAgentCard
-                    key="new-agent-padding"
-                    onClick={handleCreateAgent}
+              emptyState={
+                showFilteredEmpty ? (
+                  <Empty
+                    description={t("agentRepository.mine.emptyFiltered")}
                   />
-                ) : (
-                  <MyAgentCard
-                    key={agent.agent_id}
-                    agent={agent}
-                    onEdit={() => handleEdit(agent.agent_id, agent.permission)}
-                    onView={() =>
-                      setDetailTarget({
-                        agentId: agent.agent_id,
-                        versionNo: agent.current_version_no ?? 0,
-                      })
-                    }
-                    onApplyListing={() => handleApplyListing(agent)}
-                    onViewReview={(mode) => handleViewReview(agent, mode)}
-                    onDelete={() => handleDeleteAgent(agent)}
-                    onEvaluate={() => handleEvaluate(agent)}
-                    isApplying={
-                      applyingAgentId === agent.agent_id &&
-                      createListingMutation.isPending
-                    }
-                    isDeleting={
-                      deleteAgentMutation.isPending &&
-                      deleteAgentMutation.variables === agent.agent_id
-                    }
-                  />
-                )
+                ) : undefined
               }
+              showCreateCard={createCardInGrid}
+              createCard={
+                createCardInGrid ? (
+                  <CreateNewAgentCard onClick={handleCreateAgent} />
+                ) : undefined
+              }
+              renderItem={(agent) => (
+                <MyAgentCard
+                  key={agent.agent_id}
+                  agent={agent}
+                  onEdit={() => handleEdit(agent.agent_id, agent.permission)}
+                  onView={() =>
+                    setDetailTarget({
+                      agentId: agent.agent_id,
+                      versionNo: agent.current_version_no ?? 0,
+                      agent,
+                    })
+                  }
+                  onApplyListing={() => handleApplyListing(agent)}
+                  onViewReview={handleViewReview}
+                  onDelete={() => handleDeleteAgent(agent)}
+                  onEvaluate={() => handleEvaluate(agent)}
+                  isApplying={
+                    applyingAgentId === agent.agent_id &&
+                    createListingMutation.isPending
+                  }
+                  isDeleting={
+                    deleteAgentMutation.isPending &&
+                    deleteAgentMutation.variables === agent.agent_id
+                  }
+                />
+              )}
             />
+            {showFilteredEmpty && createCardInGrid ? (
+              <Empty
+                className="py-16"
+                description={t("agentRepository.mine.emptyFiltered")}
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -630,17 +706,58 @@ export function MyAgent({ active }: { active: boolean }) {
         onCancel={() => setCreateAgentModalVisible(false)}
         onCreated={handleAgentCreated}
       />
-      <AgentRepositoryDetailModal
+      <AgentDetail
         open={active && detailTarget != null}
         onClose={() => setDetailTarget(null)}
+        onEdit={
+          detailTarget?.agent.permission === "READ_ONLY"
+            ? undefined
+            : detailTarget
+              ? () =>
+                  handleEdit(
+                    detailTarget.agentId,
+                    detailTarget.agent.permission
+                  )
+              : undefined
+        }
         detail={detail}
-        isLoading={isDetailLoading}
-        isError={isDetailError}
-        isFetching={isDetailFetching}
-        onRetry={() => refetchDetail()}
+        agentIcon={
+          detailTarget ? (
+            <MyAgentIcon agent={detailTarget.agent} size={48} iconSize={24} />
+          ) : undefined
+        }
+        published={(detailTarget?.versionNo ?? 0) > 0}
+        status={detail?.status}
+        isLoading={isDetailLoading || isDetailListingsLoading}
+        isError={isDetailError || isDetailListingsError}
+        isFetching={isDetailFetching || isDetailListingsFetching}
+        onRetry={() => {
+          void refetchDetail();
+          void refetchDetailListings();
+        }}
       />
     </div>
   );
+}
+
+function toMyAgentItem(agent: Agent): MyEditableAgentItem {
+  const currentVersionNo = agent.current_version_no ?? 0;
+  return {
+    agent_id: Number(agent.id),
+    icon_url: agent.icon_url,
+    is_available: agent.is_available,
+    unavailable_reasons: agent.unavailable_reasons,
+    name: agent.display_name || agent.name,
+    description: agent.description,
+    current_version_no: currentVersionNo,
+    version_label:
+      agent.version_label ??
+      (currentVersionNo > 0 ? `V${currentVersionNo}` : null),
+    version_create_time: agent.version_create_time ?? null,
+    permission: agent.permission,
+    tags: agent.tags,
+    repository_info: [],
+  };
 }
 
 function getRowCount(availableHeight: number) {
