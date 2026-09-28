@@ -181,12 +181,14 @@ class TestConfigureLogging:
         monkeypatch.setattr(logging_utils_module, "LOG_DIR", str(tmp_path))
         configure_logging()
         root = logging.getLogger()
-        # One StreamHandler (console) + one file handler per default category.
+        # One StreamHandler (console) + one file handler per default category,
+        # except model_call: its file handler is bound only to the whitelisted
+        # model-layer loggers, never to root.
         default_cats = ["config", "runtime", "northbound", "data_process", "model_call"]
-        assert len(root.handlers) == len(default_cats) + 1
+        assert len(root.handlers) == len(default_cats)  # console + 4 category files
         handler_classes = [type(h).__name__ for h in root.handlers]
         assert handler_classes.count("StreamHandler") == 1
-        assert handler_classes.count("HybridRotatingFileHandler") == len(default_cats)
+        assert handler_classes.count("HybridRotatingFileHandler") == len(default_cats) - 1
 
     def test_explicit_level_overrides_effective_level(self, reset_root_logger, tmp_path, monkeypatch):
         monkeypatch.setattr(logging_utils_module, "LOG_DIR", str(tmp_path))
