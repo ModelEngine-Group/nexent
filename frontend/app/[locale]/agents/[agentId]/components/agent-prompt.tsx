@@ -1,7 +1,17 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Button, Col, Form, Input, Modal, Popover, Row, Select, Tooltip } from "antd";
+import {
+  Button,
+  Col,
+  Form,
+  Input,
+  Modal,
+  Popover,
+  Row,
+  Select,
+  Tooltip,
+} from "antd";
 import { GripVertical, ListOrdered, Maximize2, Settings2 } from "lucide-react";
 import {
   DndContext,
@@ -163,22 +173,30 @@ export default function AgentPrompt() {
   );
 
   const selectedModelIds = useMemo(() => {
-    const configuredModelIds = editedAgent.model_ids ?? [];
+    const configuredModelIds = (editedAgent.model_ids ?? []).map(Number);
     if (configuredModelIds.length > 0) {
       return configuredModelIds.filter((id) => availableModelIds.has(id));
     }
-    return defaultLlmConfig?.id && availableModelIds.has(defaultLlmConfig.id)
-      ? [defaultLlmConfig.id]
+    const defaultModelId = defaultLlmConfig?.id
+      ? Number(defaultLlmConfig.id)
+      : null;
+    return defaultModelId !== null && availableModelIds.has(defaultModelId)
+      ? [defaultModelId]
       : [];
   }, [availableModelIds, defaultLlmConfig?.id, editedAgent.model_ids]);
 
   useEffect(() => {
     if (!modelListLoaded || !editedAgent.model_ids?.length) return;
 
-    const nextModelIds = editedAgent.model_ids.filter((id) =>
+    const currentModelIds = editedAgent.model_ids.map(Number);
+    const nextModelIds = currentModelIds.filter((id) =>
       availableModelIds.has(id)
     );
-    if (nextModelIds.length === editedAgent.model_ids.length) return;
+    if (nextModelIds.length === currentModelIds.length) return;
+
+    // Keep the Ant Design Form value in sync with the cleaned agent draft.
+    // Otherwise Form.Item can re-inject an unavailable raw model ID into Select.
+    form.setFieldValue("model_ids", nextModelIds);
 
     const modelNames = nextModelIds.map((id) => {
       const option = modelOptions.find((model) => model.value === id);
@@ -197,15 +215,22 @@ export default function AgentPrompt() {
     editedAgent.model_ids,
     modelListLoaded,
     modelOptions,
+    form,
     reconcileUnavailableModels,
   ]);
 
   const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
-  const [configuringModelId, setConfiguringModelId] = useState<number | null>(null);
-  const [editingOverrideValue, setEditingOverrideValue] = useState<ModelAdvancedSettingsValue | null>(null);
-  const modelParamsOverride = (editedAgent.model_params_override ?? {}) as ModelOverrideMap;
+  const [configuringModelId, setConfiguringModelId] = useState<number | null>(
+    null
+  );
+  const [editingOverrideValue, setEditingOverrideValue] =
+    useState<ModelAdvancedSettingsValue | null>(null);
+  const modelParamsOverride = (editedAgent.model_params_override ??
+    {}) as ModelOverrideMap;
   const configuringModel = useMemo(
-    () => (availableLlmModels ?? []).find((m) => m.id === configuringModelId) ?? null,
+    () =>
+      (availableLlmModels ?? []).find((m) => m.id === configuringModelId) ??
+      null,
     [availableLlmModels, configuringModelId]
   );
   useEffect(() => {
@@ -213,7 +238,8 @@ export default function AgentPrompt() {
       setEditingOverrideValue(null);
       return;
     }
-    const overrideEntry = modelParamsOverride[String(configuringModel.id)] ?? {};
+    const overrideEntry =
+      modelParamsOverride[String(configuringModel.id)] ?? {};
     const modelDefaultsRecord = {
       temperature: configuringModel.temperature,
       top_p: configuringModel.topP,
@@ -272,10 +298,14 @@ export default function AgentPrompt() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configuringModel, configuringModelId, inferenceSpecs]);
 
-  const handleModelParamsOverrideChange = (modelId: number, next: ModelAdvancedSettingsValue) => {
+  const handleModelParamsOverrideChange = (
+    modelId: number,
+    next: ModelAdvancedSettingsValue
+  ) => {
     const entry = buildModelOverrideEntry(
       next,
-      availableLlmModels.find((model) => model.id === modelId)?.reasoningCapability
+      availableLlmModels.find((model) => model.id === modelId)
+        ?.reasoningCapability
     );
     const updated: ModelOverrideMap = { ...modelParamsOverride };
     if (Object.keys(entry).length === 0) {
@@ -283,13 +313,17 @@ export default function AgentPrompt() {
     } else {
       updated[String(modelId)] = entry;
     }
-    updateAgent({ model_params_override: Object.keys(updated).length > 0 ? updated : null });
+    updateAgent({
+      model_params_override: Object.keys(updated).length > 0 ? updated : null,
+    });
   };
 
   const handleClearModelParamsOverride = (modelId: number) => {
     const updated: ModelOverrideMap = { ...modelParamsOverride };
     delete updated[String(modelId)];
-    updateAgent({ model_params_override: Object.keys(updated).length > 0 ? updated : null });
+    updateAgent({
+      model_params_override: Object.keys(updated).length > 0 ? updated : null,
+    });
   };
 
   const canManage = canManageModels(user?.role ?? "");
@@ -459,14 +493,24 @@ export default function AgentPrompt() {
               ) : (
                 modelPriorityTrigger
               )}
-              <Tooltip title={t("agent.modelParamsOverride.button", { defaultValue: "模型参数覆盖" })}>
+              <Tooltip
+                title={t("agent.modelParamsOverride.button", {
+                  defaultValue: "模型参数覆盖",
+                })}
+              >
                 <span className="inline-flex">
                   <Button
                     type="default"
                     icon={<Settings2 size={16} />}
-                    aria-label={t("agent.modelParamsOverride.button", { defaultValue: "模型参数覆盖" })}
-                    disabled={isModelSelectionDisabled || !editedAgent.model_ids?.length}
-                    onClick={() => setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)}
+                    aria-label={t("agent.modelParamsOverride.button", {
+                      defaultValue: "模型参数覆盖",
+                    })}
+                    disabled={
+                      isModelSelectionDisabled || !editedAgent.model_ids?.length
+                    }
+                    onClick={() =>
+                      setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)
+                    }
                   />
                 </span>
               </Tooltip>
@@ -586,7 +630,8 @@ export default function AgentPrompt() {
                 temperature: (configuringModel as any).temperature,
                 top_p: (configuringModel as any).topP,
                 extra_params: (configuringModel as any).extraParams,
-                reasoning_capability: (configuringModel as any).reasoningCapability,
+                reasoning_capability: (configuringModel as any)
+                  .reasoningCapability,
               },
               inferenceSpecs,
               (configuringModel as any).type ?? "llm",
@@ -623,7 +668,13 @@ export default function AgentPrompt() {
           }
           setConfiguringModelId(null);
         }}
-        title={configuringModel ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}` : t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}
+        title={
+          configuringModel
+            ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}`
+            : t("model.advanced.overrideTitle", {
+                defaultValue: "模型参数覆盖",
+              })
+        }
         okText={t("common.confirm", { defaultValue: "确定" })}
         cancelText={t("common.cancel", { defaultValue: "取消" })}
         okButtonProps={{ disabled: !canManage && !isSpeedMode }}
@@ -661,15 +712,20 @@ export default function AgentPrompt() {
               onChange={(next) => setEditingOverrideValue(next)}
               mode="override"
               disabled={!canManage && !isSpeedMode}
-              reasoningCapability={(configuringModel as any).reasoningCapability}
+              reasoningCapability={
+                (configuringModel as any).reasoningCapability
+              }
               // Show the model-level defaults as placeholders so "empty =
               // inherit" is visible (the override form starts blank).
               inheritedDefaults={{
-                display_name: configuringModel.displayName ?? configuringModel.name,
-                context_window_tokens: (configuringModel as any).contextWindowTokens,
+                display_name:
+                  configuringModel.displayName ?? configuringModel.name,
+                context_window_tokens: (configuringModel as any)
+                  .contextWindowTokens,
                 max_input_tokens: (configuringModel as any).maxInputTokens,
                 max_output_tokens: (configuringModel as any).maxOutputTokens,
-                default_output_reserve_tokens: (configuringModel as any).defaultOutputReserveTokens,
+                default_output_reserve_tokens: (configuringModel as any)
+                  .defaultOutputReserveTokens,
                 temperature: (configuringModel as any).temperature,
                 top_p: (configuringModel as any).topP,
               }}
