@@ -2405,7 +2405,7 @@ class TestRunStreamRealExecution:
         response.token_usage = None
         agent.model = MagicMock(return_value=response)
 
-        caplog.set_level(logging.DEBUG, logger="model_call.core_agent")
+        caplog.set_level(logging.INFO, logger="model_call.core_agent")
         action_step = MagicMock()
         stream = agent._step_stream(action_step)
         with pytest.raises(module.ModelOutputProtocolError):
@@ -3224,8 +3224,8 @@ class TestLogModelCallParameters:
             agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
         # Both sinks are asserted: the file-bound DEBUG record and the console panel.
-        mock_logger.debug.assert_called_once()
-        assert "test" in mock_logger.debug.call_args[0][1]
+        mock_logger.info.assert_called_once()
+        assert "test" in mock_logger.info.call_args[0][1]
         agent.logger.log_markdown.assert_called_once()
 
     def test_log_model_call_parameters_with_dict(self):
@@ -3244,7 +3244,7 @@ class TestLogModelCallParameters:
         with patch.object(module, "logger") as mock_logger:
             agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
-        mock_logger.debug.assert_called_once()
+        mock_logger.info.assert_called_once()
         agent.logger.log_markdown.assert_called_once()
 
     def test_log_model_call_parameters_with_fallback_str(self):
@@ -3264,7 +3264,7 @@ class TestLogModelCallParameters:
             agent._log_model_call_parameters(input_messages, stop_sequences, additional_args)
 
         # Verify sensitive data was redacted in both the file record and the panel
-        file_content = mock_logger.debug.call_args[0][1]
+        file_content = mock_logger.info.call_args[0][1]
         assert "REDACTED" in file_content
         assert "REDACTED" in agent.logger.log_markdown.call_args.kwargs["content"]
 
@@ -3286,7 +3286,7 @@ class TestLogModelCallParameters:
                 {"metadata": {"secret": "must-not-leak"}},
             )
 
-        content = mock_logger.debug.call_args[0][1]
+        content = mock_logger.info.call_args[0][1]
         assert "must-not-leak" not in content
         assert "REDACTED" in content
         panel_content = agent.logger.log_markdown.call_args.kwargs["content"]
@@ -3626,7 +3626,7 @@ def test_run_injects_current_time_when_missing():
 def test_run_records_task_echo_into_model_call_log(caplog):
     """The run task echo is written to the model_call file record at DEBUG."""
     agent = _create_minimal_core_agent_for_time_tests()
-    caplog.set_level(logging.DEBUG, logger="model_call.core_agent")
+    caplog.set_level(logging.INFO, logger="model_call.core_agent")
 
     list(agent.run(task="你好", stream=True))
 

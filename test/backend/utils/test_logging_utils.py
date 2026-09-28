@@ -357,12 +357,10 @@ class TestModelCallRouting:
             entry = cfg["loggers"][name]
             assert entry["handlers"] == ["console", "file_model_call"]
             assert entry["propagate"] is False
-            # DEBUG pin: model-layer debug records must be emitted even when
-            # the root logger stays at INFO.
-            assert entry["level"] == "DEBUG"
-        # file_model_call must pass DEBUG records through the handler gate;
-        # it is bound only to the whitelisted loggers, so nothing can leak in.
-        assert cfg["handlers"]["file_model_call"]["level"] == "DEBUG"
+            # No level pin: the whitelisted loggers inherit the root LOG_LEVEL.
+            assert "level" not in entry
+        # file_model_call shares the service level like every other category.
+        assert cfg["handlers"]["file_model_call"]["level"] == cfg["handlers"]["file_runtime"]["level"]
         # Console itself stays unfiltered (docker logs behaviour unchanged).
         assert "filters" not in cfg["handlers"]["console"]
         assert "filters" not in cfg["handlers"]["file_runtime"]
@@ -420,35 +418,50 @@ class TestModelCallRouting:
         [_apply_dictconfig, _apply_configure_logging],
         ids=["dictconfig", "configure_logging"],
     )
-    def test_debug_records_reach_model_call_file(
+    def test_record_levels_follow_root_level(
         self, reset_root_logger, tmp_path, monkeypatch, apply_config
     ):
-        """Regression: MODEL INPUT PARAMETERS is logged at DEBUG on
-        model_call.core_agent; with the whitelist left at NOTSET it inherited
-        the root INFO level and was silently dropped before reaching the file.
+        """The whitelist has no level pin: records follow the root LOG_LEVEL.
+
+        Model-body records are logged at INFO on model_call.core_agent so they
+        reach the model_call file at the default root INFO; DEBUG records are
+        only emitted once the root level drops to DEBUG.
         """
         apply_config(monkeypatch, tmp_path)
         try:
-            assert logging.getLogger("model_call.core_agent").isEnabledFor(logging.DEBUG)
-            logging.getLogger("model_call.core_agent").debug("MODEL INPUT PARAMETERS probe")
-            logging.getLogger("openai_llm").debug("debug probe from openai_llm")
+            # At root INFO: INFO body record lands in the model file, DEBUG does not.
+            logging.getLogger("model_call.core_agent").info("MODEL OUTPUT info probe")
+            logging.getLogger("model_call.core_agent").debug("MODEL OUTPUT debug probe")
             for h in logging.getLogger().handlers:
                 h.flush()
             model_log = _read(tmp_path, "model_call")
             runtime_log = _read(tmp_path, "runtime")
-            assert "MODEL INPUT PARAMETERS probe" in model_log
-            assert "debug probe from openai_llm" in model_log
-            assert "MODEL INPUT PARAMETERS probe" not in runtime_log
-            assert "debug probe from openai_llm" not in runtime_log
+            assert "MODEL OUTPUT info probe" in model_log
+            assert "MODEL OUTPUT debug probe" not in model_log
+            assert "MODEL OUTPUT info probe" not in runtime_log
+
+            # At root DEBUG (LOG_LEVEL=DEBUG): DEBUG records are emitted too.
+            monkeypatch.setattr("backend.utils.logging_utils.LOG_LEVEL", "DEBUG")
+            apply_config(monkeypatch, tmp_path)
+            logging.getLogger("model_call.core_agent").debug("MODEL OUTPUT debug probe")
+            for h in logging.getLogger().handlers:
+                h.flush()
+            assert "MODEL OUTPUT debug probe" in _read(tmp_path, "model_call")
+            assert "MODEL OUTPUT debug probe" not in _read(tmp_path, "runtime")
         finally:
             _cleanup_routing_state()
 
-    def test_whitelist_pinned_to_debug_level(self, reset_root_logger, tmp_path, monkeypatch):
+    def test_whitelist_levels_follow_root(self, reset_root_logger, tmp_path, monkeypatch):
         monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging(categories=["runtime", "model_call"])
         try:
             for name in MODEL_CALL_LOGGERS:
-                assert logging.getLogger(name).level == logging.DEBUG
+                named = logging.getLogger(name)
+                assert named.level == logging.NOTSET
+                # Default IS_DEBUG=false / LOG_LEVEL=INFO: the effective level
+                # resolves through the root logger.
+                assert named.isEnabledFor(logging.INFO)
+                assert not named.isEnabledFor(logging.DEBUG)
         finally:
             _cleanup_routing_state()
 

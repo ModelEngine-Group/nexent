@@ -769,7 +769,9 @@ Stop Sequences: [{stop_seq_str}]
 Additional Args:
 {args_str}"""
 
-            logger.debug("MODEL INPUT PARAMETERS\n%s", log_content)
+            # INFO by design: the model_call loggers follow the root LOG_LEVEL,
+            # so DEBUG records would be dropped at LOG_LEVEL=INFO.
+            logger.info("MODEL INPUT PARAMETERS\n%s", log_content)
             self.logger.log_markdown(
                 content=log_content,
                 title="MODEL INPUT PARAMETERS",
@@ -988,7 +990,8 @@ Additional Args:
             memory_step.token_usage = chat_message.token_usage
             memory_step.model_output = model_output
             # Must stay after the assignment above: the record reads model_output.
-            logger.debug(
+            # INFO by design so it survives the default root LOG_LEVEL=INFO.
+            logger.info(
                 "MODEL OUTPUT\n%s",
                 truncate_content(str(model_output or ""), max_length=1000),
             )
@@ -1335,7 +1338,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             fallback_system_prompt=self.system_prompt,
         )
 
-        logger.debug("NEW RUN TASK\n%s", truncate_content(display_task.strip(), max_length=1000))
+        logger.info("NEW RUN TASK\n%s", truncate_content(display_task.strip(), max_length=1000))
         self.logger.log_task(content=display_task.strip(),
                              subtitle=f"{type(self.model).__name__} - {(self.model.model_id if hasattr(self.model, 'model_id') else '')}",
                              level=LogLevel.INFO, title=self.name if hasattr(self, "name") else None, )

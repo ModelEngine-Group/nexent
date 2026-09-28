@@ -85,8 +85,8 @@ MODEL_CALL_CATEGORY = "model_call"
 # to the model_call file handler directly via the logconfig "loggers" section
 # (dictConfig) or explicit handler binding (configure_logging), with
 # propagate=False so the records never reach the per-service category files.
-# They are pinned to DEBUG so model-layer records (e.g. MODEL INPUT PARAMETERS
-# from model_call.core_agent) are emitted regardless of the root LOG_LEVEL.
+# Levels are left untouched (NOTSET) so they follow the root LOG_LEVEL; the
+# model-body records in the SDK are logged at INFO for that reason.
 MODEL_CALL_LOGGERS = (
     "openai_llm",
     "openai_long_context_model",
@@ -147,9 +147,8 @@ def _bind_model_call_loggers(console_handler: logging.Handler, model_file_handle
     and stops propagating, so its records never reach the root handlers (they
     would otherwise be written into the service category file as well). The
     console instance is shared with root, keeping docker logs behaviour
-    unchanged (model records still appear on stdout, exactly once). Loggers
-    are pinned to DEBUG so their debug records are emitted even when the root
-    logger stays at INFO.
+    unchanged (model records still appear on stdout, exactly once). Levels are
+    left untouched so the whitelisted loggers follow the root LOG_LEVEL.
     """
     for name in MODEL_CALL_LOGGERS:
         named_logger = logging.getLogger(name)
@@ -157,7 +156,6 @@ def _bind_model_call_loggers(console_handler: logging.Handler, model_file_handle
         named_logger.addHandler(console_handler)
         named_logger.addHandler(model_file_handler)
         named_logger.propagate = False
-        named_logger.setLevel(logging.DEBUG)
 
 
 def _unbind_model_call_loggers():
@@ -167,6 +165,8 @@ def _unbind_model_call_loggers():
         for handler in list(named_logger.handlers):
             named_logger.removeHandler(handler)
         named_logger.propagate = True
+        # Defensive reset: restore root-level inheritance even if the level was
+        # touched elsewhere while the loggers were bound.
         named_logger.setLevel(logging.NOTSET)
 
 
@@ -241,14 +241,9 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
         log_path = str(log_dir / cat / f"nexent_{cat}.log")
         (log_dir / cat).mkdir(parents=True, exist_ok=True)
 
-        # file_model_call is bound only to the whitelisted model loggers (which
-        # are pinned to DEBUG), so widening it to DEBUG cannot leak non-model
-        # records — but skipping it would filter their debug records at the
-        # handler gate before they reach the file.
-        cat_level = "DEBUG" if cat == MODEL_CALL_CATEGORY else level
         file_handlers[cat_key] = {
             "class": f"{__name__}.HybridRotatingFileHandler",
-            "level": cat_level,
+            "level": level,
             "formatter": "plain",
             "filename": log_path,
             "when": "midnight",
@@ -288,12 +283,12 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
 
     # --- Model-layer routing: bind whitelisted loggers to the model_call file ---
     # propagate=False keeps their records out of the service category files;
-    # console is attached as well so stdout behaviour stays unchanged. The
-    # DEBUG level lets model-layer debug records (MODEL INPUT PARAMETERS etc.)
-    # through even when the root logger stays at INFO.
+    # console is attached as well so stdout behaviour stays unchanged. Levels
+    # are not set here: the whitelisted loggers inherit the root LOG_LEVEL, so
+    # model-body records must be logged at INFO to reach the file at INFO.
     if MODEL_CALL_CATEGORY in categories:
         config["loggers"] = {
-            name: {"level": "DEBUG", "handlers": ["console", "file_model_call"], "propagate": False}
+            name: {"handlers": ["console", "file_model_call"], "propagate": False}
             for name in MODEL_CALL_LOGGERS
         }
     return config
