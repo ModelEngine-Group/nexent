@@ -172,67 +172,74 @@ def load_official_bundles(base_dir: str | Path, profiles: Iterable[str]) -> list
     root = Path(base_dir).resolve()
     bundles: list[OfficialAgentBundle] = []
     seen_names: set[str] = set()
-    profile_dirs = {
-        path.name: path
+    selected_profiles = parse_official_agent_profiles(profiles)
+    selected_profile_set = set(selected_profiles)
+    available_profiles = {
+        path.name
         for path in root.iterdir()
         if path.is_dir()
-    } if root.is_dir() else {}
-    for profile in parse_official_agent_profiles(profiles):
-        # Resolve user-selected profiles from the already enumerated directory
-        # set instead of concatenating untrusted input into a filesystem path.
-        profile_dir = profile_dirs.get(profile)
-        if profile_dir is None:
+    } if root.is_dir() else set()
+    for profile in selected_profiles:
+        if profile not in available_profiles:
             logger.warning("Official agent profile directory not found: %s", profile)
+
+    # Recursively scan only the configured root. User-selected profile names
+    # are used for filtering scan results, never for path construction or
+    # recursive traversal.
+    bundle_paths = [
+        path
+        for path in root.rglob("*.zip")
+        if path.parent.name != "skills"
+        and path.relative_to(root).parts[0] in selected_profile_set
+    ] if root.is_dir() else []
+    bundle_dirs = [
+        path.parent
+        for path in root.rglob("agent.json")
+        if path.is_file()
+        and path.relative_to(root).parts[0] in selected_profile_set
+    ] if root.is_dir() else []
+
+    # Skill payloads are ZIP files too, but they are dependencies inside a
+    # directory Bundle rather than standalone Agent Bundles. Do not attempt
+    # to parse them as archives that must contain agent.json.
+    for path in sorted(bundle_paths):
+        profile = path.relative_to(root).parts[0]
+        try:
+            bundle = _load_zip_bundle(profile, path)
+            if bundle is None:
+                continue
+        except (OSError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
+            logger.warning("Skipping official agent bundle %s: %s", path, exc)
             continue
-        # Skill payloads are ZIP files too, but they are dependencies inside
-        # a directory Bundle rather than standalone Agent Bundles. Do not
-        # attempt to parse them as archives that must contain agent.json.
-        bundle_paths = [
-            path
-            for path in profile_dir.rglob("*.zip")
-            if path.parent.name != "skills"
-        ]
-        bundle_dirs = [
-            path.parent
-            for path in profile_dir.rglob("agent.json")
-            if path.is_file()
-        ]
-        for path in sorted(bundle_paths):
-            try:
-                bundle = _load_zip_bundle(profile, path)
-                if bundle is None:
-                    continue
-            except (OSError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
-                logger.warning("Skipping official agent bundle %s: %s", path, exc)
-                continue
-            if bundle.name in seen_names:
-                raise ValueError(f"duplicate official agent bundle: {bundle.name}")
-            seen_names.add(bundle.name)
-            bundles.append(bundle)
-        for bundle_dir in sorted(bundle_dirs):
-            try:
-                data = _read_bundle_json(bundle_dir)
-                snapshot = _snapshot_from_json(data)
-                skills = _load_skill_entries(bundle_dir, snapshot)
-                if skills:
-                    snapshot = snapshot.model_copy(update={"skills": skills})
-                kb_docs = _load_kb_documents(bundle_dir, data)
-                bundle = OfficialAgentBundle(
-                    profile=profile,
-                    name=bundle_dir.name,
-                    snapshot=snapshot,
-                    display_name=data.get("display_name"),
-                    description=data.get("description"),
-                    tags=data.get("tags"),
-                    icon=data.get("icon"),
-                    bundle_path=bundle_dir,
-                    knowledge_base_documents=kb_docs,
-                )
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
-                logger.warning("Skipping official agent bundle %s: %s", bundle_dir, exc)
-                continue
-            if bundle.name in seen_names:
-                raise ValueError(f"duplicate official agent bundle: {bundle.name}")
-            seen_names.add(bundle.name)
-            bundles.append(bundle)
+        if bundle.name in seen_names:
+            raise ValueError(f"duplicate official agent bundle: {bundle.name}")
+        seen_names.add(bundle.name)
+        bundles.append(bundle)
+    for bundle_dir in sorted(bundle_dirs):
+        profile = bundle_dir.parent.relative_to(root).parts[0]
+        try:
+            data = _read_bundle_json(bundle_dir)
+            snapshot = _snapshot_from_json(data)
+            skills = _load_skill_entries(bundle_dir, snapshot)
+            if skills:
+                snapshot = snapshot.model_copy(update={"skills": skills})
+            kb_docs = _load_kb_documents(bundle_dir, data)
+            bundle = OfficialAgentBundle(
+                profile=profile,
+                name=bundle_dir.name,
+                snapshot=snapshot,
+                display_name=data.get("display_name"),
+                description=data.get("description"),
+                tags=data.get("tags"),
+                icon=data.get("icon"),
+                bundle_path=bundle_dir,
+                knowledge_base_documents=kb_docs,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Skipping official agent bundle %s: %s", bundle_dir, exc)
+            continue
+        if bundle.name in seen_names:
+            raise ValueError(f"duplicate official agent bundle: {bundle.name}")
+        seen_names.add(bundle.name)
+        bundles.append(bundle)
     return sorted(bundles, key=lambda item: (item.profile, item.name))
