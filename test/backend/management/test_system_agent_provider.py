@@ -552,11 +552,17 @@ def test_sal_016_publish_failure_does_not_advance_revision(mocker):
 def test_sal_014_migration_contains_nullable_system_revision():
     """UT-BE-SAL-014."""
     migration = (
-        "deploy/sql/migrations/v2.6.2_001_agent_workbench.sql"
+        "deploy/sql/migrations/v2.7.0_merged_migrations.sql"
     )
 
+    # The workbench schema was consolidated into v2.7.0_merged_migrations.sql
+    # (source section: v2.6.2_001_agent_workbench.sql); scope the assertions
+    # to that section.
     with open(migration, encoding="utf-8") as file:
-        sql = file.read()
+        full_sql = file.read()
+
+    start = full_sql.index("-- Source migration: v2.6.2_001_agent_workbench.sql")
+    sql = full_sql[start:]
 
     assert "ADD COLUMN IF NOT EXISTS system_revision" in sql
     assert "system_revision VARCHAR" in sql

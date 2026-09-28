@@ -37,7 +37,7 @@ Web 直接复用原 `ClarificationCard` 的外框、图标、文本/单选/多�
 
 保留普通 `POST /agent/run`、`GET /agent/stop/{run_id}` 和 northbound 对应普通能力。携带 `enable_hitl`、`hitl_run_id`、`hitl_after_event` 的旧执行请求明确返回参数错误，包括 false、null 和零值；旧专属路由不再注册。
 
-新增 `deploy/sql/migrations/v2.6.1_001_remove_human_interaction.sql`，依次删除 `human_event_t`、`human_execution_t`、`human_request_t`、`human_run_t` 和仅供四表使用的审计函数，不使用 CASCADE。已合入的初始化及历史 SQL 保持原样。新安装先执行历史 SQL，再执行清理迁移，最终不存在四表。
+清理迁移原为 `deploy/sql/migrations/v2.6.1_001_remove_human_interaction.sql`，现已整合进 `deploy/sql/migrations/v2.7.0_merged_migrations.sql`（源节：`v2.6.1_001_remove_human_interaction.sql`），依次删除 `human_event_t`、`human_execution_t`、`human_request_t`、`human_run_t` 和仅供四表使用的审计函数，不使用 CASCADE。已合入的初始化及历史 SQL 保持原样。新安装先执行历史 SQL，再执行清理迁移，最终不存在四表。
 
 部署时须先停止旧进程和旧 scheduler，再同步更新 Web/runtime 并执行清理迁移。清理直接删除旧 HITL 数据，不提供搬迁或执行恢复。本次开发验证只对隔离临时 PostgreSQL 容器执行迁移，没有部署或修改现有业务数据库。
 
