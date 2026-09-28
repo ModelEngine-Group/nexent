@@ -27,6 +27,7 @@ from services.user_management_service import get_authorized_client, validate_tok
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
     update_password, get_provider_username
 from services.user_service import delete_user_and_cleanup
+from services.audit_service import record_security_event
 from utils.auth_utils import (
     extract_session_id_from_authorization,
     get_current_user_context,
@@ -59,7 +60,7 @@ async def service_health():
 
 
 @router.post("/signup")
-async def signup(request: UserSignUpRequest):
+async def signup(request: UserSignUpRequest, http_request: Request):
     """User registration"""
     try:
         user_data = await signup_user_with_invitation(email=request.email,
@@ -67,6 +68,11 @@ async def signup(request: UserSignUpRequest):
                                                       invite_code=request.invite_code,
                                                       auto_login=request.auto_login)
         success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
+        signup_user_info = (user_data or {}).get("user") or {}
+        record_security_event("user_signup", request=http_request,
+                              user_id=signup_user_info.get("id"),
+                              user_email=signup_user_info.get("email") or request.email,
+                              details={"registration_type": (user_data or {}).get("registration_type", "")})
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": success_message, "data": user_data})
     except NoInviteCodeException as e:
@@ -112,11 +118,16 @@ async def signup(request: UserSignUpRequest):
 
 
 @router.post("/signin")
-async def signin(request: UserSignInRequest):
+async def signin(request: UserSignInRequest, http_request: Request):
     """User login"""
     try:
         signin_content = await signin_user(email=request.email,
                                            password=request.password)
+        signin_data = (signin_content or {}).get("data") or {}
+        signin_user_info = signin_data.get("user") or {}
+        record_security_event("user_signin", request=http_request,
+                              user_id=signin_user_info.get("id"),
+                              user_email=signin_user_info.get("email") or request.email)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content=signin_content)
     except AuthApiError as e:
@@ -165,6 +176,13 @@ async def logout(request: Request):
         # Make logout idempotent: if no token or token expired, still return success
         session_id = None
         cas_logout_url = ""
+        # Audit-only identity resolution: failure never affects the logout flow.
+        logout_user_id, logout_tenant_id = None, None
+        if authorization:
+            try:
+                logout_user_id, logout_tenant_id = get_current_user_id(authorization)
+            except Exception:
+                pass
         if authorization:
             session_id = extract_session_id_from_authorization(authorization)
             if session_id:
@@ -182,6 +200,9 @@ async def logout(request: Request):
                 # Ignore sign out errors to keep logout idempotent
                 logging.warning(
                     f"Sign out encountered an error but will be ignored: {str(signout_err)}")
+        record_security_event("user_logout", request=request,
+                              user_id=logout_user_id, tenant_id=logout_tenant_id,
+                              session_id=session_id)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={
                                 "message": "Logout successful",
@@ -325,6 +346,8 @@ async def revoke_user_account(request: Request):
         # Orchestrate revoke for regular user
         await delete_user_and_cleanup(user_id=user_id, tenant_id=tenant_id)
 
+        record_security_event("account_revoke", request=request,
+                              user_id=user_id, tenant_id=tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "User account revoked"})
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
@@ -338,6 +361,7 @@ async def revoke_user_account(request: Request):
 
 @router.post("/tokens")
 async def create_token_endpoint(
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Create a new token for the authenticated user.
@@ -350,12 +374,15 @@ async def create_token_endpoint(
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: No authorization header found")
 
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: missing user_id in JWT token")
 
         result = create_token(str(user_id))
+        record_security_event("token_create", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"token_id": (result or {}).get("token_id")})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": result}
@@ -408,6 +435,7 @@ async def list_tokens_endpoint(
 @router.delete("/tokens/{token_id}")
 async def delete_token_endpoint(
     token_id: int,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Soft delete a token.
@@ -419,7 +447,7 @@ async def delete_token_endpoint(
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: No authorization header found")
 
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: missing user_id in JWT token")
@@ -429,6 +457,9 @@ async def delete_token_endpoint(
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="Token not found or not owned by user")
 
+        record_security_event("token_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"token_id": token_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": {"token_id": token_id}}
@@ -444,6 +475,7 @@ async def delete_token_endpoint(
 @router.put("/password")
 async def update_password_endpoint(
     request: UpdatePasswordRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """Update current user's password.
@@ -456,7 +488,7 @@ async def update_password_endpoint(
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: No authorization token provided")
 
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         if not user_id:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                                 detail="Unauthorized: missing user_id in JWT token")
@@ -469,6 +501,8 @@ async def update_password_endpoint(
 
         logger.info(f"Password updated successfully for user {user_id}")
 
+        record_security_event("password_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Password updated successfully"}

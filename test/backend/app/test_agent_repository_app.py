@@ -17,6 +17,7 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
 sys.modules.setdefault("services.agent_repository_service", MagicMock())
+sys.modules.setdefault("services.official_agent_sync_service", MagicMock())
 sys.modules.setdefault("utils.auth_utils", MagicMock())
 
 consts_model = types.ModuleType("consts.model")
@@ -35,8 +36,14 @@ class _SkillResolution(BaseModel):
     new_name: Optional[str] = None
 
 
+class _KnowledgeBaseResolution(BaseModel):
+    knowledge_name: str
+    action: str
+
+
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
 consts_model.SkillResolution = _SkillResolution
+consts_model.KnowledgeBaseResolution = _KnowledgeBaseResolution
 
 class _TagAssignmentFilter(BaseModel):
     definition_id: int
@@ -69,11 +76,45 @@ _ForbiddenError = consts_exceptions_mock.ForbiddenError
 _AppException = consts_exceptions_mock.AppException
 _SkillDuplicateError = consts_exceptions_mock.SkillDuplicateError
 
-from apps.agent_repository_app import agent_repository_router
+from apps.agent_repository_app import agent_repository_router, sync_official_agents_api
 
 app = FastAPI()
 app.include_router(agent_repository_router)
 client = TestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_sync_official_agents_api_accepts_loopback_request(mocker):
+    request = MagicMock()
+    request.client.host = "127.0.0.1"
+    mock_sync = mocker.patch(
+        "apps.agent_repository_app.sync_official_agents",
+        new_callable=AsyncMock,
+        return_value=[{"name": "medical-assistant"}],
+    )
+
+    response = await sync_official_agents_api(
+        request,
+        profiles="medical",
+    )
+
+    assert response.body == (
+        b'{"synchronized":1,"items":[{"name":"medical-assistant"}]}'
+    )
+    mock_sync.assert_awaited_once_with(
+        profiles="medical",
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_official_agents_api_rejects_non_loopback_request():
+    request = MagicMock()
+    request.client.host = "172.20.0.5"
+
+    with pytest.raises(Exception) as error:
+        await sync_official_agents_api(request)
+
+    assert error.value.status_code == 403
 
 
 @pytest.fixture
@@ -928,6 +969,10 @@ def test_import_agent_from_repository_api_passes_tenant_id(
         tenant_id="test_tenant_id",
         authorization=mock_auth_header["Authorization"],
         skill_resolutions=None,
+        model_ids=None,
+        embedding_model_ids=None,
+        knowledge_base_resolutions=None,
+        user_id="test_user_id",
         return_root_id=True,
     )
 

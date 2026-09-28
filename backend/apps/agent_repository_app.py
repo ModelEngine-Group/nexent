@@ -3,12 +3,13 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse
 
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
 from consts.model import (
     AgentRepositoryListingCreateRequest,
+    KnowledgeBaseResolution,
     SkillResolution,
     TagAssignmentFilter,
 )
@@ -21,12 +22,68 @@ from services.agent_repository_service import (
     list_agent_repository_tag_stats_impl,
     list_my_editable_agents_impl,
     update_agent_repository_status_impl,
+    delete_official_agent_impl,
+    list_official_agent_management_impl,
 )
-from utils.auth_utils import get_current_user_id
+from services.official_agent_sync_service import sync_official_agents
+from utils.auth_utils import get_current_user_context, get_current_user_id
 from utils.agent_transfer_utils import AgentToolImportError
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
+
+
+def _require_super_admin(user_role: str) -> None:
+    if user_role.upper() != "SU":
+        raise UnauthorizedError("Super admin role is required")
+
+
+@agent_repository_router.get("/official/management")
+async def list_official_agent_management_api(
+    authorization: str = Header(None)
+):
+    try:
+        _, _, user_role = get_current_user_context(authorization)
+        _require_super_admin(user_role)
+        return JSONResponse(content={"items": list_official_agent_management_impl()})
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
+
+
+@agent_repository_router.delete("/official/management/{agent_repository_id}")
+async def delete_official_agent_api(
+    agent_repository_id: int, authorization: str = Header(None)
+):
+    try:
+        user_id, _, user_role = get_current_user_context(authorization)
+        _require_super_admin(user_role)
+        return JSONResponse(content=delete_official_agent_impl(agent_repository_id, user_id))
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
+    except ValueError as error:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(error))
+
+
+@agent_repository_router.post("/internal/official/sync")
+async def sync_official_agents_api(
+    request: Request,
+    profiles: Optional[str] = Query(None),
+):
+    """Synchronize mounted official bundles from a container-local request."""
+    client_host = request.client.host if request.client else None
+    if client_host not in {"127.0.0.1", "::1"}:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Official agent synchronization is only available locally",
+        )
+    try:
+        kwargs = {}
+        if profiles is not None:
+            kwargs["profiles"] = profiles
+        result = await sync_official_agents(**kwargs)
+        return JSONResponse(content={"synchronized": len(result), "items": result})
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(error))
 
 
 def _parse_tag_predicates(raw: str | None) -> list[TagAssignmentFilter]:
@@ -311,17 +368,39 @@ async def check_repository_import_precheck_api(
 @agent_repository_router.post("/{agent_repository_id}/import")
 async def import_agent_from_repository_api(
     agent_repository_id: int,
-    skill_resolutions: Optional[list[SkillResolution]] = Body(default=None),
+    payload: Optional[object] = Body(default=None),
     authorization: Optional[str] = Header(None),
 ):
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        skill_resolutions = None
+        model_ids = None
+        embedding_model_ids = None
+        knowledge_base_resolutions = None
+        if isinstance(payload, list):
+            skill_resolutions = [SkillResolution.model_validate(item) for item in payload]
+        elif isinstance(payload, dict):
+            skill_resolutions = [
+                SkillResolution.model_validate(item)
+                for item in (payload.get("skill_resolutions") or [])
+            ] or None
+            model_ids = payload.get("model_ids")
+            embedding_model_ids = payload.get("embedding_model_ids")
+            knowledge_base_resolutions = [
+                KnowledgeBaseResolution.model_validate(item)
+                for item in (payload.get("knowledge_base_resolutions") or [])
+            ] or None
+
         result = await import_agent_from_repository_impl(
             agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             authorization=authorization,
             skill_resolutions=skill_resolutions,
+            model_ids=model_ids,
+            embedding_model_ids=embedding_model_ids,
+            knowledge_base_resolutions=knowledge_base_resolutions,
+            user_id=user_id,
             return_root_id=True,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)

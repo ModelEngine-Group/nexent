@@ -14,69 +14,73 @@ import log from "@/lib/logger";
 import type { TFunction } from "i18next";
 
 const TENANT_RESOURCE_LIMIT_CODE = "120104";
+
 const TENANT_RESOURCE_LIMIT_KEYS: Record<string, string> = {
   tenants: "tenantResources.limit.tenants",
   users: "tenantResources.limit.users",
   groups: "tenantResources.limit.groups",
+  agents: "tenantResources.limit.agents",
   administrators: "tenantResources.limit.administrators",
   super_admins: "tenantResources.limit.superAdmins",
+  external_a2a_agents: "tenantResources.limit.externalA2aAgents",
 };
 
-/** Return a localized tenant quota message while preserving the server limit. */
 export const getTenantResourceLimitMessage = (
   error: unknown,
   t: TFunction
 ): string | null => {
-  if (!error || typeof error !== "object") return null;
+  if (!error || typeof error !== "object") {
+    return null;
+  }
 
   const apiError = error as {
     code?: string | number;
     details?: Record<string, unknown> | null;
   };
-  if (String(apiError.code) !== TENANT_RESOURCE_LIMIT_CODE) return null;
+
+  if (String(apiError.code) !== TENANT_RESOURCE_LIMIT_CODE) {
+    return null;
+  }
 
   const details = apiError.details || {};
   const resource = String(details.resource || "");
   const translationKey = TENANT_RESOURCE_LIMIT_KEYS[resource];
-  if (!translationKey) return t("errorCode.120104");
+
+  if (!translationKey) {
+    return t("errorCode.120104");
+  }
 
   return t(translationKey, {
     limit: details.limit ?? "",
   });
 };
 
-type TranslationFunction = (
-  key: string,
-  options?: Record<string, unknown>
-) => string;
-
-/**
- * Resolve knowledge-base quota errors while retaining the server-provided limit.
- * The backend returns the standard business code plus structured scope details;
- * this helper keeps those details out of generic error handling and localizes them
- * at the point where the user can take action.
- */
 export const getKnowledgeResourceLimitMessage = (
   error: unknown,
-  t: TranslationFunction
+  t: TFunction
 ): string | undefined => {
-  if (!error || typeof error !== "object") return undefined;
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
 
   const candidate = error as {
     code?: string | number;
-    details?: Record<string, unknown>;
+    details?: Record<string, unknown> | null;
   };
+
   const code = String(candidate.code ?? "");
   const details = candidate.details || {};
 
   if (code === ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED) {
     const limit = Number(details.limit);
-    const limitValue = Number.isFinite(limit) ? limit : 0;
-    const key =
+    const translationKey =
       details.scope === "tenant"
         ? "knowledgeBase.message.tenantLimitExceeded"
         : "knowledgeBase.message.userLimitExceeded";
-    return t(key, { limit: limitValue });
+
+    return t(translationKey, {
+      limit: Number.isFinite(limit) ? limit : 0,
+    });
   }
 
   if (
@@ -84,12 +88,92 @@ export const getKnowledgeResourceLimitMessage = (
     details.resource === "knowledge_file"
   ) {
     const limit = Number(details.limit_mb);
+
     return t("knowledgeBase.upload.fileTooLarge", {
       limit: Number.isFinite(limit) ? limit : 100,
     });
   }
 
   return undefined;
+};
+
+const CONVERSATION_RESOURCE_LIMIT_KEYS: Record<string, string> = {
+  conversations: "chatInterface.conversationLimitExceeded",
+  conversation_turns: "chatInterface.turnLimitExceeded",
+};
+
+const CONVERSATION_RESOURCE_LIMIT_PATTERNS: Array<{
+  resource: keyof typeof CONVERSATION_RESOURCE_LIMIT_KEYS;
+  pattern: RegExp;
+}> = [
+  {
+    resource: "conversations",
+    pattern:
+      /Conversation history limit reached:\s*maximum\s+(\d+)\s+conversations?\s+per user/i,
+  },
+  {
+    resource: "conversation_turns",
+    pattern:
+      /Conversation turn limit reached:\s*maximum\s+(\d+)\s+turns?\s+per conversation/i,
+  },
+];
+
+export const getConversationResourceLimitMessage = (
+  error: unknown,
+  t: TFunction
+): string | null => {
+  const candidate =
+    error && typeof error === "object"
+      ? (error as {
+          code?: string | number;
+          message?: unknown;
+          details?: unknown;
+          data?: unknown;
+        })
+      : undefined;
+
+  const details =
+    candidate?.details && typeof candidate.details === "object"
+      ? (candidate.details as Record<string, unknown>)
+      : candidate?.data && typeof candidate.data === "object"
+        ? (candidate.data as Record<string, unknown>)
+        : undefined;
+
+  const resource = String(details?.resource || "");
+  const limit = details?.limit;
+  const translationKey = CONVERSATION_RESOURCE_LIMIT_KEYS[resource];
+
+  if (
+    String(candidate?.code) === TENANT_RESOURCE_LIMIT_CODE &&
+    translationKey &&
+    (typeof limit === "number" || typeof limit === "string")
+  ) {
+    return t(translationKey, { limit });
+  }
+
+  const messageText =
+    typeof error === "string"
+      ? error
+      : typeof candidate?.message === "string"
+        ? candidate.message
+        : error instanceof Error
+          ? error.message
+          : "";
+
+  for (const {
+    resource: matchedResource,
+    pattern,
+  } of CONVERSATION_RESOURCE_LIMIT_PATTERNS) {
+    const match = messageText.match(pattern);
+
+    if (match) {
+      return t(CONVERSATION_RESOURCE_LIMIT_KEYS[matchedResource], {
+        limit: match[1],
+      });
+    }
+  }
+
+  return null;
 };
 
 /**
