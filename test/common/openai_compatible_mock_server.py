@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 SUPPORTED_SCENARIOS = {
     "success",
     "partial_then_success",
+    "invalid_then_success",
     "always_429",
     "always_503",
     "always_401",
@@ -39,9 +40,14 @@ class MockState:
     response_text: str = "MOCK_SUCCESS"
     retry_after: float = 0.0
     partial_chunk_delay: float = 0.05
+    success_chunk_delay: float = 0.0
+    pause_after_success_chunks: int = 0
+    success_stream_paused: bool = False
+    emit_reasoning: bool = True
     request_count: int = 0
     requests: list[dict[str, Any]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    release_success_stream: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def configure(self, payload: dict[str, Any]) -> dict[str, Any]:
         scenario = payload.get("scenario", "success")
@@ -54,6 +60,15 @@ class MockState:
             self.partial_chunk_delay = max(
                 0.0, float(payload.get("partial_chunk_delay", 0.05))
             )
+            self.success_chunk_delay = max(
+                0.0, float(payload.get("success_chunk_delay", 0.0))
+            )
+            self.pause_after_success_chunks = max(
+                0, int(payload.get("pause_after_success_chunks", 0))
+            )
+            self.emit_reasoning = payload.get("emit_reasoning", True) is not False
+            self.success_stream_paused = False
+            self.release_success_stream.clear()
             self.request_count = 0
             self.requests.clear()
             return self._snapshot_unlocked()
@@ -83,11 +98,18 @@ class MockState:
         with self.lock:
             return self._snapshot_unlocked()
 
+    def release_stream(self) -> dict[str, Any]:
+        self.release_success_stream.set()
+        with self.lock:
+            return self._snapshot_unlocked()
+
     def _snapshot_unlocked(self) -> dict[str, Any]:
         return {
             "scenario": self.scenario,
             "response_text": self.response_text,
             "retry_after": self.retry_after,
+            "success_stream_paused": self.success_stream_paused,
+            "emit_reasoning": self.emit_reasoning,
             "request_count": self.request_count,
             "requests": list(self.requests),
         }
@@ -192,6 +214,10 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, snapshot)
             return
 
+        if path == "/__release":
+            self._send_json(HTTPStatus.OK, self.state.release_stream())
+            return
+
         if path not in {"/v1/chat/completions", "/chat/completions"}:
             self._send_error(HTTPStatus.NOT_FOUND, "not_found", "Unknown endpoint")
             return
@@ -232,6 +258,9 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
             return
         if scenario == "partial_then_success" and request_number == 1:
             self._send_partial_stream(payload)
+            return
+        if scenario == "invalid_then_success" and request_number == 1:
+            self._send_invalid_protocol_stream(payload)
             return
 
         finish_reason = "length" if scenario == "length" else "stop"
@@ -308,13 +337,16 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
                 delta={"role": "assistant", "content": ""},
                 finish_reason=None,
             ),
-            self._completion_chunk(
-                request_id=request_id,
-                model=model,
-                delta={"reasoning_content": "Deterministic mock reasoning. "},
-                finish_reason=None,
-            ),
         ]
+        if self.state.emit_reasoning:
+            chunks.append(
+                self._completion_chunk(
+                    request_id=request_id,
+                    model=model,
+                    delta={"reasoning_content": "Deterministic mock reasoning. "},
+                    finish_reason=None,
+                )
+            )
         chunks.extend(
             self._completion_chunk(
                 request_id=request_id,
@@ -347,7 +379,54 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
                 b"data: [DONE]\n\n",
             ]
         )
-        self._send_bytes(HTTPStatus.OK, b"".join(chunks), "text/event-stream")
+        if not self.state.success_chunk_delay and not self.state.pause_after_success_chunks:
+            self._send_bytes(HTTPStatus.OK, b"".join(chunks), "text/event-stream")
+            return
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("x-request-id", f"mock-{uuid.uuid4().hex}")
+        self.end_headers()
+        for index, chunk in enumerate(chunks, start=1):
+            self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
+            self.wfile.flush()
+            if index == self.state.pause_after_success_chunks:
+                with self.state.lock:
+                    self.state.success_stream_paused = True
+                self.state.release_success_stream.wait(timeout=60)
+                with self.state.lock:
+                    self.state.success_stream_paused = False
+            elif self.state.success_chunk_delay:
+                time.sleep(self.state.success_chunk_delay)
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
+    def _send_invalid_protocol_stream(self, payload: dict[str, Any]) -> None:
+        """Return a transport-successful but CodeAgent-invalid first response."""
+        request_id = f"chatcmpl-mock-{uuid.uuid4().hex}"
+        model = payload["model"]
+        chunks = [
+            self._completion_chunk(
+                request_id=request_id,
+                model=model,
+                delta={"content": "INVALID_SEMANTIC_FIRST <code></code>"},
+                finish_reason=None,
+            ),
+            self._completion_chunk(
+                request_id=request_id,
+                model=model,
+                delta={},
+                finish_reason="stop",
+            ),
+            b"data: [DONE]\n\n",
+        ]
+        if payload.get("stream") is True:
+            self._send_bytes(HTTPStatus.OK, b"".join(chunks), "text/event-stream")
+            return
+        self._send_non_stream_response(
+            payload, "INVALID_SEMANTIC_FIRST <code></code>", "stop"
+        )
 
     def _send_partial_stream(self, payload: dict[str, Any]) -> None:
         request_id = f"chatcmpl-mock-{uuid.uuid4().hex}"
@@ -393,7 +472,11 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
                         "index": 0,
                         "message": {
                             "role": "assistant",
-                            "reasoning_content": "Deterministic mock reasoning. ",
+                            "reasoning_content": (
+                                "Deterministic mock reasoning. "
+                                if self.state.emit_reasoning
+                                else ""
+                            ),
                             "content": code,
                         },
                         "finish_reason": finish_reason,
