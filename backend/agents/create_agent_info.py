@@ -86,7 +86,7 @@ from consts.const import (
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from consts.model import ToolParamsRequest
-from consts.exceptions import ValidationError
+from consts.exceptions import ValidationError, WorkbenchError
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 
 from .tool_user_context import resolve_tool_user_context
@@ -709,6 +709,39 @@ def _build_internal_s3_url(file: dict) -> str:
     return "s3:/" + url
 
 
+def _collect_run_minio_files(
+    minio_files: Optional[List[Dict[str, Any]]],
+    history: Optional[List[Any]],
+    max_files: int = 50,
+) -> List[Dict[str, Any]]:
+    """Collect current and historical attachments for one authorized Agent run."""
+    seen_urls: set[str] = set()
+    collected: List[Dict[str, Any]] = []
+    sources = [minio_files]
+    for message in history or []:
+        attachments = (
+            message.get("minio_files")
+            if isinstance(message, dict)
+            else getattr(message, "minio_files", None)
+        )
+        sources.append(attachments)
+
+    for attachments in sources:
+        if not isinstance(attachments, list):
+            continue
+        for file in attachments:
+            if not isinstance(file, dict) or not file.get("name"):
+                continue
+            s3_url = _build_internal_s3_url(file)
+            if not s3_url or s3_url in seen_urls:
+                continue
+            seen_urls.add(s3_url)
+            collected.append(file)
+            if len(collected) == max_files:
+                return collected
+    return collected
+
+
 def _safe_workspace_segment(value: Any, fallback: str) -> str:
     """Return a filesystem-safe user path segment."""
     normalized = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._")
@@ -723,6 +756,37 @@ def _build_run_workspace(user_id: str, run_id: str) -> str:
         / _safe_workspace_segment(user_id, "anonymous")
         / run_id
     )
+
+
+def _materialize_runtime_skill_snapshot(
+    snapshot: List[Dict[str, Any]],
+    workspace_path: str,
+    tenant_id: str,
+) -> List[Dict[str, Any]]:
+    """Materialize frozen Skill files below the run workspace without mutating input."""
+    effective = copy.deepcopy(snapshot)
+    snapshot_root = (Path(workspace_path).resolve() / ".skill_snapshot").resolve()
+    tenant_root = (snapshot_root / tenant_id).resolve()
+    if not tenant_root.is_relative_to(snapshot_root):
+        raise WorkbenchError("RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE")
+    for skill in effective:
+        skill_name = str(skill.get("name") or "")
+        if not skill_name or Path(skill_name).name != skill_name or skill_name in {".", ".."}:
+            raise WorkbenchError("RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE")
+        skill_root = (tenant_root / skill_name).resolve()
+        if not skill_root.is_relative_to(tenant_root):
+            raise WorkbenchError("RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE")
+        files = skill.pop("files", [])
+        for relative_path, content in files:
+            destination = (skill_root / str(relative_path)).resolve()
+            if not destination.is_relative_to(skill_root):
+                raise WorkbenchError("RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(bytes(content))
+        if not (skill_root / "SKILL.md").is_file():
+            raise WorkbenchError("RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE")
+        skill["_snapshot_root"] = str(snapshot_root)
+    return effective
 
 
 def _validate_run_minio_files(
@@ -742,7 +806,8 @@ def _validate_run_minio_files(
 def _get_skills_for_template(
     agent_id: int,
     tenant_id: str,
-    version_no: int = 0
+    version_no: int = 0,
+    runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
 ) -> List[dict]:
     """Get skills list for prompt template injection.
 
@@ -755,13 +820,16 @@ def _get_skills_for_template(
         List of skill dicts with name and description
     """
     try:
-        from management.services.skill.service import SkillService
-        skill_service = SkillService()
-        enabled_skills = skill_service.get_enabled_skills_for_agent(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=version_no
-        )
+        if runtime_skill_snapshot is None:
+            from management.services.skill.service import SkillService
+            skill_service = SkillService()
+            enabled_skills = skill_service.get_enabled_skills_for_agent(
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                version_no=version_no,
+            )
+        else:
+            enabled_skills = runtime_skill_snapshot
         return [
             {"name": s.get("name", ""), "description": s.get("description", "")}
             for s in enabled_skills
@@ -924,6 +992,7 @@ def _get_skill_script_tools(
     tenant_id: str,
     version_no: int = 0,
     runtime_file_context: Optional[Dict[str, Any]] = None,
+    runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
 ) -> List[ToolConfig]:
     """Get tool config for skill script execution and skill reading.
 
@@ -943,15 +1012,27 @@ def _get_skill_script_tools(
         "version_no": version_no,
     }
     file_context = dict(runtime_file_context or {})
+    skill_snapshot_root = next(
+        (
+            str(skill.get("_snapshot_root"))
+            for skill in (runtime_skill_snapshot or [])
+            if skill.get("_snapshot_root")
+        ),
+        None,
+    )
 
     skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
         from management.services.skill.service import SkillService
 
-        enabled_skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=version_no,
+        enabled_skills = (
+            SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
+                agent_id=agent_id,
+                tenant_id=tenant_id,
+                version_no=version_no,
+            )
+            if runtime_skill_snapshot is None
+            else runtime_skill_snapshot
         )
         skill_config_values = {
             skill.get("name", ""): dict(skill.get("config_values") or {})
@@ -962,7 +1043,7 @@ def _get_skill_script_tools(
         logger.warning(f"Failed to resolve effective skill configuration: {exc}", exc_info=True)
 
     try:
-        return [
+        tools = [
             ToolConfig(
                 class_name="RunSkillScriptTool",
                 name="run_skill_script",
@@ -980,7 +1061,8 @@ def _get_skill_script_tools(
                 ),
                 output_type="string",
                 params={
-                    "local_skills_dir": CONTAINER_SKILLS_PATH,
+                    "local_skills_dir": skill_snapshot_root or CONTAINER_SKILLS_PATH,
+                    "isolated_skills_root": bool(skill_snapshot_root),
                     "workspace_path": file_context.get("workspace_path"),
                     "authorized_skill_names": sorted(skill_config_values),
                 },
@@ -994,7 +1076,11 @@ def _get_skill_script_tools(
                 description="Read skill execution guide and optional additional files. Always reads SKILL.md first, then optionally reads additional files.",
                 inputs='{"skill_name": "str", "additional_files": "list[str]"}',
                 output_type="string",
-                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                params={
+                    "local_skills_dir": skill_snapshot_root or CONTAINER_SKILLS_PATH,
+                    "isolated_skills_root": bool(skill_snapshot_root),
+                    **({"authorized_skill_names": sorted(skill_config_values)} if runtime_skill_snapshot is not None else {}),
+                },
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
@@ -1006,8 +1092,9 @@ def _get_skill_script_tools(
                 inputs='{"skill_name": "str"}',
                 output_type="string",
                 params={
-                    "local_skills_dir": CONTAINER_SKILLS_PATH,
+                    "local_skills_dir": skill_snapshot_root or CONTAINER_SKILLS_PATH,
                     "config_overrides": skill_config_values,
+                    **({"authorized_skill_names": sorted(skill_config_values)} if runtime_skill_snapshot is not None else {}),
                 },
                 source="builtin",
                 usage="builtin",
@@ -1071,6 +1158,9 @@ def _get_skill_script_tools(
                 metadata=file_context,
             ),
         ]
+        if runtime_skill_snapshot is not None:
+            tools = [tool for tool in tools if tool.class_name != "WriteSkillFileTool"]
+        return tools
     except Exception as e:
         logger.warning(f"Failed to load skill script tool: {e}")
         return []
@@ -1213,12 +1303,30 @@ async def create_agent_config(
     automation_has_attachments: bool = False,
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
     runtime_file_context: Optional[Dict[str, Any]] = None,
+    runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
+    runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
+    runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
 
     # create sub agent
+    child_tool_params = normalized_tool_params
+    child_knowledge_context = runtime_knowledge_context
+    if runtime_knowledge_tools is not None:
+        child_tool_params = normalized_tool_params.model_copy(deep=True)
+        root_override = child_tool_params.agents.get(agent_info.get("name"))
+        if root_override is not None:
+            from services.runtime_knowledge_mount import MANAGED_CLASSES
+
+            managed_names = MANAGED_CLASSES | {
+                tool.get("name") for tool in runtime_knowledge_tools
+                if tool.get("class_name") in MANAGED_CLASSES
+            }
+            root_override.tools = {name: params for name, params in root_override.tools.items()
+                                   if name not in managed_names}
+        child_knowledge_context = None
     sub_agent_relations = query_sub_agent_relations(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     managed_agents = []
@@ -1238,12 +1346,67 @@ async def create_agent_config(
             allow_memory_search=allow_memory_search,
             version_no=sub_agent_version_no,
             override_model_id=None,
-            tool_params=normalized_tool_params,
+            tool_params=child_tool_params,
             conversation_id=conversation_id,
             include_automation_tool=False,
-            runtime_knowledge_context=runtime_knowledge_context,
+            runtime_knowledge_context=child_knowledge_context,
             runtime_file_context=runtime_file_context,
+            # Workbench overlays replace Skills on the effective root only.
+            runtime_skill_snapshot=None,
         )
+        # Persisted Agent relations are rendered into the manager prompt by
+        # their configured business name. Keep the callable registered in the
+        # Python executor under that same name; the generic runtime identity
+        # assigned by the recursive builder is only appropriate for roots and
+        # Workbench-selected dynamic children.
+        sub_agent_config.invocation_name = sub_agent_config.name
+        managed_agents.append(sub_agent_config)
+
+    # Workbench-selected Agents are request-scoped children. They are built
+    # from pinned published versions but never persisted as Agent relations.
+    used_invocation_names = {
+        str(agent.invocation_name or agent.name) for agent in managed_agents
+    }
+    for mount in runtime_sub_agent_mounts or []:
+        sub_agent_id = int(mount["agent_id"])
+        sub_agent_version_no = int(mount["version_no"])
+        if sub_agent_id == int(agent_id) and sub_agent_version_no == int(version_no):
+            raise WorkbenchError("WORKBENCH_AGENT_CYCLE")
+        sub_agent_config = await create_agent_config(
+            agent_id=sub_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            language=language,
+            last_user_query=last_user_query,
+            allow_memory_search=allow_memory_search,
+            version_no=sub_agent_version_no,
+            override_model_id=None,
+            tool_params=child_tool_params,
+            conversation_id=conversation_id,
+            include_automation_tool=False,
+            runtime_knowledge_context=child_knowledge_context,
+            runtime_file_context=runtime_file_context,
+            runtime_skill_snapshot=None,
+            runtime_knowledge_tools=None,
+            runtime_sub_agent_mounts=None,
+        )
+        invocation_name = str(
+            mount.get("invocation_name")
+            or f"agent_{sub_agent_id}_v{sub_agent_version_no}"
+        )
+        if invocation_name in used_invocation_names:
+            raise WorkbenchError("WORKBENCH_AGENT_NAME_CONFLICT")
+        used_invocation_names.add(invocation_name)
+        sub_agent_config.name = invocation_name
+        sub_agent_config.invocation_name = invocation_name
+        sub_agent_config.runtime_ref = str(
+            mount.get("runtime_ref")
+            or f"agent:{sub_agent_id}:v{sub_agent_version_no}"
+        )
+        sub_agent_config.display_name = str(
+            mount.get("display_name") or sub_agent_config.display_name or invocation_name
+        )
+        sub_agent_config.origin = "PERSISTED"
         managed_agents.append(sub_agent_config)
 
     # create external A2A agents (synchronous function, no await needed)
@@ -1255,6 +1418,8 @@ async def create_agent_config(
         user_id,
         version_no=version_no,
         tool_params=normalized_tool_params,
+        runtime_skill_snapshot=runtime_skill_snapshot,
+        runtime_knowledge_tools=runtime_knowledge_tools,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
@@ -1569,7 +1734,12 @@ async def create_agent_config(
     enable_context_manager = agent_info.get("enable_context_manager", False)
 
     # Get the skills included in ContextManager items.
-    skills = _get_skills_for_template(agent_id, tenant_id, version_no)
+    skills = _get_skills_for_template(
+        agent_id,
+        tenant_id,
+        version_no,
+        runtime_skill_snapshot=runtime_skill_snapshot,
+    )
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
     builtin_tools = _get_skill_script_tools(
@@ -1577,6 +1747,7 @@ async def create_agent_config(
         tenant_id,
         version_no,
         runtime_file_context=runtime_file_context,
+        runtime_skill_snapshot=runtime_skill_snapshot,
     )
     available_tools = tool_list + builtin_tools
 
@@ -1749,6 +1920,12 @@ async def create_agent_config(
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
         enable_planning=enable_planning,
     )
+    agent_config.agent_id = agent_id
+    agent_config.version_no = int(version_no)
+    agent_config.invocation_name = f"agent_{agent_id}_v{int(version_no)}"
+    agent_config.runtime_ref = f"agent:{agent_id}:v{int(version_no)}"
+    agent_config.display_name = agent_info.get("display_name") or agent_config.name
+    agent_config.origin = "PERSISTED"
     return agent_config
 
 
@@ -1756,6 +1933,7 @@ def _resolve_runtime_tool_records(
     agent_id: int,
     tenant_id: str,
     version_no: int = 0,
+    runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Merge explicitly enabled tools with tools required by enabled skills."""
     explicit_tools = search_tools_for_sub_agent(
@@ -1769,24 +1947,37 @@ def _resolve_runtime_tool_records(
 
     dependency_values: Dict[int, Dict[str, Any]] = {}
     dependency_sources: Dict[int, Dict[str, str]] = {}
-    enabled_skill_instances = skill_db.search_skills_for_agent(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        version_no=version_no,
+    enabled_skill_instances = (
+        skill_db.search_skills_for_agent(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        if runtime_skill_snapshot is None
+        else runtime_skill_snapshot
     )
     for skill_instance in enabled_skill_instances:
-        skill = skill_db.get_skill_by_id(skill_instance.get("skill_id"), tenant_id)
+        skill = (
+            skill_db.get_skill_by_id(skill_instance.get("skill_id"), tenant_id)
+            if runtime_skill_snapshot is None
+            else skill_instance
+        )
         if not skill:
             continue
         effective_config = dict(skill.get("config_values") or {})
-        effective_config.update(skill_instance.get("config_values") or {})
+        if runtime_skill_snapshot is None:
+            effective_config.update(skill_instance.get("config_values") or {})
         skill_name = skill.get("name") or str(skill.get("skill_id"))
         for tool_id in skill.get("tool_ids") or []:
             if tool_id in explicit_tool_ids:
                 continue
             values = dependency_values.setdefault(tool_id, {})
             sources = dependency_sources.setdefault(tool_id, {})
+            runtime_definition = next((item for item in skill.get("tool_definitions") or [] if item.get("tool_id") == tool_id), {})
+            runtime_parameter_names = {param.get("name") for param in runtime_definition.get("params") or []}
             for name, value in effective_config.items():
+                if runtime_skill_snapshot is not None and name not in runtime_parameter_names:
+                    continue
                 if name in values and values[name] != value:
                     raise ValidationError(
                         f"Skills '{sources[name]}' and '{skill_name}' configure "
@@ -1799,7 +1990,11 @@ def _resolve_runtime_tool_records(
     if not implicit_tool_ids:
         return explicit_tools
 
-    implicit_definitions = query_tools_by_ids(list(implicit_tool_ids))
+    implicit_definitions = (
+        query_tools_by_ids(list(implicit_tool_ids))
+        if runtime_skill_snapshot is None
+        else [definition for skill in runtime_skill_snapshot for definition in skill.get("tool_definitions") or []]
+    )
     definitions_by_id = {tool.get("tool_id"): tool for tool in implicit_definitions}
     missing_tool_ids = implicit_tool_ids - set(definitions_by_id)
     if missing_tool_ids:
@@ -1830,6 +2025,8 @@ async def create_tool_config_list(
     user_id,
     version_no: int = 0,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
+    runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
+    runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -1839,9 +2036,18 @@ async def create_tool_config_list(
         agent_id=agent_id,
         tenant_id=tenant_id,
         version_no=version_no,
+        runtime_skill_snapshot=runtime_skill_snapshot,
     )
 
     # Look up agent name for use in error messages.
+    if runtime_knowledge_tools is not None:
+        from services.runtime_knowledge_mount import MANAGED_CLASSES
+
+        tools_list = [tool for tool in tools_list if tool.get("class_name") not in MANAGED_CLASSES]
+        tools_list.extend(copy.deepcopy([
+            tool for tool in runtime_knowledge_tools if tool.get("class_name") in MANAGED_CLASSES
+        ]))
+
     # Agent name is optional for tool_params matching (matching uses tool identifiers only),
     # but we include it in error messages so callers can identify which agent/tool caused a failure.
     agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
@@ -2020,7 +2226,8 @@ async def create_tool_config_list(
 
             # Build display_name to index_name mapping for LLM parameter conversion
             # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
-            configured_index_names = tool_config.params.get("index_names", [])
+            configured_index_names = tool_config.params.get("index_names") or []
+            tool_config.params["index_names"] = configured_index_names
 
             # Enforce knowledge-base-level read permission for the chatting user.
             # Agent-level permission controls "who can use this agent", but each knowledge
@@ -2221,37 +2428,7 @@ async def join_minio_file_description_to_query(
         Modified query with file descriptions appended
     """
     final_query = query
-    seen_urls: set[str] = set()
-    all_files: list[dict] = []
-
-    # Collect files from current message first (higher priority)
-    if minio_files and isinstance(minio_files, list):
-        for file in minio_files:
-            if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
-                s3_url = _build_internal_s3_url(file)
-                if not s3_url:
-                    continue
-                if s3_url not in seen_urls:
-                    seen_urls.add(s3_url)
-                    all_files.append(file)
-
-    # Collect files from historical messages (lower priority, already-deduped)
-    if history and isinstance(history, list):
-        for msg in history:
-            if isinstance(msg, dict) and msg.get("minio_files"):
-                for file in msg["minio_files"]:
-                    if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
-                        s3_url = _build_internal_s3_url(file)
-                        if not s3_url:
-                            continue
-                        if s3_url not in seen_urls:
-                            seen_urls.add(s3_url)
-                            all_files.append(file)
-
-    # Enforce file count limit (keep most recent files by truncating from the end)
-    if len(all_files) > max_files:
-        all_files = all_files[:max_files]
-        logger.info(f"File list truncated from {len(all_files)} to {max_files} files")
+    all_files = _collect_run_minio_files(minio_files, history, max_files=max_files)
 
     if all_files:
         file_descriptions: list[str] = []
@@ -2379,6 +2556,52 @@ def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict)
     return list(used_mcp_urls)
 
 
+def apply_root_generation_overlay(
+    model_list: List[ModelConfig],
+    agent_config: AgentConfig,
+    generation_config: Optional[Dict[str, Any]],
+) -> None:
+    """Add a root-only model alias without changing child Agent aliases."""
+    if not generation_config:
+        return
+    for model_config in model_list:
+        if model_config.cite_name != agent_config.model_name:
+            continue
+        extra_body = dict(model_config.extra_body or {})
+        deep_thinking = bool(generation_config.get("deep_thinking"))
+        extra_body["enable_thinking"] = deep_thinking
+        # Effort is a dedicated ModelConfig field, not an extra_body override.
+        # Clear inherited model settings so the Workbench choice is authoritative.
+        extra_body.pop("reasoning_effort", None)
+        extra_body.pop("reasoning_budget_tokens", None)
+        root_model = model_config.model_copy(
+            deep=True,
+            update={
+                "cite_name": "workbench_root_model",
+                "enable_thinking": deep_thinking,
+                "reasoning_effort": (
+                    (generation_config.get("thinking_effort") or "low")
+                    if deep_thinking else None
+                ),
+                "reasoning_budget_tokens": None,
+                "temperature": (
+                    generation_config.get("temperature")
+                    if generation_config.get("temperature") is not None
+                    else model_config.temperature
+                ),
+                "top_p": (
+                    generation_config.get("top_p")
+                    if generation_config.get("top_p") is not None
+                    else model_config.top_p
+                ),
+                "extra_body": extra_body,
+            },
+        )
+        model_list.append(root_model)
+        agent_config.model_name = root_model.cite_name
+        return
+
+
 async def create_agent_run_info(
     agent_id,
     minio_files,
@@ -2400,10 +2623,21 @@ async def create_agent_run_info(
     enable_planning: bool = False,
     enable_automation_tool: bool = True,
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
+    runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
+    runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
+    runtime_generation_config: Optional[Dict[str, Any]] = None,
+    runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
 ):
     workspace_run_id = uuid.uuid4().hex
     workspace_path = _build_run_workspace(user_id, workspace_run_id)
-    _validate_run_minio_files(minio_files, user_id, tenant_id)
+    if runtime_skill_snapshot is not None:
+        runtime_skill_snapshot = _materialize_runtime_skill_snapshot(
+            runtime_skill_snapshot,
+            workspace_path,
+            tenant_id,
+        )
+    effective_minio_files = _collect_run_minio_files(minio_files, history)
+    _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
     runtime_file_context = {
         "workspace_path": workspace_path,
         "minio_client": minio_client,
@@ -2435,7 +2669,7 @@ async def create_agent_run_info(
     final_query = await join_minio_file_description_to_query(
         minio_files=minio_files,
         query=query,
-        history=history
+        history=history,
     )
     model_list = await create_model_config_list(tenant_id)
     create_config_kwargs = {
@@ -2452,6 +2686,8 @@ async def create_agent_run_info(
     }
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
+    if runtime_skill_snapshot is not None:
+        create_config_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
     if enable_automation_tool and not is_debug and conversation_id is not None:
         create_config_kwargs.update({
             "include_automation_tool": True,
@@ -2466,6 +2702,10 @@ async def create_agent_run_info(
     if context_policy is not None:
         create_config_kwargs["request_context_policy"] = context_policy
 
+    if runtime_knowledge_tools is not None:
+        create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
+    if runtime_sub_agent_mounts is not None:
+        create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     # v2.6.0: Apply per-agent model params override to model_config_list.
@@ -2542,6 +2782,14 @@ async def create_agent_run_info(
                         if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
                             mc.reasoning_budget_tokens = budget
                     break
+    # Request-scoped Workbench settings apply only to the root model. Static
+    # children retain the model aliases from their published versions.
+    # Static children keep their published aliases and never inherit this overlay.
+    apply_root_generation_overlay(
+        model_list,
+        agent_config,
+        runtime_generation_config,
+    )
 
     # A request-level effort is valid only when the selected model's switch is
     # enabled. Known capabilities use their declared levels. Unknown/custom
@@ -2696,7 +2944,7 @@ async def create_agent_run_info(
         workspace_path=workspace_path,
         workspace_run_id=workspace_run_id,
         tenant_id=tenant_id,
-        minio_files=minio_files,
+        minio_files=effective_minio_files,
         redis_client=get_redis_client(),
         user_context=resolve_tool_user_context(agent_config, user_id, tenant_id),
     )

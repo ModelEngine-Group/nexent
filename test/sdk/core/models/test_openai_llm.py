@@ -2882,12 +2882,37 @@ def test_translate_thinking_wraps_qwen_in_chat_template_kwargs(openai_model_inst
 
 
 def test_translate_thinking_keeps_top_level_for_non_qwen(openai_model_instance):
-    """DeepSeek/DashScope-style providers read the top-level flag."""
+    """Generic OpenAI-compatible gateways retain an explicit caller toggle."""
     openai_model_instance.model_id = "deepseek-ai/DeepSeek-V3"
     result = openai_model_instance._translate_thinking_flag(
         {"enable_thinking": False}
     )
-    assert result == {}
+    assert result == {"enable_thinking": False}
+
+
+def test_generic_gateway_keeps_explicit_thinking_toggle(openai_model_instance):
+    openai_model_instance.model_id = "deepseek-v4-flash"
+    openai_model_instance.model_factory = "OpenAI-API-Compatible"
+    openai_model_instance.reasoning_capability = None
+    openai_model_instance.api_base_url = (
+        "https://example.apigateway-cn-beijing.volceapi.com/v1"
+    )
+
+    assert openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": False, "custom": 1}
+    ) == {"enable_thinking": False, "custom": 1}
+
+
+def test_known_openai_provider_does_not_receive_unknown_toggle(openai_model_instance):
+    openai_model_instance.model_id = "gpt-4o"
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "openai",
+    }
+
+    assert openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": False}
+    ) == {}
 
 
 def test_translate_thinking_merges_existing_chat_template_kwargs(openai_model_instance):

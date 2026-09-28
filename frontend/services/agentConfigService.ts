@@ -163,7 +163,7 @@ type AgentListApiItem = {
   author?: string;
   created_by?: string | null;
   create_time?: string;
-  tags?: string[];
+  tags?: unknown;
   model_ids?: number[];
   model_id?: number;
   model_names?: string[];
@@ -192,7 +192,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     author: agent.author,
     created_by: agent.created_by,
     create_time: agent.create_time,
-    tags: agent.tags || [],
+    tags: normalizeTags(agent.tags),
     model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
     model_names:
       agent.model_names || (agent.model_name ? [agent.model_name] : []),

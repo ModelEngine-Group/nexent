@@ -90,6 +90,17 @@ class ConversationRecord(TableBase):
         server_default=text("0"),
         doc="Monotonic version of conversation runtime metadata",
     )
+    workbench_config = Column(
+        JSONB,
+        nullable=True,
+        doc="Canonical schema-v3 Workbench conversation declaration",
+    )
+    workbench_config_version = Column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        doc="Monotonic version of the canonical Workbench declaration",
+    )
 
 
 class ConversationMessage(TableBase):
@@ -663,6 +674,21 @@ class AgentInfo(TableBase):
     version_no = Column(Integer, default=0, nullable=False, primary_key=True,
                         doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     name = Column(String(100), doc="Agent name")
+    system_key = Column(
+        String(100),
+        doc="Stable platform-owned Agent key; NULL for user-created Agents",
+    )
+    agent_origin = Column(
+        String(20),
+        default="USER",
+        nullable=False,
+        server_default=text("'USER'"),
+        doc="Agent ownership origin: USER or SYSTEM",
+    )
+    system_revision = Column(
+        String(100),
+        doc="Server-controlled Nexent release revision for a system Agent",
+    )
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
     author = Column(String(100), doc="Agent author")

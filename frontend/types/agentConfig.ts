@@ -135,6 +135,7 @@ export interface PublishedAgent {
   /** Agent-owned model inference snapshots used by the chat runtime. */
   model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   icon_url?: string;
+  tags?: string[];
 }
 
 export interface ModelParamsOverrideEntry {
@@ -148,13 +149,13 @@ export interface Agent {
   name: string;
   display_name?: string;
   description: string;
+  tags?: string[];
   author?: string;
   /** Nexent user_id of the agent creator (owner). */
   created_by?: string | null;
   create_time?: string;
   version_label?: string | null;
   version_create_time?: string | null;
-  tags?: string[];
   unavailable_reasons?: string[];
   model: string;
   model_ids?: number[];

@@ -10,6 +10,15 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
+
+@pytest.fixture(autouse=True)
+def _default_to_ordinary_agent(monkeypatch):
+    """Keep general SkillInstance tests scoped to an ordinary Agent."""
+    monkeypatch.setattr(
+        "backend.database.agent_db.is_system_agent",
+        lambda *_args, **_kwargs: False,
+    )
+
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
@@ -881,6 +890,16 @@ class TestDeleteSkillsByAgentId:
         update_call_args = mock_update.call_args
         update_dict = update_call_args[0][0]
         assert update_dict['updated_by'] == 'deleter_user'
+
+    def test_delete_rejects_system_agent(self, monkeypatch):
+        """UT-BE-SAL-012."""
+        monkeypatch.setattr(
+            "backend.database.agent_db.is_system_agent",
+            lambda *_args, **_kwargs: True,
+        )
+
+        with pytest.raises(ValueError, match="managed by the platform"):
+            delete_skills_by_agent_id(1, "tenant1", "user1")
 
 
 # ===== delete_skill_instances_by_skill_id Tests =====
