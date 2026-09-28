@@ -1,6 +1,8 @@
 import logging
 from typing import List, Optional
 
+import httpx
+
 from nexent.core import MessageObserver
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 
@@ -148,6 +150,38 @@ async def _provider_catalog_connectivity_check(
     return any(str(model.get("id", "")).lower() == expected_model_id for model in model_list)
 
 
+async def _image_generation_connectivity_check(
+    model_name: str,
+    base_url: str,
+    api_key: str,
+    ssl_verify: bool = True,
+    timeout_seconds: Optional[float] = None,
+) -> bool:
+    """Probe an image-generation (vlm2) model via /images/generations.
+
+    Image-generation models are not served on the chat-completions endpoint,
+    so the shared VLM chat probe reports them as "model does not exist". A
+    minimal real generation is the only reliable probe; each call produces
+    one billable image, so the payload is kept as small as possible.
+    """
+    url = (base_url or "").rstrip("/")
+    if not url.endswith("/images/generations"):
+        url = f"{url}/images/generations"
+    # Image generation is slower than chat; default well above the 5s used
+    # by the chat-style probes.
+    timeout = timeout_seconds if timeout_seconds else 60.0
+    try:
+        async with httpx.AsyncClient(verify=ssl_verify, timeout=timeout) as client:
+            response = await client.post(
+                url,
+                json={"model": model_name, "prompt": "connectivity check"},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
 async def _perform_connectivity_check(
     model_name: str,
     model_type: str,
@@ -250,7 +284,26 @@ async def _perform_connectivity_check(
             rerank_config,
             "rerank", "rerank", None, model_name=model_name,
         ).health_check()
-    elif model_type in ("vlm", "vlm2", "vlm3", "vlm4"):
+    elif model_type == "vlm2":
+        # Image-generation models are served on /images/generations, not on
+        # chat/completions — the shared VLM chat probe reports them as
+        # "model does not exist". Try the free provider-catalog check first,
+        # then probe the generation endpoint directly.
+        if await _provider_catalog_connectivity_check(
+            model_name=model_name,
+            model_type=model_type,
+            model_api_key=model_api_key,
+            model_factory=model_factory,
+        ):
+            return True
+        connectivity = await _image_generation_connectivity_check(
+            model_name=model_name,
+            base_url=model_base_url,
+            api_key=model_api_key,
+            ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
+        )
+    elif model_type in ("vlm", "vlm3", "vlm4"):
         if await _provider_catalog_connectivity_check(
             model_name=model_name,
             model_type=model_type,
