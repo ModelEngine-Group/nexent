@@ -2104,6 +2104,7 @@ class TestCreateAgentConfig:
                 ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
+                "display_name": "知识助手",
                 "description": "test description",
                 "duty_prompt": "test duty",
                 "constraint_prompt": "test constraint",
@@ -2156,6 +2157,9 @@ class TestCreateAgentConfig:
         mocks["build_components"].assert_called_once()
         mocks["prepare_templates"].assert_awaited_once()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
+        # UT-BE-TRACE-021: preserve the UI name separately from the variable name.
+        assert mocks["agent_config"].call_args.kwargs["name"] == "test_agent"
+        assert mocks["agent_config"].call_args.kwargs["display_name"] == "知识助手"
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
         assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
 
@@ -2381,6 +2385,7 @@ class TestCreateAgentConfig:
             # Verify that AgentConfig was called correctly
             mock_agent_config.assert_called_once_with(
                 name="test_agent",
+                display_name=None,
                 description="test description",
                 prompt_templates={"system_prompt": "populated_system_prompt"},
                 tools=ANY,
@@ -2465,6 +2470,7 @@ class TestCreateAgentConfig:
                 # Verify that AgentConfig was called correctly, including sub-agents
                 mock_agent_config.assert_called_once_with(
                     name="test_agent",
+                    display_name=None,
                     description="test description",
                     prompt_templates={
                         "system_prompt": "populated_system_prompt"},
@@ -2815,6 +2821,7 @@ class TestCreateAgentConfig:
 
             mock_agent_config.assert_called_with(
                 name="test_agent",
+                display_name=None,
                 description="test description",
                 prompt_templates={"system_prompt": "populated_system_prompt"},
                 tools=ANY,
@@ -4658,6 +4665,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -4809,6 +4817,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -5065,6 +5074,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -5097,6 +5107,10 @@ class TestCreateAgentRunInfo:
                 "url": "http://nexent.mcp/sse",
                 "transport": "sse",
                 "httpx_client_factory": create_agent_info_module.create_httpx_client,
+                "headers": {
+                    "X-Tenant-ID": "tenant_1",
+                    "X-Nexent-Internal-Token": create_agent_info_module.TOKEN,
+                },
             }
 
     @pytest.mark.asyncio

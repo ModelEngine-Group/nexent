@@ -11,128 +11,45 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import {
-  Alert,
-  Button,
-  Col,
-  Row,
-  App,
-  Input,
-  Select,
-  Empty,
-  Tooltip,
-  Tag,
-  Table,
-  Space,
-} from "antd";
+import { App } from "antd";
 import {
   Plus,
   ShieldCheck,
   RefreshCw,
-  SlidersHorizontal,
+  Pencil,
   Trash2,
-  Edit3,
+  Loader2,
 } from "lucide-react";
 import { ExclamationCircleFilled } from "@ant-design/icons";
 
-import {
-  MODEL_TYPES,
-  MODEL_STATUS,
-  LAYOUT_CONFIG,
-  MODEL_SOURCES,
-} from "@/const/modelConfig";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { TooltipProvider } from "@/components/ui/tooltip";
+
+import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
+import { usePermission } from "@/hooks/permission/usePermission";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
 import {
-  CapacityCoverage,
   ModelOption,
   ModelType,
-  ModelSource,
   ModelConnectStatus,
 } from "@/types/modelConfig";
-import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import log from "@/lib/logger";
 
-import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
-import { DefaultModelDialog } from "./model/DefaultModelDialog";
+import { ModelAddDialog } from "./model/ModelAddDialog";
+import { ModelEditDialog } from "./model/ModelEditDialog";
+import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
+import { ModelLibraryList } from "./model/ModelLibraryList";
+import {
+  ModelManagerDialog,
+  ConnectionGroup,
+} from "./model/ModelManagerDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
 import { useModelList } from "@/hooks/model/useModelList";
-
-// Fallback labels (zh-CN) for connect statuses missing a translation entry.
-const CONNECT_STATUS_FALLBACK_LABELS: Record<string, string> = {
-  available: "可用",
-  unavailable: "不可用",
-  detecting: "检测中",
-  not_detected: "未检测",
-};
-
-const DEFAULT_USAGE_I18N_KEYS: Record<string, string> = {
-  "llm.main": "modelConfig.option.mainModel",
-  "embedding.embedding": "modelConfig.option.embeddingModel",
-  "embedding.multi_embedding": "modelConfig.option.multiEmbeddingModel",
-  "reranker.reranker": "modelConfig.option.rerankerModel",
-  "multimodal.vlm": "modelConfig.option.imageUnderstandingModel",
-  "multimodal.vlm2": "modelConfig.option.imageGenerationModel",
-  "multimodal.vlm3": "modelConfig.option.videoUnderstandingModel",
-  "multimodal.vlm4": "modelConfig.option.audioUnderstandingModel",
-  "voice.tts": "modelConfig.option.ttsModel",
-  "voice.stt": "modelConfig.option.sttModel",
-};
-
-// Model data structure
-const getModelData = (t: any) => ({
-  llm: {
-    title: t("modelConfig.category.llm"),
-    options: [{ id: "main", name: t("modelConfig.option.mainModel") }],
-  },
-  embedding: {
-    title: t("modelConfig.category.embedding"),
-    options: [
-      {
-        id: MODEL_TYPES.EMBEDDING,
-        name: t("modelConfig.option.embeddingModel"),
-      },
-      {
-        id: MODEL_TYPES.MULTI_EMBEDDING,
-        name: t("modelConfig.option.multiEmbeddingModel"),
-      },
-    ],
-  },
-  reranker: {
-    title: t("modelConfig.category.reranker"),
-    options: [{ id: "reranker", name: t("modelConfig.option.rerankerModel") }],
-  },
-  multimodal: {
-    title: t("modelConfig.category.multimodal"),
-    options: [
-      {
-        id: MODEL_TYPES.VLM,
-        name: t("modelConfig.option.imageUnderstandingModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM2,
-        name: t("modelConfig.option.imageGenerationModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM3,
-        name: t("modelConfig.option.videoUnderstandingModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM4,
-        name: t("modelConfig.option.audioUnderstandingModel"),
-      },
-    ],
-  },
-  voice: {
-    title: t("modelConfig.category.voice"),
-    options: [
-      { id: MODEL_TYPES.TTS, name: t("modelConfig.option.ttsModel") },
-      { id: MODEL_TYPES.STT, name: t("modelConfig.option.sttModel") },
-    ],
-  },
-});
 
 // Define the methods exposed by the component
 export interface ModelConfigSectionRef {
@@ -164,6 +81,10 @@ export const ModelConfigSection = forwardRef<
   const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig, appConfig, saveConfig } = useConfig();
   const modelEngineEnable = appConfig?.modelEngineEnabled ?? false;
+  // #4008: default-slot changes are an update operation; the slot selects
+  // stay visible for read-only users but are disabled.
+  const { can: canPermission } = usePermission();
+  const canUpdateModels = canPermission("model:update");
 
   const { confirm } = useConfirmModal();
 
@@ -171,25 +92,24 @@ export const ModelConfigSection = forwardRef<
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [capacityCoverage, setCapacityCoverage] =
-    useState<CapacityCoverage | null>(null);
 
-  // Default model dialog
-  const [isDefaultDialogOpen, setIsDefaultDialogOpen] = useState(false);
+  // v2.6.1 redesign: add-model dialog (single/batch tab)
+  const [addDialogTab, setAddDialogTab] = useState<"single" | "batch">(
+    "single"
+  );
+
   // Single model edit dialog
   const [editingCardModel, setEditingCardModel] = useState<ModelOption | null>(
     null
   );
 
-  // Filter & pagination
-  const [searchKeyword, setSearchKeyword] = useState<string>("");
-  const [filterType, setFilterType] = useState<ModelType | "all">("all");
-  const [filterSource, setFilterSource] = useState<ModelSource | "all">("all");
-  const [filterStatus, setFilterStatus] = useState<ModelConnectStatus | "all">(
-    "all"
+  // v2.6.1 redesign: batch edit / delete dialog
+  const [managerMode, setManagerMode] = useState<"editGroup" | "deleteGroup">(
+    "editGroup"
   );
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(12);
+  const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [batchUpdating, setBatchUpdating] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   const { invalidate } = useModelList();
   // Error state management
@@ -202,7 +122,6 @@ export const ModelConfigSection = forwardRef<
   const abortControllerRef = useRef<AbortController | null>(null);
   const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const capacityCoverageRequestIdRef = useRef(0);
 
   const scheduleAutoSave = () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -235,12 +154,14 @@ export const ModelConfigSection = forwardRef<
   }, [modelConfig]);
 
   /* ------------------ Missing field highlight ------------------ */
+  // v2.6.1 redesign: the default-model slots are always visible inline (the
+  // old flow opened the DefaultModelDialog first), so highlighting only needs
+  // to mark the slot and scroll it into view.
   useEffect(() => {
     const handleHighlightMissingField = (event: any) => {
       const { field } = event.detail;
       if (field === "llm.main" || field === "embedding.embedding") {
         setErrorFields((prev) => ({ ...prev, [field]: true }));
-        setIsDefaultDialogOpen(true);
         setTimeout(() => {
           const el = document.querySelector<HTMLElement>(
             `[data-error-field="${field}"]`
@@ -274,23 +195,71 @@ export const ModelConfigSection = forwardRef<
     return result;
   }, [selectedModels]);
 
-  /* ------------------ v2.6.0: Table columns (replaces ModelItemCard grid) ------------------ */
-  const modelTypeColors: Record<string, string> = {
-    [MODEL_TYPES.LLM]: "blue",
-    [MODEL_TYPES.EMBEDDING]: "geekblue",
-    [MODEL_TYPES.MULTI_EMBEDDING]: "cyan",
-    [MODEL_TYPES.RERANK]: "purple",
-    [MODEL_TYPES.STT]: "orange",
-    [MODEL_TYPES.TTS]: "magenta",
-    [MODEL_TYPES.VLM]: "green",
-    [MODEL_TYPES.VLM2]: "green",
-    [MODEL_TYPES.VLM3]: "green",
-  };
-
   /* ------------------ Card-level edit / delete ------------------ */
   const handleCardEdit = useCallback((model: ModelOption) => {
     setEditingCardModel(model);
   }, []);
+
+  /**
+   * Blank the default-model slots that reference any of the given display
+   * names (deleted models must not keep occupying a slot). Shared by the
+   * single delete confirm and the batch delete dialog.
+   */
+  const clearDefaultSlotsFor = useCallback(
+    (displayNames: string[]) => {
+      const removed = new Set(displayNames);
+      let configUpdates: any = {};
+      const selectedPairs: [string, string, string][] = [
+        ["llm", "main", "llm"],
+        ["embedding", "embedding", "embedding"],
+        ["embedding", "multi_embedding", "multiEmbedding"],
+        ["reranker", "reranker", "rerank"],
+        ["multimodal", "vlm", "vlm"],
+        ["multimodal", "vlm2", "vlm2"],
+        ["multimodal", "vlm3", "vlm3"],
+        ["multimodal", "vlm4", "vlm4"],
+        ["voice", "stt", "stt"],
+        ["voice", "tts", "tts"],
+      ];
+      const blank = (voice: boolean) => {
+        const base = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+        if (voice) {
+          return {
+            ...base,
+            modelFactory: "",
+            modelAppid: "",
+            accessToken: "",
+          };
+        }
+        return base;
+      };
+      selectedPairs.forEach(([cat, opt, cfgKey]) => {
+        const current = selectedModels[cat]?.[opt];
+        if (current && removed.has(current)) {
+          setSelectedModels((p) => ({
+            ...p,
+            [cat]: { ...p[cat], [opt]: "" },
+          }));
+          if (cfgKey === "embedding" || cfgKey === "multiEmbedding") {
+            configUpdates[cfgKey] = { ...blank(false), dimension: 0 };
+          } else if (cfgKey === "stt" || cfgKey === "tts") {
+            configUpdates[cfgKey] = blank(true);
+          } else {
+            configUpdates[cfgKey] = blank(false);
+          }
+        }
+      });
+      if (Object.keys(configUpdates).length > 0) {
+        updateModelConfig(configUpdates);
+        scheduleAutoSave();
+      }
+    },
+    [selectedModels, updateModelConfig]
+  );
 
   const handleCardDelete = useCallback(
     async (model: ModelOption) => {
@@ -329,252 +298,101 @@ export const ModelConfigSection = forwardRef<
             message.error(msg);
             throw e;
           }
-          // Clear default selections if they reference this model
-          const disp = model.displayName;
-          let configUpdates: any = {};
-          const selectedPairs: [string, string, string][] = [
-            ["llm", "main", "llm"],
-            ["embedding", "embedding", "embedding"],
-            ["embedding", "multi_embedding", "multiEmbedding"],
-            ["reranker", "reranker", "rerank"],
-            ["multimodal", "vlm", "vlm"],
-            ["multimodal", "vlm2", "vlm2"],
-            ["multimodal", "vlm3", "vlm3"],
-            ["voice", "stt", "stt"],
-            ["voice", "tts", "tts"],
-          ];
-          const blank = (voice: boolean) => {
-            const base = {
-              modelName: "",
-              displayName: "",
-              apiConfig: { apiKey: "", modelUrl: "" },
-            };
-            if (voice) {
-              return {
-                ...base,
-                modelFactory: "",
-                modelAppid: "",
-                accessToken: "",
-              };
-            }
-            return base;
-          };
-          selectedPairs.forEach(([cat, opt, cfgKey]) => {
-            if (selectedModels[cat]?.[opt] === disp) {
-              setSelectedModels((p) => ({
-                ...p,
-                [cat]: { ...p[cat], [opt]: "" },
-              }));
-              if (cfgKey === "embedding" || cfgKey === "multiEmbedding") {
-                configUpdates[cfgKey] = {
-                  ...blank(false),
-                  dimension: 0,
-                };
-              } else if (cfgKey === "stt" || cfgKey === "tts") {
-                configUpdates[cfgKey] = blank(true);
-              } else {
-                configUpdates[cfgKey] = blank(false);
-              }
-            }
-          });
-          if (Object.keys(configUpdates).length > 0) {
-            updateModelConfig(configUpdates);
-            scheduleAutoSave();
-          }
+          clearDefaultSlotsFor([model.displayName]);
           message.success(
             t("model.message.deleteSuccess", {
-              name: disp,
-              defaultValue: `已删除：${disp}`,
+              name: model.displayName,
+              defaultValue: `已删除：${model.displayName}`,
             })
           );
           await loadModelLists(true);
         },
       });
     },
-    [message, modal, modelConfig, selectedModels, t, updateModelConfig]
+    [message, modal, t, clearDefaultSlotsFor]
   );
 
-  const modelTableColumns = useMemo(
-    () => [
-      {
-        title: t("modelConfig.table.col.model", { defaultValue: "模型" }),
-        key: "model",
-        width: 240,
-        render: (_: any, m: ModelOption) => (
-          <div className="flex flex-col">
-            <span className="font-medium text-sm">
-              {m.displayName || m.name}
-            </span>
-            <span className="text-xs text-gray-500">{m.name}</span>
-          </div>
-        ),
-      },
-      {
-        title: t("modelConfig.table.col.type", { defaultValue: "类型" }),
-        dataIndex: "type",
-        key: "type",
-        width: 110,
-        render: (type: ModelType) => {
-          // Map raw type ids to the semantic i18n keys used across the app
-          // (add dialog / getModelData). Without this, vlm2/vlm3/vlm4 fall
-          // through to the raw id ("vlm3") because no model.type.vlmN keys
-          // exist in the locale files.
-          const typeLabelKeyMap: Record<string, string> = {
-            llm: "llm",
-            embedding: "embedding",
-            multi_embedding: "multiEmbedding",
-            vlm: "imageUnderstanding",
-            vlm2: "imageGeneration",
-            vlm3: "videoUnderstanding",
-            vlm4: "audioUnderstanding",
-            rerank: "rerank",
-            stt: "stt",
-            tts: "tts",
-          };
-          return (
-            <Tag color={modelTypeColors[type] || "default"}>
-              {t(`model.type.${typeLabelKeyMap[type] ?? type}`, {
-                defaultValue: type,
-              })}
-            </Tag>
-          );
-        },
-      },
-      {
-        title: t("modelConfig.table.col.source", { defaultValue: "来源" }),
-        dataIndex: "source",
-        key: "source",
-        width: 130,
-        render: (source: ModelSource) => <Tag>{source}</Tag>,
-      },
-      {
-        title: t("modelConfig.table.col.connectStatus", {
-          defaultValue: "连通状态",
-        }),
-        dataIndex: "connect_status",
-        key: "connect_status",
-        width: 110,
-        render: (status: ModelConnectStatus, m: ModelOption) => {
-          if (!status) return <span className="text-gray-400">—</span>;
-          const meta = getConnectivityMeta(status as ConnectivityStatusType);
-          const text = t(`model.connectivity.${status}`, {
-            defaultValue: CONNECT_STATUS_FALLBACK_LABELS[status] ?? status,
+  /* ------------------ v2.6.1 redesign: batch operations ------------------ */
+
+  const handleBatchUpdateGroup = useCallback(
+    async (group: ConnectionGroup, patch: { apiKey: string; url: string }) => {
+      setBatchUpdating(true);
+      let failed = 0;
+      for (const m of group.models) {
+        try {
+          // Partial update: only api_key + base_url are sent; the backend
+          // leaves every other field untouched.
+          await modelService.updateSingleModel({
+            currentDisplayName: m.displayName,
+            url: patch.url,
+            apiKey: patch.apiKey,
+            source: m.source,
           });
-          return (
-            <Tooltip title={text}>
-              <Tag
-                color={meta.color}
-                style={{ cursor: "pointer" }}
-                onClick={() => verifyOneModel(m.displayName, m.type)}
-              >
-                {text}
-              </Tag>
-            </Tooltip>
-          );
-        },
-      },
-      {
-        title: t("modelConfig.table.col.context", { defaultValue: "上下文" }),
-        key: "context",
-        width: 100,
-        render: (_: any, m: ModelOption) => {
-          const v = m.contextWindowTokens || m.maxTokens;
-          if (!v) return <span className="text-gray-400">—</span>;
-          return <span>{v.toLocaleString()}</span>;
-        },
-      },
-      {
-        title: t("modelConfig.table.col.maxOutput", {
-          defaultValue: "最大输出",
-        }),
-        key: "maxOutput",
-        width: 100,
-        render: (_: any, m: ModelOption) => {
-          if (!m.maxOutputTokens)
-            return <span className="text-gray-400">—</span>;
-          return <span>{m.maxOutputTokens.toLocaleString()}</span>;
-        },
-      },
-      {
-        title: t("modelConfig.table.col.defaultUsage", {
-          defaultValue: "默认用途",
-        }),
-        key: "defaultUsage",
-        width: 160,
-        render: (_: any, m: ModelOption) => {
-          const slots = defaultSlotMap[m.displayName] || [];
-          if (slots.length === 0)
-            return <span className="text-gray-400">—</span>;
-          return (
-            <Space size={4} wrap>
-              {slots.map((s) => (
-                <Tag key={s} color="geekblue">
-                  {t(DEFAULT_USAGE_I18N_KEYS[s] ?? s, {
-                    defaultValue: s,
-                  })}
-                </Tag>
-              ))}
-            </Space>
-          );
-        },
-      },
-      {
-        title: t("modelConfig.table.col.actions", { defaultValue: "操作" }),
-        key: "actions",
-        width: 110,
-        render: (_: any, m: ModelOption) => (
-          <Space size={4}>
-            <Can permission="model:update">
-              <Tooltip title={t("common.edit", { defaultValue: "编辑" })}>
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<Edit3 size={14} />}
-                  onClick={() => handleCardEdit(m)}
-                />
-              </Tooltip>
-            </Can>
-            <Can permission="model:delete">
-              <Tooltip title={t("common.delete", { defaultValue: "删除" })}>
-                <Button
-                  size="small"
-                  type="text"
-                  danger
-                  icon={<Trash2 size={14} />}
-                  onClick={() => handleCardDelete(m)}
-                />
-              </Tooltip>
-            </Can>
-          </Space>
-        ),
-      },
-    ],
-    [t, defaultSlotMap, modelTypeColors, handleCardEdit, handleCardDelete]
+        } catch (e: any) {
+          failed += 1;
+          log.error("batch update model failed", m.displayName, e);
+        }
+      }
+      setBatchUpdating(false);
+      if (failed === 0) {
+        message.success(
+          t("modelConfig.batchEdit.success", {
+            count: group.models.length,
+            defaultValue: `已更新 ${group.models.length} 个模型`,
+          })
+        );
+      } else {
+        message.warning(
+          t("modelConfig.batchEdit.partialFailure", {
+            failed,
+            total: group.models.length,
+            defaultValue: `${group.models.length} 个模型中 ${failed} 个更新失败`,
+          })
+        );
+      }
+      await loadModelLists(true);
+    },
+    [message, t]
   );
 
-  /* ------------------ Derived: filter & pagination ------------------ */
-  const filteredModels = useMemo<ModelOption[]>(() => {
-    const kw = searchKeyword.trim().toLowerCase();
-    return models.filter((m) => {
-      if (filterType !== "all" && m.type !== filterType) return false;
-      if (filterSource !== "all" && m.source !== filterSource) return false;
-      if (filterStatus !== "all" && m.connect_status !== filterStatus)
-        return false;
-      if (kw) {
-        const hay = [m.name, m.displayName, m.apiUrl, m.apiKey]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (!hay.includes(kw)) return false;
+  const handleBatchDeleteModels = useCallback(
+    async (targets: ModelOption[]) => {
+      setBatchDeleting(true);
+      const failed: string[] = [];
+      for (const m of targets) {
+        try {
+          await modelService.deleteCustomModel(m.displayName, m.source);
+        } catch (e: any) {
+          failed.push(m.displayName);
+          log.error("batch delete model failed", m.displayName, e);
+        }
       }
-      return true;
-    });
-  }, [models, searchKeyword, filterType, filterSource, filterStatus]);
-
-  // Auto jump to page 1 when filters change
-  useEffect(() => {
-    setPage(1);
-  }, [searchKeyword, filterType, filterSource, filterStatus, pageSize]);
+      setBatchDeleting(false);
+      clearDefaultSlotsFor(
+        targets
+          .filter((m) => !failed.includes(m.displayName))
+          .map((m) => m.displayName)
+      );
+      if (failed.length === 0) {
+        message.success(
+          t("modelConfig.batchDelete.success", {
+            count: targets.length,
+            defaultValue: `已删除 ${targets.length} 个模型`,
+          })
+        );
+      } else {
+        message.warning(
+          t("modelConfig.batchDelete.partialFailure", {
+            failed: failed.length,
+            total: targets.length,
+            defaultValue: `${targets.length} 个模型中 ${failed.length} 个删除失败`,
+          })
+        );
+      }
+      await loadModelLists(true);
+    },
+    [message, t, clearDefaultSlotsFor]
+  );
 
   /* ------------------ Connectivity resolution ------------------ */
   const getEmbeddingConnectivity = () => {
@@ -630,21 +448,6 @@ export const ModelConfigSection = forwardRef<
     if (!cfg) return;
     try {
       await invalidate();
-
-      // Capacity coverage only drives the warning banner, so keep it off the
-      // critical path for rendering the model table.
-      const coverageRequestId = ++capacityCoverageRequestIdRef.current;
-      setCapacityCoverage(null);
-      void modelService
-        .getCapacityCoverage()
-        .then((coverage) => {
-          if (coverageRequestId === capacityCoverageRequestIdRef.current) {
-            setCapacityCoverage(coverage);
-          }
-        })
-        .catch((error) => {
-          log.warn("Failed to apply model capacity coverage:", error);
-        });
 
       const allModels = await modelService.getAllModels();
       setModels(allModels);
@@ -934,44 +737,10 @@ export const ModelConfigSection = forwardRef<
   };
 
   const verifyModels = async () => {
-    if (isVerifying || models.length === 0) return;
-    // Verify ALL models in the list (not just the default-model selection):
-    // mark every row as checking, probe in parallel, update rows as they land.
-    setIsVerifying(true);
-    try {
-      await Promise.all(
-        models.map(async (m) => {
-          if (!m.displayName) return;
-          updateModelStatus(m.displayName, m.type, MODEL_STATUS.CHECKING);
-          try {
-            const isConnected = await modelService.verifyCustomModel(
-              m.displayName,
-              m.type
-            );
-            updateModelStatus(
-              m.displayName,
-              m.type,
-              isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
-            );
-          } catch (error: any) {
-            log.error(
-              t("modelConfig.error.verifyCustomModel", {
-                model: m.displayName,
-              }),
-              error
-            );
-            updateModelStatus(m.displayName, m.type, MODEL_STATUS.UNAVAILABLE);
-          }
-        })
-      );
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  /* ------------------ Sync ModelEngine ------------------ */
-  const handleSyncModels = () => {
-    setIsAddModalV2Open(true);
+    // v0 redesign: the button lives in the 默认配置 section, so it verifies
+    // only the models currently occupying default slots — not the whole
+    // library. Non-default models are checked per-row via the list action.
+    await verifyModelsInternal(models);
   };
 
   /* ------------------ Verify single ------------------ */
@@ -1171,369 +940,260 @@ export const ModelConfigSection = forwardRef<
   };
 
   /* ------------------ Select options ------------------ */
-  const modelTypeOptions = useMemo(() => {
-    const list: { value: ModelType | "all"; label: string }[] = [
-      {
-        value: "all",
-        label: t("model.filter.allTypes", { defaultValue: "全部类型" }),
-      },
-    ];
-    const map: [ModelType, string][] = [
-      [MODEL_TYPES.LLM, t("model.type.llm", { defaultValue: "大语言模型" })],
-      [
-        MODEL_TYPES.EMBEDDING,
-        t("model.type.embedding", { defaultValue: "文本嵌入" }),
-      ],
-      [
-        MODEL_TYPES.MULTI_EMBEDDING,
-        t("model.type.multiEmbedding", { defaultValue: "多模态嵌入" }),
-      ],
-      [MODEL_TYPES.RERANK, t("model.type.rerank", { defaultValue: "重排" })],
-      [
-        MODEL_TYPES.VLM,
-        t("model.type.imageUnderstanding", { defaultValue: "图像理解" }),
-      ],
-      [
-        MODEL_TYPES.VLM2,
-        t("model.type.imageGeneration", { defaultValue: "图像生成" }),
-      ],
-      [
-        MODEL_TYPES.VLM3,
-        t("model.type.videoUnderstanding", { defaultValue: "视频理解" }),
-      ],
-      [MODEL_TYPES.STT, t("model.type.stt", { defaultValue: "语音识别" })],
-      [MODEL_TYPES.TTS, t("model.type.tts", { defaultValue: "语音合成" })],
-    ];
-    map.forEach(([v, l]) => list.push({ value: v, label: l }));
-    return list;
-  }, [t]);
 
-  const modelSourceOptions = useMemo(() => {
-    const list: { value: ModelSource | "all"; label: string }[] = [
-      {
-        value: "all",
-        label: t("model.filter.allSources", { defaultValue: "全部来源" }),
-      },
-    ];
-    const sMap: [ModelSource, string][] = [
-      [MODEL_SOURCES.MODELENGINE, "ModelEngine"],
-      [MODEL_SOURCES.SILICON, "SiliconFlow"],
-      [MODEL_SOURCES.OPENAI, "OpenAI"],
-      [MODEL_SOURCES.OPENAI_API_COMPATIBLE, "OpenAI-API-Compatible"],
-      [
-        MODEL_SOURCES.CUSTOM,
-        t("model.source.custom", { defaultValue: "自定义" }),
-      ],
-      [MODEL_SOURCES.DASHSCOPE, "DashScope"],
-      [MODEL_SOURCES.TOKENPONY, "TokenPony"],
-      [MODEL_SOURCES.VOLCENGINE, "VolcEngine"],
-      [MODEL_SOURCES.DEEPSEEK, "DeepSeek"],
-      [MODEL_SOURCES.ZHIPU, "智谱 Z.AI"],
-      [MODEL_SOURCES.ANTHROPIC, "Anthropic Claude"],
-      [MODEL_SOURCES.GOOGLE, "Google Gemini"],
-      [MODEL_SOURCES.MISTRAL, "Mistral"],
-      [MODEL_SOURCES.XAI, "xAI Grok"],
-    ];
-    sMap.forEach(([v, l]) => list.push({ value: v, label: l }));
-    return list;
-  }, [t]);
-
-  const statusOptions = useMemo<
-    { value: ModelConnectStatus | "all"; label: string }[]
-  >(
-    () => [
-      {
-        value: "all",
-        label: t("model.filter.allStatus", { defaultValue: "全部状态" }),
-      },
-      {
-        value: MODEL_STATUS.AVAILABLE,
-        label: t("model.status.available", { defaultValue: "可用" }),
-      },
-      {
-        value: MODEL_STATUS.UNAVAILABLE,
-        label: t("model.status.unavailable", { defaultValue: "不可用" }),
-      },
-      {
-        value: MODEL_STATUS.CHECKING,
-        label: t("model.status.detecting", { defaultValue: "检测中" }),
-      },
-      {
-        value: MODEL_STATUS.UNCHECKED,
-        label: t("model.status.notDetected", { defaultValue: "未检测" }),
-      },
-    ],
-    [t]
+  /* ==================== v2.6.1 redesign: derived slot data ==================== */
+  const modelSlots = useMemo(() => buildModelSlots(t), [t]);
+  const configuredSlotCount = useMemo(
+    () =>
+      Object.values(selectedModels).reduce(
+        (acc, opts) => acc + Object.values(opts).filter(Boolean).length,
+        0
+      ),
+    [selectedModels]
   );
 
   /* ==================== Render ==================== */
   return (
     <>
-      <div
-        style={{
-          width: "100%",
-          margin: "0 auto",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
-      >
-        {/* -------------------- Button row -------------------- */}
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "flex-start",
-            gap: 8,
-            paddingRight: 12,
-            paddingTop: 16,
-            marginLeft: 4,
-            minHeight: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
-            marginBottom: 16,
-          }}
-        >
-          <Can permission="model:update">
-            <Button
-              type="primary"
-              size="middle"
-              icon={<SlidersHorizontal size={16} />}
-              onClick={() => setIsDefaultDialogOpen(true)}
-              ghost
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.setDefaultModels", {
-                  defaultValue: "设置默认模型",
-                })}
-              </span>
-            </Button>
-          </Can>
-          {modelEngineEnable && (
-            <Can permission="model:update">
-              <Button
-                type="primary"
-                size="middle"
-                onClick={handleSyncModels}
-                icon={<RefreshCw size={16} />}
-              >
-                <span className="button-text-full">
-                  {t("modelConfig.button.syncModelEngine")}
+      <TooltipProvider>
+        {/* px-2 matches CARD_HEADER.PADDING so section titles align with the
+          page header ("模型设置") above. h-full: the default-config card
+          takes its natural height; the library section fills the rest and
+          scrolls its list internally. */}
+        <div className="flex h-full w-full flex-col gap-8 px-2">
+          {/* ========== Section 1: 默认配置 (inline slots, v0 redesign) ========== */}
+          <section className="shrink-0">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h3 className="text-base font-semibold text-foreground">
+                  {t("modelConfig.section.defaultConfig", {
+                    defaultValue: "默认配置",
+                  })}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {t("modelConfig.section.defaultConfigHint", {
+                    defaultValue: "未配置模型时默认选用以下模型",
+                  })}
                 </span>
-              </Button>
-            </Can>
-          )}
-          {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
-          <Can permission="model:create">
-            <Button
-              type="primary"
-              size="middle"
-              icon={<Plus size={16} />}
-              onClick={() => setIsAddModalV2Open(true)}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.addModel", {
-                  defaultValue: "添加模型",
-                })}
-              </span>
-            </Button>
-          </Can>
-          <Can permission="model:update">
-            <Button
-              type="primary"
-              size="middle"
-              icon={<ShieldCheck size={16} />}
-              onClick={verifyModels}
-              loading={isVerifying}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.checkConnectivity")}
-              </span>
-            </Button>
-          </Can>
-        </div>
-
-        {/* -------------------- Capacity coverage warning -------------------- */}
-        {capacityCoverage && capacityCoverage.bareCount > 0 && (
-          <Alert
-            type="warning"
-            showIcon
-            title={t("modelConfig.capacityCoverage.warning", {
-              bareCount: capacityCoverage.bareCount,
-              total: capacityCoverage.totalLlmVlm,
-            })}
-            description={t("modelConfig.capacityCoverage.description", {
-              suggestionCount: capacityCoverage.bareModels.filter(
-                (m) => m.suggestionAvailable
-              ).length,
-            })}
-          />
-        )}
-
-        {/* -------------------- Filter bar -------------------- */}
-        <Row gutter={[12, 8]} style={{ padding: "0 4px" }} align="middle">
-          <Col xs={24} md={8} lg={8}>
-            <Input.Search
-              allowClear
-              enterButton
-              placeholder={t("modelConfig.search.placeholder", {
-                defaultValue: "搜索模型名 / 自定义名称 / API 地址",
-              })}
-              value={searchKeyword}
-              onChange={(e) => setSearchKeyword(e.target.value)}
-              onSearch={(v) => setSearchKeyword(v)}
-            />
-          </Col>
-          <Col xs={12} sm={8} md={5} lg={5}>
-            <Select
-              style={{ width: "100%" }}
-              value={filterType}
-              onChange={(v) => setFilterType(v as ModelType | "all")}
-              options={modelTypeOptions}
-            />
-          </Col>
-          <Col xs={12} sm={8} md={5} lg={5}>
-            <Select
-              style={{ width: "100%" }}
-              value={filterSource}
-              onChange={(v) => setFilterSource(v as ModelSource | "all")}
-              options={modelSourceOptions}
-            />
-          </Col>
-          <Col xs={12} sm={8} md={5} lg={5}>
-            <Select
-              style={{ width: "100%" }}
-              value={filterStatus}
-              onChange={(v) => setFilterStatus(v as ModelConnectStatus | "all")}
-              options={statusOptions}
-            />
-          </Col>
-          <Col
-            xs={12}
-            sm={24}
-            md={1}
-            lg={1}
-            style={{ textAlign: "right", color: "#94a3b8", fontSize: 12 }}
-          >
-            <Tooltip
-              title={t("modelConfig.search.totalCount", {
-                count: filteredModels.length,
-                defaultValue: `共 ${filteredModels.length} 条匹配`,
-              })}
-            >
-              <Tag color="geekblue" style={{ margin: 0 }}>
-                {filteredModels.length}/{models.length}
-              </Tag>
-            </Tooltip>
-          </Col>
-        </Row>
-
-        {/* -------------------- Model table (v2.6.0: replaces card grid) -------------------- */}
-        <div
-          style={{
-            width: "100%",
-            padding: "0 4px",
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 240,
-          }}
-        >
-          {filteredModels.length === 0 ? (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Empty
-                description={t("modelConfig.list.empty", {
-                  defaultValue: "暂无匹配的模型，请更换筛选条件或新增模型",
-                })}
-              />
+                <Badge
+                  variant="secondary"
+                  className="tabular-nums text-[10px] font-normal"
+                >
+                  {t("modelConfig.section.configuredCount", {
+                    configured: configuredSlotCount,
+                    total: modelSlots.length,
+                    defaultValue: `已配置 ${configuredSlotCount}/${modelSlots.length}`,
+                  })}
+                </Badge>
+              </div>
+              <Can permission="model:update">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={verifyModels}
+                  disabled={isVerifying}
+                >
+                  {isVerifying ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="size-4" />
+                  )}
+                  {t("modelConfig.button.checkConnectivity")}
+                </Button>
+              </Can>
             </div>
-          ) : (
-            <Table
-              size="small"
-              rowKey={(r) => `${r.id}-${r.displayName}-${r.type}`}
-              columns={modelTableColumns}
-              dataSource={filteredModels}
-              pagination={{
-                current: page,
-                pageSize,
-                total: filteredModels.length,
-                showSizeChanger: true,
-                pageSizeOptions: ["8", "12", "24", "48"],
-                showTotal: (total, range) =>
-                  t("modelConfig.pagination.showTotal", {
-                    range0: range[0],
-                    range1: range[1],
-                    total,
-                    defaultValue: `第 ${range[0]}-${range[1]} / 共 ${total} 条`,
-                  }),
-                onChange: (p, ps) => {
-                  setPage(p);
-                  setPageSize(ps);
-                },
+
+            <Card className="gap-0 p-5 sm:p-6">
+              {/* Legend */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b pb-4 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {t("modelConfig.section.legendTitle", {
+                    defaultValue: "配置说明",
+                  })}
+                </span>
+                <span>
+                  {t("modelConfig.section.legendRequired", {
+                    defaultValue: "标注（必填）的模型系统运行必须配置",
+                  })}
+                </span>
+                <span>
+                  {t("modelConfig.section.legendRecommended", {
+                    defaultValue: "标注（推荐）的模型按需推荐配置",
+                  })}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  {t("modelConfig.section.legendDot", {
+                    defaultValue: "绿色代表已连通",
+                  })}
+                </span>
+              </div>
+
+              {/* Flat slot grid (replaces the DefaultModelDialog). Slots stay
+                  visible for read-only users (model:read) but are disabled —
+                  changing default slots is an update operation (#4008). */}
+              <div className="grid grid-cols-1 gap-x-8 gap-y-5 pt-5 md:grid-cols-2 xl:grid-cols-3">
+                {modelSlots.map((slot) => (
+                  <ModelSlotSelect
+                    key={slot.fieldKey}
+                    slot={slot}
+                    models={models}
+                    value={selectedModels[slot.category]?.[slot.option] ?? ""}
+                    error={!!errorFields[slot.fieldKey]}
+                    disabled={!canUpdateModels}
+                    onChange={(displayName) =>
+                      handleModelChange(slot.category, slot.option, displayName)
+                    }
+                  />
+                ))}
+              </div>
+            </Card>
+          </section>
+
+          {/* ========== Section 2: 模型库 (fills the remaining height) ========== */}
+          <section className="flex min-h-0 w-full flex-1 flex-col gap-3">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h3 className="text-base font-semibold text-foreground">
+                  {t("modelConfig.section.modelLibrary", {
+                    defaultValue: "模型库",
+                  })}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {t("modelConfig.section.modelLibraryHint", {
+                    defaultValue: "管理已添加的全部模型",
+                  })}
+                </span>
+                <Badge
+                  variant="secondary"
+                  className="tabular-nums text-[10px] font-normal"
+                >
+                  {models.length}
+                </Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* v2.6.1: add first, then the rest */}
+                <Can permission="model:create">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setAddDialogTab("single");
+                      setIsAddModalV2Open(true);
+                    }}
+                  >
+                    <Plus className="size-4" />
+                    {t("modelConfig.button.addModel", {
+                      defaultValue: "添加模型",
+                    })}
+                  </Button>
+                </Can>
+                {modelEngineEnable && (
+                  <Can permission="model:update">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAddDialogTab("batch");
+                        setIsAddModalV2Open(true);
+                      }}
+                    >
+                      <RefreshCw className="size-4" />
+                      {t("modelConfig.button.syncModelEngine")}
+                    </Button>
+                  </Can>
+                )}
+                <Can permission="model:update">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setManagerMode("editGroup");
+                      setIsManagerOpen(true);
+                    }}
+                  >
+                    <Pencil className="size-4" />
+                    {t("modelConfig.batchEdit.title", {
+                      defaultValue: "批量修改",
+                    })}
+                  </Button>
+                </Can>
+                <Can permission="model:delete">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => {
+                      setManagerMode("deleteGroup");
+                      setIsManagerOpen(true);
+                    }}
+                  >
+                    <Trash2 className="size-4" />
+                    {t("modelConfig.batchDelete.title", {
+                      defaultValue: "批量删除",
+                    })}
+                  </Button>
+                </Can>
+              </div>
+            </div>
+
+            {/* -------------------- Model library list (v0 redesign) -------------------- */}
+            <ModelLibraryList
+              models={models}
+              defaultSlotMap={defaultSlotMap}
+              onCheck={verifyOneModel}
+              onEdit={handleCardEdit}
+              onDelete={handleCardDelete}
+            />
+          </section>
+
+          {/* -------------------- Dialogs -------------------- */}
+          {/* v2.6.1: add-model dialog (v0 design: single / batch tabs) */}
+          <ModelAddDialog
+            isOpen={isAddModalV2Open}
+            onClose={() => setIsAddModalV2Open(false)}
+            initialTab={addDialogTab}
+            onSuccess={async (newModel) => {
+              // Invalidate FIRST so the refetch completes before loadModelLists
+              // reads the cache (a model create may have auto-configured
+              // default-model slots that must be reflected immediately).
+              await queryClient.invalidateQueries({
+                queryKey: CONFIG_QUERY_KEY,
+              });
+              await loadModelLists(true);
+              if (newModel && newModel.name && newModel.type) {
+                setTimeout(() => {
+                  verifyOneModel(newModel.name, newModel.type);
+                }, 100);
+              }
+            }}
+          />
+
+          {/* v2.6.1 redesign: batch edit / delete by connection group */}
+          <ModelManagerDialog
+            open={isManagerOpen}
+            mode={managerMode}
+            models={models}
+            onClose={() => setIsManagerOpen(false)}
+            onUpdateGroup={handleBatchUpdateGroup}
+            onDeleteModels={handleBatchDeleteModels}
+            updating={batchUpdating}
+            deleting={batchDeleting}
+          />
+
+          {/* v2.6.1: per-model edit dialog (v0 design, single-page form) */}
+          {editingCardModel && (
+            <ModelEditDialog
+              key={editingCardModel.id}
+              model={editingCardModel}
+              onClose={() => setEditingCardModel(null)}
+              onSuccess={async () => {
+                setEditingCardModel(null);
+                await loadModelLists(true);
               }}
-              scroll={{ x: 980 }}
             />
           )}
         </div>
-
-        {/* -------------------- Dialogs -------------------- */}
-        <DefaultModelDialog
-          open={isDefaultDialogOpen}
-          models={models}
-          selectedModels={selectedModels}
-          errorFields={errorFields}
-          onClose={() => setIsDefaultDialogOpen(false)}
-          onChange={handleModelChange}
-          onVerifyModel={verifyOneModel}
-        />
-
-        {/* v2.6.0: new Add Model dialog (Tabs: batch import / custom access) */}
-        <ModelAddDialogV2
-          isOpen={isAddModalV2Open}
-          onClose={() => setIsAddModalV2Open(false)}
-          onSuccess={async (newModel) => {
-            // Invalidate FIRST so the refetch completes before loadModelLists
-            // reads the cache (a model create may have auto-configured
-            // default-model slots that must be reflected immediately).
-            await queryClient.invalidateQueries({ queryKey: CONFIG_QUERY_KEY });
-            await loadModelLists(true);
-            message.success(t("modelConfig.message.addSuccess"));
-            if (newModel && newModel.name && newModel.type) {
-              setTimeout(() => {
-                verifyOneModel(newModel.name, newModel.type);
-              }, 100);
-            }
-          }}
-        />
-
-        <ModelAddDialogV2
-          isOpen={!!editingCardModel}
-          model={editingCardModel}
-          onClose={() => setEditingCardModel(null)}
-          onConnectivityChange={(displayName, modelType, status) => {
-            // Refresh the list row's connect_status in place when the edit
-            // dialog's connectivity probe finishes, so the list doesn't show
-            // a stale status from the last loadModelLists.
-            setModels((prev) =>
-              prev.map((m) =>
-                m.displayName === displayName && m.type === modelType
-                  ? { ...m, connect_status: status }
-                  : m
-              )
-            );
-          }}
-          onSuccess={async () => {
-            setEditingCardModel(null);
-            await loadModelLists(true);
-          }}
-        />
-      </div>
+      </TooltipProvider>
     </>
   );
 });

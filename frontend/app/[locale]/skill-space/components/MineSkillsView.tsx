@@ -547,6 +547,7 @@ function MineSkillCard({
             <Button
               type="primary"
               size="small"
+              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
               icon={<Power className="size-3.5" aria-hidden />}
               onClick={onApplyListing}
             >
@@ -557,6 +558,7 @@ function MineSkillCard({
             <Button
               type="text"
               size="small"
+              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
               icon={<Pencil className="size-3.5" aria-hidden />}
               onClick={onEdit}
             >
@@ -566,6 +568,7 @@ function MineSkillCard({
             <Button
               type="text"
               size="small"
+              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
               icon={<Eye className="size-3.5" aria-hidden />}
               onClick={onView}
             >

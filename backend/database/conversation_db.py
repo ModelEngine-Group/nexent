@@ -3,9 +3,16 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TypedDict
 
-from sqlalchemy import asc, desc, func, insert, select, update
+from sqlalchemy import asc, desc, func, insert, select, text, update
 
+from consts.const import (
+    MAX_CONVERSATION_TURNS,
+    MAX_CONVERSATIONS_PER_USER,
+    MESSAGE_ROLE,
+)
+from consts.error_code import ErrorCode
 from consts.exceptions import (
+    AppException,
     ConversationNotFoundError,
     RuntimeMetadataVersionConflict,
     WorkbenchConfigVersionConflict,
@@ -123,6 +130,70 @@ def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
     return DEFAULT_TENANT_ID
 
 
+def _lock_conversation_limit_scope(session, scope: str) -> None:
+    """Serialize quota checks for one user or conversation within a transaction."""
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": scope},
+    )
+
+
+def _enforce_user_conversation_limit(session, user_id: Optional[str]) -> None:
+    """Reject creation when a user already owns the configured number of conversations."""
+    if not user_id:
+        return
+
+    _lock_conversation_limit_scope(session, f"conversation-user-limit:{user_id}")
+    statement = select(func.count(ConversationRecord.conversation_id)).where(
+        ConversationRecord.created_by == user_id,
+        ConversationRecord.delete_flag == "N",
+    )
+    conversation_count = int(session.scalar(statement) or 0)
+    if conversation_count >= MAX_CONVERSATIONS_PER_USER:
+        raise AppException(
+            ErrorCode.TENANT_RESOURCE_EXCEEDED,
+            "Conversation history limit reached: "
+            f"maximum {MAX_CONVERSATIONS_PER_USER} conversations per user",
+            details={
+                "resource": "conversations",
+                "scope": "user",
+                "limit": MAX_CONVERSATIONS_PER_USER,
+                "current_count": conversation_count,
+            },
+        )
+
+
+def _enforce_conversation_turn_limit(
+    session,
+    conversation_id: int,
+    message_role: str,
+    user_id: Optional[str],
+) -> None:
+    """Reject a new user message when the conversation turn quota is reached."""
+    if not user_id or message_role != MESSAGE_ROLE["USER"]:
+        return
+
+    _lock_conversation_limit_scope(session, f"conversation-turn-limit:{conversation_id}")
+    statement = select(func.count(ConversationMessage.message_id)).where(
+        ConversationMessage.conversation_id == conversation_id,
+        ConversationMessage.message_role == MESSAGE_ROLE["USER"],
+        ConversationMessage.delete_flag == "N",
+    )
+    turn_count = int(session.scalar(statement) or 0)
+    if turn_count >= MAX_CONVERSATION_TURNS:
+        raise AppException(
+            ErrorCode.TENANT_RESOURCE_EXCEEDED,
+            "Conversation turn limit reached: "
+            f"maximum {MAX_CONVERSATION_TURNS} turns per conversation",
+            details={
+                "resource": "conversation_turns",
+                "scope": "conversation",
+                "limit": MAX_CONVERSATION_TURNS,
+                "current_count": turn_count,
+            },
+        )
+
+
 def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         agent_id: Optional[int] = None,
                         chat_mode: Optional[str] = None,
@@ -143,6 +214,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
         Dict[str, Any]: Dictionary containing complete information of the newly created conversation
     """
     with get_db_session() as session:
+        _enforce_user_conversation_limit(session, user_id)
+
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": 'N'}
         if agent_id is not None:
@@ -225,6 +298,13 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         # Ensure conversation_id is integer type
         conversation_id = int(message_data['conversation_id'])
         message_idx = int(message_data['message_idx'])
+        message_role = message_data['role']
+        _enforce_conversation_turn_limit(
+            session=session,
+            conversation_id=conversation_id,
+            message_role=message_role,
+            user_id=user_id,
+        )
 
         minio_files = message_data.get('minio_files')
         # Convert minio_files to JSON string for storage
@@ -234,7 +314,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
                 minio_files = json.dumps(minio_files)
 
         # Prepare data dictionary
-        data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_data['role'],
+        data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_role,
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
                 "delete_flag": 'N', "status": status}
         if user_id:

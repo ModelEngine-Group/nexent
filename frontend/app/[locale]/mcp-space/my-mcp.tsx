@@ -40,6 +40,7 @@ import AddMcpServiceCard from "./components/AddMcpServiceCard";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
 import MineMcpServiceCard, {
   type MineMcpCardItem,
+  type McpConnectionStatus,
 } from "./components/MineMcpServiceCard";
 import MineApplyListingModal from "./components/MineApplyListingModal";
 import MineMcpReviewStatusModal from "./components/MineMcpReviewStatusModal";
@@ -97,6 +98,9 @@ export function MyMcp({
   const [refreshingMineKey, setRefreshingMineKey] = useState<string | null>(
     null
   );
+  const [connectionStatuses, setConnectionStatuses] = useState<
+    Record<string, McpConnectionStatus>
+  >({});
   const [reviewProgressItem, setReviewProgressItem] = useState<{
     item: MineMcpCardItem;
     onlineService?: CommunityMcpCard;
@@ -576,10 +580,11 @@ export function MyMcp({
     setRefreshingMineKey(key);
     try {
       const result = await checkMcpServerHealth(mcpId);
-      if (result.success) {
-        message.success(t("mcpConfig.message.healthCheckSuccess"));
-      } else {
-        message.error(t("mcpConfig.message.healthCheckFailed"));
+      setConnectionStatuses((current) => ({
+        ...current,
+        [key]: result.success ? "success" : "failed",
+      }));
+      if (!result.success) {
         // If MCP is enabled and health check fails, auto-disable it
         if (
           item.kind === "local" &&
@@ -590,7 +595,7 @@ export function MyMcp({
       }
       await refreshMineData();
     } catch {
-      message.error(t("mcpConfig.message.healthCheckFailed"));
+      setConnectionStatuses((current) => ({ ...current, [key]: "failed" }));
     } finally {
       setRefreshingMineKey(null);
     }
@@ -715,6 +720,7 @@ export function MyMcp({
                   }
                   onHealthCheck={handleHealthCheck}
                   healthChecking={refreshingMineKey === getMineItemKey(item)}
+                  connectionStatus={connectionStatuses[key] ?? "unchecked"}
                 />
               );
             }}

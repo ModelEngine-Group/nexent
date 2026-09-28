@@ -33,7 +33,6 @@ from .models import (
     ManagerState,
     ThreadManagerSnapshot,
 )
-from .telemetry import get_thread_telemetry
 
 
 logger = logging.getLogger("thread_manager")
@@ -105,7 +104,7 @@ class ThreadManager:
         self._completed_count = 0
         self._rejected_count = 0
         self._metrics = ThreadMetrics()
-        self._telemetry = telemetry or get_thread_telemetry()
+        self._telemetry = telemetry
         self._lock = threading.RLock()
         self.state = ManagerState.CREATED
 
@@ -681,6 +680,8 @@ class ThreadManager:
         dedicated=None,
         **fields,
     ):
+        if self._telemetry is None:
+            return
         if dedicated is None:
             dedicated = execution.execution_id in self._dedicated_execution_ids
         try:

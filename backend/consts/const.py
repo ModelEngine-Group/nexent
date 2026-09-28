@@ -109,7 +109,18 @@ AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 
 # Container-internal official skills ZIP directory
-OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
+OFFICIAL_SKILLS_ZIP_PATH = os.getenv(
+    "OFFICIAL_SKILLS_ZIP_PATH", "/mnt/nexent/official-skills-zip"
+)
+
+# Container-internal official agents bundle directory (one JSON per agent)
+OFFICIAL_AGENTS_PATH = os.getenv(
+    "OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents"
+)
+
+OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "")
+SYSTEM_TENANT_ID = "system"
+SYSTEM_USER_ID = "system"
 
 
 # Preview Configuration
@@ -217,6 +228,8 @@ MAX_USERS_PER_TENANT = _positive_int_env("MAX_USERS_PER_TENANT", 10_000)
 MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
 MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
 MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
+MAX_CONVERSATION_TURNS = _positive_int_env("MAX_CONVERSATION_TURNS", 100)
+MAX_CONVERSATIONS_PER_USER = _positive_int_env("MAX_CONVERSATIONS_PER_USER", 1_000)
 MAX_AGENTS_PER_TENANT = _positive_int_env("MAX_AGENTS_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration

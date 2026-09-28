@@ -1,5 +1,6 @@
 """Unit tests for backend.apps.agent_repository_app module."""
 
+import importlib
 import json
 import os
 import sys
@@ -16,6 +17,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
+# Load the real sync module before this API test installs shared dependency stubs.
+# Otherwise its MagicMock remains in sys.modules when sync service tests collect.
+importlib.import_module("services.official_agent_sync_service")
 sys.modules.setdefault("services.agent_repository_service", MagicMock())
 sys.modules.setdefault("utils.auth_utils", MagicMock())
 
@@ -23,7 +27,7 @@ consts_model = types.ModuleType("consts.model")
 
 
 class _AgentRepositoryListingCreateRequest(BaseModel):
-    icon: Optional[str] = None
+    icon_url: Optional[str] = None
     downloads: int = Field(0, ge=0)
     tags: Optional[List[str]] = None
     tool_count: Optional[int] = Field(None, ge=0)
@@ -35,8 +39,14 @@ class _SkillResolution(BaseModel):
     new_name: Optional[str] = None
 
 
+class _KnowledgeBaseResolution(BaseModel):
+    knowledge_name: str
+    action: str
+
+
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
 consts_model.SkillResolution = _SkillResolution
+consts_model.KnowledgeBaseResolution = _KnowledgeBaseResolution
 
 class _TagAssignmentFilter(BaseModel):
     definition_id: int
@@ -69,11 +79,105 @@ _ForbiddenError = consts_exceptions_mock.ForbiddenError
 _AppException = consts_exceptions_mock.AppException
 _SkillDuplicateError = consts_exceptions_mock.SkillDuplicateError
 
-from apps.agent_repository_app import agent_repository_router
+from apps.agent_repository_app import agent_repository_router, sync_official_agents_api
 
 app = FastAPI()
 app.include_router(agent_repository_router)
 client = TestClient(app)
+
+
+def test_upload_repository_icon_uses_separate_route(mocker):
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    upload = mocker.patch(
+        "apps.agent_repository_app.upload_agent_repository_icon_impl",
+        new_callable=AsyncMock,
+        return_value={"icon_url": "/api/repository/agent/7/versions/2/icon/image-id"},
+    )
+    response = client.post(
+        "/repository/agent/7/versions/2/icon",
+        files={"file": ("icon.png", b"image", "image/png")},
+    )
+    assert response.status_code == 200
+    upload.assert_awaited_once_with(7, 2, "tenant-1", "user-1", b"image")
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code"),
+    [
+        (ValueError("invalid icon"), 400),
+        (_UnauthorizedError("no listing access"), 403),
+    ],
+)
+def test_upload_repository_icon_maps_service_errors(mocker, error, status_code):
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    upload = mocker.patch(
+        "apps.agent_repository_app.upload_agent_repository_icon_impl",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    response = client.post(
+        "/repository/agent/7/versions/2/icon",
+        files={"file": ("icon.png", b"image", "image/png")},
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["detail"] == str(error)
+    upload.assert_awaited_once_with(7, 2, "tenant-1", "user-1", b"image")
+
+
+def test_repository_icon_read_requires_listing_access(mocker):
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    read = mocker.patch(
+        "apps.agent_repository_app.get_agent_repository_icon_impl",
+        side_effect=FileNotFoundError("Repository icon not found"),
+    )
+    response = client.get("/repository/agent/7/versions/2/icon/image-id")
+    assert response.status_code == 404
+    read.assert_called_once_with(7, 2, "image-id", "tenant-1")
+
+
+@pytest.mark.asyncio
+async def test_sync_official_agents_api_accepts_loopback_request(mocker):
+    request = MagicMock()
+    request.client.host = "127.0.0.1"
+    mock_sync = mocker.patch(
+        "apps.agent_repository_app.sync_official_agents",
+        new_callable=AsyncMock,
+        return_value=[{"name": "medical-assistant"}],
+    )
+
+    response = await sync_official_agents_api(
+        request,
+        profiles="medical",
+    )
+
+    assert response.body == (
+        b'{"synchronized":1,"items":[{"name":"medical-assistant"}]}'
+    )
+    mock_sync.assert_awaited_once_with(
+        profiles="medical",
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_official_agents_api_rejects_non_loopback_request():
+    request = MagicMock()
+    request.client.host = "172.20.0.5"
+
+    with pytest.raises(Exception) as error:
+        await sync_official_agents_api(request)
+
+    assert error.value.status_code == 403
 
 
 @pytest.fixture
@@ -550,7 +654,7 @@ def test_create_agent_repository_listing_api_passes_card_fields(mocker, mock_aut
     }
 
     payload = {
-        "icon": "🤖",
+        "icon_url": None,
         "tags": ["代码审查", "自定义"],
         "downloads": 0,
     }
@@ -928,6 +1032,10 @@ def test_import_agent_from_repository_api_passes_tenant_id(
         tenant_id="test_tenant_id",
         authorization=mock_auth_header["Authorization"],
         skill_resolutions=None,
+        model_ids=None,
+        embedding_model_ids=None,
+        knowledge_base_resolutions=None,
+        user_id="test_user_id",
         return_root_id=True,
     )
 

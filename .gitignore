@@ -97,3 +97,5 @@ agent_repository_frontend
 .code-review-graph/
 
 .codex/skills/openspec-*
+# Added by Serena MCP
+.serena/
