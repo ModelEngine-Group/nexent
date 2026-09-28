@@ -215,7 +215,30 @@ def test_sync_bundle_upserts_official_repository_record():
         repository_id=88,
         publisher_tenant_id=sync_service.SYSTEM_TENANT_ID,
         user_id=sync_service.SYSTEM_USER_ID,
-        updates={"name": "medical-assistant"},
+        updates={
+            "name": "medical-assistant",
+            "display_name": "Root Agent",
+            "description": "Root description",
+            "author": "Nexent",
+            "tags": [],
+            "tool_count": 0,
+            "version_name": "Official",
+            "icon": "medical-icon",
+            "version_no": 1,
+            "agent_info_json": {
+                "agent_id": 601,
+                "knowledge_bases": [
+                    {
+                        "logical_index_name": "kb-1",
+                        "display_name": "公文写作",
+                        "description": "Official guidance",
+                        "documents": [],
+                    }
+                ],
+            },
+            "status": sync_service.STATUS_SHARED,
+            "content": "Official Nexent agent",
+        },
     )
 
 

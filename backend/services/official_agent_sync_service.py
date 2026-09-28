@@ -128,7 +128,25 @@ def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
         repository_id=repository_id,
         publisher_tenant_id=SYSTEM_TENANT_ID,
         user_id=SYSTEM_USER_ID,
-        updates={"name": bundle.name},
+        # Official bundles are file-backed templates. Re-synchronizing the
+        # same bundle/version must refresh its card metadata and snapshot too;
+        # otherwise edits to agent.json remain invisible because the generic
+        # repository upsert intentionally only refreshes status for an
+        # unchanged version.
+        updates={
+            "name": bundle.name,
+            "display_name": repository_data["display_name"],
+            "description": repository_data["description"],
+            "author": repository_data["author"],
+            "tags": repository_data["tags"],
+            "tool_count": repository_data["tool_count"],
+            "version_name": repository_data["version_name"],
+            "icon": repository_data["icon"],
+            "version_no": repository_data["version_no"],
+            "agent_info_json": repository_data["agent_info_json"],
+            "status": repository_data["status"],
+            "content": repository_data["content"],
+        },
     )
     return {"name": bundle.name, "agent_repository_id": repository_id, "updated": updated}
 
