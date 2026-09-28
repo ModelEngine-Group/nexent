@@ -1,6 +1,6 @@
 """Tests for runtime-owned evaluation dispatch."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -8,10 +8,62 @@ from fastapi import HTTPException
 import apps.agent_evaluation_runtime_app as runtime_app
 from apps.agent_evaluation_runtime_app import (
     EvaluationRunRequest,
+    TrialRunRequest,
     dispatch_evaluation_run_api,
+    trial_run_evaluation_api,
 )
 from consts.evaluation_status import EvalRunStatus
 from consts.exceptions import AppException
+
+
+@pytest.mark.asyncio
+async def test_trial_run_uses_internal_identity_and_runtime_executor(monkeypatch):
+    monkeypatch.setattr(runtime_app, "verify_internal_runtime_jwt", lambda _: ("u1", "t1"))
+    executor = AsyncMock(return_value={"answer": "ok", "scores": {"judge": 1.0}})
+    monkeypatch.setattr(runtime_app, "_load_trial_executor", lambda: executor)
+
+    result = await trial_run_evaluation_api(
+        TrialRunRequest(
+            agent_id=7,
+            agent_version_no=3,
+            query="hello",
+            judge_model_id=99,
+            evaluator_ids=[5],
+        ),
+        "internal-token",
+    )
+
+    assert result == {"answer": "ok", "scores": {"judge": 1.0}}
+    executor.assert_awaited_once_with(
+        tenant_id="t1",
+        user_id="u1",
+        agent_id=7,
+        agent_version_no=3,
+        query="hello",
+        judge_model_id=99,
+        evaluator_ids=[5],
+        language="zh",
+    )
+
+
+@pytest.mark.asyncio
+async def test_trial_run_rejects_missing_internal_token_without_executing(monkeypatch):
+    monkeypatch.setattr(
+        runtime_app,
+        "verify_internal_runtime_jwt",
+        MagicMock(side_effect=ValueError("invalid token")),
+    )
+    load_executor = MagicMock()
+    monkeypatch.setattr(runtime_app, "_load_trial_executor", load_executor)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await trial_run_evaluation_api(
+            TrialRunRequest(agent_id=7, query="hello", judge_model_id=99),
+            None,
+        )
+
+    assert exc_info.value.status_code == 401
+    load_executor.assert_not_called()
 
 
 @pytest.mark.asyncio

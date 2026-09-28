@@ -1,6 +1,7 @@
 """Unit tests for backend.apps.northbound_app module."""
 import sys
 import os
+from http import HTTPStatus
 
 # The conftest.py sets up all mocks
 
@@ -23,6 +24,7 @@ from consts.exceptions import (
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
     RuntimeUpstreamError,
+    TenantResourceLimitError,
     NotFoundException,
     UnauthorizedError,
     SignatureValidationError,
@@ -185,6 +187,39 @@ def test_create_api_users_batch_endpoint_is_exposed_by_northbound_router():
         group_id=None,
         count=1,
     )
+
+
+def test_create_api_users_batch_returns_tenant_limit_error():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    limit_error = TenantResourceLimitError(
+        "Tenant user limit reached: maximum 10000 users per tenant",
+        resource="users",
+        scope="tenant",
+        limit=10000,
+        current_count=10000,
+    )
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.create_api_users_batch", side_effect=limit_error):
+        mock_ctx.return_value = ctx
+
+        response = client.post(
+            "/nb/v1/api-users/batch",
+            headers=_build_headers(),
+            json={"role": "USER", "count": 1},
+        )
+
+    assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+    assert response.json() == {
+        "code": "120104",
+        "message": "Tenant user limit reached: maximum 10000 users per tenant",
+        "details": {
+            "resource": "users",
+            "scope": "tenant",
+            "limit": 10000,
+            "current_count": 10000,
+        },
+    }
 
 
 def test_create_api_users_batch_endpoint_maps_validation_error():
@@ -1739,18 +1774,14 @@ def test_get_agent_knowledge_bases_http_exception_passthrough():
         assert resp.json()["detail"] == "forbidden"
 
 
-@pytest.mark.parametrize("enable_hitl", [False, True])
-def test_run_chat_passes_hitl_flag(enable_hitl):
-    from fastapi.responses import StreamingResponse
-
-    async def chunks():
-        yield b'data: {"type":"human_run","content":{}}\n\n'
-
-    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock), \
-            patch("apps.northbound_app.start_streaming_chat", new_callable=AsyncMock) as start:
-        start.return_value = StreamingResponse(chunks())
-        response = client.post("/nb/v1/chat/run", json={
-            "agent_name": "assistant", "query": "help", "enable_hitl": enable_hitl,
+@pytest.mark.parametrize("field,value", [
+    ("enable_hitl", True), ("enable_hitl", False), ("hitl_run_id", None),
+    ("hitl_run_id", "old-run"), ("hitl_after_event", 0),
+])
+def test_retired_control_fields_rejected_before_northbound_execution(field, value):
+    with patch("apps.northbound_app.start_streaming_chat", new_callable=AsyncMock) as run:
+        response = client.post("/nb/v1/chat/run", headers=_build_headers(), json={
+            "query": "Continue", "agent_name": "Analyst", field: value,
         })
-    assert response.status_code == 200
-    assert start.call_args.kwargs["enable_hitl"] is enable_hitl
+        assert response.status_code == 400
+        run.assert_not_awaited()

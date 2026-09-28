@@ -30,7 +30,12 @@ patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes and models
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import (
+    NotFoundException,
+    TenantResourceLimitError,
+    ValidationError,
+    UnauthorizedError,
+)
 from consts.model import (
     GroupCreateRequest, GroupUpdateRequest,
     GroupUserRequest, GroupListRequest, SetDefaultGroupRequest,
@@ -125,6 +130,37 @@ class TestGroupCreation:
             assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
             assert "Group name already exists" in data["detail"]
+
+    def test_create_group_limit_returns_standard_429_payload(self):
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.create_group') as mock_create_group:
+            mock_get_user.return_value = ("user-123", "tenant-123")
+            mock_create_group.side_effect = TenantResourceLimitError(
+                "Tenant group limit reached: maximum 1000 groups per tenant",
+                resource="groups",
+                scope="tenant",
+                limit=1000,
+                current_count=1000,
+            )
+
+            response = client.post(
+                "/groups",
+                json={
+                    "tenant_id": "tenant-123",
+                    "group_name": "Second Group",
+                    "group_description": "Test Description",
+                },
+                headers={"Authorization": "Bearer token"},
+            )
+
+            assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+            assert response.json()["code"] == "120104"
+            assert response.json()["details"] == {
+                "resource": "groups",
+                "scope": "tenant",
+                "limit": 1000,
+                "current_count": 1000,
+            }
 
     def test_create_group_unexpected_error(self):
         """Test group creation with unexpected error"""

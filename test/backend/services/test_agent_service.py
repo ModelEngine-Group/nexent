@@ -15,6 +15,58 @@ import pytest
 from fastapi.responses import StreamingResponse
 from fastapi import Request
 
+
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_hides_system_agent_before_capability_reads(monkeypatch):
+    """UT-BE-SAL-010: ordinary detail lookup must not disclose a system Agent."""
+    from backend.management.services.agent import service as agent_service
+
+    monkeypatch.setattr(
+        agent_service,
+        "search_agent_info_by_agent_id",
+        lambda *_args, **_kwargs: {
+            "agent_id": 7,
+            "tenant_id": "tenant-a",
+            "name": "workbench_main",
+            "agent_origin": "SYSTEM",
+            "system_key": "workbench_main",
+        },
+    )
+    tool_lookup = MagicMock()
+    monkeypatch.setattr(agent_service, "search_tools_for_sub_agent", tool_lookup)
+
+    with pytest.raises(agent_service.ForbiddenError, match="not accessible"):
+        await agent_service.get_agent_info_impl(
+            agent_id=7,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    tool_lookup.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_agent_with_skills_rejects_system_agent_before_skill_reads(monkeypatch):
+    """UT-BE-SAL-010 and UT-BE-SAL-011: reject before Skill reads."""
+    from backend.management.services.agent import management as agent_service
+
+    monkeypatch.setattr(
+        agent_service,
+        "get_current_user_info",
+        lambda _authorization: ("user-a", "tenant-a", "USER"),
+    )
+    monkeypatch.setattr(agent_service, "is_system_agent", lambda *_args: True)
+    skill_collector = MagicMock()
+    monkeypatch.setattr(agent_service, "collect_skill_zip_entries", skill_collector)
+
+    with pytest.raises(agent_service.ForbiddenError, match="cannot be exported"):
+        await agent_service.export_agent_with_skills_impl(
+            agent_id=7,
+            authorization="Bearer token",
+        )
+
+    skill_collector.assert_not_called()
+
 # =============================================================================
 # STEP 1: Set up ALL sys.modules mocks BEFORE any backend imports
 # =============================================================================
@@ -410,10 +462,8 @@ def mock_convert_list_to_string(items):
 
     import management.services.agent.service as agent_service
     from management.services.agent.service import update_agent_info_impl
-    from management.services.agent.service import get_creating_sub_agent_info_impl
     from management.services.agent.service import list_all_agent_info_impl
     from management.services.agent.service import get_agent_info_impl
-    from management.services.agent.service import get_creating_sub_agent_id_service
     from management.services.agent.service import get_enable_tool_id_by_agent_id
     from management.services.agent.service import (
         get_agent_call_relationship_impl,
@@ -615,10 +665,8 @@ import management.services.agent.naming as naming_service
 import management.services.agent.run as agent_run_service
 import management.services.agent.service as agent_service
 from management.services.agent.service import update_agent_info_impl
-from management.services.agent.service import get_creating_sub_agent_info_impl
 from management.services.agent.service import list_all_agent_info_impl
 from management.services.agent.service import get_agent_info_impl
-from management.services.agent.service import get_creating_sub_agent_id_service
 from management.services.agent.service import get_enable_tool_id_by_agent_id
 from management.services.agent.service import (
     get_agent_call_relationship_impl,
@@ -669,6 +717,14 @@ def reset_mocks():
     """Reset all mocks before each test to ensure a clean test environment."""
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
+    agent_run_service.get_conversation_service.reset_mock(
+        return_value=True,
+        side_effect=True,
+    )
+    agent_run_service.get_conversation_service.return_value = {
+        "conversation_id": 123,
+        "knowledge_scope": None,
+    }
     yield
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
@@ -720,61 +776,6 @@ async def test_get_enable_tool_id_by_agent_id():
         # Assert
         assert sorted(result) == [1, 3, 4]
         mock_query.assert_called_once_with(agent_id=123, tenant_id="test_tenant")
-
-
-@patch("management.services.agent.management.create_agent")
-@patch("management.services.agent.service.search_blank_sub_agent_by_main_agent_id")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_id_service_existing_agent(
-    mock_search, mock_create
-):
-    """
-    Test retrieving an existing sub-agent ID associated with a main agent.
-
-    This test verifies that when a sub-agent already exists for a main agent:
-    1. The function returns the existing sub-agent ID
-    2. No new agent is created (create_agent is not called)
-    """
-    # Setup - existing sub agent found
-    mock_search.return_value = 456
-
-    # Execute
-    result = await get_creating_sub_agent_id_service(
-        tenant_id="test_tenant", user_id="test_user"
-    )
-
-    # Assert
-    assert result == 456
-    mock_search.assert_called_once_with(tenant_id="test_tenant")
-    mock_create.assert_not_called()
-
-
-@patch("management.services.agent.service.create_agent")
-@patch("management.services.agent.service.search_blank_sub_agent_by_main_agent_id")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_id_service_new_agent(mock_search, mock_create):
-    """
-    Test creating a new sub-agent when none exists for a main agent.
-
-    This test verifies that when no sub-agent exists for a main agent:
-    1. A new agent is created with appropriate parameters
-    2. The function returns the newly created agent's ID
-    """
-    # Setup - no existing sub agent found
-    mock_search.return_value = None
-    mock_create.return_value = {"agent_id": 789}
-
-    # Execute
-    result = await get_creating_sub_agent_id_service(
-        tenant_id="test_tenant", user_id="test_user"
-    )
-
-    # Assert
-    assert result == 789
-    mock_search.assert_called_once_with(tenant_id="test_tenant")
-    mock_create.assert_called_once_with(
-        agent_info={"enabled": False}, tenant_id="test_tenant", user_id="test_user"
-    )
 
 
 @patch("management.services.agent.service.SkillService")
@@ -958,80 +959,6 @@ async def test_get_agent_info_impl_with_version_no(
     mock_check_availability.assert_called_once()
     # Verify query_current_version_no is called for version_no > 0
     mock_query_current_version_no.assert_called_once_with(123, "test_tenant")
-
-
-@patch("management.services.agent.service.get_model_by_model_id")
-@patch("management.services.agent.service.query_sub_agents_id_list")
-@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
-@patch("management.services.agent.service.search_agent_info_by_agent_id")
-@patch("management.services.agent.service.get_creating_sub_agent_id_service")
-@patch("management.services.agent.service.get_current_user_info")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_info_impl_success(
-    mock_get_current_user_info,
-    mock_get_creating_sub_agent,
-    mock_search_agent_info,
-    mock_get_enable_tools,
-    mock_query_sub_agents_id,
-    mock_get_model_by_model_id,
-):
-    """
-    Test successful retrieval of creating sub-agent information.
-
-    This test verifies that:
-    1. The function correctly gets the current user and tenant IDs
-    2. It retrieves or creates the sub-agent ID
-    3. It fetches the sub-agent's information and enabled tools
-    4. It returns a complete data structure with the sub-agent information
-    """
-    # Setup
-    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
-    mock_get_creating_sub_agent.return_value = 456
-    mock_search_agent_info.return_value = {
-        "model_ids": None,
-        "model_names": "test_model",
-        "name": "agent_name",
-        "display_name": "display name",
-        "description": "description...",
-        "max_steps": 5,
-        "business_description": "Sub agent",
-        "duty_prompt": "Sub duty prompt",
-        "constraint_prompt": "Sub constraint prompt",
-        "few_shots_prompt": "Sub few shots prompt",
-    }
-    mock_get_enable_tools.return_value = [1, 2]
-    mock_query_sub_agents_id.return_value = [789]
-
-    # Mock get_model_by_model_id - return None for model_id=None
-    mock_get_model_by_model_id.return_value = None
-
-    # Execute
-    # Ensure the sub agent id remains as initially configured (456)
-    mock_get_enable_tools.return_value = [1, 2]
-    result = await get_creating_sub_agent_info_impl(authorization="Bearer token")
-
-    # Assert
-    # W2 added `requested_output_tokens` to the response shape at
-    # agent_service.py:1112. The mocked `search_agent_info` payload does not
-    # include the key, so `agent_info.get("requested_output_tokens")` is None
-    # in the returned dict.
-    expected_result = {
-        "agent_id": 456,
-        "name": "agent_name",
-        "display_name": "display name",
-        "description": "description...",
-        "enable_tool_id_list": [1, 2],
-        "model_ids": None,
-        "model_names": "test_model",
-        "max_steps": 5,
-        "requested_output_tokens": None,
-        "business_description": "Sub agent",
-        "duty_prompt": "Sub duty prompt",
-        "constraint_prompt": "Sub constraint prompt",
-        "few_shots_prompt": "Sub few shots prompt",
-        "sub_agent_id_list": [789],
-    }
-    assert result == expected_result
 
 
 @patch("management.services.agent.service.create_or_update_tool_by_tool_info")
@@ -3164,6 +3091,19 @@ async def test_list_all_agent_info_impl_success(
             "create_time": 2,
             "current_version_no": 1,  # Published
         },
+        {
+            "agent_id": 99,
+            "name": "workbench_main",
+            "display_name": "Nexent Workbench",
+            "description": "Protected system Agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "admin_user",
+            "create_time": 3,
+            "current_version_no": 1,
+            "agent_origin": "SYSTEM",
+            "system_key": "workbench_main",
+        },
     ]
 
     # Configure mocks
@@ -3183,6 +3123,8 @@ async def test_list_all_agent_info_impl_success(
 
     # Assert
     assert len(result) == 2
+    # UT-BE-SAL-009: ownership metadata cannot expose a system Agent.
+    assert {agent["agent_id"] for agent in result} == {1, 2}
     assert result[0]["agent_id"] == 1
     assert result[0]["name"] == "Agent 1"
     assert result[0]["display_name"] == "Display Agent 1"
@@ -4086,6 +4028,12 @@ async def test_export_agent_by_agent_id_success(
             usage="test_mcp_server",
         ),
     ]
+    mock_tools.append(ToolConfig(
+        class_name="AidpSearchTool", name="aidp_search", source="local",
+        params={"api_key": "secret", "server_url": "private", "tenant_id": "old", "kds_list": ["kb"]},
+        metadata={"allowed_kds_set": ["kb"], "kds_name_to_id_map": {"KB": "kb"}},
+        description="AIDP search", inputs="query", output_type="string", usage=None,
+    ))
     mock_create_tool_config.return_value = mock_tools
 
     mock_sub_agent_ids = [456, 789]
@@ -4104,7 +4052,10 @@ async def test_export_agent_by_agent_id_success(
     assert result.agent_id == 123
     assert result.tenant_id == "test_tenant"
     assert result.name == "Test Agent"
-    assert len(result.tools) == 5
+    assert len(result.tools) == 6
+    aidp_tool = next(tool for tool in result.tools if tool.class_name == "AidpSearchTool")
+    assert aidp_tool.params == {"kds_list": ["kb"]}
+    assert aidp_tool.metadata == {}
     assert result.managed_agents == mock_sub_agent_ids
 
     # Verify KnowledgeBaseSearchTool metadata is empty
@@ -4709,6 +4660,8 @@ async def test_prepare_agent_run(
         is_debug=False,
         override_version_no=None,
         override_model_id=None,
+        reasoning_effort=None,
+        reasoning_budget_tokens=None,
         requested_output_tokens=4096,
         tool_params=None,
         conversation_id=123,
@@ -6318,6 +6271,47 @@ async def test_generate_stream_unexpected_exception_emits_error(monkeypatch, cap
     assert "Traceback" in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_generate_stream_without_channel_emits_preparation_error(monkeypatch):
+    """Debug/no-memory runs return a safe SSE error even without a channel."""
+    agent_request = AgentRequest(
+        agent_id=9,
+        conversation_id=9010,
+        query="q",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.prepare_agent_run",
+        AsyncMock(side_effect=TypeError("invalid persisted tool params")),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "AgentRunAlreadyActiveError",
+        type("AgentRunAlreadyActiveError", (Exception,), {}),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "MemoryPreparationException",
+        type("MemoryPreparationException", (Exception,), {}),
+    )
+
+    chunks = []
+    async for chunk in agent_run_service.generate_stream(
+        agent_request,
+        user_id="u",
+        tenant_id="t",
+        enable_memory=False,
+        channel=None,
+    ):
+        chunks.append(chunk)
+
+    assert len(chunks) == 1
+    assert '"type": "error"' in chunks[0]
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in chunks[0]
+
+
 async def test_generate_stream_registers_and_streams(monkeypatch):
     """generate_stream(enable_memory=False) should prepare run info, register it and stream data without memory tokens."""
     # Prepare AgentRequest & Request
@@ -6603,6 +6597,61 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
 
     assert not any("memory_search" in chunk for chunk in out)
     assert "data: fb1\n\n" in out
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_reports_recursive_fallback_failure(monkeypatch):
+    agent_request = AgentRequest(
+        agent_id=8,
+        conversation_id=888,
+        query="q3",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    fake_channel = MagicMock()
+    fake_channel.publish = AsyncMock()
+    original_generate_stream = agent_run_service.generate_stream
+
+    monkeypatch.setattr(
+        "management.services.agent.run.build_memory_context",
+        MagicMock(return_value=MagicMock(user_config=MagicMock(memory_switch=True))),
+        raising=False,
+    )
+
+    async def raise_prepare(*_, **__):
+        raise Exception("prep failed")
+
+    async def fail_recursive_fallback(*_, **kwargs):
+        if kwargs.get("enable_memory") is False:
+            raise RuntimeError("fallback failed")
+        async for chunk in original_generate_stream(*_, **kwargs):
+            yield chunk
+
+    monkeypatch.setattr(
+        "management.services.agent.run.prepare_agent_run",
+        raise_prepare,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.generate_stream",
+        fail_recursive_fallback,
+        raising=False,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in original_generate_stream(
+            agent_request,
+            user_id="u",
+            tenant_id="t",
+            enable_memory=True,
+            channel=fake_channel,
+        )
+    ]
+
+    assert chunks
+    assert fake_channel.publish.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -10718,81 +10767,6 @@ async def test_list_all_agent_info_impl_creator_no_group_overlap_hidden(
 # ============================================================================
 
 
-# Tests for get_creating_sub_agent_info_impl exception handling
-@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
-@patch("management.services.agent.service.query_sub_agents_id_list")
-@patch("management.services.agent.service.search_agent_info_by_agent_id")
-@patch("management.services.agent.service.get_creating_sub_agent_id_service")
-@patch("management.services.agent.service.get_current_user_info")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_info_impl_get_id_exception(
-    mock_get_user_info,
-    mock_get_sub_agent_id,
-    mock_search_info,
-    mock_query_sub_agents,
-    mock_get_enable_tool,
-):
-    """Test that exception getting sub agent ID is raised as ValueError."""
-    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
-    mock_get_sub_agent_id.side_effect = Exception("Database error getting sub agent id")
-
-    with pytest.raises(ValueError, match="Failed to get creating sub agent id"):
-        await get_creating_sub_agent_info_impl(authorization="Bearer token")
-
-
-@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
-@patch("management.services.agent.service.query_sub_agents_id_list")
-@patch("management.services.agent.service.search_agent_info_by_agent_id")
-@patch("management.services.agent.service.get_creating_sub_agent_id_service")
-@patch("management.services.agent.service.get_current_user_info")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_info_impl_search_info_exception(
-    mock_get_user_info,
-    mock_get_sub_agent_id,
-    mock_search_info,
-    mock_query_sub_agents,
-    mock_get_enable_tool,
-):
-    """Test that exception searching agent info is raised as ValueError."""
-    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
-    mock_get_sub_agent_id.return_value = 123
-    mock_search_info.side_effect = Exception("Database error searching agent info")
-
-    with pytest.raises(ValueError, match="Failed to get sub agent info"):
-        await get_creating_sub_agent_info_impl(authorization="Bearer token")
-
-
-@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
-@patch("management.services.agent.service.query_sub_agents_id_list")
-@patch("management.services.agent.service.search_agent_info_by_agent_id")
-@patch("management.services.agent.service.get_creating_sub_agent_id_service")
-@patch("management.services.agent.service.get_current_user_info")
-@pytest.mark.asyncio
-async def test_get_creating_sub_agent_info_impl_get_tool_ids_exception(
-    mock_get_user_info,
-    mock_get_sub_agent_id,
-    mock_search_info,
-    mock_query_sub_agents,
-    mock_get_enable_tool,
-):
-    """Test that exception getting tool IDs is raised as ValueError."""
-    mock_get_user_info.return_value = ("user_1", "tenant_1", "en")
-    mock_get_sub_agent_id.return_value = 123
-    mock_search_info.return_value = {
-        "name": "sub_agent",
-        "display_name": "Sub Agent",
-        "description": "desc",
-        "model_name": "model",
-        "model_id": 1,
-        "max_steps": 10,
-        "business_description": "biz desc",
-    }
-    mock_get_enable_tool.side_effect = Exception("Database error getting tool ids")
-
-    with pytest.raises(ValueError, match="Failed to get sub agent enable tool id list"):
-        await get_creating_sub_agent_info_impl(authorization="Bearer token")
-
-
 # Tests for get_agent_by_name_impl
 @patch("management.services.agent.management.query_version_list")
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
@@ -11289,7 +11263,7 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
     mock_agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"], tools=[]),
         },
     )
 
@@ -11337,7 +11311,7 @@ async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
     mock_agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"], tools=[]),
         },
     )
 
@@ -11378,9 +11352,13 @@ async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_a
     agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["ExistingSkill"]),
+            "1": types.SimpleNamespace(
+                agent_id=1, skill_names=["ExistingSkill"], tools=[]
+            ),
             "2": types.SimpleNamespace(
-                agent_id=2, skill_names=["RenamedSkill", "NewSkill", "MissingSkill"]
+                agent_id=2,
+                skill_names=["RenamedSkill", "NewSkill", "MissingSkill"],
+                tools=[],
             ),
         },
     )
@@ -12016,7 +11994,7 @@ async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_
     mock_tool = MagicMock()
     mock_tool.class_name = "TestTool"
     mock_tool.source = "local"
-    mock_tool.params = ["param1", "param2"]
+    mock_tool.params = {"param1": "value1", "param2": "value2"}
     mock_tool.metadata = {}
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
@@ -14126,9 +14104,8 @@ async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("hitl", [False, True])
 async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
-    monkeypatch, caplog, hitl
+    monkeypatch, caplog
 ):
     """A failed final batch emits a safe error and marks the message failed."""
     from management.services.agent import service as agent_service
@@ -14160,8 +14137,7 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
         agent_run_service, "update_message_status", fallback_status, raising=False
     )
     run_info = MagicMock()
-    run_info.human_interaction = object() if hitl else None
-    run_info.attempt_outcome = "completed" if hitl else None
+    run_info.attempt_outcome = "completed"
 
     with caplog.at_level("ERROR", logger=agent_service.logger.name):
         collected = [
@@ -14175,8 +14151,7 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
     assert SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[-1]
     assert "Failed to persist assistant stream batch" in caplog.text
     fallback_status.assert_called_once_with(4242, "failed", "user")
-    if hitl:
-        assert run_info.attempt_outcome == "recovery_required"
+    assert run_info.attempt_outcome == "failed"
 
 
 @pytest.mark.asyncio
@@ -20227,3 +20202,23 @@ def test_is_agent_running_returns_false_when_run_is_missing(mocker):
     )
 
     assert agent_run_service.is_agent_running(44, "user-id") is False
+
+
+@pytest.mark.asyncio
+async def test_import_agent_with_skills_rejects_parameters_before_dependency_writes(mocker):
+    from management.services.agent import management
+    from utils.agent_transfer_utils import AgentToolImportError
+
+    mocker.patch.object(management, "get_current_user_info", return_value=("user", "tenant", "en"))
+    mocker.patch.object(management, "query_all_tools", return_value=[{
+        "class_name": "AidpSearchTool", "source": "local", "params": [{"name": "kds_list"}],
+    }])
+    skill_service = mocker.patch.object(management, "SkillService")
+    import_agents = mocker.patch.object(management, "import_agent_impl", new_callable=AsyncMock)
+    snapshot = types.SimpleNamespace(agent_info={"1": types.SimpleNamespace(tools=[
+        types.SimpleNamespace(class_name="AidpSearchTool", source="local", params={"unknown": 1}),
+    ])})
+    with pytest.raises(AgentToolImportError, match="unknown"):
+        await management.import_agent_with_skills_impl(snapshot, [], "Bearer token")
+    skill_service.assert_not_called()
+    import_agents.assert_not_called()

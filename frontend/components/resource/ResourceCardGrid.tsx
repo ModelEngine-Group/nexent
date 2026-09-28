@@ -31,6 +31,8 @@ export interface ResourceCardGridProps<T> {
   onCreate?: () => void;
   columns?: number;
   rows?: number;
+  /** Constrain the card grid to this height and distribute cards across rows. */
+  gridHeight?: number;
   /** Keep support for callers that need to place another item before the cards. */
   headerItem?: ReactNode;
   emptyState?: ReactNode;
@@ -57,6 +59,7 @@ export default function ResourceCardGrid<T>({
   onCreate,
   columns,
   rows,
+  gridHeight,
   headerItem,
   emptyState = <Empty />,
   paginateItems = true,
@@ -91,6 +94,8 @@ export default function ResourceCardGrid<T>({
   const hasSearchControl = onSearchChange !== undefined || search !== undefined;
   const gridStyle = {
     "--resource-card-columns": columnCount,
+    "--resource-card-rows": rowCount,
+    ...(gridHeight !== undefined ? { height: `${gridHeight}px` } : {}),
   } as CSSProperties;
 
   useEffect(() => {
@@ -135,12 +140,16 @@ export default function ResourceCardGrid<T>({
         </div>
       ) : null}
       <div
-        className="grid grid-cols-1 gap-5 sm:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))]"
+        className={`grid grid-cols-1 gap-5 min-[576px]:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))] ${
+          gridHeight !== undefined
+            ? "grid-rows-[repeat(var(--resource-card-rows),minmax(0,1fr))]"
+            : ""
+        }`}
         style={gridStyle}
       >
         {headerItem != null && currentPage === 1 ? headerItem : null}
         {createCardNode}
-        {itemCount === 0 ? (
+        {itemCount === 0 && !createCardNode ? (
           <div className="col-span-full flex min-h-[220px] items-center justify-center">
             {emptyState}
           </div>
@@ -148,7 +157,7 @@ export default function ResourceCardGrid<T>({
           visibleItems.map((item, index) => renderItem(item, index))
         )}
       </div>
-      {itemCount > 0 && totalPages > 1 && onPageChange ? (
+      {itemCount > 0 && onPageChange ? (
         <div className="mt-7 flex justify-end">
           <Pagination
             current={currentPage}

@@ -3,7 +3,8 @@ system_prompt: |-
 
   ## 多轮对话规则
 
-  - 如果需求缺少关键信息，先提出一个简洁的澄清问题；该轮不要输出 XML 控制块。
+  - 每次响应都必须以独占一行的 `<FINAL_ANSWER>` 开始，并以独占一行的 `</FINAL_ANSWER>` 结束；外层之外不得有任何内容。
+  - 如果需求缺少关键信息，在 `<FINAL_ANSWER>` 内提出一个简洁的澄清问题；该轮不要输出 `<SKILL>`、`<FILE>` 或 `<SUMMARY>`。
   - 修改技能时同时参考对话历史和当前技能快照。
   {% if target_files %}
   - 本轮是定向文件修改。只能修改这些文件：{{ target_files | join(', ') }}。
@@ -15,7 +16,7 @@ system_prompt: |-
   - 输出顺序固定为 `<SKILL>`、零个或多个 `<FILE>`、`<SUMMARY>`。
   - 所有 XML 控制标签必须独占一行，控制块外不要包裹 Markdown 代码围栏。
   - 不要在澄清、思考或总结文本中引用或解释 XML 控制标签；它们只能作为真实结构独占一行输出。
-  - 输出结构时直接从 `<SKILL>` 开始，不要添加 Markdown 代码围栏或语言标识。
+  - 输出结构时在 `<FINAL_ANSWER>` 后直接输出 `<SKILL>`，不要添加 Markdown 代码围栏或语言标识。
   {% endif %}
 
   技能由多个文件组成，包括：核心描述文件（SKILL.md）、示例文档、脚本代码等。
@@ -60,6 +61,7 @@ system_prompt: |-
 
   ### 单文件场景（仅需要 SKILL.md）
 
+  <FINAL_ANSWER>
   <SKILL>
   ---
   name: your-skill-name
@@ -77,9 +79,11 @@ system_prompt: |-
   <SUMMARY>
   这里是你对用户的友好说明，如技能已创建、功能亮点等
   </SUMMARY>
+  </FINAL_ANSWER>
 
   ### 多文件场景（需要 SKILL.md + 其他文件）
 
+  <FINAL_ANSWER>
   <SKILL>
   ---
   name: your-skill-name
@@ -109,6 +113,7 @@ system_prompt: |-
   <SUMMARY>
   这里是你对用户的友好说明，如技能已创建、功能亮点等
   </SUMMARY>
+  </FINAL_ANSWER>
 
   ### 文件引用声明规则（重要）
 

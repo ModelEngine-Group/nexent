@@ -323,6 +323,7 @@ def test_search_version_by_version_no_found(monkeypatch, mock_session):
     # This is needed because agent_version_db imports get_db_session and as_dict at module level
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+    db_models_mock.AgentVersion.tenant_id.__eq__.reset_mock()
     
     result = search_version_by_version_no(agent_id=1, tenant_id="tenant1", version_no=1)
     
@@ -330,6 +331,7 @@ def test_search_version_by_version_no_found(monkeypatch, mock_session):
     assert result["version_no"] == 1
     assert result["version_name"] == "v1.0"
     assert result["status"] == STATUS_RELEASED
+    db_models_mock.AgentVersion.tenant_id.__eq__.assert_called_once_with("tenant1")
 
 
 def test_search_version_by_version_no_not_found(monkeypatch, mock_session):

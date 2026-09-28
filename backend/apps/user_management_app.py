@@ -16,7 +16,9 @@ from consts.exceptions import (
     UserRegistrationException,
     AppException,
     UnauthorizedError,
+    TenantResourceLimitError,
     ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from consts.error_code import ErrorCode
 from services.cas_service import build_logout_url, CasAuthenticationError
@@ -75,6 +77,12 @@ async def signup(request: UserSignUpRequest):
         logging.error(f"User registration failed by invite code: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="INVITE_CODE_INVALID")
+    except TenantResourceLimitError as e:
+        logging.warning("User registration rejected by resource limit: %s", e)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(e),
+        )
     except ValidationError as e:
         detail = str(e)
         if detail == ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL:

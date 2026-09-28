@@ -3,6 +3,7 @@ import sys
 import types
 import importlib.util
 from pathlib import Path
+from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 
 from test.common.test_mocks import bootstrap_test_env
@@ -28,6 +29,15 @@ class AgentHistory(BaseModel):
 class ValidationError(Exception):
     """Mock ValidationError for testing."""
     pass
+
+
+class WorkbenchError(ValidationError):
+    """Safe runtime boundary error used by the generation overlay."""
+
+    def __init__(self, code, status_code=422):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(code)
 
 
 class MCPConnectionError(Exception):
@@ -71,6 +81,7 @@ sys.modules["consts.capability_profiles"].CATALOG = {}
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
+consts_exceptions_module.WorkbenchError = WorkbenchError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
@@ -736,7 +747,7 @@ class TestGetSkillScriptTools:
     """Tests for the _get_skill_script_tools function"""
 
     def test_get_skill_script_tools_success(self):
-        """Test case for successfully getting skill script tools"""
+        """UT-BE-WMA-019: standard runtime injects upload/download helpers."""
         mock_tool_config.reset_mock()
         with patch('consts.const.CONTAINER_SKILLS_PATH', "/container/skills"):
             result = _get_skill_script_tools(
@@ -2475,6 +2486,68 @@ class TestCreateAgentConfig:
                 )
 
     @pytest.mark.asyncio
+    async def test_create_agent_config_mounts_runtime_sub_agents_without_relation_write(self):
+        """Workbench children are pinned request inputs, not persisted relations."""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]) as mock_query_sub, \
+                patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock, return_value=[]), \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock, return_value={"system_prompt": "manager"}), \
+                patch('backend.agents.create_agent_info.get_model_by_model_id', return_value={"display_name": "test_model"}):
+
+            mock_search_agent.return_value = {
+                "name": "workbench_main",
+                "description": "root",
+                "model_ids": [123],
+                "max_steps": 5,
+            }
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id=99,
+            )
+            child = Mock()
+            child.name = "published-name"
+            child.invocation_name = "published-name"
+            child.display_name = "Published name"
+
+            with patch(
+                'backend.agents.create_agent_info.create_agent_config',
+                new_callable=AsyncMock,
+                return_value=child,
+            ) as recursive_create:
+                mock_agent_config.reset_mock()
+                await create_agent_config(
+                    99,
+                    "tenant_1",
+                    "user_1",
+                    runtime_sub_agent_mounts=[{
+                        "agent_id": 7,
+                        "version_no": 3,
+                        "runtime_ref": "agent:7:v3",
+                        "invocation_name": "agent_7_v3",
+                        "display_name": "Research",
+                    }],
+                )
+
+            recursive_create.assert_awaited_once()
+            assert recursive_create.await_args.kwargs["agent_id"] == 7
+            assert recursive_create.await_args.kwargs["version_no"] == 3
+            assert recursive_create.await_args.kwargs["runtime_sub_agent_mounts"] is None
+            assert child.name == "agent_7_v3"
+            assert child.runtime_ref == "agent:7:v3"
+            assert child.display_name == "Research"
+            assert mock_agent_config.call_args.kwargs["managed_agents"] == [child]
+            mock_query_sub.assert_called_once_with(
+                main_agent_id=99, tenant_id="tenant_1", version_no=0
+            )
+
+    @pytest.mark.asyncio
     async def test_create_agent_config_with_pinned_sub_agent_version(self):
         """Test sub-agent config uses pinned selected_agent_version_no from relation"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
@@ -2532,10 +2605,11 @@ class TestCreateAgentConfig:
                 )
                 mock_recursive_create.assert_called_once()
                 assert mock_recursive_create.call_args.kwargs["version_no"] == 3
+                assert mock_sub_agent_config.invocation_name == "sub_agent"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_memory(self):
-        """Test case for creating agent configuration with memory"""
+        """UT-BE-WMA-018: standard Agent configuration preserves memory."""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
@@ -3828,6 +3902,88 @@ class TestCreateAgentConfig:
 class TestCreateModelConfigList:
     """Tests for the create_model_config_list function"""
 
+    def test_reasoning_helpers_filter_model_fields_and_resolve_effort(self):
+        module = create_agent_info_module
+
+        assert module._is_thinking_enabled(None) is False
+        assert module._is_thinking_enabled({"enable_thinking": True}) is True
+        assert module._is_thinking_enabled({"enable_thinking": False}) is False
+        assert module._is_thinking_enabled({"reasoning_effort": "high"}) is True
+
+        assert module._build_extra_body({
+            "enable_thinking": True,
+            "reasoning_effort": "high",
+            "temperature": 0.2,
+            "__custom__": {"top_k": 4},
+        }) == {"enable_thinking": True, "temperature": 0.2, "top_k": 4}
+
+        supported = {"status": "supported", "levels": ["low", "high"], "default": "high"}
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "low"}, supported
+        ) == "low"
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "medium"}, supported
+        ) == "high"
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True}, {"status": "supported", "levels": [], "default": None}
+        ) is None
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True}, {"status": "unsupported"}
+        ) is None
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "high"},
+            {"status": "unsupported"},
+        ) == "high"
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "auto"}, supported
+        ) is None
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": False, "reasoning_effort": "high"}, supported
+        ) is None
+
+        budget_capability = {
+            "status": "supported",
+            "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+        }
+        assert module._resolve_model_reasoning_budget(
+            {"enable_thinking": True, "reasoning_budget_tokens": 64},
+            budget_capability,
+        ) == 128
+        assert module._resolve_model_reasoning_budget(
+            {"enable_thinking": True, "reasoning_budget_tokens": 65536},
+            budget_capability,
+        ) == 32768
+        assert module._resolve_model_reasoning_budget(
+            {"enable_thinking": True, "reasoning_budget_tokens": 4096},
+            {"status": "supported", "controls": []},
+        ) == 4096
+        for value in (True, 0, -1, "4096"):
+            assert module._resolve_model_reasoning_budget(
+                {"enable_thinking": True, "reasoning_budget_tokens": value},
+                budget_capability,
+            ) is None
+
+    def test_reasoning_capability_resolver_delegates_to_catalog(self):
+        module = create_agent_info_module
+        capability = {"status": "supported", "levels": ["low"], "default": "low"}
+        loader = types.ModuleType("configs.model_catalog_loader")
+        resolver = MagicMock(return_value=capability)
+        loader.resolve_reasoning_capability = resolver
+        configs = types.ModuleType("configs")
+        configs.__path__ = []
+        with patch.dict(
+            sys.modules,
+            {"configs": configs, "configs.model_catalog_loader": loader},
+        ):
+            assert module._resolve_reasoning_capability(
+                "openai/o3", "https://api.openai.com/v1", "openai"
+            ) == capability
+        resolver.assert_called_once_with(
+            model_name="openai/o3",
+            base_url="https://api.openai.com/v1",
+            provider_hint="openai",
+        )
+
     @pytest.mark.asyncio
     async def test_create_model_config_list(self):
         """Test case for model configuration list creation"""
@@ -3910,6 +4066,37 @@ class TestCreateModelConfigList:
             assert calls[3][1]['api_key'] == "main_key"
             assert calls[3][1]['model_name'] == "main_model_name"
             assert calls[3][1]['url'] == "http://main.url"
+
+    @pytest.mark.asyncio
+    async def test_create_model_config_list_includes_reasoning_metadata(self):
+        mock_model_config.reset_mock()
+        capability = {"status": "supported", "levels": ["low", "high"], "default": "high"}
+        with patch("backend.agents.create_agent_info.get_model_records") as records, \
+                patch("backend.agents.create_agent_info.tenant_config_manager") as manager, \
+                patch("backend.agents.create_agent_info.get_model_name_from_config", return_value="default"), \
+                patch("backend.agents.create_agent_info.add_repo_to_name", return_value="openai/o3"), \
+                patch("backend.agents.create_agent_info._resolve_reasoning_capability", return_value=capability):
+            records.return_value = [{
+                "display_name": "O3",
+                "api_key": "key",
+                "model_repo": "openai",
+                "model_name": "o3",
+                "base_url": "https://api.openai.com/v1",
+                "model_factory": "openai",
+                "extra_params": {"enable_thinking": True, "reasoning_effort": "low"},
+            }]
+            manager.get_model_config.return_value = {
+                "api_key": "key",
+                "model_name": "default",
+                "base_url": "https://api.openai.com/v1",
+            }
+
+            await create_model_config_list("tenant-1")
+
+        first_call = mock_model_config.call_args_list[0].kwargs
+        assert first_call["enable_thinking"] is True
+        assert first_call["reasoning_effort"] == "low"
+        assert first_call["reasoning_capability"] == capability
 
     @pytest.mark.asyncio
     async def test_create_model_config_list_empty_database(self):
@@ -4085,6 +4272,384 @@ class TestCreateAgentRunInfo:
     """Tests for the create_agent_run_info function"""
 
     @pytest.mark.asyncio
+    async def test_create_agent_run_info_applies_reasoning_overrides(self):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort="high",
+            reasoning_capability={"status": "supported", "levels": ["low", "high"]},
+            extra_body={"keep": True, "remove": True},
+        )
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[selected],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={
+                "model_params_override": {
+                    "7": {
+                        "extra_params": {
+                            "enable_thinking": False,
+                            "reasoning_effort": "high",
+                            "__custom__": {"remove": None, "added": "yes"},
+                        },
+                        "reasoning_effort": "low",
+                    }
+                }
+            },
+        ), patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            return_value={"display_name": "selected"},
+        ), patch(
+            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.urljoin",
+            return_value="http://nexent.mcp/sse",
+        ), patch(
+            "backend.agents.create_agent_info.threading"
+        ) as threading_mock:
+            threading_mock.Event.return_value = "stop_event"
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+            )
+
+        assert selected.enable_thinking is False
+        assert selected.reasoning_effort == "low"
+        assert selected.extra_body == {"keep": True, "added": "yes"}
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_applies_budget_override(self):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort="auto",
+            reasoning_budget_tokens=None,
+            reasoning_capability={
+                "status": "supported",
+                "levels": [],
+                "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+            },
+            extra_body=None,
+        )
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[selected],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={
+                "model_params_override": {
+                    "7": {"extra_params": {"enable_thinking": True, "reasoning_budget_tokens": 4096}}
+                }
+            },
+        ), patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            return_value={"display_name": "selected"},
+        ), patch(
+            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.urljoin",
+            return_value="http://nexent.mcp/sse",
+        ), patch("backend.agents.create_agent_info.threading") as threading_mock:
+            threading_mock.Event.return_value = "stop_event"
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+            )
+
+        assert selected.reasoning_budget_tokens == 4096
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_validates_request_budget(self):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort=None,
+            reasoning_budget_tokens=None,
+            reasoning_capability={
+                "status": "supported",
+                "levels": [],
+                "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+            },
+            extra_body=None,
+        )
+        common_patches = [
+            patch(
+                "backend.agents.create_agent_info.join_minio_file_description_to_query",
+                new_callable=AsyncMock,
+                return_value="processed_query",
+            ),
+            patch(
+                "backend.agents.create_agent_info.create_model_config_list",
+                new_callable=AsyncMock,
+                return_value=[selected],
+            ),
+            patch(
+                "backend.agents.create_agent_info.create_agent_config",
+                new_callable=AsyncMock,
+                return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+            ),
+            patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={}),
+            patch(
+                "backend.agents.create_agent_info.get_remote_mcp_server_list",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("backend.agents.create_agent_info.filter_mcp_servers_and_tools", return_value=[]),
+            patch("backend.agents.create_agent_info.urljoin", return_value="http://nexent.mcp/sse"),
+            patch("backend.agents.create_agent_info.threading"),
+        ]
+        with ExitStack() as stack:
+            for item in common_patches:
+                stack.enter_context(item)
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+                reasoning_budget_tokens=4096,
+            )
+
+        assert selected.reasoning_budget_tokens == 4096
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("enable_thinking", "extra_effort", "override_effort", "expected_enabled", "expected_effort"),
+        [
+            (True, "medium", None, True, "medium"),
+            (False, "high", None, False, "high"),
+            ("invalid", 123, None, True, "high"),
+            (True, 123, "low", True, "low"),
+        ],
+    )
+    async def test_create_agent_run_info_covers_reasoning_override_boundaries(
+        self, enable_thinking, extra_effort, override_effort, expected_enabled, expected_effort
+    ):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort="high",
+            reasoning_capability={"status": "supported", "levels": ["low", "medium", "high"]},
+            extra_body={"keep": True},
+        )
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[selected],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={
+                "model_params_override": {
+                    "7": {
+                        "extra_params": {
+                            "enable_thinking": enable_thinking,
+                            "reasoning_effort": extra_effort,
+                        },
+                        "reasoning_effort": override_effort,
+                    }
+                }
+            },
+        ), patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            return_value={"display_name": "selected"},
+        ), patch(
+            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.urljoin",
+            return_value="http://nexent.mcp/sse",
+        ), patch(
+            "backend.agents.create_agent_info.threading"
+        ) as threading_mock:
+            threading_mock.Event.return_value = "stop_event"
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+            )
+
+        assert selected.enable_thinking is expected_enabled
+        assert selected.reasoning_effort == expected_effort
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "model_config",
+        [
+            None,
+            types.SimpleNamespace(
+                cite_name="selected",
+                enable_thinking=False,
+                reasoning_capability={"status": "supported", "levels": ["low", "high"]},
+            ),
+            types.SimpleNamespace(
+                cite_name="selected",
+                enable_thinking=True,
+                reasoning_capability={"status": "supported", "levels": ["low"]},
+            ),
+        ],
+    )
+    async def test_create_agent_run_info_rejects_invalid_reasoning_effort(self, model_config):
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[] if model_config is None else [model_config],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected"),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={},
+        ):
+            with pytest.raises(ValidationError, match="does not support"):
+                await create_agent_run_info(
+                    agent_id="agent-1",
+                    minio_files=[],
+                    query="query",
+                    history=[],
+                    user_id="user-1",
+                    tenant_id="tenant-1",
+                    language="zh",
+                    is_debug=True,
+                    reasoning_effort="high",
+                )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "reasoning_effort, expected_effort, capability",
+        [
+            (
+                "high",
+                "high",
+                {"status": "supported", "levels": ["low", "high"]},
+            ),
+            (
+                "auto",
+                None,
+                {"status": "supported", "levels": ["low", "high"]},
+            ),
+            ("high", "high", None),
+        ],
+    )
+    async def test_create_agent_run_info_accepts_valid_reasoning_effort(
+        self, reasoning_effort, expected_effort, capability
+    ):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort=None,
+            reasoning_capability=capability,
+            extra_body=None,
+        )
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[selected],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={},
+        ), patch(
+            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.urljoin",
+            return_value="http://nexent.mcp/sse",
+        ), patch(
+            "backend.agents.create_agent_info.threading"
+        ) as threading_mock:
+            threading_mock.Event.return_value = "stop_event"
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+                reasoning_effort=reasoning_effort,
+            )
+
+        assert selected.reasoning_effort == expected_effort
+
+    @pytest.mark.asyncio
     async def test_create_agent_run_info_success(self):
         """Test case for successfully creating agent run info with dict format mcp_host"""
         mock_agent_run_info.reset_mock()
@@ -4148,6 +4713,7 @@ class TestCreateAgentRunInfo:
                 workspace_run_id=ANY,
                 tenant_id="tenant_1",
                 minio_files=[],
+                user_context=None,
             )
 
             # Verify that other functions were called correctly
@@ -6823,6 +7389,38 @@ class TestDispatchProfileHitMetric:
 # ============================================================================
 
 
+@pytest.mark.asyncio
+async def test_runtime_knowledge_records_reach_tool_constructor_without_mutation(mocker):
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    original = [{"name": "aidp_search", "class_name": "AidpSearchTool", "params": []}]
+    runtime = [{"name": "knowledge_base_search", "class_name": "KnowledgeBaseSearchTool",
+                "description": "Search", "inputs": "{}", "output_type": "string",
+                "params": [{"name": "top_k", "default": 8},
+                           {"name": "index_names", "default": ["old"]}]}]
+    before = deepcopy(runtime)
+    prefix = "backend.agents.create_agent_info."
+    mocker.patch(prefix + "_resolve_runtime_tool_records", return_value=original)
+    mocker.patch(prefix + "discover_langchain_tools", new_callable=AsyncMock, return_value=[])
+    mocker.patch(prefix + "search_agent_info_by_agent_id", return_value={"name": "root"})
+    mocker.patch(prefix + "get_vector_db_core", return_value=MagicMock())
+    mocker.patch(prefix + "get_embedding_model_by_index_name", return_value=(MagicMock(), None, None))
+    mocker.patch(prefix + "get_knowledge_name_map_by_index_names", return_value={"new": "Selected"})
+    mocker.patch(prefix + "ElasticSearchService.filter_accessible_indices", return_value=["new"])
+    mocker.patch(prefix + "ToolConfig", side_effect=lambda **kwargs: SimpleNamespace(metadata=None, **kwargs))
+    configs = await create_agent_info_module.create_tool_config_list(
+        1, "tenant", "user", runtime_knowledge_tools=runtime,
+        tool_params={"agents": {"root": {"tools": {"knowledge_base_search": {"index_names": ["new"]}}}}},
+    )
+    assert len(configs) == 1
+    assert configs[0].params["top_k"] == 8
+    assert configs[0].params["index_names"] == ["new"]
+    assert configs[0].metadata["allowed_index_names"] == ["new"]
+    assert runtime == before
+    assert original[0]["class_name"] == "AidpSearchTool"
+
+
 class TestKBPermissionFilteringInCreateToolConfigList:
     """Tests for knowledge base permission filtering in create_tool_config_list."""
 
@@ -6957,6 +7555,65 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             assert len(result) == 1
             assert mock_tc_instance.params["index_names"] == ["kb1", "kb2"]
             assert mock_tc_instance.metadata["allowed_index_names"] == []
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_normalizes_null_index_names(self):
+        """A persisted null index_names value behaves like an empty KB selection."""
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_tools_for_sub_agent"
+            ) as mock_tools,
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                return_value={"name": "workbench_main"},
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_vector_db_core",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_embedding_model_by_index_name"
+            ) as mock_get_embedding,
+            patch(
+                "backend.agents.create_agent_info.ToolConfig"
+            ) as mock_tool_config,
+        ):
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": None},
+                    {"name": "rerank", "default": False},
+                ],
+            }]
+
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+
+            instance = MockToolConfigInstance()
+
+            def capture_and_return(**kwargs):
+                for key, value in kwargs.items():
+                    setattr(instance, key, value)
+                return instance
+
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            assert result == [instance]
+            assert instance.params["index_names"] == []
+            assert instance.metadata["allowed_index_names"] == []
+            mock_get_embedding.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_preserves_order_after_filtering(self):

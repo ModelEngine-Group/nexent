@@ -28,14 +28,14 @@ class CreateScheduledTaskProposalTool(Tool):
         "Create a pending scheduled-task proposal when the user explicitly asks "
         "for a task to run later or repeatedly. Pass the user's scheduling request "
         "verbatim. This tool only extracts and saves a proposal for user confirmation; "
-        "it never executes the business task. Call it as the only action in the code "
-        "block and return its result directly as the final answer."
+        "it never executes the business task. Make it the only business-tool call in "
+        "the code block and pass its result to final_answer(...)."
     )
     description_zh = (
         "当用户明确要求未来、延迟或周期性执行任务时，创建一个待确认的"
         "定时任务提案。request_text 必须原样传入用户的定时执行请求。"
         "此工具只提取并保存待用户确认的提案，不会立即执行业务任务。"
-        "调用时它必须是代码块中的唯一动作，并将返回结果直接作为最终回答。"
+        "它必须是代码块中唯一的业务工具调用，并将其结果传给 final_answer(...)。"
     )
     inputs = {
         "request_text": {

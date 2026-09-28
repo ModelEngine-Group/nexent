@@ -11,6 +11,39 @@ import { DEFAULT_ERROR_MESSAGES } from "./errorMessage";
 import { handleSessionExpired } from "@/lib/session";
 import { isSessionExpired } from "./errorCode";
 import log from "@/lib/logger";
+import type { TFunction } from "i18next";
+
+const TENANT_RESOURCE_LIMIT_CODE = "120104";
+const TENANT_RESOURCE_LIMIT_KEYS: Record<string, string> = {
+  tenants: "tenantResources.limit.tenants",
+  users: "tenantResources.limit.users",
+  groups: "tenantResources.limit.groups",
+  administrators: "tenantResources.limit.administrators",
+  super_admins: "tenantResources.limit.superAdmins",
+};
+
+/** Return a localized tenant quota message while preserving the server limit. */
+export const getTenantResourceLimitMessage = (
+  error: unknown,
+  t: TFunction
+): string | null => {
+  if (!error || typeof error !== "object") return null;
+
+  const apiError = error as {
+    code?: string | number;
+    details?: Record<string, unknown> | null;
+  };
+  if (String(apiError.code) !== TENANT_RESOURCE_LIMIT_CODE) return null;
+
+  const details = apiError.details || {};
+  const resource = String(details.resource || "");
+  const translationKey = TENANT_RESOURCE_LIMIT_KEYS[resource];
+  if (!translationKey) return t("errorCode.120104");
+
+  return t(translationKey, {
+    limit: details.limit ?? "",
+  });
+};
 
 /**
  * Get error message by error code with i18n support.

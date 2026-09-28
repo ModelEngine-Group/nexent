@@ -1256,6 +1256,7 @@ class TestAgentConfig:
         )
         assert config.prompt_templates is None
         assert config.max_steps == 15
+        assert config.output_protocol == "code_action"
         assert config.provide_run_summary is False
         assert config.instructions is None
         assert config.managed_agents == []

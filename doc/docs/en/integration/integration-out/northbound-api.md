@@ -91,7 +91,6 @@ POST /nb/v1/chat/run
 |-----------|------|----------|-------------|
 | `agent_name` | string | Yes | Target Agent name |
 | `query` | string | Yes | User input content |
-| `enable_hitl` | boolean | No | Enable human interaction; defaults to `false` |
 | `conversation_id` | integer | No | Existing conversation ID; if not provided, create new conversation |
 | `attachments` | array | No | Attachment list (S3 URLs or attachment metadata objects) |
 | `model_id` | integer | No | Model ID (overrides Agent default model) |
@@ -205,116 +204,40 @@ data: {"type":"model_output_thinking","content":", please wait...","unit_index":
 data: {"type":"final_answer","content":"Analysis complete","unit_index":2}
 ```
 
-## Human-in-the-loop (HITL)
+## Structured clarification and follow-up after stopping
 
-The gateway entry point is `POST /api/nb/v1/chat/run`. Other paths in this document omit the shared `/api` gateway prefix; use your deployment's root path when connecting directly. All HITL endpoints use `Authorization: Bearer {access_key}`. The API key determines the user and tenant; callers cannot supply either identity.
+When essential information is missing, the Agent can return a structured clarification. The ordinary completion path ends that run and releases its worker. After the stream ends, send the answers as a normal new query in the same conversation. No capability switch, pending-request lookup, decision endpoint, or execution-resume API is required.
 
-### Start and discover capabilities
+### Clarification SSE
+
+The envelope remains `data: {"type": ..., "content": ...}`. For `type="human_interaction"`, `content` is a **JSON object** containing `schema_version: 1` and `questions`. An ordinary `final_answer` also contains the complete readable questions as a text fallback.
+
+```text
+data: {"type":"human_interaction","content":{"schema_version":1,"questions":[{"id":"audience","type":"single_choice","title":"Who is the notice for?","required":true,"options":[{"id":"team","label":"Internal team"},{"id":"client","label":"Clients"}],"allow_other":true,"placeholder":""}]},"unit_index":1}
+
+data: {"type":"final_answer","content":"1. Who is the notice for?\n   - Internal team\n   - Clients\n   - 其他 / Other","unit_index":2}
+```
+
+There are at most five questions, using `text`, `single_choice`, or `multiple_choice`. Question fields include `id`, `type`, `title`, `required`, `options`, `allow_other`, and `placeholder`; each option has an `id` and `label`. Text questions have no options, and choice questions have 2–12 options. Render the form and keep submission disabled until the current stream ends. Clients rendering a valid card may hide its exactly matching text fallback; text-only clients display `final_answer`.
+
+### Send answers as the next query
+
+Combine the questions, readable option labels, and any additional text into an ordinary query using the actual conversation ID:
 
 ```bash
 curl -N 'https://your-nexent-domain.com/api/nb/v1/chat/run' \
   -H "Authorization: Bearer ${NEXENT_API_KEY}" \
   -H 'Content-Type: application/json' \
-  -d '{"agent_name":"general-assistant","query":"Help me prepare a notice","enable_hitl":true}'
+  -d '{"conversation_id":123,"agent_name":"general-assistant","query":"Answers to the previous questions: the notice is for the internal team, specifically the engineering department."}'
 ```
 
-`enable_hitl` defaults to `false`. Check `GET /nb/v1/chat/human-interactions/capabilities` first: its `data` includes `enabled`, `accept_new_runs`, `tool_approval_enabled`, executor mode and form limits. When HITL is disabled or new runs are being drained, chat starts follow the existing ordinary execution path. Opting in does not force a clarification card for every query.
+`123` is only an example. Send readable answers, not just question or option IDs. The new run reads ordinary conversation history without restoring a previous execution stack or plan cursor. On refresh, rebuild the card from its ordinary `human_interaction` message unit. Older cards are read-only, and their answers appear in the following user message.
 
-The runtime creates a `run_id` for this conversation. A pending interaction puts it into `WAITING_HUMAN`; an accepted decision moves it to `READY` so the existing worker or scheduler can continue the same run. The northbound service forwards requests using an internal JWT and reuses runtime persistence, ownership checks, version checks and idempotency.
+### Ordinary stop and compatibility
 
-### SSE contract
+Continue using `GET /nb/v1/chat/stop/{conversation_id}`. Success acknowledges the stop request; the run remains reserved until its worker actually exits. If the next send receives `X-Stream-Status: conflict`, preserve the draft and ask the user to send again shortly without automatically retrying. A new query after stopping can read the original task, the stop notice, and saved partial results. Stopping does not roll back external operations already performed.
 
-The envelope remains `data: {"type": ..., "content": ...}`. **The card event type is `human_interaction`.** Its `content` is a JSON object, not a serialized JSON string.
-
-| `type` | Content and purpose |
-|---|---|
-| `conversation_created` | Object containing the newly created `conversation_id` |
-| `human_run` | Run status; snapshots also include `conversation_id`, `event_seq`, and pending `requests` |
-| `human_interaction` | A pending input or approval card |
-| `human_decision` | Accepted decision: `run_id`, `request_id`, `status` |
-| `human_execution` | Tool execution slot and status |
-| `model_output_thinking`, `final_answer`, `token_count`, etc. | Existing runtime output, forwarded unchanged |
-
-The card's `content.kind` selects its behavior:
-
-| `kind` | `decision` | Input |
-|---|---|---|
-| `CLARIFICATION` | `answer` | `answers` for structured forms; `text` for legacy single-question cards |
-| `ACTION_APPROVAL` | `approve` / `reject` | Approve or reject the exact frozen action |
-| `USER_STEERING` | `steer` | `text` with guidance after a pause |
-
-Example (copy the actual card's digest when replying):
-
-```text
-id: 12
-data: {"type":"human_interaction","content":{"request_id":"01a09fce-3a28-7860-8646-b0eec69d5f47","run_id":"01a09fce-3a28-7860-8646-b0eec69d5f46","kind":"CLARIFICATION","status":"PENDING","version":1,"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expires_at":"2026-09-15T10:00:00+00:00","payload":{"schema_version":2,"questions":[{"id":"audience","type":"single_choice","title":"Who is the notice for?","required":true,"options":[{"id":"team","label":"Internal team"},{"id":"client","label":"Clients"}],"allow_other":true}]}}}
-```
-
-`payload.questions` supports `text`, `single_choice`, and `multiple_choice`, with at most five questions and one clarification card per run. Text answers use strings, single-choice answers use option IDs, and multiple-choice answers use arrays of option IDs. When `allow_other` is true, `other_text` can supplement an answer. Runtime validates required fields, allowed options and duplicate answers. Question-level `type` is separate from the outer SSE event type.
-
-### Endpoints and decisions
-
-The common prefix below is `/nb/v1/chat/human-interactions`:
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/capabilities` | Read actual runtime capabilities |
-| GET | `/conversation/{conversation_id}` | Latest visible run for this API user; `data=null` if none |
-| GET | `/{run_id}` | Read status and pending `requests` |
-| POST | `/{run_id}/requests/{request_id}/decisions` | Submit a card response |
-| GET | `/{run_id}/events?after_event=12` | Subscribe to later SSE events of the same run |
-| POST | `/{run_id}/pause` | Request a pause at a safe boundary; does not immediately abort an executing tool |
-| POST | `/{run_id}/steer` | Add guidance and cancel any pending card |
-| POST | `/{run_id}/terminate` | Stop the run and cancel pending cards |
-
-JSON success responses use `{"message":"success","requestId":"...","data":...}`. An accepted decision returns `data: {"run_id":"...","request_id":"...","accepted":true}`. SSE endpoints return the event stream directly.
-
-Submit completed cards to the decision endpoint; **do not send the answer as a new `/chat/run` query**:
-
-```bash
-curl -X POST \
-  'https://your-nexent-domain.com/api/nb/v1/chat/human-interactions/01a09fce-3a28-7860-8646-b0eec69d5f46/requests/01a09fce-3a28-7860-8646-b0eec69d5f47/decisions' \
-  -H "Authorization: Bearer ${NEXENT_API_KEY}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "version":1,
-    "digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "idempotency_key":"answer-20260914-0001",
-    "decision":"answer",
-    "answers":[{"question_id":"audience","value":"team"}]
-  }'
-```
-
-Copy `version` and `digest` from the actual card. The JSON body must contain an `idempotency_key` of 8–100 characters. Retry a timed-out submission with the same key and identical body; reusing a key with different content returns `409`. Structured forms require `answers` without `text`. Legacy clarification and pause cards use `text`. Approvals use `approve` or `reject` without `answers`, and cannot change the tool's frozen arguments.
-
-For additional guidance outside a card, submit `{"message_id":"guidance-0001","text":"Continue with the revised requirements"}` to `/{run_id}/steer`. `message_id` provides idempotency for that guidance. This cancels pending cards and does not approve a pending tool action.
-
-A conversation may contain multiple runs and card versions, so `conversation_id` alone is insufficient for submission. Decisions bind to `run_id + request_id + version + digest`; the conversation snapshot endpoint recovers these identifiers.
-
-### Waiting and reconnecting
-
-1. Record the conversation ID, run ID, and SSE `id` of each fully consumed event. Merge cards from both `human_run.requests` and `human_interaction` by `request_id + version`.
-2. Display `human_interaction` cards and update them when receiving `human_decision`.
-3. `accepted=true` confirms input acceptance; subsequent output still arrives through SSE. Continue consuming the original stream if it is connected. Otherwise subscribe to `/{run_id}/events?after_event=<last-consumed-id>`.
-4. If `after_event` is absent, the subscription endpoint also accepts `Last-Event-ID`. Explicit `after_event` takes precedence. The default `0` replays all persisted events. Subscribing neither writes a user message nor starts another Agent run.
-5. Every subscription starts with a current `human_run` snapshot without an SSE `id`, followed by persisted events after the requested cursor. **Do not advance the consumed cursor to that initial snapshot's `event_seq`**: doing so would skip output not yet consumed. Snapshots and heartbeats do not advance the client cursor. After submitting a decision, continue from the last ID consumed before submission.
-6. `WAITING_HUMAN` is not completion; the subscription may remain open or close while waiting. Terminal statuses are `COMPLETED`, `FAILED`, `STOPPED`, `EXPIRED`, and `RECOVERY_REQUIRED`. The last means execution cannot automatically resume; do not blindly replay the action.
-
-The existing `GET /nb/v1/chat/stop/{conversation_id}` also terminates the API user's active HITL run in that conversation.
-
-### Errors and deployment
-
-| HTTP status | Meaning |
-|---|---|
-| 401 | Invalid API key or internal runtime authentication |
-| 404 | Run/card missing or outside the authenticated user and tenant scope |
-| 409 | Card already handled, stale version/digest, or conflicting idempotency key |
-| 410 | Expiration detected during this submission; a previously processed expiration may instead return `409` |
-| 422 | Invalid command, answer, decision kind or event cursor |
-| 503 | Runtime HITL disabled for run queries and decisions |
-| 502 / 504 | Runtime unavailable / timeout |
-
-Apply `deploy/sql/migrations/v2.6.0_merged_migrations.sql`, configure a valid runtime `HITL_ENCRYPTION_KEY`, and enable `HITL_ENABLED` and `HITL_ACCEPT_NEW_RUNS`. Tool approval is independently controlled by `HITL_TOOL_APPROVAL_ENABLED`. The default `native-live-v1` mode preserves the live execution state; loss of its worker can require recovery instead of automatic replay. These northbound endpoints preserve the existing execution modes' limits.
+The old HITL routes, approvals, pause/resume engine, four-table runtime dependencies, and encryption-key settings have been removed. Northbound `/chat/run` returns `400` for any request containing `enable_hitl`, `hitl_run_id`, or `hitl_after_event`, including false, null, and zero values. Update Web and runtime together. Existing identity, permissions, attachment, metadata, and ordinary error contracts remain unchanged.
 
 ## Upload Conversation Attachments
 

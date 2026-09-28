@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MCP_TOOLS_QUERY_KEYS, McpSource } from "@/const/mcpTools";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import { refreshToolListWithToast } from "@/hooks/mcpTools/useRefreshToolListWithToast";
 import {
@@ -512,6 +513,10 @@ export function SuggestedResourceInstallationCard({
     setSubmitted(true);
     submitCard(cardKey);
     aui.thread().append({
+      runConfig: nl2AgentCardRunConfig(
+        aui.thread().composer().getState().runConfig,
+        payload.agent_id
+      ),
       role: "user",
       content: [
         {

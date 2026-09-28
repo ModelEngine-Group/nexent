@@ -31,11 +31,13 @@ def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     assert config.instructions == "system"
     assert config.tools == []
     assert config.max_steps == 5
+    assert config.output_protocol == "final_answer_envelope"
     assert config.provide_run_summary is False
     assert config.enable_planning is False
 
 
 def test_normalize_relative_path_rejects_absolute_parent_and_empty_segments():
+    """UT-BE-NCR-009: reject unsafe or ambiguous generated file paths."""
     assert _normalize_relative_path("scripts/run.py") == "scripts/run.py"
     assert _normalize_relative_path("./scripts/run.py") == "scripts/run.py"
     assert _normalize_relative_path("/tmp/run.py") is None
@@ -181,6 +183,56 @@ async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker)
 
 
 @pytest.mark.asyncio
+async def test_build_nl2skill_run_info_adds_uploaded_files_to_request(mocker):
+    captured: dict = {}
+
+    def fake_template(**kwargs):
+        captured.update(kwargs)
+        return {"system_prompt": "system", "user_prompt": kwargs["user_request"]}
+
+    mocker.patch.object(
+        nl2skill_service,
+        "get_skill_creation_simple_prompt_template",
+        side_effect=fake_template,
+    )
+    mocker.patch.object(
+        nl2skill_service,
+        "create_model_config_list",
+        new_callable=AsyncMock,
+        return_value=[SimpleNamespace(cite_name="main_model", model_name="primary")],
+    )
+    mocker.patch.object(
+        nl2skill_service,
+        "_resolve_model_for_nl2skill",
+        return_value=("main_model", "primary", {}),
+    )
+    mocker.patch.object(
+        nl2skill_service,
+        "AgentRunInfo",
+        side_effect=lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+
+    result = await build_nl2skill_run_info(
+        NL2SkillRunRequest(
+            query="Create a parser for this file",
+            minio_files=[
+                {
+                    "name": "sample.csv",
+                    "url": "s3://bucket/sample.csv",
+                    "presigned_url": "https://example.test/sample.csv",
+                }
+            ],
+        ),
+        tenant_id="tenant",
+        language="en",
+    )
+
+    assert "sample.csv" in captured["user_request"]
+    assert "s3://bucket/sample.csv" in captured["user_request"]
+    assert result.query == captured["user_request"]
+
+
+@pytest.mark.asyncio
 async def test_build_nl2skill_run_info_requires_at_least_one_model(mocker):
     mocker.patch.object(nl2skill_service, "get_skill_creation_simple_prompt_template", return_value={})
     mocker.patch.object(nl2skill_service, "create_model_config_list", new_callable=AsyncMock, return_value=[])
@@ -191,6 +243,7 @@ async def test_build_nl2skill_run_info_requires_at_least_one_model(mocker):
 
 @pytest.mark.asyncio
 async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
+    """UT-BE-NCR-016: preserve Skill event semantics."""
     stop_event = threading.Event()
     run_info = SimpleNamespace(stop_event=stop_event)
     mocker.patch.object(
@@ -202,13 +255,14 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
     async def fake_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
         chunks = [
-            {"type": "model_thinking_output", "content": "Preparing.\n<SK"},
+            {"type": "model_thinking_output", "content": "Preparing.\n<FINAL_"},
+            {"type": "model_output_thinking", "content": "ANSWER>\n<SK"},
             {
                 "type": "model_output_thinking",
                 "content": "ILL>\n---\nname: demo\ndescription: Demo\ntags: [demo]\n---\n# Demo\n</SKILL>\n",
             },
             {"type": "model_output_code", "content": '<FILE path="scripts/run.py">\nprint("ok")\n</FILE>\n'},
-            {"type": "model_output_thinking", "content": "<SUMMARY>\nReady.\n</SUMMARY>\n"},
+            {"type": "model_output_thinking", "content": "<SUMMARY>\nReady.\n</SUMMARY>\n</FINAL_ANSWER>"},
             {"type": "final_answer", "content": "duplicate"},
         ]
         for chunk in chunks:
@@ -231,6 +285,7 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
         for item in payloads
     )
     assert any(item["type"] == "summary" for item in payloads)
+    assert not any("FINAL_ANSWER" in item.get("content", "") for item in payloads)
     assert not any(item.get("content") == "duplicate" for item in payloads)
     assert payloads[-1]["type"] == "done"
     assert stop_event.is_set()
@@ -338,6 +393,7 @@ async def test_stream_emits_targets_and_filters_non_target_file_updates(mocker):
 
 @pytest.mark.asyncio
 async def test_stream_skips_malformed_chunks_and_emits_error_on_agent_failure(mocker):
+    """UT-BE-NCR-018: runtime failure produces one safe terminal error."""
     stop_event = threading.Event()
     mocker.patch.object(
         nl2skill_service,
@@ -411,6 +467,7 @@ async def test_stream_preserves_final_answer_without_control_content(mocker):
 
 @pytest.mark.asyncio
 async def test_stream_propagates_cancellation_and_stops_run_info(mocker):
+    """UT-BE-NCR-019: cancellation stops without duplicate terminal output."""
     stop_event = threading.Event()
     mocker.patch.object(
         nl2skill_service,

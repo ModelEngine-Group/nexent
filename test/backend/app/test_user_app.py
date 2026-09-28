@@ -49,7 +49,13 @@ patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('database.client.MinioClient', return_value=minio_mock).start()
 
 # Import exception classes
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    ValidationError,
+    UnauthorizedError,
+)
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -64,16 +70,18 @@ app.include_router(router)
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def mock_requester_context():
+    """Provide a stable authenticated requester for user-list endpoint tests."""
+    with patch(
+        "apps.user_app.get_current_user_context",
+        return_value=("admin-1", "tenant1", "ADMIN"),
+    ):
+        yield
+
+
 class TestGetUsersEndpoint:
     """Test get_users_endpoint (POST /users/list)"""
-
-    @pytest.fixture(autouse=True)
-    def mock_requester_context(self):
-        with patch(
-            "apps.user_app.get_current_user_context",
-            return_value=("admin-1", "tenant1", "ADMIN"),
-        ):
-            yield
 
     def test_get_users_success_with_pagination(self):
         """Test successful user list retrieval with pagination"""
@@ -107,6 +115,31 @@ class TestGetUsersEndpoint:
                 "tenant1", 1, 20, "created_at", "desc",
                 requester_tenant_id="tenant1", requester_role="ADMIN",
             )
+
+
+class TestUserResourceLimit:
+    """Test structured quota errors at the user management HTTP boundary."""
+
+    def test_role_update_limit_returns_standard_429_payload(self):
+        with patch("apps.user_app.get_current_user_context", return_value=("admin-1", "tenant1", "ADMIN")), \
+             patch("apps.user_app.update_user_for_requester", new_callable=AsyncMock) as mock_update:
+            mock_update.side_effect = TenantResourceLimitError(
+                "Tenant administrator limit reached: maximum 1000 administrators per tenant",
+                resource="administrators",
+                scope="tenant",
+                limit=1000,
+                current_count=1000,
+            )
+
+            response = client.put(
+                "/users/user-1",
+                json={"role": "ADMIN"},
+                headers={"Authorization": "Bearer token"},
+            )
+
+            assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+            assert response.json()["code"] == "120104"
+            assert response.json()["details"]["resource"] == "administrators"
 
     def test_get_users_success_without_pagination(self):
         """Test successful user list retrieval without pagination (returns all data)"""

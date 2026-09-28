@@ -45,6 +45,9 @@ export const conversationService = {
       today_start_ms: String(params.todayStartMs),
       week_start_ms: String(params.weekStartMs),
     });
+    if (params.conversationType) {
+      query.set("conversation_type", params.conversationType);
+    }
     const response = await fetch(
       `${API_ENDPOINTS.conversation.list}?${query.toString()}`
     );
@@ -99,6 +102,34 @@ export const conversationService = {
       );
     }
 
+    return data.data;
+  },
+  async updateWorkbenchConfig(
+    conversationId: number,
+    config: import("@/features/workbench").WorkbenchSessionConfig,
+    expectedVersion: number
+  ): Promise<{
+    workbench_config: import("@/features/workbench").WorkbenchSessionConfig;
+    workbench_config_version: number;
+  }> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.workbenchConfig(conversationId),
+      {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ config, expected_version: expectedVersion }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.detail?.code || data.code || response.status,
+        data.detail?.message ||
+          data.message ||
+          "Workbench config update failed",
+        data.detail
+      );
+    }
     return data.data;
   },
 
@@ -1015,17 +1046,35 @@ export const conversationService = {
       }>;
       agent_id?: number; // Add agent_id parameter
       model_id?: number; // Optional model override
+      generation_config?: {
+        deep_thinking: boolean;
+        thinking_effort?: "low" | "medium" | "high";
+      };
+      reasoning_effort?:
+        | "auto"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max";
+      reasoning_budget_tokens?: number;
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
       enable_plan?: boolean;
-      enable_hitl?: boolean;
-      hitl_run_id?: string;
-      hitl_after_event?: number;
       knowledge_scope?: ConversationKnowledgeScope;
       metadata?: Record<string, unknown> | null;
       expected_metadata_version?: number;
+      entrypoint?: "workbench";
+      workbench?: import("@/features/workbench").WorkbenchSessionConfig;
+      expected_workbench_config_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
+      persist_history?: boolean;
+      retry_message_index?: number;
+      retry_user_message_id?: number;
+      workbench_config?: import("@/features/workbench").WorkbenchSessionConfig;
       draft_snapshot?: Record<string, unknown>;
       complexity?: "simple" | "complicated";
       language?: "zh" | "en";
@@ -1033,7 +1082,8 @@ export const conversationService = {
     signal?: AbortSignal,
     onConversationId?: (id: string) => void,
     onRuntimeMetadataVersion?: (version: number) => void,
-    onRunId?: (id: string) => void
+    onRunId?: (id: string) => void,
+    onWorkbenchConfigVersion?: (version: number) => void
   ): Promise<
     ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
   > {
@@ -1046,14 +1096,21 @@ export const conversationService = {
         minio_files: params.minio_files || null,
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
-        enable_hitl: params.enable_hitl === true,
-        hitl_run_id: params.hitl_run_id,
-        hitl_after_event: params.hitl_after_event ?? 0,
       };
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
         requestParams.complexity = params.complexity || "complicated";
         requestParams.language = params.language;
+      }
+      if (params.persist_history && params.runtime_mode) {
+        requestParams.persist_history = true;
+        requestParams.workbench_config = params.workbench_config;
+        if (params.retry_message_index !== undefined) {
+          requestParams.retry_message_index = params.retry_message_index;
+        }
+        if (params.retry_user_message_id !== undefined) {
+          requestParams.retry_user_message_id = params.retry_user_message_id;
+        }
       }
 
       // Only include conversation_id if it has a value
@@ -1071,6 +1128,28 @@ export const conversationService = {
       if (params.model_id !== undefined && params.model_id !== null) {
         requestParams.model_id = params.model_id;
       }
+      if (params.generation_config !== undefined) {
+        requestParams.generation_config = params.generation_config;
+      }
+      const budgetTokens = params.reasoning_budget_tokens;
+      const hasBudgetSelection =
+        typeof budgetTokens === "number" &&
+        Number.isInteger(budgetTokens) &&
+        budgetTokens >= 0;
+      if (
+        !hasBudgetSelection &&
+        params.reasoning_effort !== undefined &&
+        params.reasoning_effort !== "auto"
+      ) {
+        requestParams.reasoning_effort = params.reasoning_effort;
+      }
+      if (
+        hasBudgetSelection &&
+        budgetTokens !== undefined &&
+        budgetTokens > 0
+      ) {
+        requestParams.reasoning_budget_tokens = budgetTokens;
+      }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;
       }
@@ -1083,6 +1162,16 @@ export const conversationService = {
       if (params.expected_metadata_version !== undefined) {
         requestParams.expected_metadata_version =
           params.expected_metadata_version;
+      }
+      if (params.entrypoint !== undefined) {
+        requestParams.entrypoint = params.entrypoint;
+      }
+      if (params.workbench !== undefined) {
+        requestParams.workbench = params.workbench;
+      }
+      if (params.expected_workbench_config_version !== undefined) {
+        requestParams.expected_workbench_config_version =
+          params.expected_workbench_config_version;
       }
 
       // Build URL with query parameters for resume mode
@@ -1107,6 +1196,11 @@ export const conversationService = {
         signal,
       });
 
+      if (response.headers.get("X-Stream-Status") === "conflict") {
+        await response.body?.cancel();
+        throw new Error("agent_run_conflict");
+      }
+
       const conversationId = response.headers.get("conversation_id");
       if (conversationId && onConversationId) {
         onConversationId(conversationId);
@@ -1124,16 +1218,46 @@ export const conversationService = {
           onRuntimeMetadataVersion(parsedVersion);
         }
       }
+      const workbenchConfigVersion = response.headers.get(
+        "X-Workbench-Config-Version"
+      );
+      if (workbenchConfigVersion !== null && onWorkbenchConfigVersion) {
+        const parsedVersion = Number(workbenchConfigVersion);
+        if (Number.isInteger(parsedVersion) && parsedVersion >= 0) {
+          onWorkbenchConfigVersion(parsedVersion);
+        }
+      }
 
       if (!response.ok) {
         let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        let code: string | number = response.status;
+        let details: Record<string, unknown> | undefined;
         try {
           const errorData = await response.json();
-          errorMessage = errorData.detail || errorData.message || errorMessage;
+          const detail = errorData.detail;
+          if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+            code =
+              typeof detail.code === "string" ? detail.code : response.status;
+            errorMessage =
+              typeof detail.message === "string"
+                ? detail.message
+                : errorMessage;
+            details =
+              typeof detail.current_version === "number"
+                ? { current_version: detail.current_version }
+                : undefined;
+          } else {
+            errorMessage =
+              typeof detail === "string"
+                ? detail
+                : typeof errorData.message === "string"
+                  ? errorData.message
+                  : errorMessage;
+          }
         } catch {
           // Preserve the HTTP status when the error response is not JSON.
         }
-        throw new Error(errorMessage);
+        throw new ApiError(code, errorMessage, details);
       }
 
       if (!response.body) {

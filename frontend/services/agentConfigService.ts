@@ -12,7 +12,11 @@ import log from "@/lib/logger";
 import yaml from "js-yaml";
 import type { SkillFileNode } from "@/types/skill";
 
-/** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
+/**
+ * Normalize tags field into a string array.
+ * Ant Design mode="tags" sends a string when only one tag is entered, and
+ * malformed/persisted skill data may also carry a non-array tags value.
+ */
 function normalizeTags(tags: unknown): string[] {
   if (Array.isArray(tags)) return tags;
   if (typeof tags === "string" && tags.trim() !== "") return [tags.trim()];
@@ -182,7 +186,9 @@ export const fetchAgentList = async (tenantId?: string) => {
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
+      tags: normalizeTags(agent.tags),
     }));
 
     return {
@@ -238,6 +244,7 @@ export const fetchPublishedAgentList = async () => {
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
     }));
 
@@ -252,54 +259,6 @@ export const fetchPublishedAgentList = async () => {
       success: false,
       data: [],
       message: "agentConfig.agents.publishedListFetchFailed",
-    };
-  }
-};
-
-/**
- * get creating sub agent id
- * @param mainAgentId current main agent id
- * @returns new sub agent id
- */
-export const getCreatingSubAgentId = async () => {
-  try {
-    const response = await fetch(API_ENDPOINTS.agent.getCreatingSubAgentId, {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return {
-      success: true,
-      data: {
-        agentId: data.agent_id,
-        name: data.name,
-        displayName: data.display_name,
-        description: data.description,
-        enabledToolIds: data.enable_tool_id_list || [],
-        modelIds: data.model_ids || (data.model_id ? [data.model_id] : []),
-        modelNames:
-          data.model_names || (data.model_name ? [data.model_name] : []),
-        maxSteps: data.max_steps,
-        requestedOutputTokens: data.requested_output_tokens ?? null,
-        businessDescription: data.business_description,
-        dutyPrompt: data.duty_prompt,
-        constraintPrompt: data.constraint_prompt,
-        fewShotsPrompt: data.few_shots_prompt,
-        sub_agent_id_list: data.sub_agent_id_list || [],
-      },
-      message: "",
-    };
-  } catch (error) {
-    log.error("Failed to get creating sub agent ID:", error);
-    return {
-      success: false,
-      data: null,
-      message: "agentConfig.agents.createSubAgentIdFailed",
     };
   }
 };
@@ -1232,7 +1191,7 @@ export const fetchSkills = async (tenantId?: string | null) => {
       name: skill.name,
       description: skill.description || "",
       source: skill.source || "custom",
-      tags: skill.tags || [],
+      tags: normalizeTags(skill.tags),
       content: skill.content || "",
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,

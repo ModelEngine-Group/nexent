@@ -187,6 +187,7 @@ export default function AgentInfo() {
                 ]}
               >
                 <Input
+                  data-testid="agent-variable-name-input"
                   placeholder={t("agent.namePlaceholder")}
                   maxLength={AGENT_NAME_MAX_LENGTH}
                   showCount

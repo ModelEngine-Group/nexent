@@ -470,12 +470,6 @@ render_k8s_runtime_config_values() {
     printf '      url: %s\n' "$(yaml_quote "$(env_or_default REDIS_URL "redis://nexent-redis:6379/0")")"
     printf '      backendUrl: %s\n' "$(yaml_quote "$(env_or_default REDIS_BACKEND_URL "redis://nexent-redis:6379/1")")"
     printf '      port: %s\n' "$(yaml_quote "$(env_or_default REDIS_PORT "6379")")"
-    echo "    humanInteraction:"
-    printf '      enabled: %s\n' "$(yaml_quote "${HITL_ENABLED:-true}")"
-    printf '      acceptNewRuns: %s\n' "$(yaml_quote "${HITL_ACCEPT_NEW_RUNS:-true}")"
-    printf '      toolApprovalEnabled: %s\n' "$(yaml_quote "${HITL_TOOL_APPROVAL_ENABLED:-false}")"
-    printf '      waitSeconds: %s\n' "$(yaml_quote "${HITL_WAIT_SECONDS:-86400}")"
-    printf '      maxConcurrency: %s\n' "$(yaml_quote "${HITL_MAX_CONCURRENCY:-2}")"
     echo "    minio:"
     printf '      endpoint: %s\n' "$(yaml_quote "$(env_or_default MINIO_ENDPOINT "http://nexent-minio:9000")")"
     printf '      region: %s\n' "$(yaml_quote "$(env_or_default MINIO_REGION "cn-north-1")")"
@@ -1171,32 +1165,6 @@ load_existing_elasticsearch_api_key() {
     return 0
 }
 
-load_existing_hitl_encryption_key() {
-    local existing_key
-    existing_key="$(get_existing_secret_value "HITL_ENCRYPTION_KEY")" || return 1
-    [ -n "$existing_key" ] || return 1
-    HITL_ENCRYPTION_KEY="$existing_key"
-    return 0
-}
-
-configure_human_interaction() {
-    HITL_ENABLED="${HITL_ENABLED:-true}"
-    HITL_ACCEPT_NEW_RUNS="${HITL_ACCEPT_NEW_RUNS:-true}"
-    HITL_TOOL_APPROVAL_ENABLED="${HITL_TOOL_APPROVAL_ENABLED:-false}"
-    HITL_WAIT_SECONDS="${HITL_WAIT_SECONDS:-86400}"
-    HITL_MAX_CONCURRENCY="${HITL_MAX_CONCURRENCY:-2}"
-
-    if [ "$HITL_ENABLED" != "true" ] || [ -n "${HITL_ENCRYPTION_KEY:-}" ]; then
-        return 0
-    fi
-    if load_existing_hitl_encryption_key; then
-        echo "Reusing existing human interaction encryption key from Kubernetes secret."
-        return 0
-    fi
-    HITL_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '[:space:]')
-    echo "Human interaction encryption key generated for Kubernetes secret."
-}
-
 # Generate Supabase secrets (only for full version)
 generate_supabase_secrets() {
     if [ "$DEPLOYMENT_VERSION" != "full" ]; then
@@ -1340,7 +1308,7 @@ render_runtime_secret_values() {
     gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:${supabase_postgres_password}@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
     env_checksum="$(deployment_env_values_checksum)"
     sql_checksum="$(sql_files_checksum)"
-    supabase_secret_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|secretKeyBase=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|postgres=${supabase_postgres_password}|gotrue=${gotrue_db_url}|hitl=${HITL_ENCRYPTION_KEY:-}")"
+    supabase_secret_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|secretKeyBase=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|postgres=${supabase_postgres_password}|gotrue=${gotrue_db_url}")"
 
     {
         echo "global:"
@@ -1353,7 +1321,6 @@ render_runtime_secret_values() {
         echo "  secrets:"
         printf '    elasticsearchApiKey: %s\n' "$(yaml_quote "$(env_or_default ELASTICSEARCH_API_KEY "")")"
         printf '    postgresPassword: %s\n' "$(yaml_quote "$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")")"
-        printf '    hitlEncryptionKey: %s\n' "$(yaml_quote "${HITL_ENCRYPTION_KEY:-}")"
         echo "    minio:"
         printf '      rootUser: %s\n' "$(yaml_quote "$(env_or_default MINIO_ROOT_USER "nexent")")"
         printf '      rootPassword: %s\n' "$(yaml_quote "$(env_or_default MINIO_ROOT_PASSWORD "nexent@4321")")"
@@ -1512,7 +1479,6 @@ apply() {
 
     # Step 6: Prepare application-only secrets after infrastructure is healthy.
     generate_supabase_secrets
-    configure_human_interaction
     if [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" != "true" ] && [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ]; then
         if [ -n "${ELASTICSEARCH_API_KEY:-}" ]; then
             echo "Using ELASTICSEARCH_API_KEY from deploy/env/.env."

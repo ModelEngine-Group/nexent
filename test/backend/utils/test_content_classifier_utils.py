@@ -8,6 +8,32 @@ from utils.content_classifier_utils import ContentClassifier
 class TestContentClassifier:
     """Test cases for ContentClassifier."""
 
+    def test_ac_010_final_answer_envelope_is_consumed(self):
+        classifier = ContentClassifier()
+
+        events = classifier.classify(
+            "<FINAL_ANSWER>\n<SKILL>\n# Demo\n</SKILL>\n"
+            "<SUMMARY>\nCreated.\n</SUMMARY>\n</FINAL_ANSWER>",
+            origin_type="model_output",
+        )
+        events.extend(classifier.flush())
+
+        assert all("FINAL_ANSWER" not in event.get("content", "") for event in events)
+        assert any(event["type"] == "skill_body" and "# Demo" in event["content"] for event in events)
+        assert any(event["type"] == "summary" and "Created." in event["content"] for event in events)
+        assert classifier.saw_control_tag is True
+
+    def test_ac_010_final_answer_envelope_can_be_adjacent_to_payload(self):
+        classifier = ContentClassifier()
+
+        events = classifier.classify(
+            "<FINAL_ANSWER>clarification?</FINAL_ANSWER>",
+            origin_type="model_output",
+        )
+        events.extend(classifier.flush())
+
+        assert "".join(event.get("content", "") for event in events) == "clarification?"
+
     def test_basic_classification(self):
         """Test basic content classification."""
         classifier = ContentClassifier()

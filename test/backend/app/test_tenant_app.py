@@ -5,7 +5,13 @@ import sys
 import os
 
 # Import exception classes and models
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    ValidationError,
+    UnauthorizedError,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -138,6 +144,36 @@ class TestTenantExceptions:
         with pytest.raises(UnauthorizedError) as exc_info:
             raise UnauthorizedError("Invalid token")
         assert "Invalid token" in str(exc_info.value)
+
+    def test_tenant_limit_returns_standard_429_payload(self):
+        tenant_service_module.create_tenant.reset_mock(side_effect=True, return_value=True)
+        auth_utils_module.get_current_user_id.return_value = ("user-1", "tenant-1")
+        tenant_service_module.create_tenant.side_effect = TenantResourceLimitError(
+            "Tenant limit reached: maximum 100 tenants",
+            resource="tenants",
+            scope="platform",
+            limit=100,
+            current_count=100,
+        )
+
+        response = client.post(
+            "/tenants",
+            json={"tenant_name": "Second tenant"},
+            headers={"Authorization": "Bearer token"},
+        )
+
+        assert response.status_code == 429
+        assert response.json() == {
+            "code": "120104",
+            "message": "Tenant limit reached: maximum 100 tenants",
+            "details": {
+                "resource": "tenants",
+                "scope": "platform",
+                "limit": 100,
+                "current_count": 100,
+            },
+        }
+        tenant_service_module.create_tenant.side_effect = None
 
 
 class TestTenantResponsePatterns:

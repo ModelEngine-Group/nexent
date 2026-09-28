@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError as PydanticValidationError
 
+from consts.model import reject_legacy_agent_fields
 from consts.exceptions import (
     ConversationNotFoundError,
     ForbiddenError,
@@ -17,10 +18,12 @@ from consts.exceptions import (
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
     RuntimeUpstreamError,
+    TenantResourceLimitError,
     UnauthorizedError,
     NotFoundException,
     UnauthorizedError,
     ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from consts.model import (
     ApiKeyTargetRequest,
@@ -218,6 +221,11 @@ async def create_api_users_batch_endpoint(
             content={"message": "success", "requestId": ctx.request_id, "data": data},
         )
     except Exception as exc:
+        if isinstance(exc, TenantResourceLimitError):
+            return JSONResponse(
+                status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                content=tenant_resource_limit_error_payload(exc),
+            )
         _raise_api_key_http_exception(exc)
 
 
@@ -392,15 +400,10 @@ async def run_chat(
             }
         }],
     ),
-    enable_hitl: bool = Body(
-        False,
-        embed=True,
-        description="Enable human interaction when supported by the runtime. Cards use type=human_interaction; "
-                    "submit answers through /nb/v1/chat/human-interactions/{run_id}/requests/{request_id}/decisions.",
-    ),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     try:
+        reject_legacy_agent_fields(await request.json())
         ctx: NorthboundContext = await _get_northbound_context(request)
         return await start_streaming_chat(
             ctx=ctx,
@@ -413,7 +416,6 @@ async def run_chat(
             tool_params=tool_params,
             model_id=model_id,
             idempotency_key=idempotency_key,
-            enable_hitl=enable_hitl,
         )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
