@@ -862,6 +862,17 @@ def test_normalize_mcp_config_keeps_proxy_by_default():
     }
 
 
+def test_agent_run_thread_marks_kernel_cancellation_stopped(basic_agent_run_info, monkeypatch):
+    from concurrent.futures import CancelledError
+
+    instance = MagicMock()
+    instance.create_single_agent.side_effect = CancelledError("cancelled during bootstrap")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=instance))
+    run_agent.agent_run_thread(basic_agent_run_info)
+    assert basic_agent_run_info.attempt_outcome == "stopped"
+    assert not any("Run Agent Error" in str(call) for call in basic_agent_run_info.observer.add_message.call_args_list)
+
+
 def test_agent_run_thread_handles_internal_exception(
     basic_agent_run_info, mock_memory_context, monkeypatch
 ):

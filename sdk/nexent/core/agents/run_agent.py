@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import threading
+from concurrent.futures import CancelledError
 from copy import deepcopy
 from typing import Any, Dict, Union
 
@@ -355,7 +356,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     _log_memory_value_assessment(agent)
 
         agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
-    except RunTerminated:
+    except (RunTerminated, CancelledError):
         agent_run_info.attempt_outcome = "stopped"
     except (ModelInvocationTerminalError, ModelOutputProtocolExhaustedError):
         agent_run_info.attempt_outcome = "failed"
