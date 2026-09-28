@@ -266,6 +266,7 @@ The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and re
 | Service | Internal Port | External Port | Description |
 |---------|---------------|---------------|-------------|
 | Web Interface | 3000 | 3000 | Main application access |
+| HTTPS Entry | 3100 | 3100 | Optional encrypted entry via Nginx (when HTTPS is enabled) |
 | Backend API | 5010 | 5010 | Backend service |
 | Runtime API | 5014 | 5014 | Agent runtime service |
 | MCP API | 5011/5015 | 5011/5015 | MCP management and tool service |
