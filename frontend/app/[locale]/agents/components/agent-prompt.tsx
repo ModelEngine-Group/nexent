@@ -115,6 +115,9 @@ export default function AgentPrompt() {
   const updateDraft = useAgentStore((state) => state.updateDraft);
   const flushDraft = useAgentStore((state) => state.flushDraft);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
+  const reconcileUnavailableModels = useAgentStore(
+    (state) => state.reconcileUnavailableModels
+  );
   const agentId = useAgentStore((state) => state.agentId);
   const defaultLlmConfig = useAgentStore((state) => state.defaultLlmConfig);
   const { configFocusRequest } = useNl2AgentFlow();
@@ -184,7 +187,7 @@ export default function AgentPrompt() {
     const primaryModel = modelOptions.find(
       (option) => option.value === nextModelIds[0]
     );
-    updateAgent({
+    reconcileUnavailableModels({
       model_ids: nextModelIds,
       model: primaryModel?.displayName ?? "",
       model_names: modelNames,
@@ -194,7 +197,7 @@ export default function AgentPrompt() {
     editedAgent.model_ids,
     modelListLoaded,
     modelOptions,
-    updateAgent,
+    reconcileUnavailableModels,
   ]);
 
   const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
