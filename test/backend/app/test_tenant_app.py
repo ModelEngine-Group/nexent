@@ -64,6 +64,18 @@ sys.modules["services.tenant_service"] = tenant_service_module
 sys.modules["utils"] = utils_module
 sys.modules["utils.auth_utils"] = auth_utils_module
 
+# apps.tenant_app imports services.audit_service; the `services` ModuleType stub
+# above is not a package, so the audit submodule must be pre-registered (with the
+# real module loaded from its file so audit assertions observe real lines).
+import importlib.util as _importlib_util
+_audit_spec = _importlib_util.spec_from_file_location(
+    "services.audit_service",
+    os.path.join(os.path.dirname(__file__), "../../../backend/services/audit_service.py"),
+)
+_audit_service = _importlib_util.module_from_spec(_audit_spec)
+_audit_spec.loader.exec_module(_audit_service)
+sys.modules["services.audit_service"] = _audit_service
+
 from apps.tenant_app import router
 
 app = FastAPI()

@@ -4,7 +4,7 @@ User management API endpoints
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
@@ -12,6 +12,7 @@ from consts.model import (
     UserListRequest, UserUpdateRequest
 )
 from consts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError
+from services.audit_service import record_security_event
 from services.user_service import (
     delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 )
@@ -86,6 +87,7 @@ async def get_users_endpoint(
 async def update_user_endpoint(
     user_id: str,
     request: UserUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -114,6 +116,11 @@ async def update_user_endpoint(
 
         logger.info(f"Updated user {user_id} by user {current_user_id}")
 
+        record_security_event("user_update", request=http_request,
+                              user_id=current_user_id, tenant_id=requester_tenant_id,
+                              details={"target_user_id": user_id,
+                                       "changes": {key: value for key, value in request.model_dump().items()
+                                                   if value is not None}})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -146,6 +153,7 @@ async def update_user_endpoint(
 @router.delete("/{user_id}")
 async def delete_user_endpoint(
     user_id: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -166,7 +174,7 @@ async def delete_user_endpoint(
     """
     try:
         # Get current user ID from token for access control
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Get user tenant ID for cleanup operations
         user_tenant = get_user_tenant_by_user_id(user_id)
@@ -180,6 +188,10 @@ async def delete_user_endpoint(
 
         logger.info(f"Permanently deleted user {user_id} by admin {current_user_id}")
 
+        record_security_event("user_delete", request=http_request,
+                              user_id=current_user_id, tenant_id=operator_tenant_id,
+                              details={"target_user_id": user_id,
+                                       "target_tenant_id": tenant_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
