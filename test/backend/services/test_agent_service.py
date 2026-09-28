@@ -662,10 +662,12 @@ if hasattr(sys.modules.get("consts"), "model"):
 
 # Now import backend modules
 import management.services.agent.naming as naming_service
+import management.services.agent.management as agent_management
 import management.services.agent.run as agent_run_service
 import management.services.agent.service as agent_service
 from management.services.agent.service import update_agent_info_impl
 from management.services.agent.service import list_all_agent_info_impl
+from management.services.agent.service import list_agent_page_impl
 from management.services.agent.service import get_agent_info_impl
 from management.services.agent.service import get_enable_tool_id_by_agent_id
 from management.services.agent.service import (
@@ -1105,6 +1107,40 @@ async def test_update_agent_info_impl_exception_handling(
         await update_agent_info_impl(request, authorization="Bearer token")
 
     assert "Failed to update agent info" in str(context.value)
+
+
+@patch("management.services.agent.service.update_agent")
+@patch("management.services.agent.service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_reraises_agent_quota_error(
+    mock_get_current_user_info, mock_update_agent
+):
+    """Agent quota errors must pass through without generic error wrapping."""
+    from consts.exceptions import TenantResourceLimitError
+
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    limit_error = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant",
+        resource="agents",
+        scope="tenant",
+        limit=1000,
+        current_count=1000,
+    )
+    mock_update_agent.side_effect = limit_error
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.model_id = None
+    request.display_name = "Test Display Name"
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    request.example_questions = None
+    apply_default_prompt_template_request_fields(request)
+
+    with pytest.raises(TenantResourceLimitError) as exc_info:
+        await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert exc_info.value is limit_error
 
 
 @patch("management.services.agent.service.query_tools_by_ids")
@@ -3044,6 +3080,373 @@ async def test_get_agent_info_impl_breaks_after_selected_model_id(
     mock_get_model_by_model_id_ignore_delete.assert_called_once_with(9, "test_tenant")
 
 
+def _mock_paged_agent_candidates(monkeypatch, agents):
+    monkeypatch.setattr(
+        agent_management,
+        "query_agent_list_candidates_by_tenant_id",
+        lambda _tenant_id, **_kwargs: [dict(agent) for agent in agents],
+    )
+    monkeypatch.setattr(
+        agent_management,
+        "get_user_tenant_by_user_id",
+        lambda _user_id: {"user_role": "ADMIN"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_all_agent_info_impl_loads_only_requested_ids(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        agent_management,
+        "get_user_tenant_by_user_id",
+        lambda _user_id: {"user_role": "ADMIN"},
+    )
+    monkeypatch.setattr(agent_management, "get_server_agent_ids", lambda _tenant_id: set())
+    monkeypatch.setattr(
+        agent_management,
+        "query_agent_info_by_ids",
+        lambda tenant_id, agent_ids: calls.append((tenant_id, agent_ids)) or [],
+    )
+    monkeypatch.setattr(
+        agent_management,
+        "query_all_agent_info_by_tenant_id",
+        lambda **_kwargs: pytest.fail("paged list must not load every agent record"),
+    )
+
+    result = await agent_management.list_all_agent_info_impl(
+        tenant_id="tenant_123", user_id="alice", agent_ids=[2]
+    )
+
+    assert result == []
+    assert calls == [("tenant_123", [2])]
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_impl_filters_before_paginating(monkeypatch):
+    """Search, tag, and permission constraints apply before page slicing."""
+    agents = [
+        {
+            "agent_id": 1,
+            "name": "Support Alpha",
+            "description": "General help",
+            "permission": "EDIT",
+            "tags": ["support"],
+        },
+        {
+            "agent_id": 2,
+            "name": "Support Read Only",
+            "description": "General help",
+            "permission": "READ_ONLY",
+            "tags": ["support"],
+        },
+        {
+            "agent_id": 3,
+            "name": "Operations",
+            "description": "Support escalation",
+            "permission": "EDIT",
+            "tags": ["support"],
+        },
+        {
+            "agent_id": 4,
+            "name": "Billing",
+            "description": "Support billing",
+            "permission": "EDIT",
+            "tags": ["billing"],
+        },
+    ]
+
+    async def list_agents(**_kwargs):
+        return agents
+
+    _mock_paged_agent_candidates(monkeypatch, agents)
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123",
+        user_id="test_user",
+        permission="EDIT",
+        tag="support",
+        search="support",
+        page=2,
+        page_size=1,
+    )
+
+    assert [agent["agent_id"] for agent in result["items"]] == [3]
+    assert result["pagination"] == {
+        "page": 2,
+        "page_size": 1,
+        "total": 2,
+        "total_pages": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_filters_creator_before_pagination(monkeypatch):
+    agents = [
+        {"agent_id": 1, "created_by": "alice"},
+        {"agent_id": 2, "created_by": "bob"},
+        {"agent_id": 3, "created_by": "alice"},
+        {"agent_id": 4, "created_by": "bob"},
+    ]
+
+    async def list_agents(**_kwargs):
+        return agents
+
+    _mock_paged_agent_candidates(monkeypatch, agents)
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+
+    mine = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", created_by="alice", page=2, page_size=1
+    )
+    others = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", created_by_not="alice", page=2, page_size=1
+    )
+
+    assert [item["agent_id"] for item in mine["items"]] == [3]
+    assert [item["agent_id"] for item in others["items"]] == [4]
+    assert mine["pagination"]["total"] == 2
+    assert others["pagination"]["total"] == 2
+    assert mine["creator_counts"] == {"all": 4, "created": 2, "others": 2}
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_rejects_conflicting_creator_filters(monkeypatch):
+    async def list_agents(**_kwargs):
+        return []
+
+    _mock_paged_agent_candidates(monkeypatch, [])
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+
+    with pytest.raises(ValueError, match="created_by"):
+        await list_agent_page_impl(
+            tenant_id="tenant_123", user_id="alice", created_by="alice", created_by_not="alice"
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_applies_structured_tags_before_pagination(monkeypatch):
+    agents = [
+        {"agent_id": 1, "name": "First", "created_by": "alice"},
+        {"agent_id": 2, "name": "Second", "created_by": "bob"},
+        {"agent_id": 3, "name": "Third", "created_by": "alice"},
+    ]
+
+    async def list_agents(**_kwargs):
+        return agents
+
+    _mock_paged_agent_candidates(monkeypatch, agents)
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+    monkeypatch.setattr(
+        agent_management.TagManagementDB,
+        "filter_authorized_resource_ids",
+        lambda *_args: ["1", "3"],
+    )
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", tag_predicates=[object()], page=2, page_size=1
+    )
+
+    assert [item["agent_id"] for item in result["items"]] == [3]
+    assert result["pagination"]["total"] == 2
+    assert result["creator_counts"] == {"all": 2, "created": 2, "others": 0}
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_enriches_only_current_page_version_metadata(monkeypatch):
+    agents = [
+        {"agent_id": 1, "created_by": "alice", "current_version_no": 1},
+        {"agent_id": 2, "created_by": "alice", "current_version_no": 2},
+    ]
+    calls = []
+
+    async def list_agents(**_kwargs):
+        return agents
+
+    def versions(agent_ids, tenant_id, version_nos):
+        calls.append((agent_ids, tenant_id, version_nos))
+        return [{
+            "agent_id": 2,
+            "version_no": 2,
+            "version_name": "Release Two",
+            "create_time": "2026-09-23T10:00:00",
+        }]
+
+    _mock_paged_agent_candidates(monkeypatch, agents)
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", list_agents)
+    monkeypatch.setattr(agent_management, "batch_search_version_names", versions)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=2, page_size=1
+    )
+
+    assert calls == [([2], "tenant_123", [2])]
+    assert result["items"][0]["version_label"] == "Release Two"
+    assert result["items"][0]["version_create_time"] == "2026-09-23T10:00:00"
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_enriches_only_current_page_and_keeps_unavailable(monkeypatch):
+    candidates = [
+        {"agent_id": agent_id, "tenant_id": "tenant_123", "name": f"Agent {agent_id}",
+         "display_name": f"Agent {agent_id}", "created_by": "alice", "enabled": True}
+        for agent_id in (1, 2, 3)
+    ]
+    enriched_ids = []
+
+    monkeypatch.setattr(
+        agent_management,
+        "query_agent_list_candidates_by_tenant_id",
+        lambda _tenant_id, **_kwargs: candidates,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        agent_management,
+        "get_user_tenant_by_user_id",
+        lambda _user_id: {"user_role": "ADMIN"},
+    )
+
+    async def enrich_page(*, agent_ids=None, **_kwargs):
+        assert agent_ids is not None, "listing must not enrich every candidate"
+        enriched_ids.extend(agent_ids)
+        return [
+            {"agent_id": agent_id, "tenant_id": "tenant_123", "current_version_no": 0,
+             "is_available": False, "unavailable_reasons": ["tool_unavailable"]}
+            for agent_id in agent_ids
+        ]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", enrich_page)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=2, page_size=1
+    )
+
+    assert enriched_ids == [2]
+    assert [agent["agent_id"] for agent in result["items"]] == [2]
+    assert result["items"][0]["unavailable_reasons"] == ["tool_unavailable"]
+    assert result["pagination"]["total"] == 3
+    assert result["creator_counts"] == {"all": 3, "created": 3, "others": 0}
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_keeps_duplicate_warning_when_original_is_off_page(monkeypatch):
+    candidates = [
+        {"agent_id": 2, "name": "duplicate", "display_name": "Newer",
+         "create_time": "2026-09-24", "created_by": "alice"},
+        {"agent_id": 1, "name": "duplicate", "display_name": "Original",
+         "create_time": "2026-09-20", "created_by": "alice"},
+    ]
+    _mock_paged_agent_candidates(monkeypatch, candidates)
+
+    async def enrich_page(*, agent_ids, **_kwargs):
+        return [
+            {"agent_id": agent_id, "current_version_no": 0,
+             "is_available": True, "unavailable_reasons": []}
+            for agent_id in agent_ids
+        ]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", enrich_page)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=1, page_size=1
+    )
+
+    assert [agent["agent_id"] for agent in result["items"]] == [2]
+    assert result["items"][0]["is_available"] is False
+    assert result["items"][0]["unavailable_reasons"] == ["duplicate_name"]
+    assert result["pagination"]["total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_filters_visibility_before_count_and_enrichment(monkeypatch):
+    from consts.const import PERMISSION_PRIVATE
+
+    candidates = [
+        {"agent_id": 1, "name": "Mine", "created_by": "alice", "group_ids": "2"},
+        {"agent_id": 2, "name": "Shared", "created_by": "bob", "group_ids": "2"},
+        {"agent_id": 3, "name": "Hidden", "created_by": "bob", "group_ids": "3"},
+        {"agent_id": 4, "name": "Private", "created_by": "bob", "group_ids": "2",
+         "ingroup_permission": PERMISSION_PRIVATE},
+    ]
+    _mock_paged_agent_candidates(monkeypatch, candidates)
+    monkeypatch.setattr(
+        agent_management, "get_user_tenant_by_user_id",
+        lambda _user_id: {"user_role": "USER"},
+    )
+    monkeypatch.setattr(agent_management, "query_group_ids_by_user", lambda _user_id: [2])
+    monkeypatch.setattr(
+        agent_management,
+        "convert_string_to_list",
+        lambda value: [int(part) for part in value.split(",") if part] if value else [],
+    )
+    enriched_ids = []
+
+    async def enrich_page(*, agent_ids, **_kwargs):
+        enriched_ids.extend(agent_ids)
+        return [
+            {"agent_id": agent_id, "current_version_no": 0,
+             "is_available": True, "unavailable_reasons": []}
+            for agent_id in agent_ids
+        ]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", enrich_page)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=1, page_size=10
+    )
+
+    assert enriched_ids == [1, 2]
+    assert [agent["agent_id"] for agent in result["items"]] == [1, 2]
+    assert result["pagination"]["total"] == 2
+    assert result["creator_counts"] == {"all": 2, "created": 1, "others": 1}
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_preserves_cross_tenant_order_and_version_scope(monkeypatch):
+    candidates_by_tenant = {
+        "tenant_123": [{"agent_id": 1, "name": "Mine", "created_by": "alice"}],
+        "shared": [{"agent_id": 2, "name": "Shared", "created_by": "bob"}],
+    }
+    enrich_calls = []
+    version_calls = []
+    monkeypatch.setattr(
+        agent_management,
+        "query_agent_list_candidates_by_tenant_id",
+        lambda tenant_id, **_kwargs: [dict(agent) for agent in candidates_by_tenant[tenant_id]],
+    )
+    monkeypatch.setattr(
+        agent_management,
+        "get_user_tenant_by_user_id",
+        lambda _user_id: {"user_role": "ADMIN"},
+    )
+
+    async def enrich_page(*, tenant_id, agent_ids, **_kwargs):
+        enrich_calls.append((tenant_id, agent_ids))
+        return [
+            {"agent_id": agent_id, "current_version_no": 1,
+             "is_available": True, "unavailable_reasons": []}
+            for agent_id in agent_ids
+        ]
+
+    def versions(agent_ids, tenant_id, version_nos):
+        version_calls.append((tenant_id, agent_ids, version_nos))
+        return [{"agent_id": agent_ids[0], "version_no": 1,
+                 "version_name": tenant_id, "create_time": None}]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", enrich_page)
+    monkeypatch.setattr(agent_management, "batch_search_version_names", versions)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", additional_tenant_id="shared",
+        user_id="alice", page=1, page_size=2,
+    )
+
+    assert [item["agent_id"] for item in result["items"]] == [1, 2]
+    assert [item["version_label"] for item in result["items"]] == ["tenant_123", "shared"]
+    assert enrich_calls == [("tenant_123", [1]), ("shared", [2])]
+    assert version_calls == [("tenant_123", [1], [1]), ("shared", [2], [1])]
+    assert result["pagination"]["total"] == 2
+
+
 @pytest.mark.asyncio
 @patch("management.services.model.resolver.get_model_by_model_id")
 @patch("management.services.agent.management.check_agent_availability")
@@ -3079,6 +3482,7 @@ async def test_list_all_agent_info_impl_success(
             "created_by": "user1",
             "create_time": 1,
             "current_version_no": None,  # Not published
+            "icon_url": "/api/agent/1/icon",
         },
         {
             "agent_id": 2,
@@ -3133,6 +3537,7 @@ async def test_list_all_agent_info_impl_success(
     assert result[0]["group_ids"] == []
     assert result[0]["permission"] == "EDIT"  # Admin can edit all
     assert result[0]["is_published"] == False  # current_version_no is None
+    assert result[0]["icon_url"] == "/api/agent/1/icon"
     assert result[1]["agent_id"] == 2
     assert result[1]["name"] == "Agent 2"
     assert result[1]["display_name"] == "Display Agent 2"
@@ -3141,6 +3546,7 @@ async def test_list_all_agent_info_impl_success(
     assert result[1]["group_ids"] == [1, 2, 3]
     assert result[1]["permission"] == "EDIT"  # Admin can edit all
     assert result[1]["is_published"] == True  # current_version_no is not None
+    assert result[1]["icon_url"] is None
 
     # Verify mock calls
     mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
@@ -11296,7 +11702,79 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
 
 
 @pytest.mark.asyncio
-@patch("management.services.agent.management.get_current_user_info")
+@patch('management.services.agent.management.get_current_user_info')
+async def test_import_agent_with_skills_impl_reuses_existing_skills(mock_get_user_info):
+    """A use-existing resolution links the existing skill instead of failing."""
+    from management.services.agent.service import import_agent_with_skills_impl
+    from management.services.agent import management as ag_svc
+    from consts.model import SkillResolution
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+
+    existing_skills = [{"name": "ExistingSkill", "skill_id": 99}]
+    skills = [
+        MagicMock(skill_name="ExistingSkill", skill_zip_base64="SGVsbG8gV29ybGQ="),
+        MagicMock(skill_name="NewSkill", skill_zip_base64="SGVsbG8gV29ybGQ="),
+    ]
+
+    mock_agent_info = MagicMock()
+    mock_agent_info.agent_id = 1
+
+    mock_skill_service = MagicMock()
+    mock_skill_service.create_skill_from_zip_bytes.return_value = {"skill_id": 200}
+
+    with patch.object(ag_svc.skill_db, 'list_skills', return_value=existing_skills):
+        with patch.object(ag_svc, 'import_agent_impl', return_value={1: 100}) as mock_import:
+            with patch.object(ag_svc.skill_db, 'create_or_update_skill_by_skill_info'):
+                with patch('management.services.agent.management.SkillService', return_value=mock_skill_service):
+                    result = await import_agent_with_skills_impl(
+                        agent_info=mock_agent_info,
+                        skills=skills,
+                        authorization="Bearer token",
+                        skill_resolutions=[
+                            SkillResolution(
+                                skill_name="ExistingSkill",
+                                action="use_existing",
+                            )
+                        ],
+                    )
+
+    assert result == {1: 100}
+    # Only the new skill is created from zip bytes; the existing one is reused.
+    mock_skill_service.create_skill_from_zip_bytes.assert_called_once()
+    skill_name_to_id = mock_import.call_args.kwargs["skill_name_to_id"]
+    assert skill_name_to_id == {"ExistingSkill": 99, "NewSkill": 200}
+
+
+@pytest.mark.asyncio
+@patch('management.services.agent.management.get_current_user_info')
+async def test_import_agent_with_skills_impl_duplicate_raises_by_default(mock_get_user_info):
+    """Default behaviour still hard-gates duplicate skill names."""
+    from management.services.agent.service import import_agent_with_skills_impl
+    from management.services.agent import management as ag_svc
+    from consts.exceptions import SkillDuplicateError
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+
+    existing_skills = [{"name": "ExistingSkill", "skill_id": 99}]
+    skills = [MagicMock(skill_name="ExistingSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")]
+
+    mock_agent_info = MagicMock()
+    mock_agent_info.agent_id = 1
+
+    with patch.object(ag_svc.skill_db, 'list_skills', return_value=existing_skills):
+        with pytest.raises(SkillDuplicateError) as exc_info:
+            await import_agent_with_skills_impl(
+                agent_info=mock_agent_info,
+                skills=skills,
+                authorization="Bearer token",
+            )
+
+    assert "ExistingSkill" in exc_info.value.duplicate_names
+
+
+@pytest.mark.asyncio
+@patch('management.services.agent.management.get_current_user_info')
 async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
     """Test import_agent_with_skills_impl handles case where main agent is not in mapping."""
     from management.services.agent.service import import_agent_with_skills_impl
@@ -19521,82 +19999,105 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
 @pytest.mark.parametrize(
     ("content", "message"),
     [
-        (b"", "Agent icon file is empty"),
+        (b"", "Icon file is empty"),
         (
             b"x" * (agent_service.AGENT_ICON_MAX_BYTES + 1),
-            "Agent icon must not exceed 2 MB",
+            "Icon must not exceed 2 MB",
         ),
-        (b"not an image", "Agent icon must be a PNG, JPEG, GIF, or WebP image"),
+        (b"not an image", "Icon must be a PNG, JPEG, GIF, or WebP image"),
     ],
     ids=("empty", "too-large", "invalid-format"),
 )
-async def test_upload_agent_icon_impl_rejects_invalid_content(content, message):
+async def test_upload_agent_icon_impl_rejects_invalid_content(mocker, content, message):
+    mocker.patch.object(agent_service, "is_system_agent", return_value=False)
     with pytest.raises(ValueError, match=message):
         await agent_service.upload_agent_icon_impl(123, content, "tenant", "user")
 
 
 @pytest.mark.asyncio
+async def test_upload_agent_icon_impl_rejects_system_agent(mocker):
+    mocker.patch.object(agent_service, "is_system_agent", return_value=True)
+    get_agent = mocker.patch.object(agent_service, "get_agent_info_impl")
+    upload = mocker.patch.object(agent_service, "upload_icon_image")
+
+    with pytest.raises(agent_service.ForbiddenError, match="System Agent"):
+        await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
+
+    get_agent.assert_not_called()
+    upload.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_upload_agent_icon_impl_rejects_without_edit_permission(mocker):
-    mocker.patch.object(
-        agent_service, "_detect_agent_icon_content_type", return_value="image/png"
-    )
+    mocker.patch.object(agent_service, "is_system_agent", return_value=False)
     mocker.patch.object(
         agent_service, "get_agent_info_impl", return_value={"permission": "VIEW"}
     )
-    upload = mocker.patch.object(agent_service.minio_client, "upload_fileobj")
+    upload = mocker.patch.object(agent_service, "upload_icon_image")
 
     with pytest.raises(agent_service.ForbiddenError, match="permission to edit"):
-        await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+        await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
 
     upload.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_upload_agent_icon_impl_upload_failure(mocker):
-    mocker.patch.object(
-        agent_service, "_detect_agent_icon_content_type", return_value="image/png"
-    )
+    mocker.patch.object(agent_service, "is_system_agent", return_value=False)
     mocker.patch.object(
         agent_service,
         "get_agent_info_impl",
         return_value={"permission": "EDIT", "tenant_id": "owner-tenant"},
     )
     mocker.patch.object(
-        agent_service.minio_client,
-        "upload_fileobj",
-        return_value=(False, "storage error"),
+        agent_service, "upload_icon_image", side_effect=ValueError("Failed to upload icon: storage error")
     )
 
-    with pytest.raises(ValueError, match="Failed to upload agent icon: storage error"):
-        await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+    with pytest.raises(ValueError, match="Failed to upload icon: storage error"):
+        await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
 
 
 @pytest.mark.asyncio
 async def test_upload_agent_icon_impl_success(mocker):
-    mocker.patch.object(
-        agent_service, "_detect_agent_icon_content_type", return_value="image/png"
-    )
+    mocker.patch.object(agent_service, "is_system_agent", return_value=False)
     mocker.patch.object(
         agent_service,
         "get_agent_info_impl",
         return_value={"permission": "EDIT", "tenant_id": "owner-tenant"},
     )
-    upload = mocker.patch.object(
-        agent_service.minio_client, "upload_fileobj", return_value=(True, None)
-    )
+    upload = mocker.patch.object(agent_service, "upload_icon_image", return_value="image/png")
     update = mocker.patch.object(agent_service, "update_agent_icon")
 
-    result = await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+    result = await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
 
-    assert result == {"icon_url": "/api/agent/123/icon", "content_type": "image/png"}
+    assert result["content_type"] == "image/png"
+    assert result["icon_url"].startswith("/api/agent/123/icon?v=")
+    assert len(result["icon_url"].split("?v=", 1)[1]) == 32
     upload.assert_called_once()
     assert upload.call_args.args[1] == "agent-icons/owner-tenant/123/icon"
     update.assert_called_once_with(
         agent_id=123,
         tenant_id="owner-tenant",
-        icon_url="/api/agent/123/icon",
+        icon_url=result["icon_url"],
         user_id="user",
     )
+
+
+@pytest.mark.asyncio
+async def test_upload_agent_icon_impl_changes_url_on_reupload(mocker):
+    mocker.patch.object(agent_service, "is_system_agent", return_value=False)
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"permission": "EDIT", "tenant_id": "owner-tenant"},
+    )
+    mocker.patch.object(agent_service, "upload_icon_image", return_value="image/png")
+    mocker.patch.object(agent_service, "update_agent_icon")
+
+    first = await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
+    second = await agent_service.upload_agent_icon_impl(123, b"\x89PNG\r\n\x1a\n", "tenant", "user")
+
+    assert first["icon_url"] != second["icon_url"]
 
 
 @pytest.mark.asyncio
@@ -19622,10 +20123,10 @@ async def test_get_agent_icon_impl_raises_when_object_missing(mocker):
         return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "owner-tenant"},
     )
     get_stream = mocker.patch.object(
-        agent_service, "get_file_stream", return_value=None
+        agent_service, "read_icon_image", side_effect=FileNotFoundError("Icon not found")
     )
 
-    with pytest.raises(FileNotFoundError, match="Agent icon not found"):
+    with pytest.raises(FileNotFoundError, match="Icon not found"):
         await agent_service.get_agent_icon_impl(123, "tenant", "user")
 
     get_stream.assert_called_once_with("agent-icons/owner-tenant/123/icon")
@@ -19639,13 +20140,10 @@ async def test_get_agent_icon_impl_rejects_invalid_stored_content(mocker):
         return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "tenant"},
     )
     mocker.patch.object(
-        agent_service, "get_file_stream", return_value=io.BytesIO(b"invalid")
-    )
-    mocker.patch.object(
-        agent_service, "_detect_agent_icon_content_type", return_value=None
+        agent_service, "read_icon_image", side_effect=FileNotFoundError("Icon is invalid")
     )
 
-    with pytest.raises(FileNotFoundError, match="Agent icon is invalid"):
+    with pytest.raises(FileNotFoundError, match="Icon is invalid"):
         await agent_service.get_agent_icon_impl(123, "tenant", "user")
 
 
@@ -19658,10 +20156,7 @@ async def test_get_agent_icon_impl_success(mocker):
         return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "owner-tenant"},
     )
     mocker.patch.object(
-        agent_service, "get_file_stream", return_value=io.BytesIO(content)
-    )
-    mocker.patch.object(
-        agent_service, "_detect_agent_icon_content_type", return_value="image/webp"
+        agent_service, "read_icon_image", return_value=(content, "image/webp")
     )
 
     result = await agent_service.get_agent_icon_impl(123, "tenant", "user")

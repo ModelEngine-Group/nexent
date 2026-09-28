@@ -69,6 +69,7 @@ from utils.memory_tool_prompt import build_memory_tool_policy
 from utils.automation_tool_prompt import build_automation_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.http_client_utils import create_httpx_client
+from utils.mcp_url_utils import get_tenant_local_mcp_server
 from utils.redis_utils import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
@@ -79,11 +80,13 @@ from consts.const import (
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
+    TOKEN,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+    RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError, WorkbenchError
@@ -93,6 +96,21 @@ from .tool_user_context import resolve_tool_user_context
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
+
+
+def _build_parallel_executor_tool_config(default_timeout_seconds: int) -> ToolConfig:
+    return ToolConfig(
+        class_name=ParallelExecutorTool.__name__,
+        name=ParallelExecutorTool.name,
+        description=ParallelExecutorTool.description,
+        inputs=json.dumps(
+            ParallelExecutorTool.inputs_for_timeout(default_timeout_seconds),
+            ensure_ascii=False,
+        ),
+        output_type=ParallelExecutorTool.output_type,
+        params={"default_timeout_seconds": default_timeout_seconds},
+        source="local",
+    )
 
 
 def _create_fixed_search_memory_tool():
@@ -1427,15 +1445,7 @@ async def create_agent_config(
     # Append parallel_executor as an always-available system-managed tool.
     # Memory handling is wired separately below: only store_memory is exposed
     # to the model, while search_memory runs once during preparation.
-    tool_list.append(ToolConfig(
-        class_name=ParallelExecutorTool.__name__,
-        name=ParallelExecutorTool.name,
-        description=ParallelExecutorTool.description,
-        inputs=json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
-        output_type=ParallelExecutorTool.output_type,
-        params={},
-        source="local",
-    ))
+    tool_list.append(_build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS))
 
     if (
         include_automation_tool
@@ -1898,6 +1908,7 @@ async def create_agent_config(
 
     agent_config = AgentConfig(
         name="undefined" if agent_info["name"] is None else agent_info["name"],
+        display_name=agent_info.get("display_name"),
         description="undefined" if agent_info["description"] is None else agent_info["description"],
         prompt_templates=await prepare_prompt_templates(
             is_manager=len(managed_agents) > 0 or len(external_a2a_agents) > 0,
@@ -2848,7 +2859,7 @@ async def create_agent_run_info(
         selected_config.reasoning_budget_tokens = reasoning_budget_tokens
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
-    default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     remote_mcp_list.append({
         "remote_mcp_server_name": "outer-apis",
         "remote_mcp_server": default_mcp_url,
@@ -2877,6 +2888,10 @@ async def create_agent_run_info(
             }
             if url == default_mcp_url:
                 mcp_config["httpx_client_factory"] = create_httpx_client
+                mcp_config["headers"] = {
+                    "X-Tenant-ID": str(tenant_id),
+                    "X-Nexent-Internal-Token": TOKEN,
+                }
             headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:

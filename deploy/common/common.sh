@@ -2235,7 +2235,7 @@ deployment_render_helm_monitoring_global_values() {
   printf '    langsmithOtlpTracesEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGSMITH_OTLP_TRACES_ENDPOINT "https://api.smith.langchain.com/otel/v1/traces")")"
   printf '    otlpMetricsEnabled: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_METRICS_ENABLED "true")")"
   printf '    instrumentRequests: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_INSTRUMENT_REQUESTS "false")")"
-  printf '    fastapiIncludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_INCLUDED_URLS "/agent/run")")"
+  printf '    fastapiIncludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_INCLUDED_URLS "/agent/run,/conversation/generate_title,/nb/v1/generate_title")")"
   printf '    fastapiExcludedUrls: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_EXCLUDED_URLS "")")"
   printf '    fastapiExcludeSpans: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_FASTAPI_EXCLUDE_SPANS "receive,send")")"
   printf '    telemetrySampleRate: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TELEMETRY_SAMPLE_RATE "1.0")")"

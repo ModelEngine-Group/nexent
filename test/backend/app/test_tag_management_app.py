@@ -73,10 +73,10 @@ def test_management_permission_is_derived_from_auth_and_tenant_cannot_be_overrid
     service.assert_called_once_with("tenant-from-auth", 999, request, "user-from-auth")
 
     install_auth(monkeypatch, allowed=False)
-    with pytest.raises(HTTPException) as error:
-        tag_app.list_tag_libraries(AUTHORIZATION)
-    assert error.value.status_code == 403
-    assert error.value.detail == "Tag library management permission is required"
+    list_service = MagicMock(return_value=[])
+    monkeypatch.setattr(tag_app.TagManagementService, "list_libraries", list_service)
+    assert tag_app.list_tag_libraries(AUTHORIZATION) == []
+    list_service.assert_called_once_with("tenant-from-auth")
 
 
 def test_tag_definition_requires_at_least_one_initial_value_with_clear_message():

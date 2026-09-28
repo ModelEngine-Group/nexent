@@ -1176,6 +1176,45 @@ def test_agent_repository_snapshot():
     assert len(snapshot.skills) == 1
 
 
+def test_official_agent_bundle_derives_card_fields_from_root_agent():
+    root_agent = model_consts.ExportAndImportAgentInfo(
+        agent_id=1,
+        tenant_id="official",
+        name="medical_assistant",
+        display_name="Medical Assistant",
+        description="Medical assistant",
+        max_steps=5,
+        provide_run_summary=False,
+        enabled=True,
+        tools=[],
+        managed_agents=[],
+    )
+
+    bundle = model_consts.OfficialAgentBundle(
+        agent_id=1,
+        agent_info={"1": root_agent},
+        mcp_info=[],
+    )
+
+    assert bundle.name == "medical_assistant"
+    assert bundle.display_name == "Medical Assistant"
+    assert bundle.icon == "🤖"
+    assert bundle.version_label == "V1"
+
+
+def test_official_agent_bundle_uses_defaults_without_root_agent():
+    bundle = model_consts.OfficialAgentBundle(
+        agent_id=1,
+        agent_info={},
+        mcp_info=[],
+    )
+
+    assert bundle.name == "agent"
+    assert bundle.display_name == "agent"
+    assert bundle.icon == "🤖"
+    assert bundle.version_label == "V1"
+
+
 def test_repository_import_requests():
     """Test repository import request models"""
     req = model_consts.RepositoryImportPrecheckResponse(
@@ -1415,15 +1454,17 @@ def test_manage_tenant_model_list_response():
 
 
 def test_agent_repository_listing_requests():
-    """Test AgentRepositoryListingCreateRequest"""
+    """Test the repository icon URL in the listing creation request."""
+    icon_url = "/api/repository/agent/1/versions/1/icon/image-id"
     req = model_consts.AgentRepositoryListingCreateRequest(
-        icon="🚀",
+        icon_url=icon_url,
         downloads=100,
         tags=["ai", "automation"],
         tool_count=10,
         content="This is a great agent"
     )
-    assert req.icon == "🚀"
+    assert req.icon_url == icon_url
+    assert req.model_dump(exclude_unset=True)["icon_url"] == icon_url
     assert req.downloads == 100
 
 

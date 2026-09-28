@@ -1,14 +1,40 @@
 import logging
 from typing import List, Optional
-from sqlalchemy import or_, update
+from sqlalchemy import or_, text, update
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
 from database.agent_version_db import query_current_version_no
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
+from consts.exceptions import TenantResourceLimitError
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
+
+
+def _enforce_tenant_agent_limit(session, tenant_id: str) -> None:
+    """Serialize standard-Agent creation and enforce the tenant quota."""
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"tenant-agent-limit:{tenant_id}"},
+    )
+    agent_count = session.query(AgentInfo.agent_id).filter(
+        AgentInfo.tenant_id == tenant_id,
+        AgentInfo.version_no == 0,
+        AgentInfo.delete_flag == "N",
+        or_(
+            AgentInfo.agent_origin == "USER",
+            AgentInfo.agent_origin.is_(None),
+        ),
+    ).count()
+    if agent_count >= MAX_AGENTS_PER_TENANT:
+        raise TenantResourceLimitError(
+            f"Tenant agent limit reached: maximum {MAX_AGENTS_PER_TENANT} agents per tenant",
+            resource="agents",
+            scope="tenant",
+            limit=MAX_AGENTS_PER_TENANT,
+            current_count=agent_count,
+        )
 
 
 def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
@@ -59,6 +85,21 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
         if not agent:
             raise ValueError("agent not found")
         return agent.agent_id
+
+
+def find_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: int = 0):
+    """Return an Agent ID by name, or ``None`` when no Agent exists.
+
+    This non-raising variant is intended for idempotent provisioning flows
+    where a missing Agent is an expected branch, not an error condition.
+    """
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.name == agent_name,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == version_no,
+            AgentInfo.delete_flag != 'Y').first()
+        return agent.agent_id if agent else None
 
 
 def search_system_agent(
@@ -239,6 +280,10 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "is_new": True,  # Mark new agents as new
     })
     with get_db_session() as session:
+        # System Agents are provisioned separately and are excluded by the
+        # quota query above; ordinary Agent creation is serialized per tenant.
+        if info_with_metadata.get("agent_origin", "USER") != "SYSTEM":
+            _enforce_tenant_agent_limit(session, tenant_id)
         new_agent = AgentInfo(**filter_property(info_with_metadata, AgentInfo))
         new_agent.delete_flag = 'N'
         session.add(new_agent)
@@ -372,6 +417,24 @@ def update_agent_icon(agent_id: int, tenant_id: str, icon_url: str, user_id: str
             raise ValueError("ag_tenant_agent_t Agent not found")
 
 
+def update_agent_display_name(
+    agent_id: int, tenant_id: str, display_name: str, user_id: str
+) -> None:
+    """Update the display name on every active version of an agent."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.delete_flag == "N",
+            )
+            .values(display_name=display_name, updated_by=user_id)
+        )
+        if result.rowcount == 0:
+            raise ValueError("ag_tenant_agent_t Agent not found")
+
+
 def query_agent_records_for_nl2agent(agent_id: int, tenant_id: str) -> list[dict]:
     """Return all tenant-owned records for NL2Agent draft validation.
 
@@ -456,6 +519,55 @@ def query_all_agent_info_by_tenant_id(tenant_id: str, version_no: int = 0):
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag != 'Y'
         ).order_by(AgentInfo.create_time.desc()).all()
+        return [as_dict(agent) for agent in agents]
+
+
+def query_agent_list_candidates_by_tenant_id(
+    tenant_id: str, *, include_description: bool = False
+) -> list[dict]:
+    """Load only fields needed to filter and page visible draft agents."""
+    columns = [
+        AgentInfo.agent_id,
+        AgentInfo.tenant_id,
+        AgentInfo.name,
+        AgentInfo.display_name,
+        AgentInfo.created_by,
+        AgentInfo.create_time,
+        AgentInfo.group_ids,
+        AgentInfo.ingroup_permission,
+    ]
+    if include_description:
+        columns.append(AgentInfo.description)
+    with get_db_session() as session:
+        rows = (
+            session.query(*columns)
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != 'Y',
+                AgentInfo.enabled.is_(True),
+            )
+            .order_by(AgentInfo.create_time.desc(), AgentInfo.agent_id.desc())
+            .all()
+        )
+        return [dict(row._mapping) for row in rows]
+
+
+def query_agent_info_by_ids(tenant_id: str, agent_ids: list[int]) -> list[dict]:
+    """Load complete draft records for one already-authorized agent page."""
+    if not agent_ids:
+        return []
+    with get_db_session() as session:
+        agents = (
+            session.query(AgentInfo)
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != 'Y',
+                AgentInfo.agent_id.in_(agent_ids),
+            )
+            .all()
+        )
         return [as_dict(agent) for agent in agents]
 
 
