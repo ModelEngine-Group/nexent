@@ -282,6 +282,14 @@ def test_load_official_bundles_only_reads_selected_profiles(tmp_path: Path):
     assert all(bundle.snapshot.agent_id in {101, 202} for bundle in bundles)
 
 
+def test_load_official_bundles_resolves_profiles_from_existing_directories(tmp_path: Path):
+    _write_bundle(tmp_path, "金融", "assistant", _agent_payload())
+
+    bundles = load_official_bundles(tmp_path, ["金融"])
+
+    assert [(bundle.profile, bundle.name) for bundle in bundles] == [("金融", "assistant")]
+
+
 def test_load_official_bundles_rejects_duplicate_bundle_keys(tmp_path: Path):
     _write_bundle(tmp_path, "medical", "assistant", _agent_payload())
     _write_bundle(tmp_path, "finance", "assistant", _agent_payload(202))

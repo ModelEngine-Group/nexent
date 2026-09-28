@@ -172,10 +172,17 @@ def load_official_bundles(base_dir: str | Path, profiles: Iterable[str]) -> list
     root = Path(base_dir).resolve()
     bundles: list[OfficialAgentBundle] = []
     seen_names: set[str] = set()
+    profile_dirs = {
+        path.name: path
+        for path in root.iterdir()
+        if path.is_dir()
+    } if root.is_dir() else {}
     for profile in parse_official_agent_profiles(profiles):
-        profile_dir = root / profile
-        if not profile_dir.is_dir():
-            logger.warning("Official agent profile directory not found: %s", profile_dir)
+        # Resolve user-selected profiles from the already enumerated directory
+        # set instead of concatenating untrusted input into a filesystem path.
+        profile_dir = profile_dirs.get(profile)
+        if profile_dir is None:
+            logger.warning("Official agent profile directory not found: %s", profile)
             continue
         # Skill payloads are ZIP files too, but they are dependencies inside
         # a directory Bundle rather than standalone Agent Bundles. Do not
