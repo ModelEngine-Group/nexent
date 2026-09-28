@@ -155,6 +155,18 @@ def test_sync_bundle_upserts_official_repository_record():
         description="",
         tags=None,
         icon="medical-icon",
+        knowledge_bases=[
+            SimpleNamespace(
+                model_dump=MagicMock(
+                    return_value={
+                        "logical_index_name": "kb-1",
+                        "display_name": "公文写作",
+                        "description": "Official guidance",
+                        "documents": [],
+                    }
+                )
+            )
+        ],
     )
 
     with patch.object(sync_service, "_materialize_snapshot", return_value=snapshot):
@@ -177,7 +189,17 @@ def test_sync_bundle_upserts_official_repository_record():
         "author": "Nexent",
         "submitted_by": sync_service.SYSTEM_USER_ID,
         "version_name": "Official",
-        "agent_info_json": {"agent_id": 601},
+        "agent_info_json": {
+            "agent_id": 601,
+            "knowledge_bases": [
+                {
+                    "logical_index_name": "kb-1",
+                    "display_name": "公文写作",
+                    "description": "Official guidance",
+                    "documents": [],
+                }
+            ],
+        },
         "status": sync_service.STATUS_SHARED,
         "tags": [],
         "icon": "medical-icon",

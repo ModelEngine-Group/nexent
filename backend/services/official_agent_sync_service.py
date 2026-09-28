@@ -90,6 +90,15 @@ def _materialize_snapshot(bundle: OfficialAgentBundle):
 def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
     snapshot = _materialize_snapshot(bundle)
     root = snapshot.agent_info[str(snapshot.agent_id)]
+    # Keep the official bundle's knowledge-base declarations in the repository
+    # snapshot as well as the tool's logical index references.  The logical
+    # name (for example ``kb-1``) is only an internal remapping key; the
+    # bundle's ``display_name`` is the name that must be shown to users.
+    snapshot_payload = snapshot.model_dump(mode="json")
+    snapshot_payload["knowledge_bases"] = [
+        knowledge_base.model_dump(mode="json")
+        for knowledge_base in (bundle.knowledge_bases or [])
+    ]
     repository_data = {
         "agent_id": snapshot.agent_id,
         "version_no": getattr(root, "version_no", 1) or 1,
@@ -103,7 +112,7 @@ def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
         "author": "Nexent",
         "submitted_by": SYSTEM_USER_ID,
         "version_name": "Official",
-        "agent_info_json": snapshot.model_dump(mode="json"),
+        "agent_info_json": snapshot_payload,
         "status": STATUS_SHARED,
         "tags": bundle.tags or [],
         "icon": bundle.icon,

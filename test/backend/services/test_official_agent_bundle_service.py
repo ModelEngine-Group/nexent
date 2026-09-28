@@ -11,6 +11,7 @@ from services.official_agent_bundle_service import (
     MAX_BUNDLE_BYTES,
     MAX_BUNDLE_FILE_BYTES,
     OfficialAgentBundle,
+    _load_kb_metadata,
     _load_kb_documents,
     _load_skill_entries,
     _read_bundle_json,
@@ -152,6 +153,22 @@ def test_load_kb_documents_reads_text_and_binary_files_and_skips_hidden_files(tm
 def test_load_kb_documents_rejects_unsafe_logical_name(tmp_path: Path):
     with pytest.raises(ValueError, match="unsafe official knowledge base name"):
         _load_kb_documents(tmp_path, {"knowledge_bases": [{"logical_index_name": "../medical"}]})
+
+
+def test_load_kb_metadata_preserves_chinese_display_name_for_single_declaration():
+    metadata = _load_kb_metadata(
+        {
+            "knowledge_bases": {
+                "logical_index_name": "kb-1",
+                "display_name": "公文写作",
+                "description": "Official guidance",
+            }
+        }
+    )
+
+    assert len(metadata) == 1
+    assert metadata[0].logical_index_name == "kb-1"
+    assert metadata[0].display_name == "公文写作"
 
 
 def test_load_zip_bundle_rejects_bundle_size_limit(tmp_path: Path):
