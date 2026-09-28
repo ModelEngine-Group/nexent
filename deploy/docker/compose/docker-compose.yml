@@ -229,7 +229,7 @@ services:
     networks:
       - nexent
     ports:
-      - "3000:3000"
+      - "${NEXENT_WEB_PORT_MAPPING-3000:3000}"
     volumes:
       - ${ROOT_DIR}/project-config:/mnt/nexent-data/project-config
     env_file:
@@ -246,6 +246,26 @@ services:
       options:
         max-size: "10m" # Maximum size of a single log file
         max-file: "3" # Maximum number of log files to keep
+
+
+  nexent-nginx:
+    image: nginx:alpine
+    container_name: nexent-nginx
+    restart: always
+    profiles:
+      - https
+    networks:
+      - nexent
+    ports:
+      - "3000:3000"
+    volumes:
+      - ${ROOT_DIR}/nginx/ssl:/etc/nginx/ssl:ro
+      - ../assets/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nexent-data-process:
     image: ${NEXENT_DATA_PROCESS_IMAGE}
