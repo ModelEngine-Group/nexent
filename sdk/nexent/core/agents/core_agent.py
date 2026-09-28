@@ -1267,6 +1267,8 @@ Additional Args:
             additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
         if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
             additional_args["_defer_attempt_commit"] = True
+            if legacy_code_action:
+                additional_args["_retry_empty_response"] = False
 
         if legacy_code_action:
             input_messages = self._legacy_request_messages(input_messages)

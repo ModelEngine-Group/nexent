@@ -2987,6 +2987,7 @@ class TestRunStreamRealExecution:
         assert response.model_attempt_commit_deferred is False
         agent.model.assert_called_once()
         assert agent.model.call_args.kwargs["stop_sequences"] == ["Observation:", "Calling tools:"]
+        assert agent.model.call_args.kwargs["_retry_empty_response"] is False
 
     @pytest.mark.parametrize("format_name", ["code", "run"])
     def test_cmsr_007_disabled_legacy_code_with_outer_text_executes_once(self, monkeypatch, format_name):
