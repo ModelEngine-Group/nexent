@@ -16,15 +16,15 @@ from consts.model import (
 from services.agent_repository_service import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
+    delete_official_agent_impl,
     get_agent_repository_listing_detail_impl,
+    get_agent_repository_icon_impl,
     import_agent_from_repository_impl,
     list_agent_repository_listings_impl,
     list_agent_repository_tag_stats_impl,
     list_my_editable_agents_impl,
-    update_agent_repository_status_impl,
-    delete_official_agent_impl,
     list_official_agent_management_impl,
-    get_agent_repository_icon_impl,
+    update_agent_repository_status_impl,
     upload_agent_repository_icon_impl,
 )
 from services.official_agent_sync_service import sync_official_agents
@@ -355,7 +355,7 @@ async def create_agent_repository_listing_api(
     """Create or update a marketplace repository listing from an agent version snapshot."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        card_fields = payload.model_dump(exclude_none=True) if payload else None
+        card_fields = payload.model_dump(exclude_unset=True) if payload else None
         result = await create_agent_repository_listing_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
