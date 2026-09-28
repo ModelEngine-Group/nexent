@@ -1752,6 +1752,72 @@ def test_list_agent_page_api_forwards_creator_and_structured_tag_filters(
     assert kwargs["page_size"] == 8
 
 
+def test_list_agent_page_api_forwards_creator_and_asset_owner_tenant(
+    mocker, mock_auth_header
+):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("test_user", "auth_tenant", "en"),
+    )
+    mocker.patch("apps.agent_app.ASSET_OWNER_TENANT_ID", "asset_owner")
+    mock_list = mocker.patch(
+        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
+    )
+    mock_list.return_value = {"items": [], "pagination": {"total": 0}}
+
+    response = config_client.get(
+        "/agent/list/page",
+        params={"created_by": "author-7"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    kwargs = mock_list.await_args.kwargs
+    assert kwargs["tenant_id"] == "auth_tenant"
+    assert kwargs["created_by"] == "author-7"
+    assert kwargs["additional_tenant_id"] == "asset_owner"
+
+
+def test_list_agent_page_api_rejects_invalid_tag_predicates(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("test_user", "auth_tenant", "en"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
+    )
+
+    response = config_client.get(
+        "/agent/list/page",
+        params={"tag_predicates": "{}"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "tag_predicates must be a list"
+    mock_list.assert_not_awaited()
+
+
+def test_list_agent_page_api_hides_unexpected_error(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("test_user", "auth_tenant", "en"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_app.list_agent_page_impl",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("lookup failed"),
+    )
+    log_error = mocker.patch("apps.agent_app.logger.error")
+
+    response = config_client.get("/agent/list/page", headers=mock_auth_header)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Paged agent list error."
+    mock_list.assert_awaited_once()
+    log_error.assert_called_once_with("Paged agent list error: lookup failed")
+
+
 def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     """Test list_all_agent_info_api success case without tenant_id."""
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")

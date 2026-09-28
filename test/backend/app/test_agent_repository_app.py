@@ -94,6 +94,34 @@ def test_upload_repository_icon_uses_separate_route(mocker):
     upload.assert_awaited_once_with(7, 2, "tenant-1", "user-1", b"image")
 
 
+@pytest.mark.parametrize(
+    ("error", "status_code"),
+    [
+        (ValueError("invalid icon"), 400),
+        (_UnauthorizedError("no listing access"), 403),
+    ],
+)
+def test_upload_repository_icon_maps_service_errors(mocker, error, status_code):
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    upload = mocker.patch(
+        "apps.agent_repository_app.upload_agent_repository_icon_impl",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    response = client.post(
+        "/repository/agent/7/versions/2/icon",
+        files={"file": ("icon.png", b"image", "image/png")},
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["detail"] == str(error)
+    upload.assert_awaited_once_with(7, 2, "tenant-1", "user-1", b"image")
+
+
 def test_repository_icon_read_requires_listing_access(mocker):
     mocker.patch(
         "apps.agent_repository_app.get_current_user_id",
