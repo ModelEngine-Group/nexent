@@ -5,6 +5,7 @@ from typing import Optional
 
 from database.model_management_db import get_model_by_model_id
 from utils.model_name_utils import add_repo_to_name
+from utils.reasoning import normalize_reasoning_params
 
 
 REASONING_EFFORT_VALUES = {
@@ -44,27 +45,32 @@ def reasoning_snapshot_from_model(model_info: Optional[dict]) -> dict:
     """Return the agent-owned reasoning settings copied from a model row."""
     model_extra = (model_info or {}).get("extra_params")
     model_extra = model_extra if isinstance(model_extra, dict) else {}
+    capability = _resolve_model_reasoning_capability(model_info)
+    model_extra = normalize_reasoning_params(model_extra, capability)
     enabled = model_extra.get("enable_thinking")
     if not isinstance(enabled, bool):
-        enabled = (
-            isinstance(model_extra.get("reasoning_effort"), str)
-            or isinstance(model_extra.get("reasoning_budget_tokens"), int)
-        )
+        enabled = False
 
     snapshot = {"enable_thinking": enabled}
     if enabled:
         effort = model_extra.get("reasoning_effort")
-        capability = _resolve_model_reasoning_capability(model_info)
         if isinstance(capability, dict) and capability.get("status") == "supported":
-            levels = set(capability.get("levels") or []) or COMMON_REASONING_LEVELS
+            levels = {
+                str(value)
+                for control in capability.get("controls") or []
+                if isinstance(control, dict) and control.get("type") == "effort"
+                for value in control.get("values") or []
+            }
+            levels.update(capability.get("levels") or [])
+            levels = levels or COMMON_REASONING_LEVELS
         else:
-            levels = COMMON_REASONING_LEVELS
+            levels = set()
         snapshot["reasoning_effort"] = (
             effort
             if effort == "auto"
             or (effort in REASONING_EFFORT_VALUES and effort in levels)
             else "auto"
-        )
+        ) if levels else None
         budget = model_extra.get("reasoning_budget_tokens")
         if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
             controls = capability.get("controls") if isinstance(capability, dict) else None
@@ -77,6 +83,9 @@ def reasoning_snapshot_from_model(model_info: Optional[dict]) -> dict:
             maximum = budget_control.get("max") if isinstance(budget_control, dict) else None
             if isinstance(minimum, int) and isinstance(maximum, int):
                 snapshot["reasoning_budget_tokens"] = min(maximum, max(minimum, budget))
+                snapshot.pop("reasoning_effort", None)
+        if snapshot.get("reasoning_effort") is None:
+            snapshot.pop("reasoning_effort", None)
     return snapshot
 
 
@@ -113,6 +122,8 @@ def snapshot_agent_reasoning_config(
             deepcopy(extra_params) if isinstance(extra_params, dict) else {}
         )
 
+        model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+        capability = _resolve_model_reasoning_capability(model_info)
         has_reasoning_override = (
             "enable_thinking" in extra_params
             or "reasoning_effort" in extra_params
@@ -120,15 +131,21 @@ def snapshot_agent_reasoning_config(
             or "reasoning_effort" in entry
         )
         if not has_reasoning_override:
-            model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
             extra_params.update(reasoning_snapshot_from_model(model_info))
-        elif extra_params.get("enable_thinking") is True and not isinstance(
-            extra_params.get("reasoning_effort"), str
+        extra_params = normalize_reasoning_params(extra_params, capability)
+        if (
+            extra_params.get("enable_thinking") is True
+            and not any(
+                key in extra_params
+                for key in ("reasoning_effort", "reasoning_budget_tokens")
+            )
         ):
-            extra_params["reasoning_effort"] = "auto"
-        elif extra_params.get("enable_thinking") is False:
-            extra_params.pop("reasoning_effort", None)
-            extra_params.pop("reasoning_budget_tokens", None)
+            effort_control = any(
+                isinstance(control, dict) and control.get("type") == "effort"
+                for control in (capability or {}).get("controls") or []
+            )
+            if effort_control:
+                extra_params["reasoning_effort"] = "auto"
 
         entry["extra_params"] = extra_params
         override_map[model_key] = entry

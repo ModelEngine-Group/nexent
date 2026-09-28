@@ -1,15 +1,13 @@
 import io
-import json
 import logging
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, File, Form, Header, Query, Request, UploadFile
+from fastapi import APIRouter, Body, File, Form, Header, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
-
 from nexent.core.concurrency import ManagedTaskSpec
+from pydantic import BaseModel, Field
 
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import (
@@ -71,30 +69,18 @@ class BatchDeleteRequest(BaseModel):
     case_ids: list[int]
 
 
-MAX_DOCX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-
-
 class GenerateCasesRequest(BaseModel):
     description: str = Field(..., min_length=1, max_length=1000)
     count: int = Field(default=20, ge=1, le=200)
     model_id: int = Field(...)
+    # ES mode: knowledge-base display names. With ENABLE_AIDP_KNOWLEDGE=true:
+    # AIDP kds_ids. The backend interprets the values by that env switch.
     knowledge_base_names: list[str] | None = None
     agent_id: int | None = None
     agent_version_no: int | None = None
     set_name: str | None = None
     set_description: str | None = None
     target_set_id: int | None = None
-
-
-def _parse_docx_to_text(raw: bytes) -> str:
-    """Extract text content from a .docx file."""
-    from io import BytesIO
-
-    from docx import Document
-
-    doc = Document(BytesIO(raw))
-    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    return "\n\n".join(paragraphs)
 
 
 # ── Endpoints ───────────────────────────────────────────────────────
@@ -452,49 +438,6 @@ async def delete_evaluation_set_api(
         )
 
 
-async def _parse_generate_cases_request(
-    request: Request,
-) -> tuple[GenerateCasesRequest, UploadFile | None]:
-    """Parse the request body as JSON or multipart form.
-
-    Returns ``(payload, file)`` where *file* is ``None`` for JSON bodies.
-    """
-    content_type = request.headers.get("content-type", "")
-    if "multipart" in content_type:
-        form = await request.form()
-        payload = GenerateCasesRequest(**json.loads(str(form["payload"])))
-        file = form.get("file")
-    else:
-        body = await request.json()
-        payload = GenerateCasesRequest(**body)
-        file = None
-    return payload, file
-
-
-def _validate_and_parse_docx(raw: bytes, filename: str | None) -> tuple[str, str]:
-    """Validate extension and size, then parse a DOCX upload.
-
-    Returns ``(file_content, file_name)``. Raises ``AppException`` when the
-    extension is invalid, the file is too large, or parsing fails.
-    """
-    if not filename or not filename.lower().endswith(".docx"):
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, "Only .docx files are supported"
-        )
-    if len(raw) > MAX_DOCX_FILE_SIZE:
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR,
-            f"File size exceeds {MAX_DOCX_FILE_SIZE // (1024 * 1024)}MB limit",
-        )
-    try:
-        file_content = _parse_docx_to_text(raw)
-    except Exception as e:
-        raise AppException(
-            ErrorCode.COMMON_VALIDATION_ERROR, f"Failed to parse DOCX file: {e}"
-        ) from e
-    return file_content, filename
-
-
 def _resolve_target_set(
     payload: GenerateCasesRequest,
     tenant_id: str,
@@ -534,19 +477,12 @@ def _resolve_target_set(
 
 @router.post("/generate-cases-async")
 async def generate_cases_async_api(
-    request: Request,
+    payload: GenerateCasesRequest,
     authorization: str | None = Header(None),
 ):
+    """Start async AI case generation for a new or existing evaluation set."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-
-        payload, file = await _parse_generate_cases_request(request)
-
-        file_content = None
-        file_name = None
-        if file and isinstance(file, UploadFile):
-            raw = await file.read()
-            file_content, file_name = _validate_and_parse_docx(raw, file.filename)
 
         set_id, is_new = _resolve_target_set(payload, tenant_id, user_id)
         _update_generation_status(set_id, tenant_id, "GENERATING", 0)
@@ -564,8 +500,6 @@ async def generate_cases_async_api(
             payload.description,
             payload.count,
             payload.model_id,
-            file_content,
-            file_name,
             payload.agent_id,
             is_new,
             payload.knowledge_base_names,

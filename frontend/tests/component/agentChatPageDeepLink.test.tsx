@@ -56,6 +56,14 @@ const usePublishedAgentList = vi.fn(() => ({
   agents: [agent],
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: vi.fn(() => ({
+    replace: vi.fn(),
+    push: vi.fn(),
+  })),
+  useParams: vi.fn(() => ({ locale: "zh" })),
+}));
+
 vi.mock("../../app/[locale]/newchat/assistant-ui/chat", () => ({
   Chat: ({
     selectedAgent,

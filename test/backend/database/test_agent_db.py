@@ -106,6 +106,15 @@ from backend.database.agent_db import (
     batch_search_agent_display_names,
 )
 
+
+@pytest.fixture(autouse=True)
+def _default_to_ordinary_agent(monkeypatch):
+    """Keep general Agent DB tests scoped to an ordinary Agent."""
+    monkeypatch.setattr(
+        "backend.database.agent_db.is_system_agent",
+        lambda *_args, **_kwargs: False,
+    )
+
 class MockAgent:
     def __init__(self):
         self.agent_id = 1
@@ -832,6 +841,31 @@ def test_update_related_agents_no_changes(monkeypatch, mock_session):
     # Verify: no deletions, no additions
     session.add.assert_not_called()
     # Note: update_related_agents doesn't explicitly call commit(), it relies on context manager
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda: insert_related_agent(1, 2, "tenant1", "user1"),
+        lambda: delete_related_agent(1, 2, "tenant1", "user1"),
+        lambda: update_related_agents(
+            1,
+            "tenant1",
+            "user1",
+            related_agents=[{"agent_id": 2}],
+        ),
+        lambda: delete_agent_relationship(1, "tenant1", "user1"),
+    ],
+)
+def test_system_agent_relationship_mutations_are_rejected(monkeypatch, operation):
+    """UT-BE-SAL-012."""
+    monkeypatch.setattr(
+        "backend.database.agent_db.is_system_agent",
+        lambda *_args, **_kwargs: True,
+    )
+
+    with pytest.raises(ValueError, match="managed by the platform"):
+        operation()
 
 
 def test_clear_agent_new_mark_success(monkeypatch):

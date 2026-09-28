@@ -53,6 +53,7 @@ from utils.model_name_utils import (
     split_repo_name,
     sort_models_by_id,
 )
+from utils.reasoning import normalize_reasoning_params
 # Model Catalog - 预置模型目录，自动填充默认配置
 try:
     from configs.model_catalog_loader import (
@@ -67,9 +68,9 @@ except Exception as _exc:  # noqa: BLE001
         return False
 
     def resolve_reasoning_capability(  # type: ignore[no-redef]
-        _model_name: str,
-        _base_url: Optional[str] = None,
-        _provider_hint: Optional[str] = None,
+        model_name: str,
+        base_url: Optional[str] = None,
+        provider_hint: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         return None
 
@@ -93,6 +94,9 @@ def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
         base_url=model.get("base_url"),
         provider_hint=model.get("model_factory"),
     )
+    model["extra_params"] = normalize_reasoning_params(
+        model.get("extra_params"), capability
+    ) or None
     if capability is not None:
         model["reasoning_capability"] = capability
 

@@ -1,47 +1,8 @@
-import { afterEach, expect, vi } from "vitest";
+import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 
 afterEach(cleanup);
-
-expect.extend({
-  toBeInTheDocument(received: Element | null) {
-    const pass = Boolean(
-      received && document.documentElement.contains(received)
-    );
-    return {
-      pass,
-      message: () =>
-        `expected element ${pass ? "not " : ""}to be in the document`,
-    };
-  },
-  toHaveAttribute(received: Element, name: string, value?: string) {
-    const actual = received.getAttribute(name);
-    const pass =
-      value === undefined ? received.hasAttribute(name) : actual === value;
-    return {
-      pass,
-      message: () =>
-        `expected ${name}=${String(actual)} ${pass ? "not " : ""}to equal ${String(value)}`,
-    };
-  },
-  toHaveTextContent(received: Element, value: string) {
-    const actual = received.textContent ?? "";
-    const pass = actual.includes(value);
-    return {
-      pass,
-      message: () =>
-        `expected ${JSON.stringify(actual)} ${pass ? "not " : ""}to contain ${JSON.stringify(value)}`,
-    };
-  },
-});
-
-declare module "vitest" {
-  interface Assertion<T> {
-    toBeInTheDocument(): void;
-    toHaveAttribute(name: string, value?: string): void;
-    toHaveTextContent(value: string): void;
-  }
-}
 
 Object.defineProperty(window, "matchMedia", {
   writable: true,

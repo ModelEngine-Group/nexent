@@ -61,6 +61,9 @@ export interface ReasoningCapability {
     | { type: "effort"; values: string[] }
     | { type: "budget_tokens"; min: number; max: number }
   >;
+  provider_id?: string | null;
+  budget_wire_format?: "thinking_object" | "thinking_budget" | null;
+  toggle_wire_format?: "thinking_object" | "enable_thinking" | "chat_template" | null;
   matched_api?: string | null;
   matched_model_id?: string | null;
   source: "catalog" | "models_dev" | "operator" | "unknown";

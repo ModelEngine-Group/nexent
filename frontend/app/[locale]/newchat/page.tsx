@@ -41,6 +41,7 @@ import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
 import { conversationService } from "@/services/conversationService";
 import { useTranslation } from "react-i18next";
+import { useConversationRouteGuard } from "@/features/workbench/hooks/useConversationRouteGuard";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -52,10 +53,7 @@ import type {
 function useLocalChatRuntime(
   dictationAdapter: ServerDictationAdapter
 ): AssistantRuntime {
-  const attachmentAdapter = useMemo(
-    () => createNewChatAttachmentAdapter(),
-    []
-  );
+  const attachmentAdapter = useMemo(() => createNewChatAttachmentAdapter(), []);
 
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
@@ -78,6 +76,7 @@ export default function Home() {
 }
 
 const PersistentChatHome: FC = () => {
+  useConversationRouteGuard("agent_chat");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined

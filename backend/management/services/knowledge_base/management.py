@@ -984,6 +984,14 @@ class KnowledgeBaseManagementService:
 
         indices = [record["index_name"] for record in visible_knowledgebases]
 
+        if include_stats:
+            from services.resource_tag_projection import project_authorized_resource_tags
+
+            visible_knowledgebases = project_authorized_resource_tags(
+                visible_knowledgebases, resource_type="knowledge_base", id_field="index_name",
+                default_tenant_id=target_tenant_id,
+            )
+
         response = {
             "indices": indices,
             "count": len(indices),
@@ -1019,6 +1027,7 @@ class KnowledgeBaseManagementService:
 
                     stats_info.append({
                         "knowledge_id": record.get("knowledge_id"),
+                        "tags": record.get("tags", []),
                         # Internal index name (used as ID)
                         "name": index_name,
                         # User-facing knowledge base name from PostgreSQL (fallback to index_name)

@@ -92,6 +92,26 @@ sys.modules.setdefault("utils.config_utils", MagicMock())
 from services.repository_import_precheck import build_repository_import_precheck
 
 
+@pytest.mark.parametrize("params,available", [
+    ({"api_key": "old", "server_url": "old", "tenant_id": "old", "kds_list": ["kb"]}, True),
+    ({"unknown_option": 1}, False),
+])
+def test_aidp_precheck_validates_portable_params(params, available):
+    with patch("services.repository_import_precheck.query_all_tools", return_value=[{
+        "class_name": "AidpSearchTool", "source": "local", "is_available": True,
+        "params": [{"name": "kds_list"}],
+    }]), patch("services.repository_import_precheck.skill_db.list_skills", return_value=[]):
+        result = build_repository_import_precheck(
+            agent_repository_id=2, display_name="AIDP", tenant_id="tenant",
+            snapshot=_snapshot(model_name="", tools=[{
+                "class_name": "AidpSearchTool", "source": "local", "params": params,
+            }]),
+        )
+    tool = next(item for item in result.items if item.type == "tool")
+    assert tool.available is available
+    assert tool.reason_code == (None if available else "tool_params_incompatible")
+
+
 def _snapshot(
     *,
     model_name: str = "gpt-5-mini",
@@ -146,6 +166,7 @@ def test_build_precheck_all_available(
         "class_name": "KnowledgeBaseSearchTool",
         "source": "local",
         "is_available": True,
+        "params": [{"name": "index_names"}],
     }]
     mock_list_skills.return_value = []
 
