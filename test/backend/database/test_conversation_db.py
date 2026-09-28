@@ -27,6 +27,7 @@ sa_mod.asc = MagicMock(name="asc")
 sa_mod.desc = MagicMock(name="desc")
 sa_mod.func = MagicMock(name="func")
 sa_mod.select = MagicMock(name="select")
+sa_mod.text = MagicMock(name="text")
 
 
 def _create_insert_mock():
@@ -246,6 +247,7 @@ from backend.database.conversation_db import (
     update_message_unit_status,
 )
 from consts.exceptions import (
+    AppException,
     ConversationNotFoundError,
     RuntimeMetadataVersionConflict,
 )
@@ -792,8 +794,55 @@ def test_create_conversation_success(monkeypatch, mock_session_ctx):
     assert result["agent_id"] == 7
     assert result["create_time"] == 1234567890
     assert result["update_time"] == 1234567890
-    session.execute.assert_called_once()
+    assert session.execute.call_count == 2
     assert _captured_insert_values["agent_id"] == 7
+
+
+def test_create_conversation_rejects_user_history_limit(monkeypatch, mock_session_ctx):
+    """A user cannot create another active conversation at the configured limit."""
+    session, ctx = mock_session_ctx
+    session.scalar.return_value = 1
+    monkeypatch.setattr(
+        "backend.database.conversation_db.MAX_CONVERSATIONS_PER_USER", 1
+    )
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(AppException) as exc_info:
+        create_conversation("At limit", user_id="user-1")
+
+    error = exc_info.value
+    assert error.error_code.value == "120104"
+    assert error.details == {
+        "resource": "conversations",
+        "scope": "user",
+        "limit": 1,
+        "current_count": 1,
+    }
+    assert _captured_insert_values == {}
+
+
+def test_create_conversation_allows_user_below_history_limit(monkeypatch, mock_session_ctx):
+    """A user below the configured history limit can create a conversation."""
+    session, ctx = mock_session_ctx
+    session.scalar.return_value = 0
+    record = MagicMock(
+        conversation_id=43,
+        conversation_title="Below limit",
+        agent_id=None,
+        chat_mode="execution",
+        knowledge_scope=None,
+        runtime_metadata={},
+        runtime_metadata_version=0,
+        create_time=1000.0,
+        update_time=1000.0,
+    )
+    session.execute.return_value.fetchone.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    result = create_conversation("Below limit", user_id="user-1")
+
+    assert result["conversation_id"] == 43
+    assert session.execute.call_count == 2
 
 
 def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
@@ -941,6 +990,39 @@ def test_create_conversation_message_forwards_status(monkeypatch):
     assert message_id == 7
     # Verify status is in the captured values
     assert _captured_insert_values["status"] == "streaming"
+
+
+def test_create_conversation_message_rejects_turn_limit(monkeypatch):
+    """A user message at the conversation turn limit is rejected before insert."""
+    session = MagicMock()
+    session.scalar.return_value = 1
+    ctx = MagicMock()
+    ctx.__enter__.return_value = session
+    ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.conversation_db.MAX_CONVERSATION_TURNS", 1)
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    with pytest.raises(AppException) as exc_info:
+        create_conversation_message(
+            {
+                "conversation_id": 1,
+                "message_idx": 2,
+                "role": "user",
+                "content": "second turn",
+                "minio_files": None,
+            },
+            user_id="actor",
+        )
+
+    error = exc_info.value
+    assert error.error_code.value == "120104"
+    assert error.details == {
+        "resource": "conversation_turns",
+        "scope": "conversation",
+        "limit": 1,
+        "current_count": 1,
+    }
+    assert _captured_insert_values == {}
 
 
 def test_create_conversation_message_with_minio_files(monkeypatch):

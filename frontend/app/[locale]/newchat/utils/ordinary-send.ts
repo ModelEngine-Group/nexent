@@ -1,6 +1,13 @@
 import type { ThreadMessage, ThreadRuntime } from "@assistant-ui/react";
 
-export function ordinarySendError(error: unknown, language: string): string {
+export function ordinarySendError(
+  error: unknown,
+  language: string,
+  localizeError?: (error: unknown) => string | null
+): string {
+  const localizedLimitMessage = localizeError?.(error) ?? null;
+  if (localizedLimitMessage) return localizedLimitMessage;
+
   if (error instanceof Error && error.message === "agent_run_conflict") {
     return language.startsWith("zh")
       ? "上一轮正在结束，请稍后再发送"
