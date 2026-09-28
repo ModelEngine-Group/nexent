@@ -35,6 +35,8 @@ from consts.exceptions import (
     SkillDuplicateError,
     AppException,
     UnauthorizedError,
+    TenantResourceLimitError,
+    tenant_resource_limit_error_payload,
     ValidationError,
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
@@ -500,6 +502,12 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
             status_code=HTTPStatus.FORBIDDEN,
             detail=str(exc),
         ) from exc
+    except TenantResourceLimitError as exc:
+        logger.warning("Agent update rejected by resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
+        )
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(
@@ -706,6 +714,12 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
             "duplicate_skills": exc.duplicate_names,
             "skill_conflicts": exc.skill_conflicts,
         })
+    except TenantResourceLimitError as exc:
+        logger.warning("Agent import rejected by resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
+        )
     except Exception as e:
         logger.error(f"Agent import error: {str(e)}")
         raise HTTPException(

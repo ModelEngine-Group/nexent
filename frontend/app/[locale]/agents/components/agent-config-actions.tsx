@@ -21,6 +21,7 @@ import AgentCallRelationshipModal from "@/components/agent/AgentCallRelationship
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import log from "@/lib/logger";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import { a2aClientService } from "@/services/a2aService";
 import {
   deleteAgent,
@@ -169,7 +170,9 @@ export default function AgentConfigActions({
 
       if (!createResult.success || !createResult.data?.agent_id) {
         message.error(
-          createResult.message || t("agentConfig.agents.copyFailed")
+          getTenantResourceLimitMessage(createResult.error, t) ||
+            createResult.message ||
+            t("agentConfig.agents.copyFailed")
         );
         return;
       }

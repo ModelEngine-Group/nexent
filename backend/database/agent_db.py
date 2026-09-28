@@ -1,14 +1,40 @@
 import logging
 from typing import List, Optional
-from sqlalchemy import or_, update
+from sqlalchemy import or_, text, update
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
 from database.agent_version_db import query_current_version_no
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
+from consts.exceptions import TenantResourceLimitError
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
+
+
+def _enforce_tenant_agent_limit(session, tenant_id: str) -> None:
+    """Serialize standard-Agent creation and enforce the tenant quota."""
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"tenant-agent-limit:{tenant_id}"},
+    )
+    agent_count = session.query(AgentInfo.agent_id).filter(
+        AgentInfo.tenant_id == tenant_id,
+        AgentInfo.version_no == 0,
+        AgentInfo.delete_flag == "N",
+        or_(
+            AgentInfo.agent_origin == "USER",
+            AgentInfo.agent_origin.is_(None),
+        ),
+    ).count()
+    if agent_count >= MAX_AGENTS_PER_TENANT:
+        raise TenantResourceLimitError(
+            f"Tenant agent limit reached: maximum {MAX_AGENTS_PER_TENANT} agents per tenant",
+            resource="agents",
+            scope="tenant",
+            limit=MAX_AGENTS_PER_TENANT,
+            current_count=agent_count,
+        )
 
 
 def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
@@ -239,6 +265,10 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "is_new": True,  # Mark new agents as new
     })
     with get_db_session() as session:
+        # System Agents are provisioned separately and are excluded by the
+        # quota query above; ordinary Agent creation is serialized per tenant.
+        if info_with_metadata.get("agent_origin", "USER") != "SYSTEM":
+            _enforce_tenant_agent_limit(session, tenant_id)
         new_agent = AgentInfo(**filter_property(info_with_metadata, AgentInfo))
         new_agent.delete_flag = 'N'
         session.add(new_agent)
