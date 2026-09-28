@@ -3,7 +3,7 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse
 
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
@@ -25,6 +25,7 @@ from services.agent_repository_service import (
     delete_official_agent_impl,
     list_official_agent_management_impl,
 )
+from services.official_agent_sync_service import sync_official_agents
 from utils.auth_utils import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,31 @@ async def delete_official_agent_api(
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
     except ValueError as error:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(error))
+
+
+@agent_repository_router.post("/internal/official/sync")
+async def sync_official_agents_api(
+    request: Request,
+    base_dir: Optional[str] = Query(None),
+    profiles: Optional[str] = Query(None),
+):
+    """Synchronize mounted official bundles from a container-local request."""
+    client_host = request.client.host if request.client else None
+    if client_host not in {"127.0.0.1", "::1"}:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Official agent synchronization is only available locally",
+        )
+    try:
+        kwargs = {}
+        if base_dir is not None:
+            kwargs["base_dir"] = base_dir
+        if profiles is not None:
+            kwargs["profiles"] = profiles
+        result = await sync_official_agents(**kwargs)
+        return JSONResponse(content={"synchronized": len(result), "items": result})
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(error))
 
 
 def _parse_tag_predicates(raw: str | None) -> list[TagAssignmentFilter]:

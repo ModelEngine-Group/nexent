@@ -28,7 +28,7 @@
 cd nexent
 ```
 
-`deploy/deploy-official-agents.sh` 会自动完成资源复制和容器内同步，用户不需要手工执行 `git clone`、`docker cp` 或 `sync_official_agents.py`。
+`deploy/deploy-official-agents.sh` 会自动完成资源复制和容器内同步，用户不需要手工执行 `git clone`、`docker cp` 或调用同步接口。
 
 ## 三、官方资源目录结构
 
@@ -215,7 +215,10 @@ Docker 模式下，脚本的内部流程如下：
     ├─ 只筛选用户选择的 Profile
     ├─ 复制到 nexent-config:/mnt/nexent/official-agents/
     └─ docker exec nexent-config
-         python backend/scripts/sync_official_agents.py
+         curl -fsS -X POST --get \
+           --data-urlencode "base_dir=/mnt/nexent/official-agents" \
+           --data-urlencode "profiles=<selected-profiles>" \
+           http://127.0.0.1:5010/repository/agent/internal/official/sync
 ```
 
 官方资源最终存放在 `nexent-config` 容器的：

@@ -210,15 +210,25 @@ copy_profiles() {
 }
 
 sync_repository() {
+  local response synchronized
   if [ "${DEPLOY_OFFICIAL_K8S:-false}" = true ]; then
-    MSYS_NO_PATHCONV=1 kubectl exec deployment/nexent-config -n "$NAMESPACE" -- \
-      python backend/scripts/sync_official_agents.py \
-      --base-dir "$TARGET_CONTAINER_DIR" --profiles "$PROFILES"
+    MSYS_NO_PATHCONV=1 response="$(kubectl exec deployment/nexent-config -n "$NAMESPACE" -- \
+      curl -fsS -X POST --get \
+      --data-urlencode "base_dir=$TARGET_CONTAINER_DIR" \
+      --data-urlencode "profiles=$PROFILES" \
+      http://127.0.0.1:5010/repository/agent/internal/official/sync)" || \
+      die "official agent synchronization request failed"
   else
-    MSYS_NO_PATHCONV=1 docker exec -e "OFFICIAL_AGENT_PROFILES=$PROFILES" nexent-config \
-      python backend/scripts/sync_official_agents.py \
-      --base-dir "$TARGET_CONTAINER_DIR" --profiles "$PROFILES"
+    MSYS_NO_PATHCONV=1 response="$(docker exec nexent-config \
+      curl -fsS -X POST --get \
+      --data-urlencode "base_dir=$TARGET_CONTAINER_DIR" \
+      --data-urlencode "profiles=$PROFILES" \
+      http://127.0.0.1:5010/repository/agent/internal/official/sync)" || \
+      die "official agent synchronization request failed"
   fi
+  synchronized="$(printf '%s' "$response" | sed -n 's/.*"synchronized"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+  [ -n "$synchronized" ] || die "invalid official agent synchronization response: $response"
+  printf 'Synchronized %s official agent bundle(s)\n' "$synchronized"
 }
 
 prepare_source
