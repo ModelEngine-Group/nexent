@@ -2613,6 +2613,32 @@ def test_reasoning_only_stop_response_recovers_on_retry(openai_model_instance):
     assert openai_model_instance.last_retry_count == 1
 
 
+def test_oc_033_empty_response_retry_can_be_disabled_for_one_call(openai_model_instance):
+    """A disabled CodeAgent call rolls back its first empty generation and stops."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        chunk = _make_content_chunk(None)
+        chunk.choices[0].finish_reason = "stop"
+        return [chunk]
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
+        openai_model_instance.__call__(
+            [{"role": "user", "content": "hello"}],
+            _retry_empty_response=False,
+        )
+
+    assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
+    assert exc_info.value.attempts == 1
+    assert calls["n"] == 1
+    openai_model_instance.observer.rollback_model_attempt.assert_called_once()
+    openai_model_instance.observer.commit_model_attempt.assert_not_called()
+
+
 def test_reasoning_only_retry_is_interrupted_by_stop_event(openai_model_instance):
     def fake_create(stream=True, **kwargs):
         chunk = _make_content_chunk(None)

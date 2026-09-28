@@ -288,6 +288,7 @@ class OpenAIModel(OpenAIServerModel):
                  context_rebuild=None, _overflow_recovery_ordinal: int = 0,
                  _model_attempts_used: int = 0,
                  _defer_attempt_commit: bool = False,
+                 _retry_empty_response: bool = True,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
@@ -332,6 +333,7 @@ class OpenAIModel(OpenAIServerModel):
                     _overflow_recovery_ordinal=_overflow_recovery_ordinal,
                     _model_attempts_used=_model_attempts_used,
                     _defer_attempt_commit=_defer_attempt_commit,
+                    _retry_empty_response=_retry_empty_response,
                     **kwargs,
                 )
 
@@ -801,9 +803,13 @@ class OpenAIModel(OpenAIServerModel):
                     "attempt": attempt,
                     "reason": "empty_response",
                 })
-                # Empty ``stop`` responses share the normal model attempt
-                # budget. Deterministic truncation (``length``) fails fast.
-                if self.last_finish_reason not in (None, "stop") or attempt >= self.retry_config.max_attempts:
+                # Empty completed responses use the model attempt budget only
+                # when this caller enables empty-response retry.
+                if (
+                    not _retry_empty_response
+                    or self.last_finish_reason not in (None, "stop")
+                    or attempt >= self.retry_config.max_attempts
+                ):
                     raise ModelInvocationTerminalError(
                         ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED,
                         attempt,
@@ -896,6 +902,7 @@ class OpenAIModel(OpenAIServerModel):
                         _overflow_recovery_ordinal=_overflow_recovery_ordinal + 1,
                         _model_attempts_used=attempt,
                         _defer_attempt_commit=_defer_attempt_commit,
+                        _retry_empty_response=_retry_empty_response,
                         **kwargs,
                     )
                 is_timeout = _is_timeout_error(e)
