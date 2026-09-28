@@ -25,7 +25,6 @@ from .output_protocol import ModelOutputProtocolExhaustedError
 
 
 logger = logging.getLogger("run_agent")
-logger.setLevel(logging.DEBUG)
 
 
 class DeferredAgentRun:
