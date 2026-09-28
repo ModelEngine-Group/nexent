@@ -1,9 +1,7 @@
 """Audit entries recorded on successful group and membership operations.
 
 Feature-scoped companion to ``test_group_app.py``: only the audit assertions
-live here; the legacy module keeps its endpoint-coverage suites. The
-``group_default_set`` endpoint has no audit assertion in the reference PR
-either.
+live here; the legacy module keeps its endpoint-coverage suites.
 """
 
 import importlib.machinery
@@ -204,3 +202,27 @@ def test_batch_add_success_records_audit_entry(caplog):
     assert "event=group_member_batch_add" in messages[0]
     assert "user_id=admin-1" in messages[0]
     assert 'details={"target_user_id":"user-9","group_count":2,"group_ids":[3,4]}' in messages[0]
+
+
+def test_set_default_success_records_audit_entry(caplog):
+    """Test setting the tenant default group records a security audit entry"""
+    with patch("apps.group_app.get_current_user_id") as mock_get_user, \
+         patch("apps.group_app.set_tenant_default_group_id") as mock_set_default:
+        mock_get_user.return_value = ("admin-1", "tenant-1")
+        mock_set_default.return_value = True
+
+        with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER):
+            response = client.put(
+                "/groups/tenants/tenant-1/default",
+                headers={"Authorization": "Bearer token"},
+                json={"default_group_id": 7},
+            )
+
+    assert response.status_code == HTTPStatus.OK
+    messages = _audit_messages(caplog)
+    assert len(messages) == 1
+    assert "event=group_default_set" in messages[0]
+    assert "result=success" in messages[0]
+    assert "user_id=admin-1" in messages[0]
+    assert "tenant_id=tenant-1" in messages[0]
+    assert 'details={"tenant_id":"tenant-1","default_group_id":7}' in messages[0]

@@ -4,6 +4,13 @@ Feature-scoped companion to ``test_northbound_app.py``. The branch has no
 ``/api-users/batch`` or key-management endpoints yet, so the single carrier is
 ``POST /nb/v1/users``; the plaintext password in the payload must never reach
 the audit line.
+
+Pending: the reference PR also audits the API-key operations
+(``api_key_refresh`` / ``api_key_revoke`` in ``apps/api_key_app.py``, plus
+``northbound_api_key_refresh`` / ``northbound_api_key_revoke`` here with its
+two test cases and ``test_api_key_app_audit.py``). API-key management is not in
+this branch's base (upstream #3745), so those four events have no endpoint to
+attach to yet — port them together once the base picks it up.
 """
 
 import logging
