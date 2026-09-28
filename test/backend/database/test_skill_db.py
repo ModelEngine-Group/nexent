@@ -52,7 +52,13 @@ class AppException(Exception):
         self.details = details or {}
         super().__init__(message or _error_code)
 
+
+class TenantResourceLimitError(AppException):
+    code = "120104"
+
+
 exceptions_mock.AppException = AppException
+exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
 sys.modules['consts.error_code'] = error_code_mock
 sys.modules['consts.exceptions'] = exceptions_mock
 
