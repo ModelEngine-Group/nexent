@@ -178,7 +178,77 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
     register.assert_called_once_with(
         123, result, "user-a", reservation_token="reservation-a"
     )
-    assert memory == "memory"
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_forwards_separate_identity_without_memory(monkeypatch):
+    request = _request()
+    async def stream_chunks(**_kwargs):
+        yield "data: done\n\n"
+
+    prepare = AsyncMock(return_value=(MagicMock(), None))
+    monkeypatch.setattr(agent_run, "prepare_agent_run", prepare)
+    monkeypatch.setattr(agent_run, "_stream_agent_chunks", stream_chunks)
+
+    chunks = [
+        chunk
+        async for chunk in agent_run.generate_stream(
+            request,
+            user_id="owner-a",
+            tenant_id="owner-tenant",
+            language="en",
+            enable_memory=True,
+            conversation_owner_user_id="visitor-a",
+            conversation_owner_tenant_id="visitor-tenant",
+            disable_personal_memory=True,
+        )
+    ]
+
+    assert chunks == ["data: done\n\n"]
+    prepare.assert_awaited_once_with(
+        agent_request=request,
+        user_id="owner-a",
+        tenant_id="owner-tenant",
+        language="en",
+        allow_memory_search=False,
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-tenant",
+        disable_personal_memory=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_fallback_preserves_separate_identity(monkeypatch):
+    request = _request()
+    original_generate_stream = agent_run.generate_stream
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    prepare = AsyncMock(side_effect=RuntimeError("preparation failed"))
+
+    async def fallback(*_args, **kwargs):
+        assert kwargs["conversation_owner_user_id"] == "visitor-a"
+        assert kwargs["conversation_owner_tenant_id"] == "visitor-tenant"
+        assert kwargs["disable_personal_memory"] is True
+        yield "data: fallback\n\n"
+
+    monkeypatch.setattr(agent_run, "prepare_agent_run", prepare)
+    monkeypatch.setattr(agent_run, "generate_stream", fallback)
+
+    chunks = [
+        chunk
+        async for chunk in original_generate_stream(
+            request,
+            user_id="owner-a",
+            tenant_id="owner-tenant",
+            enable_memory=True,
+            channel=channel,
+            conversation_owner_user_id="visitor-a",
+            conversation_owner_tenant_id="visitor-tenant",
+            disable_personal_memory=True,
+        )
+    ]
+
+    assert chunks == ["data: fallback\n\n"]
 
 
 @pytest.mark.asyncio

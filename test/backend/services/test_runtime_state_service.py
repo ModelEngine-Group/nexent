@@ -415,6 +415,14 @@ def test_consume_scoped_rate_limit_uses_only_a_precomputed_digest(monkeypatch):
         service.consume_scoped_rate_limit("runtime-scope", "raw-token", 2)
 
 
+def test_consume_scoped_rate_limit_rejects_invalid_namespace():
+    service = TestRuntimeStateService(FakeRedisClient())
+    digest = "a" * 64
+
+    with pytest.raises(ValueError, match="rate limit namespace is invalid"):
+        service.consume_scoped_rate_limit("Invalid_Namespace", digest, 2)
+
+
 def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
