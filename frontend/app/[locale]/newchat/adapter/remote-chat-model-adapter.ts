@@ -23,6 +23,7 @@ import {
 } from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
+import { stripStreamedFinalAnswerEcho } from "@/lib/streamFinalAnswer";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 import type { HumanInteractionEvent } from "@/types/clarification";
@@ -2127,6 +2128,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
       parentReasoning.close();
     };
+    const removeFinalAnswerEcho = (answer: string) => {
+      for (let index = contentParts.length - 1; index >= 0; index -= 1) {
+        const part = contentParts[index];
+        if (part?.type !== "reasoning") continue;
+        const remaining = stripStreamedFinalAnswerEcho(part.text, answer);
+        if (remaining !== null) {
+          if (remaining.trim()) contentParts[index] = { ...part, text: remaining };
+          else removeContentPart(index);
+        }
+        break;
+      }
+    };
 
     // Helper: build a fresh sub-agent metadata object for a given invocation.
     function subAgentMetadataFor(entry: ActiveSubAgent): SubAgentPartMetadata {
@@ -2538,6 +2551,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "final_answer") {
+            removeFinalAnswerEcho(chunk.content);
             upsertCreatedAgentPart(false);
             // Backward compatibility for streams produced before the warning
             // event existed. A later final answer proves those earlier step
@@ -2950,6 +2964,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               // after the most recent step thought instead of being reordered
               // in front of it.
               flushOpenReasoning();
+              removeFinalAnswerEcho(chunk.content);
               completeVerificationPanel();
               for (const part of contentParts) {
                 if (part?.type === "text" && part.isError) {

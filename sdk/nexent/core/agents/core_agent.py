@@ -85,6 +85,10 @@ _ACTION_FORMAT_REMINDER_ZH = (
     "任务完成时，在最后一个代码块的最后一条顶层语句调用 final_answer(...)。"
     "不要直接输出裸文本最终答案。"
 )
+_STRICT_PLATFORM_FINAL_SENTENCES = (
+    "在思考结束后，当你认为可以回答用户问题，必须在最后一个 `<code>...</code>` 代码块的最后一条顶层语句中调用 `final_answer(...)`；禁止输出裸文本最终回答或在其后继续执行动作。",
+    "After thinking, when you can answer the user, call `final_answer(...)` as the last top-level statement in the final `<code>...</code>` block. Never return a bare-text final answer or execute another action afterward.",
+)
 
 RUNTIME_METADATA_BLOCK_RE = re.compile(
     r'<runtime_metadata\b.*</runtime_metadata>',
@@ -973,6 +977,34 @@ Additional Args:
         self._consecutive_protocol_errors = 0
         return ActionOutput(output=direct_answer, is_final_answer=True)
 
+    def _accept_exhausted_raw_output(self, memory_step: ActionStep, model_output: Any) -> bool:
+        """Accept only a complete visible third strict generation as an answer candidate."""
+
+        if (
+            getattr(self, "output_protocol", "code_action") != "code_action"
+            or not getattr(self, "enable_protocol_repair_retry", False)
+            or getattr(self, "_consecutive_protocol_errors", 0) < 2
+            or self.stop_event.is_set()
+            or getattr(memory_step, "tool_calls", None)
+            or not has_meaningful_visible_content(model_output)
+        ):
+            return False
+        diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
+        finish_reason = getattr(self.model, "last_finish_reason", None) or diagnostics.get("finish_reason")
+        if finish_reason == "length":
+            return False
+        self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+        self._protocol_repair_messages.clear()
+        self._pending_thought_continuation = False
+        self._consecutive_protocol_errors = 0
+        memory_step.action_output = model_output
+        memory_step._final_answer_source = "protocol_exhausted_raw_output"
+        self._record_output_protocol(
+            "protocol_exhausted_raw_final_answer",
+            final_answer_source="protocol_exhausted_raw_output",
+        )
+        return True
+
     def _log_protocol_repair_accepted(self, message: ChatMessage | None) -> None:
         """Record a content-free success marker before clearing repair context."""
 
@@ -1082,11 +1114,16 @@ Additional Args:
                 "Do not repeat any completed action. Return the next response using the required "
                 "Agent protocol; when complete, return exactly one <FINAL_ANSWER> envelope."
             )
-        else:
+        elif getattr(self, "enable_protocol_repair_retry", False):
             instruction = (
                 "Continue the current task from the read-only completed-action record above. "
                 "Do not repeat any completed action. Return exactly one next executable action "
                 "using the required Agent protocol; call final_answer(...) when the task is complete."
+            )
+        else:
+            instruction = (
+                "Continue the current task from the completed-action record above. "
+                "Do not repeat any completed action."
             )
         return [
             *input_messages,
@@ -1095,6 +1132,39 @@ Additional Args:
                 content=[{"type": "text", "text": instruction}],
             ),
         ]
+
+    def _legacy_request_messages(self, messages: list[Any]) -> list[Any]:
+        """Remove the post-baseline platform termination sentence for this request only."""
+
+        result = []
+        for message in messages:
+            if message_role(message) != "system":
+                result.append(message)
+                continue
+            content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+            if not isinstance(content, (str, list)) or not any(
+                sentence in str(content) for sentence in _STRICT_PLATFORM_FINAL_SENTENCES
+            ):
+                result.append(message)
+                continue
+            filtered = deepcopy(message)
+            parts = content if isinstance(content, list) else [{"type": "text", "text": content}]
+            filtered_parts = []
+            for part in parts:
+                if not isinstance(part, dict) or not isinstance(part.get("text"), str):
+                    filtered_parts.append(part)
+                    continue
+                text = part["text"]
+                for sentence in _STRICT_PLATFORM_FINAL_SENTENCES:
+                    text = text.replace(sentence, "")
+                filtered_parts.append({**part, "text": text})
+            new_content = filtered_parts if isinstance(content, list) else filtered_parts[0]["text"]
+            if isinstance(filtered, dict):
+                filtered["content"] = new_content
+            else:
+                filtered.content = new_content
+            result.append(filtered)
+        return result
 
     def _thought_continuation_message(self) -> ChatMessage:
         """Build one request-only nudge from the current optional plan state."""
@@ -1198,6 +1268,8 @@ Additional Args:
         if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
             additional_args["_defer_attempt_commit"] = True
 
+        if legacy_code_action:
+            input_messages = self._legacy_request_messages(input_messages)
         input_messages = self._ensure_open_model_turn(input_messages)
         if not request_kwargs:
             memory_step.model_input_messages = input_messages
@@ -1243,6 +1315,8 @@ Additional Args:
                     if rebuilt.memory_messages is not None else rebuilt.messages
                 )
                 self._emit_history_summary_event()
+                if legacy_code_action:
+                    rebuilt.messages[:] = self._legacy_request_messages(rebuilt.messages)
                 return rebuilt
 
             chat_message: ChatMessage = self.model(
@@ -1306,18 +1380,8 @@ Additional Args:
                     else:
                         code_action = parse_code_blobs(model_output)
                 except Exception:
-                    if not has_meaningful_visible_content(model_output):
-                        yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
-                        return
-                    classified_output = classify_model_output(
-                        model_output,
-                        protocol="code_action",
-                        finish_reason=finish_reason,
-                        logger=self.logger,
-                    )
-                    if isinstance(classified_output, NonterminalThought):
-                        raise NonterminalThoughtTurn()
-                    code_action = classified_output.code
+                    yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
+                    return
                 else:
                     classified_output = ExecutableAction(code=code_action)
                 # Successfully extracting a legacy action accepts the model
@@ -1419,6 +1483,9 @@ Additional Args:
                     )
 
         except NonterminalThoughtTurn:
+            if self._accept_exhausted_raw_output(memory_step, model_output):
+                yield ActionOutput(output=model_output, is_final_answer=True)
+                return
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
         except RuntimeFinalAnswer as terminal:
@@ -1440,6 +1507,9 @@ Additional Args:
                     f"{protocol_error.reason.value}",
                     self.logger,
                 ) from protocol_error
+            if self._accept_exhausted_raw_output(memory_step, model_output):
+                yield ActionOutput(output=model_output, is_final_answer=True)
+                return
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
         except (AgentExecutionError, AgentGenerationError):
@@ -1449,6 +1519,9 @@ Additional Args:
                 raise AgentExecutionError(
                     "Legacy code action failed during parsing or normalization.", self.logger
                 )
+            if self._accept_exhausted_raw_output(memory_step, model_output):
+                yield ActionOutput(output=model_output, is_final_answer=True)
+                return
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise ModelOutputProtocolError(
                 reason=ProtocolErrorReason.MALFORMED_ACTION,
@@ -1872,7 +1945,10 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                         else "final_answer_tool"
                     )
                     final_answer_classification = (
-                        "legacy_direct_final_answer" if direct_answer_source else "explicit_final_answer"
+                        "protocol_exhausted_raw_final_answer"
+                        if direct_answer_source == "protocol_exhausted_raw_output"
+                        else "legacy_direct_final_answer" if direct_answer_source
+                        else "explicit_final_answer"
                     )
                     if not has_meaningful_visible_content(candidate_answer):
                         diagnostics = getattr(self.model, "last_response_diagnostics", None)
