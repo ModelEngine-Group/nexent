@@ -1107,6 +1107,40 @@ async def test_update_agent_info_impl_exception_handling(
     assert "Failed to update agent info" in str(context.value)
 
 
+@patch("management.services.agent.service.update_agent")
+@patch("management.services.agent.service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_reraises_agent_quota_error(
+    mock_get_current_user_info, mock_update_agent
+):
+    """Agent quota errors must pass through without generic error wrapping."""
+    from consts.exceptions import TenantResourceLimitError
+
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    limit_error = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant",
+        resource="agents",
+        scope="tenant",
+        limit=1000,
+        current_count=1000,
+    )
+    mock_update_agent.side_effect = limit_error
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.model_id = None
+    request.display_name = "Test Display Name"
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    request.example_questions = None
+    apply_default_prompt_template_request_fields(request)
+
+    with pytest.raises(TenantResourceLimitError) as exc_info:
+        await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert exc_info.value is limit_error
+
+
 @patch("management.services.agent.service.query_tools_by_ids")
 @patch("management.services.agent.service.create_or_update_tool_by_tool_info")
 @patch("management.services.agent.service.query_tool_instances_by_agent_id")
