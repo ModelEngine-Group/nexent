@@ -216,7 +216,6 @@ Docker 模式下，脚本的内部流程如下：
     ├─ 复制到 nexent-config:/mnt/nexent/official-agents/
     └─ docker exec nexent-config
          curl -fsS -X POST --get \
-           --data-urlencode "base_dir=/mnt/nexent/official-agents" \
            --data-urlencode "profiles=<selected-profiles>" \
            http://127.0.0.1:5010/repository/agent/internal/official/sync
 ```

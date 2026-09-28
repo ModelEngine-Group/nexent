@@ -214,14 +214,12 @@ sync_repository() {
   if [ "${DEPLOY_OFFICIAL_K8S:-false}" = true ]; then
     MSYS_NO_PATHCONV=1 response="$(kubectl exec deployment/nexent-config -n "$NAMESPACE" -- \
       curl -fsS -X POST --get \
-      --data-urlencode "base_dir=$TARGET_CONTAINER_DIR" \
       --data-urlencode "profiles=$PROFILES" \
       http://127.0.0.1:5010/repository/agent/internal/official/sync)" || \
       die "official agent synchronization request failed"
   else
     MSYS_NO_PATHCONV=1 response="$(docker exec nexent-config \
       curl -fsS -X POST --get \
-      --data-urlencode "base_dir=$TARGET_CONTAINER_DIR" \
       --data-urlencode "profiles=$PROFILES" \
       http://127.0.0.1:5010/repository/agent/internal/official/sync)" || \
       die "official agent synchronization request failed"
