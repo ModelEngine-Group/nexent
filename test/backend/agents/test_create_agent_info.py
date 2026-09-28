@@ -2366,7 +2366,8 @@ class TestCreateAgentConfig:
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
                 "model_ids": [123],
-                "provide_run_summary": True
+                "provide_run_summary": True,
+                "enable_protocol_repair_retry": False,
             }
             mock_query_sub.return_value = []
             mock_create_tools.return_value = []
@@ -2399,6 +2400,7 @@ class TestCreateAgentConfig:
                 model_name="test_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
+                enable_protocol_repair_retry=False,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
@@ -2487,6 +2489,7 @@ class TestCreateAgentConfig:
                     model_name="test_model",
                     provide_run_summary=True,
                     allow_chat_metadata=False,
+                    enable_protocol_repair_retry=False,
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
@@ -2837,6 +2840,7 @@ class TestCreateAgentConfig:
                 model_name="main_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
+                enable_protocol_repair_retry=False,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,

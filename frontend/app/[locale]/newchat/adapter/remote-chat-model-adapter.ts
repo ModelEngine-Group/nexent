@@ -23,6 +23,7 @@ import {
 } from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
+import { stripStreamedFinalAnswerEcho } from "@/lib/streamFinalAnswer";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 import type { HumanInteractionEvent } from "@/types/clarification";
@@ -1768,6 +1769,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     type InvocationSlot = {
       invocationId: string;
       reasoningIdx: number | null;
+      stepLabel: string;
+      pendingStepLabel: string;
+      pendingWhitespace: string;
     };
     const invocationSlots = new Map<string, InvocationSlot>();
     const contentParts: any[] = [];
@@ -1861,7 +1865,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const ensureSlot = (invocationId: string): InvocationSlot => {
       let slot = invocationSlots.get(invocationId);
       if (!slot) {
-        slot = { invocationId, reasoningIdx: null };
+        slot = {
+          invocationId,
+          reasoningIdx: null,
+          stepLabel: "",
+          pendingStepLabel: "",
+          pendingWhitespace: "",
+        };
         invocationSlots.set(invocationId, slot);
       }
       return slot;
@@ -1961,6 +1971,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       invocationId: string;
       reasoningIdx: number | null;
       textLength: number;
+      pendingStepLabel: string;
+      pendingWhitespace: string;
     };
     const subAgentAttemptCheckpoints = new Map<
       string,
@@ -2064,6 +2076,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           invocationId: top.invocationId,
           reasoningIdx: idx,
           textLength: idx === null ? 0 : (contentParts[idx]?.text?.length ?? 0),
+          pendingStepLabel: top.slot.pendingStepLabel,
+          pendingWhitespace: top.slot.pendingWhitespace,
         });
         return true;
       }
@@ -2072,7 +2086,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       subAgentAttemptCheckpoints.delete(chunk.attempt_id);
       if (chunk.phase !== "rollback" || !checkpoint) return true;
       const slot = slotForInvocation(checkpoint.invocationId);
-      if (!slot || slot.reasoningIdx === null) return true;
+      if (!slot) return true;
+      slot.pendingStepLabel = checkpoint.pendingStepLabel;
+      slot.pendingWhitespace = checkpoint.pendingWhitespace;
+      if (slot.reasoningIdx === null) return true;
       if (checkpoint.reasoningIdx === null) {
         removeContentPart(slot.reasoningIdx);
       } else {
@@ -2088,8 +2105,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (specificInvocationId) {
         const entry = activeSubAgents.get(specificInvocationId);
         if (!entry || entry.slot.reasoningIdx === null) return;
-        contentParts[entry.slot.reasoningIdx].status = { type: "done" };
+        const index = entry.slot.reasoningIdx;
+        if (contentParts[index].text === entry.slot.stepLabel) {
+          removeContentPart(index);
+        } else {
+          contentParts[index].status = { type: "done" };
+        }
         entry.slot.reasoningIdx = null;
+        entry.slot.stepLabel = "";
         return;
       }
       parentReasoning.close();
@@ -2100,11 +2123,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // sees a ``done`` status on the last byte.
       for (const entry of activeSubAgents.values()) {
         if (entry.slot.reasoningIdx !== null) {
-          contentParts[entry.slot.reasoningIdx].status = { type: "done" };
-          entry.slot.reasoningIdx = null;
+          flushOpenReasoning(entry.invocationId);
         }
       }
       parentReasoning.close();
+    };
+    const removeFinalAnswerEcho = (answer: string) => {
+      for (let index = contentParts.length - 1; index >= 0; index -= 1) {
+        const part = contentParts[index];
+        if (part?.type !== "reasoning") continue;
+        const remaining = stripStreamedFinalAnswerEcho(part.text, answer);
+        if (remaining !== null) {
+          if (remaining.trim()) contentParts[index] = { ...part, text: remaining };
+          else removeContentPart(index);
+        }
+        break;
+      }
     };
 
     // Helper: build a fresh sub-agent metadata object for a given invocation.
@@ -2388,38 +2422,25 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // metadata, not a standalone reasoning card in creation mode.
             if (isNl2Skill) continue;
             // A new model step closes the previous reasoning part.
+            // Show the logical step before any model token. Attempts only
+            // snapshot/restore text after this stable label.
             flushOpenReasoning(chunk.invocation_id);
-            // Fold `step_count` into the invocation's reasoning part text
-            // so the rendering layer sees the same reasoning part shape
-            // regardless of whether the data came from streaming or a
-            // historical load. ReasoningTrigger extracts the step label
-            // (``**步骤 N**``) at render time.
-            //
-            // Each parallel invocation owns a stable slot index inside
-            // ``contentParts``: the first step_count (or reasoning) chunk
-            // pushes a fresh reasoning part; later chunks mutate the part
-            // in place. This keeps every per-invocation reasoning part
-            // contiguous in the parts array, so assistant-ui's GroupedParts
-            // yields a single card per invocation even when chunks
-            // interleave across multiple parallel sub-agents.
             const top = resolveSubAgent(chunk.invocation_id);
             if (top) {
-              if (top.slot.reasoningIdx === null) {
-                const part = makeReasoningPart(
-                  chunk.content,
-                  true,
-                  subAgentMetadataFor(top)
-                );
-                contentParts.push(part);
-                top.slot.reasoningIdx = contentParts.length - 1;
-              } else {
-                contentParts[top.slot.reasoningIdx].text += chunk.content;
-              }
-              yield buildStreamResult(contentParts);
+              const part = makeReasoningPart(
+                chunk.content,
+                true,
+                subAgentMetadataFor(top)
+              );
+              contentParts.push(part);
+              top.slot.reasoningIdx = contentParts.length - 1;
+              top.slot.stepLabel = chunk.content;
+              top.slot.pendingStepLabel = "";
+              top.slot.pendingWhitespace = "";
             } else {
-              parentReasoning.append(chunk.content);
-              yield buildStreamResult(contentParts);
+              parentReasoning.queueStepLabel(chunk.content);
             }
+            yield buildStreamResult(contentParts);
             continue;
           }
 
@@ -2530,6 +2551,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "final_answer") {
+            removeFinalAnswerEcho(chunk.content);
             upsertCreatedAgentPart(false);
             // Backward compatibility for streams produced before the warning
             // event existed. A later final answer proves those earlier step
@@ -2611,10 +2633,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               // sibling chunks can keep adding parts without leaving dangling
               // streaming reasoning on the finishing run.
               if (closing.slot.reasoningIdx !== null) {
-                contentParts[closing.slot.reasoningIdx].status = {
-                  type: "done",
-                };
-                closing.slot.reasoningIdx = null;
+                flushOpenReasoning(closing.invocationId);
               }
               activeSubAgents.delete(invocationId!);
               markSubAgentRunFinished(contentParts, closing.runId);
@@ -2659,13 +2678,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             const top = resolveSubAgent(chunk.invocation_id);
             if (top) {
               if (top.slot.reasoningIdx === null) {
+                if (!chunk.content.trim()) {
+                  top.slot.pendingWhitespace += chunk.content;
+                  continue;
+                }
                 const part = makeReasoningPart(
-                  chunk.content,
+                  top.slot.pendingStepLabel +
+                    top.slot.pendingWhitespace +
+                    chunk.content,
                   true,
                   subAgentMetadataFor(top)
                 );
                 contentParts.push(part);
                 top.slot.reasoningIdx = contentParts.length - 1;
+                top.slot.pendingStepLabel = "";
+                top.slot.pendingWhitespace = "";
               } else {
                 contentParts[top.slot.reasoningIdx].text += chunk.content;
               }
@@ -2802,6 +2829,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
             if (chunk.type === "step_count") {
               flushOpenReasoning(chunk.invocation_id);
+              const top = resolveSubAgent(chunk.invocation_id);
+              if (top) {
+                const part = makeReasoningPart(
+                  chunk.content,
+                  true,
+                  subAgentMetadataFor(top)
+                );
+                contentParts.push(part);
+                top.slot.reasoningIdx = contentParts.length - 1;
+                top.slot.stepLabel = chunk.content;
+                top.slot.pendingStepLabel = "";
+                top.slot.pendingWhitespace = "";
+              } else {
+                parentReasoning.queueStepLabel(chunk.content);
+              }
+              yield buildStreamResult(contentParts);
             }
           }
           if (chunk.type === "workbench_config_resolved") {
@@ -2921,6 +2964,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               // after the most recent step thought instead of being reordered
               // in front of it.
               flushOpenReasoning();
+              removeFinalAnswerEcho(chunk.content);
               completeVerificationPanel();
               for (const part of contentParts) {
                 if (part?.type === "text" && part.isError) {
@@ -2931,10 +2975,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             } else if (chunk.type === "warning") {
               flushOpenReasoning();
             }
-            const partType =
-              chunk.type === "step_count"
-                ? "reasoning"
-                : mapChunkType(chunk.type);
+            const partType = mapChunkType(chunk.type);
             if (chunk.type === "parse") {
               flushOpenReasoning(chunk.invocation_id);
               if (chunk.content.trim()) {
@@ -2951,17 +2992,27 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const top = resolveSubAgent(chunk.invocation_id);
               if (top) {
                 if (top.slot.reasoningIdx === null) {
-                  const part = makeReasoningPart(
-                    chunk.content,
-                    true,
-                    subAgentMetadataFor(top)
-                  );
-                  contentParts.push(part);
-                  top.slot.reasoningIdx = contentParts.length - 1;
+                  if (!chunk.content.trim()) {
+                    top.slot.pendingWhitespace += chunk.content;
+                  } else {
+                    const part = makeReasoningPart(
+                      top.slot.pendingStepLabel +
+                        top.slot.pendingWhitespace +
+                        chunk.content,
+                      true,
+                      subAgentMetadataFor(top)
+                    );
+                    contentParts.push(part);
+                    top.slot.reasoningIdx = contentParts.length - 1;
+                    top.slot.pendingStepLabel = "";
+                    top.slot.pendingWhitespace = "";
+                  }
                 } else {
                   contentParts[top.slot.reasoningIdx].text += chunk.content;
                 }
-                yield buildStreamResult(contentParts);
+                if (top.slot.reasoningIdx !== null) {
+                  yield buildStreamResult(contentParts);
+                }
               } else {
                 parentReasoning.append(chunk.content);
                 yield buildStreamResult(contentParts);

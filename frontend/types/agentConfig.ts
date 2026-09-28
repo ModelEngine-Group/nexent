@@ -19,6 +19,7 @@ export type AgentConfigUpdate = Partial<
     | "is_main_agent"
     | "provide_run_summary"
     | "allow_chat_metadata"
+    | "enable_protocol_repair_retry"
     | "description"
     | "duty_prompt"
     | "constraint_prompt"
@@ -134,6 +135,7 @@ export interface PublishedAgent {
   allow_chat_metadata?: boolean;
   /** Agent-owned model inference snapshots used by the chat runtime. */
   model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
+  enable_protocol_repair_retry?: boolean;
   icon_url?: string;
   tags?: string[];
 }
@@ -174,6 +176,7 @@ export interface Agent {
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   allow_chat_metadata?: boolean;
+  enable_protocol_repair_retry?: boolean;
   enable_context_manager?: boolean;
   is_a2a?: boolean;
   verification_config?: AgentVerificationConfig;
@@ -281,11 +284,7 @@ export interface AidpKnowledgeBaseItem {
   created_by?: string;
   /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
   resource_status?:
-    | "ACTIVE"
-    | "CREATING"
-    | "DELETE_PENDING"
-    | "ORPHANED"
-    | "UNAVAILABLE";
+    "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
   /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
   created_at?: string;
   /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
@@ -369,9 +368,7 @@ export interface SkillGroup {
 
 // Skill with installation status for tenant creation flow
 export type SkillInstallStatus =
-  | "installable"
-  | "installed"
-  | "resource_missing";
+  "installable" | "installed" | "resource_missing";
 
 export interface InstallableSkill {
   skill_id: number;
