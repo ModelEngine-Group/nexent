@@ -27,6 +27,7 @@ from services.agent_repository_service import (
 )
 from services.official_agent_sync_service import sync_official_agents
 from utils.auth_utils import get_current_user_context, get_current_user_id
+from utils.agent_transfer_utils import AgentToolImportError
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
@@ -394,7 +395,7 @@ async def import_agent_from_repository_api(
                 for item in (payload.get("knowledge_base_resolutions") or [])
             ] or None
 
-        await import_agent_from_repository_impl(
+        result = await import_agent_from_repository_impl(
             agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             authorization=authorization,
@@ -403,8 +404,9 @@ async def import_agent_from_repository_api(
             embedding_model_ids=embedding_model_ids,
             knowledge_base_resolutions=knowledge_base_resolutions,
             user_id=user_id,
+            return_root_id=True,
         )
-        return JSONResponse(status_code=HTTPStatus.OK, content={})
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(
             f"Unauthorized agent repository import attempt "
@@ -423,6 +425,9 @@ async def import_agent_from_repository_api(
                 "duplicate_skills": exc.duplicate_names,
             },
         )
+    except AgentToolImportError as e:
+        logger.warning("Agent repository tool validation failed (id=%s): %s", agent_repository_id, e)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logger.warning(
             f"Agent repository listing not found for import "

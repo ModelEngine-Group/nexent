@@ -17,6 +17,7 @@ from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     AppException,
     ForbiddenError,
+    TenantResourceLimitError,
 )
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -37,6 +38,7 @@ from management.services.agent.read import (
 from database.agent_db import (
     batch_search_agent_display_names,
     create_agent,
+    is_system_agent,
     query_all_agent_info_by_tenant_id,
     query_sub_agent_relations,
     query_sub_agents_id_list,
@@ -215,6 +217,8 @@ async def upload_agent_icon_impl(
     user_id: str,
 ) -> dict:
     """Validate, store, and attach a user-supplied image to an editable agent."""
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent is managed by the platform")
     if not content:
         raise ValueError("Agent icon file is empty")
     if len(content) > AGENT_ICON_MAX_BYTES:
@@ -395,10 +399,17 @@ async def get_agent_info_impl(
 ):
     try:
         agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+        if (
+            agent_info.get("agent_origin") == "SYSTEM"
+            or agent_info.get("system_key") is not None
+        ):
+            raise ForbiddenError("Agent is not accessible")
         # Keep the request-scoped tenant_id unless the record explicitly provides one.
         record_tenant_id = agent_info.get("tenant_id")
         if record_tenant_id:
             tenant_id = record_tenant_id
+    except ForbiddenError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")
@@ -668,6 +679,12 @@ async def update_agent_info_impl(
 ):
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
+    if (
+        request.agent_id is not None
+        and is_system_agent(request.agent_id, tenant_id) is True
+    ):
+        raise ForbiddenError("System Agent is managed by the platform")
+
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(
             ErrorCode.COMMON_PARAMETER_INVALID,
@@ -760,6 +777,8 @@ async def update_agent_info_impl(
             request.prompt_template_name = prompt_template_name
             request.model_params_override = model_params_override
             update_agent(agent_id, request, user_id)
+    except TenantResourceLimitError:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")

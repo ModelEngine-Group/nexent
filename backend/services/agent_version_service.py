@@ -32,10 +32,27 @@ from database.agent_version_db import (
     STATUS_ARCHIVED,
 )
 from database.model_management_db import get_model_by_model_id, get_valid_model_ids
+from database.agent_db import is_system_agent
 from utils.str_utils import convert_string_to_list
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 
 logger = logging.getLogger("agent_version_service")
+
+
+def _ensure_system_agent_mutation_allowed(
+    agent_id: int,
+    tenant_id: str,
+    allow_system: bool = False,
+) -> None:
+    """Reject public mutations of protected platform Agents."""
+    if not allow_system and is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
+
+
+def _ensure_system_agent_hidden(agent_id: int, tenant_id: str) -> None:
+    """Hide protected platform Agents from ordinary direct-ID read paths."""
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("Agent not found")
 
 
 def _remove_audit_fields_for_insert(data: dict) -> None:
@@ -66,6 +83,7 @@ def publish_version_impl(
     release_note: Optional[str] = None,
     source_type: str = SOURCE_TYPE_NORMAL,
     source_version_no: Optional[int] = None,
+    allow_system: bool = False,
 ) -> dict:
     """
     Publish a new version
@@ -74,6 +92,8 @@ def publish_version_impl(
     3. Update current_version_no
     4. Optionally register as A2A Server agent
     """
+    _ensure_system_agent_mutation_allowed(agent_id, tenant_id, allow_system)
+
     # Get draft data
     agent_draft, tools_draft, relations_draft = query_agent_draft(agent_id, tenant_id)
     if not agent_draft:
@@ -224,6 +244,7 @@ def get_version_list_impl(
     """
     Get version list for an agent
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     items = query_version_list(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -243,6 +264,7 @@ def get_version_impl(
     """
     Get version
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     version = search_version_by_version_no(agent_id, tenant_id, version_no)
     if not version:
         raise ValueError(f"Version {version_no} not found")
@@ -258,6 +280,7 @@ def get_version_detail_impl(
     Get version detail including snapshot data, structured like agent info.
     Returns agent info with tools, sub_agents, skills, availability, etc.
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     result: Dict[str, Any] = {}
 
     # Get version metadata first
@@ -403,6 +426,8 @@ def rollback_version_impl(
     Returns:
         Success message with target version info
     """
+    _ensure_system_agent_mutation_allowed(agent_id, tenant_id)
+
     # Verify the target version exists
     version = search_version_by_version_no(agent_id, tenant_id, target_version_no)
     if not version:
@@ -455,6 +480,7 @@ def update_version_status_impl(
     """
     Update version status (DISABLED / ARCHIVED)
     """
+    _ensure_system_agent_mutation_allowed(agent_id, tenant_id)
     valid_statuses = [STATUS_DISABLED, STATUS_ARCHIVED]
     if status not in valid_statuses:
         raise ValueError(f"Invalid status. Must be one of: {valid_statuses}")
@@ -484,6 +510,8 @@ def update_version_impl(
     """
     Update version metadata (version_name and release_note)
     """
+    _ensure_system_agent_mutation_allowed(agent_id, tenant_id)
+
     # Check if version exists
     version = search_version_by_version_no(agent_id, tenant_id, version_no)
     if not version:
@@ -517,6 +545,8 @@ def delete_version_impl(
     Soft delete a version by setting delete_flag='Y'
     Also soft deletes all related snapshot data (agent, tools, relations, skills) for this version
     """
+    _ensure_system_agent_mutation_allowed(agent_id, tenant_id)
+
     # Check if version exists
     version = search_version_by_version_no(agent_id, tenant_id, version_no)
     if not version:
@@ -587,6 +617,7 @@ def get_current_version_impl(
     """
     Get current published version
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     current_version_no = query_current_version_no(agent_id, tenant_id)
     if current_version_no is None:
         raise ValueError("No published version")
@@ -618,6 +649,7 @@ def compare_versions_impl(
     Returns detailed comparison data for both versions.
     Handles version 0 as draft data.
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     # Get version A detail (handles version 0 as draft)
     version_a = _get_version_detail_or_draft(agent_id, tenant_id, version_no_a)
     # Get version B detail (handles version 0 as draft)
@@ -728,6 +760,7 @@ def _get_version_detail_or_draft(
     Get version detail for published versions, or draft data for version 0.
     Returns structured agent info similar to get_version_detail_impl.
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     from database import skill_db as skill_db_module
 
     result: Dict[str, Any] = {}
@@ -852,6 +885,8 @@ async def list_published_agents_impl(
         enriched_agents: list[dict] = []
 
         for agent in agent_list:
+            if agent.get("agent_origin") == "SYSTEM" or agent.get("system_key"):
+                continue
             # Filter out disabled agents
             if not agent.get("enabled"):
                 continue
@@ -1004,7 +1039,18 @@ async def list_published_agents_impl(
                 "model_params_override": agent.get("model_params_override"),
             })
 
-        return simple_agent_list
+        try:
+            from services.resource_tag_projection import project_authorized_resource_tags
+
+            return project_authorized_resource_tags(
+                simple_agent_list,
+                resource_type="agent",
+                id_field="agent_id",
+                default_tenant_id=tenant_id,
+            )
+        except Exception as error:  # noqa: BLE001 - tags are display-only list metadata
+            logger.warning("Failed to project published Agent tags: %s", error)
+            return [{**agent, "tags": []} for agent in simple_agent_list]
 
     except Exception as e:
         logger.error(f"Failed to list published agents: {str(e)}")

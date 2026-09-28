@@ -4,17 +4,20 @@ import logging
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
 from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
+from consts.const import ENABLE_AGENT_WORKBENCH
 from consts.model import (
     NL2SkillRunRequest,
     SkillCreateRequest,
     SkillInstanceInfoRequest,
     SkillUpdateRequest,
 )
+from permissions.depends import require
+from permissions.models import CurrentUser
 from services.asset_owner_visibility import can_view_skill
 from services.agent_draft_permission_service import (
     AgentDraftEditError,
@@ -22,6 +25,10 @@ from services.agent_draft_permission_service import (
     require_agent_draft_edit,
 )
 from services.nl2skill_service import create_nl2skill_stream
+from services.workbench_creation_history_service import (
+    prepare_creation_history,
+    persist_creation_stream,
+)
 from management.services.skill.service import (
     SkillService,
     UnsupportedSkillFilePreview,
@@ -38,6 +45,7 @@ _NOT_FOUND_TEXT = "not found"
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
+require_skill_create_permission = require("skill:create")
 
 
 def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], tenant_id: str):
@@ -741,9 +749,12 @@ async def delete_skill(
 @skill_creator_router.post("/nl2skill/run")
 async def nl2skill_run_api(
     request: NL2SkillRunRequest,
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    _current_user: CurrentUser = Depends(require_skill_create_permission),
 ):
-    """Run one non-persistent, multi-turn NL2Skill conversation turn."""
+    """Run NL2Skill; Workbench turns opt into conversation persistence."""
+    if (request.persist_history or request.workbench_config is not None) and not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     try:
         _, tenant_id, user_language = get_current_user_info(authorization)
     except Exception as e:
@@ -756,7 +767,35 @@ async def nl2skill_run_api(
             tenant_id=tenant_id,
             language=request.language or user_language or "zh",
         )
+        if request.persist_history:
+            user_id, _ = get_current_user_id(authorization)
+            conversation_id, assistant_index = prepare_creation_history(
+                conversation_id=request.conversation_id,
+                mode="skill_create",
+                query=request.query,
+                minio_files=request.minio_files,
+                workbench_config=request.workbench_config,
+                agent_id=None,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                retry_user_message_id=request.retry_user_message_id,
+                retry_message_index=request.retry_message_index,
+            )
+            stream = persist_creation_stream(
+                stream,
+                conversation_id=conversation_id,
+                assistant_index=assistant_index,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+            return StreamingResponse(
+                stream,
+                media_type="text/event-stream",
+                headers={"conversation_id": str(conversation_id)},
+            )
         return StreamingResponse(stream, media_type="text/event-stream")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Workbench creation session.") from exc
     except HTTPException:
         raise
     except Exception:

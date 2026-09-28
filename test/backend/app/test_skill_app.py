@@ -119,7 +119,19 @@ sys.modules['consts.model'] = consts_model_mock
 sys.modules['consts.const'] = consts_const_mock
 consts_const_mock.MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
 consts_const_mock.APP_VERSION = "v2.0.2"
+consts_const_mock.ENABLE_AGENT_WORKBENCH = False
 consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
+
+# Keep permission dependencies inert in endpoint tests that exercise legacy
+# authentication and stream behavior rather than RBAC itself.
+permissions_mock = types.ModuleType("permissions")
+permissions_depends_mock = types.ModuleType("permissions.depends")
+permissions_models_mock = types.ModuleType("permissions.models")
+permissions_depends_mock.require = lambda _permission: (lambda: None)
+permissions_models_mock.CurrentUser = object
+sys.modules["permissions"] = permissions_mock
+sys.modules["permissions.depends"] = permissions_depends_mock
+sys.modules["permissions.models"] = permissions_models_mock
 
 class SkillException(Exception):
     pass
@@ -176,6 +188,12 @@ class MockSkillResponse(BaseModel):
 class MockNL2SkillRunRequest(BaseModel):
     query: str
     history: Optional[List[Dict[str, str]]] = None
+    minio_files: Optional[List[Dict[str, Any]]] = None
+    conversation_id: Optional[int] = None
+    persist_history: bool = False
+    workbench_config: Optional[Dict[str, Any]] = None
+    retry_user_message_id: Optional[int] = None
+    retry_message_index: Optional[int] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     complexity: str = "complicated"
     language: Optional[str] = None
@@ -192,15 +210,18 @@ services_mock.__path__ = [
 ]  # Keep real service submodules importable
 services_skill_service_mock = types.ModuleType('management.services.skill.service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
+services_creation_history_mock = types.ModuleType('services.workbench_creation_history_service')
 services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 services_agent_draft_permission_mock = types.ModuleType('services.agent_draft_permission_service')
 sys.modules['services'] = services_mock
 sys.modules['management.services.skill.service'] = services_skill_service_mock
 sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
+sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
 sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
 sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
 setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
+setattr(services_mock, 'workbench_creation_history_service', services_creation_history_mock)
 setattr(services_mock, 'asset_owner_visibility', services_asset_owner_visibility_mock)
 
 
@@ -231,6 +252,8 @@ services_skill_service_mock.update_skill_list = MagicMock()
 services_skill_service_mock.get_official_skills_with_status = MagicMock(return_value=[])
 services_skill_service_mock.install_skills_from_zip_for_tenant = MagicMock(return_value=[])
 services_nl2skill_service_mock.create_nl2skill_stream = AsyncMock()
+services_creation_history_mock.prepare_creation_history = MagicMock(return_value=(42, 1))
+services_creation_history_mock.persist_creation_stream = MagicMock()
 
 
 def setup_function():
@@ -238,6 +261,7 @@ def setup_function():
     sys.modules['services'] = services_mock
     sys.modules['management.services.skill.service'] = services_skill_service_mock
     sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
+    sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
     sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
     sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
@@ -3308,7 +3332,11 @@ class TestSkillAppRemainingExceptionMappings:
         )
         expected = skill_app.HTTPException(status_code=409, detail="conflict")
         mocker.patch.object(skill_app, "create_nl2skill_stream", side_effect=expected)
-        request = MagicMock(language=None)
+        request = MagicMock(
+            language=None,
+            persist_history=False,
+            workbench_config=None,
+        )
 
         with pytest.raises(skill_app.HTTPException) as exc_info:
             await skill_app.nl2skill_run_api(request=request, authorization="token")

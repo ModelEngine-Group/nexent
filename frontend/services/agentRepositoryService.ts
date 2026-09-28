@@ -219,7 +219,7 @@ export async function importAgentFromRepository(
   agentRepositoryId: number,
   skillResolutions?: SkillResolutionInput[],
   modelOptions?: RepositoryImportModelOptions
-): Promise<void> {
+): Promise<{ agent_id: number }> {
   try {
     const response = await fetch(
       API_ENDPOINTS.agentRepository.import(agentRepositoryId),
@@ -261,6 +261,7 @@ export async function importAgentFromRepository(
       error.detail = detail;
       throw error;
     }
+    return response.json();
   } catch (error) {
     if (error instanceof Error && "status" in error) {
       throw error;

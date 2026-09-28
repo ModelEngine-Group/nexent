@@ -228,6 +228,7 @@ MAX_USERS_PER_TENANT = _positive_int_env("MAX_USERS_PER_TENANT", 10_000)
 MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
 MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
 MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
+MAX_AGENTS_PER_TENANT = _positive_int_env("MAX_AGENTS_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -273,6 +274,7 @@ IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
+ENABLE_AGENT_WORKBENCH = os.getenv("ENABLE_AGENT_WORKBENCH", "false").lower() in ("true", "1", "yes", "on")
 AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
 AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
 AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")

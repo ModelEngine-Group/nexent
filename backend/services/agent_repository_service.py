@@ -1320,7 +1320,8 @@ async def import_agent_from_repository_impl(
     embedding_model_ids: Optional[Dict[str, int]] = None,
     knowledge_base_resolutions: Optional[List[KnowledgeBaseResolution]] = None,
     user_id: Optional[str] = None,
-) -> Dict[int, int]:
+    return_root_id: bool = False,
+) -> Dict[int, int] | Dict[str, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     record = get_agent_repository_by_id(
         agent_repository_id,
@@ -1379,6 +1380,8 @@ async def import_agent_from_repository_impl(
                 "(agent_repository_id=%s)",
                 agent_repository_id,
             )
+        if return_root_id:
+            return {"agent_id": item.agent_id} if item.agent_id else {}
         return {record.get("agent_id"): item.agent_id} if item.agent_id else {}
 
     agent_info_json = record.get("agent_info_json")
@@ -1408,6 +1411,8 @@ async def import_agent_from_repository_impl(
             "(agent_repository_id=%s)",
             agent_repository_id,
         )
+    if return_root_id:
+        return {"agent_id": result[snapshot.agent_id]}
     return result
 
 
