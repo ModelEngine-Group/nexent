@@ -1,0 +1,43 @@
+schema_version: '1.0'
+module:
+  id: AIDP-KNOWLEDGE
+  name: AIDP knowledge base
+  description: AIDP knowledge base overview, file view and two-step creation page inside the Nexent frontend, including the AIDP-only branch selected by the deployment flag.
+features:
+  - feature_id: AKPR-001
+    name: AIDP knowledge base list and creation page refactor
+    status: active
+    description: AIDP knowledge bases are listed in a card or table overview with an independent name search, a collapsible three-step guide and a full-page file view per knowledge base; creation moves to a dedicated two-step page that carries permission, chunking, retrieval, graph, model and safety-guard configuration. The ES knowledge base path stays untouched.
+    business_rules:
+      - rule_id: AKPR-RULE-001
+        description: The overview renders a knowledge base guide with the fixed steps "create knowledge base, upload files, configure the knowledge base in an agent"; the guide collapses and reopens without losing the rest of the page state.
+      - rule_id: AKPR-RULE-002
+        description: The overview defaults to the card view and can switch to a table; both views project the same permission-scoped, server-paginated result set and switching never calls a mutating endpoint.
+      - rule_id: AKPR-RULE-003
+        description: The independent name search reuses the existing keyword query, resets to the first page on change and restores the unfiltered set when cleared; no column-level search or filter exists in this version.
+      - rule_id: AKPR-RULE-004
+        description: The table exposes a column visibility setting that hides and restores optional columns, keeps the name and action columns available, and never mutates backend state.
+      - rule_id: AKPR-RULE-005
+        description: Selecting a knowledge base opens a full-page file view for that base only; returning restores the previous search, page, view mode and column setting, and a delayed response from a previously opened base never overwrites the current one.
+      - rule_id: AKPR-RULE-006
+        description: Displayed metadata uses only real response values; unknown values render as an em dash, the personal/enterprise type comes from the AIDP is_private field instead of Nexent group permission, and personal capacity uses only a valid current_cap value in the documented unit.
+      - rule_id: AKPR-RULE-007
+        description: Existing EDIT and READ_ONLY permissions, unavailable resource states and the hidden modification entry points for them are preserved in both overview and file view.
+      - rule_id: AKPR-RULE-008
+        description: The AIDP page selection by the deployment flag stays isolated; ES deployments keep rendering the original ES knowledge base components and the new AIDP guide, overview and file view never enter that render path.
+      - rule_id: AKPR-RULE-009
+        description: File upload, processing-status polling, download and deletion inside the AIDP file view keep their permission gates, expose partial-failure feedback, and clean up their polling state when the view is left.
+      - rule_id: AKPR-RULE-010
+        description: Creation uses a dedicated two-step page; the first step owns name, description, permission and user groups, the next step only validates and caches local form state, and the knowledge base is created once at final submission before any file upload.
+      - rule_id: AKPR-RULE-011
+        description: Chunking submits chunk_mode 0 for smart splitting and 1 for legal clauses, converts the overlap percentage to floor(tokens * percent / 100) integer tokens bounded by 50 percent of the chunk size, and keeps the existing default chunking values.
+      - rule_id: AKPR-RULE-012
+        description: The graph model is queried from the llm model category and the multimodal model from the vlm category, with independent fields and query caches; disabling either capability omits its hidden previous configuration instead of resubmitting it.
+      - rule_id: AKPR-RULE-013
+        description: Graph configuration serializes into the documented graph_config payload with documented defaults, maps the thinking switch inversely onto no_think_mode, keeps the graph Top K independent from the knowledge base Top K, and limits the editable prompt to 2048 UTF-8 bytes.
+      - rule_id: AKPR-RULE-014
+        description: The safety guard uses the exact field sensitive_intercept_enalbe with integer values 1 and 0 across create, update and query; an explicit 0 is always forwarded, an absent value is never reported as confirmed off, and a failed update is never presented as saved.
+    required_test_stages: [D1, D2, D3, D4, D5]
+    source:
+      requirement_ids: [AKPR-001]
+      spec_path: nexent-doc/nexent/knowledge-base-pages-refactor/proposal.md

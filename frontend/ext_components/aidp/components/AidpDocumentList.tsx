@@ -1,12 +1,21 @@
 import React, { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Pagination, Tag, Upload, message, Tooltip } from "antd";
+import {
+  Button,
+  Pagination,
+  Popconfirm,
+  Tag,
+  Upload,
+  message,
+  Tooltip,
+} from "antd";
 import {
   UploadOutlined,
   InboxOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
+import { Download, Trash2 } from "lucide-react";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpDocumentItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
@@ -19,6 +28,7 @@ import {
   normalizeAidpDocStatus,
 } from "@/lib/aidpDocumentStatus";
 import { partitionAidpFiles } from "@/services/uploadService";
+import log from "@/lib/logger";
 
 const { Dragger } = Upload;
 
@@ -49,6 +59,40 @@ const isDuplicateUploadReason = (
   return DUPLICATE_UPLOAD_REASON_MARKERS.some((marker) =>
     haystack.includes(marker)
   );
+};
+
+/**
+ * Resolve the download filename from the response headers.
+ *
+ * The backend forwards the AIDP file name through `X-File-Name` and a
+ * standard `Content-Disposition`; either may carry a percent-encoded UTF-8
+ * value, so both are decoded and the listed document name is only used as a
+ * last resort.
+ */
+const resolveDownloadFilename = (
+  response: Response,
+  fallback: string
+): string => {
+  const headerName = response.headers.get("X-File-Name");
+  if (headerName) {
+    try {
+      return decodeURIComponent(headerName);
+    } catch {
+      return headerName;
+    }
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      // fall through to the plain form
+    }
+  }
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+  if (plainMatch?.[1]) return plainMatch[1];
+  return fallback;
 };
 
 /** Table cell showing a document name above its AIDP file id. */
@@ -172,6 +216,10 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const [uploading, setUploading] = useState(false);
+  /** File uuid currently downloading; drives that row's button spinner. */
+  const [downloadingFileUuid, setDownloadingFileUuid] = useState<string | null>(
+    null
+  );
   // Antd <Dragger> fires beforeUpload once per file in a multi-select batch.
   // The `fileList` array may-or-may-not be the same reference across the N
   // calls (behavior differs between <Upload> and <Dragger> and antd versions),
@@ -252,6 +300,80 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
     [activeKb, i18n.language, onDocsUploaded, t]
   );
 
+  // ---- Download and delete ----
+  // Download requires read access to the knowledge base and delete requires
+  // edit access. An unavailable or orphaned knowledge base cannot be serviced
+  // by AIDP at all, so both operations stay disabled there regardless of the
+  // effective permission.
+  const isKbUnavailable =
+    activeKb?.resource_status === "UNAVAILABLE" ||
+    activeKb?.resource_status === "ORPHANED";
+  const canDeleteDocuments =
+    !!activeKb && !isKbUnavailable && activeKb.permission === "EDIT";
+  const canDownloadDocuments = !!activeKb && !isKbUnavailable;
+
+  const handleDownload = useCallback(
+    async (doc: AidpDocumentItem) => {
+      if (!activeKb) return;
+      setDownloadingFileUuid(doc.file_uuid);
+      try {
+        const response = await aidpKnowledgeService.downloadDoc(
+          activeKb.kds_id,
+          doc.file_uuid
+        );
+        const blob = await response.blob();
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = resolveDownloadFilename(response, doc.file_name);
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(downloadUrl);
+        message.success(t("aidpKnowledge.downloadSuccess"));
+      } catch (error) {
+        log.error("Failed to download AIDP document:", error);
+        message.error(t("aidpKnowledge.downloadFailed"));
+      } finally {
+        setDownloadingFileUuid(null);
+      }
+    },
+    [activeKb, t]
+  );
+
+  const handleDeleteDocument = useCallback(
+    async (doc: AidpDocumentItem) => {
+      if (!activeKb) return;
+      try {
+        const result = await aidpKnowledgeService.removeDoc(
+          activeKb.kds_id,
+          doc.file_uuid
+        );
+        if (result.summary.failed > 0 && result.summary.success === 0) {
+          message.error(t("aidpKnowledge.deleteDocFailed"));
+        } else if (result.summary.failed > 0) {
+          message.warning(
+            t("aidpKnowledge.deleteDocPartial", {
+              success: result.summary.success,
+              failed: result.summary.failed,
+            })
+          );
+        } else {
+          message.success(t("aidpKnowledge.deleteDocSuccess"));
+        }
+        // The single-document UI always sends one uuid, so a partial result
+        // means that one file failed; refresh either way to keep the list
+        // consistent with the upstream state.
+        onRefresh();
+      } catch (error) {
+        log.error("Failed to delete AIDP document:", error);
+        message.error(t("aidpKnowledge.deleteDocFailed"));
+      }
+    },
+    [activeKb, onRefresh, t]
+  );
+
   // Format file size for display
   const formatSize = (bytes?: number): string => {
     if (!bytes || bytes === 0) return "-";
@@ -319,6 +441,9 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     {t("aidpKnowledge.docCreatedAt")}
                   </th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                    {t("aidpKnowledge.docActions")}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -339,6 +464,42 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                       {doc.created_at
                         ? new Date(doc.created_at).toLocaleString()
                         : "-"}
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-1 justify-end">
+                        {canDownloadDocuments && (
+                          <Tooltip title={t("aidpKnowledge.download")}>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<Download className="h-4 w-4" />}
+                              loading={downloadingFileUuid === doc.file_uuid}
+                              onClick={() => void handleDownload(doc)}
+                            />
+                          </Tooltip>
+                        )}
+                        {canDeleteDocuments && (
+                          <Popconfirm
+                            title={t("aidpKnowledge.confirmDeleteDocTitle")}
+                            description={t(
+                              "aidpKnowledge.confirmDeleteDocContent"
+                            )}
+                            okText={t("common.confirm")}
+                            cancelText={t("common.cancel")}
+                            okButtonProps={{ danger: true }}
+                            onConfirm={() => void handleDeleteDocument(doc)}
+                          >
+                            <Tooltip title={t("aidpKnowledge.delete")}>
+                              <Button
+                                type="text"
+                                danger
+                                size="small"
+                                icon={<Trash2 className="h-4 w-4" />}
+                              />
+                            </Tooltip>
+                          </Popconfirm>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

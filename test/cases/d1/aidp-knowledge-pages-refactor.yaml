@@ -1,0 +1,502 @@
+schema_version: '1.0'
+stage: D1
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKPR-D1-001
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-001]
+    title: Overview guide expands, collapses and keeps the fixed three steps
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the AIDP-only guide renders the knowledge base explanation with the fixed steps and toggles without disturbing page state.
+    preconditions:
+      - Render the AIDP overview component with an empty knowledge base list.
+    test_data: {profile: mock, locale: zh-CN}
+    steps:
+      - order: 1
+        action: Mount the overview page.
+        expected: The guide is expanded and lists create knowledge base, upload files and configure the knowledge base in an agent.
+      - order: 2
+        action: Collapse the guide.
+        expected: The guide body is hidden while the reopen entry stays visible and operable.
+      - order: 3
+        action: Reopen the guide.
+        expected: The explanation and the three steps are visible again with unchanged search and view state.
+    expected_results:
+      - The explanation and the three documented steps are visible when expanded.
+      - Collapse hides only the guide body.
+      - Reopening restores the same content order.
+    forbidden_side_effects:
+      - No backend request is issued by expanding or collapsing the guide.
+      - No search, page or view mode change.
+    unit_boundary: AIDP knowledge guide expansion state and fixed step labels
+    inputs:
+      - initial expanded state
+      - collapse click
+      - reopen click
+    assertions:
+      - Guide content is visible on first entry.
+      - The reopen entry remains visible after collapse.
+      - The three step labels match the fixed order.
+      - Guide toggling issues no request.
+  - case_id: AKPR-D1-002
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-002, AKPR-RULE-004]
+    title: Cards are the default view and switching or hiding columns keeps the result set
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify default card rendering, table switching and column visibility control over one shared paginated result set.
+    preconditions:
+      - Render the overview with a fixed page of knowledge bases and a recorded search and page number.
+    test_data: {profile: mock, page_size: 10, total: 23}
+    steps:
+      - order: 1
+        action: Mount the overview with existing results.
+        expected: Knowledge bases render as cards.
+      - order: 2
+        action: Switch to the table view.
+        expected: The same records render as table rows with the current keyword and page preserved.
+      - order: 3
+        action: Hide one optional column and then restore defaults.
+        expected: The column disappears and returns while the name and action columns stay present throughout.
+    expected_results:
+      - The card view is the default.
+      - Switching views keeps keyword, page and totals identical.
+      - Hiding and restoring columns changes only local visibility.
+    forbidden_side_effects:
+      - No mutating endpoint is called by view or column changes.
+      - No record is dropped or duplicated by switching views.
+      - Required columns cannot be hidden.
+    unit_boundary: Overview view mode and column visibility state
+    inputs:
+      - default view mode
+      - card to table switch
+      - hidden column set
+      - restore defaults action
+    assertions:
+      - Initial view mode is cards.
+      - Table switch preserves keyword, page and total.
+      - Hidden optional column is absent and restorable.
+      - Name and action columns stay visible.
+  - case_id: AKPR-D1-003
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-003]
+    title: Independent name search drives the keyword query and resets the page
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the single search box reuses the existing keyword query, resets to page one and keeps table headers free of search controls.
+    preconditions:
+      - Render the overview with a recorded non-first page and a stubbed list service.
+    test_data: {profile: mock, keyword: finance, page: 3}
+    steps:
+      - order: 1
+        action: Type a keyword into the page search box and wait for the debounce.
+        expected: The list service is called with the keyword and page one for both views.
+      - order: 2
+        action: Clear the search box.
+        expected: The unfiltered permission-scoped set is requested again.
+      - order: 3
+        action: Inspect the table header row.
+        expected: No column exposes a search or filter control.
+    expected_results:
+      - The keyword query is reused with a page reset.
+      - Clearing restores the unfiltered set.
+      - Column headers contain no search entry.
+    forbidden_side_effects:
+      - No request per keystroke outside the debounce.
+      - No column filter parameter is sent.
+    unit_boundary: Overview search debounce and page reset with the existing keyword parameter
+    inputs:
+      - keyword text
+      - debounce interval elapse
+      - clear action
+      - table header render
+    assertions:
+      - listKbs receives keyword and page one after debounce.
+      - Clearing the box requests the unfiltered set.
+      - No header search control exists.
+  - case_id: AKPR-D1-004
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-005, AKPR-RULE-009]
+    title: File view targets one knowledge base and restores the previous list state on return
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the full-page file view scoping, the preserved list state on return and the cleanup of the previous base document state.
+    preconditions:
+      - Render the overview with two knowledge bases and a recorded search, page, view mode and column setting.
+    test_data: {profile: mock, selected_base: kb-alpha, other_base: kb-beta}
+    steps:
+      - order: 1
+        action: Select a knowledge base.
+        expected: Only that base files render and the overview is replaced by the full-page file view.
+      - order: 2
+        action: Return to the overview.
+        expected: The previous keyword, page, view mode and column setting are intact.
+      - order: 3
+        action: Resolve a delayed document response from the first base after selecting the second.
+        expected: The delayed payload is discarded and the second base files remain.
+    expected_results:
+      - Files belong to the selected base only.
+      - Returning restores the previous list state.
+      - A stale response never overwrites the current base.
+    forbidden_side_effects:
+      - No cross-base document leakage.
+      - No polling left running after leaving the file view.
+      - No list state reset on return.
+    unit_boundary: List and file view switching, document state reset and polling cleanup
+    inputs:
+      - selected base id
+      - return action
+      - delayed response for a previous base
+    assertions:
+      - File list requests carry the selected base id.
+      - Return renders the preserved list state.
+      - A late response for the previous base is ignored.
+      - Polling state is cleared when the view is left.
+  - case_id: AKPR-D1-005
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-006]
+    title: AIDP list metadata normalizes real values and marks unknown ones as absent
+    type: BE-UT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the list response normalization of private and public type, capacity and missing values without fabricating data.
+    preconditions:
+      - Provide raw AIDP list rows with mixed boolean, numeric, string and missing metadata values.
+    test_data: {profile: mock, cases: ['is_private true', 'is_private 0', 'is_private string true', 'missing is_private', 'current_cap 2.5', 'missing current_cap', 'missing document count']}
+    steps:
+      - order: 1
+        action: Normalize rows with boolean, numeric and string forms of is_private.
+        expected: A stable personal or enterprise type is produced for every form.
+      - order: 2
+        action: Normalize rows without a type, capacity or count value.
+        expected: Those fields are reported as unknown instead of a fabricated default.
+      - order: 3
+        action: Normalize a valid personal capacity.
+        expected: The documented unit value is preserved unchanged.
+    expected_results:
+      - Real values survive normalization.
+      - Unknown values are distinguishable from a real zero.
+      - Capacity is not estimated from file sizes.
+    forbidden_side_effects:
+      - No Nexent group permission is used to infer the base type.
+      - No synthetic zero count or capacity is produced.
+      - No extra upstream request is issued per row.
+    unit_boundary: AIDP list metadata normalization helpers
+    inputs:
+      - is_private variants
+      - current_cap values
+      - document count presence
+    assertions:
+      - Boolean, integer and string is_private forms normalize consistently.
+      - A missing count is distinguishable from zero.
+      - A missing capacity is reported as unknown.
+      - A valid capacity keeps its unit.
+  - case_id: AKPR-D1-006
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-007]
+    title: Read-only and unavailable knowledge bases expose no modification entry
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify that permission and lifecycle restrictions remove every executable modification entry in cards, table rows and the file view.
+    preconditions:
+      - Render the overview with one editable, one read-only and one unavailable knowledge base.
+    test_data: {profile: mock, permissions: [EDIT, READ_ONLY], resource_status: [available, unavailable]}
+    steps:
+      - order: 1
+        action: Render the card menu and table actions for each permission.
+        expected: Only the editable base offers executable edit and delete entries.
+      - order: 2
+        action: Open the file view of a read-only base.
+        expected: Upload and delete entries are absent or disabled while browsing stays possible.
+      - order: 3
+        action: Render an unavailable base.
+        expected: No executable modification entry is offered and its state stays visible.
+    expected_results:
+      - Modification entries follow the effective permission.
+      - Unavailable bases stay visible without modification entries.
+      - No request is emitted from a disabled entry.
+    forbidden_side_effects:
+      - No modification request for read-only or unavailable bases.
+      - No hidden menu item remains clickable.
+      - No downgrade of the existing visibility rules.
+    unit_boundary: Card menu and table action rendering under permission and lifecycle states
+    inputs:
+      - effective permission
+      - resource_status
+      - menu open state
+    assertions:
+      - Read-only rows render no executable modification entry.
+      - Unavailable rows keep their lifecycle indicator.
+      - No request leaves a disabled entry.
+  - case_id: AKPR-D1-007
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-002]
+    title: First-load empty, filtered empty, loading and failure states stay distinct
+    type: FE-COMP
+    priority: P1
+    status: active
+    automation: automated
+    objective: Verify the four overview states render distinct messages and remain localized.
+    preconditions:
+      - Render the overview with a stubbed service returning an empty set, an empty filtered set, a pending promise and an error.
+    test_data: {profile: mock, states: ['first empty', 'filtered empty', loading, failed], locales: [zh, en]}
+    steps:
+      - order: 1
+        action: Resolve an empty list without a keyword.
+        expected: A first-use empty state renders instead of a search-empty state.
+      - order: 2
+        action: Resolve an empty list with an active keyword.
+        expected: A search-empty state renders with the keyword context.
+      - order: 3
+        action: Keep the request pending and then reject it.
+        expected: Loading and failure states render distinctly and the failure state offers a retry path.
+    expected_results:
+      - All four states are distinguishable.
+      - Both locales resolve every state string.
+    forbidden_side_effects:
+      - No fabricated placeholder rows.
+      - No silent failure rendering as an empty state.
+    unit_boundary: Overview empty, loading and failure state rendering
+    inputs:
+      - empty payload
+      - empty filtered payload
+      - pending request
+      - rejected request
+      - locale
+    assertions:
+      - First empty and filtered empty differ.
+      - Loading state precedes data.
+      - Failure state is distinct and localized.
+      - No placeholder rows are invented.
+  - case_id: AKPR-D1-008
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-010]
+    title: Two-step creation validates locally, preserves state and creates exactly once
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify step navigation without creation, state preservation across steps and single creation before upload.
+    preconditions:
+      - Render the AIDP creation page with stubbed create and upload services and a selected local file.
+    test_data: {profile: mock, files: 2, failing_uploads: 1}
+    steps:
+      - order: 1
+        action: Fill step one and press next.
+        expected: Validation runs with no create request issued and step two renders.
+      - order: 2
+        action: Return to step one.
+        expected: Form values, conditional sections and the selected files are preserved.
+      - order: 3
+        action: Submit with one failing upload.
+        expected: Creation happens once and the created base and the failed upload are reported separately.
+      - order: 4
+        action: Submit again after the failed upload.
+        expected: No second knowledge base is created and the retry targets the failed file only.
+    expected_results:
+      - Step one never creates a resource.
+      - State survives backward navigation.
+      - Creation happens exactly once before uploads.
+    forbidden_side_effects:
+      - No create request from the next action.
+      - No duplicate base after retry or double click.
+      - No upload before a successful create.
+    unit_boundary: Creation page step state, submit guard and create-then-upload sequencing
+    inputs:
+      - step one form values
+      - selected files
+      - upload failure
+      - repeated submit
+    assertions:
+      - Next issues no create request.
+      - Backward navigation keeps values and files.
+      - Exactly one create request precedes uploads.
+      - A failed upload does not trigger a second create.
+  - case_id: AKPR-D1-009
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-011]
+    title: Creation defaults and chunking mapping follow the confirmed values
+    type: BE-UT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify preserved creation defaults, the chunk mode enumeration and the overlap-to-token conversion with its bounds.
+    preconditions:
+      - Prepare create payloads with missing defaults, both chunk modes and boundary overlap percentages.
+    test_data: {profile: mock, chunk_tokens: [1024, 512], percents: [12.5, 50], modes: [smart, legal]}
+    steps:
+      - order: 1
+        action: Submit a payload without explicit chunking or retrieval values.
+        expected: The existing defaults apply unchanged and the new graph parameters use their documented defaults.
+      - order: 2
+        action: Submit each chunk mode.
+        expected: The chunk mode serializes as 0 for smart splitting and 1 for legal clauses.
+      - order: 3
+        action: Submit overlap percentages including the boundaries.
+        expected: The overlap becomes the floor conversion in integer tokens and any value above half the chunk size is rejected.
+    expected_results:
+      - Defaults remain 1024 tokens, 128 overlap, 0.0 similarity and Top K 10.
+      - Chunk modes serialize 0 and 1.
+      - Overlap conversion is exact and bounded.
+    forbidden_side_effects:
+      - No silent clamping of an invalid overlap.
+      - No renamed legacy field in the outgoing payload.
+      - No change to the ES knowledge base contract.
+    unit_boundary: Create default application, chunk mode mapping and overlap conversion
+    inputs:
+      - payload without defaults
+      - chunk mode selection
+      - chunk tokens and overlap percent
+    assertions:
+      - Defaults match the existing Nexent values.
+      - Overlap equals the floor conversion.
+      - Overlap above 50 percent of the chunk size is rejected.
+      - Legacy field names stay unchanged.
+  - case_id: AKPR-D1-010
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-013]
+    title: Graph configuration serializes documented keys with an inverse thinking switch
+    type: BE-UT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify graph configuration serialization, the inverse thinking mapping, the independent Top K values and the prompt byte limit.
+    preconditions:
+      - Prepare graph payloads with the switch on and off, both languages and prompt lengths around the byte limit.
+    test_data: {profile: mock, domains: [general, medical], prompt_bytes: [2048, 2049], languages: [chinese, english]}
+    steps:
+      - order: 1
+        action: Submit a graph configuration with the thinking switch enabled.
+        expected: The thinking mode field is false and the graph keys use their documented names.
+      - order: 2
+        action: Submit a knowledge base Top K together with a graph Top K.
+        expected: The two values are serialized independently without overwriting each other.
+      - order: 3
+        action: Submit prompts at and beyond the byte boundary together with a disabled graph.
+        expected: The limit passes at the boundary, longer input is rejected and a disabled graph omits its configuration entirely.
+    expected_results:
+      - The thinking switch maps inversely onto the thinking mode field.
+      - Both Top K values survive independently.
+      - The prompt limit is enforced in UTF-8 bytes.
+    forbidden_side_effects:
+      - No hidden previous graph configuration is submitted when the graph is off.
+      - No graph Top K overwrites the knowledge base Top K.
+      - No invented JSON key names.
+    unit_boundary: Graph configuration validation and serialization
+    inputs:
+      - graph switch
+      - domain
+      - graph top k
+      - hop count
+      - thinking switch
+      - prompt language
+      - prompt text
+    assertions:
+      - The thinking mode field is false when thinking is enabled.
+      - Graph and knowledge base Top K stay independent.
+      - Prompt length is measured in UTF-8 bytes.
+      - Disabled graph omits its configuration.
+  - case_id: AKPR-D1-011
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-012]
+    title: Graph and multimodal models are queried from separate categories with independent caches
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the model category split, the independent query caches and the omission of hidden model values.
+    preconditions:
+      - Render the creation form with stubbed model queries per category and both capability switches toggled.
+    test_data: {profile: mock, categories: [llm, vlm, embedding]}
+    steps:
+      - order: 1
+        action: Enable the graph section.
+        expected: The graph model query uses the llm category and fills the graph model field.
+      - order: 2
+        action: Enable multimodal captioning.
+        expected: The multimodal model query uses the vlm category and fills the multimodal field independently.
+      - order: 3
+        action: Disable each capability after a selection.
+        expected: The hidden model value is absent from the submitted payload.
+    expected_results:
+      - Each model field is populated from its own category.
+      - Caches and selections never mix.
+      - Disabled capabilities submit no model value.
+    forbidden_side_effects:
+      - No llm result used for the multimodal field.
+      - No hidden previous model resubmitted.
+      - No unverified model name silently defaulted.
+    unit_boundary: Creation form model queries, caches and hidden value handling
+    inputs:
+      - graph switch
+      - multimodal switch
+      - selected models
+      - query cache keys
+    assertions:
+      - Graph query uses llm and multimodal uses vlm.
+      - Caches are keyed independently.
+      - Disabled capability clears its submitted model.
+  - case_id: AKPR-D1-012
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-014]
+    title: Safety guard serializes integer 1 and 0 and never omits an explicit disabled value
+    type: BE-UT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify create and update serialization of the safety guard including the explicit zero and the absent-value distinction.
+    preconditions:
+      - Prepare create and update payloads with the guard enabled, explicitly disabled and absent.
+    test_data: {profile: mock, values: ['enabled 1', 'explicit 0', absent]}
+    steps:
+      - order: 1
+        action: Build a create payload with the guard enabled and disabled.
+        expected: The field is present as integer 1 or explicit 0.
+      - order: 2
+        action: Build an update payload that only changes the guard to off.
+        expected: The field survives the update whitelist and is forwarded as 0.
+      - order: 3
+        action: Map a query response that lacks the field.
+        expected: The state is reported as unknown rather than confirmed off.
+    expected_results:
+      - Integer 1 and 0 are both serialized.
+      - An explicit 0 is never dropped by filtering.
+      - Missing data is not reported as a confirmed disabled state.
+    forbidden_side_effects:
+      - No boolean or string encoding of the field.
+      - No field nesting inside graph configuration.
+      - No Nexent-side content interception added.
+    unit_boundary: Safety guard request serialization and query mapping
+    inputs:
+      - safety switch state
+      - create payload
+      - update payload
+      - query response without the field
+    assertions:
+      - Enabled serializes 1 and disabled serializes 0.
+      - The update whitelist forwards the field.
+      - A missing field maps to unknown.

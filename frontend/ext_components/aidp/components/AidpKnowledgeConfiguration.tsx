@@ -1,16 +1,19 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { useTranslation } from "react-i18next";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
-import { App, Row, Col, Modal } from "antd";
-import { InfoCircleFilled } from "@ant-design/icons";
+import { App, Button, Modal, Tag } from "antd";
+import { ArrowLeftOutlined, InfoCircleFilled } from "@ant-design/icons";
 
-import {
-  SETUP_PAGE_CONTAINER,
-  TWO_COLUMN_LAYOUT,
-  STANDARD_CARD,
-} from "@/const/layoutConstants";
+import { SETUP_PAGE_CONTAINER, STANDARD_CARD } from "@/const/layoutConstants";
 import { KB_SEARCH_DEBOUNCE_MS } from "@/const/knowledgeBase";
 import {
   AIDP_DOC_STATUS_POLL_MS,
@@ -24,21 +27,47 @@ import aidpKnowledgeService, {
 } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import log from "@/lib/logger";
 
-import AidpKnowledgeList from "./AidpKnowledgeList";
+import AidpKnowledgeList, {
+  AIDP_KB_DEFAULT_COLUMNS,
+  type AidpKbColumnKey,
+  type AidpKbViewMode,
+} from "./AidpKnowledgeList";
 import AidpDocumentList from "./AidpDocumentList";
-import AidpCreateKbModal from "./AidpCreateKbModal";
 import AidpUpdateKbModal from "./AidpUpdateKbModal";
 
+/**
+ * Overview and file view orchestration for AIDP knowledge bases.
+ *
+ * The two views replace each other inside this component instead of using a
+ * route: the overview state (search, page, view mode, column setting) lives
+ * here, so returning from a file view restores it untouched. Entering a file
+ * view clears the previous knowledge base documents and stops its upload
+ * watch, so a late response can never land in another base.
+ *
+ * Creation is a separate page (`knowledges/create`); a knowledge base created
+ * there is opened here through the `kb` query parameter.
+ */
 const AidpKnowledgeConfiguration: React.FC = () => {
   const { t } = useTranslation();
   const { message: appMessage } = App.useApp();
+  const router = useRouter();
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const locale = (params?.locale as string) || "zh";
 
   // ---- KB list state ----
   const [kbs, setKbs] = useState<AidpKnowledgeBaseItem[]>([]);
   const [loadingKbs, setLoadingKbs] = useState(false);
+  const [kbsLoadFailed, setKbsLoadFailed] = useState(false);
   const [kbTotal, setKbTotal] = useState(0);
   const [kbHasMore, setKbHasMore] = useState(false);
   const [kbTotalReliable, setKbTotalReliable] = useState(true);
+
+  // ---- Overview presentation state (preserved across the file view) ----
+  const [viewMode, setViewMode] = useState<AidpKbViewMode>("cards");
+  const [visibleColumns, setVisibleColumns] = useState<AidpKbColumnKey[]>([
+    ...AIDP_KB_DEFAULT_COLUMNS,
+  ]);
 
   // ---- Active KB / document state ----
   // activeKbId is stored separately from the paginated `kbs` list, because
@@ -46,8 +75,12 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   // which may not contain the currently active KB. `selectedKb` is the item
   // itself — set on selection, kept stable across list refetches.
   const [activeKbId, setActiveKbId] = useState<string | null>(null);
-  const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(null);
-  const [activeKbDetail, setActiveKbDetail] = useState<AidpKbDetail | null>(null);
+  const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(
+    null
+  );
+  const [activeKbDetail, setActiveKbDetail] = useState<AidpKbDetail | null>(
+    null
+  );
   const [documents, setDocuments] = useState<AidpDocumentItem[]>([]);
   const [totalDocs, setTotalDocs] = useState(0);
   const [docHasMore, setDocHasMore] = useState(false);
@@ -64,9 +97,10 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [docPage, setDocPage] = useState(1);
 
   // ---- Modal state ----
-  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
-  const [editingKb, setEditingKb] = useState<AidpKnowledgeBaseItem | null>(null);
+  const [editingKb, setEditingKb] = useState<AidpKnowledgeBaseItem | null>(
+    null
+  );
 
   // ---- Keyword search state ----
   // `kbKeyword` is the raw input value and keeps the text field responsive;
@@ -86,11 +120,12 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const fetchKbs = useCallback(
     async (page: number = 1, keyword: string = "") => {
       setLoadingKbs(true);
+      setKbsLoadFailed(false);
       try {
         const result = await aidpKnowledgeService.listKbs(
           page,
           KB_PAGE_SIZE,
-          keyword,
+          keyword
         );
         setKbs(result.value);
         setKbTotal(result.total_count ?? result.value.length);
@@ -104,6 +139,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         setKbTotal(0);
         setKbHasMore(false);
         setKbTotalReliable(false);
+        setKbsLoadFailed(true);
       } finally {
         setLoadingKbs(false);
       }
@@ -148,7 +184,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         const result = await aidpKnowledgeService.listDocs(
           kbId,
           page,
-          DOC_PAGE_SIZE,
+          DOC_PAGE_SIZE
         );
         const count = result.total_count ?? result.value.length;
         setDocuments(result.value);
@@ -245,7 +281,24 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     stopUploadWatch,
   ]);
 
-  // ---- Handle KB selection ----
+  // ---- Clear the file view state ----
+  // Used on return to the overview and whenever another base is opened: the
+  // previous documents and its upload watch must never survive into the next
+  // knowledge base.
+  const clearFileView = useCallback(() => {
+    stopUploadWatch();
+    setActiveKbId(null);
+    setSelectedKb(null);
+    setActiveKbDetail(null);
+    setDocuments([]);
+    setTotalDocs(0);
+    setDocHasMore(false);
+    setDocTotalReliable(true);
+    setDocProcessingCount(0);
+    setDocPage(1);
+  }, [stopUploadWatch]);
+
+  // ---- Handle KB selection (enter the full-page file view) ----
   const handleSelectKb = useCallback(
     (kb: AidpKnowledgeBaseItem) => {
       stopUploadWatch();
@@ -255,10 +308,50 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       setDocHasMore(false);
       setDocTotalReliable(true);
       setDocProcessingCount(0);
-      fetchDocs(kb.kds_id, 1);
+      void fetchDocs(kb.kds_id, 1);
     },
     [fetchDocs, stopUploadWatch]
   );
+
+  // ---- Open a knowledge base by id (used by the `kb` query parameter) ----
+  // The creation page sends the user here right after a successful create, so
+  // the files just uploaded are visible without a manual search.
+  const openKbById = useCallback(
+    async (kbId: string) => {
+      try {
+        const detail = await aidpKnowledgeService.getKb(kbId);
+        const item = {
+          ...detail,
+          kds_id: kbId,
+          kds_name: detail.kds_name || kbId,
+        } as AidpKnowledgeBaseItem;
+        handleSelectKb(item);
+      } catch (error) {
+        log.error("Failed to open AIDP knowledge base from query:", error);
+      }
+    },
+    [handleSelectKb]
+  );
+
+  const requestedKbId = searchParams?.get("kb") || null;
+  const openedRequestedKbRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Only react to a new `kb` value; a manual return to the overview while
+    // the parameter is still present must not reopen it.
+    if (!requestedKbId) return;
+    if (openedRequestedKbRef.current === requestedKbId) return;
+    openedRequestedKbRef.current = requestedKbId;
+    void openKbById(requestedKbId);
+  }, [openKbById, requestedKbId]);
+
+  // ---- Return to the overview ----
+  const handleBackToList = useCallback(() => {
+    clearFileView();
+    if (requestedKbId && typeof window !== "undefined") {
+      // Drop the parameter so a refresh does not reopen the file view.
+      window.history.replaceState(null, "", `/${locale}/knowledges`);
+    }
+  }, [clearFileView, locale, requestedKbId]);
 
   // ---- Handle KB deletion ----
   const handleDeleteKb = useCallback(
@@ -277,22 +370,13 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             await aidpKnowledgeService.deleteKb(kb.kds_id);
             appMessage.success(t("aidpKnowledge.deleteKbSuccess"));
 
-            // If the deleted KB was active, clear selection
+            // If the deleted KB was open, leave the file view.
             if (activeKbId === kb.kds_id) {
-              stopUploadWatch();
-              setActiveKbId(null);
-              setSelectedKb(null);
-              setActiveKbDetail(null);
-              setDocuments([]);
-              setTotalDocs(0);
-              setDocHasMore(false);
-              setDocTotalReliable(true);
-              setDocProcessingCount(0);
-              setDocPage(1);
+              clearFileView();
             }
 
             // Refresh list, keeping the active search filter applied
-            fetchKbs(kbPage, debouncedKbKeyword);
+            void fetchKbs(kbPage, debouncedKbKeyword);
           } catch (error) {
             appMessage.error(t("aidpKnowledge.deleteKbFailed"));
           }
@@ -306,7 +390,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       fetchKbs,
       kbPage,
       debouncedKbKeyword,
-      stopUploadWatch,
+      clearFileView,
     ]
   );
 
@@ -331,40 +415,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       }
     },
     [activeKbId]
-  );
-
-  // ---- After create success ----
-  // The create response already contains the resource. Insert it locally
-  // instead of scanning up to 50 expensive server-side pages. Files uploaded
-  // together with the KB are watched like any other upload so their processing
-  // status appears without a manual refresh.
-  const handleCreateKbSuccess = useCallback(
-    (newKb: AidpKnowledgeBaseItem, uploadedFileIds: string[] = []) => {
-      setCreateModalOpen(false);
-      setKbs((current) =>
-        [newKb, ...current.filter((kb) => kb.kds_id !== newKb.kds_id)].slice(
-          0,
-          KB_PAGE_SIZE
-        )
-      );
-      setKbTotal((current) => {
-        const nextTotal = current + 1;
-        setKbHasMore(kbPage * KB_PAGE_SIZE < nextTotal);
-        return nextTotal;
-      });
-      setKbTotalReliable(true);
-      stopUploadWatch();
-      startUploadWatch(uploadedFileIds);
-      setActiveKbId(newKb.kds_id);
-      setSelectedKb(newKb);
-      setActiveKbDetail(newKb);
-      setDocPage(1);
-      setDocHasMore(false);
-      setDocTotalReliable(true);
-      setDocProcessingCount(0);
-      void fetchDocs(newKb.kds_id, 1);
-    },
-    [fetchDocs, kbPage, startUploadWatch, stopUploadWatch]
   );
 
   // ---- Refresh the active KB metadata (counts / name) ----
@@ -414,111 +464,104 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     refreshActiveKbDetail();
   }, [activeKbId, docPage, fetchDocs, refreshActiveKbDetail]);
 
+  // ---- Navigate to the dedicated creation page ----
+  const handleCreateNew = useCallback(() => {
+    router.push(`/${locale}/knowledges/create`);
+  }, [locale, router]);
+
   // Active KB item is stored in `selectedKb` state (not derived from `kbs`),
   // because the KB list is server-paginated and refetching it after upload
   // returns only the current page — which may not contain the active KB.
   const activeKbItem = selectedKb;
 
+  const containerStyle = {
+    maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
+    padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
+  };
+
+  // ---- File view: one knowledge base, full page ----
+  if (activeKbId && activeKbItem) {
+    const isUnavailable =
+      activeKbItem.resource_status === "UNAVAILABLE" ||
+      activeKbItem.resource_status === "ORPHANED";
+    return (
+      <div
+        className="w-full h-full mx-auto relative flex flex-col"
+        style={containerStyle}
+      >
+        <div className="flex-1 min-h-0 w-full mt-4 overflow-y-auto">
+          <div className="mb-3 flex items-center gap-2 flex-wrap">
+            <Button
+              icon={<ArrowLeftOutlined />}
+              onClick={handleBackToList}
+              size="small"
+            >
+              {t("aidpKnowledge.backToList")}
+            </Button>
+            <h2 className="text-base font-semibold text-gray-800 truncate">
+              {activeKbItem.kds_name}
+            </h2>
+            {isUnavailable && (
+              <Tag color="default">{t("aidpKnowledge.kbUnavailable")}</Tag>
+            )}
+            {activeKbItem.permission === "READ_ONLY" && !isUnavailable && (
+              <Tag color="default">{t("aidpKnowledge.kbReadOnly")}</Tag>
+            )}
+          </div>
+          <AidpDocumentList
+            activeKb={activeKbItem}
+            documents={documents}
+            totalDocs={totalDocs}
+            totalReliable={docTotalReliable}
+            hasMore={docHasMore}
+            isLoading={loadingDocs}
+            currentPage={docPage}
+            pageSize={DOC_PAGE_SIZE}
+            onPageChange={(page) => {
+              // The upload watch only makes sense on the page the upload
+              // landed on; the status poller still covers other pages.
+              stopUploadWatch();
+              void fetchDocs(activeKbId, page);
+            }}
+            onDocsUploaded={handleDocsUploaded}
+            onRefresh={handleRefreshDocs}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Overview: guide plus the card or table list ----
   return (
     <div
       className="w-full h-full mx-auto relative flex flex-col"
-      style={{
-        maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
-        padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
-      }}
+      style={containerStyle}
     >
-      {/* Two-column layout — content-sized cards with a single
-          scroll container; no card stretches to viewport height. */}
       <div className="flex-1 min-h-0 w-full mt-4 overflow-y-auto">
-        <Row className="w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
-          {/* Left column: KB list */}
-          <Col
-            xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
-            md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
-            lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
-            xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
-            xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
-          >
-            <AidpKnowledgeList
-              kbs={kbs}
-              activeKbId={activeKbId}
-              isLoading={loadingKbs}
-              total={kbTotal}
-              totalReliable={kbTotalReliable}
-              hasMore={kbHasMore}
-              currentPage={kbPage}
-              pageSize={KB_PAGE_SIZE}
-              keyword={kbKeyword}
-              onKeywordChange={setKbKeyword}
-              onPageChange={(page) => fetchKbs(page, debouncedKbKeyword)}
-              onSelect={handleSelectKb}
-              onRefresh={() => fetchKbs(kbPage, debouncedKbKeyword)}
-              onCreateNew={() => setCreateModalOpen(true)}
-              onEdit={handleEditKb}
-              onDelete={handleDeleteKb}
-            />
-          </Col>
-
-          {/* Right column: Document list or empty state */}
-          <Col
-            xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
-            md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
-            lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
-            xl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xl}
-            xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
-          >
-            {activeKbItem ? (
-              <AidpDocumentList
-                activeKb={activeKbItem}
-                documents={documents}
-                totalDocs={totalDocs}
-                totalReliable={docTotalReliable}
-                hasMore={docHasMore}
-                isLoading={loadingDocs}
-                currentPage={docPage}
-                pageSize={DOC_PAGE_SIZE}
-                onPageChange={(page) => {
-                  // The upload watch only makes sense on the page the upload
-                  // landed on; the status poller still covers other pages.
-                  stopUploadWatch();
-                  void fetchDocs(activeKbId!, page);
-                }}
-                onDocsUploaded={handleDocsUploaded}
-                onRefresh={handleRefreshDocs}
-              />
-            ) : (
-              <div
-                className={`${STANDARD_CARD.BASE_CLASSES} w-full`}
-                style={{ padding: STANDARD_CARD.PADDING }}
-              >
-                <div className="flex items-center justify-center py-12">
-                  <div className="text-center">
-                    <div className="text-gray-400 mb-2">
-                      <InfoCircleFilled
-                        style={{ fontSize: 36, color: "#1677ff" }}
-                      />
-                    </div>
-                    <h3 className="text-base font-medium text-gray-700 mb-1">
-                      {t("aidpKnowledge.selectKbTitle")}
-                    </h3>
-                    <p className="text-gray-500 max-w-md text-xs">
-                      {t("aidpKnowledge.selectKbHint")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </Col>
-        </Row>
+        <AidpKnowledgeList
+          kbs={kbs}
+          isLoading={loadingKbs}
+          loadFailed={kbsLoadFailed}
+          total={kbTotal}
+          totalReliable={kbTotalReliable}
+          hasMore={kbHasMore}
+          currentPage={kbPage}
+          pageSize={KB_PAGE_SIZE}
+          keyword={kbKeyword}
+          viewMode={viewMode}
+          visibleColumns={visibleColumns}
+          onKeywordChange={setKbKeyword}
+          onPageChange={(page) => fetchKbs(page, debouncedKbKeyword)}
+          onViewModeChange={setViewMode}
+          onVisibleColumnsChange={setVisibleColumns}
+          onSelect={handleSelectKb}
+          onRefresh={() => fetchKbs(kbPage, debouncedKbKeyword)}
+          onCreateNew={handleCreateNew}
+          onEdit={handleEditKb}
+          onDelete={handleDeleteKb}
+          onRetry={() => fetchKbs(kbPage, debouncedKbKeyword)}
+        />
       </div>
-
-      {/* Create KB Modal */}
-      <AidpCreateKbModal
-        open={createModalOpen}
-        existingKbs={kbs}
-        onCancel={() => setCreateModalOpen(false)}
-        onSuccess={handleCreateKbSuccess}
-      />
 
       {/* Update KB Modal */}
       <AidpUpdateKbModal

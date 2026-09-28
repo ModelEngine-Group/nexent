@@ -1,0 +1,206 @@
+schema_version: '1.0'
+stage: D5
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKPR-D5-001
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-007, AKPR-RULE-014]
+    title: Restricted users never reach a modification endpoint
+    type: SECURITY
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify across the overview, file view and creation page that permission and group rules block modification requests at the boundary. This case stays blocked until a disposable deployment with multiple permission roles is available.
+    preconditions:
+      - A deployed instance has a read-only user, a group-less user and an edit user on one knowledge base.
+      - Request logging is available.
+    test_data: {profile: real_smoke, roles: [READ_ONLY, 'USER without group', EDIT]}
+    steps:
+      - order: 1
+        action: As the read-only user, open the base and attempt edit, upload, delete and safety guard changes.
+        expected: No modification entry is executable and no modification request is issued.
+      - order: 2
+        action: As a user without a valid group, submit the creation first step with a shared permission.
+        expected: The submission is rejected and no knowledge base is created.
+      - order: 3
+        action: As the edit user, perform the same operations.
+        expected: Only the permitted operations issue requests and they succeed.
+    expected_results:
+      - Disabled or hidden entries emit no request.
+      - Group validation rejects an invalid shared permission before creation.
+      - Permitted operations behave normally.
+    forbidden_side_effects:
+      - No modification request from a restricted role.
+      - No local-only permission change without the upstream counterpart.
+      - No exposure of upstream credentials in any error path.
+    risk_type: SECURITY
+    risk: A user without edit permission could modify a knowledge base or its safety configuration through a stale or unguarded UI entry.
+    condition:
+      - Read-only permission on the selected knowledge base.
+      - Shared permission without a valid same-tenant group.
+      - Unavailable resource state.
+    metrics:
+      - Count of modification requests by a restricted role.
+      - Count of knowledge bases created from an invalid group submission.
+    thresholds:
+      - Zero modification requests from restricted roles.
+      - Zero resources created from an invalid group submission.
+    recovery_expectations:
+      - After the rejected attempt the UI keeps the previous state and reports the failure without claiming success.
+    execution:
+      profiles:
+        - name: real_smoke
+          required_services: [knowledge-provider]
+  - case_id: AKPR-D5-002
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-005, AKPR-RULE-009]
+    title: Delayed responses and polling never cross knowledge base boundaries
+    type: RELIABILITY
+    priority: P1
+    status: blocked
+    automation: automated
+    objective: Verify that switching or leaving the file view discards in-flight results, stops polling and never renders another base document list. This case stays blocked until a deployment with a controllable slow upstream is available.
+    preconditions:
+      - A deployed instance can delay document responses.
+      - Two knowledge bases with distinct documents exist.
+    test_data: {profile: real_smoke, delay_seconds: 5, bases: 2}
+    steps:
+      - order: 1
+        action: Open the first base and immediately switch to the second.
+        expected: The first base documents never render in the second and the later response is discarded.
+      - order: 2
+        action: Upload a document and leave the file view before processing completes.
+        expected: Polling stops after leaving and no late update reaches the overview.
+      - order: 3
+        action: Repeat the switch several times and inspect the rendered list.
+        expected: Only the current base documents appear and the list state matches the last selection.
+    expected_results:
+      - No stale document list is rendered.
+      - Polling stops when the view is left.
+      - The current base is always the one displayed.
+    forbidden_side_effects:
+      - No orphan polling loop after navigation.
+      - No document count or status from another base.
+      - No duplicate document rows after repeated switching.
+    risk_type: RELIABILITY
+    risk: A late response from a previously opened knowledge base can overwrite the current file view or leave polling running.
+    condition:
+      - Slow upstream document responses.
+      - Rapid switching between knowledge bases.
+      - Navigating away while uploads are processing.
+    metrics:
+      - Count of discarded late responses.
+      - Polling cycles after leaving the file view.
+      - Rendered document count per base.
+    thresholds:
+      - Zero cross-base document renders.
+      - Zero polling cycles after leaving the view.
+    recovery_expectations:
+      - Reopening a base shows its own current documents and a correct processing state.
+    execution:
+      profiles:
+        - name: real_smoke
+          required_services: [knowledge-provider]
+  - case_id: AKPR-D5-003
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-012, AKPR-RULE-013, AKPR-RULE-014]
+    title: Disabled capabilities and missing remote values are never reported as active or saved
+    type: SECURITY
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify that hidden configuration is not resubmitted, that missing remote values stay unknown and that a failed save is never presented as success. This case stays blocked until a deployment with a controllable upstream failure mode and the upstream safety contract is available.
+    preconditions:
+      - A deployed instance can reject a metadata update on demand.
+      - A knowledge base created before the safety field existed is available for readback.
+    test_data: {profile: real_smoke, graph: [true, false], multimodal: [true, false], guard_absent: true}
+    steps:
+      - order: 1
+        action: Create a knowledge base with the graph and multimodal capabilities disabled.
+        expected: No graph configuration and no hidden model field reaches the upstream request.
+      - order: 2
+        action: Read back a knowledge base whose response omits the safety field.
+        expected: The UI reports the state as unknown instead of confirmed disabled.
+      - order: 3
+        action: Fail the metadata update after the guard change and inspect the UI.
+        expected: The change is reported as not saved and the previous value remains displayed.
+    expected_results:
+      - Hidden configuration stays out of requests.
+      - Missing remote values are not converted into confirmed states.
+      - Failed saves are visible as failures.
+    forbidden_side_effects:
+      - No resubmission of a previously selected hidden model.
+      - No success message after a failed upstream update.
+      - No safety field nested inside graph configuration.
+    risk_type: SECURITY
+    risk: A user could believe a safety guard or graph configuration is active while the remote state is unknown or a save failed.
+    condition:
+      - Graph or multimodal capability disabled after a selection.
+      - Upstream response without the safety field.
+      - Metadata update failure after a permission save.
+    metrics:
+      - Count of hidden configuration fields in outgoing payloads.
+      - Count of success messages after failed updates.
+    thresholds:
+      - Zero hidden configuration fields in requests.
+      - Zero false success reports.
+    recovery_expectations:
+      - After a failed save the previous remote value stays displayed and a retry re-sends the explicit value.
+    execution:
+      profiles:
+        - name: real_smoke
+          required_services: [knowledge-provider]
+  - case_id: AKPR-D5-004
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-010]
+    title: Creation and upload failures leave exactly one consistent knowledge base
+    type: RELIABILITY
+    priority: P1
+    status: blocked
+    automation: automated
+    objective: Verify that failures around creation and upload never produce duplicate knowledge bases or permission rows without their knowledge base. This case stays blocked until a deployment with controllable upstream create and upload failures is available.
+    preconditions:
+      - A deployed instance can fail creation and file uploads on demand.
+      - Permission rows are inspectable for the test tenant.
+    test_data: {profile: real_smoke, upload_failures: 2, create_failures: 1}
+    steps:
+      - order: 1
+        action: Fail the create request and inspect local state.
+        expected: No knowledge base and no orphan permission row remain.
+      - order: 2
+        action: Create successfully with two failing uploads and retry them.
+        expected: One knowledge base exists and the retries never create another.
+      - order: 3
+        action: Interrupt the submission and reload the creation page.
+        expected: No duplicate resource appears and the user can identify the outcome of the previous attempt.
+    expected_results:
+      - Exactly one knowledge base exists after retries.
+      - Permission rows always belong to an existing knowledge base.
+      - Interrupted submissions do not silently duplicate resources.
+    forbidden_side_effects:
+      - No duplicate knowledge base after retry or reload.
+      - No orphan permission row.
+      - No upload executed before a successful create.
+    risk_type: RELIABILITY
+    risk: Retrying a partially failed creation can create duplicate knowledge bases or inconsistent permission records.
+    condition:
+      - Create failure.
+      - Partial upload failure with retry.
+      - Submission interrupted before a response arrives.
+    metrics:
+      - Knowledge bases created per submission attempt.
+      - Orphan permission rows.
+      - Upload attempts before a successful create.
+    thresholds:
+      - At most one knowledge base per intended submission.
+      - Zero orphan permission rows.
+    recovery_expectations:
+      - The created knowledge base stays usable and the failed files can be retried without creating a new base.
+    execution:
+      profiles:
+        - name: real_smoke
+          required_services: [knowledge-provider]

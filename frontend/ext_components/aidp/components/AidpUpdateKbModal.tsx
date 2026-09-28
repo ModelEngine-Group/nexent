@@ -3,8 +3,17 @@
 import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Collapse, Modal, Form, Input, message } from "antd";
-import { SettingOutlined } from "@ant-design/icons";
+import {
+  Collapse,
+  Modal,
+  Form,
+  Input,
+  Space,
+  Switch,
+  Tooltip,
+  message,
+} from "antd";
+import { QuestionCircleOutlined, SettingOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
@@ -39,6 +48,11 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
 
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
+  // Whether the response actually reported the safety guard state. A missing
+  // value is unknown, never a confirmed disabled state, so the hint below
+  // tells the user that saving will state the value explicitly.
+  const guardKnown =
+    typeof knowledgeBase?.sensitive_intercept_enalbe === "number";
 
   // Pre-fill form when opening. ``group_ids`` may be null/undefined on rows
   // that predate the column — normalize to an empty array so the Select
@@ -58,6 +72,10 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
         : Array.isArray(knowledgeBase.group_ids)
           ? knowledgeBase.group_ids
           : [],
+      // An absent value stays unknown: the switch defaults to off and the
+      // hint below says the remote state was never reported.
+      sensitive_intercept_enalbe:
+        knowledgeBase.sensitive_intercept_enalbe === 1,
     });
   }, [open, knowledgeBase, form, isUser]);
 
@@ -105,7 +123,20 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
             (id, idx) => id !== [...originalGroupIds].sort((a, b) => a - b)[idx]
           );
 
-      if (!nameChanged && !descriptionChanged && !permissionChanged) {
+      // The safety guard is synchronized whenever the user changed it, and
+      // also when the remote value was never reported: an explicit 0 or 1 must
+      // reach the upstream request instead of being silently omitted.
+      const originalGuard =
+        knowledgeBase.sensitive_intercept_enalbe === 1 ? 1 : 0;
+      const newGuard = values.sensitive_intercept_enalbe ? 1 : 0;
+      const guardChanged = !guardKnown || newGuard !== originalGuard;
+
+      if (
+        !nameChanged &&
+        !descriptionChanged &&
+        !permissionChanged &&
+        !guardChanged
+      ) {
         form.resetFields();
         onSuccess(knowledgeBase);
         return;
@@ -119,6 +150,7 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           group_ids: normalizedNewGroupIds,
           ...(nameChanged ? { name } : {}),
           ...(descriptionChanged ? { description } : {}),
+          ...(guardChanged ? { sensitive_intercept_enalbe: newGuard } : {}),
         }
       );
       const metadataFailed = result.metadata_status === "failed";
@@ -141,6 +173,10 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
             : knowledgeBase.description,
         ingroup_permission: newPermission,
         group_ids: normalizedNewGroupIds,
+        sensitive_intercept_enalbe:
+          !metadataFailed && guardChanged
+            ? newGuard
+            : knowledgeBase.sensitive_intercept_enalbe,
         resource_status:
           result.metadata_status === "updated"
             ? "ACTIVE"
@@ -196,6 +232,23 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           style={{ padding: "20px 24px 8px" }}
         >
           <AidpKnowledgeBaseBasicFields t={t} />
+          <Form.Item
+            name="sensitive_intercept_enalbe"
+            valuePropName="checked"
+            label={
+              <Space>
+                <span>{t("aidpKnowledge.createSafetyGuard")}</span>
+                <Tooltip title={t("aidpKnowledge.createSafetyGuardHint")}>
+                  <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+                </Tooltip>
+              </Space>
+            }
+            extra={
+              guardKnown ? undefined : t("aidpKnowledge.safetyGuardUnknown")
+            }
+          >
+            <Switch />
+          </Form.Item>
           {canConfigureGroupPermissions ? (
             <Collapse
               className="!rounded-xl !border-gray-200"
