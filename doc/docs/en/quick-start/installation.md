@@ -255,6 +255,7 @@ The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and re
 | Service | Internal Port | External Port | Description |
 |---------|---------------|---------------|-------------|
 | Web Interface | 3000 | 3000 | Main application access |
+| HTTPS Entry | 3100 | 3100 | Optional encrypted entry via Nginx (when HTTPS is enabled) |
 | Backend API | 5010 | 5010 | Backend service |
 | Data Processing | 5012 | 5012 | Data processing API |
 | Northbound API | 5013 | 5013 | Northbound interface service (A2A/MCP integration) |
