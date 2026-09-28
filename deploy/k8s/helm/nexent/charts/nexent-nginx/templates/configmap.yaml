@@ -6,5 +6,5 @@ metadata:
   namespace: {{ .Values.global.namespace }}
 data:
   default.conf: |
-{{ (.Values.config | replace "$server_port" (printf "%v" .Values.services.nginx.entryPort | default .Values.services.nginx.nodePort)) | indent 4 }}
+{{ .Values.config | indent 4 }}
 {{- end }}

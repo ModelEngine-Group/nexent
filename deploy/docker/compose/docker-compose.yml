@@ -257,7 +257,7 @@ services:
     networks:
       - nexent
     ports:
-      - "3000:3000"
+      - "3100:3100"
     volumes:
       - ${ROOT_DIR}/nginx/ssl:/etc/nginx/ssl:ro
       - ../assets/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro

@@ -1083,8 +1083,8 @@ deploy_core_services() {
 deploy_https_nginx() {
   # Start the Nginx HTTPS reverse proxy when HTTPS is enabled.
   if [ "$DEPLOYMENT_HTTPS_MODE" = "disabled" ] || [ -z "$DEPLOYMENT_HTTPS_MODE" ]; then
-    # Stop and remove the HTTPS profile service so it releases host port 3000
-    # and the web service can take the port back on this same deployment run.
+    # Stop and remove the HTTPS profile service when HTTPS is disabled so a
+    # previously enabled deployment does not keep the proxy running.
     if ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" ps -q nexent-nginx 2>/dev/null | grep -q .; then
       echo "Stopping Nginx HTTPS reverse proxy (HTTPS disabled)..."
       if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" rm -sf nexent-nginx 2>/dev/null; then
@@ -1096,12 +1096,6 @@ deploy_https_nginx() {
   fi
 
   deployment_https_prepare || return 1
-
-  # Bind web to a loopback-only alternate port so nginx can take the public
-  # 3000 entry port. Compose short syntax cannot fully unpublish a port in a
-  # way that is compatible with old Docker/Compose versions, so loopback keeps
-  # local debugging possible without exposing a plaintext entry to the network.
-  export NEXENT_WEB_PORT_MAPPING="127.0.0.1:3001:3000"
 
   echo "🔒 Starting Nginx HTTPS reverse proxy (nexent-nginx)..."
   if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then

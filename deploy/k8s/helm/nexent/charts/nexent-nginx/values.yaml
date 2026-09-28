@@ -20,10 +20,9 @@ resources:
 services:
   nginx:
     type: NodePort
-    # External port users actually visit (NodePort); used in the HTTP->HTTPS
-    # redirect because $server_port inside the container is the internal port.
-    entryPort: 30000
-    nodePort: 30000
+    # Dedicated HTTPS entry; web keeps NodePort 30000 for plain HTTP.
+    entryPort: 31000
+    nodePort: 31000
 
 # TLS certificate (PEM contents rendered into a Secret by the deployment script)
 tls:
@@ -51,8 +50,6 @@ config: |
       ssl_prefer_server_ciphers on;
       ssl_session_cache shared:SSL:10m;
       ssl_session_timeout 10m;
-
-      error_page 497 https://$host:$server_port$request_uri;
 
       client_max_body_size 1024M;
 
