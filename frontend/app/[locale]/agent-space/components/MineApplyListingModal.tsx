@@ -408,7 +408,9 @@ export function MineApplyListingModal({
               ) : null}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {t("agentRepository.mine.applyModal.tagsHint")}
+              {t("agentRepository.mine.applyModal.tagsHint", {
+                count: MAX_TAGS,
+              })}
             </p>
           </section>
 
