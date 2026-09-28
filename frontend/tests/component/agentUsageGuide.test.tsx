@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentUsageGuideModal } from "../../app/[locale]/agent-space/components/AgentUsageGuideModal";
 import { MyAgentCard } from "../../app/[locale]/agent-space/components/MyAgentCard";
 import { a2aClientService } from "@/services/a2aService";
+import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import { configService } from "@/services/configService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 
@@ -23,6 +24,9 @@ vi.mock("@/services/a2aService", () => ({
 }));
 vi.mock("@/services/configService", () => ({
   configService: { fetchRuntimeFrontendConfig: vi.fn() },
+}));
+vi.mock("@/services/agentConfigService", () => ({
+  fetchPublishedAgentList: vi.fn(),
 }));
 vi.mock("@/app/[locale]/agents/components/a2a/A2AServerSettingsPanel", () => ({
   default: ({ endpointId }: { endpointId: string }) => (
@@ -80,6 +84,22 @@ async function openTab(user: ReturnType<typeof userEvent.setup>, key: string) {
 
 beforeEach(() => {
   vi.mocked(configService.fetchRuntimeFrontendConfig).mockResolvedValue({});
+  vi.mocked(fetchPublishedAgentList).mockResolvedValue({
+    success: true,
+    data: [
+      {
+        id: "41",
+        name: "demo_agent",
+        display_name: "Demo Agent",
+        description: "Demo",
+        model: "demo-model",
+        max_step: 1,
+        provide_run_summary: false,
+        tools: [],
+      },
+    ],
+    message: "",
+  });
   vi.mocked(a2aClientService.getServerSettings).mockResolvedValue({
     success: true,
     data: { is_enabled: false },
@@ -317,7 +337,7 @@ describe("Agent usage guide component coverage", () => {
     await openTab(user, "agentUsageGuide.tabs.northbound");
     const example = await screen.findByText(/\/nb\/v1\/chat\/run/);
     expect(example.textContent).toContain("<YOUR_API_KEY>");
-    expect(example.textContent).toContain("Demo Agent");
+    expect(example.textContent).toContain("demo_agent");
   });
 
   it("keeps guide tab content stable and lets a backdrop click close the modal", async () => {

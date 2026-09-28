@@ -16,7 +16,9 @@ import {
   getA2AGuideState,
 } from "@/lib/agentUsageGuide";
 import { a2aClientService } from "@/services/a2aService";
+import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import { configService } from "@/services/configService";
+import type { Agent } from "@/types/agentConfig";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 
 interface AgentUsageGuideModalProps {
@@ -57,6 +59,14 @@ export function AgentUsageGuideModal({
     queryFn: () => a2aClientService.getServerSettings(agentId!),
     enabled: open && activeTab === "a2a" && agentId != null,
   });
+  const publishedAgentsQuery = useQuery({
+    queryKey: ["publishedAgentsList"],
+    queryFn: fetchPublishedAgentList,
+    enabled: open && activeTab === "northbound" && agentId != null,
+  });
+  const publishedAgent = publishedAgentsQuery.data?.data?.find(
+    (candidate: Agent) => candidate.id === String(agentId)
+  );
 
   const shareUrl = useMemo(() => {
     if (!open || !canOpen || agentId == null || typeof window === "undefined") {
@@ -68,7 +78,10 @@ export function AgentUsageGuideModal({
     frontendConfigQuery.data?.northboundBaseUrl,
     typeof window === "undefined" ? undefined : window.location.origin
   );
-  const northboundCurl = buildNorthboundCurl(agentName, northboundUrl);
+  const northboundCurl = buildNorthboundCurl(
+    publishedAgent?.name?.trim() || agentName,
+    northboundUrl
+  );
   const a2aGuideState = getA2AGuideState({
     isLoading: a2aQuery.isLoading,
     isError: a2aQuery.isError,
