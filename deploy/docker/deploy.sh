@@ -1083,16 +1083,25 @@ deploy_core_services() {
 deploy_https_nginx() {
   # Start the Nginx HTTPS reverse proxy when HTTPS is enabled.
   if [ "$DEPLOYMENT_HTTPS_MODE" = "disabled" ] || [ -z "$DEPLOYMENT_HTTPS_MODE" ]; then
+    # Stop and remove the HTTPS profile service so it releases host port 3000
+    # and the web service can take the port back on this same deployment run.
+    if ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" ps -q nexent-nginx 2>/dev/null | grep -q .; then
+      echo "Stopping Nginx HTTPS reverse proxy (HTTPS disabled)..."
+      if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" rm -sf nexent-nginx 2>/dev/null; then
+        docker rm -f nexent-nginx 2>/dev/null || true
+      fi
+    fi
     export NEXENT_WEB_PORT_MAPPING="3000:3000"
     return 0
   fi
 
   deployment_https_prepare || return 1
 
-  # Publish only the container port (no host binding) so nginx can take 3000.
-  # Compose "${VAR-default}" keeps the default only when VAR is unset;
-  # an empty value must win so the web service stops publishing the host port.
-  export NEXENT_WEB_PORT_MAPPING="3000"
+  # Bind web to a loopback-only alternate port so nginx can take the public
+  # 3000 entry port. Compose short syntax cannot fully unpublish a port in a
+  # way that is compatible with old Docker/Compose versions, so loopback keeps
+  # local debugging possible without exposing a plaintext entry to the network.
+  export NEXENT_WEB_PORT_MAPPING="127.0.0.1:3001:3000"
 
   echo "🔒 Starting Nginx HTTPS reverse proxy (nexent-nginx)..."
   if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then
@@ -1830,6 +1839,17 @@ main_deploy() {
     return 0
   fi
 
+  # Configure HTTPS state before core services start so nexent-web is created
+  # with the right port mapping on the first run (avoids a recreate cycle).
+  deploy_https_nginx || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ HTTPS 反向代理部署失败"
+    else
+      echo "HTTPS reverse proxy deployment failed"
+    fi
+    exit 1
+  }
+
   # Start core services
   deploy_core_services || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -1840,15 +1860,6 @@ main_deploy() {
     exit 1
   }
 
-  # Start Nginx HTTPS reverse proxy when HTTPS is enabled
-  deploy_https_nginx || {
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "❌ HTTPS 反向代理部署失败"
-    else
-      echo "❌ HTTPS reverse proxy deployment failed"
-    fi
-    exit 1
-  }
 
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "   ✅ 核心服务启动成功"
