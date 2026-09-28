@@ -1844,6 +1844,13 @@ class TestMaxStepsReached:
 class TestRunStreamRealExecution:
     """Tests that actually execute the real _run_stream method for line coverage."""
 
+    @pytest.fixture(autouse=True)
+    def _stub_sandbox_context(self, monkeypatch):
+        """Keep executor tests independent of the sandbox's external imports."""
+        sandbox_module = ModuleType(f"{core_agent_module.__package__}.sandbox")
+        sandbox_module._execute_with_tool_context = lambda executor, code: executor(code)
+        monkeypatch.setitem(sys.modules, sandbox_module.__name__, sandbox_module)
+
     class _FakeActionStep:
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
@@ -2417,7 +2424,7 @@ class TestRunStreamRealExecution:
         caplog.set_level(logging.INFO, logger="model_call.core_agent")
         action_step = MagicMock()
         stream = agent._step_stream(action_step)
-        with pytest.raises(module.ModelOutputProtocolError):
+        with pytest.raises(module.RuntimeFinalAnswer):
             next(stream)
 
         records = [r for r in caplog.records if r.name == "model_call.core_agent"]
@@ -3029,7 +3036,6 @@ class TestRunStreamRealExecution:
         agent.python_executor = MagicMock(return_value=SimpleNamespace(
             output="2", is_final_answer=True, logs="",
         ))
-
         outputs = list(agent._step_stream(action_step))
 
         assert len(outputs) == 1
@@ -3056,7 +3062,6 @@ class TestRunStreamRealExecution:
         agent.python_executor = MagicMock(return_value=SimpleNamespace(
             output="正常答案", is_final_answer=True, logs="",
         ))
-
         outputs = list(agent._step_stream(action_step))
 
         assert len(outputs) == 1

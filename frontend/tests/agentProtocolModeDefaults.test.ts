@@ -14,7 +14,9 @@ test("new and missing-policy agents default to legacy mode", async () => {
       readFrontendFile(
         "app/[locale]/agents/components/agent-config-actions.tsx"
       ),
-      readFrontendFile("app/[locale]/agents/components/agent-run-policy.tsx"),
+      readFrontendFile(
+        "app/[locale]/agents/[agentId]/components/agent-run-policy.tsx"
+      ),
     ]
   );
 
