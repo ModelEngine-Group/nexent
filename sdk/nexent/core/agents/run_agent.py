@@ -16,7 +16,6 @@ from .nexent_agent import NexentAgent, ProcessType
 
 
 logger = logging.getLogger("run_agent")
-logger.setLevel(logging.DEBUG)
 
 
 def _get_authorized_context_items(agent_run_info: AgentRunInfo):

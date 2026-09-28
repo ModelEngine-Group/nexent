@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from data_process.ray_config import RayConfig
-from utils.logging_utils import configure_logging
+from utils.logging_utils import get_uvicorn_logging_config
 from consts.const import (
     REDIS_URL, REDIS_PORT, FLOWER_PORT, RAY_DASHBOARD_PORT, RAY_DASHBOARD_HOST,
     RAY_ACTOR_NUM_CPUS, RAY_NUM_CPUS, DISABLE_RAY_DASHBOARD, DISABLE_CELERY_FLOWER,
@@ -27,10 +27,11 @@ from consts.const import (
 # Load environment variables
 load_dotenv()
 
-# Configure logging with color formatter
-configure_logging(logging.INFO)
+# Configure logging: console + file, both console and uvicorn share the same config
+import logging.config
+logging.config.dictConfig(get_uvicorn_logging_config(categories=["data_process"]))
 logging.getLogger("ray").setLevel(logging.WARNING)
-logger = logging.getLogger("data_process_service")
+logger = logging.getLogger("data_process")
 
 # Global variables to track processes
 service_processes = {
@@ -890,7 +891,8 @@ def main():
             app,
             host=args.api_host,
             port=args.api_port,
-            log_level="warning"
+            log_level="warning",
+            log_config=get_uvicorn_logging_config(categories=["data_process"])
         )
 
     except KeyboardInterrupt:
