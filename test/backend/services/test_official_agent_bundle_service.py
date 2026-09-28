@@ -155,6 +155,19 @@ def test_load_kb_documents_rejects_unsafe_logical_name(tmp_path: Path):
         _load_kb_documents(tmp_path, {"knowledge_bases": [{"logical_index_name": "../medical"}]})
 
 
+def test_load_kb_documents_accepts_single_knowledge_base_declaration(tmp_path: Path):
+    kb_dir = tmp_path / "kb" / "medical"
+    kb_dir.mkdir(parents=True)
+    (kb_dir / "overview.md").write_text("overview", encoding="utf-8")
+
+    result = _load_kb_documents(
+        tmp_path,
+        {"knowledge_bases": {"logical_index_name": "medical"}},
+    )
+
+    assert result == {"medical": [{"file_name": "overview.md", "content": "overview"}]}
+
+
 def test_load_kb_metadata_preserves_chinese_display_name_for_single_declaration():
     metadata = _load_kb_metadata(
         {
@@ -169,6 +182,11 @@ def test_load_kb_metadata_preserves_chinese_display_name_for_single_declaration(
     assert len(metadata) == 1
     assert metadata[0].logical_index_name == "kb-1"
     assert metadata[0].display_name == "公文写作"
+
+
+def test_load_kb_metadata_rejects_invalid_declaration_type():
+    with pytest.raises(ValueError, match="must be an object or list"):
+        _load_kb_metadata({"knowledge_bases": "medical"})
 
 
 def test_load_zip_bundle_rejects_bundle_size_limit(tmp_path: Path):
