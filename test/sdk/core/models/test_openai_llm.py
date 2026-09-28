@@ -1323,11 +1323,16 @@ def test_call_with_reasoning_content_only(openai_model_instance):
             "Final response")
 
 
+@pytest.mark.parametrize("content_preview_enabled", [False, True])
 def test_call_rejects_reasoning_only_response_and_records_diagnostics(
-    openai_model_instance, caplog
+    openai_model_instance, caplog, monkeypatch, content_preview_enabled
 ):
     """A reasoning stream that exhausts its budget must not become an empty success."""
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    if content_preview_enabled:
+        monkeypatch.setenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", "1")
+    else:
+        monkeypatch.delenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", raising=False)
 
     reasoning_chunk = MagicMock()
     reasoning_chunk.choices = [MagicMock()]
@@ -1366,7 +1371,14 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
     assert diagnostics["reasoning_chunk_count"] == 1
     assert diagnostics["reasoning_char_count"] == len("Internal reasoning")
     assert diagnostics["output_tokens"] == 20
+    assert diagnostics["reasoning_only_budget_exhausted"] is True
     assert "event=empty_model_response" in caplog.text
+    assert f"attempt_id={openai_model_instance.last_attempt_id}" in caplog.text
+    assert "output_tokens=20" in caplog.text
+    if content_preview_enabled:
+        assert 'reasoning_preview="Internal reasoning"' in caplog.text
+    else:
+        assert "Internal reasoning" not in caplog.text
 
 
 def test_call_with_reasoning_content_and_content_together(openai_model_instance):
@@ -2633,6 +2645,32 @@ def test_reasoning_only_stop_response_recovers_on_retry(openai_model_instance):
     )
     assert calls["n"] == 2
     assert openai_model_instance.last_retry_count == 1
+
+
+def test_oc_033_empty_response_retry_can_be_disabled_for_one_call(openai_model_instance):
+    """A disabled CodeAgent call rolls back its first empty generation and stops."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        chunk = _make_content_chunk(None)
+        chunk.choices[0].finish_reason = "stop"
+        return [chunk]
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
+        openai_model_instance.__call__(
+            [{"role": "user", "content": "hello"}],
+            _retry_empty_response=False,
+        )
+
+    assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
+    assert exc_info.value.attempts == 1
+    assert calls["n"] == 1
+    openai_model_instance.observer.rollback_model_attempt.assert_called_once()
+    openai_model_instance.observer.commit_model_attempt.assert_not_called()
 
 
 def test_reasoning_only_retry_is_interrupted_by_stop_event(openai_model_instance):

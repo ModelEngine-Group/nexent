@@ -272,6 +272,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     info_with_metadata.setdefault("context_policy", None)
     info_with_metadata.setdefault("model_params_override", None)
     info_with_metadata.setdefault("is_a2a", False)
+    info_with_metadata.setdefault("enable_protocol_repair_retry", False)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -309,6 +310,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "is_main_agent": new_agent.is_main_agent,
             "provide_run_summary": new_agent.provide_run_summary,
             "allow_chat_metadata": bool(new_agent.allow_chat_metadata),
+            "enable_protocol_repair_retry": new_agent.enable_protocol_repair_retry,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,
             "business_logic_model_name": new_agent.business_logic_model_name,
@@ -519,6 +521,55 @@ def query_all_agent_info_by_tenant_id(tenant_id: str, version_no: int = 0):
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag != 'Y'
         ).order_by(AgentInfo.create_time.desc()).all()
+        return [as_dict(agent) for agent in agents]
+
+
+def query_agent_list_candidates_by_tenant_id(
+    tenant_id: str, *, include_description: bool = False
+) -> list[dict]:
+    """Load only fields needed to filter and page visible draft agents."""
+    columns = [
+        AgentInfo.agent_id,
+        AgentInfo.tenant_id,
+        AgentInfo.name,
+        AgentInfo.display_name,
+        AgentInfo.created_by,
+        AgentInfo.create_time,
+        AgentInfo.group_ids,
+        AgentInfo.ingroup_permission,
+    ]
+    if include_description:
+        columns.append(AgentInfo.description)
+    with get_db_session() as session:
+        rows = (
+            session.query(*columns)
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != 'Y',
+                AgentInfo.enabled.is_(True),
+            )
+            .order_by(AgentInfo.create_time.desc(), AgentInfo.agent_id.desc())
+            .all()
+        )
+        return [dict(row._mapping) for row in rows]
+
+
+def query_agent_info_by_ids(tenant_id: str, agent_ids: list[int]) -> list[dict]:
+    """Load complete draft records for one already-authorized agent page."""
+    if not agent_ids:
+        return []
+    with get_db_session() as session:
+        agents = (
+            session.query(AgentInfo)
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != 'Y',
+                AgentInfo.agent_id.in_(agent_ids),
+            )
+            .all()
+        )
         return [as_dict(agent) for agent in agents]
 
 

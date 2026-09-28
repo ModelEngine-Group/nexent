@@ -186,12 +186,15 @@ class AgentRunMetadata:
     history_count: Optional[int] = None
     minio_files_count: Optional[int] = None
     extra_metadata: Dict[str, Any] = field(default_factory=dict)
+    user_email: Optional[str] = None
+    agent_display_name: Optional[str] = None
 
     def metadata(self) -> Dict[str, Any]:
         """Return compact metadata for OpenInference/Langfuse attributes."""
         metadata: Dict[str, Any] = {
             "agent_id": self.agent_id,
             "agent_name": self.agent_name,
+            "agent_display_name": self.agent_display_name,
             "tenant_id": self.tenant_id,
             "conversation_id": self.conversation_id,
             "is_debug": self.is_debug,
@@ -597,7 +600,9 @@ class MonitoringManager:
                     schedule_delay_millis=1000,  # 1 second
                     max_export_batch_size=512
                 )
-                self._tracer_provider.add_span_processor(span_processor)
+                from .span_processor import MonitoringSpanProcessor
+
+                self._tracer_provider.add_span_processor(MonitoringSpanProcessor(span_processor))
 
             metric_readers = []
             if self._config.export_metrics:
@@ -816,6 +821,7 @@ class MonitoringManager:
             "tenant.id": agent_metadata.tenant_id,
             "agent.id": agent_metadata.agent_id,
             "agent.name": agent_metadata.agent_name,
+            "agent.display_name": agent_metadata.agent_display_name,
             "conversation.id": agent_metadata.conversation_id,
             "agent.debug": agent_metadata.is_debug,
             "agent.language": agent_metadata.language,
@@ -836,7 +842,7 @@ class MonitoringManager:
             metadata=agent_metadata.metadata(),
             tags=agent_metadata.tags(),
             session_id=agent_metadata.conversation_id,
-            user_id=agent_metadata.user_id,
+            user_id=agent_metadata.user_email or agent_metadata.user_id,
             attributes=plain_attrs,
         )
 
@@ -866,6 +872,10 @@ class MonitoringManager:
                 span_kind=OPENINFERENCE_SPAN_KIND_AGENT,
                 include_query=True,
             )
+            trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
+            if trace_name:
+                # Only the main run may name the trace; children retain their own Agent names.
+                attributes["langfuse.trace.name"] = trace_name
             try:
                 with self.trace_operation(
                     operation_name,

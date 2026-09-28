@@ -129,6 +129,9 @@ class _MockProcessType:
 class _MockAgentRunMetadata:
     agent_name: str | None = None
     query: str | None = None
+    agent_display_name: str | None = None
+    agent_id: int | None = None
+    model_name: str | None = None
 
 
 MessageObserver = _MockMessageObserver
@@ -3811,8 +3814,10 @@ class TestCreateSingleAgent:
         assert wrapped_agent._agent_id == "managed-1"
         assert wrapped_agent._agent_name == "Research agent"
 
+    @pytest.mark.parametrize("enable_protocol_repair_retry", [False, True])
     def test_create_single_agent_passes_context_item_override(
-        self, nexent_agent_instance, mock_model_config, mock_core_agent
+        self, nexent_agent_instance, mock_model_config, mock_core_agent,
+        enable_protocol_repair_retry,
     ):
         """Test create_single_agent converts the supplied context input sequence into runtime state."""
         nexent_agent_instance.model_config_list = [mock_model_config]
@@ -3824,6 +3829,7 @@ class TestCreateSingleAgent:
             max_steps=5,
             model_name="test_model",
             output_protocol="final_answer_envelope",
+            enable_protocol_repair_retry=enable_protocol_repair_retry,
         )
 
         with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
@@ -3836,6 +3842,7 @@ class TestCreateSingleAgent:
         assert result is mock_core_agent
         assert context_runtime.items == [context_item]
         assert mock_core_agent_fn.call_args.kwargs["output_protocol"] == "final_answer_envelope"
+        assert mock_core_agent_fn.call_args.kwargs["enable_protocol_repair_retry"] is enable_protocol_repair_retry
 
     def test_create_single_agent_with_prompt_templates(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent correctly passes prompt_templates."""

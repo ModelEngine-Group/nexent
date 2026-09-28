@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MenuProps } from "antd";
 import { App, Button, Dropdown, Empty, Grid, Input, Modal, Spin } from "antd";
 import {
-  Bot,
   Copy,
   Download,
   MoreHorizontal,
@@ -20,18 +19,18 @@ import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import ResourceCard from "@/components/resource/ResourceCard";
+import { AgentDetail } from "@/components/agent/agent-detail";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
-import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
+import { RepositoryAgentIcon } from "./components/RepositoryAgentIcon";
 import {
-  useAgentRepositoryListingDetail,
   useAgentRepositoryListings,
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
-import { mapRepositoryListingDetail } from "@/lib/agentRepositoryDetail";
+import { useRepositoryAgentDetail } from "@/hooks/agentRepository/useRepositoryAgentDetail";
 
 const CARD_GAP = 20;
 const MIN_CARD_HEIGHT = 240;
@@ -155,26 +154,16 @@ export function AgentSpace({ active }: { active: boolean }) {
     });
   const [copyListing, setCopyListing] =
     useState<AgentRepositoryListingItem | null>(null);
-  const [detailListingId, setDetailListingId] = useState<number | null>(null);
+  const [detailListing, setDetailListing] =
+    useState<AgentRepositoryListingItem | null>(null);
   const {
-    data: repositoryDetail,
+    detail,
+    repositoryDetail,
     isLoading: isDetailLoading,
     isError: isDetailError,
     isFetching: isDetailFetching,
-    refetch: refetchDetail,
-  } = useAgentRepositoryListingDetail(
-    detailListingId,
-    active && detailListingId != null
-  );
-  const detail = useMemo(
-    () =>
-      repositoryDetail
-        ? mapRepositoryListingDetail(repositoryDetail)
-        : detailListingId != null
-          ? undefined
-          : null,
-    [detailListingId, repositoryDetail]
-  );
+    retry: refetchDetail,
+  } = useRepositoryAgentDetail(detailListing, active);
   const confirmTakeDown = (listing: AgentRepositoryListingItem) => {
     const title =
       listing.display_name?.trim() ||
@@ -234,15 +223,16 @@ export function AgentSpace({ active }: { active: boolean }) {
         key={listing.agent_repository_id}
         className="h-full min-h-0"
         title={title}
-        onClick={() => setDetailListingId(listing.agent_repository_id)}
+        onClick={() => setDetailListing(listing)}
         descriptionLines={descriptionLines}
         icon={
           <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
-            {listing.icon?.trim() ? (
-              <span aria-hidden>{listing.icon.trim()}</span>
-            ) : (
-              <Bot className="size-5" aria-hidden />
-            )}
+            <RepositoryAgentIcon
+              agentId={listing.agent_id}
+              iconUrl={listing.icon_url}
+              size={44}
+              iconSize={20}
+            />
           </div>
         }
         description={
@@ -321,6 +311,7 @@ export function AgentSpace({ active }: { active: boolean }) {
           <Button
             type="text"
             size="small"
+            className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
             icon={<Copy className="size-3.5" aria-hidden />}
             onClick={() => setCopyListing(listing)}
           >
@@ -389,14 +380,27 @@ export function AgentSpace({ active }: { active: boolean }) {
           />
         )}
       </div>
-      <AgentRepositoryDetailModal
-        open={active && detailListingId != null}
-        onClose={() => setDetailListingId(null)}
+      <AgentDetail
+        open={active && detailListing != null}
+        onClose={() => setDetailListing(null)}
         detail={detail}
+        agentIcon={
+          detailListing ? (
+            <RepositoryAgentIcon
+              agentId={repositoryDetail?.agent_id ?? detailListing.agent_id}
+              iconUrl={repositoryDetail?.icon_url ?? detailListing.icon_url}
+              size={48}
+              iconSize={24}
+            />
+          ) : undefined
+        }
+        published
+        status={repositoryDetail?.status}
+        showRepositoryInfo
         isLoading={isDetailLoading}
         isError={isDetailError}
         isFetching={isDetailFetching}
-        onRetry={() => refetchDetail()}
+        onRetry={refetchDetail}
       />
       <AgentRepositoryCopyDialog
         listing={copyListing}

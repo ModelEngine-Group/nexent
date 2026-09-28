@@ -539,8 +539,6 @@ NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
 
 > **Important**: The URL must include the `/api` suffix because the Northbound service uses FastAPI's `root_path="/api"` configuration.
 
-## 💡 Need Help
-
 ## 🤖 Official Agent Deployment
 
 After Nexent is deployed, you can install official agents from the official agent resources included in the deployment package. Official agent deployment is decoupled from the Nexent platform deployment and does not run automatically when the platform starts.
@@ -556,26 +554,6 @@ Before deployment, make sure that:
 
 No additional environment variables are required, and users do not need to run Git commands, `docker cp`, or the synchronization API manually.
 
-### Official Agent Directory Structure
-
-```text
-deploy/docker/assets/official-agents/
-├── general/
-│   └── document_writing_assistant/
-│       ├── agent.json
-│       ├── skills/
-│       └── kb/
-├── medical/
-│   └── medical_assistant/
-└── finance/
-    └── finance_assistant/
-```
-
-- `general`, `medical`, and `finance` are official agent profiles;
-- A profile can contain multiple official agent bundles;
-- Each bundle must contain an `agent.json` file at its root;
-- `skills/` stores dependent Skills, and `kb/` stores the original knowledge base documents.
-
 ### Interactive Deployment
 
 Run the following command from the Nexent repository root:
@@ -584,18 +562,7 @@ Run the following command from the Nexent repository root:
 bash deploy/deploy-official-agents.sh
 ```
 
-The script scans the available profiles and displays a selection menu:
-
-```text
-Available official Agent profiles:
-  1) finance
-  2) general
-  3) medical
-
-Select profiles (comma-separated numbers, or all):
-```
-
-You can enter one profile, multiple profiles such as `2,3`, or `all` to install every profile. The script validates the directories and `agent.json` files. Invalid selections stop before any copy or synchronization operation.
+The script scans the actual first-level directories under `deploy/docker/assets/official-agents` and presents them as the available profiles. You can enter one profile, multiple profiles such as `2,3`, or `all` to install every profile. The script validates the directories and `agent.json` files. Invalid selections stop before any copy or synchronization operation.
 
 For Docker deployments, the selected profiles are copied to `/mnt/nexent/official-agents/` in the `nexent-config` container and then synchronized to the official agent repository.
 
@@ -639,40 +606,6 @@ Deleting an official template requires Super Administrator privileges:
 4. Select the template and confirm deletion.
 
 This removes the official repository listing, the source Agent in the system tenant, and the corresponding server-side Bundle files. Agent copies already created in regular tenants are not deleted.
-
-### Common Issues
-
-#### `official Agent directory not found`
-
-Run the command from the Nexent repository root and confirm that the following directory exists:
-
-```text
-deploy/docker/assets/official-agents
-```
-
-#### `no official Agent profiles found`
-
-Make sure that `official-agents` contains at least one profile directory, for example:
-
-```text
-deploy/docker/assets/official-agents/general
-```
-
-#### `profile has no agent.json`
-
-Confirm that the directory structure is:
-
-```text
-official-agents/<profile>/<agent>/agent.json
-```
-
-#### `Synchronized 0 official Agent bundle(s)`
-
-Common causes include an invalid `agent.json` under the selected profile, resources not being copied to `nexent-config`, or the service using an image without the latest official-agent synchronization code.
-
-#### The knowledge base is not created when copying an official agent
-
-The deployment stage only publishes the template. Knowledge base creation occurs when the user copies the official agent. For an official agent with a knowledge base, confirm that the target tenant has an available embedding model.
 
 ## 💡 Need Help
 

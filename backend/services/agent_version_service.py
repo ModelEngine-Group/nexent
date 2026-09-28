@@ -1037,6 +1037,7 @@ async def list_published_agents_impl(
                 "example_questions": agent.get("example_questions"),
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
                 "model_params_override": agent.get("model_params_override"),
+                "enable_protocol_repair_retry": agent.get("enable_protocol_repair_retry") is True,
             })
 
         try:

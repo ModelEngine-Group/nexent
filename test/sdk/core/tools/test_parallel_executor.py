@@ -1,5 +1,6 @@
 import contextvars
 import time
+from unittest.mock import patch
 
 import pytest
 
@@ -198,6 +199,22 @@ class TestMaxWorkers:
 # ---------------------------------------------------------------------------
 
 class TestParallelExecutorTool:
+    def test_configured_default_timeout_and_explicit_override(self):
+        tool = ParallelExecutorTool(default_timeout_seconds=240)
+        assert tool.inputs["timeout"]["default"] == 240
+        assert "默认240秒" in tool.description_zh
+
+        with patch("sdk.nexent.core.tools.parallel_executor._parallel_executor") as execute:
+            tool.forward(tasks=[])
+            execute.assert_called_with([], timeout=240, max_workers=4)
+            tool.forward(tasks=[], timeout=30)
+            execute.assert_called_with([], timeout=30, max_workers=4)
+
+    @pytest.mark.parametrize("timeout", [0, -1, True, 1.5])
+    def test_invalid_configured_default_timeout(self, timeout):
+        with pytest.raises(ValueError, match="positive integer"):
+            ParallelExecutorTool(default_timeout_seconds=timeout)
+
     def test_forward_delegates_to_parallel_executor(self):
         """ParallelExecutorTool.forward should delegate to _parallel_executor."""
         tool = ParallelExecutorTool()

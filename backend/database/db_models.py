@@ -726,6 +726,13 @@ class AgentInfo(TableBase):
         ),
     )
     enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
+    enable_protocol_repair_retry = Column(
+        Boolean,
+        default=False,
+        server_default=text("false"),
+        nullable=False,
+        comment="Whether this agent uses strict output validation and silent protocol repair",
+    )
     is_a2a = Column(Boolean, default=False, nullable=False, doc="Whether to publish this agent as an A2A Server agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
@@ -1736,7 +1743,7 @@ class AgentRepository(TableBase):
     tags = Column(ARRAY(Text), doc="Marketplace tags")
     tool_count = Column(Integer,
                         doc="Total tool count across all agents in the bundle (display only)")
-    icon = Column(String(100), doc="Marketplace card icon (emoji or URL)")
+    icon_url = Column(String(1024), doc="Repository icon URL")
     downloads = Column(Integer, default=0,
                        doc="Marketplace download/copy count for card display")
     version_name = Column(String(100),

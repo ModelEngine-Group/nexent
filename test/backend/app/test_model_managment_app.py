@@ -856,13 +856,90 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
 async def test_verify_model_config_exception(client, auth_header, sample_model_data, mocker):
     """Test model config verification with exception."""
     mocker.patch(
-        'backend.apps.model_managment_app.verify_model_config_connectivity', 
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
         side_effect=Exception("err")
     )
-    
+
     response = client.post(
         "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_probe_falls_back_to_stored_key_for_stored_url(client, auth_header, user_credentials, mocker):
+    """Empty-key probe of an existing model borrows the stored key when the
+    probe targets the stored endpoint (edit dialog, URL untouched)."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+    stored = {
+        "api_key": "stored-secret-key",
+        "base_url": "https://api.example.com/v1/",  # trailing slash on purpose
+    }
+    mocker.patch(
+        'backend.apps.model_managment_app.get_model_by_model_id',
+        return_value=stored,
+    )
+    mock_verify = mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": False, "model_name": "m"},
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck",
+        headers=auth_header,
+        json={
+            "model_name": "m",
+            "model_type": "llm",
+            "base_url": "https://api.example.com/v1",  # no trailing slash
+            "api_key": "sk-no-api-key",
+            "probe_model_id": 7,
+        },
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    probed_config = mock_verify.call_args.args[0]
+    assert probed_config["api_key"] == "stored-secret-key"
+
+
+@pytest.mark.asyncio
+async def test_probe_does_not_borrow_stored_key_for_foreign_url(client, auth_header, user_credentials, mocker):
+    """A probe pointing at a different base_url must NOT receive the stored
+    key — otherwise any tenant member could exfiltrate stored keys by
+    directing the probe at their own server."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+    stored = {
+        "api_key": "stored-secret-key",
+        "base_url": "https://api.example.com/v1/",
+    }
+    mocker.patch(
+        'backend.apps.model_managment_app.get_model_by_model_id',
+        return_value=stored,
+    )
+    mock_verify = mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": False, "model_name": "m"},
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck",
+        headers=auth_header,
+        json={
+            "model_name": "m",
+            "model_type": "llm",
+            "base_url": "https://attacker.example/collect",
+            "api_key": "sk-no-api-key",
+            "probe_model_id": 7,
+        },
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    probed_config = mock_verify.call_args.args[0]
+    assert probed_config["api_key"] == "sk-no-api-key"
 
 
 # Tests for /model/update endpoint

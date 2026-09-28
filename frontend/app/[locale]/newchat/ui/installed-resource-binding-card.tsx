@@ -12,13 +12,13 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import ToolConfigModal from "../../agents/components/agentConfig/tool/ToolConfigModal";
-import SkillConfigModal from "../../agents/components/agentConfig/skill/SkillConfigModal";
+import ToolConfigModal from "../../agents/components/capability/tool/ToolConfigModal";
+import SkillConfigModal from "../../agents/components/capability/skill/SkillConfigModal";
 import {
   findCanonicalTool,
   mergeCanonicalTool,
   mergeToolParamValues,
-} from "../../agents/components/agentConfig/tool/utils";
+} from "../../agents/components/capability/tool/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

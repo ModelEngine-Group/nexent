@@ -29,7 +29,7 @@ from agents.create_agent_info import (
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
 from consts.const import (
-    TOKEN, 
+    TOKEN,
     ENABLE_AIDP_KNOWLEDGE,
     LOCAL_MCP_SERVER,
     MODEL_CONFIG_MAPPING,

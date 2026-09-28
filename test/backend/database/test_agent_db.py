@@ -1,8 +1,9 @@
 import sys
 import types
 import pytest
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
-from sqlalchemy import literal_column
+from sqlalchemy import Boolean, Integer, String, column, literal_column, table
 
 # 首先模拟consts模块，避免ModuleNotFoundError
 consts_mock = MagicMock()
@@ -184,6 +185,7 @@ class MockAgent:
         self.version_no = 0
         self.created_by = None
         self.allow_chat_metadata = False
+        self.enable_protocol_repair_retry = True
 
 class MockAgentRelation:
     def __init__(self, selected_agent_version_no=None):
@@ -219,6 +221,7 @@ def test_search_agent_info_by_agent_id_success(monkeypatch, mock_session):
     result = search_agent_info_by_agent_id(1, "tenant1")
 
     assert result["agent_id"] == 1
+    assert result["enable_protocol_repair_retry"] is True
     assert result["name"] == "test_agent"
     assert result["tenant_id"] == "tenant1"
 
@@ -414,7 +417,8 @@ def test_resolve_sub_agent_version_no_fallback_to_draft(monkeypatch):
     assert result == 0
 
 
-def test_create_agent_success(monkeypatch, mock_session):
+@pytest.mark.parametrize("requested_policy,expected_policy", [(None, False), (True, True)])
+def test_create_agent_success(monkeypatch, mock_session, requested_policy, expected_policy):
     """测试成功创建agent"""
     session, query = mock_session
     session.add = MagicMock()
@@ -428,13 +432,20 @@ def test_create_agent_success(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
     monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
-    monkeypatch.setattr("backend.database.agent_db.AgentInfo", lambda **kwargs: mock_agent)
     monkeypatch.setattr("backend.database.agent_db._enforce_tenant_agent_limit", lambda *_args: None)
+    def make_agent(**kwargs):
+        mock_agent.enable_protocol_repair_retry = kwargs["enable_protocol_repair_retry"]
+        return mock_agent
+
+    monkeypatch.setattr("backend.database.agent_db.AgentInfo", make_agent)
 
     agent_info = {"name": "new_agent", "description": "test description"}
+    if requested_policy is not None:
+        agent_info["enable_protocol_repair_retry"] = requested_policy
     result = create_agent(agent_info, "tenant1", "user1")
 
     assert result["agent_id"] == 1
+    assert result["enable_protocol_repair_retry"] is expected_policy
     session.add.assert_called_once()
     session.flush.assert_called_once()
 
@@ -547,6 +558,25 @@ def test_update_agent_success(monkeypatch, mock_session):
     update_agent(1, agent_info, "user1")
 
     assert mock_agent.updated_by == "user1"
+
+
+def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypatch, mock_session):
+    """A partial update must not reset a disabled protocol repair policy."""
+    from backend.consts.model import AgentInfoRequest
+
+    session, query = mock_session
+    mock_agent = MockAgent()
+    query.filter.return_value.first.return_value = mock_agent
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+
+    update_agent(1, AgentInfoRequest(enable_protocol_repair_retry=False), "user1")
+    assert mock_agent.enable_protocol_repair_retry is False
+
+    update_agent(1, AgentInfoRequest(description="updated"), "user1")
+    assert mock_agent.enable_protocol_repair_retry is False
 
 def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_session):
     """update_agent should skip None values and convert group_ids list to string."""
@@ -683,6 +713,110 @@ def test_query_all_agent_info_by_tenant_id(monkeypatch, mock_session):
 
     assert len(result) == 1
     assert result[0]["agent_id"] == 1
+
+
+@pytest.fixture
+def agent_list_info_columns(monkeypatch):
+    fields = {
+        "agent_id": Integer,
+        "tenant_id": String,
+        "name": String,
+        "display_name": String,
+        "created_by": String,
+        "create_time": String,
+        "group_ids": String,
+        "ingroup_permission": String,
+        "description": String,
+        "version_no": Integer,
+        "delete_flag": String,
+        "enabled": Boolean,
+    }
+    agent_table = table(
+        "agent_info", *(column(name, kind) for name, kind in fields.items())
+    )
+    agent_info = SimpleNamespace(
+        **{name: agent_table.c[name] for name in fields}
+    )
+    monkeypatch.setattr("backend.database.agent_db.AgentInfo", agent_info)
+    return agent_info
+
+
+def _sql(expression):
+    return str(expression.compile(compile_kwargs={"literal_binds": True}))
+
+
+@pytest.mark.parametrize("include_description", [False, True])
+def test_query_agent_list_candidates_by_tenant_id(
+    monkeypatch, mock_session, agent_list_info_columns, include_description
+):
+    from backend.database.agent_db import query_agent_list_candidates_by_tenant_id
+
+    session, query = mock_session
+    query.filter.return_value.order_by.return_value.all.return_value = [
+        SimpleNamespace(_mapping={"agent_id": 7, "name": "Agent 7"})
+    ]
+    db_session = MagicMock()
+    db_session.__enter__.return_value = session
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: db_session)
+
+    result = query_agent_list_candidates_by_tenant_id(
+        "tenant1", include_description=include_description
+    )
+
+    expected_columns = [
+        "agent_id", "tenant_id", "name", "display_name", "created_by",
+        "create_time", "group_ids", "ingroup_permission",
+    ]
+    if include_description:
+        expected_columns.append("description")
+    assert [field.name for field in session.query.call_args.args] == expected_columns
+    assert [_sql(condition) for condition in query.filter.call_args.args] == [
+        "agent_info.tenant_id = 'tenant1'",
+        "agent_info.version_no = 0",
+        "agent_info.delete_flag != 'Y'",
+        "agent_info.enabled IS true",
+    ]
+    assert [_sql(order) for order in query.filter.return_value.order_by.call_args.args] == [
+        "agent_info.create_time DESC", "agent_info.agent_id DESC",
+    ]
+    assert result == [{"agent_id": 7, "name": "Agent 7"}]
+
+
+def test_query_agent_info_by_ids_skips_empty_ids(monkeypatch):
+    from backend.database.agent_db import query_agent_info_by_ids
+
+    get_session = MagicMock()
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", get_session)
+
+    assert query_agent_info_by_ids("tenant1", []) == []
+    get_session.assert_not_called()
+
+
+def test_query_agent_info_by_ids_filters_and_converts(
+    monkeypatch, mock_session, agent_list_info_columns
+):
+    from backend.database.agent_db import query_agent_info_by_ids
+
+    session, query = mock_session
+    agents = [SimpleNamespace(agent_id=3), SimpleNamespace(agent_id=5)]
+    query.filter.return_value.all.return_value = agents
+    db_session = MagicMock()
+    db_session.__enter__.return_value = session
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: db_session)
+    to_dict = MagicMock(side_effect=lambda agent: {"agent_id": agent.agent_id})
+    monkeypatch.setattr("backend.database.agent_db.as_dict", to_dict)
+
+    result = query_agent_info_by_ids("tenant1", [3, 5])
+
+    session.query.assert_called_once_with(agent_list_info_columns)
+    assert [_sql(condition) for condition in query.filter.call_args.args] == [
+        "agent_info.tenant_id = 'tenant1'",
+        "agent_info.version_no = 0",
+        "agent_info.delete_flag != 'Y'",
+        "agent_info.agent_id IN (3, 5)",
+    ]
+    assert result == [{"agent_id": 3}, {"agent_id": 5}]
+    assert [call.args[0] for call in to_dict.call_args_list] == agents
 
 def test_insert_related_agent_success(monkeypatch, mock_session):
     """测试成功插入相关agent"""

@@ -1,0 +1,58 @@
+schema_version: '1.0'
+changes:
+  - change_id: CMSR-BUG-001
+    change_type: bugfix
+    bug_id: CMSR-BUG-001
+    title: Silent retry produces blank steps and delayed successful output
+    description: Correct model stream delivery and label-only reasoning while preserving attempt rollback.
+    observed_behavior: Short successful retry content can be delayed to completion; failed output rollback can leave a label-only reasoning card.
+    expected_behavior: Safe successful content is visible before completion; no failed fragment or label-only card remains.
+    escaped_stage: production
+    coverage_gap:
+      type: missing_boundary
+      description: Existing tests assert final rollback but not visibility before the next provider fragment or code-only step rendering.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [CMSR-005], modified: [], retired: []}
+    affected_cases: {existing: [], added: [CMSR-D1-001, CMSR-D1-002, CMSR-D2-001, CMSR-D3-001, CMSR-D4-001, CMSR-D5-001], modified: [], retired: []}
+  - change_id: CMSR-BUG-002
+    change_type: bugfix
+    bug_id: CMSR-BUG-002
+    title: Valid semantic repair omits streamed and persisted model output
+    description: Restore successful protocol-repair attempt streaming, commit and persistence at step one.
+    observed_behavior: The corrected action executes but the model output is suppressed; the browser stays Connecting and stored units omit the successful raw content.
+    expected_behavior: Invalid output rolls back and valid corrected output streams before completion, commits and persists with sanitized lifecycle logs.
+    escaped_stage: production
+    coverage_gap:
+      type: missing_boundary
+      description: Existing tests covered provider transport retry but asserted that semantic repair output should be hidden.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [CMSR-005], retired: []}
+    affected_cases: {existing: [], added: [CMSR-D1-003], modified: [CMSR-D2-001, CMSR-D3-001, CMSR-D4-001, CMSR-D5-001], retired: []}
+  - change_id: CMSR-BUG-003
+    change_type: bugfix
+    bug_id: CMSR-BUG-003
+    title: Step labels arrive after content and disappear from reasoning
+    description: Emit and render a step label before the first model token while preserving it across retries.
+    observed_behavior: The persisted step_count follows model output and is queued for a nonexistent later chunk, so the UI omits Step 1.
+    expected_behavior: A running step displays its label first; retry output follows it; old late labels prepend to existing reasoning; terminal label-only cards are removed.
+    escaped_stage: production
+    coverage_gap:
+      type: missing_boundary
+      description: Existing tests asserted label suppression but not the actual CoreAgent event order or running UI state before the first token.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [CMSR-005], retired: []}
+    affected_cases: {existing: [], added: [], modified: [CMSR-D1-002, CMSR-D1-003, CMSR-D2-001, CMSR-D3-001, CMSR-D4-001, CMSR-D5-001], retired: []}
+  - change_id: CMSR-BUG-004
+    change_type: bugfix
+    bug_id: CMSR-BUG-004
+    title: Reasoning-only output budget exhaustion lacks actionable diagnosis
+    description: Correlate rejected output with the model budget and response shape without leaking content by default.
+    observed_behavior: A model exhausts 4096 output tokens on reasoning-only content three times; logs classify generic protocol failure and the UI blames protocol compliance.
+    expected_behavior: Each rejection identifies budget exhaustion versus malformed Action, with bounded output preview available only by explicit diagnostic opt-in.
+    escaped_stage: production
+    coverage_gap:
+      type: missing_assertion
+      description: Existing tests checked repair lifecycle markers but not model budget, reasoning-only response shape, attempt correlation or diagnostic privacy.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [CMSR-005], retired: []}
+    affected_cases: {existing: [], added: [CMSR-D1-004], modified: [CMSR-D5-001], retired: []}
