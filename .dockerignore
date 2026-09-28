@@ -46,13 +46,6 @@ uploads/
 test/
 assets/
 
-# Official Agent resources are intentionally bundled into the main image.
-!deploy/
-!deploy/docker/
-!deploy/docker/assets/
-!deploy/docker/assets/official-agents/
-!deploy/docker/assets/official-agents/**
-
 # Github
 .github/
 
