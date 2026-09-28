@@ -86,6 +86,7 @@ from consts.const import (
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+    RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError, WorkbenchError
@@ -95,6 +96,21 @@ from .tool_user_context import resolve_tool_user_context
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
+
+
+def _build_parallel_executor_tool_config(default_timeout_seconds: int) -> ToolConfig:
+    return ToolConfig(
+        class_name=ParallelExecutorTool.__name__,
+        name=ParallelExecutorTool.name,
+        description=ParallelExecutorTool.description,
+        inputs=json.dumps(
+            ParallelExecutorTool.inputs_for_timeout(default_timeout_seconds),
+            ensure_ascii=False,
+        ),
+        output_type=ParallelExecutorTool.output_type,
+        params={"default_timeout_seconds": default_timeout_seconds},
+        source="local",
+    )
 
 
 def _create_fixed_search_memory_tool():
@@ -1429,15 +1445,7 @@ async def create_agent_config(
     # Append parallel_executor as an always-available system-managed tool.
     # Memory handling is wired separately below: only store_memory is exposed
     # to the model, while search_memory runs once during preparation.
-    tool_list.append(ToolConfig(
-        class_name=ParallelExecutorTool.__name__,
-        name=ParallelExecutorTool.name,
-        description=ParallelExecutorTool.description,
-        inputs=json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
-        output_type=ParallelExecutorTool.output_type,
-        params={},
-        source="local",
-    ))
+    tool_list.append(_build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS))
 
     if (
         include_automation_tool

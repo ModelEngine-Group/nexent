@@ -10,6 +10,7 @@ from test.common.test_mocks import bootstrap_test_env
 
 env_state = bootstrap_test_env()
 consts_const = env_state["mock_const"]
+consts_const.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS = 120
 
 # Mock consts.model module with HistoryItem class
 from typing import List, Optional, Dict, Any
@@ -463,6 +464,9 @@ _mock_parallel_executor_tool_cls.__name__ = "ParallelExecutorTool"
 _mock_parallel_executor_tool_cls.name = "parallel_executor"
 _mock_parallel_executor_tool_cls.description = "Execute multiple independent calls in parallel."
 _mock_parallel_executor_tool_cls.inputs = {"tasks": {"type": "array"}}
+_mock_parallel_executor_tool_cls.inputs_for_timeout = lambda timeout: {
+    "tasks": {"type": "array"}, "timeout": {"type": "integer", "default": timeout}
+}
 _mock_parallel_executor_tool_cls.output_type = "any"
 _parallel_executor_mod = _create_stub_module(
     "nexent.core.tools.parallel_executor",
@@ -2350,7 +2354,8 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS', 240):
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2412,6 +2417,8 @@ class TestCreateAgentConfig:
             assert len(pe_calls) == 1
             assert pe_calls[0][1]["name"] == "parallel_executor"
             assert pe_calls[0][1]["source"] == "local"
+            assert pe_calls[0][1]["params"] == {"default_timeout_seconds": 240}
+            assert '"default": 240' in pe_calls[0][1]["inputs"]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):
