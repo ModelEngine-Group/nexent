@@ -39,6 +39,7 @@ const_mock = MagicMock()
 const_mock.DEPLOYMENT_VERSION = 'test_version'
 const_mock.APP_VERSION = 'v1.2.3'
 const_mock.ENABLE_AIDP_KNOWLEDGE = False
+const_mock.ENABLE_AGENT_WORKBENCH = False
 
 sys.modules['services.tenant_config_service'] = services_mock
 sys.modules['utils.auth_utils'] = auth_mock
@@ -125,7 +126,8 @@ class TestTenantConfigApp(unittest.TestCase):
         self.assertIn("deployment_version", data)
         self.assertIn("app_version", data)
         self.assertIn("enable_aidp_knowledge", data)
-        self.assertEqual(len(data.keys()), 4)
+        self.assertIs(data["enable_agent_workbench"], False)
+        self.assertEqual(len(data.keys()), 5)
 
 
 if __name__ == '__main__':

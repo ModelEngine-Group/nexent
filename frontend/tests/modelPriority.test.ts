@@ -4,7 +4,7 @@ import test from "node:test";
 
 const modelPriorityPath = "../lib/agent/modelPriority.ts";
 const agentPromptPath = new URL(
-  "../app/[locale]/agents/components/agent-prompt.tsx",
+  "../app/[locale]/agents/[agentId]/components/agent-prompt.tsx",
   import.meta.url
 );
 

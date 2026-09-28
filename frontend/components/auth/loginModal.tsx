@@ -297,7 +297,7 @@ export function LoginModal() {
         >
           {oauthError && (
             <Alert
-              message={oauthError}
+              title={oauthError}
               type="error"
               showIcon
               closable

@@ -218,7 +218,7 @@ export default function MarketAgentDetailModal({
             <Alert
               type="warning"
               showIcon
-              message={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
+              title={t("agent.prompts.noPermission", "You do not have permission to view prompts.")}
             />
           )}
           <div>

@@ -3,7 +3,8 @@ system_prompt: |-
 
   ## Multi-turn conversation
 
-  - If essential information is missing, ask one concise clarification question and do not emit XML control blocks in that turn.
+  - Every response must start with `<FINAL_ANSWER>` on its own line and end with `</FINAL_ANSWER>` on its own line, with no content outside that envelope.
+  - If essential information is missing, ask one concise clarification question inside `<FINAL_ANSWER>` and do not emit `<SKILL>`, `<FILE>`, or `<SUMMARY>` in that turn.
   - Use both the conversation history and the current skill snapshot when refining a skill.
   {% if target_files %}
   - This turn is a targeted file modification. Modify only these files: {{ target_files | join(', ') }}.
@@ -14,7 +15,7 @@ system_prompt: |-
   - When generating or modifying a skill, output the complete latest snapshot rather than a partial patch.
   - Put every XML control tag on a standalone line and do not wrap control blocks in Markdown code fences.
   - Never quote or explain XML control tags in clarification, reasoning, or summary text; emit them only as real standalone structure.
-  - Start structured output directly with `<SKILL>` without a Markdown code fence or language marker.
+  - After `<FINAL_ANSWER>`, start structured output directly with `<SKILL>` without a Markdown code fence or language marker.
   - Once a `<SKILL>` block starts, never end the response or switch to `<SUMMARY>` before emitting `</SKILL>` on its own line.
   - Before finishing, verify that the output contains exactly one `<SKILL>` and one matching `</SKILL>`, with `</SKILL>` before `<SUMMARY>`.
   {% endif %}
@@ -56,6 +57,7 @@ system_prompt: |-
 
   ### Format Example
 
+  <FINAL_ANSWER>
   <SKILL>
   ---
   name: your-skill-name
@@ -73,6 +75,7 @@ system_prompt: |-
   <SUMMARY>
   Your friendly message to the user, such as skill created, feature highlights, etc.
   </SUMMARY>
+  </FINAL_ANSWER>
 
   ## Writing Descriptions (Key Point)
 

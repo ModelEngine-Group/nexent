@@ -4,6 +4,7 @@ import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, AgentStep } from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
+import { stripStreamedFinalAnswerEcho } from "@/lib/streamFinalAnswer";
 
 // Streaming message types for recovery
 export interface StreamingUnit {
@@ -83,6 +84,8 @@ interface JsonData {
   last_unit_index?: number;
   replay_chunk_count?: number;
   conversation_id?: number;
+  attempt_id?: string;
+  phase?: "begin" | "rollback" | "commit";
 }
 
 // Reconstruct streaming state from persisted units (for tab-switch recovery)
@@ -318,6 +321,28 @@ const processThinkingCodeUnit = (
   state.lastContentType = unit.unit_type;
 };
 
+const removeFinalAnswerEchoFromStep = (
+  step: AgentStep | null,
+  answer: string
+): void => {
+  if (!step || !answer) return;
+  for (let index = step.contents.length - 1; index >= 0; index -= 1) {
+    const block = step.contents[index];
+    if (
+      block.type !== chatConfig.messageTypes.MODEL_OUTPUT &&
+      block.type !== chatConfig.messageTypes.MODEL_OUTPUT_THINKING &&
+      block.type !== chatConfig.messageTypes.MODEL_OUTPUT_CODE
+    ) {
+      continue;
+    }
+    const remaining = stripStreamedFinalAnswerEcho(block.content, answer);
+    if (remaining === null) return;
+    if (remaining.trim()) step.contents[index] = { ...block, content: remaining };
+    else step.contents.splice(index, 1);
+    return;
+  }
+};
+
 // Check if unit type should be skipped during reconstruction
 const isSkippedUnitType = (unitType: string): boolean => {
   const skippedTypes = [
@@ -385,6 +410,10 @@ export function reconstructFromStreamingMessage(
         break;
 
       case "final_answer":
+        removeFinalAnswerEchoFromStep(
+          state.currentStep ?? state.steps[state.steps.length - 1] ?? null,
+          unit.unit_content
+        );
         state.finalAnswer = unit.unit_content;
         break;
 
@@ -460,6 +489,10 @@ export const handleStreamResponse = async (
   let finalAnswer = "";
   let lastModelOutputIndex = -1;
   let lastContentType: string | null = null;
+  const attemptBlockCheckpoints = new Map<
+    string,
+    { originalLengths: Map<string, number>; createdIds: Set<string> }
+  >();
 
   if (resumeConfig) {
     const recovered = reconstructFromStreamingMessage(
@@ -547,6 +580,42 @@ export const handleStreamResponse = async (
                 // This chunk was already processed before disconnect (unit_index <= last processed index)
                 continue;
               }
+            }
+
+            if (
+              jsonData.type === "model_attempt_control" &&
+              jsonData.attempt_id &&
+              jsonData.phase
+            ) {
+              if (jsonData.phase === "begin") {
+                attemptBlockCheckpoints.set(jsonData.attempt_id, {
+                  originalLengths: new Map(),
+                  createdIds: new Set(),
+                });
+              } else if (jsonData.phase === "rollback") {
+                const checkpoints = attemptBlockCheckpoints.get(
+                  jsonData.attempt_id
+                );
+                currentStep.contents = currentStep.contents.filter((item) => {
+                  if (checkpoints?.createdIds.has(item.id)) {
+                    return false;
+                  }
+                  const originalLength = checkpoints?.originalLengths.get(
+                    item.id
+                  );
+                  if (originalLength !== undefined) {
+                    item.content = item.content.slice(0, originalLength);
+                  }
+                  return true;
+                });
+                attemptBlockCheckpoints.delete(jsonData.attempt_id);
+                lastModelOutputIndex = currentStep.contents.length - 1;
+                lastContentType =
+                  currentStep.contents[lastModelOutputIndex]?.type ?? null;
+              } else {
+                attemptBlockCheckpoints.delete(jsonData.attempt_id);
+              }
+              continue;
             }
 
             if (jsonData.type && jsonData.content) {
@@ -686,21 +755,40 @@ export const handleStreamResponse = async (
                     lastContentBlock && lastContentBlock.type === messageType;
 
                   if (shouldAppend) {
+                    if (jsonData.attempt_id) {
+                      const checkpoints = attemptBlockCheckpoints.get(
+                        jsonData.attempt_id
+                      );
+                      if (
+                        !checkpoints?.originalLengths.has(lastContentBlock.id)
+                      ) {
+                        checkpoints?.originalLengths.set(
+                          lastContentBlock.id,
+                          lastContentBlock.content.length
+                        );
+                      }
+                    }
                     // Same type - append to existing block
                     lastContentBlock.content += messageContent;
                   } else {
                     // Different type or no existing block - create new content block
                     // This ensures thinking and deep_thinking are shown as separate nodes
+                    const blockId = `model-${Date.now()}-${Math.random()
+                      .toString(36)
+                      .substring(2, 7)}`;
                     currentStep.contents.push({
-                      id: `model-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 7)}`,
+                      id: blockId,
                       type: messageType,
                       subType,
                       content: messageContent,
                       expanded: true,
                       timestamp: Date.now(),
                     });
+                    if (jsonData.attempt_id) {
+                      attemptBlockCheckpoints
+                        .get(jsonData.attempt_id)
+                        ?.createdIds.add(blockId);
+                    }
                     lastModelOutputIndex = currentStep.contents.length - 1;
                   }
 
@@ -741,19 +829,36 @@ export const handleStreamResponse = async (
                       lastModelOutputIndex >= 0 &&
                       currentStep.contents[lastModelOutputIndex]
                     ) {
-                      currentStep.contents[lastModelOutputIndex].content +=
-                        processedContent;
+                      const codeBlock =
+                        currentStep.contents[lastModelOutputIndex];
+                      if (jsonData.attempt_id) {
+                        const checkpoints = attemptBlockCheckpoints.get(
+                          jsonData.attempt_id
+                        );
+                        if (!checkpoints?.originalLengths.has(codeBlock.id)) {
+                          checkpoints?.originalLengths.set(
+                            codeBlock.id,
+                            codeBlock.content.length
+                          );
+                        }
+                      }
+                      codeBlock.content += processedContent;
                     } else {
                       // Create new main content block for code
+                      const blockId = `model-code-${crypto.randomUUID()}`;
+
                       currentStep.contents.push({
-                        id: `model-code-${Date.now()}-${Math.random()
-                          .toString(36)
-                          .substring(2, 7)}`,
+                        id: blockId,
                         type: chatConfig.messageTypes.MODEL_OUTPUT_CODE,
                         content: processedContent,
                         expanded: true,
                         timestamp: Date.now(),
                       });
+                      if (jsonData.attempt_id) {
+                        attemptBlockCheckpoints
+                          .get(jsonData.attempt_id)
+                          ?.createdIds.add(blockId);
+                      }
                       lastModelOutputIndex = currentStep.contents.length - 1;
                     }
 
@@ -769,8 +874,9 @@ export const handleStreamResponse = async (
                     }
 
                     // If it does not exist, add one
+                    const blockId = `generating-code-${stepIdCounter.current}`;
                     const newGeneratingItem = {
-                      id: `generating-code-${stepIdCounter.current}`,
+                      id: blockId,
                       type: chatConfig.messageTypes.GENERATING_CODE,
                       content: t("chatStreamHandler.callingTool"),
                       expanded: true,
@@ -779,6 +885,11 @@ export const handleStreamResponse = async (
                     };
 
                     currentStep.contents.push(newGeneratingItem);
+                    if (jsonData.attempt_id) {
+                      attemptBlockCheckpoints
+                        .get(jsonData.attempt_id)
+                        ?.createdIds.add(blockId);
+                    }
 
                     // Mark as code generation type
                     lastContentType = chatConfig.contentTypes.GENERATING_CODE;
@@ -958,6 +1069,7 @@ export const handleStreamResponse = async (
 
                 case chatConfig.messageTypes.FINAL_ANSWER:
                   // Accumulate final answer content and process user break tag
+                  removeFinalAnswerEchoFromStep(currentStep, messageContent);
                   finalAnswer += processUserBreakTag(messageContent, t);
                   break;
 

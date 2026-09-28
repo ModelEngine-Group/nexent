@@ -2,28 +2,41 @@ import asyncio
 import json
 import logging
 import threading
+from contextvars import Context, copy_context
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any, Dict, Union
 
 import httpx
 
 from ...monitor import (
+    AgentRunMetadata,
+    get_agent_monitoring_context,
+    get_monitoring_manager,
     set_monitoring_capacity_snapshot,
     set_monitoring_context_budget_snapshot,
 )
-from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
+from ..concurrency import (
+    ManagedExecution,
+    ManagedTaskSpec,
+    RunCancellationScope,
+    ThreadManager,
+    get_current_thread_manager,
+)
+from ..concurrency.context import _reset_current_thread_manager, _set_current_thread_manager
 from ..concurrency.helpers import (
     get_fallback_thread_manager,
     shutdown_fallback_thread_manager,
 )
-from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated
+from ..concurrency.cancellation import RunTerminated
+from ..model_errors import ModelInvocationTerminalError
 from .agent_model import AgentRunInfo
 from .managed_mcp import ManagedMCPToolCollection
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
+from .output_protocol import ModelOutputProtocolExhaustedError
 
 
 logger = logging.getLogger("run_agent")
-logger.setLevel(logging.DEBUG)
 
 
 class DeferredAgentRun:
@@ -33,6 +46,7 @@ class DeferredAgentRun:
         self._ready = threading.Event()
         self._lock = threading.Lock()
         self._agent_run_info: AgentRunInfo | None = None
+        self._context: Context | None = None
         self._cancelled = False
 
     def bind(self, agent_run_info: AgentRunInfo) -> None:
@@ -40,6 +54,7 @@ class DeferredAgentRun:
             if self._agent_run_info is not None:
                 raise RuntimeError("Deferred agent run is already bound")
             self._agent_run_info = agent_run_info
+            self._context = copy_context()
             cancelled = self._cancelled
             self._ready.set()
         if cancelled:
@@ -60,13 +75,27 @@ class DeferredAgentRun:
                 return
         with self._lock:
             agent_run_info = self._agent_run_info
+            context = self._context
+            self._context = None
             cancelled = self._cancelled or cancel_event.is_set()
         if agent_run_info is None:
             return
         if cancelled:
             agent_run_info.cancellation_scope.cancel()
             return
-        agent_run_thread(agent_run_info)
+        # Admission precedes request preparation. Use the binding-time trace
+        # and metadata without shadowing the worker's managed execution owner.
+        manager = get_current_thread_manager()
+
+        def run_bound():
+            token = _set_current_thread_manager(manager)
+            try:
+                agent_run_thread(agent_run_info)
+            finally:
+                _reset_current_thread_manager(token)
+
+        if context is not None:
+            context.run(run_bound)
 
 
 def _get_default_agent_thread_manager() -> ThreadManager:
@@ -259,7 +288,25 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
 
 def agent_run_thread(agent_run_info: AgentRunInfo):
+    """Trace the complete SDK worker, including setup and resource cleanup."""
+    current = get_agent_monitoring_context() or AgentRunMetadata()
+    metadata = replace(
+        current,
+        agent_name=current.agent_name or getattr(agent_run_info.agent_config, "name", None),
+        agent_display_name=current.agent_display_name or getattr(agent_run_info.agent_config, "display_name", None),
+        query=current.query if current.query is not None else agent_run_info.query,
+    )
+    with get_monitoring_manager().start_agent_run(metadata):
+        _agent_run_thread(agent_run_info)
+
+
+def _agent_run_thread(agent_run_info: AgentRunInfo):
     try:
+        # Keep the runner compatible with legacy/lightweight AgentRunInfo
+        # stand-ins used by integrations.  Full AgentRunInfo instances always
+        # define this field, but its absence must not prevent a run that does
+        # not need tool-side authorization context.
+        user_context = getattr(agent_run_info, "user_context", None)
         set_monitoring_capacity_snapshot(
             getattr(agent_run_info, "capacity_snapshot", None)
         )
@@ -274,6 +321,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 model_config_list=agent_run_info.model_config_list,
                 stop_event=agent_run_info.stop_event,
                 redis_client=agent_run_info.redis_client,
+                user_context=user_context,
                 sandbox_config=getattr(agent_run_info, "sandbox_config", None),
                 minio_client=getattr(agent_run_info, "minio_client", None),
                 conversation_id=agent_run_info.conversation_id,
@@ -289,8 +337,6 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 context_items_override=_get_authorized_context_items(agent_run_info),
             )
             nexent.set_agent(agent)
-            if agent_run_info.human_interaction is not None:
-                agent_run_info.human_interaction.attach(agent)
 
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             try:
@@ -321,6 +367,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     stop_event=agent_run_info.stop_event,
                     mcp_tool_collection=tool_collection,
                     redis_client=agent_run_info.redis_client,
+                    user_context=user_context,
                     sandbox_config=getattr(agent_run_info, "sandbox_config", None),
                     minio_client=getattr(agent_run_info, "minio_client", None),
                     conversation_id=agent_run_info.conversation_id,
@@ -336,8 +383,6 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     context_items_override=_get_authorized_context_items(agent_run_info),
                 )
                 nexent.set_agent(agent)
-                if agent_run_info.human_interaction is not None:
-                    agent_run_info.human_interaction.attach(agent)
 
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 try:
@@ -350,19 +395,11 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     _log_memory_value_assessment(agent)
 
         agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
-    except AttemptSuspended:
-        agent_run_info.attempt_outcome = "waiting_human"
     except RunTerminated:
         agent_run_info.attempt_outcome = "stopped"
-    except RecoveryRequired:
-        agent_run_info.attempt_outcome = "recovery_required"
-        message = (
-            "执行进程已中断。为避免重复执行操作，本次任务无法自动恢复，请重新发起任务。"
-            if agent_run_info.observer.lang == "zh" else
-            "Execution was interrupted. To avoid repeating actions, this task cannot resume automatically. "
-            "Please start a new task."
-        )
-        agent_run_info.observer.add_message("", ProcessType.ERROR, message)
+    except (ModelInvocationTerminalError, ModelOutputProtocolExhaustedError):
+        agent_run_info.attempt_outcome = "failed"
+        raise
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
         if "Couldn't connect to the MCP server" in str(e):

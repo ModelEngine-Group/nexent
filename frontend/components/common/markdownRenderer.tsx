@@ -98,7 +98,9 @@ const flattenTextContent = (value: React.ReactNode): string => {
   }
 
   if (React.isValidElement(value)) {
-    return flattenTextContent(value.props?.children);
+    return flattenTextContent(
+      (value.props as { children?: React.ReactNode }).children
+    );
   }
 
   return "";
@@ -1480,7 +1482,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     );
     const headingId = matchedHeading?.id ?? slugifyHeadingText(headingText);
     renderedHeadingIndex += 1;
-    const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements;
+    const HeadingTag = `h${level}` as React.ElementType;
 
     return (
       <HeadingTag
@@ -1674,7 +1676,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 const directSrc = props?.src;
                 const childSource = React.Children.toArray(children)
                   .map((child) =>
-                    React.isValidElement(child) ? child.props?.src : undefined
+                    React.isValidElement(child)
+                      ? (child.props as { src?: string }).src
+                      : undefined
                   )
                   .find(Boolean);
                 const videoSrc = directSrc ?? childSource;

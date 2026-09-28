@@ -323,6 +323,7 @@ def test_search_version_by_version_no_found(monkeypatch, mock_session):
     # This is needed because agent_version_db imports get_db_session and as_dict at module level
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+    db_models_mock.AgentVersion.tenant_id.__eq__.reset_mock()
     
     result = search_version_by_version_no(agent_id=1, tenant_id="tenant1", version_no=1)
     
@@ -330,6 +331,7 @@ def test_search_version_by_version_no_found(monkeypatch, mock_session):
     assert result["version_no"] == 1
     assert result["version_name"] == "v1.0"
     assert result["status"] == STATUS_RELEASED
+    db_models_mock.AgentVersion.tenant_id.__eq__.assert_called_once_with("tenant1")
 
 
 def test_search_version_by_version_no_not_found(monkeypatch, mock_session):
@@ -1567,11 +1569,13 @@ def test_batch_search_version_names_success(monkeypatch, mock_session):
     mock_v1.agent_id = 1
     mock_v1.version_no = 2
     mock_v1.version_name = "v2.0"
+    mock_v1.create_time = "2023-01-02 12:00:00"
 
     mock_v2 = MagicMock()
     mock_v2.agent_id = 3
     mock_v2.version_no = 1
     mock_v2.version_name = None
+    mock_v2.create_time = None
 
     mock_all = MagicMock()
     mock_all.return_value = [mock_v1, mock_v2]
@@ -1587,8 +1591,10 @@ def test_batch_search_version_names_success(monkeypatch, mock_session):
     result = batch_search_version_names(agent_ids=[1, 3], tenant_id="tenant1", version_nos=[1, 2])
 
     assert len(result) == 2
-    assert result[0] == {"agent_id": 1, "version_no": 2, "version_name": "v2.0"}
-    assert result[1] == {"agent_id": 3, "version_no": 1, "version_name": None}
+    assert result[0] == {
+        "agent_id": 1, "version_no": 2, "version_name": "v2.0", "create_time": "2023-01-02 12:00:00"
+    }
+    assert result[1] == {"agent_id": 3, "version_no": 1, "version_name": None, "create_time": None}
 
 
 # ===================== batch_query_current_version_nos tests =====================

@@ -28,6 +28,7 @@ export interface ErrorResponse {
   message: string;
   code: number;
   data?: any;
+  details?: Record<string, unknown> | null;
 }
 
 // Authorization context type

@@ -2288,24 +2288,6 @@ class TestNorthboundFileDescriptorAndUpload:
         assert result["summary"]["failed"] == 1
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("enable_hitl", [False, True])
-async def test_streaming_chat_forwards_hitl_opt_in(enable_hitl):
-    from fastapi.responses import StreamingResponse
-
-    async def chunks():
-        yield b'data: {"type":"human_run","content":{"run_id":"run"}}\n\n'
-
-    runtime_proxy_mod.forward_agent_run.return_value = StreamingResponse(chunks())
-    with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
-            patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
-            patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock, return_value={"data": {}}):
-        response = await ns.start_streaming_chat(
-            ctx=MockNorthboundContext(token_id=0), conversation_id=7, agent_name="test_agent",
-            query="hello", enable_hitl=enable_hitl,
-        )
-    assert runtime_proxy_mod.forward_agent_run.call_args.kwargs["agent_request"].enable_hitl is enable_hitl
-    assert b"human_run" in b"".join([chunk async for chunk in response.body_iterator])
 
 
 @pytest.mark.asyncio
@@ -2313,7 +2295,7 @@ async def test_runtime_error_is_not_prefixed_with_conversation_created():
     from fastapi.responses import StreamingResponse
 
     async def chunks():
-        yield b'{"message":"HITL run already active"}'
+        yield b'{"message":"Agent run already active"}'
 
     runtime_proxy_mod.forward_agent_run.return_value = StreamingResponse(chunks(), status_code=409)
     with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
@@ -2323,4 +2305,4 @@ async def test_runtime_error_is_not_prefixed_with_conversation_created():
             ctx=MockNorthboundContext(token_id=0), conversation_id=None, agent_name="test_agent", query="hello",
         )
     assert response.status_code == 409
-    assert b"".join([chunk async for chunk in response.body_iterator]) == b'{"message":"HITL run already active"}'
+    assert b"".join([chunk async for chunk in response.body_iterator]) == b'{"message":"Agent run already active"}'

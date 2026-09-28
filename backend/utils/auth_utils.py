@@ -306,6 +306,24 @@ def get_supabase_admin_client():
         return None
 
 
+def delete_supabase_user(user_id: str) -> bool:
+    """Delete an auth user during rollback of a failed local registration."""
+    if not user_id:
+        return False
+
+    try:
+        admin_client = get_supabase_admin_client()
+        if not admin_client or not hasattr(admin_client.auth, "admin"):
+            logger.warning("Supabase admin client unavailable while rolling back user %s", user_id)
+            return False
+        admin_client.auth.admin.delete_user(user_id)
+        logger.info("Rolled back Supabase user %s after failed registration", user_id)
+        return True
+    except Exception as exc:
+        logger.error("Failed to roll back Supabase user %s: %s", user_id, exc)
+        return False
+
+
 def get_jwt_expiry_seconds(token: str) -> int:
     """
     Get expiration time from JWT token (seconds)

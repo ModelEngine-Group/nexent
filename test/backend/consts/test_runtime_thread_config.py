@@ -6,10 +6,62 @@ import sys
 import pytest
 
 from backend.consts.const import (
+    MAX_KNOWLEDGE_BASES_PER_TENANT,
+    MAX_KNOWLEDGE_BASES_PER_USER,
+    MAX_KNOWLEDGE_FILE_SIZE_MB,
+    MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER,
     RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
     RUNTIME_AGENT_THREAD_MAX_WORKERS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
+
+
+def test_knowledge_resource_defaults_match_deployment_example():
+    """Knowledge resource limits expose the documented production defaults."""
+    assert MAX_KNOWLEDGE_BASES_PER_TENANT == 10_000
+    assert MAX_KNOWLEDGE_BASES_PER_USER == 10
+    assert MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER == 1_000
+    assert MAX_KNOWLEDGE_FILE_SIZE_MB == 100
+
+    example_path = Path(__file__).resolve().parents[3] / "deploy" / "env" / ".env.example"
+    example = example_path.read_text(encoding="utf-8")
+    for assignment in (
+        "MAX_KNOWLEDGE_BASES_PER_TENANT=10000",
+        "MAX_KNOWLEDGE_BASES_PER_USER=10",
+        "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER=1000",
+        "MAX_KNOWLEDGE_FILE_SIZE_MB=100",
+    ):
+        assert assignment in example
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("MAX_KNOWLEDGE_BASES_PER_TENANT", "17"),
+        ("MAX_KNOWLEDGE_BASES_PER_USER", "3"),
+        ("MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", "19"),
+        ("MAX_KNOWLEDGE_FILE_SIZE_MB", "64"),
+    ],
+)
+def test_knowledge_resource_env_overrides_defaults(variable, value):
+    """Knowledge resource limits can be overridden through deployment variables."""
+    environment = os.environ.copy()
+    environment[variable] = value
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            f"import backend.consts.const as c; print(c.{variable})",
+        ],
+        cwd=Path(__file__).resolve().parents[3],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert float(result.stdout.strip()) == float(value)
 
 
 def test_ut_be_tlm_034_platform_defaults_match_deployment_example():

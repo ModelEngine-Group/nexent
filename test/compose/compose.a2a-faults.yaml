@@ -1,0 +1,34 @@
+version: "3.7"
+
+services:
+  a2a-fault-proxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    ports:
+      - "8474:8474"
+      - "18888:18888"
+      - "18848:18848"
+    networks:
+      - nexent-a2a-test
+
+  a2a-fault-proxy-init:
+    image: curlimages/curl:8.10.1
+    depends_on:
+      - a2a-fault-proxy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        until curl --fail --silent http://a2a-fault-proxy:8474/version; do sleep 1; done
+        curl --silent --show-error --fail -X POST http://a2a-fault-proxy:8474/proxies \
+          -H 'Content-Type: application/json' \
+          -d '{"name":"a2a-agent","listen":"0.0.0.0:18888","upstream":"a2a-agent:8888"}' || true
+        curl --silent --show-error --fail -X POST http://a2a-fault-proxy:8474/proxies \
+          -H 'Content-Type: application/json' \
+          -d '{"name":"nacos-a2a","listen":"0.0.0.0:18848","upstream":"nacos-a2a-test:8848"}' || true
+    networks:
+      - nexent-a2a-test
+
+networks:
+  nexent-a2a-test:
+    external: true
+    name: nexent-a2a-test

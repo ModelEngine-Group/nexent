@@ -1,596 +1,383 @@
 "use client";
 
+import { useCallback, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type Ref,
-} from "react";
+  App,
+  Button,
+  Card,
+  Col,
+  Grid,
+  Input,
+  Modal,
+  Pagination,
+  Row,
+  Spin,
+  Tag,
+} from "antd";
+import { Bot, FileInput, Pencil, Search, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
-import { Button, Spin, Switch, Tag, Tour } from "antd";
-import {
-  History,
-  Maximize2,
-  Minimize2,
-  Pencil,
-  RefreshCw,
-  Sparkles,
-  X,
-} from "lucide-react";
-import { useSearchParams } from "next/navigation";
 
-import AgentSelectorHeader from "./agent-selector-header";
-import AgentConfig from "./agent-config";
-import AgentVersion from "./agent-version";
-import AgentDebugPanel from "./agent-debug";
+import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import CreateAgentModal from "@/components/agent/CreateAgentModal";
+import CreateResourceCard from "@/components/resource/CreateResourceCard";
+import ResourceCard from "@/components/resource/ResourceCard";
+import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
-  Nl2AgentChatPanel,
-  type Nl2AgentChatPanelHandle,
-} from "../newchat/assistant-ui/nl2agent-chat-panel";
-import {
-  Nl2AgentFlowProvider,
-  useNl2AgentFlow,
-  type Nl2AgentConfigFocusTarget,
-} from "@/contexts/nl2AgentFlow";
-import { useAgentStore } from "@/stores/agentStore";
-import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
-import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { searchAgentInfo } from "@/services/agentConfigService";
+  openImportWizardWithFile,
+  type ImportAgentData,
+} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
-import type {
-  Nl2AgentDraftField,
-  Nl2AgentStateEvent,
-} from "../newchat/adapter/remote-chat-model-adapter";
+import { searchAgentInfo } from "@/services/agentConfigService";
+import { useAgentStore } from "@/stores/agentStore";
+import type { Agent } from "@/types/agentConfig";
+import { AgentDetail } from "@/components/agent/agent-detail";
+import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
 
-function resolveDraftFocusTarget(
-  updatedFields: readonly Nl2AgentDraftField[]
-): Nl2AgentConfigFocusTarget | null {
-  if (
-    updatedFields.includes("greeting_message") ||
-    updatedFields.includes("example_questions")
-  ) {
-    return { section: "conversation_guide" };
-  }
-  if (updatedFields.includes("few_shots_prompt")) {
-    return { section: "role_model", promptTab: "few-shots" };
-  }
-  if (updatedFields.includes("constraint_prompt")) {
-    return { section: "role_model", promptTab: "constraint" };
-  }
-  if (updatedFields.includes("duty_prompt")) {
-    return { section: "role_model", promptTab: "duty" };
-  }
-  if (updatedFields.includes("name") || updatedFields.includes("description")) {
-    return { section: "display_info" };
-  }
-  return null;
+import AgentConfigActions from "./components/agent-config-actions";
+import AgentAvatar from "./components/agent-avatar";
+import AgentVersion from "./agent-version";
+
+interface AgentCardItem extends Agent {
+  create_time?: string;
+  update_time?: string;
 }
 
-const AGENT_TOUR_SEEN_STORAGE_KEY = "nexent.agent-tour.seen";
-
-interface PanelCardProps {
-  title: string;
-  children: ReactNode;
-  className?: string;
-  leftAction?: ReactNode;
-  rightAction?: ReactNode;
-  icon?: ReactNode;
-  panelRef?: Ref<HTMLElement>;
+function getAgentTitle(agent: AgentCardItem) {
+  return agent.display_name || agent.name;
 }
 
-function PanelCard({
-  title,
-  children,
-  className = "",
-  leftAction,
-  rightAction,
-  icon,
-  panelRef,
-}: PanelCardProps) {
-  return (
-    <section
-      ref={panelRef}
-      className={`flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm ${className}`}
-    >
-      <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
-        <div className="flex items-center gap-2">
-          {icon}
-          <h3 className="text-base font-medium text-gray-900">{title}</h3>
-          {leftAction}
-        </div>
-        {rightAction}
-      </div>
-      {children}
-    </section>
-  );
+function formatAgentDate(agent: AgentCardItem) {
+  const source = agent.update_time || agent.create_time;
+  if (!source) return null;
+  const date = new Date(source);
+  return Number.isNaN(date.getTime()) ? source : date.toLocaleDateString();
 }
 
-function AgentSetupContent() {
+export default function AgentsPage() {
   const { t } = useTranslation("common");
-  const searchParams = useSearchParams();
-  const queryClient = useQueryClient();
-  const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
-  const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
-  const generationPanelRef = useRef<HTMLElement>(null);
-  const configPanelRef = useRef<HTMLElement>(null);
-  const actionAreaRef = useRef<HTMLDivElement>(null);
-  const [isGenerationVisible, setIsGenerationVisible] = useState(true);
-  const [isAgentTourOpen, setIsAgentTourOpen] = useState(false);
-  const [agentTourCurrent, setAgentTourCurrent] = useState(0);
-  const [isAgentTourPending, setIsAgentTourPending] = useState(false);
-  const [isDebugVisible, setIsDebugVisible] = useState(false);
-  const [isCompareMode, setIsCompareMode] = useState(false);
-  const [isDebugFullscreen, setIsDebugFullscreen] = useState(false);
-  const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
-    useState(false);
-  const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const requestedAgentId = Number(searchParams.get("agent_id"));
-  const isRequestedAgentLoading =
-    Number.isInteger(requestedAgentId) &&
-    requestedAgentId > 0 &&
-    requestedAgentId !== currentAgentId;
-  const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(
-    currentAgentId
-  );
-  const { total } = useAgentVersionList(currentAgentId);
-  const shouldFetchVersionDetail = !isRequestedAgentLoading && total > 0;
-  const { agentVersionDetail } = useAgentVersionDetail(
-    currentAgentId,
-    agentInfo?.current_version_no ?? null,
-    shouldFetchVersionDetail
-  );
-  const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
-  const {
-    agentId: flowAgentId,
-    completionSyncFailed,
-    isComposerDisabled,
-    isFormLocked,
-    markCompletionSynced,
-    markCompletionSyncFailed,
-    markGenerationCompleted,
-    markGenerationStopped,
-    markRunFinished,
-    markRunStarted,
-    markPromptGenerationFailed,
-    requestConfigFocus,
-    resetFlow,
-    sessionGeneration,
-  } = useNl2AgentFlow();
-  const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
-  const canManualUnlock =
-    !isNl2AgentUnavailable &&
-    flowAgentId === currentAgentId &&
-    !isRequestedAgentLoading &&
-    (isFormLocked || isComposerDisabled);
-  const showOptimizationSuggestions =
-    !isRequestedAgentLoading && !isNl2AgentUnavailable;
+  const { message } = App.useApp();
+  const pathname = usePathname();
+  const router = useRouter();
+  const screens = Grid.useBreakpoint();
+  const initialize = useAgentStore((state) => state.initialize);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [importData, setImportData] = useState<ImportAgentData | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
-  useEffect(() => {
-    resetFlow(currentAgentId);
-  }, [currentAgentId, resetFlow]);
-
-  const enqueueSnapshotRefresh = useCallback(
-    (agentId: number, focusTarget: Nl2AgentConfigFocusTarget | null = null) => {
-      snapshotRefreshQueue.current = snapshotRefreshQueue.current
-        .then(async () => {
-          const initialState = useAgentStore.getState();
-          if (initialState.currentAgentId !== agentId) return false;
-
-          const autosaveSucceeded = await initialState.waitForIdle();
-          if (!autosaveSucceeded) {
-            throw new Error("Pending Agent edits could not be saved");
-          }
-          if (useAgentStore.getState().currentAgentId !== agentId) return false;
-
-          const result = await searchAgentInfo(agentId, undefined, 0);
-          if (!result.success || !result.data) {
-            throw new Error(result.message);
-          }
-          const currentState = useAgentStore.getState();
-          if (currentState.currentAgentId !== agentId) return false;
-          if (!currentState.replaceServerSnapshot(agentId, result.data)) {
-            throw new Error("Agent context changed during synchronization");
-          }
-
-          await queryClient.invalidateQueries({ queryKey: ["agents"] });
-          if (focusTarget) requestConfigFocus(agentId, focusTarget);
-          return true;
-        })
-        .catch((error) => {
-          log.warn("[NL2Agent] Failed to refresh saved draft fields", {
-            agentId,
-            error,
-          });
-          return false;
-        });
-      return snapshotRefreshQueue.current;
+  const loadAgent = useCallback(
+    async (agentId: number) => {
+      const result = await searchAgentInfo(agentId);
+      if (!result.success || !result.data) {
+        message.error(
+          result.message || t("agentConfig.agents.detailsLoadFailed")
+        );
+        return null;
+      }
+      initialize(result.data);
+      return result.data;
     },
-    [requestConfigFocus]
+    [initialize, message, t]
   );
 
-  const synchronizeCompletion = useCallback(
+  const columns = screens.xxl ? 4 : screens.xl ? 3 : screens.md ? 2 : 1;
+  const rows = screens.xs ? 2 : 3;
+  const itemsPerPage = Math.max(1, columns * rows - 1);
+  const { agents, pagination, isLoading, isError, refetch } = useAgentList({
+    search,
+    page,
+    pageSize: itemsPerPage,
+  });
+  const cardHeight = `calc((100% - ${(rows - 1) * 20}px) / ${rows})`;
+
+  const updateUrl = useCallback(
     (agentId: number) => {
-      void enqueueSnapshotRefresh(agentId).then((synchronized) => {
-        if (synchronized) markCompletionSynced(agentId);
-        else markCompletionSyncFailed(agentId);
-      });
+      router.push(`${pathname}/${agentId}`);
     },
-    [enqueueSnapshotRefresh, markCompletionSyncFailed, markCompletionSynced]
+    [pathname, router]
   );
 
-  const handleStateEvent = useCallback(
-    (event: Nl2AgentStateEvent) => {
-      if (event.event === "prompt_generation_failed") {
-        markPromptGenerationFailed(event.agent_id, event.failed_fields);
-        return;
-      }
-      if (event.event === "agent_generation_completed") {
-        markGenerationCompleted(event.agent_id);
-        synchronizeCompletion(event.agent_id);
-        return;
-      }
-      void enqueueSnapshotRefresh(
-        event.agent_id,
-        resolveDraftFocusTarget(event.updated_fields)
-      );
+  const handleOpenDetail = useCallback(
+    async (agent: Agent) => {
+      const loadedAgent = await loadAgent(Number(agent.id));
+      if (!loadedAgent) return;
+      setSelectedAgent(loadedAgent);
+      setDetailOpen(true);
     },
-    [
-      enqueueSnapshotRefresh,
-      markGenerationCompleted,
-      markPromptGenerationFailed,
-      synchronizeCompletion,
-    ]
+    [loadAgent]
   );
 
-  const handleGenerationStopped = useCallback(
-    (agentId: number) => markGenerationStopped(agentId),
-    [markGenerationStopped]
+  const handleManageVersions = useCallback(
+    async (agentId: number) => {
+      const loadedAgent = await loadAgent(agentId);
+      if (!loadedAgent) return;
+      setSelectedAgent(loadedAgent);
+      setIsVersionManageOpen(true);
+    },
+    [loadAgent]
   );
 
-  const handleManualUnlock = useCallback(() => {
-    if (!canManualUnlock || currentAgentId === null) return;
-    nl2AgentChatPanelRef.current?.cancelRun();
-    markGenerationStopped(currentAgentId);
-  }, [canManualUnlock, currentAgentId, markGenerationStopped]);
+  const refreshSelectedAgentInfo = useCallback(async () => {
+    if (!selectedAgent?.id) return null;
+    const loadedAgent = await loadAgent(Number(selectedAgent.id));
+    if (loadedAgent) setSelectedAgent(loadedAgent);
+    return loadedAgent;
+  }, [loadAgent, selectedAgent]);
 
-  const retryCompletionSync = useCallback(() => {
-    if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
-  }, [currentAgentId, synchronizeCompletion]);
+  const handleCreate = ({ agentId }: { agentId: number }) => {
+    setIsCreateOpen(false);
+    void refetch();
+    updateUrl(agentId);
+  };
 
-  const handleAgentCreated = useCallback(() => {
-    setIsGenerationVisible(true);
-    if (
-      typeof window !== "undefined" &&
-      window.localStorage.getItem(AGENT_TOUR_SEEN_STORAGE_KEY) === "true"
-    ) {
-      return;
-    }
-    setAgentTourCurrent(0);
-    setIsAgentTourPending(true);
-  }, []);
-
-  const handleAgentPublished = useCallback(() => {
-    if (currentAgentId === null) return;
-
-    void Promise.all([
-      refetchAgentInfo(),
-      queryClient.invalidateQueries({
-        queryKey: ["agentVersions", currentAgentId],
-      }),
-    ]).catch((error) => {
-      log.warn("[AgentVersion] Failed to refresh version information", {
-        agentId: currentAgentId,
-        error,
-      });
+  const handleImport = async () => {
+    await openImportWizardWithFile({
+      onSuccess: (data) => {
+        setImportData(data);
+        setIsImportOpen(true);
+      },
+      message,
+      t,
+      log,
     });
-  }, [currentAgentId, queryClient, refetchAgentInfo]);
+  };
 
-  useEffect(() => {
-    if (
-      !isAgentTourPending ||
-      !generationPanelRef.current ||
-      !configPanelRef.current ||
-      !actionAreaRef.current
-    ) {
-      return;
-    }
-
-    const animationFrame = requestAnimationFrame(() => {
-      setIsAgentTourOpen(true);
-      setIsAgentTourPending(false);
-      window.localStorage.setItem(AGENT_TOUR_SEEN_STORAGE_KEY, "true");
-    });
-
-    return () => cancelAnimationFrame(animationFrame);
-  }, [isAgentTourPending, isGenerationVisible]);
+  const handleImportComplete = (agentId: number) => {
+    setIsImportOpen(false);
+    setImportData(null);
+    void refetch();
+    updateUrl(agentId);
+  };
 
   return (
-    <div className="flex h-full w-full min-h-0 flex-col bg-gray-50">
-      <div className="h-auto min-h-0 shrink-0 bg-white">
-        <AgentSelectorHeader
-          onToggleVersionManage={() =>
-            setIsShowVersionManagePanel((visible) => !visible)
-          }
-          isVersionManageVisible={isShowVersionManagePanel}
-          onAgentCreated={handleAgentCreated}
-        />
-      </div>
-
-      <main className="relative flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
-        <div
-          className="flex min-w-0 min-h-0 flex-1 flex-row gap-4"
-          style={{ visibility: isRequestedAgentLoading ? "hidden" : "visible" }}
-        >
-          <PanelCard
-            panelRef={generationPanelRef}
-            title={t("agent.page.panel.nl2agent")}
-            className={
-              isGenerationVisible ? (isDebugVisible ? "flex-1" : "flex-[1]") : "hidden"
-            }
-            rightAction={
-              <button
-                type="button"
-                aria-label={t("agent.page.panel.nl2agent.closeAria")}
-                onClick={() => setIsGenerationVisible(false)}
-                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-              >
-                <X size={18} />
-              </button>
-            }
-          >
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              {isNl2AgentUnavailable ? (
-                <div
-                  className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                  role="status"
-                >
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white px-4 py-6 sm:px-6 xl:px-16">
+      <Card
+        className="flex h-full min-h-0 w-full flex-col"
+        styles={{
+          body: {
+            display: "flex",
+            minHeight: 0,
+            flex: 1,
+            flexDirection: "column",
+          },
+        }}
+      >
+        <div className="flex h-full min-h-0 w-full flex-col gap-5">
+          <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-4">
+              <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                <Bot className="size-7" aria-hidden />
+              </span>
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                  {t("agentRepository.page.tab.mine")}
+                </h1>
+                <p className="mt-1 text-sm text-slate-600">
                   {t(
-                    "nl2agent.unavailable",
-                    "Create or select an editable Agent first."
+                    "agentRepository.mine.description",
+                    "选择一个智能体以查看详情或进入编辑。"
                   )}
-                </div>
-              ) : null}
-              {completionSyncFailed ? (
-                <div
-                  className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                  role="alert"
-                >
-                  <span>
-                    {t(
-                      "nl2agent.completion.syncFailed",
-                      "The Agent was generated, but the form could not be refreshed."
-                    )}
-                  </span>
-                  <Button
-                    icon={<RefreshCw size={14} />}
-                    onClick={retryCompletionSync}
-                    size="small"
-                  >
-                    {t("nl2agent.completion.retry", "Retry")}
-                  </Button>
-                </div>
-              ) : null}
-              <Nl2AgentChatPanel
-                ref={nl2AgentChatPanelRef}
-                key={sessionGeneration}
-                agentId={currentAgentId}
-                showOptimizationSuggestions={showOptimizationSuggestions}
-                disabled={
-                  isComposerDisabled ||
-                  isRequestedAgentLoading ||
-                  isNl2AgentUnavailable
-                }
-                onStateEvent={handleStateEvent}
-                onStopped={handleGenerationStopped}
-                onRunStart={markRunStarted}
-                onRunEnd={markRunFinished}
-              />
+                </p>
+              </div>
             </div>
-          </PanelCard>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                icon={<FileInput className="size-4" />}
+                onClick={handleImport}
+              >
+                {t("agentConfig.button.import")}
+              </Button>
+            </div>
+          </section>
 
-          <PanelCard
-            panelRef={configPanelRef}
-            title={t("agent.page.panel.config")}
-            className={isDebugFullscreen ? "flex-1" : "flex-[2]"}
-            leftAction={
-              currentAgentId !== null ? (
-                <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-gray-700">
-                  <Tag color="orange" className="rounded-md text-sm">
-                    <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                      <Pencil size={12} aria-hidden="true" />
-                      {t("agent.version.draftStatus")}
-                    </span>
-                  </Tag>
-                 
-                </div>
-              ) : null
-            }
-            rightAction={
-              <div className="flex items-center gap-2">
-                {agentInfo?.current_version_no && total > 0 ? (
-                  <div className="flex items-center gap-1">
-                    <History size={16} />
-                    {t("agent.version.current")}:
-                    <Tag
-                      color="cyan"
-                      variant="outlined"
-                      className="cursor-pointer rounded-md font-mono text-sm"
-                      onClick={() => setIsShowVersionManagePanel(true)}
-                    >
-                      {agentVersionDetail?.version.version_name ||
-                        `V${agentInfo.current_version_no}`}
-                    </Tag>
-                    <span className="text-xs text-gray-500">
-                      / {t("agent.version.totalVersions", { count: total })}
-                    </span>
-                  </div>
-                ) : null}
-                <Button
-                  icon={<Sparkles size={16} />}
-                  onClick={() => setIsGenerationVisible((visible) => !visible)}
-                  type={isGenerationVisible ? "primary" : "default"}
-                >
-                  {t("agent.page.panel.nl2agent")}
+          <Input
+            allowClear
+            prefix={<Search className="size-4 text-slate-400" />}
+            placeholder={t("agentSelector.searchPlaceholder")}
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            className="h-10"
+          />
+
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {isLoading ? (
+              <div className="flex h-full items-center justify-center">
+                <Spin size="large" />
+              </div>
+            ) : isError ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3">
+                <p className="text-sm text-slate-500">
+                  {t("agentRepository.mine.loadError")}
+                </p>
+                <Button onClick={() => refetch()}>
+                  {t("repository.common.retry")}
                 </Button>
               </div>
-            }
-          >
-            <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
-              <AgentConfig
-                actionAreaRef={actionAreaRef}
-                canManualUnlock={canManualUnlock}
-                onManualUnlock={handleManualUnlock}
-                onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
-                onPublished={handleAgentPublished}
-              />
-            </div>
-          </PanelCard>
-
-          <PanelCard
-            title={t("agent.page.panel.debug")}
-            className={
-              isDebugVisible ? (isDebugFullscreen ? "flex-[2]" : "flex-1") : "hidden"
-            }
-            leftAction={
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <span>{t("agent.debug.compareMode")}</span>
-                <Switch
-                  checked={isCompareMode}
-                  onChange={setIsCompareMode}
-                  size="small"
-                />
-              </div>
-            }
-            rightAction={
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  aria-label={
-                    isDebugFullscreen
-                      ? "Restore debug panel size"
-                      : "Maximize debug panel"
-                  }
-                  onClick={() => {
-                    if (isDebugFullscreen) {
-                      setIsDebugFullscreen(false);
-                      return;
-                    }
-
-                    setIsGenerationVisible(false);
-                    setIsShowVersionManagePanel(false);
-                    setIsDebugFullscreen(true);
-                  }}
-                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            ) : (
+              <div className="flex h-full min-h-0 flex-col">
+                <Row
+                  gutter={[20, 20]}
+                  className="min-h-0 flex-1 content-stretch overflow-hidden"
                 >
-                  {isDebugFullscreen ? (
-                    <Minimize2 size={18} />
-                  ) : (
-                    <Maximize2 size={18} />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  aria-label={t("agent.page.panel.debug.closeAria")}
-                  onClick={() => {
-                    setIsDebugVisible(false);
-                    setIsDebugFullscreen(false);
-                  }}
-                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                >
-                  <X size={18} />
-                </button>
+                  <Col
+                    xs={24}
+                    sm={12}
+                    xl={8}
+                    xxl={6}
+                    className="flex"
+                    style={{ height: cardHeight }}
+                  >
+                    <CreateResourceCard
+                      title={t("agentConfig.button.new")}
+                      onClick={() => setIsCreateOpen(true)}
+                      className="min-h-0"
+                    />
+                  </Col>
+                  {(agents as AgentCardItem[]).map((agent) => {
+                    const date = formatAgentDate(agent);
+                    return (
+                      <Col
+                        key={agent.id}
+                        xs={24}
+                        sm={12}
+                        xl={8}
+                        xxl={6}
+                        className="flex"
+                        style={{ height: cardHeight }}
+                      >
+                        <ResourceCard
+                          className="h-full min-h-0"
+                          title={getAgentTitle(agent)}
+                          subtitle={
+                            agent.current_version_no
+                              ? t("agentRepository.mine.currentVersion", {
+                                  version:
+                                    agent.version_name ||
+                                    `V${agent.current_version_no}`,
+                                })
+                              : undefined
+                          }
+                          icon={
+                            <AgentAvatar
+                              agent={agent}
+                              size={44}
+                              iconSize={20}
+                            />
+                          }
+                          description={
+                            agent.description ||
+                            t("agentRepository.card.noDescription")
+                          }
+                          descriptionLines={2}
+                          actions={
+                            <div className="flex flex-col items-end gap-1.5">
+                              <AgentConfigActions
+                                agentId={Number(agent.id)}
+                                readOnly={agent.permission === "READ_ONLY"}
+                                variant="menu"
+                                onManageVersions={handleManageVersions}
+                              />
+                              <Tag
+                                color={
+                                  agent.current_version_no ? "green" : "orange"
+                                }
+                              >
+                                {agent.current_version_no
+                                  ? t(
+                                      "agentRepository.mine.lifecycle.published"
+                                    )
+                                  : t("agentRepository.mine.lifecycle.draft")}
+                              </Tag>
+                            </div>
+                          }
+                          meta={
+                            <span className="inline-flex items-center gap-1">
+                              <Clock className="size-3.5" aria-hidden />
+                              {date || "-"}
+                            </span>
+                          }
+                          footerLayout="inline"
+                          footer={
+                            <Button
+                              type="text"
+                              size="small"
+                              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                              icon={<Pencil className="size-3.5" aria-hidden />}
+                              onClick={() => updateUrl(Number(agent.id))}
+                            >
+                              {t("agentRepository.mine.edit")}
+                            </Button>
+                          }
+                          onClick={() => void handleOpenDetail(agent)}
+                        />
+                      </Col>
+                    );
+                  })}
+                </Row>
+                {(pagination?.total ?? 0) > itemsPerPage ? (
+                  <div className="flex shrink-0 justify-end pt-5">
+                    <Pagination
+                      current={pagination?.page ?? page}
+                      pageSize={itemsPerPage}
+                      total={pagination?.total ?? 0}
+                      showSizeChanger={false}
+                      onChange={setPage}
+                    />
+                  </div>
+                ) : null}
               </div>
-            }
-          >
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <AgentDebugPanel isCompareMode={isCompareMode} />
-            </div>
-          </PanelCard>
-
-          {isShowVersionManagePanel && (
-            <PanelCard
-              title={t("agent.version.manage")}
-              className="flex-1"
-              rightAction={
-                <button
-                  type="button"
-                  aria-label={t("agent.page.panel.debug.closeAria")}
-                  onClick={() => setIsShowVersionManagePanel(false)}
-                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                >
-                  <X size={18} />
-                </button>
-              }
-            >
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentVersion
-                  currentVersionNo={agentInfo?.current_version_no}
-                  onRefreshAgentInfo={refetchAgentInfo}
-                />
-              </div>
-            </PanelCard>
-          )}
-        </div>
-        {isRequestedAgentLoading ? (
-          <div
-            className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-gray-50"
-            role="status"
-          >
-            <Spin size="large" />
-            <span className="text-sm text-gray-500">{t("common.loading")}</span>
+            )}
           </div>
-        ) : null}
-      </main>
-      <Tour
-        open={isAgentTourOpen}
-        current={agentTourCurrent}
-        onChange={setAgentTourCurrent}
-        onClose={() => setIsAgentTourOpen(false)}
-        steps={[
-          {
-            title: t("agent.tour.generation.title"),
-            description: t("agent.tour.generation.description"),
-            target: generationPanelRef.current,
-            nextButtonProps: {
-              children: t("agent.tour.next"),
-            },
-          },
-          {
-            title: t("agent.tour.configuration.title"),
-            description: t("agent.tour.configuration.description"),
-            target: configPanelRef.current,
-            prevButtonProps: {
-              children: t("agent.tour.previous"),
-            },
-            nextButtonProps: {
-              children: t("agent.tour.next"),
-            },
-          },
-          {
-            title: t("agent.tour.actions.title"),
-            description: t("agent.tour.actions.description"),
-            target: actionAreaRef.current,
-            prevButtonProps: {
-              children: t("agent.tour.previous"),
-            },
-            nextButtonProps: {
-              children: t("agent.tour.finish"),
-            },
-          },
-        ]}
+        </div>
+      </Card>
+
+      <AgentDetail
+        detail={selectedAgent ? mapAgentInfoDetail(selectedAgent) : null}
+        agentIcon={
+          selectedAgent ? (
+            <AgentAvatar agent={selectedAgent} size={48} iconSize={24} />
+          ) : undefined
+        }
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        onEdit={() => selectedAgent && updateUrl(Number(selectedAgent.id))}
+        published={Boolean(selectedAgent?.current_version_no)}
+      />
+      <Modal
+        centered
+        width={900}
+        open={isVersionManageOpen}
+        title={t("agent.version.manage")}
+        onCancel={() => setIsVersionManageOpen(false)}
+        footer={null}
+      >
+        <AgentVersion
+          currentVersionNo={selectedAgent?.current_version_no}
+          onRefreshAgentInfo={refreshSelectedAgentInfo}
+        />
+      </Modal>
+      <CreateAgentModal
+        open={isCreateOpen}
+        onCancel={() => setIsCreateOpen(false)}
+        onCreated={handleCreate}
+      />
+      <AgentImportWizard
+        visible={isImportOpen}
+        initialData={importData}
+        onCancel={() => {
+          setIsImportOpen(false);
+          setImportData(null);
+        }}
+        onImportComplete={handleImportComplete}
       />
     </div>
-  );
-}
-
-export default function AgentSetupOrchestrator() {
-  return (
-    <Nl2AgentFlowProvider>
-      <AgentSetupContent />
-    </Nl2AgentFlowProvider>
   );
 }

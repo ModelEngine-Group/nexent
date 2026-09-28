@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Pagination, Tag, Tooltip } from "antd";
+import { Button, Input, Pagination, Tag, Tooltip } from "antd";
 import {
   PlusOutlined,
   ReloadOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
 import { SquarePen, Trash2 } from "lucide-react";
 
@@ -24,6 +25,10 @@ interface AidpKnowledgeListProps {
   hasMore: boolean;
   currentPage: number;
   pageSize: number;
+  /** Raw search box value. The parent debounces it before querying, so this is
+   *  intentionally the un-debounced text the user is currently typing. */
+  keyword: string;
+  onKeywordChange: (value: string) => void;
   onPageChange: (page: number) => void;
   onSelect: (kb: AidpKnowledgeBaseItem) => void;
   onRefresh: () => void;
@@ -41,6 +46,8 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   hasMore,
   currentPage,
   pageSize,
+  keyword,
+  onKeywordChange,
   onPageChange,
   onSelect,
   onRefresh,
@@ -107,6 +114,18 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
             </Tooltip>
           </div>
         </div>
+        {/* Search box. `keyword` is the raw input value and the parent debounces
+            it, so typing stays responsive and only the settled text triggers a
+            request. Clearing the field restores the unfiltered list. */}
+        <Input
+          allowClear
+          className="mt-3"
+          placeholder={t("aidpKnowledge.searchPlaceholder")}
+          prefix={<SearchOutlined className="text-gray-400" />}
+          value={keyword}
+          onChange={(e) => onKeywordChange(e.target.value)}
+          size="small"
+        />
       </div>
 
       {/* List */}
@@ -139,7 +158,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                     <div className="flex-1 min-w-0 mr-2">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p
-                          className="text-sm font-medium text-gray-800 truncate"
+                          className="min-w-0 truncate text-sm font-medium text-gray-800"
                           title={kb.kds_name}
                         >
                           {kb.kds_name}
@@ -229,7 +248,9 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
           </div>
         ) : (
           <div className="p-6 text-center text-gray-500 text-sm">
-            {t("aidpKnowledge.listEmpty")}
+            {keyword.trim()
+              ? t("aidpKnowledge.searchEmpty")
+              : t("aidpKnowledge.listEmpty")}
           </div>
         )}
       </div>

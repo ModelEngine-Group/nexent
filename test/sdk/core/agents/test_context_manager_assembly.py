@@ -7,7 +7,7 @@ from nexent.core.agents.context import (
     ContextManager,
     ContextManagerConfig,
 )
-from smolagents.memory import ActionStep, TaskStep
+from smolagents.memory import ActionStep, TaskStep, ToolCall
 from smolagents.monitoring import Timing
 
 
@@ -89,6 +89,43 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     assert final.evidence.message_roles == ("system", "user", "user", "user")
     assert final.evidence.history_message_roles == ("user", "user", "user")
     assert final.tools == [{"name": "a"}, {"name": "z"}]
+
+
+def test_oc_013_oc_023_request_only_messages_are_budgeted_and_not_saved():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="")
+    memory.steps.append(TaskStep(task="current task"))
+    system_reminder = {"role": "system", "content": [{"type": "text", "text": "format contract"}]}
+    tail_reminder = {"role": "user", "content": [{"type": "text", "text": "format contract"}]}
+    continuation = {"role": "user", "content": [{"type": "text", "text": "continue with action"}]}
+    kwargs = {"model": None, "memory": memory, "current_run_start_idx": 0, "run_context": run_context}
+    baseline = manager.assemble_final_context(**kwargs)
+    first = manager.assemble_final_context(
+        **kwargs, request_system_messages=[system_reminder], request_tail_messages=[tail_reminder]
+    )
+    continued = manager.assemble_final_context(
+        **kwargs, request_system_messages=[system_reminder],
+        request_tail_messages=[tail_reminder, continuation], force_compaction=True,
+    )
+
+    assert [_message_text(message) for message in first.messages] == [
+        "stable policy", "format contract", "current task", "format contract"
+    ]
+    assert [_message_text(message) for message in continued.messages][-2:] == [
+        "format contract", "continue with action"
+    ]
+    assert [_message_text(message) for message in continued.memory_messages] == [
+        "stable policy", "current task"
+    ]
+    assert first.evidence.final_token_estimate > baseline.evidence.final_token_estimate
+    assert continued.evidence.final_token_estimate > first.evidence.final_token_estimate
+    assert len(memory.steps) == 1
+    with pytest.raises(ValueError):
+        manager.assemble_final_context(
+            **kwargs, purpose="final_answer", request_tail_messages=[continuation]
+        )
 
 
 def test_context_fingerprint_bounds_cycles_and_excessive_depth():
@@ -215,6 +252,50 @@ def test_current_run_keeps_only_task_as_user_message():
         "assistant",
     ]
     assert sum(message["role"] == "user" for message in final.messages) == 1
+
+
+def test_completed_skill_read_is_available_to_the_next_model_step():
+    """A successful skill read remains evidence; the model need not read it again."""
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(
+        memory=memory, fallback_system_prompt="policy"
+    )
+    memory.steps.extend(
+        [
+            TaskStep(task="use the matching skill"),
+            ActionStep(
+                step_number=1,
+                timing=Timing(start_time=0),
+                tool_calls=[
+                    ToolCall(
+                        name="python_interpreter",
+                        arguments='skill_content = read_skill_md("demo-skill")',
+                        id="call_1",
+                    )
+                ],
+                observations="Execution logs:\nSKILL_CONTENT_SENTINEL: follow the guide",
+                action_output="SKILL_CONTENT_SENTINEL: follow the guide",
+            ),
+        ]
+    )
+
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    action_history = next(
+        _message_text(message)
+        for message in final.messages
+        if '<completed_action_history read_only="true">' in _message_text(message)
+    )
+    assert "read_skill_md" in action_history
+    assert 'read_skill_md("demo-skill")' in action_history
+    assert "SKILL_CONTENT_SENTINEL: follow the guide" in action_history
+    assert "Do not copy this record's format as your next response." in action_history
 
 
 def test_context_manager_attributes_tool_schema_change():

@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from nexent.core.agents.subagent_wrapper import SubAgentToolWrapper, _default_task_extractor
+from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 
 
 class InnerAgent:
@@ -146,3 +147,23 @@ def test_call_still_balances_observer_events_when_inner_raises(observer: Mock) -
     start_kwargs = observer.add_subagent_start.call_args.kwargs
     end_kwargs = observer.add_subagent_end.call_args.kwargs
     assert start_kwargs["invocation_id"] == end_kwargs["invocation_id"]
+
+
+def test_cmsr_004_managed_subagent_preserves_terminal_model_error(observer: Mock) -> None:
+    terminal = ModelInvocationTerminalError(
+        ModelErrorCode.SERVICE_UNAVAILABLE,
+        5,
+        cause=RuntimeError("provider detail"),
+    )
+    wrapper = SubAgentToolWrapper(
+        Mock(side_effect=terminal),
+        observer,
+        agent_id="agent-1",
+        agent_name="Research",
+    )
+
+    with pytest.raises(ModelInvocationTerminalError) as exc_info:
+        wrapper(task="x")
+
+    assert exc_info.value is terminal
+    assert observer.add_subagent_end.call_count == 1

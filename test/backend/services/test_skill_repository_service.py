@@ -20,6 +20,7 @@ _MOCKED_MODULE_NAMES = [
     "database.skill_repository_db",
     "database.group_db",
     "database.skill_db",
+    "database.tag_management_db",
     "database.user_tenant_db",
     "management.services.skill.service",
     "services.notification_service",
@@ -96,6 +97,16 @@ sys.modules["utils.str_utils"] = _utils_str_utils_mock
 _skill_db_mock = MagicMock()
 _skill_db_mock.get_skill_by_name = MagicMock(return_value=None)
 sys.modules["database.skill_db"] = _skill_db_mock
+
+_tag_management_db_mock = types.ModuleType("database.tag_management_db")
+_tag_management_db_mock.TagManagementDB = MagicMock()
+_tag_management_db_mock.TagManagementDB.filter_authorized_resource_ids = MagicMock(
+    return_value=[]
+)
+_tag_management_db_mock.TagManagementDB.list_resource_assignment_display_values_by_ids = (
+    MagicMock(return_value={})
+)
+sys.modules["database.tag_management_db"] = _tag_management_db_mock
 
 _user_tenant_db_mock = MagicMock()
 _user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock()
@@ -241,6 +252,9 @@ def setup_function():
     _group_db_mock.query_group_ids_by_user.return_value = []
     _skill_db_mock.reset_mock()
     _skill_db_mock.get_skill_by_name.return_value = None
+    _tag_management_db_mock.TagManagementDB.reset_mock()
+    _tag_management_db_mock.TagManagementDB.filter_authorized_resource_ids.return_value = []
+    _tag_management_db_mock.TagManagementDB.list_resource_assignment_display_values_by_ids.return_value = {}
     _user_tenant_db_mock.reset_mock()
     _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
         "user_role": "DEV",

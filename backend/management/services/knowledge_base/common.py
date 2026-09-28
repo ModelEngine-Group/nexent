@@ -251,5 +251,3 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
 
     # Case B: Name is available in this tenant
     return {"status": "available"}
-
-

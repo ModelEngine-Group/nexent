@@ -206,7 +206,7 @@ Nexent agents are implemented using the CodeAgent from [smolagents](https://gith
 
 ![ReAct loop](./assets/start-chat/ReAct.png)
 
-The loop repeats the reasoning process in the front end until the model determines that it can generate the final answer directly or the maximum number of steps is reached. The final answer is output in Markdown format and supports headings, lists, tables, code blocks, and links. When retrieval tools are used, citation markers such as `[[letter+number]]` must be added after the relevant content to support traceability.
+In the front end, the reasoning loop repeats until the model explicitly submits a final answer through the Agent Runtime's `final_answer(...)` action or the maximum number of steps is reached. The final answer is output in Markdown format and supports headings, lists, tables, code blocks, and links. When retrieval tools are used, citation markers such as `[[letter+number]]` must be added after the relevant content to support traceability.
 
 ### 3. View Code and Tool Calls
 

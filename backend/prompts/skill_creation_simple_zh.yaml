@@ -3,7 +3,8 @@ system_prompt: |-
 
   ## 多轮对话规则
 
-  - 如果需求缺少关键信息，先提出一个简洁的澄清问题；该轮不要输出 XML 控制块。
+  - 每次响应都必须以独占一行的 `<FINAL_ANSWER>` 开始，并以独占一行的 `</FINAL_ANSWER>` 结束；外层之外不得有任何内容。
+  - 如果需求缺少关键信息，在 `<FINAL_ANSWER>` 内提出一个简洁的澄清问题；该轮不要输出 `<SKILL>`、`<FILE>` 或 `<SUMMARY>`。
   - 修改技能时同时参考对话历史和当前技能快照。
   {% if target_files %}
   - 本轮是定向文件修改。只能修改这些文件：{{ target_files | join(', ') }}。
@@ -14,7 +15,7 @@ system_prompt: |-
   - 一旦生成或修改技能，必须输出最新的完整快照，不要只输出局部补丁。
   - 所有 XML 控制标签必须独占一行，控制块外不要包裹 Markdown 代码围栏。
   - 不要在澄清、思考或总结文本中引用或解释 XML 控制标签；它们只能作为真实结构独占一行输出。
-  - 输出结构时直接从 `<SKILL>` 开始，不要添加 Markdown 代码围栏或语言标识。
+  - 输出结构时在 `<FINAL_ANSWER>` 后直接输出 `<SKILL>`，不要添加 Markdown 代码围栏或语言标识。
   - `<SKILL>` 块一旦开始，就不得在输出 `</SKILL>` 前结束响应或切换到 `<SUMMARY>`；`</SKILL>` 必须独占一行。
   - 输出结束前执行结构自检：必须恰好包含一个 `<SKILL>` 和一个与之配对的 `</SKILL>`，且 `</SKILL>` 必须位于 `<SUMMARY>` 之前。
   {% endif %}
@@ -56,6 +57,7 @@ system_prompt: |-
 
   ### 格式示例
 
+  <FINAL_ANSWER>
   <SKILL>
   ---
   name: your-skill-name
@@ -73,6 +75,7 @@ system_prompt: |-
   <SUMMARY>
   这里是你对用户的友好说明，如技能已创建、功能亮点等
   </SUMMARY>
+  </FINAL_ANSWER>
 
   ## 编写描述（关键）
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import types
+
+import pytest
 from threading import Event
 from unittest.mock import MagicMock, patch
 
@@ -47,10 +49,15 @@ def test_create_single_agent_injects_managed_runtime_and_run_items():
     with patch.object(factory, "create_model", return_value=MagicMock()), \
             patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
         factory.create_single_agent(config)  # NOSONAR - trusted local test double.
+        factory.create_single_agent(config)
+        assert config.context_items == [item]
 
     runtime = captured["context_runtime"]
     assert type(runtime).__name__ == "ManagedContextRuntime"
-    assert runtime.items == [item]
+    assert runtime.items[0] == item
+    assert runtime.items[1].id == "system:clarification_protocol"
+    assert "ends the current execution" in runtime.items[1].content["text"]
+    assert captured["enable_clarification"] is True
     assert runtime.context_manager.get_registered_items() == []
 
 
@@ -163,3 +170,18 @@ def test_each_managed_agent_runtime_owns_one_distinct_context_manager():
     assert len({id(manager) for manager in managers}) == 3
     assert main_agent is created_agents[-1]
     assert all(not hasattr(agent, "context_manager") for agent in created_agents)
+
+
+@pytest.mark.parametrize("kind", ["child", "nl2agent", "nl2skill"])
+def test_clarification_policy_is_not_injected_into_other_protocols(kind):
+    factory = _factory()
+    factory.observer.enable_nl2a_wrapper = kind == "nl2agent"
+    item = ContextItemInput(id="system:policy", type="system", content={"text": "original policy"})
+    config = AgentConfig(name="agent", description="test", model_name="main", tools=[], context_items=[item],
+                         output_protocol="final_answer_envelope" if kind == "nl2skill" else "code_action")
+    with patch.object(factory, "create_model", return_value=MagicMock()), \
+            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent") as core:
+        factory.create_single_agent(config, _managed_context=kind == "child")
+    assert core.call_args.kwargs["enable_clarification"] is False
+    assert core.call_args.kwargs["context_runtime"].items == [item]
+    assert config.context_items == [item]

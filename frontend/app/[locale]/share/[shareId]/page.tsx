@@ -131,7 +131,7 @@ export default function ShareConversationPage() {
         <Alert
           type="error"
           showIcon
-          message={t(
+          title={t(
             "chatInterface.shareLoadFailed",
             "Unable to open this shared conversation"
           )}

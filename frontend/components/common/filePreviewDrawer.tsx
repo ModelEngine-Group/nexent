@@ -161,6 +161,9 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
   const markdownContainerRef = useRef<HTMLDivElement | null>(null);
   const textFetchSessionRef = useRef(0);
   const csvDelimiterRef = useRef<string>(",");
+  // Keep preview loading independent from callback identities supplied by parents.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const handleKnowledgePreviewAccessError = useCallback(
     (reason: PreviewAccessReason) => {
@@ -177,10 +180,10 @@ export function FilePreviewDrawer(props: Readonly<FilePreviewProps>) {
         okText: t("common.confirm"),
         centered: true,
       });
-      onClose();
+      onCloseRef.current();
       return true;
     },
-    [previewContext, t, onClose]
+    [previewContext, t]
   );
 
   const resetTextPreviewState = useCallback(() => {

@@ -109,6 +109,7 @@ class LeaseScheduler(Generic[JobPayload]):
         self._loop_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._running: set[asyncio.Task[None]] = set()
+        self._waiting: set[Hashable] = set()
         self._recovery_pending = True
 
     @property
@@ -118,6 +119,25 @@ class LeaseScheduler(Generic[JobPayload]):
     @property
     def active_count(self) -> int:
         return len(self._running)
+
+    @property
+    def waiting_count(self) -> int:
+        """Jobs parked on external (e.g. human) input; they still hold leases."""
+        return len(self._waiting)
+
+    def mark_waiting(self, job_id: Hashable, *, waiting: bool) -> None:
+        """Flag a claimed job as parked on external input (human decisions).
+
+        A waiting job keeps its executor task and lease alive but no longer
+        consumes a max_concurrency slot, so hour-long human waits cannot
+        starve machine execution. The waiting set is bounded only by job
+        expiration, not by max_concurrency. Must be called on the scheduler
+        loop thread; worker threads should relay via loop.call_soon_threadsafe.
+        """
+        if waiting:
+            self._waiting.add(job_id)
+        else:
+            self._waiting.discard(job_id)
 
     async def start(self) -> None:
         if self.is_running:
@@ -153,7 +173,9 @@ class LeaseScheduler(Generic[JobPayload]):
                 if self._recovery_pending:
                     await self.store.recover()
                     self._recovery_pending = False
-                capacity = max(0, self.config.max_concurrency - len(self._running))
+                # Waiting jobs still hold executor tasks, but their parked
+                # human-input waits must not consume execution concurrency.
+                capacity = max(0, self.config.max_concurrency - (len(self._running) - len(self._waiting)))
                 if capacity:
                     claimed = await self.store.claim_due(
                         self.owner_id,
@@ -203,6 +225,7 @@ class LeaseScheduler(Generic[JobPayload]):
         except Exception:
             logger.exception("Scheduled job failed: job_id=%s", job.job_id)
         finally:
+            self._waiting.discard(job.job_id)
             renewal.cancel()
             await asyncio.gather(renewal, return_exceptions=True)
             try:

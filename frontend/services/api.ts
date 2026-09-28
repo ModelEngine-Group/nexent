@@ -55,6 +55,8 @@ export const API_ENDPOINTS = {
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     knowledgeScope: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
+    workbenchConfig: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench-config`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     batchDelete: `${API_BASE_URL}/conversation/batch-delete`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
@@ -85,9 +87,9 @@ export const API_ENDPOINTS = {
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    listPage: `${API_BASE_URL}/agent/list/page`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
-    getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
     stop: (runId: string | number) =>
       `${API_BASE_URL}/agent/stop/${encodeURIComponent(String(runId))}`,
     export: `${API_BASE_URL}/agent/export`,
@@ -101,11 +103,14 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     knowledgeCapabilities: (agentId: number) =>
       `${API_BASE_URL}/agent/${agentId}/knowledge-capabilities`,
+    workbenchBootstrap: `${API_BASE_URL}/agent/workbench/bootstrap`,
+    workbenchPreview: `${API_BASE_URL}/agent/workbench/capabilities/preview`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
     generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
-    icon: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/icon`,
+    icon: (agentId: number, revision?: string | null) =>
+      `${API_BASE_URL}/agent/${agentId}/icon${revision ? `?v=${encodeURIComponent(revision)}` : ""}`,
     versions: {
       version: (agentId: number, versionNo: number) =>
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
@@ -200,7 +205,7 @@ export const API_ENDPOINTS = {
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
-    listByAgent: `${API_BASE_URL}/agent-evaluations`,
+    list: `${API_BASE_URL}/agent-evaluations`,
     detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
     cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
     report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
@@ -297,7 +302,9 @@ export const API_ENDPOINTS = {
     catalogProviders: `${API_BASE_URL}/model/catalog/providers`,
     catalogProviderModels: (provider: string, modelType?: string) => {
       const base = `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/models`;
-      return modelType ? `${base}?model_type=${encodeURIComponent(modelType)}` : base;
+      return modelType
+        ? `${base}?model_type=${encodeURIComponent(modelType)}`
+        : base;
     },
     catalogModelProfile: (provider: string, modelName: string) =>
       `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/${encodeURIComponent(modelName)}`,
@@ -377,6 +384,10 @@ export const API_ENDPOINTS = {
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    removeKbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
+    downloadKbDocument: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
     models: `${API_BASE_URL}/aidp-mgmt/models`,
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
@@ -568,7 +579,10 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       const queryString = queryParams.toString();
@@ -595,7 +609,10 @@ export const API_ENDPOINTS = {
         queryParams.append("agent_id", String(params.agent_id));
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.search_tag_predicates?.length) {
         queryParams.append(
@@ -608,6 +625,11 @@ export const API_ENDPOINTS = {
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    official: `${API_BASE_URL}/repository/agent/official`,
+    officialInstall: `${API_BASE_URL}/repository/agent/official/install`,
+    officialManagement: `${API_BASE_URL}/repository/agent/official/management`,
+    officialManagementItem: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/official/management/${agentRepositoryId}`,
     tagStats: `${API_BASE_URL}/repository/agent/tags`,
     importPrecheck: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
@@ -617,6 +639,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
+    icon: (agentId: number, versionNo: number) =>
+      `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}/icon`,
   },
   skillRepository: {
     listings: (params?: SkillRepositoryListingListParams) => {
@@ -638,7 +662,10 @@ export const API_ENDPOINTS = {
         queryParams.append("search", params.search.trim());
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       if (params?.sort_by_update_time) {
@@ -665,7 +692,10 @@ export const API_ENDPOINTS = {
         queryParams.append("new_skill_padding", "true");
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
@@ -896,7 +926,8 @@ export const fetchWithErrorHandling = async (
           if (errorData?.error === "TenantStorageFull") {
             throw new ApiError(
               413,
-              errorData.message || "Tenant storage limit reached"
+              errorData.message || "Tenant storage limit reached",
+              errorData
             );
           }
         } catch (error) {
@@ -906,7 +937,8 @@ export const fetchWithErrorHandling = async (
         }
         throw new ApiError(
           ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit."
+          "File size exceeds limit.",
+          errorDetails
         );
       }
 

@@ -46,9 +46,14 @@ def _validate_user_tenant_limit(
             getattr(UserTenant, "delete_flag", None) == "N",
         ).count())
         if user_count >= _USER_LIMIT:
-            raise TenantResourceLimitError(
+            error = TenantResourceLimitError(
                 f"Tenant user limit reached: maximum {_USER_LIMIT} users per tenant"
             )
+            error.resource = "users"
+            error.scope = "tenant"
+            error.limit = _USER_LIMIT
+            error.current_count = user_count
+            raise error
 
     normalized_role = (user_role or "").upper()
     if normalized_role == "ADMIN":
@@ -59,9 +64,14 @@ def _validate_user_tenant_limit(
             getattr(UserTenant, "delete_flag", None) == "N",
         ).count())
         if admin_count >= _ADMIN_LIMIT:
-            raise TenantResourceLimitError(
+            error = TenantResourceLimitError(
                 f"Tenant administrator limit reached: maximum {_ADMIN_LIMIT} administrators per tenant"
             )
+            error.resource = "administrators"
+            error.scope = "tenant"
+            error.limit = _ADMIN_LIMIT
+            error.current_count = admin_count
+            raise error
     elif normalized_role == "SU":
         _lock_resource_limit(session, "super-admin-limit")
         super_admin_count = _count_or_zero(session.query(UserTenant).filter(
@@ -69,9 +79,14 @@ def _validate_user_tenant_limit(
             getattr(UserTenant, "delete_flag", None) == "N",
         ).count())
         if super_admin_count >= _SUPER_ADMIN_LIMIT:
-            raise TenantResourceLimitError(
+            error = TenantResourceLimitError(
                 f"Super administrator limit reached: maximum {_SUPER_ADMIN_LIMIT} super administrator"
             )
+            error.resource = "super_admins"
+            error.scope = "platform"
+            error.limit = _SUPER_ADMIN_LIMIT
+            error.current_count = super_admin_count
+            raise error
 
 
 def get_user_role_by_tenant(user_id: str, tenant_id: str) -> str:

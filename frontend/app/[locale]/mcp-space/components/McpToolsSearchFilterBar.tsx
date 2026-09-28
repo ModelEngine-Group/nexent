@@ -118,7 +118,7 @@ export default function McpToolsSearchFilterBar({
             }
             allowClear
             prefix={<Search className="h-4 w-4 text-slate-400" />}
-            className="h-10 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
+            className="h-8 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
           />
           {searchActions ? (
             <div className="shrink-0">{searchActions}</div>
@@ -127,7 +127,7 @@ export default function McpToolsSearchFilterBar({
             <Select
               value={status}
               onChange={onStatusChange}
-              className="h-10 w-full min-w-[150px]"
+              className="h-8 w-full min-w-[150px]"
               popupMatchSelectWidth={false}
               options={statusOptions}
             />

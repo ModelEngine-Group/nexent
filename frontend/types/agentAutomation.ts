@@ -72,12 +72,19 @@ export interface AgentAutomationTask {
 export interface AgentAutomationRun {
   run_id: number;
   task_id: number;
+  tenant_id: string;
+  user_id: string;
   conversation_id: number;
   scheduled_fire_at: string;
   actual_fire_at?: string | null;
   trigger_type: string;
   status: string;
   generated_prompt?: string | null;
+  user_message_id?: number | null;
+  assistant_message_id?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
   error_code?: string | null;
   error_message?: string | null;
 }

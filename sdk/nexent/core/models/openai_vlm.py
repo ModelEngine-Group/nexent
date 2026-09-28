@@ -45,8 +45,13 @@ class OpenAIVLModel(OpenAIModel):
         Returns:
             bool: True if the model responds successfully, otherwise False.
         """
-        # Use local test image from images folder - use absolute path based on module location
-        module_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # Use local test image from images folder - anchor on the nexent
+        # package root (asset lives in nexent/assets/). A relative dirname
+        # chain worked here only by coincidence of module depth and broke in
+        # the gateway copy of this probe; anchoring on the package makes both
+        # robust against future module moves.
+        import nexent
+        module_dir = os.path.dirname(os.path.abspath(nexent.__file__))
         test_image_path = os.path.join(module_dir, "assets", "git-flow.png")
         if os.path.exists(test_image_path):
             base64_image = self.encode_image(test_image_path)

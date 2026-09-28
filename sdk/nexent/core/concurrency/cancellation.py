@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Callable
 
 
+class RunTerminated(BaseException):
+    """Cooperative cancellation that must bypass ordinary action repair."""
+
+
 @dataclass(frozen=True)
 class ResourceToken:
     value: str

@@ -147,8 +147,12 @@
   color: #172033;
 }
 
-.memory-config-card {
+.memory-config-stack {
   margin-top: 24px;
+}
+
+.memory-config-card {
+  margin-top: 0;
   box-shadow: none;
 }
 
