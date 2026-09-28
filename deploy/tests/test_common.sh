@@ -1288,11 +1288,11 @@ if [[ "$HTTPS_DISABLED_PORTS" == *"nexent-nginx"* ]]; then
   exit 1
 fi
 
-# K8s port values: enabled switches web to ClusterIP and gives 30000 to nginx
+# K8s port values: enabled keeps web on NodePort 30000 and adds nginx NodePort 31000
 deployment_prepare_config --components infrastructure,application --port-policy production --https-mode self-signed --app-version latest
 HTTPS_ENABLED_PORTS="$(deployment_render_k8s_port_values)"
-assert_contains "$HTTPS_ENABLED_PORTS" 'type: "ClusterIP"' "enabled HTTPS should switch web to ClusterIP"
-assert_contains "$HTTPS_ENABLED_PORTS" $'nexent-nginx:\n  enabled: true\n  services:\n    nginx:\n      type: "NodePort"\n      entryPort: 30000\n      nodePort: 30000' "enabled HTTPS should render nginx NodePort 30000"
+assert_contains "$HTTPS_ENABLED_PORTS" $'nexent-web:\n  services:\n    web:\n      type: "NodePort"\n      nodePort: 30000' "enabled HTTPS should keep web on NodePort 30000"
+assert_contains "$HTTPS_ENABLED_PORTS" $'nexent-nginx:\n  enabled: true\n  services:\n    nginx:\n      type: "NodePort"\n      entryPort: 31000\n      nodePort: 31000' "enabled HTTPS should render nginx NodePort 31000"
 
 
 # Custom mode with an encrypted key: prepare must materialize a decrypted copy
