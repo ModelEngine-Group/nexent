@@ -1,0 +1,76 @@
+enabled: false
+
+replicaCount: 1
+
+images:
+  nginx:
+    repository: nginx
+    tag: alpine
+    pullPolicy: IfNotPresent
+
+resources:
+  nginx:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 256Mi
+      cpu: 500m
+
+services:
+  nginx:
+    type: NodePort
+    # External port users actually visit (NodePort); used in the HTTP->HTTPS
+    # redirect because $server_port inside the container is the internal port.
+    entryPort: 30000
+    nodePort: 30000
+
+# TLS certificate (PEM contents rendered into a Secret by the deployment script)
+tls:
+  cert: ""
+  key: ""
+  # Kept for backward compatibility; the deployment script decrypts
+  # encrypted keys before rendering, so nginx never needs a passphrase.
+  keyPassphrase: ""
+
+config: |
+  map $http_upgrade $connection_upgrade {
+      default upgrade;
+      ''      close;
+  }
+
+  server {
+      listen 3000 ssl;
+      server_name _;
+
+      ssl_certificate     /etc/nginx/ssl/server.pem;
+      ssl_certificate_key /etc/nginx/ssl/server.key;
+
+      ssl_protocols TLSv1.2 TLSv1.3;
+      ssl_ciphers HIGH:!aNULL:!MD5;
+      ssl_prefer_server_ciphers on;
+      ssl_session_cache shared:SSL:10m;
+      ssl_session_timeout 10m;
+
+      error_page 497 https://$host:$server_port$request_uri;
+
+      client_max_body_size 1024M;
+
+      proxy_buffering off;
+      proxy_read_timeout 3600s;
+      proxy_send_timeout 3600s;
+      proxy_connect_timeout 60s;
+
+      location / {
+          proxy_pass http://nexent-web:3000;
+          proxy_http_version 1.1;
+
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto https;
+      }
+  }

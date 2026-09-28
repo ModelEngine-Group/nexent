@@ -70,9 +70,28 @@ bash deploy.sh docker --components infrastructure,application,data-process,supab
 # 使用中国大陆镜像源
 bash deploy.sh docker --image-source mainland
 
-# 使用本地 latest 镜像
++# 使用本地 latest 镜像
 bash deploy.sh docker --image-source local-latest
 ```
+
+#### HTTPS（可选）
+
+Nexent 可通过随部署安装的 Nginx 反向代理终结 HTTPS。该选项默认关闭，并复用现有入口端口：Docker 部署继续使用 3000 端口，Kubernetes 部署继续使用 NodePort 30000。启用 HTTPS 后，入口端口由 Nginx 发布，web 容器转为集群内部访问；同端口的 HTTP 请求会自动重定向到 HTTPS。
+
+可交互启用（安装器只询问一个问题：HTTPS 模式），也可非交互启用：
+
+```bash
+# 自签证书（内网部署推荐）
+bash deploy.sh docker --defaults --https-mode self-signed
+
+# 使用自己的证书（路径也可以预先写入 deploy/env/.env）
+bash deploy.sh docker --defaults --https-mode custom --https-cert-file /path/to/server.pem --https-key-file /path/to/server.key
+```
+
+- **self-signed**：安装器生成 99 年有效期的自签证书（私钥不加密），保存在 `<ROOT_DIR>/nginx/ssl/`，重复部署时自动复用。SAN 条目从部署主机网卡自动探测（排除回环与 Docker 网桥）；如需指定，在 `deploy/env/.env` 预填 `NEXENT_HTTPS_SAN`（例如 `NEXENT_HTTPS_SAN=10.0.0.5,example.com`）。浏览器会提示证书不受信任，将证书导入系统信任链后即可消除。
+- **custom**：通过 `NEXENT_HTTPS_CERT_FILE` 与 `NEXENT_HTTPS_KEY_FILE` 指定 PEM 证书与私钥。安装器在部署前校验证书对（PEM 格式、证书与私钥匹配、有效期）。支持加密私钥：通过 `NEXENT_HTTPS_KEY_PASSPHRASE` 或 `--https-key-passphrase` 提供密码；与其他部署凭证一致，密码以明文保存在 `deploy/env/.env` 中。
+- 启用 HTTPS 后，请同步更新 `deploy/env/.env` 中的 `SITE_URL`（例如 `SITE_URL=https://your-host:3000`），确保认证回调与生成的链接使用 HTTPS 入口。
+- 再次禁用 HTTPS（`--https-mode disabled`）后，入口端口交还给 web 容器；证书文件会保留，之后可重新启用。
 
 部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。`--defaults` 会优先复用该文件；文件不存在时使用内置默认值。下次交互部署时可选择复用本地配置或重新全量配置。
 

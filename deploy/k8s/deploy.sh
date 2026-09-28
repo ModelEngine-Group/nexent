@@ -710,6 +710,7 @@ update_values_yaml() {
 
   deployment_apply_image_source
   deployment_prepare_monitoring_env k8s || exit 1
+  deployment_https_prepare || exit 1
   deployment_render_helm_values "$GENERATED_VALUES"
   render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
   render_persistence_values "$GENERATED_PERSISTENCE_VALUES"

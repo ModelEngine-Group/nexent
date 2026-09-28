@@ -79,6 +79,12 @@ dependencies:
     repository: "file://./charts/nexent-openssh"
     condition: nexent-openssh.enabled
 
+  # Optional Nginx HTTPS reverse proxy (terminates TLS on the web NodePort)
+  - name: nexent-nginx
+    version: 0.1.0
+    repository: "file://./charts/nexent-nginx"
+    condition: nexent-nginx.enabled
+
   # Optional OpenTelemetry monitoring stack
   - name: nexent-monitoring
     version: 0.1.0

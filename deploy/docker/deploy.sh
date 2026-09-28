@@ -1080,6 +1080,28 @@ deploy_core_services() {
   fi
 }
 
+deploy_https_nginx() {
+  # Start the Nginx HTTPS reverse proxy when HTTPS is enabled.
+  if [ "$DEPLOYMENT_HTTPS_MODE" = "disabled" ] || [ -z "$DEPLOYMENT_HTTPS_MODE" ]; then
+    export NEXENT_WEB_PORT_MAPPING="3000:3000"
+    return 0
+  fi
+
+  deployment_https_prepare || return 1
+
+  # Publish only the container port (no host binding) so nginx can take 3000.
+  # Compose "${VAR-default}" keeps the default only when VAR is unset;
+  # an empty value must win so the web service stops publishing the host port.
+  export NEXENT_WEB_PORT_MAPPING="3000"
+
+  echo "🔒 Starting Nginx HTTPS reverse proxy (nexent-nginx)..."
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then
+    echo "   ❌ ERROR Failed to start nexent-nginx"
+    return 1
+  fi
+  echo "   ✅ Nginx HTTPS reverse proxy started"
+}
+
 stop_unselected_data_process_service() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && return 0
 
@@ -1814,6 +1836,16 @@ main_deploy() {
       echo "❌ 核心服务部署失败"
     else
       echo "❌ Core services deployment failed"
+    fi
+    exit 1
+  }
+
+  # Start Nginx HTTPS reverse proxy when HTTPS is enabled
+  deploy_https_nginx || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ HTTPS 反向代理部署失败"
+    else
+      echo "❌ HTTPS reverse proxy deployment failed"
     fi
     exit 1
   }
