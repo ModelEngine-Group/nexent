@@ -137,7 +137,7 @@
           "params": {
             "top_k": 3,
             "index_names": [
-              "kb-1749-2"
+              "kb-1749"
             ],
             "search_mode": "hybrid",
             "rerank": false,
@@ -214,7 +214,7 @@
           "params": {
             "top_k": 3,
             "index_names": [
-              "kb-1749-3"
+              "kb-1749"
             ],
             "search_mode": "hybrid",
             "rerank": false,
