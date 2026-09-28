@@ -130,10 +130,26 @@ sys.modules['tool_collection.mcp'] = types.ModuleType("tool_collection.mcp")
 sys.modules['tool_collection.mcp.local_mcp_service'] = stub_local_mcp
 sys.modules['tool_collection.mcp.nl2agent_mcp_tools'] = stub_nl2agent_mcp_tools
 
+# Stub logging.config so that mcp_service.py line 22
+#   logging.config.dictConfig(get_uvicorn_logging_config(...))
+# does not fail when it tries to call dictConfig on a real dict.
+# Must stub both sys.modules AND patch the logging module's .config attribute.
+import logging
+
+logging_config_mod = types.ModuleType("logging.config")
+logging_config_mod.dictConfig = lambda *a, **kw: None
+logging_config_mod.fileConfig = lambda *a, **k: None
+sys.modules['logging.config'] = logging_config_mod
+logging.config = logging_config_mod  # patch the actual logging module too
+
 # Stub utils
 stub_utils = types.ModuleType("utils")
 stub_utils.logging_utils = types.ModuleType("utils.logging_utils")
 stub_utils.logging_utils.configure_logging = MagicMock()
+stub_utils.logging_utils.configure_elasticsearch_logging = MagicMock()
+stub_utils.logging_utils.get_uvicorn_logging_config = MagicMock(
+    return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
+)
 sys.modules['utils'] = stub_utils
 sys.modules['utils.logging_utils'] = stub_utils.logging_utils
 

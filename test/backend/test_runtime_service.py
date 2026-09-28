@@ -103,10 +103,23 @@ apps_pkg = types.ModuleType("backend.apps")
 base_app_mod = types.ModuleType("backend.apps.base_app")
 base_app_mod.app = MagicMock()
 
+# Stub logging_utils so runtime_service can import get_uvicorn_logging_config
+# (it was migrated from configure_logging to dictConfig)
+logging_utils_mod = types.ModuleType("utils.logging_utils")
+logging_utils_mod.configure_logging = MagicMock()
+logging_utils_mod.configure_elasticsearch_logging = MagicMock()
+logging_utils_mod.get_uvicorn_logging_config = MagicMock(
+    return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
+)
+utils_mod = types.ModuleType("utils")
+utils_mod.logging_utils = logging_utils_mod
+
 # Install stubs into sys.modules
 sys.modules.setdefault("backend", backend_pkg)
 sys.modules["backend.apps"] = apps_pkg
 sys.modules["backend.apps.base_app"] = base_app_mod
+sys.modules.setdefault("utils", utils_mod)
+sys.modules["utils.logging_utils"] = logging_utils_mod
 
 # Also stub non-namespaced imports used by the application
 apps_pkg_flat = types.ModuleType("apps")
@@ -124,20 +137,20 @@ setattr(apps_pkg, "runtime_app", base_app_mod)
 class TestMainServiceModuleIntegration:
     """Integration tests for runtime_service module dependencies"""
 
-    @patch('runtime_service.configure_logging')
+    @patch('runtime_service.get_uvicorn_logging_config')
     @patch('runtime_service.configure_elasticsearch_logging')
-    def test_logging_configuration_called_on_import(self, mock_configure_es, mock_configure_logging):
+    def test_logging_configuration_called_on_import(self, mock_configure_es, mock_get_uvicorn_config):
         """
         Test that logging configuration functions are called when module is imported.
 
         This test verifies that:
-        1. configure_logging is called with logging.INFO
+        1. get_uvicorn_logging_config is called to build the dict config
         2. configure_elasticsearch_logging is called
         """
-        # Note: This test checks that logging configuration happens during module import
-        # The mocks should have been called when the module was imported
-        # In a real scenario, you might need to reload the module to test this properly
-        pass  # The actual verification would depend on how the test runner handles imports
+        # Note: This test checks that logging configuration happens during module import.
+        # The mocks should have been called when the module was imported.
+        # In a real scenario, you might need to reload the module to test this properly.
+        pass
 
 
 if __name__ == '__main__':
