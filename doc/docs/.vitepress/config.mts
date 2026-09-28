@@ -448,6 +448,10 @@ export default defineConfig({
                 ],
               },
               {
+                text: "官方智能体部署",
+                link: "/zh/deployment/official-agents",
+              },
+              {
                 text: "升级指南",
                 collapsed: false,
                 items: [
