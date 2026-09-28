@@ -171,6 +171,49 @@ class TestUploadFilesImpl:
     """Test cases for upload_files_impl function"""
 
     @pytest.mark.asyncio
+    async def test_knowledge_file_size_validation_handles_fallback_and_oversize(self, monkeypatch):
+        """Knowledge uploads measure fallback streams and reject files over the configured limit."""
+        from backend.services.file_management_service import (
+            _get_upload_size,
+            _validate_knowledge_file_sizes,
+        )
+
+        file_object = MagicMock()
+        file_object.tell.return_value = 0
+        file_object.seek.side_effect = [OSError("seek failed"), OSError("restore failed")]
+        fallback_upload = MagicMock(size=None, file=file_object)
+        fallback_upload.seek = AsyncMock()
+        fallback_upload.read = AsyncMock(return_value=b"abc")
+
+        assert await _get_upload_size(fallback_upload) == 3
+
+        monkeypatch.setattr(file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 2)
+        oversized_upload = MagicMock(size=3, filename="large.pdf")
+        with pytest.raises(AppException) as exc_info:
+            await _validate_knowledge_file_sizes([None, oversized_upload])
+
+        assert exc_info.value.error_code == ErrorCode.FILE_TOO_LARGE
+        assert exc_info.value.details["limit_bytes"] == 2
+
+    @pytest.mark.asyncio
+    async def test_local_knowledge_upload_validates_size_before_writing(self, monkeypatch):
+        """Local knowledge-base uploads reject oversized files before save_upload_file."""
+        monkeypatch.setattr(file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 1)
+        oversized_upload = MagicMock(size=2, filename="large.pdf")
+        save_upload = AsyncMock(return_value=True)
+
+        with patch.object(file_management_service, "save_upload_file", save_upload):
+            with pytest.raises(AppException) as exc_info:
+                await upload_files_impl(
+                    destination="local",
+                    file=[oversized_upload],
+                    folder="knowledge_base",
+                )
+
+        assert exc_info.value.error_code == ErrorCode.FILE_TOO_LARGE
+        save_upload.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_upload_files_impl_local_success(self):
         """Test successful local file upload"""
         # Create mock UploadFile
