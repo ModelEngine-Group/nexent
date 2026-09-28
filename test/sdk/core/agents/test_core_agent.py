@@ -2765,6 +2765,29 @@ class TestRunStreamRealExecution:
         assert len(agent.memory.steps) == 1
         agent.verification_controller.verify_final_answer.assert_not_called()
 
+    def test_oc_034_empty_legacy_output_emits_successful_final_step(self, monkeypatch):
+        agent = self._create_canonical_run_agent(
+            monkeypatch, enable_protocol_repair_retry=False
+        )
+        agent.observer.lang = "zh"
+        agent.verification_controller = MagicMock()
+
+        def empty_step(_action_step):
+            if False:
+                yield None
+            raise core_agent_module.RuntimeFinalAnswer(
+                agent._empty_model_response_hint(), "empty_model_output"
+            )
+
+        agent._step_stream = empty_step
+        results = list(agent._run_stream("test task", max_steps=3))
+
+        assert results[-1].output == "*模型返回了空内容。*"
+        assert len(agent.memory.steps) == 1
+        assert agent.memory.steps[0].is_final_answer is True
+        assert getattr(agent.memory.steps[0], "error", None) is None
+        agent.verification_controller.verify_final_answer.assert_not_called()
+
     def test_run_stream_retries_empty_final_answer_tool_result(self, monkeypatch):
         """An empty final_answer tool result must not end the run successfully."""
         module = core_agent_module
@@ -3039,13 +3062,12 @@ class TestRunStreamRealExecution:
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
 
-    @pytest.mark.parametrize("content,finish_reason,error_kind", [
-        ("   ", "stop", "generation"),
-        ("<code>final_answer(", "stop", "execution"),
-        ("答案是 4", "length", "execution"),
+    @pytest.mark.parametrize("content,finish_reason", [
+        ("<code>final_answer(", "stop"),
+        ("答案是 4", "length"),
     ])
     def test_cmsr_008_disabled_incomplete_output_is_ordinary_step_error(
-        self, monkeypatch, content, finish_reason, error_kind
+        self, monkeypatch, content, finish_reason
     ):
         """UT-SDK-CMSR-008-002: legacy parse failures keep their step and stream."""
         module = core_agent_module
@@ -3063,13 +3085,60 @@ class TestRunStreamRealExecution:
         if content == "I will call search next":
             agent.tools = {"search": MagicMock()}
 
-        expected = LegacyGenerationError if error_kind == "generation" else LegacyExecutionError
-        with pytest.raises(expected):
+        with pytest.raises(LegacyExecutionError):
             list(agent._step_stream(action_step))
 
         agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
+
+    @pytest.mark.parametrize("content", ["", "   \n\t"])
+    def test_oc_035_disabled_direct_empty_content_finishes_with_hint(self, content):
+        agent, action_step, response = self._create_cmsr_007_step_agent(content)
+        agent.observer.lang = "zh"
+        agent.python_executor = MagicMock()
+
+        with pytest.raises(core_agent_module.RuntimeFinalAnswer) as exc_info:
+            list(agent._step_stream(action_step))
+
+        assert exc_info.value.source == "empty_model_output"
+        assert exc_info.value.answer == "*模型返回了空内容。*"
+        agent.model.assert_called_once()
+        agent.python_executor.assert_not_called()
+        agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
+        agent.observer.rollback_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+
+    def test_oc_034_disabled_adapter_empty_content_finishes_with_hint(self):
+        agent, action_step, _response = self._create_cmsr_007_step_agent("unused")
+        agent.observer.lang = "zh"
+        agent.model.side_effect = core_agent_module.ModelInvocationTerminalError(
+            core_agent_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED, 1
+        )
+
+        with pytest.raises(core_agent_module.RuntimeFinalAnswer) as exc_info:
+            list(agent._step_stream(action_step))
+
+        assert exc_info.value.source == "empty_model_output"
+        assert exc_info.value.answer == "*模型返回了空内容。*"
+        agent.model.assert_called_once()
+        agent.observer.commit_model_attempt.assert_not_called()
+        agent.observer.rollback_model_attempt.assert_not_called()
+
+    def test_oc_034_disabled_truncated_empty_content_stays_terminal(self):
+        agent, action_step, _response = self._create_cmsr_007_step_agent(
+            "unused", finish_reason="length"
+        )
+        terminal = core_agent_module.ModelInvocationTerminalError(
+            core_agent_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED, 1
+        )
+        agent.model.side_effect = terminal
+
+        with pytest.raises(core_agent_module.ModelInvocationTerminalError) as exc_info:
+            list(agent._step_stream(action_step))
+
+        assert exc_info.value is terminal
+        agent.model.assert_called_once()
 
     @pytest.mark.parametrize("content", ["<code>print(1)</code>", "<code>  </code>"])
     def test_cmsr_008_disabled_length_or_empty_code_reaches_executor(self, monkeypatch, content):

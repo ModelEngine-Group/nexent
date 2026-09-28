@@ -911,6 +911,12 @@ Additional Args:
             "so this run was stopped safely. Please retry or use another model."
         )
 
+    def _empty_model_response_hint(self) -> str:
+        """Return a subdued terminal note for an empty legacy model response."""
+
+        lang = getattr(getattr(self, "observer", None), "lang", getattr(self, "lang", "en"))
+        return "*模型返回了空内容。*" if str(lang).lower().startswith("zh") else "*The model returned no content.*"
+
     def _resolve_deferred_model_attempt(
         self,
         message: ChatMessage | None,
@@ -956,11 +962,7 @@ Additional Args:
                 self.logger,
             )
         if not model_output or not str(model_output).strip():
-            raise AgentGenerationError(
-                "Model returned empty or whitespace-only output; "
-                "this is likely a transient API issue and the step will be retried.",
-                self.logger,
-            )
+            raise RuntimeFinalAnswer(self._empty_model_response_hint(), "empty_model_output")
         direct_answer = convert_code_format(model_output)
         memory_step.action_output = direct_answer
         memory_step._final_answer_source = "direct_model_output"
@@ -1328,6 +1330,18 @@ Additional Args:
         except ModelInvocationTerminalError as terminal_error:
             if self.stop_event.is_set():
                 raise RunTerminated() from terminal_error
+            finish_reason = getattr(self.model, "last_finish_reason", None)
+            if finish_reason is None:
+                diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
+                finish_reason = diagnostics.get("finish_reason")
+            if (
+                terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
+                and legacy_code_action
+                and finish_reason != "length"
+            ):
+                raise RuntimeFinalAnswer(
+                    self._empty_model_response_hint(), "empty_model_output"
+                ) from terminal_error
             if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED and not legacy_code_action:
                 raise ModelOutputProtocolError(
                     reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
