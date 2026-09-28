@@ -83,7 +83,7 @@ Nexent 将配置管理、智能体运行、MCP、北向接口、数据处理和 
 1. **📋 [安装部署](../quick-start/installation)** — 系统要求和部署指南
 2. **🔧 [开发者指南](../developer-guide/overview)** — 从源码构建和自定义
 3. **❓ [常见问题](../quick-start/faq)** — 常见问题和故障排除
-4. **🤖 [官方智能体部署](../deployment/official-agents)** — 从仓库内置目录安装官方智能体
+4. **🤖 [官方智能体部署](../quick-start/installation#官方智能体部署)** — 从仓库内置目录安装官方智能体
 
 ## 💬 社区与联系方式
 

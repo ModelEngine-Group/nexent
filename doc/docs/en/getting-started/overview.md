@@ -83,6 +83,7 @@ Ready to get started? Here are your next steps:
 1. **📋 [Installation & Deployment](../quick-start/installation)** — System requirements and deployment guide
 2. **🔧 [Developer Guide](../developer-guide/overview)** — Build from source and customize
 3. **❓ [FAQ](../quick-start/faq)** — Common questions and troubleshooting
+4. **🤖 [Official Agent Deployment](../quick-start/installation#official-agent-deployment)** — Install official agents from the deployment package
 
 ## 💬 Community & contact
 

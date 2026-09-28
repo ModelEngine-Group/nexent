@@ -536,6 +536,141 @@ NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
 
 ## 💡 需要帮助
 
+## 🤖 官方智能体部署
+
+Nexent 主平台安装完成后，可以从部署包中的官方智能体资源目录安装指定行业的官方智能体。官方智能体部署与 Nexent 主平台部署解耦，不会在平台启动时自动安装。
+
+### 部署前提
+
+执行前请确认：
+
+1. Nexent 已完成 Docker 或 Kubernetes 部署；
+2. `nexent-config` 服务已启动并完成数据库初始化；
+3. 部署包中存在 `deploy/docker/assets/official-agents` 目录；
+4. Docker 环境使用 Git Bash 或 WSL 执行脚本；Kubernetes 环境使用能够访问目标集群的终端执行脚本。
+
+官方智能体资源不需要额外配置环境变量，也不需要用户手工执行 Git、`docker cp` 或同步接口。
+
+### 官方智能体目录结构
+
+```text
+deploy/docker/assets/official-agents/
+├── general/
+│   └── document_writing_assistant/
+│       ├── agent.json
+│       ├── skills/
+│       └── kb/
+├── medical/
+│   └── medical_assistant/
+└── finance/
+    └── finance_assistant/
+```
+
+- `general`、`medical` 和 `finance` 是官方智能体 Profile；
+- 一个 Profile 下可以包含多个官方智能体 Bundle；
+- 每个 Bundle 的根目录必须包含 `agent.json`；
+- `skills/` 保存依赖的 Skill，`kb/` 保存知识库原始文档。
+
+### 交互式部署
+
+在 Nexent 仓库根目录执行：
+
+```bash
+bash deploy/deploy-official-agents.sh
+```
+
+脚本会扫描可用 Profile 并显示选择菜单：
+
+```text
+Available official Agent profiles:
+  1) finance
+  2) general
+  3) medical
+
+Select profiles (comma-separated numbers, or all):
+```
+
+可以输入单个 Profile、多个 Profile（例如 `2,3`），或输入 `all` 安装全部 Profile。脚本会校验目录和 `agent.json`，选择无效时不会执行复制或同步。
+
+Docker 部署时，脚本会将选中的 Profile 复制到 `nexent-config` 容器的 `/mnt/nexent/official-agents/`，然后同步到官方智能体仓库。
+
+Kubernetes 环境执行：
+
+```bash
+bash deploy/deploy-official-agents.sh --kubernetes
+```
+
+如需指定命名空间：
+
+```bash
+bash deploy/deploy-official-agents.sh \
+  --kubernetes \
+  --namespace custom-namespace
+```
+
+### 部署后的使用方式
+
+部署完成后，用户可以在 **智能体仓库** 的官方列表中复制智能体。复制时可以根据页面提示选择模型，并选择复用或创建知识库、Skill 和 MCP 配置。
+
+官方智能体部署阶段只发布模板，不会为所有租户自动创建知识库。包含知识库的官方智能体在首次复制时，要求目标租户配置可用的向量模型。
+
+### 部署验证
+
+Docker 环境可以查看已复制的资源：
+
+```bash
+docker exec nexent-config find /mnt/nexent/official-agents -name agent.json -print
+```
+
+登录 Nexent 后，打开 **智能体仓库**，切换到官方智能体列表，确认所选 Profile 中的模板已经出现。
+
+### 删除官方智能体
+
+删除官方模板需要超级管理员权限：
+
+1. 进入 **资源管理**；
+2. 打开 **智能体** 页面；
+3. 点击 **管理官方智能体**；
+4. 选择需要删除的官方模板并确认。
+
+删除操作会删除官方智能体仓库条目、system 租户中的官方源 Agent 和服务器上的对应 Bundle 文件；已经复制到普通租户中的 Agent 副本不会被删除。
+
+### 常见问题
+
+#### `official Agent directory not found`
+
+确认当前命令在 Nexent 仓库根目录执行，并确认以下目录存在：
+
+```text
+deploy/docker/assets/official-agents
+```
+
+#### `no official Agent profiles found`
+
+确认 `official-agents` 下至少存在一个 Profile 子目录，例如：
+
+```text
+deploy/docker/assets/official-agents/general
+```
+
+#### `profile has no agent.json`
+
+确认目录结构为：
+
+```text
+official-agents/<profile>/<agent>/agent.json
+```
+
+#### `Synchronized 0 official Agent bundle(s)`
+
+常见原因包括：所选 Profile 不包含有效的 `agent.json`、资源没有复制到 `nexent-config`，或当前镜像没有包含最新的官方智能体同步代码。
+
+#### 复制官方智能体时没有创建知识库
+
+官方智能体部署阶段只发布模板，知识库创建发生在用户复制官方智能体时。首次复制包含知识库的官方智能体时，请确认目标租户已配置可用的向量模型。
+
+## 💡 需要帮助
+
 - 浏览 [常见问题](./faq) 了解常见安装问题
 - 在我们的 [Discord 社区](https://discord.gg/tb5H3S3wyv) 提问
 - 在 [GitHub Issues](https://github.com/ModelEngine-Group/nexent/issues) 中提交错误报告或功能建议
