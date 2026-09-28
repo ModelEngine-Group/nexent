@@ -67,7 +67,6 @@ async def delete_official_agent_api(
 @agent_repository_router.post("/internal/official/sync")
 async def sync_official_agents_api(
     request: Request,
-    base_dir: Optional[str] = Query(None),
     profiles: Optional[str] = Query(None),
 ):
     """Synchronize mounted official bundles from a container-local request."""
@@ -79,8 +78,6 @@ async def sync_official_agents_api(
         )
     try:
         kwargs = {}
-        if base_dir is not None:
-            kwargs["base_dir"] = base_dir
         if profiles is not None:
             kwargs["profiles"] = profiles
         result = await sync_official_agents(**kwargs)

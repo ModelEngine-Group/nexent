@@ -95,7 +95,6 @@ async def test_sync_official_agents_api_accepts_loopback_request(mocker):
 
     response = await sync_official_agents_api(
         request,
-        base_dir="/mnt/nexent/official-agents",
         profiles="medical",
     )
 
@@ -103,7 +102,6 @@ async def test_sync_official_agents_api_accepts_loopback_request(mocker):
         b'{"synchronized":1,"items":[{"name":"medical-assistant"}]}'
     )
     mock_sync.assert_awaited_once_with(
-        base_dir="/mnt/nexent/official-agents",
         profiles="medical",
     )
 
