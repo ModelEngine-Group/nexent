@@ -11,6 +11,7 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    "agent/icon_storage.py",
     "agent/management.py",
     "agent/naming.py",
     "agent/read.py",
