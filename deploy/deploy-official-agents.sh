@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE_ROOT="$ROOT_DIR/deploy/docker/assets/official-agents"
+IMAGE_SOURCE_ROOT="/opt/nexent/official-agents-assets"
 TARGET_CONTAINER="nexent-config"
 TARGET_CONTAINER_DIR="/mnt/nexent/official-agents"
 NAMESPACE="nexent"
@@ -44,13 +45,30 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -d "$SOURCE_ROOT" ] || die "official Agent directory not found: $SOURCE_ROOT"
-
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nexent-official-agents.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 declare -a AVAILABLE_DIRS=()
 declare -a AVAILABLE_NAMES=()
+
+prepare_source_root() {
+  if [ -d "$SOURCE_ROOT" ]; then
+    return
+  fi
+
+  if [ "$DEPLOY_OFFICIAL_K8S" = true ]; then
+    die "official Agent directory not found: $SOURCE_ROOT (Kubernetes image resources are not copied automatically; provide the deploy package assets)"
+  fi
+
+  command -v docker >/dev/null 2>&1 || die "docker is required to read official Agent resources from the image"
+  docker inspect "$TARGET_CONTAINER" >/dev/null 2>&1 || die "container not found: $TARGET_CONTAINER"
+  SOURCE_ROOT="$TMP_ROOT/image-assets"
+  mkdir -p "$SOURCE_ROOT"
+  MSYS_NO_PATHCONV=1 docker cp "$TARGET_CONTAINER:$IMAGE_SOURCE_ROOT/." "$SOURCE_ROOT/" \
+    || die "official Agent resources not found in container image: $IMAGE_SOURCE_ROOT"
+  [ -d "$SOURCE_ROOT" ] || die "official Agent resources extracted from image are empty"
+  printf 'Using official Agent resources bundled in image: %s\n' "$IMAGE_SOURCE_ROOT"
+}
 
 load_profiles() {
   local path
@@ -152,6 +170,7 @@ sync_repository() {
   printf 'Synchronized %s official Agent bundle(s)\n' "$synchronized"
 }
 
+prepare_source_root
 select_profiles
 copy_profiles
 sync_repository
