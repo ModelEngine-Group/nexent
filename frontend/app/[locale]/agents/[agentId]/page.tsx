@@ -42,6 +42,7 @@ import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
+import { buildAgentUsageGuidePath } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
 import type {
   Nl2AgentDraftField,
@@ -111,7 +112,12 @@ function PanelCard({
 
 function AgentSetupContent() {
   const { t } = useTranslation("common");
-  const { agentId } = useParams<{ agentId: string }>();
+  const router = useRouter();
+  const { agentId, locale: routeLocale } = useParams<{
+    agentId: string;
+    locale: string;
+  }>();
+  const locale = routeLocale || "en";
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
@@ -288,7 +294,8 @@ function AgentSetupContent() {
         error,
       });
     });
-  }, [currentAgentId, queryClient, refetchAgentInfo]);
+    router.push(buildAgentUsageGuidePath(locale, currentAgentId));
+  }, [currentAgentId, locale, queryClient, refetchAgentInfo, router]);
 
   return (
     <div className="flex h-full w-full min-h-0 flex-col bg-white">

@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { getAgentUsageGuideAccess } from "@/lib/agentUsageGuide";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import {
@@ -38,6 +39,10 @@ interface MyAgentCardProps {
   ) => void;
   onDelete: () => void;
   onEvaluate: () => void;
+  onUsageGuide: () => void;
+  highlighted?: boolean;
+  guideMenuOpen?: boolean;
+  onGuideMenuOpenChange?: (open: boolean) => void;
   isApplying?: boolean;
   isDeleting?: boolean;
 }
@@ -56,6 +61,10 @@ export function MyAgentCard({
   onViewReview,
   onDelete,
   onEvaluate,
+  onUsageGuide,
+  highlighted = false,
+  guideMenuOpen,
+  onGuideMenuOpenChange,
   isApplying = false,
   isDeleting = false,
 }: MyAgentCardProps) {
@@ -68,7 +77,7 @@ export function MyAgentCard({
     refetch,
   } = useAgentRepositoryListings(
     { agent_id: agent.agent_id, page: 1, page_size: 100 },
-    menuOpen
+    menuOpen || guideMenuOpen === true
   );
 
   const title = agent.name?.trim() || t("agentRepository.card.untitled");
@@ -79,9 +88,12 @@ export function MyAgentCard({
     agent.unavailable_reasons ?? [],
     t
   );
-  const published = (agent.current_version_no ?? 0) > 0;
   const repositoryInfo = toMineRepositoryInfo(listingData?.items ?? []);
   const agentWithRepository = { ...agent, repository_info: repositoryInfo };
+  const { canOpen: published } = getAgentUsageGuideAccess({
+    currentVersionNo: agent.current_version_no,
+    permission: agent.permission,
+  });
   const footerDate = formatMineDate(agent.version_create_time);
   const versionLabel = agent.version_label;
   const canEdit = agent.permission !== "READ_ONLY";
@@ -146,6 +158,16 @@ export function MyAgentCard({
     menuItems.push({ type: "divider" });
   }
 
+  if (published) {
+    menuItems.push({
+      key: "usageGuide",
+      icon: <Share2 className="size-3.5" aria-hidden />,
+      label: t("agentRepository.mine.menu.usageGuide"),
+      className: guideMenuOpen ? "font-semibold" : undefined,
+      onClick: onUsageGuide,
+    });
+  }
+
   if (canEdit) {
     menuItems.push({
       key: "delete",
@@ -160,7 +182,10 @@ export function MyAgentCard({
   return (
     <ResourceCard
       title={title}
-      className="h-full"
+      className={`h-full ${
+        highlighted ? "rounded-xl ring-2 ring-primary ring-offset-2" : ""
+      }`}
+      aria-current={highlighted ? "true" : undefined}
       onClick={onView}
       subtitle={
         versionLabel != null ? (
@@ -197,8 +222,9 @@ export function MyAgentCard({
           {menuItems.length > 0 ? (
             <Dropdown
               menu={{ items: menuItems }}
+              open={guideMenuOpen}
+              onOpenChange={onGuideMenuOpenChange ?? setMenuOpen}
               trigger={["click"]}
-              onOpenChange={setMenuOpen}
             >
               <Button
                 type="text"
@@ -206,6 +232,7 @@ export function MyAgentCard({
                 className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
                 icon={<MoreHorizontal className="size-4" aria-hidden />}
                 aria-label={t("agentRepository.mine.menu.more")}
+                aria-haspopup="menu"
               />
             </Dropdown>
           ) : null}
@@ -220,7 +247,10 @@ export function MyAgentCard({
               >
                 <span
                   className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
-                  aria-label={unavailableReasonLabels.join(", ") || t("agentSelector.agentUnavailable")}
+                  aria-label={
+                    unavailableReasonLabels.join(", ") ||
+                    t("agentSelector.agentUnavailable")
+                  }
                 >
                   {t("mcpConfig.status.unavailable")}
                 </span>
