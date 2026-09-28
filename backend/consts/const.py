@@ -217,6 +217,7 @@ MAX_USERS_PER_TENANT = _positive_int_env("MAX_USERS_PER_TENANT", 10_000)
 MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
 MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
 MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
+MAX_AGENTS_PER_TENANT = _positive_int_env("MAX_AGENTS_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
