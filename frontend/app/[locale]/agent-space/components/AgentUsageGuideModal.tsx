@@ -37,7 +37,6 @@ export function AgentUsageGuideModal({
   const [activeTab, setActiveTab] = useState("share");
   const agentId = agent?.agent_id;
   const agentName = agent?.name?.trim() || "agent";
-  const agentInternalName = agent?.internal_name?.trim() || agentName;
   const { canOpen } = getAgentUsageGuideAccess({
     currentVersionNo: agent?.current_version_no,
   });
@@ -69,7 +68,7 @@ export function AgentUsageGuideModal({
     frontendConfigQuery.data?.northboundBaseUrl,
     typeof window === "undefined" ? undefined : window.location.origin
   );
-  const northboundCurl = buildNorthboundCurl(agentInternalName, northboundUrl);
+  const northboundCurl = buildNorthboundCurl(agentName, northboundUrl);
   const a2aGuideState = getA2AGuideState({
     isLoading: a2aQuery.isLoading,
     isError: a2aQuery.isError,

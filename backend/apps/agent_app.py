@@ -45,7 +45,6 @@ from consts.exceptions import (
 from permissions.depends import require
 from permissions.models import CurrentUser
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
-from management.services.agent.run_identity import AgentRunIdentityContext
 
 from management.services.agent.service import (
     get_agent_info_impl,
@@ -99,10 +98,11 @@ from utils.auth_utils import (
     get_current_user_id,
     verify_internal_runtime_jwt,
 )
-logger = logging.getLogger("agent_app")
+
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
 require_agent_create_permission = require("agent:create")
+logger = logging.getLogger("agent_app")
 
 
 def _runtime_overload_response(exc: Exception) -> JSONResponse:

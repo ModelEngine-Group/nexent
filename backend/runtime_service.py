@@ -1,4 +1,5 @@
 import logging
+import logging.config
 import warnings
 
 import uvicorn
@@ -15,12 +16,13 @@ load_dotenv()
 
 from apps.runtime_app import app
 from utils.logging_utils import (
-    configure_runtime_uvicorn_logging,
+    configure_elasticsearch_logging,
     get_uvicorn_logging_config,
 )
 
 
-configure_runtime_uvicorn_logging()
+logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime"]))
+configure_elasticsearch_logging()
 logger = logging.getLogger("runtime")
 
 if __name__ == "__main__":

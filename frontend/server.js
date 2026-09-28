@@ -10,7 +10,6 @@ import path from "node:path";
 import multiparty from "multiparty";
 import dotenv from "dotenv";
 import { BASE_PATH } from "./base-path.mjs";
-import { isRuntimeApiPath } from "./proxy-routing.mjs";
 import {
   ensureDir,
   readLocaleConfig,
@@ -749,7 +748,21 @@ function handleAllApiProxy(pathname, req, res) {
   }
 
   // 2. 判断是否为 runtime 运行时接口
-  const isRuntime = isRuntimeApiPath(pathname);
+  const runtimePathPrefixes = [
+    "/api/agent/run",
+    "/api/agent/nl2agent/run",
+    "/api/agent/human-interactions",
+    "/api/skills/nl2skill/run",
+    "/api/agent/stop",
+    "/api/agent/automations",
+    "/api/conversation/",
+    "/api/share/",
+    "/api/file/storage",
+    "/api/file/preprocess",
+  ];
+  const isRuntime = runtimePathPrefixes.some((prefix) =>
+    pathname.startsWith(prefix)
+  );
 
   // 3. skills 特殊接口
   // 分发代理目标

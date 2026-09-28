@@ -1303,7 +1303,6 @@ async def create_agent_config(
     automation_has_attachments: bool = False,
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
     runtime_file_context: Optional[Dict[str, Any]] = None,
-    disable_personal_memory: bool = False,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
@@ -1338,26 +1337,23 @@ async def create_agent_config(
             selected_agent_version_no=rel.get('selected_agent_version_no'),
             tenant_id=tenant_id,
         )
-        sub_agent_kwargs = {
-            "agent_id": sub_agent_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "language": language,
-            "last_user_query": last_user_query,
-            "allow_memory_search": allow_memory_search,
-            "version_no": sub_agent_version_no,
-            "override_model_id": None,
-            "tool_params": child_tool_params,
-            "conversation_id": conversation_id,
-            "include_automation_tool": False,
-            "runtime_knowledge_context": child_knowledge_context,
-            "runtime_file_context": runtime_file_context,
+        sub_agent_config = await create_agent_config(
+            agent_id=sub_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            language=language,
+            last_user_query=last_user_query,
+            allow_memory_search=allow_memory_search,
+            version_no=sub_agent_version_no,
+            override_model_id=None,
+            tool_params=child_tool_params,
+            conversation_id=conversation_id,
+            include_automation_tool=False,
+            runtime_knowledge_context=child_knowledge_context,
+            runtime_file_context=runtime_file_context,
             # Workbench overlays replace Skills on the effective root only.
-            "runtime_skill_snapshot": None,
-        }
-        if disable_personal_memory:
-            sub_agent_kwargs["disable_personal_memory"] = True
-        sub_agent_config = await create_agent_config(**sub_agent_kwargs)
+            runtime_skill_snapshot=None,
+        )
         # Persisted Agent relations are rendered into the manager prompt by
         # their configured business name. Keep the callable registered in the
         # Python executor under that same name; the generic runtime identity
@@ -1479,14 +1475,12 @@ async def create_agent_config(
     memory_list: list = []
     long_term_memory_items: list[dict[str, Any]] = []
     pre_run_tool_events: list[dict[str, Any]] = []
-    memory_context = None
-    if not disable_personal_memory:
-        memory_context = build_memory_context(
-            user_id, tenant_id, agent_id, skip_query=not allow_memory_search
-        )
+    memory_context = build_memory_context(
+        user_id, tenant_id, agent_id, skip_query=not allow_memory_search
+    )
 
     # The memory capability switch controls tenant, user, and agent memory.
-    if memory_context is not None and memory_context.user_config.memory_switch:
+    if memory_context.user_config.memory_switch:
         try:
             from services.memory_record_service import (
                 _resolve_tenant_embedding_model_info,
@@ -2629,7 +2623,6 @@ async def create_agent_run_info(
     enable_planning: bool = False,
     enable_automation_tool: bool = True,
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
-    disable_personal_memory: bool = False,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_generation_config: Optional[Dict[str, Any]] = None,
@@ -2693,8 +2686,6 @@ async def create_agent_run_info(
     }
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
-    if disable_personal_memory:
-        create_config_kwargs["disable_personal_memory"] = True
     if runtime_skill_snapshot is not None:
         create_config_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
     if enable_automation_tool and not is_debug and conversation_id is not None:

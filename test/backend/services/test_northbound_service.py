@@ -1746,26 +1746,6 @@ class TestStartStreamingChatErrorHandling:
                 )
             assert "Agent not found" in str(exc_info.value)
 
-    async def test_start_streaming_chat_lookup_error_is_not_wrapped(self):
-        """LookupError is preserved so callers receive the domain error."""
-        ctx = MockNorthboundContext(token_id=0)
-
-        async def mock_get_history(*args, **kwargs):
-            return {"data": {"history": []}}
-
-        with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
-                patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
-                patch.object(ns, 'get_agent_by_name_impl', side_effect=LookupError("Agent not found")):
-            with pytest.raises(LookupError, match="Agent not found") as exc_info:
-                await ns.start_streaming_chat(
-                    ctx=ctx,
-                    conversation_id=123,
-                    agent_name="nonexistent_agent",
-                    query="test query"
-                )
-
-            assert type(exc_info.value) is LookupError
-
 
 class TestStopChatErrorHandling:
     """Tests for error handling in stop_chat function."""

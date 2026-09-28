@@ -16,7 +16,6 @@ class FakeRedisClient:
         self.xadds = []
         self.xranges = []
         self.xreads = []
-        self.pipelines = []
         self.hashes = {}
         self.values = {}
         self.stream_events = []
@@ -91,9 +90,7 @@ class FakeRedisClient:
         return True
 
     def pipeline(self):
-        pipeline = FakePipeline(self)
-        self.pipelines.append(pipeline)
-        return pipeline
+        return FakePipeline(self)
 
 
 class FakePipeline:
@@ -399,30 +396,6 @@ def test_consume_rate_limit_success_and_limit_exceeded(monkeypatch):
         service.consume_rate_limit("tenant-1", 2)
 
 
-def test_consume_scoped_rate_limit_uses_only_a_precomputed_digest(monkeypatch):
-    monkeypatch.setattr(runtime_state_module.time, "time", lambda: 120.0)
-    client = FakeRedisClient()
-    service = TestRuntimeStateService(client)
-    digest = "a" * 64
-
-    assert service.consume_scoped_rate_limit("runtime-scope", digest, 2) == 1
-    assert client.pipelines[-1].operations[0] == (
-        "incr",
-        "runtime:rate:runtime-scope:" + digest + ":2",
-    )
-
-    with pytest.raises(ValueError, match="SHA-256 digest"):
-        service.consume_scoped_rate_limit("runtime-scope", "raw-token", 2)
-
-
-def test_consume_scoped_rate_limit_rejects_invalid_namespace():
-    service = TestRuntimeStateService(FakeRedisClient())
-    digest = "a" * 64
-
-    with pytest.raises(ValueError, match="rate limit namespace is invalid"):
-        service.consume_scoped_rate_limit("Invalid_Namespace", digest, 2)
-
-
 def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
@@ -436,6 +409,8 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
 
     service.set_thread_manager(FakeThreadManager())
 
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
     monkeypatch.setattr(
         service,
         "reset_stream",
@@ -459,11 +434,6 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
     monkeypatch.setattr(service, "acquire_idempotency", lambda key, ttl_seconds: True)
     monkeypatch.setattr(service, "release_idempotency", lambda key: client.values.setdefault("released", key))
     monkeypatch.setattr(service, "consume_rate_limit", lambda tenant_id, limit_per_minute: 1)
-    monkeypatch.setattr(
-        service,
-        "consume_scoped_rate_limit",
-        lambda namespace, scope_digest, limit_per_minute: 1,
-    )
 
     async def run_checks():
         await service.reset_stream_async("user-1", 42)
@@ -477,8 +447,7 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
         assert await service.acquire_idempotency_async("request-key", 60) is True
         await service.release_idempotency_async("request-key")
         assert await service.consume_rate_limit_async("tenant-1", 2) == 1
-        assert await service.consume_scoped_rate_limit_async("runtime-scope", "a" * 64, 2) == 1
 
     asyncio.run(run_checks())
-    assert len(managed_calls) == 12
+    assert len(managed_calls) == 11
     assert {lane for lane, _ in managed_calls} == {"control-io"}

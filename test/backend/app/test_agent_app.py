@@ -171,6 +171,7 @@ config_app = FastAPI()
 config_app.include_router(agent_config_router)
 config_client = TestClient(config_app)
 
+
 @pytest.fixture
 def mock_auth_header():
     return {"Authorization": "Bearer test_token"}
