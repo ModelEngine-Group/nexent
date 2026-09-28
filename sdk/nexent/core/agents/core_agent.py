@@ -1286,6 +1286,7 @@ Additional Args:
         if guardrail_engine:
             decision = guardrail_engine.check_input(
                 input_messages=input_messages,
+                trusted_tail_count=len(tail_overlay),
             )
             self.verification_controller.emit(
                 decision.verification_result, message=decision.message
