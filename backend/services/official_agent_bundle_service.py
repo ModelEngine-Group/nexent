@@ -12,7 +12,7 @@ from typing import Any, Iterable
 
 from pydantic import BaseModel
 
-from consts.model import AgentRepositorySnapshot
+from consts.model import AgentRepositorySnapshot, KnowledgeBaseSeed
 
 logger = logging.getLogger("official_agent_bundle_service")
 
@@ -36,6 +36,7 @@ class OfficialAgentBundle:
     tags: list[str] | None = None
     icon: str | None = None
     bundle_path: Path | None = None
+    knowledge_bases: list[KnowledgeBaseSeed] | None = None
     knowledge_base_documents: dict[str, list[dict[str, str]]] | None = None
 
 
@@ -111,7 +112,10 @@ def _load_skill_entries(extract_dir: Path, snapshot: AgentRepositorySnapshot) ->
 
 def _load_kb_documents(extract_dir: Path, data: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
     result: dict[str, list[dict[str, str]]] = {}
-    for raw_kb in data.get("knowledge_bases", []) or []:
+    raw_knowledge_bases = data.get("knowledge_bases", []) or []
+    if isinstance(raw_knowledge_bases, dict):
+        raw_knowledge_bases = [raw_knowledge_bases]
+    for raw_kb in raw_knowledge_bases:
         if not isinstance(raw_kb, dict):
             continue
         logical_name = raw_kb.get("logical_index_name")
@@ -132,6 +136,16 @@ def _load_kb_documents(extract_dir: Path, data: dict[str, Any]) -> dict[str, lis
     return result
 
 
+def _load_kb_metadata(data: dict[str, Any]) -> list[KnowledgeBaseSeed]:
+    """Load bundle KB declarations, preserving their user-facing names."""
+    raw_knowledge_bases = data.get("knowledge_bases", []) or []
+    if isinstance(raw_knowledge_bases, dict):
+        raw_knowledge_bases = [raw_knowledge_bases]
+    if not isinstance(raw_knowledge_bases, list):
+        raise ValueError("official knowledge_bases must be an object or list")
+    return [KnowledgeBaseSeed.model_validate(item) for item in raw_knowledge_bases]
+
+
 def _load_zip_bundle(profile: str, path: Path) -> OfficialAgentBundle | None:
     if path.stat().st_size > MAX_BUNDLE_BYTES:
         raise ValueError("official agent bundle exceeds size limit")
@@ -150,6 +164,7 @@ def _load_zip_bundle(profile: str, path: Path) -> OfficialAgentBundle | None:
             archive.extractall(extract_dir)
         data = _read_bundle_json(extract_dir)
         snapshot = _snapshot_from_json(data)
+        knowledge_bases = _load_kb_metadata(data)
         skills = _load_skill_entries(extract_dir, snapshot)
         if skills:
             snapshot = snapshot.model_copy(update={"skills": skills})
@@ -163,6 +178,7 @@ def _load_zip_bundle(profile: str, path: Path) -> OfficialAgentBundle | None:
             tags=data.get("tags"),
             icon=data.get("icon"),
             bundle_path=path,
+            knowledge_bases=knowledge_bases,
             knowledge_base_documents=kb_docs,
         )
 
@@ -220,6 +236,7 @@ def load_official_bundles(base_dir: str | Path, profiles: Iterable[str]) -> list
         try:
             data = _read_bundle_json(bundle_dir)
             snapshot = _snapshot_from_json(data)
+            knowledge_bases = _load_kb_metadata(data)
             skills = _load_skill_entries(bundle_dir, snapshot)
             if skills:
                 snapshot = snapshot.model_copy(update={"skills": skills})
@@ -233,6 +250,7 @@ def load_official_bundles(base_dir: str | Path, profiles: Iterable[str]) -> list
                 tags=data.get("tags"),
                 icon=data.get("icon"),
                 bundle_path=bundle_dir,
+                knowledge_bases=knowledge_bases,
                 knowledge_base_documents=kb_docs,
             )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
