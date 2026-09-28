@@ -13,6 +13,7 @@ OPTIMIZE_SYSTEM_PROMPT: |-
   5. For `duty`, keep the content concise and role-oriented.
   6. For `constraint`, keep the content as explicit usage requirements.
   7. For `few_shots`, keep the content as concrete examples consistent with the current prompt style.
+  8. Write optimized system-prompt instructions in second person, addressing the agent as "you"; begin duties with "You are". Preserve the speaker's voice in hypothetical questions and dialogue examples.
 
 OPTIMIZE_USER_PROMPT: |-
   ### Section Type

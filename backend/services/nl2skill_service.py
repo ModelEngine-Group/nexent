@@ -97,12 +97,12 @@ def _assemble_draft_content(draft_snapshot: dict[str, Any]) -> str:
         if path == "SKILL.md":
             skill_content = file_content
         elif path and file_content.strip():
-            parts.append(f'<FILE path="{path}">\n{file_content}\n</FILE>')
+            parts.append(f'<file path="{path}">\n{file_content}\n</file>')
 
     if not skill_content.strip() and not parts:
         return ""
 
-    return "\n\n".join([f"<SKILL>\n{skill_content}\n</SKILL>", *parts])
+    return "\n\n".join([f"<skill>\n{skill_content}\n</skill>", *parts])
 
 
 def _normalize_draft_snapshot(

@@ -8,6 +8,7 @@ from jinja2 import Environment, StrictUndefined
 from ...prompts import load_prompt
 from ..context.models import ContextItemInput, ContextItemType
 from .bundle import AgentPromptBundle, _thaw
+from .knowledge import render_knowledge_base_summaries, render_knowledge_scope_resources
 
 
 _RENDERER = Environment(undefined=StrictUndefined, autoescape=False)
@@ -65,16 +66,10 @@ class AgentPromptComposer:
         self,
         *,
         enable_planning: bool = False,
-        has_memory: bool = False,
-        verification_enabled: bool = False,
     ) -> str:
         text = self.render_system_section("execution_flow")
-        if has_memory:
-            text += "\n" + self.render_system_section("memory_guidance")
         if enable_planning:
             text += "\n" + self.render_system_section("planning_guidance")
-        if verification_enabled:
-            text += "\n" + self.render_system_section("self_verification_guidance")
         return text
 
     def render_restricted_python_execution(self, authorized_imports: List[str]) -> str:
@@ -110,23 +105,22 @@ class AgentPromptComposer:
         # Piecewise data sources
         tools: Optional[Dict[str, Any]] = None,
         skills: Optional[List[Dict[str, str]]] = None,
-        managed_agents: Optional[Dict[str, Any]] = None,
+        worker_agents: Optional[Dict[str, Any]] = None,
         external_a2a_agents: Optional[Dict[str, Any]] = None,
         memory_list: Optional[List[Any]] = None,
         memory_search_query: Optional[str] = None,
-        memory_tool_policy: Optional[str] = None,
-        automation_tool_policy: Optional[str] = None,
+        enable_memory_tool_policy: bool = False,
+        enable_automation_tool_policy: bool = False,
         long_term_memory_items: Optional[List[dict[str, Any]]] = None,
-        knowledge_base_summary: Optional[str] = None,
-        kb_ids: Optional[List[str]] = None,
-        knowledge_scope_policy: Optional[str] = None,
-        knowledge_scope_resources: Optional[str] = None,
+        knowledge_base_summaries: Optional[List[dict[str, Any]]] = None,
+        knowledge_base_no_indexes: bool = False,
+        knowledge_scope: Optional[Mapping[str, Any]] = None,
         restricted_python_authorized_imports: Optional[List[str]] = None,
         include_tools: bool = True,
         include_skills: bool = True,
         include_memory: bool = True,
         include_knowledge_base: bool = True,
-        include_managed_agents: bool = True,
+        include_worker_agents: bool = True,
         include_external_agents: bool = True,
         include_app_context: bool = True,
         sandbox_workspace_enabled: bool = False,
@@ -141,6 +135,7 @@ class AgentPromptComposer:
             item_id: str,
             text: str,
             priority: int,
+            layout_order: int,
             authority: str = "agent",
         ) -> None:
             if text:
@@ -150,28 +145,35 @@ class AgentPromptComposer:
                     content={"text": text},
                     source=(f"agent_prompt:{item_id}",),
                     priority=priority,
-                    metadata={"authority": authority},
+                    metadata={"authority": authority, "layout_order": layout_order},
                 ))
 
         if include_app_context:
-            add_system("header", composer.render_system_section("header"), 100, "platform")
+            add_system(
+                "header",
+                composer.render_system_section("outline_identity") + "\n" + composer.render_system_section("header"),
+                100, 0, "platform",
+            )
 
         if sandbox_workspace_enabled:
             add_system(
                 "sandbox_workspace_guidance",
                 composer.render_system_section("sandbox_workspace_guidance"),
-                99,
+                99, 32,
                 "platform",
             )
 
-        if memory_tool_policy:
-            add_system("memory_tool_policy", memory_tool_policy, 90, "platform")
+        if enable_memory_tool_policy:
+            policy = load_prompt(language, "agent/memory_tool_policy")["policy"]
+            add_system("memory_tool_policy", policy, 90, 35, "platform")
 
-        if automation_tool_policy:
-            add_system("automation_tool_policy", automation_tool_policy, 95, "platform")
+        if enable_automation_tool_policy:
+            policy = load_prompt(language, "agent/automation_tool_policy")["policy"]
+            add_system("automation_tool_policy", policy, 95, 34, "platform")
 
-        if knowledge_scope_policy:
-            add_system("knowledge_scope_policy", knowledge_scope_policy, 98, "platform")
+        if knowledge_scope is not None:
+            policy = load_prompt(language, "agent/knowledge_scope")["policy"]
+            add_system("knowledge_scope_policy", policy, 98, 33, "platform")
 
         if include_memory and long_term_memory_items:
             memory_list = [*long_term_memory_items, *(memory_list or [])]
@@ -202,25 +204,21 @@ class AgentPromptComposer:
                 ))
 
         if duty:
-            add_system("duty", composer.render_system_section("duty", duty=duty), 80)
+            duty_text = composer.render_system_section("duty", duty=duty)
+            if not include_app_context:
+                duty_text = composer.render_system_section("outline_identity") + "\n" + duty_text
+            add_system("duty", duty_text, 80, 10)
 
         has_tools = bool(include_tools and tools)
         has_agents = bool(
             is_manager
             and (
-                (include_managed_agents and managed_agents)
+                (include_worker_agents and worker_agents)
                 or (include_external_agents and external_a2a_agents)
             )
         )
         has_skills = bool(include_skills and skills)
-        resource_numbers: dict[str, int] = {}
-        for resource_name, present in (
-            ("tools", has_tools),
-            ("skills", has_skills),
-            ("agents", has_agents),
-        ):
-            if present:
-                resource_numbers[resource_name] = len(resource_numbers) + 1
+        has_resources = has_tools or has_skills or has_agents
 
         if include_skills and skills:
             for index, skill in enumerate(skills):
@@ -230,7 +228,6 @@ class AgentPromptComposer:
                     source=(f"skill:{name}",), priority=40,
                     metadata={
                         "render_group": "skills", "language": language,
-                        "resource_section_number": resource_numbers["skills"],
                         "usage_guidance": composer.render_system_section("skill_usage"),
                         "authority": "agent",
                     },
@@ -238,17 +235,17 @@ class AgentPromptComposer:
 
         add_system(
             "execution_flow",
-            composer.render_execution_flow(
-                enable_planning=enable_planning,
-                verification_enabled=verification_enabled,
-            ),
-            60,
-            "platform",
+            composer.render_system_section("outline_execution") + "\n"
+            + composer.render_execution_flow(enable_planning=enable_planning),
+            60, 20, "platform",
         )
         if is_manager:
-            add_system("manager_orchestration", composer.bundle.template["manager_agent"]["orchestration"], 58, "platform")
-        if resource_numbers:
-            add_system("available_resources_header", composer.render_system_section("available_resources_header"), 55, "platform")
+            add_system("manager_orchestration", composer.bundle.template["manager_agent"]["orchestration"], 58, 22, "platform")
+        if verification_enabled:
+            add_system("self_verification_guidance", composer.render_system_section("self_verification_guidance"), 60, 24, "platform")
+        add_system("final_answer_guidance", composer.render_system_section("final_answer_guidance"), 60, 25, "platform")
+        if has_resources:
+            add_system("available_resources_header", composer.render_system_section("available_resources_header"), 55, 50, "platform")
 
         if include_tools and tools:
             for name, tool in tools.items():
@@ -266,37 +263,40 @@ class AgentPromptComposer:
                     metadata={
                         "render_group": "tools", "language": language,
                         "is_manager": is_manager,
-                        "resource_section_number": resource_numbers["tools"],
                         "authority": "agent",
                     },
                 ))
 
-        if include_knowledge_base and knowledge_base_summary:
-            is_scoped_knowledge = bool(
-                knowledge_scope_policy or knowledge_scope_resources
-            )
+        summaries = knowledge_base_summaries or []
+        if include_knowledge_base and (summaries or knowledge_base_no_indexes):
+            is_scoped_knowledge = knowledge_scope is not None
             guidance = composer.render_system_section(
                 "knowledge_guidance_scoped" if is_scoped_knowledge else "knowledge_guidance_unscoped"
             ) + "\n"
+            heading = load_prompt(language, "agent/context_sections")["retrieved_context"]["knowledge_summary_heading"]
+            summary_text = (
+                render_knowledge_base_summaries(summaries)
+                if summaries else load_prompt(language, "agent/knowledge_scope")["resources"]["no_indexes"]
+            )
             inputs.append(ContextItemInput(
                 id="knowledge_base:summary", type=ContextItemType.KNOWLEDGE_BASE,
-                content={"text": guidance + knowledge_base_summary, "role": "user"},
-                source=tuple(f"knowledge_base:{kb_id}" for kb_id in (kb_ids or ())), priority=10,
+                content={"text": heading + "\n" + guidance + summary_text, "role": "user"},
+                source=tuple(f"knowledge_base:{item['index_name']}" for item in summaries), priority=10,
                 metadata={"authority": "retrieved"},
             ))
 
-        if include_knowledge_base and knowledge_scope_resources:
+        if include_knowledge_base and knowledge_scope is not None:
             inputs.append(ContextItemInput(
                 id="knowledge_scope:resources",
                 type=ContextItemType.KNOWLEDGE_BASE,
-                content={"text": knowledge_scope_resources, "role": "user"},
+                content={"text": render_knowledge_scope_resources(language, knowledge_scope), "role": "user"},
                 source=("knowledge_scope:runtime",),
                 priority=20,
                 metadata={"authority": "retrieved"},
             ))
 
-        if is_manager and include_managed_agents and managed_agents:
-            for name, agent in managed_agents.items():
+        if is_manager and include_worker_agents and worker_agents:
+            for name, agent in worker_agents.items():
                 payload = {
                     "name": name,
                     "description": getattr(agent, "description", None) if not isinstance(agent, dict) else agent.get("description", ""),
@@ -304,11 +304,10 @@ class AgentPromptComposer:
                     if not isinstance(agent, dict) else agent.get("tools", []),
                 }
                 inputs.append(ContextItemInput(
-                    id=f"managed_agent:{name}", type=ContextItemType.MANAGED_AGENT, content=payload,
-                    source=(f"managed_agent:{name}",), priority=45,
+                    id=f"worker_agent:{name}", type=ContextItemType.WORKER_AGENT, content=payload,
+                    source=(f"worker_agent:{name}",), priority=45,
                     metadata={
-                        "render_group": "managed_agents", "language": language,
-                        "resource_section_number": resource_numbers["agents"],
+                        "render_group": "worker_agents", "language": language,
                         "authority": "agent",
                     },
                 ))
@@ -326,23 +325,29 @@ class AgentPromptComposer:
                     content=payload, source=(f"external_agent:{payload['agent_id']}",), priority=44,
                     metadata={
                         "render_group": "external_agents", "language": language,
-                        "resource_section_number": resource_numbers["agents"],
-                        "include_section_heading": not bool(include_managed_agents and managed_agents),
                         "authority": "agent",
                     },
                 ))
         if constraint:
-            add_system("constraint", composer.render_system_section("constraint", constraint=constraint), 30)
+            add_system(
+                "constraint",
+                composer.render_system_section("outline_constraints") + "\n"
+                + composer.render_system_section("constraint", constraint=constraint),
+                30, 30,
+            )
         if not sandbox_workspace_enabled and restricted_python_authorized_imports is not None:
             add_system(
                 "restricted_python_execution",
                 composer.render_restricted_python_execution(restricted_python_authorized_imports),
-                25,
+                25, 32,
                 "platform",
             )
-        add_system("code_norms", composer.render_system_section("code_norms"), 20, "platform")
+        code_norms = composer.render_system_section("code_norms")
+        if not constraint:
+            code_norms = composer.render_system_section("outline_constraints") + "\n" + code_norms
+        add_system("code_norms", code_norms, 20, 31, "platform")
         if few_shots:
-            add_system("footer", composer.render_system_section("footer", few_shots=few_shots), 10)
+            add_system("footer", composer.render_system_section("footer", few_shots=few_shots), 10, 40)
         return inputs
 
     def compatibility_templates(self) -> dict[str, Any]:

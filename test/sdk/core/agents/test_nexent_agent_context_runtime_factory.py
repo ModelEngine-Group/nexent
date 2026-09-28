@@ -202,7 +202,7 @@ def test_each_managed_agent_runtime_owns_one_distinct_context_manager():
         description="root",
         model_name="main",
         tools=[],
-        managed_agents=[child_a, child_b],
+        worker_agents=[child_a, child_b],
     )
     created_agents = []
 

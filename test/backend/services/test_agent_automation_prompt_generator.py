@@ -278,11 +278,10 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
     monkeypatch.setattr("utils.config_utils.get_model_name_from_config", lambda config: "resolved-model")
     monkeypatch.setattr(
         prompt_generator,
-        "load_prompt",
-            lambda language, path: {
-            "TASK_CONTENT_SYSTEM_PROMPT": "system",
-            "TASK_CONTENT_USER_PROMPT": "Instruction: {{ instruction }}",
-        },
+        "compose_auxiliary_prompt",
+        lambda language, operation, values: SimpleNamespace(
+            system="system", user=f"Instruction: {values['instruction']}"
+        ),
     )
     strategy = LLMAutomationPromptStrategy(
         {
@@ -298,8 +297,6 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
 
     result = strategy._generate_sync(
         AutomationPromptContext(tenant_id="tenant", instruction="  do work  ", language="en"),
-        "TASK_CONTENT_SYSTEM_PROMPT",
-        "TASK_CONTENT_USER_PROMPT",
     )
 
     assert result == '{"title":"A","instruction":"B"}'

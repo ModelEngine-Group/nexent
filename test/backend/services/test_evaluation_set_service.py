@@ -55,7 +55,16 @@ _nexent_pkg.storage = _nexent_storage
 _nexent_core.agents = _nexent_core_agents
 _nexent_core.utils = _nexent_core_utils
 _nexent_core_prompts = types.ModuleType("nexent.core.prompts")
-_nexent_core_prompts.load_prompt = MagicMock()
+def _load_test_prompt(language, path):
+    import yaml
+    source = _REPO_ROOT / "sdk/nexent/core/prompts" / language / f"{path}.yaml"
+    return yaml.safe_load(source.read_text(encoding="utf-8"))
+_nexent_core_prompts.load_prompt = _load_test_prompt
+_nexent_core_prompts.__path__ = [str(_REPO_ROOT / "sdk/nexent/core/prompts")]
+def _render_test_prompt(source, parameters):
+    from jinja2 import Environment, StrictUndefined
+    return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+_nexent_core_prompts.render_prompt_text = _render_test_prompt
 sys.modules["nexent.core.prompts"] = _nexent_core_prompts
 _nexent_core.prompts = _nexent_core_prompts
 
@@ -994,11 +1003,6 @@ class TestPlanSearchQueries:
         )
         monkeypatch.setattr(
             service,
-            "load_prompt",
-            MagicMock(return_value={"SYSTEM_PROMPT": "sp"}),
-        )
-        monkeypatch.setattr(
-            service,
             "call_llm_for_system_prompt",
             MagicMock(return_value='{"queries": ["q1", "q2"]}'),
         )
@@ -1009,9 +1013,6 @@ class TestPlanSearchQueries:
         service, _ = service_module
         monkeypatch.setattr(
             service, "_build_kb_descriptions", MagicMock(return_value="block")
-        )
-        monkeypatch.setattr(
-            service, "load_prompt", MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         )
         monkeypatch.setattr(
             service, "call_llm_for_system_prompt", MagicMock(side_effect=ValueError("x"))
@@ -1300,13 +1301,11 @@ class TestBuildCaseGenUserPrompt:
     def test_appends_instruction_with_sources(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service,
-            "load_prompt",
-            MagicMock(
-                return_value={
-                    "USER_PROMPT_INSTRUCTION": "use {{sources}} count {{count}} max {{max_turns}}"
-                }
-            ),
+            "nexent.core.agents.prompt.auxiliary.load_prompt",
+            MagicMock(return_value={
+                "SYSTEM_PROMPT": "sp {{max_turns}}",
+                "USER_PROMPT_INSTRUCTION": "use {{sources}} count {{count}} max {{max_turns}}",
+            }),
         )
         prompt = service._build_case_gen_user_prompt(
             ["ctx1", "ctx2"], 5, "kbctx", 7, "file"
@@ -1319,7 +1318,8 @@ class TestBuildCaseGenUserPrompt:
     def test_returns_context_when_no_instruction(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service, "load_prompt", MagicMock(return_value={})
+            "nexent.core.agents.prompt.auxiliary.load_prompt",
+            MagicMock(return_value={"SYSTEM_PROMPT": "sp", "USER_PROMPT_INSTRUCTION": ""}),
         )
         prompt = service._build_case_gen_user_prompt(["ctx1"], 1, "", None, None)
         assert prompt == "ctx1"
@@ -1395,11 +1395,6 @@ class TestCallLlmAndExtractCases:
         service, _ = service_module
         monkeypatch.setattr(
             service,
-            "load_prompt",
-            MagicMock(return_value={"SYSTEM_PROMPT": "sp {{max_turns}}"}),
-        )
-        monkeypatch.setattr(
-            service,
             "call_llm_for_system_prompt",
             MagicMock(
                 return_value='[{"inputs": {"query": "q1"}, "label": {"answer": "a1"}}, '
@@ -1412,11 +1407,6 @@ class TestCallLlmAndExtractCases:
 
     def test_raises_when_no_valid_cases(self, service_module, monkeypatch):
         service, _ = service_module
-        monkeypatch.setattr(
-            service,
-            "load_prompt",
-            MagicMock(return_value={"SYSTEM_PROMPT": "sp"}),
-        )
         monkeypatch.setattr(
             service, "call_llm_for_system_prompt", MagicMock(return_value="[]")
         )

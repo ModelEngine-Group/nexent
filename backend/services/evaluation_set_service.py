@@ -35,7 +35,13 @@ from database.evaluation_set_db import (
 )
 from database.knowledge_db import get_index_name_by_knowledge_name
 from utils.llm_utils import call_llm_for_system_prompt
-from nexent.core.prompts import load_prompt
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
+from nexent.core.agents.prompt.evaluation import (
+    compose_evaluation_case_context_blocks,
+    compose_evaluation_kb_context, compose_evaluation_set_cases,
+    compose_evaluation_set_system,
+    evaluation_case_sources, render_evaluation_section,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -494,8 +500,10 @@ def _build_kb_descriptions(kb_info, tenant_id):
                 .first()
             )
             desc = (rec[0] or "").strip() if rec else ""
-            desc_text = f" - {desc}" if desc else " (no description)"
-            lines.append(f"- {kb['display_name']}{desc_text}")
+            section = "kb_description" if desc else "kb_no_description"
+            lines.append(render_evaluation_section("zh", section, {
+                "name": kb["display_name"], "description": desc,
+            }))
     return "\n".join(lines) if lines else ""
 
 
@@ -503,17 +511,15 @@ def _plan_search_queries(kb_info, description, model_id, tenant_id):
     kb_desc_block = _build_kb_descriptions(kb_info, tenant_id)
     if not kb_desc_block:
         return []
-    user_prompt = (
-        f"Scene description: {description}\n\n"
-        f"Available knowledge bases:\n{kb_desc_block}\n\n"
-        f"Plan search queries to retrieve relevant content. Only query topics that appear in the KB descriptions above."
-    )
     try:
-        template = load_prompt("zh", "evaluation/plan_kb_queries")
+        prompt = compose_auxiliary_prompt(
+            "zh", "evaluation_kb_plan",
+            {"description": description, "knowledge_bases": kb_desc_block},
+        )
         response = call_llm_for_system_prompt(
             model_id=model_id,
-            user_prompt=user_prompt,
-            system_prompt=template["SYSTEM_PROMPT"],
+            user_prompt=prompt.user,
+            system_prompt=prompt.system,
             tenant_id=tenant_id,
         )
         data = json.loads(response) if isinstance(response, str) else response
@@ -539,7 +545,9 @@ def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
     es_core = get_vector_db_core()
     parts: list[str] = []
     for kb in kb_info:
-        parts.append(f"\n### {kb['display_name']}")
+        parts.append("\n" + render_evaluation_section("zh", "kb_result_header", {
+            "name": kb["display_name"],
+        }))
         embedding_model = _get_kb_embedding_model(tenant_id, kb)
         if embedding_model is None:
             continue
@@ -635,7 +643,10 @@ def _format_kb_hit(hit: dict, query: str) -> str:
         return ""
     score = hit.get("_score", 0)
     normalized = max(0.0, min(1.0, (score + 1.0) / 2.0))
-    return f"- [{query}] (score={normalized:.2f}) {content.strip()[:400]}"
+    return render_evaluation_section("zh", "kb_result_hit", {
+        "query": query, "score": f"{normalized:.2f}",
+        "content": content.strip()[:400],
+    })
 
 
 def _update_generation_status(set_id, tenant_id, status, progress=0):
@@ -699,7 +710,9 @@ def _format_kb_name(name: str, tenant_id: str) -> str:
     """Format a single KB name with its description (truncated to 150 chars)."""
     info = _resolve_kb_info([name], tenant_id)
     if info and info[0].get("description"):
-        return f"{name}（{info[0]['description'][:150]}）"
+        return render_evaluation_section("zh", "kb_display_name", {
+            "name": name, "description": info[0]["description"][:150],
+        })
     return name
 
 
@@ -711,11 +724,13 @@ def _build_kb_context_block(kb_context, knowledge_base_names, tenant_id) -> str:
     note.  Returns ``""`` when neither is available.
     """
     if kb_context:
-        return f"## 知识库检索到的真实内容\n{kb_context}"
+        return compose_evaluation_kb_context("zh", kb_context=kb_context, kb_names="")
     if not knowledge_base_names:
         return ""
     kb_desc_parts = [_format_kb_name(name, tenant_id) for name in knowledge_base_names]
-    return f"## 关联知识库: {'; '.join(kb_desc_parts)}\n(未检索到内容)"
+    return compose_evaluation_kb_context(
+        "zh", kb_context="", kb_names="; ".join(kb_desc_parts)
+    )
 
 
 def _build_case_gen_context_blocks(
@@ -728,45 +743,26 @@ def _build_case_gen_context_blocks(
     file_name,
 ):
     """Build prompt context blocks for case generation.  Order: Agent → Scene → KB → File."""
-    context_blocks: list[str] = []
-
     agent_block = _build_agent_context_block(agent_id, tenant_id)
-    if agent_block:
-        context_blocks.append(agent_block)
-
-    context_blocks.append(f"## 场景描述\n{description}")
-
     kb_block = _build_kb_context_block(kb_context, knowledge_base_names, tenant_id)
-    if kb_block:
-        context_blocks.append(kb_block)
-
-    if file_content and file_name:
-        context_blocks.append(f"## 上传文档: {file_name}\n{file_content[:3000]}")
-    return context_blocks
+    return compose_evaluation_case_context_blocks(
+        "zh", agent_block=agent_block, description=description,
+        kb_block=kb_block, file_name=file_name, file_content=file_content,
+    )
 
 
 def _build_case_gen_user_prompt(
     context_blocks, count, kb_context, agent_id, file_content
 ):
     """Append generation instructions from YAML template to assembled context."""
-    user_prompt = "\n\n".join(context_blocks)
-    sources = ["场景描述"]
-    if kb_context:
-        sources.append("知识库检索内容")
-    if agent_id:
-        sources.append("Agent 配置（含工具、技能、子智能体）")
-    if file_content:
-        sources.append("上传的参考文档")
-    source_list = "、".join(sources)
-
-    template = load_prompt("zh", "evaluation/generate_cases")
-    instruction = (
-        (template.get("USER_PROMPT_INSTRUCTION") or "")
-        .replace("{{sources}}", source_list)
-        .replace("{{count}}", str(count))
-        .replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION))
+    sources = evaluation_case_sources(
+        "zh", has_kb=bool(kb_context), has_agent=bool(agent_id),
+        has_file=bool(file_content),
     )
-    return user_prompt + "\n\n" + instruction if instruction else user_prompt
+    return compose_evaluation_set_cases(
+        "zh", context_blocks=context_blocks, count=count,
+        sources=sources, max_turns=MAX_TURNS_PER_SESSION,
+    ).user
 
 
 def _parse_llm_cases_response(resp) -> list:
@@ -820,9 +816,9 @@ def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
     resp = call_llm_for_system_prompt(
         model_id=model_id,
         user_prompt=user_prompt,
-        system_prompt=load_prompt("zh", "evaluation/generate_cases")[
-            "SYSTEM_PROMPT"
-        ].replace("{{max_turns}}", str(MAX_TURNS_PER_SESSION)),
+        system_prompt=compose_evaluation_set_system(
+            "zh", max_turns=MAX_TURNS_PER_SESSION
+        ),
         tenant_id=tenant_id,
     )
     data = _parse_llm_cases_response(resp)

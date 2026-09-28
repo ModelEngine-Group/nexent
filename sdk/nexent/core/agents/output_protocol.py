@@ -83,14 +83,13 @@ class ModelOutputProtocolExhaustedError(Exception):
     """Terminal failure after the runtime exhausts protocol repair attempts."""
 
 
-_RUN_RE = re.compile(r"\A```<RUN>(?P<body>[\s\S]*?)```\Z")
+_RUN_RE = re.compile(r"\A```<run>(?P<body>[\s\S]*?)```\Z")
 _ACTION_PREAMBLE_RE = re.compile(
-    r"\A(?P<preamble>(?:(?:Think|Thought|思考)[ \t]*[:：][\s\S]*?\n)?"
-    r"[ \t]*(?:Code|代码)[ \t]*[:：])\s*(?P<action><code>[\s\S]*|```<RUN>[\s\S]*)\Z",
-    re.IGNORECASE,
+    r"\A(?P<preamble>(?:(?:[Tt]hink|[Tt]hought|思考)[ \t]*[:：][\s\S]*?\n)?"
+    r"[ \t]*(?:[Cc]ode|代码)[ \t]*[:：])\s*(?P<action><code>[\s\S]*|```<run>[\s\S]*)\Z",
 )
 
-_FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z")
+_FINAL_ENVELOPE_RE = re.compile(r"\A<final_answer>(?P<body>[\s\S]*)</final_answer>\Z")
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]{0,255}>")
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
 _CODE_MARKER_RE = re.compile(r"</?code>")
@@ -148,8 +147,8 @@ def protocol_repair_instruction(
     prefix = f"The previous response violated the Agent output protocol ({reason.value}). "
     if protocol == "final_envelope":
         return (
-            prefix + "Return exactly one complete <FINAL_ANSWER>...</FINAL_ANSWER> envelope. "
-            "Put the required <SKILL>, <FILE>, and <SUMMARY> content inside it, with no content outside the envelope."
+            prefix + "Return exactly one complete <final_answer>...</final_answer> envelope. "
+            "Put the required <skill>, <file>, and <summary> content inside it, with no content outside the envelope."
         )
     if reason == ProtocolErrorReason.INVALID_CLARIFICATION_FORM:
         return (
@@ -161,7 +160,7 @@ def protocol_repair_instruction(
     return (
         prefix + "Return optional reasoning followed by one or more complete <code>...</code> blocks. "
         "Prefer one block; if multiple blocks are needed, put only whitespace between them because they execute together as one Python action. "
-        "Put no text after the final block. To finish, return exactly one complete <FINAL_ANSWER>...</FINAL_ANSWER> envelope with no content outside it."
+        "Put no text after the final block. To finish, return exactly one complete <final_answer>...</final_answer> envelope with no content outside it."
     )
 
 
@@ -321,7 +320,7 @@ def _classify_code_action(
         return code_action
 
     run_match = _RUN_RE.fullmatch(text)
-    if run_match and text.count("```<RUN>") == 1:
+    if run_match and text.count("```<run>") == 1:
         return _parse_executable_action(
             run_match.group("body"),
             protocol=protocol,
@@ -329,7 +328,7 @@ def _classify_code_action(
             legacy_format=True,
         )
 
-    if any(marker in text for marker in ("<code>", "</code>", "```<RUN>")):
+    if any(marker in text for marker in ("<code>", "</code>", "```<run>")):
         _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
     if _TAG_RE.search(text) or _MODEL_CONTROL_TOKEN_RE.search(text):
         _raise_protocol_error(
@@ -353,8 +352,8 @@ def _classify_final_envelope(
     envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
     if (
         envelope_match
-        and text.count("<FINAL_ANSWER>") == 1
-        and text.count("</FINAL_ANSWER>") == 1
+        and text.count("<final_answer>") == 1
+        and text.count("</final_answer>") == 1
     ):
         answer = envelope_match.group("body")
         if has_meaningful_visible_content(answer):
@@ -387,9 +386,9 @@ def classify_model_output(
     if protocol == "final_envelope":
         return _classify_final_envelope(text, protocol=protocol, logger=logger)
     if "<code>" not in text and (
-        text.startswith("<FINAL_ANSWER>")
-        or "<FINAL_ANSWER>" in text
-        or "</FINAL_ANSWER>" in text
+        text.startswith("<final_answer>")
+        or "<final_answer>" in text
+        or "</final_answer>" in text
     ):
         return _classify_final_envelope(text, protocol=protocol, logger=logger)
 

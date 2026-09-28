@@ -438,7 +438,16 @@ sys.modules["nexent.core.models"] = _nexent_core_models_module
 _nexent_core.models = _nexent_core_models_module
 
 _nexent_core_prompts_module = types.ModuleType("nexent.core.prompts")
-_nexent_core_prompts_module.load_prompt = MagicMock()
+def _load_test_prompt(language, path):
+    import yaml
+    source = _REPO_ROOT / "sdk/nexent/core/prompts" / language / f"{path}.yaml"
+    return yaml.safe_load(source.read_text(encoding="utf-8"))
+_nexent_core_prompts_module.load_prompt = _load_test_prompt
+_nexent_core_prompts_module.__path__ = [str(_REPO_ROOT / "sdk/nexent/core/prompts")]
+def _render_test_prompt(source, parameters):
+    from jinja2 import Environment, StrictUndefined
+    return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+_nexent_core_prompts_module.render_prompt_text = _render_test_prompt
 sys.modules["nexent.core.prompts"] = _nexent_core_prompts_module
 _nexent_core.prompts = _nexent_core_prompts_module
 
@@ -2150,9 +2159,6 @@ class TestGenerateTestQueries:
         profile_utils = sys.modules["utils.agent_profile_utils"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         monkeypatch.setattr(
-            service_module, "load_prompt", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
-        )
-        monkeypatch.setattr(
             service_module,
             "call_llm_for_system_prompt",
             MagicMock(side_effect=RuntimeError("llm down")),
@@ -2168,9 +2174,6 @@ class TestGenerateTestQueries:
         from consts.exceptions import AppException
         profile_utils = sys.modules["utils.agent_profile_utils"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
-        monkeypatch.setattr(
-            service_module, "load_prompt", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
-        )
         # Non-empty list whose queries are all blank -> filtered to nothing -> EMPTY.
         monkeypatch.setattr(
             service_module,
@@ -2191,9 +2194,6 @@ class TestGenerateTestQueries:
     def test_generates_queries(self, service_module, monkeypatch):
         profile_utils = sys.modules["utils.agent_profile_utils"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
-        monkeypatch.setattr(
-            service_module, "load_prompt", MagicMock(return_value={"SYSTEM_PROMPT": "s"})
-        )
         response = json.dumps(
             [
                 {"inputs": {"query": "q1"}, "label": {"answer": "a1"}},
@@ -2726,22 +2726,24 @@ class TestAnalysisHelpers:
         assert block.count("Case ") == service_module.MAX_FAILURE_EXAMPLES
 
     def test_call_analysis_llm_and_parse(self, service_module):
-        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
+        from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
         service_module.call_llm_for_system_prompt = MagicMock(return_value='{"summary": "x"}')
         assert service_module._call_analysis_llm_and_parse(
-            {"judge_model_id": 99}, "zh", "up", "t1"
+            {"judge_model_id": 99}, AuxiliaryPrompt(system="sp", user="up"), "t1"
         ) == {"summary": "x"}
         service_module.call_llm_for_system_prompt = MagicMock(return_value={"summary": "y"})
         assert service_module._call_analysis_llm_and_parse(
-            {"judge_model_id": 99}, "zh", "up", "t1"
+            {"judge_model_id": 99}, AuxiliaryPrompt(system="sp", user="up"), "t1"
         ) == {"summary": "y"}
 
     def test_call_analysis_llm_and_parse_non_dict_raises(self, service_module):
+        from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
         from consts.exceptions import AppException
-        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.call_llm_for_system_prompt = MagicMock(return_value="[1, 2]")
         with pytest.raises(AppException) as excinfo:
-            service_module._call_analysis_llm_and_parse({"judge_model_id": 99}, "zh", "up", "t1")
+            service_module._call_analysis_llm_and_parse(
+                {"judge_model_id": 99}, AuxiliaryPrompt(system="sp", user="up"), "t1"
+            )
         assert (
             excinfo.value.error_code
             == service_module.ErrorCode.AGENT_EVALUATION_ANALYSIS_FAILED

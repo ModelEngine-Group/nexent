@@ -28,6 +28,9 @@ POLICY_FILES = {
     Path("zh/agent/answer_verifier.yaml"),
     Path("zh/memory/dreaming_user.yaml"),
     Path("zh/memory/fa_extraction.yaml"),
+    *(Path(f"{language}/agent/{name}.yaml")
+      for language in ("zh", "en")
+      for name in ("context_sections", "memory_tool_policy", "automation_tool_policy", "knowledge_scope")),
 }
 
 
@@ -36,7 +39,7 @@ def test_ut_sdk_fps_004_all_resources_have_reviewed_layout_and_original_bytes():
     assert len(ALL_SHA256) == 46
     expected = {destination_for_old_name(Path(name).name) for name in ALL_SHA256} | POLICY_FILES
     actual = {path.relative_to(PROMPTS) for path in PROMPTS.rglob("*.yaml")}
-    assert len(actual) == 54
+    assert len(actual) == 62
     assert actual == expected
     assert not list(PROMPTS.glob("*.yaml"))
 

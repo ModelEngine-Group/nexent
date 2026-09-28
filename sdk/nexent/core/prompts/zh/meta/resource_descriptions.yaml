@@ -1,0 +1,15 @@
+tool: |-
+  - {{ name }}: {{ description }} 
+   接受输入: {{ inputs }}
+   返回输出类型: {{ output_type }}
+worker_agent: "- {{ name }}: {{ description }}"
+generation_knowledge_scope: |-
+  知识库工具仅代表检索能力。不得在生成内容中写入具体知识库名称、知识库 ID、索引名称、KDS ID、固定 index_names 或固定 kds_list；统一表述为当前会话允许的知识库范围。
+optimization_knowledge_scope: |-
+  优化后的内容不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、固定 index_names 或固定 kds_list；应改写为当前会话允许的知识库范围。
+optimization_global_scope: |-
+  优化后的提示词不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、固定 index_names 或固定 kds_list；统一改写为使用当前会话允许的知识库范围。
+section_titles:
+  duty: 智能体角色
+  constraint: 使用要求
+  few_shots: 示例

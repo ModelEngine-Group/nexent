@@ -7,6 +7,7 @@ from hashlib import sha256
 from types import MappingProxyType
 from typing import Any
 
+from ...prompts import load_prompt
 from .validator import validate_agent_prompt_template
 
 
@@ -42,6 +43,17 @@ class AgentPromptBundle:
     template: Mapping[str, Any]
     system_sections: Mapping[str, str]
     digest: str
+
+    @classmethod
+    def from_resource(
+        cls, *, role: str, language: str, template_override: Mapping[str, Any] | None = None,
+    ) -> "AgentPromptBundle":
+        """Load a complete SDK-owned role template or validate an explicit override."""
+        if role not in {"manager", "managed"}:
+            raise ValueError("unsupported Agent prompt role")
+        resource = "agent/agent_manager" if role == "manager" else "agent/agent_worker"
+        template = template_override if template_override is not None else load_prompt(language, resource)
+        return cls.from_mapping(role=role, language=language, template=template)
 
     @classmethod
     def from_mapping(

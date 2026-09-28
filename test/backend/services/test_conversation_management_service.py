@@ -497,7 +497,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.load_prompt')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
         # Setup
@@ -508,10 +508,9 @@ class TestConversationManagementService(unittest.TestCase):
             "api_key": "fake-key"
         }
 
-        mock_prompt_template = {
-            "SYSTEM_PROMPT": "Generate a short title",
-            "USER_PROMPT": "Generate a title for: {{question}}"
-        }
+        mock_prompt_template = types.SimpleNamespace(
+            system="Generate a short title", user="Generate a title for: What is AI?"
+        )
         mock_get_prompt_template.return_value = mock_prompt_template
 
         mock_llm_instance = mock_openai.return_value
@@ -527,10 +526,12 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
         mock_llm_instance.assert_called_once()
-        mock_get_prompt_template.assert_called_once_with('zh', 'agent/generate_chat_title')
+        mock_get_prompt_template.assert_called_once_with(
+            'zh', 'chat_title', {'question': 'What is AI? AI stands for Artificial Intelligence.'}
+        )
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.load_prompt')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     @patch('backend.services.conversation_management_service.get_model_by_model_id')
     def test_call_llm_for_title_uses_selected_tenant_model(
@@ -542,10 +543,7 @@ class TestConversationManagementService(unittest.TestCase):
             "model_factory": "openai",
         }
         mock_get_model.return_value = selected_config
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "Generate a short title",
-            "USER_PROMPT": "{{question}}",
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="Generate a short title", user="Question")
         mock_adapter.return_value.return_value = MagicMock(content="Selected title")
 
         with self.assertLogs("conversation_management_service", level="INFO") as logs:
@@ -1323,7 +1321,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
     """Test edge cases for call_llm_for_title."""
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.load_prompt')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_modelengine_factory_uses_flat_messages(self, mock_get_config, mock_get_prompt, mock_model):
         """Should flatten messages when model_factory is modelengine."""
@@ -1334,10 +1332,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test question")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="Title")
         mock_model.return_value = mock_llm
@@ -1353,7 +1348,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             self.assertIn("content", msg)
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.load_prompt')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_empty_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is empty."""
@@ -1363,10 +1358,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="  ")  # whitespace only
         mock_model.return_value = mock_llm
@@ -1377,7 +1369,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertIn("title_generation: unknown -> 新对话", "\n".join(logs.output))
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.load_prompt')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_none_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is None."""
@@ -1387,10 +1379,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content=None)
         mock_model.return_value = mock_llm
@@ -1399,7 +1388,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "新对话")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.load_prompt')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_english_title_response(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default English title for English language."""
@@ -1409,10 +1398,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="  ")
         mock_model.return_value = mock_llm
@@ -1421,7 +1407,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "New Conversation")  # DEFAULT_EN_TITLE
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.load_prompt')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_remove_think_blocks(self, mock_get_config, mock_get_prompt, mock_model):
         """Should remove think blocks from title."""
@@ -1431,10 +1417,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="<think>reasoning</think>Actual Title")
         mock_model.return_value = mock_llm
@@ -1443,15 +1426,12 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "Actual Title")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.load_prompt')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_no_model_config_returns_empty_display_name(self, mock_get_config, mock_get_prompt, mock_model):
         """Should handle None model_config gracefully."""
         mock_get_config.return_value = None
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="Title")
         mock_model.return_value = mock_llm

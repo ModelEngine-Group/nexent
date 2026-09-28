@@ -1,0 +1,7 @@
+policy: |-
+  ### Scheduled Task Tool Rules
+  - When the user explicitly asks for a task to run later, after a delay, or repeatedly, call `create_scheduled_task_proposal`. Do not execute the business action now.
+  - Copy the scheduling request from the current user message verbatim into `request_text`. Do not add Agent, tool, knowledge-base, data-source, or implementation details.
+  - `create_scheduled_task_proposal` must be the only tool call in that code action. Do not call another tool or agent in the same action.
+  - The tool creates a pending proposal only. Return its result immediately with `final_answer` and stop the turn.
+  - Do not call this tool for immediate requests, questions about data at a time, schedule explanations, factual statements, or personal habits.

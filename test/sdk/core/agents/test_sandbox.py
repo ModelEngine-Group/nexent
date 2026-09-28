@@ -3039,7 +3039,7 @@ class TestBuildPythonExecutor:
         executor = sandbox_module.build_python_executor(
             cfg,
             logger,
-            managed_agents_exist=True,
+            worker_agents_exist=True,
             host_tools_exist=True,
         )
 

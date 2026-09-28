@@ -20,11 +20,8 @@ from nexent.core.agents.context.models import (
 )
 from nexent.core.agents.context.manager import ContextManager
 from nexent.core.agents.context.formatting import (
-    _format_agent_fallback,
     _format_external_agents_description,
-    _format_managed_agents_description,
-    _format_memory_context,
-    _format_skills_description,
+    _format_worker_agents_description,
     _format_tools_description,
 )
 from nexent.core.agents.context.llm_summary import _strip_code_fences
@@ -168,11 +165,8 @@ def test_context_item_representation_guards_and_compact_cache():
 
 
 def test_formatting_empty_and_tool_variants():
-    assert _format_memory_context([]) == ""
-    assert _format_skills_description([]) == ""
-    assert _format_managed_agents_description({}) == ""
+    assert _format_worker_agents_description({}) == ""
     assert _format_external_agents_description({}) == ""
-    assert _format_agent_fallback({"worker": {}}, {}) == ""
     assert "No tools are currently available" in _format_tools_description({}, language="en")
 
     tool = SimpleNamespace(
@@ -189,36 +183,28 @@ def test_formatting_empty_and_tool_variants():
     assert "presigned_url" in en_description
 
 
-def test_memory_formatting_renders_agent_presearch_and_ignores_retired_levels():
+def test_ut_sdk_fps_017_memory_renders_data_without_legacy_guidance():
     result_text = "Found 1 relevant memories:\n[1] Existing preference"
-
-    rendered = _format_memory_context(
-        [{"memory": result_text, "memory_level": "agent"}],
-        language="en",
+    item = _direct_item(
+        "memory:0", ContextItemType.MEMORY,
+        {"memory": result_text, "memory_level": "agent", "score": 0.8},
+        {"render_group": "memory", "language": "en"},
     )
-
-    assert "**Agent Level Memory:**" in rendered
-    assert result_text in rendered
-    assert "user_agent" not in rendered
-    assert _format_memory_context(
-        [{"memory": "retired", "memory_level": "user_agent"}],
-        language="en",
-    ) == ""
-    assert _format_memory_context(
-        [{"memory": "unknown", "memory_level": "retrieved"}],
-        language="en",
-    ) == ""
+    rendered = ContextItemRenderer().render([item])
+    assert rendered[0]["role"] == "user"
+    assert rendered[0]["content"][0]["text"] == "## Retrieved Memory\n" + result_text
+    assert "Memory Usage Guidelines" not in str(rendered)
 
 
-def test_versioned_long_term_markdown_is_not_wrapped_as_scored_list_item():
+def test_ut_sdk_fps_017_long_term_memory_markdown_is_preserved():
     markdown = "## Preferences\n\n- concise\n- use English"
-    rendered = _format_memory_context([{
-        "memory": markdown, "memory_level": "user", "version_id": 9,
-        "memory_type": "long_term", "source": "dreaming",
-    }], language="en")
-    assert markdown in rendered
-    assert f"- {markdown}" not in rendered
-    assert "`(0.00)`" not in rendered
+    item = _direct_item(
+        "memory:0", ContextItemType.MEMORY,
+        {"memory": markdown, "memory_level": "user", "version_id": 9},
+        {"render_group": "memory", "language": "en"},
+    )
+    rendered = ContextItemRenderer().render([item])
+    assert rendered[0]["content"][0]["text"] == "## Retrieved Memory\n" + markdown
 
 
 def _direct_item(item_id, item_type, content, metadata=None):
@@ -232,20 +218,9 @@ def _direct_item(item_id, item_type, content, metadata=None):
 
 def test_renderer_text_templates_and_payload_guards():
     renderer = ContextItemRenderer()
-    skills_usage = _direct_item(
-        "skills",
-        ContextItemType.SYSTEM,
-        {"template": "skills_usage", "skills": [], "language": "en", "is_manager": False},
-    )
-    fallback = _direct_item(
-        "fallback",
-        ContextItemType.SYSTEM,
-        {"template": "agent_fallback", "language": "en"},
-    )
-    assert "No skills" in renderer.render([skills_usage])[0]["content"][0]["text"]
-    assert "No agents" in renderer.render([fallback])[0]["content"][0]["text"]
-
     invalid_items = [
+        _direct_item("skills", ContextItemType.SYSTEM, {"template": "skills_usage"}),
+        _direct_item("fallback", ContextItemType.SYSTEM, {"template": "agent_fallback"}),
         _direct_item("unknown", ContextItemType.SYSTEM, {"template": "unknown"}),
         _direct_item("payload", ContextItemType.SYSTEM, {"text": "x", "extra": True}),
         _direct_item("missing", ContextItemType.SYSTEM, {"text": None}),
@@ -438,7 +413,7 @@ def test_renderer_summary_legacy_dict_renders_markdown():
     )
     message = ContextItemRenderer().render([summary])[0]
     text = message["content"][0]["text"]
-    assert "## Task Overview" in text
+    assert "### Task Overview" in text
     assert "did work" in text
     assert "## Completed Work" in text
 

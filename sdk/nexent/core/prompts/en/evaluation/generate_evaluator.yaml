@@ -224,3 +224,14 @@ SYSTEM_PROMPT: |-
   - code type function signature MUST be evaluate(query, expected, actual, runtime_events) — all four parameters required
   - Use double curly braces {{}} for variable placeholders
   - Output JSON only, no other content
+USER_PROMPT_WITH_AGENT: |-
+  {{ agent_profile }}
+
+  ## Evaluation Request
+  Generate an evaluator for the above agent. Requirements:
+
+  {{ description }}
+USER_PROMPT_WITHOUT_AGENT: |-
+  Generate an evaluator based on the following requirements:
+
+  {{ description }}

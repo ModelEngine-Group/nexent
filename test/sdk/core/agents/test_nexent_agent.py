@@ -491,7 +491,7 @@ def mock_agent_config():
         max_steps=5,
         model_name="test_model",
         provide_run_summary=False,
-        managed_agents=[]
+        worker_agents=[]
     )
 
 
@@ -2872,7 +2872,7 @@ class TestCreateSingleAgentExceptionHandling:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[]
+            worker_agents=[]
         )
 
         with pytest.raises(ValueError, match=r"Error in creating agent, agent name: test_agent, Error: Error in creating tool:"):
@@ -2890,7 +2890,7 @@ class TestCreateSingleAgentExceptionHandling:
             max_steps=5,
             model_name="nonexistent_model",
             provide_run_summary=False,
-            managed_agents=[]
+            worker_agents=[]
         )
 
         mock_agent_config = AgentConfig(
@@ -2901,10 +2901,10 @@ class TestCreateSingleAgentExceptionHandling:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[mock_sub_agent_config]
+            worker_agents=[mock_sub_agent_config]
         )
 
-        with pytest.raises(ValueError, match=r"Error in creating managed agent:"):
+        with pytest.raises(ValueError, match=r"Error in creating worker agent:"):
             nexent_agent_instance.create_single_agent(mock_agent_config)
 
 
@@ -4007,7 +4007,7 @@ class TestCreateSingleAgent:
             tools=[],
             max_steps=5,
             model_name="test_model",
-            managed_agents=[sub_agent_config],
+            worker_agents=[sub_agent_config],
             external_a2a_agents=[ext_agent_config]
         )
 
@@ -4196,7 +4196,7 @@ class TestSandboxWarmUp:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[]
+            worker_agents=[]
         )
 
         with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
@@ -4236,7 +4236,7 @@ class TestSandboxWarmUp:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[]
+            worker_agents=[]
         )
 
         with patch.dict("sys.modules", {
@@ -4249,7 +4249,7 @@ class TestSandboxWarmUp:
         mock_build.assert_called_once_with(
             config=mock_sandbox_config,
             logger_=ANY,
-            managed_agents_exist=False,
+            worker_agents_exist=False,
             host_tools_exist=False,
             session_container_group=None,
             cancellation_scope=None,
@@ -6543,7 +6543,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[],
+            worker_agents=[],
             enable_planning=False,
         )
 
@@ -6580,7 +6580,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[],
+            worker_agents=[],
             enable_planning=False,
         )
 
@@ -6622,7 +6622,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[],
+            worker_agents=[],
             enable_planning=False,
         )
         executor = MagicMock()
@@ -6689,7 +6689,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[],
+            worker_agents=[],
         )
 
         with patch.dict("sys.modules", {
@@ -6723,7 +6723,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[],
+            worker_agents=[],
         )
 
         with patch.dict("sys.modules", {
@@ -6769,7 +6769,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             tools=[],
             max_steps=5,
             model_name="test_model",
-            managed_agents=[],
+            worker_agents=[],
             enable_planning=False,
         )
         parent_config = AgentConfig(
@@ -6779,7 +6779,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             tools=[],
             max_steps=5,
             model_name="test_model",
-            managed_agents=[child_config],
+            worker_agents=[child_config],
             enable_planning=False,
         )
 
@@ -6794,10 +6794,10 @@ class TestCreateSingleAgentSandboxAndPlanning:
 
         assert result is parent_agent
         assert mock_build.call_count == 2
-        assert mock_build.call_args_list[0].kwargs["managed_agents_exist"] is False
+        assert mock_build.call_args_list[0].kwargs["worker_agents_exist"] is False
         assert mock_build.call_args_list[0].kwargs["host_tools_exist"] is False
         assert mock_build.call_args_list[0].kwargs["session_container_group"] is None
-        assert mock_build.call_args_list[1].kwargs["managed_agents_exist"] is True
+        assert mock_build.call_args_list[1].kwargs["worker_agents_exist"] is True
         assert mock_build.call_args_list[1].kwargs["host_tools_exist"] is True
         assert (
             mock_build.call_args_list[1].kwargs["session_container_group"]
@@ -6839,7 +6839,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             tools=[],
             max_steps=5,
             model_name="test_model",
-            managed_agents=[],
+            worker_agents=[],
             enable_planning=False,
         )
         parent_config = AgentConfig(
@@ -6849,7 +6849,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             tools=[],
             max_steps=5,
             model_name="test_model",
-            managed_agents=[child_config],
+            worker_agents=[child_config],
             enable_planning=False,
         )
 
@@ -6887,7 +6887,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             max_steps=5,
             model_name="test_model",
             provide_run_summary=False,
-            managed_agents=[],
+            worker_agents=[],
             enable_planning=True,
         )
 

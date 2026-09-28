@@ -59,7 +59,7 @@ INGEST_DUTY = (
     "the next part of the novel. Read it carefully and remember the events, "
     "the characters, and the order in which things happen. Do not analyze, "
     "review, or summarize the text. Simply acknowledge that you have read it "
-    "by returning exactly: <FINAL_ANSWER>OK</FINAL_ANSWER>"
+    "by returning exactly: <final_answer>OK</final_answer>"
 )
 
 PROBE_DUTY = (
@@ -78,7 +78,7 @@ PROBE_DUTY = (
     "string, a print, or any inspection code.\n"
     "- Emit exactly one envelope of this form, with the chosen option's "
     "text copied verbatim from the candidate list:\n"
-    '<FINAL_ANSWER><exact text of the option you choose></FINAL_ANSWER>'
+    '<final_answer><exact text of the option you choose></final_answer>'
 )
 
 
@@ -259,7 +259,7 @@ async def ingest_and_compress(book: EventQABook, cm_config: ContextManagerConfig
             f"{chunk_msg}\n\n"
             f"You have now read this part of the novel. Acknowledge it by "
             f"emitting exactly this code and nothing else:\n"
-            f'<FINAL_ANSWER>OK</FINAL_ANSWER>'
+            f'<final_answer>OK</final_answer>'
         )
         run_info = build_agent_run_info(
             query,

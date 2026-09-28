@@ -93,6 +93,28 @@ def _install_stubs():
     _utils.prompt_template_utils = _mk_mod(
         "utils.prompt_template_utils", get_prompt_template=MagicMock(name="get_prompt_template")
     )
+    sdk_root = _REPO_ROOT / "sdk/nexent"
+    for package_name, package_path in (
+        ("nexent", sdk_root),
+        ("nexent.core", sdk_root / "core"),
+        ("nexent.core.prompts", sdk_root / "core/prompts"),
+    ):
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(package_path)]
+        sys.modules[package_name] = package
+
+    def load_test_prompt(language, path):
+        import yaml
+        source = sdk_root / "core/prompts" / language / f"{path}.yaml"
+        return yaml.safe_load(source.read_text(encoding="utf-8"))
+
+    def render_test_prompt(source, parameters):
+        from jinja2 import Environment, StrictUndefined
+        return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+
+    prompts = sys.modules["nexent.core.prompts"]
+    prompts.load_prompt = load_test_prompt
+    prompts.render_prompt_text = render_test_prompt
     return _ErrorCode, _AppException
 
 
@@ -337,11 +359,12 @@ class TestGenerateEvaluatorByLlm:
             {"name": "expected", "type": "string", "required": True},
             {"name": "actual", "type": "string", "required": True},
         ]
-        bundle.tmpl.assert_called_once_with("zh", "evaluation/generate_evaluator")
-        bundle.llm.assert_called_once_with(
-            model_id=7, user_prompt=bundle.llm.call_args.kwargs["user_prompt"],
-            system_prompt="sys", tenant_id="t1",
-        )
+        bundle.tmpl.assert_not_called()
+        bundle.llm.assert_called_once()
+        assert bundle.llm.call_args.kwargs["model_id"] == 7
+        assert bundle.llm.call_args.kwargs["tenant_id"] == "t1"
+        assert len(bundle.llm.call_args.kwargs["system_prompt"]) > 50
+        assert "desc" in bundle.llm.call_args.kwargs["user_prompt"]
 
     def test_success_code_with_agent(self, bundle):
         bundle.tmpl.return_value = {"SYSTEM_PROMPT": "sys"}

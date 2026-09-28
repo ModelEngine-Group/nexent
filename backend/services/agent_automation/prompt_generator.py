@@ -5,11 +5,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from jinja2 import StrictUndefined, Template
 from nexent.core.concurrency import run_blocking
 
 from consts.const import LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING
-from nexent.core.prompts import load_prompt
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 
 logger = logging.getLogger("agent_automation.prompt_generator")
 
@@ -213,8 +212,6 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
                 "automation-prompt-generation",
                 self._generate_sync,
                 context,
-                "TASK_CONTENT_SYSTEM_PROMPT",
-                "TASK_CONTENT_USER_PROMPT",
                 lane="model-tool-io",
                 owner="config",
             )
@@ -226,16 +223,13 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
     def _generate_sync(
         self,
         context: AutomationPromptContext,
-        system_key: str,
-        user_key: str,
     ) -> str:
         from nexent.core.models import OpenAIModel
         from nexent.core.utils.observer import MessageObserver
         from utils.config_utils import get_model_name_from_config
 
-        prompt_template = load_prompt(context.language, "automation/agent")
         values = {"instruction": context.instruction.strip()}
-        user_prompt = Template(prompt_template[user_key], undefined=StrictUndefined).render(**values).strip()
+        prompt = compose_auxiliary_prompt(context.language, "automation_task_content", values)
         llm = OpenAIModel(
             observer=MessageObserver(),
             model_id=get_model_name_from_config(self._model_config) if self._model_config.get("model_name") else "",
@@ -249,8 +243,8 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
             stream=False,
         )
         response = llm([
-            {"role": MESSAGE_ROLE["SYSTEM"], "content": prompt_template[system_key]},
-            {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
+            {"role": MESSAGE_ROLE["SYSTEM"], "content": prompt.system},
+            {"role": MESSAGE_ROLE["USER"], "content": prompt.user.strip()},
         ])
         return getattr(response, "content", "") or ""
 

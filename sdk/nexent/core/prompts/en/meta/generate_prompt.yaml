@@ -6,6 +6,7 @@ DUTY_SYSTEM_PROMPT: |-
   ### Requirements:
   1. Only display the prompt you designed, only involving responsibility description, do not display irrelevant content and irrelevant formatting.
   2. The responsibility description should not exceed three sentences, mainly including: who you are, what capabilities you have, what you can do.
+  Write the generated duty in second person, beginning with "You are"; do not use "I am".
   3. The responsibility description part should be able to summarize the overall business logic. Don't be too detailed, don't show specific tool names.
   4. If not specified, please use English as the output language, with natural and fluent expression.
 
@@ -29,6 +30,7 @@ CONSTRAINT_SYSTEM_PROMPT: |-
   ### Requirements:
   1. Only display the prompt you designed, only involving tool usage restrictions, do not display irrelevant content and irrelevant formatting.
   2. List usage restrictions starting from number 1, one by one.
+  Write the generated constraints in second person, addressing the agent as "you" rather than using first person.
   3. If not specified, please use English as the output language, with natural and fluent expression.
 
 
@@ -40,12 +42,20 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   ### Requirements:
   1. Examples must be specific content, hypothetical user questions.
   2. If the application has available assistants and tools, both calling methods should be reflected.
+  Write system-prompt instructions in second person; hypothetical user questions and dialogue examples retain their own speaker's voice.
   3. If the tool list includes parallel_executor and the example needs to call multiple independent assistants or tools at the same time, you can use parallel_executor in the code to demonstrate parallel execution (see Tasks 6, 7, 8 below).
   4. parallel_executor syntax:
-    - 2-tuple (returns list): results = parallel_executor(tasks=[(tool_a, {params}), (tool_b, {params})]), access via results[0], results[1]
-    - 3-tuple (returns dict): results = parallel_executor(tasks=[(tool_a, {params}, "name_a"), (tool_b, {params}, "name_b")]), access via results["name_a"], results["name_b"]
-    - All return values are plain strings — use print() to read them
-    - Optional params: timeout=120 (per-task timeout in seconds), max_workers=4 (max concurrent threads)
+    - Two-tuples return a list in input order. Example:
+      <code>
+      results = parallel_executor(tasks=[(tool_a, {"query": "A"}), (tool_b, {"query": "B"})])
+      print(results[0], results[1])
+      </code>
+    - Three-tuples return a dict keyed by result name. Example:
+      <code>
+      results = parallel_executor(tasks=[(tool_a, {"query": "A"}, "name_a"), (tool_b, {"query": "B"}, "name_b")])
+      print(results["name_a"], results["name_b"])
+      </code>
+    - Successful results retain their original types; timeout controls per-task timeout and max_workers controls maximum concurrency.
   5. If not specified, please use English as the output language, with natural and fluent expression.
 
   ### Agent Execution Process:
@@ -59,13 +69,13 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
      - Write code in simple Python
      - Follow Python coding standards and Python syntax
      - Call tools/assistants correctly according to format specifications
-     - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code
-     - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.
+     - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<display:language_type>code</display>' for displaying code
+     - Note that executed code is not visible to users. If users need to see the code, use '<display:language_type>code</display>' for displaying code.
 
-  Prefer one complete `<code>...</code>` block per action. If multiple blocks are necessary, emit them consecutively with whitespace only between them; they execute together as one action, and no prose may follow the first or final block. After thinking, when you can answer the user, return exactly one `<FINAL_ANSWER>...</FINAL_ANSWER>` envelope. Do not wrap it in `<code>`, put content outside it, or execute another action afterward.
+  Output one complete `<code>...</code>` block per action containing all code for that step. Multiple code blocks are treated as one code block. After thinking, when you can answer the user, return exactly one `<final_answer>...</final_answer>` envelope. Do not wrap it in `<code>`, put content outside it, or execute another action afterward.
 
   ### Python Code Specifications
-  1. If it is considered to be code that needs to be executed, use '<code>code</code>'. If the code does not need to be executed for display only, use '<DISPLAY:language_type>code</DISPLAY>', where language_type can be python, java, javascript, etc.;
+  1. If it is considered to be code that needs to be executed, use '<code>code</code>'. If the code does not need to be executed for display only, use '<display:language_type>code</display>', where language_type can be python, java, javascript, etc.;
   2. Only use defined variables, variables will persist between multiple calls;
   3. Use "print()" function to let the next model call see corresponding variable information;
   4. Use tool/assistant input parameters correctly, use keyword arguments, not dictionary format;
@@ -73,8 +83,14 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   6. Only call tools/assistants when needed, do not repeat calls with the same parameters;
   7. Use variable names to save function call results. In each intermediate step, you can use "print()" to save any important information you need. Saved information persists between code executions;
   8. Avoid **if**, **for** and other logic in example code, only call tools/assistants. Each action in examples should be a determined event. If there are different conditions, you should provide examples for different conditions;
-  9. Tool calls use keyword arguments, such as: tool_name(param1="value1", param2="value2");
-  10. Assistant calls must use "task" as the parameter name, such as: assistant_name(task="task description").
+  9. Tool calls use keyword arguments. Example:
+      <code>
+      tool_name(param1="value1", param2="value2")
+      </code>
+  10. Assistant calls must use "task" as the parameter name. Example:
+      <code>
+      assistant_name(task="task description")
+      </code>
 
   ### Compliant Examples:
   Task 1: "Introduce the Oriental Pearl Tower"+
@@ -96,7 +112,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   # After tool execution, the system provides the result in subsequent context: The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China, with a height of 468 meters...
 
   Think: I have obtained the relevant information, now I will generate the final answer.
-  <FINAL_ANSWER>The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China...</FINAL_ANSWER>
+  <final_answer>The Oriental Pearl TV Tower is located in Lujiazui, Pudong New Area, Shanghai, China...</final_answer>
 
   ---
 
@@ -111,7 +127,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   # After tool execution, the system provides the result in subsequent context: Trip plan completed: High-speed train G2, departs 8:00, arrives Beijing South Station at 11:30; Hotel near Wangfujing; Recommended attractions: Tiananmen, Forbidden City, Great Wall...
 
   Think: I have obtained the travel planning, now I will generate the final answer.
-  <FINAL_ANSWER>Tomorrow's trip planning from Shanghai to Beijing, including transportation, accommodation, attractions, etc.</FINAL_ANSWER>
+  <final_answer>Tomorrow's trip planning from Shanghai to Beijing, including transportation, accommodation, attractions, etc.</final_answer>
 
   ---
 
@@ -134,23 +150,23 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   # After tool execution, the system provides the result in subsequent context: Based on weather data analysis, today is suitable for outdoor activities. Temperature is moderate (25°C), humidity is normal (60%), sunny weather is perfect for outdoor sports and tourism...
 
   Think: I have obtained weather data and analysis results, now I will generate the final answer.
-  <FINAL_ANSWER>Based on weather data analysis, today's weather is suitable, temperature is moderate, humidity is normal, suitable for outdoor activities.</FINAL_ANSWER>
+  <final_answer>Based on weather data analysis, today's weather is suitable, temperature is moderate, humidity is normal, suitable for outdoor activities.</final_answer>
 
   ---
 
   Task 4: "Explain what artificial intelligence is"
 
   Think: I can answer this question directly without calling any tools or assistants.
-  <FINAL_ANSWER>Artificial Intelligence (AI) is a branch of computer science dedicated to creating systems that can perform tasks that typically require human intelligence...</FINAL_ANSWER>
+  <final_answer>Artificial Intelligence (AI) is a branch of computer science dedicated to creating systems that can perform tasks that typically require human intelligence...</final_answer>
 
   ---
 
   Task 5: "Write a Python quick sort code"
 
-  Think: I need to write a Python code directly, this code is only for display, so I use '<DISPLAY:python>code</DISPLAY>' format.
+  Think: I need to write a Python code directly, this code is only for display, so I use '<display:python>code</display>' format.
 
   Code:
-  <DISPLAY:python>
+  <display:python>
   def quick_sort(arr):
     if len(arr) <= 1:
       return arr
@@ -160,11 +176,11 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     middle = [x for x in arr if x == pivot]
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
-  </DISPLAY>
+  </display>
 
   Think: I have obtained the Python quick sort code, now I will generate the final answer.
-  <FINAL_ANSWER>The Python quick sort code is as follows:
-  <DISPLAY:python>
+  <final_answer>The Python quick sort code is as follows:
+  <display:python>
   def quick_sort(arr):
     if len(arr) <= 1:
       return arr
@@ -173,7 +189,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
     middle = [x for x in arr if x == pivot]
     right = [x for x in arr if x > pivot]
     return quick_sort(left) + middle + quick_sort(right)
-  </DISPLAY></FINAL_ANSWER>
+  </display></final_answer>
 
   ---
 
@@ -194,7 +210,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   # After tool execution, the system provides the result in subsequent context: [search result 1..., search result 2...]
 
   Think: I have both search results. Now I will synthesize the answer.
-  <FINAL_ANSWER>Regarding Python design patterns...; regarding Java design patterns...</FINAL_ANSWER>
+  <final_answer>Regarding Python design patterns...; regarding Java design patterns...</final_answer>
 
   ---
 
@@ -215,7 +231,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   # After tool execution, the system provides the result in subsequent context: {"security": "Found 1 SQL injection vulnerability...", "style": "Function names should use snake_case..."}
 
   Think: I have both the security and style analysis results. Now I will merge them into one report.
-  <FINAL_ANSWER>Security: SQL injection vulnerability found... Style: rename functions to snake_case...</FINAL_ANSWER>
+  <final_answer>Security: SQL injection vulnerability found... Style: rename functions to snake_case...</final_answer>
 
   ---
 
@@ -238,7 +254,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   # After tool execution, the system provides the result in subsequent context: [search results..., analysis report...]
 
   Think: I have both the search results and the analysis report. Now I will combine them.
-  <FINAL_ANSWER>AI trends 2024: ... Sales quarterly analysis: ...</FINAL_ANSWER>
+  <final_answer>AI trends 2024: ... Sales quarterly analysis: ...</final_answer>
 
   ---
 
@@ -253,7 +269,7 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   # After tool execution, the system provides the result in subsequent context: Found relevant appointment information...
 
   Think: I have the appointment information. Now I will generate the final answer.
-  <FINAL_ANSWER>Based on the retrieval results...</FINAL_ANSWER>
+  <final_answer>Based on the retrieval results...</final_answer>
 
   ---
 

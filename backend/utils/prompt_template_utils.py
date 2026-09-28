@@ -6,7 +6,7 @@ from consts.prompt_template import (
     PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP,
     PROMPT_GENERATE_TEMPLATE_FIELDS,
 )
-from nexent.core.prompts import load_prompt, render_prompt_text
+from nexent.core.agents.prompt.meta import compose_nl2skill
 
 logger = logging.getLogger("prompt_template_utils")
 
@@ -77,42 +77,9 @@ def get_nl2skill_prompt_template(
         Dict[str, str]: Template with keys 'system_prompt' and 'user_prompt', rendered with variables
     """
     template_language = language if language in {LANGUAGE["ZH"], LANGUAGE["EN"]} else LANGUAGE["ZH"]
-    template_data = load_prompt(template_language, "meta/nl2skill")
-
-    # A draft snapshot is supplied for every interactive turn, including the empty initial draft.
-    existing_skill_content = ""
-    if isinstance(existing_skill, dict):
-        existing_skill_content = str(existing_skill.get("content") or "").strip()
-
-    # Prepare template context with existing_skill info.
-    context = {
-        "existing_skill": existing_skill,
-        "has_existing_skill_content": bool(existing_skill_content),
-        "user_request": user_request,
-        "target_files": target_files or [],
-    }
-
-    # Render templates with Jinja2
-    system_prompt_raw = template_data.get("system_prompt", "")
-    user_prompt_raw = template_data.get("user_prompt", "")
-
-    try:
-        system_prompt = (
-            render_prompt_text(system_prompt_raw, context) if system_prompt_raw else ""
-        )
-    except Exception as e:
-        logger.warning(f"Failed to render system_prompt template: {e}, using raw content")
-        system_prompt = system_prompt_raw
-
-    try:
-        user_prompt = (
-            render_prompt_text(user_prompt_raw, context) if user_prompt_raw else ""
-        )
-    except Exception as e:
-        logger.warning(f"Failed to render user_prompt template: {e}, using raw content")
-        user_prompt = user_prompt_raw
-
-    return {
-        "system_prompt": system_prompt,
-        "user_prompt": user_prompt
-    }
+    return compose_nl2skill(
+        template_language,
+        existing_skill=existing_skill,
+        user_request=user_request,
+        target_files=target_files or [],
+    )

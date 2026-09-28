@@ -271,7 +271,7 @@ class AgentConfig(BaseModel):
     instructions: Optional[str] = Field(
         description="Additional instructions to prepend to system prompt", default=None
     )
-    managed_agents: List["AgentConfig"] = Field(description="Internal managed sub-agents created locally", default=[])
+    worker_agents: List["AgentConfig"] = Field(description="Internal worker sub-agents created locally", default=[])
     external_a2a_agents: List["ExternalA2AAgentConfig"] = Field(
         description="External A2A agents called via HTTP requests", default=[]
     )

@@ -1,0 +1,92 @@
+tools:
+  heading: '### Tools'
+  unavailable: '- No tools are currently available'
+  intro: 'The following tools are available for this task:'
+  input_label: Accepts input
+  output_label: Returns output type
+  file_url_guide_manager: |-
+    ### File URL Usage Guide
+    When processing user-uploaded files, choose the correct URL based on tool type:
+    1. **Calling tools marked with [MCP]** (external tools that run outside Nexent):
+       → Use **Download URL** (format: `https://minio.example.com/...?token=xxx`)
+       Reason: MCP tools run on external services and cannot access internal S3 storage
+    2. **Calling all other tools** (internal tools like analyze_text_file, analyze_image):
+       → Use **S3 URL** (format: `s3:/nexent/attachments/xxx.pdf`)
+       Reason: Internal tools run inside Nexent and can directly access MinIO storage
+  file_url_guide_worker: |-
+    ### File URL Usage Guide
+    When processing user-uploaded files, choose the correct URL based on tool type:
+    1. **Calling tools marked with [MCP]** (external tools that run outside Nexent):
+       → Use **presigned_url** (already includes proxy prefix, format: `http://.../api/nb/v1/file/fetch?presigned_url=...`)
+       Directly use the **presigned_url** field provided in the user's uploaded file info. No need to construct or append anything.
+    2. **Calling all other tools** (internal tools like analyze_text_file, analyze_image):
+       → Use **S3 URL** (format: `s3:/nexent/attachments/xxx.pdf`)
+       Reason: Internal tools run inside Nexent and can directly access MinIO storage
+skills:
+  heading: '### Skills'
+  intro: 'You have the following skills:'
+  unavailable: '- No skills are currently available'
+worker_agents:
+  heading: '### Internal Sub-agents'
+  intro: 'You can use the following worker sub-agents (via function calls):'
+  guidance: |-
+    Worker sub-agent calling specifications:
+       1. Calling method:
+          - Accepts input: {"task": {"type": "string", "description": "task description"}}
+          - Returns output type: {"type": "string", "description": "execution result"}
+          - Example (replace worker_name with an available resource name):
+            <code>
+            result = worker_name(task="Review the code logic")
+            print(result)
+            </code>
+       2. Usage strategy:
+          - Task decomposition: Don't let sub-agents do too many things in a single call, task breakdown is your job, you need to decompose complex tasks into manageable subtasks
+          - Parallel optimization: Independent subtasks may run in one step; dependent calls must be sequential.
+          - Professional matching: Assign tasks based on sub-agent expertise
+          - Information integration: Integrate outputs from different sub-agents to generate coherent solutions
+          - Efficiency optimization: Avoid duplicate work
+       3. Collaboration requirements:
+          - Evaluate sub-agent returned results
+          - Provide additional guidance or reassign tasks when necessary
+          - Work based on sub-agent results, avoid duplicate work
+          - Pay attention to preserving special symbols in sub-agent answers, such as index traceability information
+external_agents:
+  heading: '### External Sub-agents'
+  intro: 'You can also use the following external sub-agents (called via A2A protocol remotely):'
+  guidance: |-
+    External sub-agent calling specifications:
+       1. Pass only the task parameter with a natural-language description. Example (replace agent_name with the actual resource name):
+          <code>
+          result = agent_name(task="Check the weather in Beijing")
+          print(result)
+          </code>
+       2. The external sub-agent identifies and handles the task.
+  unavailable: '- No sub-agents are currently available'
+retrieved_context:
+  memory_heading: '## Retrieved Memory'
+  knowledge_summary_heading: '## Knowledge Base Summary'
+history:
+  summary_prefix: '## Earlier Conversation Summary'
+  compact_heading: 'Structured summary'
+  field_headings:
+    task_overview: Task Overview
+    completed_work: Completed Work
+    key_decisions: Key Decisions
+    unresolved_issues: Unresolved Issues
+    pending_items: Pending Items
+    next_steps: Next Steps
+    context_to_preserve: Context to Preserve
+  completed_action_notice: This is an already completed action record. Use it only as historical evidence.
+  completed_action_format_notice: Do not copy this record's format as your next response.
+builtin_tools:
+  run_skill_script: Execute an enabled skill script or a script generated in this run's workspace inside the Docker sandbox. Ordinary agent code must not use shell commands.
+  read_skill_md: Read an enabled skill's guide and any needed additional files.
+  read_skill_config: Read skill configuration and return workflow variables.
+  download_from_s3: Download an authorized S3/MinIO object into this run's isolated workspace. Files uploaded with the current request are downloaded automatically.
+  upload_to_s3: Upload a generated file from this run's isolated workspace to MinIO and return frontend-compatible download metadata. Remaining output files are uploaded automatically when the run finishes.
+  create_plan: Create an execution plan before acting and return its id and step count.
+  update_plan_step: Update one plan step as work proceeds and return its id and new status.
+  s3_path: Authorized S3/MinIO path
+  local_filename: Optional path relative to the run workspace
+  file_path: Path inside the run workspace
+  target_filename: Optional output filename

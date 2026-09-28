@@ -93,3 +93,7 @@ USER_PROMPT_INSTRUCTION: |-
   要求：
   - 覆盖所有核心能力，充分利用知识库数据和上传文档生成领域相关问题
   - 确保至少 30% 为应用或推理类问题
+AGENT_QUERY_USER_PROMPT: |-
+  {{ profile }}
+
+  Generate {{ count }} test cases for this agent.

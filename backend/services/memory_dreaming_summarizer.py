@@ -9,7 +9,7 @@ from concurrent.futures import as_completed
 from consts.const import MODEL_CONFIG_MAPPING
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.models import OpenAIModel
-from nexent.core.prompts import load_prompt
+from nexent.core.agents.prompt.memory import compose_memory_prompt, format_dreaming_source, load_memory_template
 from nexent.memory.dreaming import (
     DreamingSummarizationOutput,
     DreamingSummarizationRequest,
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 DREAMING_SUMMARIZATION_MAX_WORKERS = 3
 def _load_prompt() -> dict:
-    prompt = load_prompt("en", "memory/dreaming_user")
+    prompt = load_memory_template("memory_dreaming")
     if not isinstance(prompt, dict) or not prompt.get("system") or not prompt.get("user"):
         raise RuntimeError("Dreaming summary prompt is invalid")
     return prompt
@@ -104,7 +104,10 @@ class TenantDreamingSummarizer:
             for future in as_completed(futures):
                 index = futures[future]
                 summaries[index] = future.result()
-            reduce_source = "\n\n".join(f"## Map Summary {i + 1}\n\n{value}" for i, value in enumerate(summaries))
+            reduce_source = "\n\n".join(
+                format_dreaming_source("map_summary", {"index": i + 1, "content": value})
+                for i, value in enumerate(summaries)
+            )
             markdown = self._generate(reduce_source, request, operation="dreaming_summarization_reduce")
             return DreamingSummarizationOutput(
                 markdown=markdown,
@@ -115,17 +118,26 @@ class TenantDreamingSummarizer:
     @staticmethod
     def _source_markdown(request: DreamingSummarizationRequest) -> str:
         prior = request.prior_markdown.strip() or "(none)"
-        return (
-            f"## Current Active User Memory\n\nSource: {request.prior_source}\n\n{prior}\n\n"
-            f"## Newly Promoted Evidence\n\n{request.new_evidence_markdown.strip()}"
-        )
+        return format_dreaming_source("source_full", {
+            "prior_source": request.prior_source,
+            "prior": prior,
+            "evidence": request.new_evidence_markdown.strip(),
+        })
 
     @staticmethod
     def _chunk_units(request: DreamingSummarizationRequest, limit: int) -> list[str]:
         blocks = []
         if request.prior_markdown.strip():
-            blocks.append(f"## Current Active User Memory\n\nSource: {request.prior_source}\n\n{request.prior_markdown.strip()}")
-        blocks.extend(f"### Evidence {unit.unit_id}\n\n{unit.content.strip()}" for unit in request.units if unit.is_new)
+            blocks.append(format_dreaming_source("source_prior", {
+                "prior_source": request.prior_source,
+                "prior": request.prior_markdown.strip(),
+            }))
+        blocks.extend(
+            format_dreaming_source("source_evidence", {
+                "unit_id": unit.unit_id, "content": unit.content.strip(),
+            })
+            for unit in request.units if unit.is_new
+        )
         if len(blocks) <= DREAMING_SUMMARIZATION_MAX_WORKERS:
             return blocks
         chunks: list[str] = []
@@ -148,18 +160,22 @@ class TenantDreamingSummarizer:
 
     def _generate(self, source: str, request: DreamingSummarizationRequest, operation: str, chunk_index: int | None = None) -> str:
         set_monitoring_operation(operation)
-        user_prompt = self.prompt["user"].format(
-            task_mode={
+        prompt = compose_memory_prompt(
+            "memory_dreaming", {
+                "task_mode": {
                 "dreaming_summarization": "single",
                 "dreaming_summarization_map": "map",
                 "dreaming_summarization_reduce": "reduce",
             }[operation],
-            max_chars=request.max_chars, attempt=request.attempt,
-            validation_feedback=", ".join(request.validation_feedback) or "none", source=source,
+                "max_chars": request.max_chars,
+                "attempt": request.attempt,
+                "validation_feedback": ", ".join(request.validation_feedback) or "none",
+                "source": source,
+            }, template_override=self.prompt,
         )
         response = self.model([
-            {"role": "system", "content": self.prompt["system"]},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": prompt.system},
+            {"role": "user", "content": prompt.user},
         ])
         result = _parse_summary_envelope(response.content)
         logger.info("Dreaming summary operation=%s chunk=%s input_chars=%d output_chars=%d", operation, chunk_index, len(source), len(result))

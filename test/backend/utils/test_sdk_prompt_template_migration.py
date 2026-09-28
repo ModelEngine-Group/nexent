@@ -67,15 +67,11 @@ def test_ut_be_fps_002_memory_resource_failure_is_not_silenced(mocker):
         tenant_id="tenant", user_id="user", agent_id="1", conversation_id="conv",
     )
     mocker.patch(
-        "services.fa_memory_extractor.load_prompt",
+        "nexent.core.agents.prompt.auxiliary.load_prompt",
         side_effect=FileNotFoundError("missing"),
     )
     with pytest.raises(FileNotFoundError):
         extractor._build_messages("final answer")
-    mocker.patch(
-        "services.memory_dreaming_summarizer.load_prompt",
-        side_effect=FileNotFoundError("missing"),
-    )
     with pytest.raises(FileNotFoundError):
         _load_prompt()
 

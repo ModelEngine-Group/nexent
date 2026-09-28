@@ -1,4 +1,4 @@
-const FINAL_ENVELOPE = /^<FINAL_ANSWER>([\s\S]*)<\/FINAL_ANSWER>$/;
+const FINAL_ENVELOPE = /^<final_answer>([\s\S]*)<\/final_answer>$/;
 
 export function unwrapFinalAnswer(value: string): string {
   if (typeof value !== "string") return value;
@@ -10,8 +10,8 @@ export function unwrapFinalAnswer(value: string): string {
   const body = match[1];
   if (
     !body.trim() ||
-    body.includes("<FINAL_ANSWER>") ||
-    body.includes("</FINAL_ANSWER>")
+    body.includes("<final_answer>") ||
+    body.includes("</final_answer>")
   ) {
     return value;
   }

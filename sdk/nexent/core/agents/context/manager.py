@@ -414,8 +414,8 @@ class ContextManager:
             for item in candidates:
                 compact = item.compact()
                 saving = max(0, item.token_estimate - compact.token_estimate)
-                savings.append((saving, item.layout_key, item, compact))
-            for _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1])):
+                savings.append((saving, item.priority, item.layout_key, item, compact))
+            for _, _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1], row[2])):
                 index = result.index(original)
                 result[index] = compact
                 if (
@@ -769,7 +769,7 @@ class ContextManager:
                 ContextItemType.SYSTEM,
                 ContextItemType.TOOL,
                 ContextItemType.SKILL,
-                ContextItemType.MANAGED_AGENT,
+                ContextItemType.WORKER_AGENT,
                 ContextItemType.EXTERNAL_AGENT,
             }
         }

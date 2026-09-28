@@ -184,10 +184,10 @@ def build_agent_run_info(
         is_manager=is_manager,
         tools={tool.name: tool for tool in tools},
         skills=skills or [],
-        managed_agents={agent.name: agent for agent in managed_agents},
+        worker_agents={agent.name: agent for agent in managed_agents},
         external_a2a_agents={},
         memory_list=[],
-        knowledge_base_summary="",
+        knowledge_base_summaries=[],
         prompt_bundle=prompt_bundle,
     )
     if prompt_components:
@@ -244,7 +244,7 @@ def build_agent_run_info(
         max_steps=max_steps,
         model_name="main_model",
         prompt_templates=prompt_templates,
-        managed_agents=managed_agents,
+        worker_agents=managed_agents,
         context_manager_config=cm_config,
         context_items=context_items,
     )
@@ -320,7 +320,7 @@ def build_agent_run_info_with_custom_prompt(
         max_steps=max_steps,
         model_name="main_model",
         prompt_templates=prompt_templates,
-        managed_agents=managed_agents,
+        worker_agents=managed_agents,
         context_manager_config=context_manager_config or ContextManagerConfig(),
         context_items=[
             ContextItemInput(

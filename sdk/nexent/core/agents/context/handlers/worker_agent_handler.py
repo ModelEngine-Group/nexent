@@ -1,4 +1,4 @@
-"""Handler for managed agent context items."""
+"""Handler for worker agent context items."""
 
 from typing import Any, Dict, List
 
@@ -7,11 +7,11 @@ from ..item_handler import ContextItemHandler
 from ..reducer_models import ReductionResult
 
 
-class ManagedAgentHandler(ContextItemHandler):
-    """Scores and reduces internal managed sub-agent definitions."""
+class WorkerAgentHandler(ContextItemHandler):
+    """Scores and reduces internal worker sub-agent definitions."""
 
     def supported_types(self) -> List[ContextItemType]:
-        return [ContextItemType.MANAGED_AGENT]
+        return [ContextItemType.WORKER_AGENT]
 
     def score(self, item: ContextItem, query: str, context: Dict[str, Any]) -> float:
         # TODO(W13): Implement scoring:

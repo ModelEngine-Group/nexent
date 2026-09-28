@@ -370,12 +370,12 @@ export { updateSkill };
 
 /**
  * Extract summary content from final_answer.
- * final_answer contains the FULL response including <SKILL> block.
+ * final_answer contains the FULL response including <skill> block.
  * The SKILL content was already streamed via skill_content events,
- * so we only need the summary (content AFTER </SKILL>).
+ * so we only need the summary (content AFTER </skill>).
  */
 function extractSummaryFromFinalAnswer(fullContent: string): string {
-  const SKILL_CLOSE = "</SKILL>";
+  const SKILL_CLOSE = "</skill>";
   const closeIndex = fullContent.indexOf(SKILL_CLOSE);
   if (closeIndex === -1) {
     return fullContent;
@@ -386,8 +386,8 @@ function extractSummaryFromFinalAnswer(fullContent: string): string {
 /**
  * Initialize a skill content parser state that handles multi-file streaming.
  * Supports:
- * - <SKILL>...</SKILL>: Default SKILL.md content
- * - <FILE path="...">...</FILE>: Additional files
+ * - <skill>...</skill>: Default SKILL.md content
+ * - <file path="...">...</file>: Additional files
  * - Text outside all tags: Summary for chat bubble
  */
 export function createSkillContentParser(): {
@@ -423,10 +423,10 @@ export function createSkillContentParser(): {
   let pendingCloseTag = "";
 
   // Regex patterns
-  const SKILL_OPEN = "<SKILL>";
-  const SKILL_CLOSE = "</SKILL>";
-  const FILE_OPEN_PATTERN = /<FILE\s+path="([^"]+)">/i;
-  const FILE_CLOSE = "</FILE>";
+  const SKILL_OPEN = "<skill>";
+  const SKILL_CLOSE = "</skill>";
+  const FILE_OPEN_PATTERN = /<file\s+path="([^"]+)">/;
+  const FILE_CLOSE = "</file>";
 
   function findTagInBuffer(): {
     type: "skill_open" | "skill_close" | "file_open" | "file_close" | "none";
@@ -520,7 +520,7 @@ export function createSkillContentParser(): {
 
         switch (tagInfo.type) {
           case "skill_open":
-            // Content before <SKILL> is noise, ignore
+            // Content before <skill> is noise, ignore
             // Switch to SKILL.md tab
             activeTab = "SKILL.md";
             // Find or ensure SKILL.md tab exists

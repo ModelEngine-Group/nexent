@@ -109,7 +109,7 @@ class WikipediaSearchTool(Tool):
 
 ### 最终回答
 
-模型使用唯一一对 `<FINAL_ANSWER>...</FINAL_ANSWER>` 提交最终答案并结束当前任务。该过程不注册工具。
+模型使用唯一一对 `<final_answer>...</final_answer>` 提交最终答案并结束当前任务。该过程不注册工具。
 
 ### 工具注册
 

@@ -11,8 +11,8 @@ import yaml
 ROOT = Path(__file__).parents[4]
 PROMPTS = ROOT / "sdk/nexent/core/prompts"
 POLICY_HASHES = {
-    "zh/agent/human_interaction.yaml": "8061aa79016a7df1562096bad2fb75139dbdc6ef33520dc929d09c340cfc6f12",
-    "en/agent/human_interaction.yaml": "abc6593398a579dc30de099d6fd5a5326c5b8f03f670b53550aae4f61c70ad31",
+    "zh/agent/human_interaction.yaml": "31bb381d4603d6d0ae5ab4492dc3d6d980d4ad9a3b64de84685b479927d71b2d",
+    "en/agent/human_interaction.yaml": "af8fe686dd7e1549a1ba24c563800076bf291a38c36c653d9a8f86e6a5a50f79",
     "en/agent/context_summary.yaml": "dd689841e3e4f03809ea6d198121688dbbb8531234fc90e2dc0107ae0939543b",
     "en/agent/answer_verifier.yaml": "0232a3c067ebff27194ea6d9abe9f4bfb2005aea678e18281a91742077d0ac15",
 }
@@ -109,7 +109,7 @@ def test_ut_sdk_fps_009_special_names_and_no_redundant_automation_path():
     assert (PROMPTS / "en/memory/dreaming_user.yaml").is_file()
     assert not (PROMPTS / "en/memory/dreaming_user_memory.yaml").exists()
     resources = list(PROMPTS.rglob("*.yaml"))
-    assert len(resources) == 54
+    assert len(resources) == 62
     for resource in resources:
         if resource.stem.startswith(("nl2agent", "nl2skill", "agent_manager", "agent_worker")):
             continue
@@ -140,7 +140,7 @@ def test_ut_sdk_fps_011_languages_have_matching_paths_fields_and_jinja_variables
 
     en_paths = {p.relative_to(PROMPTS / "en") for p in (PROMPTS / "en").rglob("*.yaml")}
     zh_paths = {p.relative_to(PROMPTS / "zh") for p in (PROMPTS / "zh").rglob("*.yaml")}
-    assert len(en_paths) == len(zh_paths) == 27
+    assert len(en_paths) == len(zh_paths) == 31
     assert en_paths == zh_paths
 
     def flatten(value, prefix=""):

@@ -20,14 +20,11 @@ class DownloadFromS3Tool(Tool):
     name = "download_from_s3"
     is_user_selectable = False
     description = (
-        "Download a file from S3/MinIO storage to the local workspace. "
-        "Accepts s3://bucket/key, /bucket/key, or plain object key paths. "
-        "The file will be saved to the workspace directory. "
-        "Returns the local file path for use with other tools like read_file or analyze_text_file."
+        "Download an authorized S3/MinIO object into the run workspace. "
+        "Returns a local path for subsequent file tools."
     )
     description_zh = (
-        "从 S3/MinIO 存储下载文件到当前运行的隔离工作区。"
-        "支持 s3://bucket/key、/bucket/key 或对象键格式，并返回可供其他工具使用的本地路径。"
+        "将已授权的 S3/MinIO 对象下载到本轮隔离工作区，返回供文件工具使用的本地路径。"
     )
 
     inputs = {

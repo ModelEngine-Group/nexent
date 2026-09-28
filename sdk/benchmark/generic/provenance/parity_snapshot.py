@@ -19,7 +19,7 @@ PROMPT_COMPONENT_IDS = {
 RESOURCE_TYPES = {
     "tools": "tool",
     "skills": "skill",
-    "managed_agents": "managed_agent",
+    "managed_agents": "worker_agent",
     "external_agents": "external_agent",
     "memory": "memory",
     "knowledge_base": "knowledge_base",
@@ -143,7 +143,7 @@ def build_context_item_snapshot(context_items: list[Any]) -> list[dict[str, Any]
                 "stable"
                 if item_type in {
                     "system", "system_prompt", "tool", "skill",
-                    "managed_agent", "external_agent",
+                    "worker_agent", "external_agent",
                 }
                 else "dynamic"
             ),

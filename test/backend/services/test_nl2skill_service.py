@@ -50,7 +50,7 @@ def test_assemble_draft_content_handles_invalid_files_and_skill_fallback():
     assert _assemble_draft_content({"content": "fallback", "files": "invalid"}) == "fallback"
     assert _assemble_draft_content({"content": "", "files": [{"path": "notes.txt", "content": ""}]}) == ""
     assert _assemble_draft_content({"content": "fallback", "files": [{"path": "notes.txt", "content": "note"}]}) == (
-        "<SKILL>\nfallback\n</SKILL>\n\n<FILE path=\"notes.txt\">\nnote\n</FILE>"
+        "<skill>\nfallback\n</skill>\n\n<file path=\"notes.txt\">\nnote\n</file>"
     )
 
 
@@ -87,8 +87,8 @@ def test_normalize_draft_snapshot_assembles_all_files():
     )
 
     assert result is not None
-    assert "<SKILL>\n# Demo\n</SKILL>" in result["content"]
-    assert '<FILE path="scripts/run.py">' in result["content"]
+    assert "<skill>\n# Demo\n</skill>" in result["content"]
+    assert '<file path="scripts/run.py">' in result["content"]
 
 
 def test_normalize_draft_snapshot_keeps_empty_initial_draft_empty():
@@ -209,10 +209,10 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
             {"type": "model_output_thinking", "content": "ANSWER>\n<SK"},
             {
                 "type": "model_output_thinking",
-                "content": "ILL>\n---\nname: demo\ndescription: Demo\ntags: [demo]\n---\n# Demo\n</SKILL>\n",
+                "content": "ILL>\n---\nname: demo\ndescription: Demo\ntags: [demo]\n---\n# Demo\n</skill>\n",
             },
-            {"type": "model_output_code", "content": '<FILE path="scripts/run.py">\nprint("ok")\n</FILE>\n'},
-            {"type": "model_output_thinking", "content": "<SUMMARY>\nReady.\n</SUMMARY>\n</FINAL_ANSWER>"},
+            {"type": "model_output_code", "content": '<file path="scripts/run.py">\nprint("ok")\n</file>\n'},
+            {"type": "model_output_thinking", "content": "<summary>\nReady.\n</summary>\n</final_answer>"},
             {"type": "final_answer", "content": "duplicate"},
         ]
         for chunk in chunks:
@@ -235,7 +235,7 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
         for item in payloads
     )
     assert any(item["type"] == "summary" for item in payloads)
-    assert not any("</FINAL_ANSWER>" in item.get("content", "") for item in payloads)
+    assert not any("</final_answer>" in item.get("content", "") for item in payloads)
     assert not any(item.get("content") == "duplicate" for item in payloads)
     assert payloads[-1]["type"] == "done"
     assert stop_event.is_set()
@@ -268,7 +268,7 @@ async def test_stream_parses_skill_start_after_reasoning_without_newline(mocker)
         yield json.dumps(
             {
                 "type": "model_output_thinking",
-                "content": "SKILL>\n# Demo\n</SKILL>\n",
+                "content": "SKILL>\n# Demo\n</skill>\n",
             }
         )
 
@@ -307,10 +307,10 @@ async def test_stream_emits_targets_and_filters_non_target_file_updates(mocker):
             {
                 "type": "model_output_code",
                 "content": (
-                    "<SKILL>\n# Changed unexpectedly\n</SKILL>\n"
-                    '<FILE path="scripts/other.py">\nother\n</FILE>\n'
-                    '<FILE path="scripts/run.py">\nupdated\n</FILE>\n'
-                    "<SUMMARY>\nDone.\n</SUMMARY>\n"
+                    "<skill>\n# Changed unexpectedly\n</skill>\n"
+                    '<file path="scripts/other.py">\nother\n</file>\n'
+                    '<file path="scripts/run.py">\nupdated\n</file>\n'
+                    "<summary>\nDone.\n</summary>\n"
                 ),
             }
         )
@@ -377,7 +377,7 @@ async def test_stream_classifies_final_answer_control_content_and_skips_later_ta
 
     async def fake_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
-        yield json.dumps({"type": "final_answer", "content": "<SKILL>\n# Demo"})
+        yield json.dumps({"type": "final_answer", "content": "<skill>\n# Demo"})
         yield json.dumps({"type": "final_answer", "content": "tail"})
 
     mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)

@@ -769,7 +769,7 @@ class VerificationController:
         re.IGNORECASE,
     )
     _EMPTY_RE = re.compile(r"^\s*(execution logs:\s*)?(last output from code snippet:\s*)?\s*$", re.IGNORECASE)
-    _RAW_TAG_RE = re.compile(r"</?(code|RUN)>|<DISPLAY:[^>]+>|</DISPLAY>", re.IGNORECASE)
+    _RAW_TAG_RE = re.compile(r"</?(code|run)>|<display:[^>]+>|</display>")
     _CITATION_RE = re.compile(r"\[\[[a-e]\d+\]\]")
     _LIGHTWEIGHT_CONVERSATION_RE = re.compile(
         r"^\s*(你好|您好|嗨|哈喽|hello|hi|hey|早上好|上午好|中午好|下午好|晚上好|"

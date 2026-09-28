@@ -25,6 +25,7 @@ from ..model_errors import ModelInvocationTerminalError
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
+from .prompt.user_context import render_user_context
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
 from .clarification import choose_clarification_tool_name, clarification_policy
@@ -744,24 +745,24 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Create managed agents recursively. Session-scoped Docker agents
+                # Create worker agents recursively. Session-scoped Docker agents
                 # share one container for the tree but retain independent kernels.
-                raw_managed_agents = []
-                for sub_agent_config in agent_config.managed_agents:
+                raw_worker_agents = []
+                for sub_agent_config in agent_config.worker_agents:
                     inner_agent = self.create_single_agent(
                         sub_agent_config,
                         _managed_context=True,
                         _sandbox_tree_context=_sandbox_tree_context,
                     )
-                    raw_managed_agents.append((inner_agent, sub_agent_config))
-                managed_agents_list = [
+                    raw_worker_agents.append((inner_agent, sub_agent_config))
+                worker_agents_list = [
                     self._wrap_subagent(inner_agent, sub_agent_config)
-                    for inner_agent, sub_agent_config in raw_managed_agents
+                    for inner_agent, sub_agent_config in raw_worker_agents
                 ]
             except Exception as e:
-                raise ValueError(f"Error in creating managed agent: {e}")
+                raise ValueError(f"Error in creating worker agent: {e}")
 
-            # Create wrapper agents for external A2A agents - add them to managed_agents
+            # Create wrapper agents for external A2A agents in the worker-agent call set.
             # so model can call them like: external_agent_name(task="...")
             if agent_config.external_a2a_agents:
                 try:
@@ -774,7 +775,7 @@ class NexentAgent:
                             observer=self.observer,
                             cancellation_scope=self.cancellation_scope,
                         )
-                        managed_agents_list.append(
+                        worker_agents_list.append(
                             self._wrap_subagent(
                                 wrapper,
                                 ext_agent_config,
@@ -809,7 +810,7 @@ class NexentAgent:
                 and getattr(agent_config, "output_protocol", "code_action") == "code_action"
             )
             if enable_clarification and any(item.type == ContextItemType.SYSTEM for item in context_items):
-                tool_name = choose_clarification_tool_name({tool.name for tool in [*tool_list, *managed_agents_list]})
+                tool_name = choose_clarification_tool_name({tool.name for tool in [*tool_list, *worker_agents_list]})
                 context_items.append(ContextItemInput(
                     id="system:clarification_protocol",
                     type=ContextItemType.SYSTEM,
@@ -821,7 +822,7 @@ class NexentAgent:
                     },
                     source=("runtime:clarification_protocol",),
                     priority=100,
-                    metadata={"authority": "platform"},
+                    metadata={"authority": "platform", "layout_order": 23},
                 ))
             if effective_prompt_tools is not None:
                 visible_names = set(effective_prompt_tools.tools)
@@ -840,23 +841,23 @@ class NexentAgent:
                 items=context_items,
             )
 
-            # Build one code executor for this agent. Managed-agent orchestration
+            # Build one code executor for this agent. Worker-agent orchestration
             # is a host-marked tool, so every agent needs its own kernel to avoid
             # nested execution deadlocks; session containers can still be shared.
             python_executor = None
             if self.sandbox_config is not None:
                 from .sandbox import SandboxLevel, build_python_executor
-                has_managed = bool(
-                    agent_config.managed_agents
+                has_worker = bool(
+                    agent_config.worker_agents
                     or getattr(agent_config, "external_a2a_agents", [])
                 )
                 python_executor = build_python_executor(
                     config=self.sandbox_config,
                     logger_=logger,
-                    managed_agents_exist=has_managed,
+                    worker_agents_exist=has_worker,
                     host_tools_exist=_has_host_tools([
                         *tool_list,
-                        *managed_agents_list,
+                        *worker_agents_list,
                     ]),
                     session_container_group=_sandbox_tree_context.get(
                         "session_container_group"
@@ -949,7 +950,7 @@ class NexentAgent:
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
                 provide_run_summary=agent_config.provide_run_summary,
-                managed_agents=managed_agents_list,
+                managed_agents=worker_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
                 context_runtime=context_runtime,
@@ -1303,13 +1304,15 @@ class NexentAgent:
             result = json.loads(download_tool.forward(source_url, local_filename))
             downloaded.append({"name": filename, "path": result["local_path"]})
 
-        file_lines = "\n".join(f"- {item['name']}: {item['path']}" for item in downloaded)
-        workspace_note = (
-            f"\n\nRun workspace: {workspace}\n"
-            f"Write every generated file under: {workspace / 'outputs'}"
+        language = getattr(self.observer, "lang", "en")
+        file_lines = "\n".join(
+            render_user_context(language, "workspace_file", item) for item in downloaded
         )
+        workspace_note = render_user_context(language, "workspace_note", {
+            "workspace": workspace, "outputs": workspace / "outputs",
+        })
         if file_lines:
-            workspace_note += f"\nUploaded files are available locally:\n{file_lines}"
+            workspace_note += render_user_context(language, "workspace_files", {"file_lines": file_lines})
         self._push_file_workspace_to_sandbox()
         self._initialize_sandbox_workspaces()
         return query + workspace_note

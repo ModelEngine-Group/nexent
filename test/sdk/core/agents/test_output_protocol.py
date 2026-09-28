@@ -43,11 +43,11 @@ def test_ac_001_visible_content_is_meaningful(value):
             ProtocolErrorReason.MALFORMED_ACTION,
         ),
         (
-            "<FINAL_ANSWER>done</FINAL_ANSWER><code>print('late')</code>",
+            "<final_answer>done</final_answer><code>print('late')</code>",
             ProtocolErrorReason.MALFORMED_ACTION,
         ),
         (
-            "<DISPLAY:python>print(1)</DISPLAY>",
+            "<display:python>print(1)</display>",
             ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
         ),
         (
@@ -84,7 +84,7 @@ def test_ac_001_ac_002_invalid_code_outputs_are_protocol_errors(output, reason):
 def test_ac_008_length_finish_reason_is_never_executable_or_final():
     with pytest.raises(ModelOutputProtocolError) as exc_info:
         classify_model_output(
-            "<FINAL_ANSWER>partial</FINAL_ANSWER>",
+            "<final_answer>partial</final_answer>",
             protocol="code_action",
             finish_reason="length",
         )
@@ -111,7 +111,7 @@ def test_ac_003_exact_code_action_is_executable():
 @pytest.mark.parametrize("legacy", [False, True])
 def test_platform_think_code_preamble_is_not_an_invalid_action(prefix, legacy):
     code = "some_tool('done')"
-    envelope = f"```<RUN>\n{code}\n```" if legacy else f"<code>{code}</code>"
+    envelope = f"```<run>\n{code}\n```" if legacy else f"<code>{code}</code>"
 
     assert classify_model_output(prefix + envelope, protocol="code_action") == ExecutableAction(
         code=code, legacy_format=legacy,
@@ -202,7 +202,7 @@ def test_ac_021_protocol_markers_inside_python_literals_and_comments_are_preserv
 
 def test_legacy_run_action_remains_executable_only():
     result = classify_model_output(
-        "```<RUN>\nprint('legacy')\n```",
+        "```<run>\nprint('legacy')\n```",
         protocol="code_action",
     )
 
@@ -211,11 +211,11 @@ def test_legacy_run_action_remains_executable_only():
 
 def test_ac_004_final_envelope_preserves_arbitrary_payload():
     payload = (
-        "\n<SKILL># Skill\n```python\nprint('<xml/>')\n```\n🙂</SKILL>\n"
-        "<DISPLAY:python>print(1)</DISPLAY>\n"
+        "\n<skill># Skill\n```python\nprint('<xml/>')\n```\n🙂</skill>\n"
+        "<display:python>print(1)</display>\n"
     )
     result = classify_model_output(
-        f"<FINAL_ANSWER>{payload}</FINAL_ANSWER>",
+        f"<final_answer>{payload}</final_answer>",
         protocol="code_action",
     )
 
@@ -224,11 +224,17 @@ def test_ac_004_final_envelope_preserves_arbitrary_payload():
 
 def test_cftp_001_final_only_protocol_accepts_the_same_envelope():
     result = classify_model_output(
-        "<FINAL_ANSWER>clarification?</FINAL_ANSWER>",
+        "<final_answer>clarification?</final_answer>",
         protocol="final_envelope",
     )
 
     assert result == ExplicitFinalAnswer(answer="clarification?")
+
+
+@pytest.mark.parametrize("protocol", ["final_envelope", "code_action"])
+def test_uppercase_final_envelope_is_not_accepted(protocol):
+    with pytest.raises(ModelOutputProtocolError):
+        classify_model_output("<FINAL_ANSWER>old</FINAL_ANSWER>", protocol=protocol)
 
 
 @pytest.mark.parametrize("protocol", ["final_envelope", "code_action"])
@@ -240,11 +246,11 @@ def test_cftp_001_lowercase_final_envelope_is_rejected(protocol):
 @pytest.mark.parametrize(
     "output",
     [
-        "<FINAL_ANSWER></FINAL_ANSWER>",
-        "outside<FINAL_ANSWER>inside</FINAL_ANSWER>",
-        "<FINAL_ANSWER>one</FINAL_ANSWER><FINAL_ANSWER>two</FINAL_ANSWER>",
-        "<FINAL_ANSWER><FINAL_ANSWER>nested</FINAL_ANSWER></FINAL_ANSWER>",
-        "<FINAL_ANSWER>unfinished",
+        "<final_answer></final_answer>",
+        "outside<final_answer>inside</final_answer>",
+        "<final_answer>one</final_answer><final_answer>two</final_answer>",
+        "<final_answer><final_answer>nested</final_answer></final_answer>",
+        "<final_answer>unfinished",
     ],
 )
 def test_ac_010_invalid_final_envelopes_are_rejected(output):
@@ -257,11 +263,11 @@ def test_ac_010_invalid_final_envelopes_are_rejected(output):
 @pytest.mark.parametrize(
     "output",
     [
-        "<FINAL_ANSWER></FINAL_ANSWER>",
-        "outside<FINAL_ANSWER>inside</FINAL_ANSWER>",
-        "<FINAL_ANSWER>one</FINAL_ANSWER><FINAL_ANSWER>two</FINAL_ANSWER>",
-        "<FINAL_ANSWER><FINAL_ANSWER>nested</FINAL_ANSWER></FINAL_ANSWER>",
-        "<FINAL_ANSWER>unfinished",
+        "<final_answer></final_answer>",
+        "outside<final_answer>inside</final_answer>",
+        "<final_answer>one</final_answer><final_answer>two</final_answer>",
+        "<final_answer><final_answer>nested</final_answer></final_answer>",
+        "<final_answer>unfinished",
     ],
 )
 def test_cftp_001_invalid_final_envelopes_in_code_action_mode_are_rejected(output):

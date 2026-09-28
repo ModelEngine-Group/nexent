@@ -80,7 +80,7 @@ INGEST_DUTY = (
     "in their original chronological order. The next message will simply ask "
     "you to acknowledge the latest batch of sessions you have just seen. "
     "Do not analyze or summarize anything. Acknowledge by returning exactly: "
-    '<FINAL_ANSWER>OK</FINAL_ANSWER>'
+    '<final_answer>OK</final_answer>'
 )
 
 PROBE_DUTY = (
@@ -94,7 +94,7 @@ PROBE_DUTY = (
     "- If the user has updated some information over time, answer with the "
     "MOST RECENT value, not an older superseded one.\n"
     "- Answer in a SINGLE step with exactly one final envelope.\n"
-    '<FINAL_ANSWER><your concise answer here></FINAL_ANSWER>'
+    '<final_answer><your concise answer here></final_answer>'
 )
 
 
@@ -220,7 +220,7 @@ async def ingest_and_compress(dialogue: LongMemEvalDialogue,
             f"You have just been shown sessions {batch_idx * batch_size + 1}"
             f"-{batch_idx * batch_size + len(batch)} of {len(sessions)} in "
             f"the conversation history. Acknowledge by emitting exactly:\n"
-            f'<FINAL_ANSWER>OK</FINAL_ANSWER>'
+            f'<final_answer>OK</final_answer>'
         )
         run_info = build_agent_run_info(
             ack_query,

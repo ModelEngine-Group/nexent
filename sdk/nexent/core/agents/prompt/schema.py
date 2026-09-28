@@ -24,9 +24,13 @@ FIELD_VARIABLES = MappingProxyType({
 })
 
 REQUIRED_SYSTEM_SECTIONS = frozenset({
+    "outline_identity",
+    "outline_execution",
+    "outline_constraints",
     "header",
     "duty",
     "execution_flow",
+    "final_answer_guidance",
     "constraint",
     "code_norms",
     "restricted_python_execution",
@@ -34,7 +38,6 @@ REQUIRED_SYSTEM_SECTIONS = frozenset({
     "available_resources_header",
     "knowledge_guidance_scoped",
     "knowledge_guidance_unscoped",
-    "memory_guidance",
     "planning_guidance",
     "self_verification_guidance",
     "sandbox_workspace_guidance",

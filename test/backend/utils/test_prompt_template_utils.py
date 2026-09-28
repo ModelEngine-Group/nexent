@@ -86,7 +86,7 @@ class TestNl2SkillPromptTemplate:
 
     def test_skill_template_missing_keys_fall_back_to_empty(self, mocker):
         mocker.patch(
-            "utils.prompt_template_utils.load_prompt",
+            "nexent.core.agents.prompt.meta.load_prompt",
             return_value={"other": "data"},
         )
         result = get_nl2skill_prompt_template("zh")
@@ -94,7 +94,7 @@ class TestNl2SkillPromptTemplate:
 
     def test_skill_template_missing_resource_raises(self, mocker):
         mocker.patch(
-            "utils.prompt_template_utils.load_prompt",
+            "nexent.core.agents.prompt.meta.load_prompt",
             side_effect=FileNotFoundError("File not found"),
         )
         with pytest.raises(FileNotFoundError):

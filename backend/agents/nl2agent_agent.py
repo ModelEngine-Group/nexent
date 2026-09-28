@@ -5,7 +5,7 @@ import json
 from consts.const import LANGUAGE
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
-from nexent.core.prompts import load_prompt, render_prompt_text
+from nexent.core.agents.prompt.meta import compose_nl2agent_system
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from tool_collection.mcp.nl2agent_mcp_tools import (
     MAX_BINDING_CANDIDATES,
@@ -34,9 +34,8 @@ def build_nl2agent_system_prompt(
     template_language = (
         LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
     )
-    template = load_prompt(template_language, "meta/nl2agent")["system_prompt"]
-    return render_prompt_text(
-        template,
+    return compose_nl2agent_system(
+        template_language,
         {
             "installed_tool_name": tool_name,
             "uninstalled_tool_name": uninstalled_tool_name,

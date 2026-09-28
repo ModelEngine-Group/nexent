@@ -20,17 +20,12 @@ class UploadToS3Tool(Tool):
     name = "upload_to_s3"
     is_user_selectable = False
     description = (
-        "Upload a file from the local workspace to S3/MinIO storage. "
-        "The file path must be within the workspace directory. A relative path such as "
-        "'report.pdf' is resolved from the run outputs directory; do not prefix it with "
-        "'outputs/' when creating the file because code already runs in that directory. "
-        "Returns a permanent S3 URL. Use that S3 URL in user-facing Markdown links "
+        "Upload a file from this run's workspace to S3/MinIO. "
+        "Returns a permanent S3 URL. Use that URL in user-facing Markdown links "
         "and images; never create or expose a presigned URL in the final answer."
     )
     description_zh = (
-        "将当前运行工作区中的文件上传到 S3/MinIO。"
-        "相对路径（如 report.pdf）从本次运行的 outputs 目录解析；代码已经在该目录运行，"
-        "创建文件时不要再添加 outputs/ 前缀。返回永久 S3 对象地址；最终回答中的文件链接和"
+        "将本轮工作区文件上传到 S3/MinIO，返回永久 S3 对象地址；最终回答中的文件链接和"
         "图片必须使用该 S3 地址，不要创建或暴露预签名链接。"
     )
 

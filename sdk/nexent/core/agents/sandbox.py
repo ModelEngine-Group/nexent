@@ -3024,7 +3024,7 @@ def _now() -> float:
 def build_python_executor(
     config: SandboxConfig,
     logger_: logging.Logger,
-    managed_agents_exist: bool = False,
+    worker_agents_exist: bool = False,
     host_tools_exist: bool = False,
     session_container_group: Optional[_SessionDockerContainerGroup] = None,
     cancellation_scope: Optional[RunCancellationScope] = None,
@@ -3039,7 +3039,7 @@ def build_python_executor(
     Args:
         config: sandbox configuration.
         logger_: logger instance.
-        managed_agents_exist: Deprecated compatibility flag. Managed-agent
+        worker_agents_exist: Deprecated compatibility flag. Worker-agent
             orchestration is proxied to the Runtime process, so it no longer
             requires disabling the configured sandbox.
         session_container_group: Internal agent-tree container group. When set,

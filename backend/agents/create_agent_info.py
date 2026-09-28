@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.prompt.user_context import render_user_context
 from nexent.core.concurrency import run_blocking
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.context import (
@@ -64,10 +65,10 @@ from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from utils.model_name_utils import add_repo_to_name
 from management.services.agent.prompt_template_loader import load_agent_prompt_bundle
-from nexent.core.agents.prompt import AgentPromptComposer
+from nexent.core.agents.prompt import AgentPromptComposer, get_builtin_tool_descriptions
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.memory_tool_prompt import build_memory_tool_policy
-from utils.automation_tool_prompt import build_automation_tool_policy
+from utils.memory_tool_prompt import should_enable_memory_tool_policy
+from utils.automation_tool_prompt import should_enable_automation_tool_policy
 from utils.context_utils import build_context_inputs
 from utils.http_client_utils import create_httpx_client
 from utils.redis_utils import get_redis_client
@@ -153,12 +154,10 @@ def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
 
 def _build_effective_knowledge_base_summary(
     tool_list: List[ToolConfig],
-    language: str,
     include_empty_message: bool = True,
-) -> tuple[str, List[str]]:
-    """Build routing summaries from the final, permission-filtered tool scope."""
-    knowledge_base_summary = ""
-    kb_ids: List[str] = []
+) -> tuple[list[dict[str, str]], bool]:
+    """Collect selected summaries without formatting prompt prose."""
+    summaries: list[dict[str, str]] = []
     try:
         for tool in tool_list:
             if tool.class_name != "KnowledgeBaseSearchTool":
@@ -166,14 +165,7 @@ def _build_effective_knowledge_base_summary(
             metadata = tool.metadata if isinstance(tool.metadata, dict) else {}
             index_names = metadata.get("allowed_index_names") or []
             if not index_names:
-                if not include_empty_message:
-                    return "", []
-                empty_message = (
-                    "当前没有可用的知识库索引。\n"
-                    if language == LANGUAGE["ZH"]
-                    else "No knowledge base indexes are currently available.\n"
-                )
-                return empty_message, []
+                return [], include_empty_message
             display_map = metadata.get("index_name_to_display_map", {})
             for index_name in index_names:
                 try:
@@ -182,10 +174,11 @@ def _build_effective_knowledge_base_summary(
                         index_name=index_name
                     )
                     summary = message.get("summary", "")
-                    knowledge_base_summary += (
-                        f"**{display_name}**: {summary}\n\n"
-                    )
-                    kb_ids.append(index_name)
+                    summaries.append({
+                        "index_name": str(index_name),
+                        "display_name": str(display_name),
+                        "summary": str(summary),
+                    })
                 except Exception as exc:
                     logger.warning(
                         f"Failed to get summary for knowledge base {index_name}: {exc}"
@@ -193,7 +186,7 @@ def _build_effective_knowledge_base_summary(
             break
     except Exception as exc:
         logger.error(f"Failed to build knowledge base summary: {exc}")
-    return knowledge_base_summary, kb_ids
+    return summaries, False
 
 
 # Safe fallback for context-manager token_threshold when no capacity is known.
@@ -832,6 +825,8 @@ def _get_skill_script_tools(
         "version_no": version_no,
     }
     file_context = dict(runtime_file_context or {})
+    tool_prose_en = get_builtin_tool_descriptions("en")
+    tool_prose_zh = get_builtin_tool_descriptions("zh")
 
     skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
@@ -857,21 +852,8 @@ def _get_skill_script_tools(
                 ToolConfig(
                     class_name="RunSkillScriptTool",
                     name="run_skill_script",
-                    description=(
-                        "Execute an enabled skill's bundled script, or a generated Python/Node.js "
-                        "script in the current run workspace, inside the Docker sandbox. For "
-                        "workspace scripts written as bare filenames by the code executor, pass "
-                        "script_path='outputs/<filename>'. Ordinary agent code must not use "
-                        "subprocess, os.system, or shell calls for system commands; use a "
-                        "skill-bundled wrapper or a shell-free language API."
-                    ),
-                    description_zh=(
-                        "在 Docker 沙箱中执行已启用技能的自带脚本，或执行本轮工作区中生成的 "
-                        "Python/Node.js 脚本。代码执行器用裸文件名写入工作区脚本时，"
-                        "script_path 应传入 'outputs/<文件名>'。普通智能体代码不得使用 "
-                        "subprocess、os.system 或 Shell 执行系统命令；应使用技能脚本封装或"
-                        "不依赖 Shell 的语言 API。"
-                    ),
+                    description=tool_prose_en["run_skill_script"],
+                    description_zh=tool_prose_zh["run_skill_script"],
                     inputs=(
                         '{"skill_name": "str", "script_path": "str", '
                         '"params": "str", "source": "str"}'
@@ -889,8 +871,8 @@ def _get_skill_script_tools(
                 ToolConfig(
                     class_name="ReadSkillMdTool",
                     name="read_skill_md",
-                    description="Read skill execution guide and optional additional files. Always reads SKILL.md first, then optionally reads additional files.",
-                    description_zh="读取技能执行指南和可选附加文件。始终先读取 SKILL.md，再按需读取附加文件。",
+                    description=tool_prose_en["read_skill_md"],
+                    description_zh=tool_prose_zh["read_skill_md"],
                     inputs='{"skill_name": "str", "additional_files": "list[str]"}',
                     output_type="string",
                     params={"local_skills_dir": CONTAINER_SKILLS_PATH},
@@ -901,8 +883,8 @@ def _get_skill_script_tools(
                 ToolConfig(
                     class_name="ReadSkillConfigTool",
                     name="read_skill_config",
-                    description="Read the config.yaml file from a skill directory. Returns JSON containing configuration variables needed for skill workflows.",
-                    description_zh="读取技能目录中的 config.yaml，返回技能工作流所需配置变量的 JSON。",
+                    description=tool_prose_en["read_skill_config"],
+                    description_zh=tool_prose_zh["read_skill_config"],
                     inputs='{"skill_name": "str"}',
                     output_type="string",
                     params={
@@ -919,20 +901,17 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="DownloadFromS3Tool",
                 name="download_from_s3",
-                description=(
-                    "Download an authorized S3/MinIO object into this run's isolated workspace. "
-                    "Files uploaded with the current request are downloaded automatically."
-                ),
-                description_zh="将已授权的 S3/MinIO 对象下载到本轮隔离工作区。当前请求上传的文件会自动下载。",
+                description=tool_prose_en["download_from_s3"],
+                description_zh=tool_prose_zh["download_from_s3"],
                 inputs=json.dumps({
                     "s3_path": {
-                        "type": "string", "description": "Authorized S3/MinIO path",
-                        "description_zh": "已授权的 S3/MinIO 路径",
+                        "type": "string", "description": tool_prose_en["s3_path"],
+                        "description_zh": tool_prose_zh["s3_path"],
                     },
                     "local_filename": {
                         "type": "string",
-                        "description": "Optional path relative to the run workspace",
-                        "description_zh": "相对于本轮工作区的可选路径",
+                        "description": tool_prose_en["local_filename"],
+                        "description_zh": tool_prose_zh["local_filename"],
                         "nullable": True,
                     },
                 }),
@@ -945,24 +924,17 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="UploadToS3Tool",
                 name="upload_to_s3",
-                description=(
-                    "Upload a generated file from this run's isolated workspace to MinIO and "
-                    "return frontend-compatible download metadata. Remaining output files are "
-                    "uploaded automatically when the run finishes."
-                ),
-                description_zh=(
-                    "将本轮隔离工作区生成的文件上传到 MinIO，并返回前端可用的下载元数据。"
-                    "运行结束时会自动上传剩余输出文件。"
-                ),
+                description=tool_prose_en["upload_to_s3"],
+                description_zh=tool_prose_zh["upload_to_s3"],
                 inputs=json.dumps({
                     "file_path": {
-                        "type": "string", "description": "Path inside the run workspace",
-                        "description_zh": "本轮工作区内的文件路径",
+                        "type": "string", "description": tool_prose_en["file_path"],
+                        "description_zh": tool_prose_zh["file_path"],
                     },
                     "target_filename": {
                         "type": "string",
-                        "description": "Optional output filename",
-                        "description_zh": "可选的输出文件名",
+                        "description": tool_prose_en["target_filename"],
+                        "description_zh": tool_prose_zh["target_filename"],
                         "nullable": True,
                     },
                 }),
@@ -1056,12 +1028,14 @@ def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
         return
 
     # Protocol fields stay fixed while prose follows the run language at render time.
+    tool_prose_en = get_builtin_tool_descriptions("en")
+    tool_prose_zh = get_builtin_tool_descriptions("zh")
     tools.extend([
         ToolConfig(
             class_name="CreatePlanTool",
             name="create_plan",
-            description="Create an execution plan for the current task before starting. Pass 3-8 functional steps with a stable id, short title, and detailed description. Returns the plan id and step count.",
-            description_zh="为当前任务创建执行计划。开始执行前调用一次，传入 3-8 个功能块步骤。每个步骤必须有稳定的 id（step-1、step-2、...）、简短标题和详细描述。返回创建的计划 id 和步骤数量。",
+            description=tool_prose_en["create_plan"],
+            description_zh=tool_prose_zh["create_plan"],
             inputs='{"title": "string", "steps": "array"}',
             output_type="object",
             params={},
@@ -1070,8 +1044,8 @@ def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
         ToolConfig(
             class_name="UpdatePlanStepTool",
             name="update_plan_step",
-            description="Update one plan step status. Use status='in_progress' when starting, status='completed' when done, or status='skipped' when no longer needed. Returns the updated step id and status.",
-            description_zh="更新单个计划步骤的状态。开始执行时使用 status='in_progress'，完成后使用 status='completed'，不再需要时使用 status='skipped'。返回被更新的步骤 id 和状态。",
+            description=tool_prose_en["update_plan_step"],
+            description_zh=tool_prose_zh["update_plan_step"],
             inputs='{"step_id": "string", "status": "string"}',
             output_type="object",
             params={},
@@ -1108,7 +1082,7 @@ async def create_agent_config(
     # create sub agent
     sub_agent_relations = query_sub_agent_relations(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
-    managed_agents = []
+    worker_agents = []
     for rel in sub_agent_relations:
         sub_agent_id = rel['selected_agent_id']
         sub_agent_version_no = resolve_sub_agent_version_no(
@@ -1131,7 +1105,7 @@ async def create_agent_config(
             runtime_knowledge_context=runtime_knowledge_context,
             runtime_file_context=runtime_file_context,
         )
-        managed_agents.append(sub_agent_config)
+        worker_agents.append(sub_agent_config)
 
     # create external A2A agents (synchronous function, no await needed)
     external_a2a_agents = _get_external_a2a_agents(agent_id, tenant_id, version_no)
@@ -1188,7 +1162,7 @@ async def create_agent_config(
     constraint_prompt = agent_info.get("constraint_prompt", "")
     few_shots_prompt = agent_info.get("few_shots_prompt", "")
 
-    is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
+    is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
 
     # Memory list population: in the new Memory system this is performed by
     # the backend's ``memory_context_service`` via the
@@ -1446,9 +1420,8 @@ async def create_agent_config(
     # The final tool params already contain the conversation selection and ACL
     # intersection. Summaries therefore restore semantic routing without
     # expanding beyond the effective per-run knowledge-base whitelist.
-    knowledge_base_summary, kb_ids = _build_effective_knowledge_base_summary(
+    knowledge_base_summaries, knowledge_base_no_indexes = _build_effective_knowledge_base_summary(
         tool_list,
-        language,
         include_empty_message=not bool(runtime_knowledge_context),
     )
 
@@ -1459,7 +1432,7 @@ async def create_agent_config(
     # Get the skills included in ContextManager items.
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
-    is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
+    is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
     builtin_tools = _get_skill_script_tools(
         agent_id,
         tenant_id,
@@ -1483,14 +1456,8 @@ async def create_agent_config(
             policy_version=policy.policy_version,
             tool_schema_version=policy.tool_schema_version,
         ).tools)
-    memory_tool_policy = build_memory_tool_policy(
-        language,
-        prompt_tools,
-    )
-    automation_tool_policy = build_automation_tool_policy(
-        language,
-        prompt_tools,
-    )
+    enable_memory_tool_policy = should_enable_memory_tool_policy(prompt_tools)
+    enable_automation_tool_policy = should_enable_automation_tool_policy(prompt_tools)
 
     prompt_bundle = load_agent_prompt_bundle(is_manager=is_manager, language=language)
     prompt_composer = AgentPromptComposer(prompt_bundle)
@@ -1560,17 +1527,16 @@ async def create_agent_config(
         verification_enabled=verification_config.enabled,
         tools=prompt_tools,
         skills=skills,
-        managed_agents={agent.name: agent for agent in managed_agents},
+        worker_agents={agent.name: agent for agent in worker_agents},
         external_a2a_agents={agent.agent_id: agent for agent in external_a2a_agents},
         memory_list=memory_list,
         memory_search_query=last_user_query,
-        memory_tool_policy=memory_tool_policy,
-        automation_tool_policy=automation_tool_policy,
+        enable_memory_tool_policy=enable_memory_tool_policy,
+        enable_automation_tool_policy=enable_automation_tool_policy,
         long_term_memory_items=long_term_memory_items,
-        knowledge_base_summary=knowledge_base_summary,
-        kb_ids=kb_ids,
-        knowledge_scope_policy=(runtime_knowledge_context or {}).get("policy"),
-        knowledge_scope_resources=(runtime_knowledge_context or {}).get("resources"),
+        knowledge_base_summaries=knowledge_base_summaries,
+        knowledge_base_no_indexes=knowledge_base_no_indexes,
+        knowledge_scope=(runtime_knowledge_context or {}).get("scope"),
         restricted_python_authorized_imports=(
             get_local_python_authorized_imports() if is_local_python_executor else None
         ),
@@ -1628,7 +1594,7 @@ async def create_agent_config(
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
         allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
-        managed_agents=managed_agents,
+        worker_agents=worker_agents,
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
         context_items=context_items,
@@ -2085,6 +2051,7 @@ async def join_minio_file_description_to_query(
     history=None,
     max_files: int = 50,
     max_chars: int = 10000,
+    language: str = "en",
 ):
     """
     Join MinIO file descriptions to the user query.
@@ -2142,8 +2109,8 @@ async def join_minio_file_description_to_query(
     if all_files:
         file_descriptions: list[str] = []
         # Calculate fixed overhead that is added only once
-        prefix = "User uploaded files. The file information is as follows:\n"
-        suffix = f"\n\nUser wants to answer questions based on the information in the above files: {query}"
+        prefix = render_user_context(language, "file_intro")
+        suffix = render_user_context(language, "file_query", {"query": query})
         fixed_overhead = len(prefix) + len(suffix)
 
         for i, file in enumerate(all_files):
@@ -2151,14 +2118,11 @@ async def join_minio_file_description_to_query(
             presigned_url = file.get("presigned_url", "")
 
             # Build description with both URLs
-            if presigned_url:
-                desc = (
-                    f"File name: {file['name']}\n"
-                    f"- S3 URL: {s3_url}  [for tools WITHOUT [MCP] prefix, like analyze_text_file]\n"
-                    f"- presigned_url: {presigned_url}  [for tools WITH [MCP] prefix]"
-                )
-            else:
-                desc = f"File name: {file['name']}, S3 URL: {s3_url}  [permanent]"
+            desc = render_user_context(
+                language,
+                "file_with_presigned_url" if presigned_url else "file_without_presigned_url",
+                {"name": file["name"], "s3_url": s3_url, "presigned_url": presigned_url},
+            )
 
             # Calculate total length if we include this description
             # Each description after the first adds 2 chars for \n\n separator
@@ -2181,7 +2145,7 @@ async def join_minio_file_description_to_query(
     return final_query
 
 
-def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files: int = 20) -> str:
+def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files: int = 20, language: str = "en") -> str:
     """Format minio_files into a string for embedding in history content.
 
     Args:
@@ -2197,27 +2161,26 @@ def _format_minio_files_for_content(minio_files: Optional[List[dict]], max_files
     file_lines = []
     for i, file in enumerate(minio_files):
         if i >= max_files:
-            file_lines.append(f"  - ... (and {len(minio_files) - max_files} more files)")
+            file_lines.append(render_user_context(language, "history_file_overflow", {"count": len(minio_files) - max_files}))
             break
         if isinstance(file, dict) and file.get("name") and (file.get("url") or file.get("object_name")):
             s3_url = _build_internal_s3_url(file)
             if not s3_url:
                 continue
             presigned_url = file.get("presigned_url", "")
-            if presigned_url:
-                file_lines.append(
-                    f"  - {file['name']}: {s3_url} (for non-MCP tools), presigned_url: {presigned_url} (for [MCP] tools)"
-                )
-            else:
-                file_lines.append(f"  - {file['name']}: {s3_url}")
+            file_lines.append(render_user_context(
+                language,
+                "history_file_with_presigned_url" if presigned_url else "history_file_without_presigned_url",
+                {"name": file["name"], "s3_url": s3_url, "presigned_url": presigned_url},
+            ))
 
     if not file_lines:
         return ""
 
-    return "\n[Attached files]:\n" + "\n".join(file_lines)
+    return render_user_context(language, "history_file_intro") + "\n".join(file_lines)
 
 
-def _convert_history_with_minio_files(history: List) -> Optional[List[AgentHistory]]:
+def _convert_history_with_minio_files(history: List, language: str = "en") -> Optional[List[AgentHistory]]:
     """Convert HistoryItem list to AgentHistory list, embedding minio_files into content.
 
     Args:
@@ -2233,7 +2196,7 @@ def _convert_history_with_minio_files(history: List) -> Optional[List[AgentHisto
     for item in history:
         content = item.content
         if item.minio_files:
-            file_info = _format_minio_files_for_content(item.minio_files)
+            file_info = _format_minio_files_for_content(item.minio_files, language=language)
             if file_info:
                 content = content + file_info if content else file_info
         result.append(AgentHistory(role=item.role, content=content))
@@ -2256,7 +2219,7 @@ def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict)
                     mcp_info_dict[tool.usage]["remote_mcp_server"])
 
         # Recursively check sub-agents (only internal AgentConfig, not external A2A)
-        for sub_agent_config in agent_config.managed_agents:
+        for sub_agent_config in agent_config.worker_agents:
             check_agent_tools(sub_agent_config)
 
     # Check all agent tools
@@ -2313,7 +2276,8 @@ async def create_agent_run_info(
     final_query = await join_minio_file_description_to_query(
         minio_files=minio_files,
         query=query,
-        history=history
+        history=history,
+        language=language,
     )
     model_list = await create_model_config_list(tenant_id)
     create_config_kwargs = {
@@ -2445,7 +2409,7 @@ async def create_agent_run_info(
             mcp_host.append(url)
 
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
-    converted_history = _convert_history_with_minio_files(history)
+    converted_history = _convert_history_with_minio_files(history, language=language)
 
     # Resolve sandbox config: DB policy overrides env-var defaults.
     # build_sandbox_policy returns None when level=local (backward-compatible).

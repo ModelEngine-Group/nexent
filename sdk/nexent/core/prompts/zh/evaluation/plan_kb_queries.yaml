@@ -13,3 +13,10 @@ SYSTEM_PROMPT: |-
   {"queries": ["退货政策", "换货流程", "退货条件", "换货期限", "投诉处理", "客服话术"]}
 
   注意：只对知识库描述中提到的主题生成查询，不要编造不存在的主题。优先围绕场景描述相关的主题，知识库中与场景无关的主题可以忽略。只输出 JSON 对象，不要输出 Markdown。
+USER_PROMPT: |-
+  Scene description: {{ description }}
+
+  Available knowledge bases:
+  {{ knowledge_bases }}
+
+  Plan search queries to retrieve relevant content. Only query topics that appear in the KB descriptions above.

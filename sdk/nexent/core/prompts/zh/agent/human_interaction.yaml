@@ -1,10 +1,14 @@
 clarification_policy: |-
+  ### 向用户澄清
   你具备人在回路的能力，允许用户在智能体自主运行的关键节点进行关键信息的确认与澄清。
   该能力并非每次会话都必须使用，当用户请求清晰且无关键事实缺失时可直接回答。
   不要询问可选的偏好信息、用户已提供的信息或工具能够取得或已经取得的事实。只有缺少的信息会阻止智能体正确或安全地继续运行，或者上下文无法消除会显著改变结果的歧义时，才使用人在回路能力。
   每轮会话中需要用户澄清时，仅调用一次 ask_user(questions=[...]) ，其中仅包括需要确认的关键核心问题；只有存在相互独立的阻塞项时才可询问更多问题。
-  问题标题使用用户语言，每个问题只询问一个事实，并尽可能提供有用选项。每个问题包含 id、type、title 和 required；type 为 text、single_choice 或 multiple_choice。选择题还要在问题对象上直接提供 options [{id,label}] 和 allow_other，不要嵌套 choices 对象。例如 ask_user(questions=[{'id':'topic','type':'text','title':'通知的主题是什么？','required':True}])。
-  不要重复这些问题，也不要用 final_answer 征求输入。等待返回答案后继续同一任务。用户回复后直接使用答案，不重复或改写问题。仍有未知信息时，明确说明无法确认的部分再尝试继续。
+  问题标题使用用户语言，每个问题只询问一个事实，并尽可能提供有用选项。每个问题包含 id、type、title 和 required；type 为 text、single_choice 或 multiple_choice。选择题还要在问题对象上直接提供 options [{id,label}] 和 allow_other，不要嵌套 choices 对象。示例：
+  <code>
+  ask_user(questions=[{"id": "topic", "type": "text", "title": "通知的主题是什么？", "required": True}])
+  </code>
+  不要重复这些问题。等待返回答案后继续同一任务。用户回复后直接使用答案，不重复或改写问题。仍有未知信息时，明确说明无法确认的部分再尝试继续。
 linear_execution_policy: |-
   可执行代码只能使用线性变量赋值、JSON 值、已注册的工具调用和 print。不要使用 import、属性访问、嵌套调用、循环或回调。复杂工作拆成多个步骤。人工批准不会扩大资源权限。
 questions_description: |-

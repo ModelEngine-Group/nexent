@@ -28,3 +28,4 @@ user_prompt: |
   - Generate plain text summary content only
 
   Summary (no more than {{ max_words }} words):
+document_entry: "Document {{ index }}: {{ summary }}"

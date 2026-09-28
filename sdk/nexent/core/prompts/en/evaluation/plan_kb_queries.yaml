@@ -13,3 +13,10 @@ SYSTEM_PROMPT: |-
   {"queries": ["return policy", "exchange process", "return conditions", "exchange deadline", "complaint handling", "customer service scripts"]}
 
   Only generate queries for topics mentioned in the KB descriptions. Prioritize topics relevant to the scene description; ignore KB topics unrelated to the scene. Output ONLY the JSON object, no markdown.
+USER_PROMPT: |-
+  Scene description: {{ description }}
+
+  Available knowledge bases:
+  {{ knowledge_bases }}
+
+  Plan search queries to retrieve relevant content. Only query topics that appear in the KB descriptions above.

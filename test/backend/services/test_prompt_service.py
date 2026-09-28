@@ -6,6 +6,7 @@ import unittest
 import json
 import sys
 import atexit
+from pathlib import Path
 from concurrent.futures import Future
 from unittest.mock import patch, MagicMock
 
@@ -32,6 +33,9 @@ _MODULE_PATCH_NAMES = [
     'nexent',
     'nexent.core',
     'nexent.core.prompts',
+    'nexent.core.agents.prompt',
+    'nexent.core.agents.prompt.auxiliary',
+    'nexent.core.agents.prompt.meta',
     'nexent.core.agents',
     'nexent.core.agents.agent_model',
     'nexent.core.concurrency',
@@ -72,6 +76,7 @@ class MockToolConfig:
 nexent_mock = MagicMock()
 nexent_core_mock = MagicMock()
 nexent_core_agents_mock = MagicMock()
+nexent_core_agents_mock.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core/agents')]
 nexent_agent_model_mock = MagicMock()
 nexent_agent_model_mock.ToolConfig = MockToolConfig
 nexent_storage_mock = MagicMock()
@@ -85,8 +90,16 @@ sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = nexent_core_mock
 prompt_resource_stub = types.ModuleType('nexent.core.prompts')
 prompt_resource_stub.load_prompt = MagicMock()
+prompt_resource_stub.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core/prompts')]
+def _render_test_prompt(source, parameters):
+    from jinja2 import Environment, StrictUndefined
+    return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+prompt_resource_stub.render_prompt_text = _render_test_prompt
 sys.modules['nexent.core.prompts'] = prompt_resource_stub
 sys.modules['nexent.core.agents'] = nexent_core_agents_mock
+prompt_assembly_stub = types.ModuleType('nexent.core.agents.prompt')
+prompt_assembly_stub.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core/agents/prompt')]
+sys.modules['nexent.core.agents.prompt'] = prompt_assembly_stub
 sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
@@ -225,7 +238,7 @@ class TestPromptService(unittest.TestCase):
         self.test_model_id = 1
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.meta.load_prompt')
     @patch('backend.services.prompt_service.query_tools_by_ids')
     @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
     def test_optimize_prompt_section_impl_success(
@@ -1862,7 +1875,7 @@ class TestPromptService(unittest.TestCase):
     def test_optimize_prompt_section_impl_empty_result(self):
         """Test that empty LLM result raises AppException"""
         with patch('backend.services.prompt_service.call_llm_for_system_prompt') as mock_call_llm:
-            with patch('backend.services.prompt_service.load_prompt') as mock_template:
+            with patch('nexent.core.agents.prompt.meta.load_prompt') as mock_template:
                 mock_template.return_value = {
                     "OPTIMIZE_SYSTEM_PROMPT": "System prompt",
                     "OPTIMIZE_USER_PROMPT": "User prompt",
@@ -1889,7 +1902,7 @@ class TestPromptService(unittest.TestCase):
     def test_optimize_prompt_section_impl_uses_default_title(self):
         """Test that section_title defaults when not provided"""
         with patch('backend.services.prompt_service.call_llm_for_system_prompt') as mock_call_llm:
-            with patch('backend.services.prompt_service.load_prompt') as mock_template:
+            with patch('nexent.core.agents.prompt.meta.load_prompt') as mock_template:
                 with patch('backend.services.prompt_service.join_info_for_optimize_prompt_section') as mock_join:
                     mock_template.return_value = {
                         "OPTIMIZE_SYSTEM_PROMPT": "System prompt",
@@ -2874,7 +2887,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_empty_llm_response_raises(self, mock_template, mock_llm):
         from backend.services.prompt_service import generate_guardrail_rules_impl
         mock_template.return_value = {
@@ -2892,7 +2905,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_invalid_json_response_raises(self, mock_template, mock_llm):
         from backend.services.prompt_service import generate_guardrail_rules_impl
         mock_template.return_value = {
@@ -2910,7 +2923,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_unknown_type_raises(self, mock_template, mock_llm):
         from backend.services.prompt_service import generate_guardrail_rules_impl
         mock_template.return_value = {
@@ -2929,7 +2942,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertIn("Unknown guardrail result type", ctx.exception.message)
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_single_type_success(self, mock_template, mock_llm):
         from backend.services.prompt_service import generate_guardrail_rules_impl
         mock_template.return_value = {
@@ -2947,7 +2960,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertIsInstance(result["candidates"], list)
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_multi_type_success(self, mock_template, mock_llm):
         from backend.services.prompt_service import generate_guardrail_rules_impl
         mock_template.return_value = {
@@ -2965,7 +2978,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertIsInstance(result["rules"], list)
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_single_type_with_non_list_candidates(self, mock_template, mock_llm):
         from backend.services.prompt_service import generate_guardrail_rules_impl
         mock_template.return_value = {
@@ -2983,7 +2996,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(result["candidates"], [])
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_multi_type_with_non_list_rules(self, mock_template, mock_llm):
         from backend.services.prompt_service import generate_guardrail_rules_impl
         mock_template.return_value = {
@@ -3675,7 +3688,7 @@ class TestGreetingGeneration(unittest.TestCase):
 
     @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     @patch('backend.services.prompt_service.check_agent_value_duplicate')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')
@@ -3741,7 +3754,7 @@ class TestGreetingGeneration(unittest.TestCase):
 
     @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     @patch('backend.services.prompt_service.check_agent_value_duplicate')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')
@@ -3803,7 +3816,7 @@ class TestGreetingGeneration(unittest.TestCase):
 
     @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     @patch('backend.services.prompt_service.check_agent_value_duplicate')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')
@@ -3867,7 +3880,7 @@ class TestGreetingGeneration(unittest.TestCase):
 
     @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     @patch('backend.services.prompt_service.check_agent_value_duplicate')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')
@@ -3923,7 +3936,7 @@ class TestGreetingGeneration(unittest.TestCase):
         mock_update_agent.assert_not_called()
 
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     @patch('backend.services.prompt_service.check_agent_value_duplicate')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')
@@ -3980,7 +3993,7 @@ class TestGreetingJsonDecodeError(unittest.TestCase):
 
     @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.load_prompt')
+    @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     @patch('backend.services.prompt_service.check_agent_value_duplicate')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.generate_system_prompt')

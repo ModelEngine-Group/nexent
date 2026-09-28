@@ -5,7 +5,6 @@ from utils.time_context_utils import strip_current_time_prefix
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from jinja2 import StrictUndefined, Template
 from nexent.core.concurrency import run_blocking
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
@@ -49,7 +48,7 @@ from database.model_management_db import get_model_by_model_id
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.model_gateway_service import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
-from nexent.core.prompts import load_prompt
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from utils.str_utils import remove_think_blocks
 
 logger = logging.getLogger("conversation_management_service")
@@ -276,7 +275,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
-    # Strip the [Current time: ...] prefix before persisting so historical
+    # Strip the locale-specific current-time prefix before persisting so historical
     # messages do not show the time marker. The prefix is injected by
     # run_agent_stream for the LLM call only.
     raw_query = strip_current_time_prefix(request.query)
@@ -324,7 +323,7 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     Returns:
         str: Generated title
     """
-    prompt_template = load_prompt(language, "agent/generate_chat_title")
+    prompt = compose_auxiliary_prompt(language, "chat_title", {"question": question})
     set_monitoring_context(tenant_id=tenant_id, user_id=None)
 
     if model_id is not None:
@@ -353,13 +352,10 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     )
 
     # Build messages - use new template variable 'question' instead of 'content'
-    user_prompt = Template(prompt_template["USER_PROMPT"], undefined=StrictUndefined).render({
-        "question": question
-    })
     messages = [{"role": MESSAGE_ROLE["SYSTEM"],
-                 "content": prompt_template["SYSTEM_PROMPT"]},
+                 "content": prompt.system},
                 {"role": MESSAGE_ROLE["USER"],
-                 "content": user_prompt}]
+                 "content": prompt.user}]
 
     # ModelEngine accepts role/content in a simple structure, ensure flattening before passing
     if model_config.get("model_factory", "").lower() == "modelengine":

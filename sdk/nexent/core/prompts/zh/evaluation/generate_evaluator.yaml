@@ -224,3 +224,14 @@ SYSTEM_PROMPT: |-
   - code 型函数签名必须为 evaluate(query, expected, actual, runtime_events)，四个参数缺一不可
   - 必须使用双花括号 {{}} 作为变量占位符
   - 只输出 JSON，不要有其他内容
+USER_PROMPT_WITH_AGENT: |-
+  {{ agent_profile }}
+
+  ## Evaluation Request
+  Generate an evaluator for the above agent. Requirements:
+
+  {{ description }}
+USER_PROMPT_WITHOUT_AGENT: |-
+  Generate an evaluator based on the following requirements:
+
+  {{ description }}

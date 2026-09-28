@@ -63,15 +63,6 @@ def build_authorized_context_input(
         ),
     )
 
-# =============================================================================
-# SECTION 1: Long-text format functions (expanded from Jinja2 templates)
-# Each function accepts language and is_manager params for variant-specific text
-# =============================================================================
-
-
-# SECTION 2: Fixed prompt-section text builders
-# =============================================================================
-
 
 def _composer(language: str, is_manager: bool, prompt_bundle):
     """Create a run-local composer from an explicitly supplied prompt snapshot."""
@@ -84,72 +75,6 @@ def _composer(language: str, is_manager: bool, prompt_bundle):
     return AgentPromptComposer(prompt_bundle)
 
 
-def _build_header_text(language: str = "zh", *, prompt_bundle) -> str:
-    return _composer(language, True, prompt_bundle).render_system_section("header")
-
-
-def _build_duty_text(
-    duty: str, language: str = "zh", is_manager: bool = True,
-    priority: int = 80, *, prompt_bundle,
-) -> str:
-    return _composer(language, is_manager, prompt_bundle).render_system_section("duty", duty=duty)
-
-
-def _build_execution_flow_text(
-    memory_list: Optional[List[Any]] = None, language: str = "zh",
-    is_manager: bool = True, enable_planning: bool = False,
-    verification_enabled: bool = False,
-    priority: int = 60, *, prompt_bundle,
-) -> str:
-    composer = _composer(language, is_manager, prompt_bundle)
-    text = composer.render_system_section("execution_flow")
-    if memory_list:
-        text += "\n" + composer.render_system_section("memory_guidance")
-    if enable_planning:
-        text += "\n" + composer.render_system_section("planning_guidance")
-    if verification_enabled:
-        text += "\n" + composer.render_system_section("self_verification_guidance")
-    return text
-
-
-def _build_constraint_text(
-    constraint: str, language: str = "zh", priority: int = 30, *, prompt_bundle,
-) -> str:
-    return _composer(language, True, prompt_bundle).render_system_section("constraint", constraint=constraint)
-
-
-def _build_code_norms_text(
-    language: str = "zh", is_manager: bool = True, priority: int = 20, *, prompt_bundle,
-) -> str:
-    return _composer(language, is_manager, prompt_bundle).render_system_section("code_norms")
-
-
-def _build_restricted_python_execution_policy_text(
-    authorized_imports: List[str], language: str = "zh", *, prompt_bundle, is_manager: bool = True,
-) -> str:
-    imports = ", ".join(
-        f"`{name}`" for name in sorted({
-            name.strip() for name in authorized_imports
-            if isinstance(name, str) and name.strip()
-        })
-    )
-    return _composer(language, is_manager, prompt_bundle).render_system_section(
-        "restricted_python_execution", authorized_imports=imports,
-    )
-
-
-def _build_footer_text(
-    few_shots: str, language: str = "zh", priority: int = 10, *, prompt_bundle,
-) -> str:
-    return _composer(language, True, prompt_bundle).render_system_section("footer", few_shots=few_shots)
-
-
-def _build_available_resources_header_text(
-    is_manager: bool = True, language: str = "zh", priority: int = 55, *, prompt_bundle,
-) -> str:
-    return _composer(language, is_manager, prompt_bundle).render_system_section("available_resources_header")
-
-
 def build_context_inputs(
     duty: Optional[str] = None,
     constraint: Optional[str] = None,
@@ -160,23 +85,22 @@ def build_context_inputs(
     verification_enabled: bool = False,
     tools: Optional[Dict[str, Any]] = None,
     skills: Optional[List[Dict[str, str]]] = None,
-    managed_agents: Optional[Dict[str, Any]] = None,
+    worker_agents: Optional[Dict[str, Any]] = None,
     external_a2a_agents: Optional[Dict[str, Any]] = None,
     memory_list: Optional[List[Any]] = None,
     memory_search_query: Optional[str] = None,
-    memory_tool_policy: Optional[str] = None,
-    automation_tool_policy: Optional[str] = None,
+    enable_memory_tool_policy: bool = False,
+    enable_automation_tool_policy: bool = False,
     long_term_memory_items: Optional[List[dict[str, Any]]] = None,
-    knowledge_base_summary: Optional[str] = None,
-    kb_ids: Optional[List[str]] = None,
-    knowledge_scope_policy: Optional[str] = None,
-    knowledge_scope_resources: Optional[str] = None,
+    knowledge_base_summaries: Optional[List[dict[str, Any]]] = None,
+    knowledge_base_no_indexes: bool = False,
+    knowledge_scope: Optional[Dict[str, Any]] = None,
     restricted_python_authorized_imports: Optional[List[str]] = None,
     include_tools: bool = True,
     include_skills: bool = True,
     include_memory: bool = True,
     include_knowledge_base: bool = True,
-    include_managed_agents: bool = True,
+    include_worker_agents: bool = True,
     include_external_agents: bool = True,
     include_app_context: bool = True,
     sandbox_workspace_enabled: bool = False,

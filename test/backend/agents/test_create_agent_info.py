@@ -813,8 +813,8 @@ class TestGetSkillScriptTools:
         assert names == ["download_from_s3", "upload_to_s3"]
         assert "write_skill_file" not in names
 
-    def test_ut_be_dpr_006_injects_skill_tools_per_agent_without_write_tool(self):
-        """UT-BE-DPR-006: each Agent's own skill binding controls three skill tools."""
+    def test_ut_be_fps_010_injects_skill_tools_per_agent_without_write_tool(self):
+        """UT-BE-FPS-010: only enabled skills add their SDK-described tools."""
         mock_tool_config.reset_mock()
         service = MagicMock()
         service.get_enabled_skills_for_agent.side_effect = lambda *, agent_id, **_: (
@@ -844,6 +844,11 @@ class TestGetSkillScriptTools:
         assert "write_skill_file" not in child_names
         run_skill_call = mock_tool_config.call_args_list[0]
         assert run_skill_call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+        from nexent.core.prompts import load_prompt
+
+        assert run_skill_call.kwargs["description"] == load_prompt(
+            "en", "agent/context_sections"
+        )["builtin_tools"]["run_skill_script"]
 
     def test_get_skill_script_tools_success(self):
         """Test case for successfully getting skill script tools"""
@@ -2268,10 +2273,8 @@ class TestCreateAgentConfig:
             )
 
         context_kwargs = mocks["build_components"].call_args.kwargs
-        policy = context_kwargs["memory_tool_policy"]
-        assert "### Memory Tool Policy" in policy
-        assert "search_memory" not in policy
-        assert "store_memory" in policy
+        assert context_kwargs["enable_memory_tool_policy"] is True
+        assert "memory_tool_policy" not in context_kwargs
         assert "instructions" not in mocks["agent_config"].call_args.kwargs
 
     @pytest.mark.asyncio
@@ -2329,7 +2332,7 @@ class TestCreateAgentConfig:
             "memory_level": "agent",
         }]
         assert "search_memory" not in context_kwargs["tools"]
-        assert "search_memory" not in context_kwargs["memory_tool_policy"]
+        assert "memory_tool_policy" not in context_kwargs
         assert all(
             tool.name != "search_memory"
             for tool in mocks["agent_config"].call_args.kwargs["tools"]
@@ -2487,7 +2490,7 @@ class TestCreateAgentConfig:
                 model_name="test_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
-                managed_agents=[],
+                worker_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,
@@ -2574,7 +2577,7 @@ class TestCreateAgentConfig:
                     model_name="test_model",
                     provide_run_summary=True,
                     allow_chat_metadata=False,
-                    managed_agents=[mock_sub_agent_config],
+                    worker_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
                     context_items=ANY,
@@ -2861,7 +2864,7 @@ class TestCreateAgentConfig:
                 model_name="main_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
-                managed_agents=[],
+                worker_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,
@@ -3438,8 +3441,9 @@ class TestCreateAgentConfig:
                 "zh",
                 "test query",
                 runtime_knowledge_context={
-                    "policy": "scope policy",
-                    "resources": "selected resources",
+                    "scope": {"local_capable": True, "aidp_capable": False,
+                              "local_disabled": False, "aidp_disabled": False,
+                              "local_display_names": ["selected resources"], "aidp_display_names": []},
                 },
             )
 
@@ -3452,14 +3456,11 @@ class TestCreateAgentConfig:
 
             mock_prepare_templates.assert_not_called()
             assert create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_base_summary"
-            ] == "**idx_a**: AAA\n\n"
+                "knowledge_base_summaries"
+            ] == [{"index_name": "idx_a", "display_name": "idx_a", "summary": "AAA"}]
             assert create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_scope_policy"
-            ] == "scope policy"
-            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_scope_resources"
-            ] == "selected resources"
+                "knowledge_scope"
+            ]["local_display_names"] == ["selected resources"]
 
             # Ensure only the first KnowledgeBaseSearchTool is processed.
             assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
@@ -3483,18 +3484,16 @@ class TestCreateAgentConfig:
             mock_es_service.return_value.get_summary.return_value = {
                 "summary": "Selected summary"
             }
-            summary, kb_ids = (
+            summaries, no_indexes = (
                 create_agent_info_module._build_effective_knowledge_base_summary(
                     [kb_tool],
-                    "en",
                     include_empty_message=False,
                 )
             )
 
-        assert summary == (
-            "**Selected Knowledge Base**: Selected summary\n\n"
-        )
-        assert kb_ids == ["selected-index"]
+        assert summaries == [{"index_name": "selected-index", "display_name": "Selected Knowledge Base",
+                              "summary": "Selected summary"}]
+        assert no_indexes is False
         mock_es_service.return_value.get_summary.assert_called_once_with(
             index_name="selected-index"
         )
@@ -3519,16 +3518,16 @@ class TestCreateAgentConfig:
             mock_es_service.return_value.get_summary.return_value = {
                 "summary": "Allowed summary"
             }
-            summary, kb_ids = (
+            summaries, no_indexes = (
                 create_agent_info_module._build_effective_knowledge_base_summary(
                     [kb_tool],
-                    "en",
                     include_empty_message=False,
                 )
             )
 
-        assert summary == "**Allowed Knowledge Base**: Allowed summary\n\n"
-        assert kb_ids == ["allowed-index"]
+        assert summaries == [{"index_name": "allowed-index", "display_name": "Allowed Knowledge Base",
+                              "summary": "Allowed summary"}]
+        assert no_indexes is False
         mock_es_service.return_value.get_summary.assert_called_once_with(
             index_name="allowed-index"
         )
@@ -3544,16 +3543,15 @@ class TestCreateAgentConfig:
         with patch(
             "backend.agents.create_agent_info.ElasticSearchService"
         ) as mock_es_service:
-            summary, kb_ids = (
+            summaries, no_indexes = (
                 create_agent_info_module._build_effective_knowledge_base_summary(
                     [kb_tool],
-                    "en",
                     include_empty_message=False,
                 )
             )
 
-        assert summary == ""
-        assert kb_ids == []
+        assert summaries == []
+        assert no_indexes is False
         mock_es_service.assert_not_called()
 
     @pytest.mark.asyncio
@@ -3664,12 +3662,10 @@ class TestCreateAgentConfig:
             # Verify the SDK context component uses display names from metadata.
             mock_prepare_templates.assert_not_called()
             knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_base_summary"
+                "knowledge_base_summaries"
             ]
-            assert "**Custom Name 1**" in knowledge_summary
-            assert "**Custom Name 2**" in knowledge_summary
-            assert "idx1" not in knowledge_summary
-            assert "idx2" not in knowledge_summary
+            assert [item["display_name"] for item in knowledge_summary] == ["Custom Name 1", "Custom Name 2"]
+            assert [item["index_name"] for item in knowledge_summary] == ["idx1", "idx2"]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_metadata_without_index_name_to_display_map(self):
@@ -3764,21 +3760,14 @@ class TestCreateAgentConfig:
             # as the display_name (no mapping available)
             mock_prepare_templates.assert_not_called()
             knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_base_summary"
+                "knowledge_base_summaries"
             ]
-            assert "**idx1**" in knowledge_summary
-            assert "**idx2**" in knowledge_summary
+            assert [item["display_name"] for item in knowledge_summary] == ["idx1", "idx2"]
 
-    @pytest.mark.parametrize(
-        "language,expected_message",
-        [
-            ("zh", "当前没有可用的知识库索引。\n"),
-            ("en", "No knowledge base indexes are currently available.\n"),
-        ],
-    )
+    @pytest.mark.parametrize("language", ["zh", "en"])
     @pytest.mark.asyncio
     async def test_create_agent_config_knowledge_base_summary_no_indexes_message(
-        self, language, expected_message
+        self, language
     ):
         with (
             patch(
@@ -3844,9 +3833,9 @@ class TestCreateAgentConfig:
             )
 
             mock_es_service.assert_not_called()
-            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_base_summary"
-            ] == expected_message
+            context_kwargs = create_agent_info_module.build_context_inputs.call_args.kwargs
+            assert context_kwargs["knowledge_base_summaries"] == []
+            assert context_kwargs["knowledge_base_no_indexes"] is True
 
     @pytest.mark.asyncio
     async def test_create_agent_config_knowledge_base_summary_error(self):
@@ -4105,7 +4094,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = Mock()
         mock_agent_config.tools = [mock_tool]
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {
             "test_server": {
@@ -4126,7 +4115,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = Mock()
         mock_agent_config.tools = [mock_tool]
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {}
 
@@ -4144,7 +4133,7 @@ class TestFilterMcpServersAndTools:
 
         mock_sub_agent = Mock()
         mock_sub_agent.tools = [mock_sub_tool]
-        mock_sub_agent.managed_agents = []
+        mock_sub_agent.worker_agents = []
 
         # Create mock tool for the main agent
         mock_main_tool = Mock()
@@ -4153,7 +4142,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = Mock()
         mock_agent_config.tools = [mock_main_tool]
-        mock_agent_config.managed_agents = [mock_sub_agent]
+        mock_agent_config.worker_agents = [mock_sub_agent]
 
         mcp_info_dict = {
             "main_server": {
@@ -4179,7 +4168,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = Mock()
         mock_agent_config.tools = [mock_tool]
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {
             "different_server": {
@@ -6319,11 +6308,11 @@ class TestFilterMcpServersAndTools:
 
         mock_sub_agent = MagicMock()
         mock_sub_agent.tools = []
-        mock_sub_agent.managed_agents = []
+        mock_sub_agent.worker_agents = []
 
         mock_agent_config = MagicMock()
         mock_agent_config.tools = [mock_tool1, mock_tool2, mock_tool3]
-        mock_agent_config.managed_agents = [mock_sub_agent]
+        mock_agent_config.worker_agents = [mock_sub_agent]
 
         mcp_info_dict = {
             "server1": {"remote_mcp_server": "http://server1.example.com"},
@@ -6344,15 +6333,15 @@ class TestFilterMcpServersAndTools:
 
         mock_sub_sub_agent = MagicMock()
         mock_sub_sub_agent.tools = [mock_tool1]
-        mock_sub_sub_agent.managed_agents = []
+        mock_sub_sub_agent.worker_agents = []
 
         mock_sub_agent = MagicMock()
         mock_sub_agent.tools = []
-        mock_sub_agent.managed_agents = [mock_sub_sub_agent]
+        mock_sub_agent.worker_agents = [mock_sub_sub_agent]
 
         mock_agent_config = MagicMock()
         mock_agent_config.tools = []
-        mock_agent_config.managed_agents = [mock_sub_agent]
+        mock_agent_config.worker_agents = [mock_sub_agent]
 
         mcp_info_dict = {
             "nested_server": {"remote_mcp_server": "http://nested.example.com"},
@@ -6375,7 +6364,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = MagicMock()
         mock_agent_config.tools = [mock_tool1, mock_tool2]
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {
             "enabled_server": {"remote_mcp_server": "http://enabled.example.com"},
@@ -6391,7 +6380,7 @@ class TestFilterMcpServersAndTools:
         """Test filtering with no tools returns empty list"""
         mock_agent_config = MagicMock()
         mock_agent_config.tools = []
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {
             "server1": {"remote_mcp_server": "http://server1.example.com"},

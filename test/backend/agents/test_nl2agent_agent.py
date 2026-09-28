@@ -331,7 +331,7 @@ def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
 
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
     prompt_loader = mocker.patch(
-        "agents.nl2agent_agent.load_prompt",
+        "nexent.core.agents.prompt.meta.load_prompt",
         return_value={"system_prompt": "{{ missing_value }}"},
     )
 

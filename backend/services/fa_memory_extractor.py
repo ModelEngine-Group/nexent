@@ -6,7 +6,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from nexent.core.prompts import load_prompt
+from nexent.core.agents.prompt.memory import compose_memory_prompt, load_memory_template
 from nexent.memory.models import MemoryLayer, MemoryType
 
 logger = logging.getLogger("fa_memory_extractor")
@@ -40,17 +40,16 @@ class FaMemoryExtractor:
         self.model_client = model_client
 
     def _load_prompt(self) -> dict:
-        return load_prompt("en", "memory/fa_extraction")
+        return load_memory_template("memory_extraction")
 
     def _build_messages(self, final_answer: str, user_query: str = "") -> list[dict]:
-        prompt = self._load_prompt()
-        user_content = prompt["user"].format(
-            final_answer=final_answer,
-            user_query=user_query,
+        prompt = compose_memory_prompt(
+            "memory_extraction",
+            {"final_answer": final_answer, "user_query": user_query},
         )
         return [
-            {"role": "system", "content": prompt["system"]},
-            {"role": "user", "content": user_content},
+            {"role": "system", "content": prompt.system},
+            {"role": "user", "content": prompt.user},
         ]
 
     @staticmethod

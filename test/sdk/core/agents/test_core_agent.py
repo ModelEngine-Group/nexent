@@ -618,9 +618,9 @@ second_block"""
 
 
 def test_parse_code_blobs_run_format_without_end_code():
-    """Test parse_code_blobs with ```<RUN>\\ncontent\\n``` pattern (without END_CODE)."""
+    """Test parse_code_blobs with ```<run>\\ncontent\\n``` pattern (without END_CODE)."""
     text = """Here is some code:
-```<RUN>
+```<run>
 print("Hello World")
 ```
 And some more text."""
@@ -631,9 +631,9 @@ And some more text."""
 
 
 def test_parse_code_blobs_run_incomplete_no_closing_backticks():
-    """Test parse_code_blobs when ```<RUN> tag has no closing ```."""
+    """Test parse_code_blobs when ```<run> tag has no closing ```."""
     text = """Here is some code:
-```<RUN>
+```<run>
 incomplete code without closing backticks"""
 
     # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
@@ -642,11 +642,11 @@ incomplete code without closing backticks"""
 
 
 def test_parse_code_blobs_multiple_run_blocks_one_incomplete():
-    """Test parse_code_blobs with multiple ```<RUN> blocks where one has no closing ```."""
-    text = """```<RUN>
+    """Test parse_code_blobs with multiple ```<run> blocks where one has no closing ```."""
+    text = """```<run>
 first_block()
 ```
-```<RUN>
+```<run>
 second_block"""
 
     result = core_agent_module.parse_code_blobs(text)
@@ -656,13 +656,13 @@ second_block"""
 
 
 def test_parse_code_blobs_multiple_run_blocks():
-    """Test parse_code_blobs with multiple ```<RUN> blocks."""
-    text = """```<RUN>
+    """Test parse_code_blobs with multiple ```<run> blocks."""
+    text = """```<run>
 first_block()
-```<END_CODE>
-```<RUN>
+```<end_code>
+```<run>
 second_block()
-```<END_CODE>"""
+```<end_code>"""
 
     result = core_agent_module.parse_code_blobs(text)
     expected = "first_block()\n\nsecond_block()"
@@ -733,7 +733,7 @@ def test_parse_code_blobs_direct_python_code():
     """Test parse_code_blobs with direct Python code (no code blocks).
 
     Direct Python code without code blocks will raise ValueError because
-    it's not wrapped in <code>...</code> or ```<RUN>...</RUN>``` format.
+    it's not wrapped in <code>...</code> or ```<run>...</run>``` format.
     """
     text = '''print("Hello World")
 x = 42
@@ -762,10 +762,10 @@ Just plain text that should fail."""
 def test_parse_code_blobs_display_only_raises():
     """Test parse_code_blobs raises ValueError when only DISPLAY code blocks are present."""
     text = """Here is some code:
-```<DISPLAY:python>
+```<display:python>
 def hello():
     return "Hello"
-```<END_DISPLAY_CODE>
+```<end_display_code>
 And some more text."""
 
     with pytest.raises(ValueError) as exc_info:
@@ -884,11 +884,11 @@ The result is 8."""
 # ----------------------------------------------------------------------------
 
 def test_convert_code_format_display_new_format():
-    """Validate convert_code_format correctly transforms new <DISPLAY:language>...</DISPLAY> format to standard markdown."""
+    """Validate convert_code_format correctly transforms new <display:language>...</display> format to standard markdown."""
     original_text = """Here is code:
-<DISPLAY:python>
+<display:python>
 print('hello')
-</DISPLAY>
+</display>
 And some more text."""
 
     expected_text = """Here is code:
@@ -902,11 +902,11 @@ And some more text."""
 
 
 def test_convert_code_format_display_replacements():
-    """Validate convert_code_format correctly transforms legacy <DISPLAY:language> format to standard markdown."""
+    """Validate convert_code_format correctly transforms legacy <display:language> format to standard markdown."""
     original_text = """Here is code:
-```<DISPLAY:python>
+```<display:python>
 print('hello')
-```<END_DISPLAY_CODE>
+```<end_display_code>
 And some more text."""
 
     expected_text = """Here is code:
@@ -920,9 +920,9 @@ And some more text."""
 
 
 def test_convert_code_format_display_without_end_code():
-    """Validate convert_code_format handles <DISPLAY:language> without <END_DISPLAY_CODE>."""
+    """Validate convert_code_format handles <display:language> without <end_display_code>."""
     original_text = """Here is code:
-```<DISPLAY:python>
+```<display:python>
 print('hello')
 ```
 And some more text."""
@@ -956,10 +956,10 @@ And some more text."""
 
 
 def test_convert_code_format_restore_end_code():
-    """Test that <END_CODE> is properly restored after replacements."""
-    original_text = """```<DISPLAY:python>
+    """Test that <end_code> is properly restored after replacements."""
+    original_text = """```<display:python>
 print('hello')
-```<END_CODE>"""
+```<end_code>"""
 
     expected_text = """```python
 print('hello')
@@ -981,12 +981,12 @@ print('hello')
 
 def test_convert_code_format_multiple_displays():
     """Test convert_code_format with multiple DISPLAY blocks (both new and legacy format)."""
-    original_text = """<DISPLAY:python>
+    original_text = """<display:python>
 first()
-</DISPLAY>
-<DISPLAY:javascript>
+</display>
+<display:javascript>
 second()
-</DISPLAY>"""
+</display>"""
 
     expected_text = """```python
 first()
@@ -1002,9 +1002,9 @@ second()
 def test_convert_code_format_mixed_with_code():
     """Test convert_code_format with mixed content."""
     original_text = """Some text before
-```<DISPLAY:python>
+```<display:python>
 print('displayed')
-```<END_DISPLAY_CODE>
+```<end_display_code>
 Some text after"""
 
     expected_text = """Some text before
@@ -1156,11 +1156,11 @@ But this should not match."""
 
 def test_convert_code_format_preserves_content():
     """Test that convert_code_format preserves actual code content."""
-    code = '''```<DISPLAY:python>
+    code = '''```<display:python>
 def complex_function():
     """Docstring with special chars: <>&'"""
     return "Hello 世界"
-```<END_DISPLAY_CODE>'''
+```<end_display_code>'''
 
     transformed = core_agent_module.convert_code_format(code)
 
@@ -1171,8 +1171,8 @@ def complex_function():
 
 def test_convert_code_format_handles_empty_end_tags():
     """Test convert_code_format with empty DISPLAY blocks."""
-    text = """```<DISPLAY:python>
-```<END_DISPLAY_CODE>"""
+    text = """```<display:python>
+```<end_display_code>"""
     transformed = core_agent_module.convert_code_format(text)
     expected = """```python
 ```"""
@@ -1182,13 +1182,13 @@ def test_convert_code_format_handles_empty_end_tags():
 def test_convert_code_format_complex_nested():
     """Test convert_code_format with complex nested structures."""
     text = '''# Start
-```<DISPLAY:python>
+```<display:python>
 # Python code
-```<END_DISPLAY_CODE>
+```<end_display_code>
 Middle
-```<DISPLAY:javascript>
+```<display:javascript>
 // JavaScript
-```<END_DISPLAY_CODE>
+```<end_display_code>
 End'''
 
     transformed = core_agent_module.convert_code_format(text)
@@ -1204,25 +1204,25 @@ End'''
 # ----------------------------------------------------------------------------
 
 def test_convert_code_format_code_end_tag_restoration():
-    """Test that ```<END_CODE> is properly restored to ```."""
+    """Test that ```<end_code> is properly restored to ```."""
     text = """Some code:
-```<DISPLAY:python>
+```<display:python>
 print('hello')
-```<END_CODE>
+```<end_code>
 More text."""
 
     transformed = core_agent_module.convert_code_format(text)
 
     assert "```python" in transformed
-    assert "```<END_CODE>" not in transformed
+    assert "```<end_code>" not in transformed
     assert "```\n" in transformed or '```"' in transformed or transformed.endswith("```")
 
 
 def test_parse_code_blobs_whitespace_only_run_block():
     """Test parse_code_blobs with whitespace-only RUN block."""
-    text = """```<RUN>
+    text = """```<run>
 
-```<END_CODE>"""
+```<end_code>"""
 
     result = core_agent_module.parse_code_blobs(text)
     assert result.strip() == ""
@@ -1248,11 +1248,11 @@ w = '''triple single'''
 
 def test_convert_code_format_unicode_content():
     """Test convert_code_format preserves Unicode content."""
-    text = """```<DISPLAY:python>
+    text = """```<display:python>
 def hello():
     return "你好世界"
 print("🎉")
-```<END_DISPLAY_CODE>"""
+```<end_display_code>"""
 
     transformed = core_agent_module.convert_code_format(text)
 
@@ -1263,10 +1263,10 @@ print("🎉")
 
 def test_convert_code_format_dedent_removal():
     """Test that extra backticks from dedent pattern are removed."""
-    text = """```<DISPLAY:python>
+    text = """```<display:python>
 def test():
     pass
-```<END_DISPLAY_CODE>"""
+```<end_display_code>"""
 
     transformed = core_agent_module.convert_code_format(text)
     # Should not have leftover ```< patterns
@@ -1277,7 +1277,7 @@ def test_parse_code_blobs_only_whitespace_text():
     """Test parse_code_blobs raises ValueError for whitespace-only text.
 
     Whitespace-only text is not valid executable code because it's not
-    wrapped in <code>...</code> or ```<RUN>...</RUN>``` format.
+    wrapped in <code>...</code> or ```<run>...</run>``` format.
     """
     text = "   \n\n   \t\t   "
 
@@ -1325,16 +1325,16 @@ def test_convert_code_format_both_legacy_and_display():
     """Test convert_code_format handles both legacy and new format together."""
     text = """```code:python
 legacy_code()
-```<END_CODE>
-```<DISPLAY:python>
+```<end_code>
+```<display:python>
 new_code()
-```<END_DISPLAY_CODE>"""
+```<end_display_code>"""
 
     transformed = core_agent_module.convert_code_format(text)
 
     assert "```python" in transformed
     assert "code:python" not in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "<display:" not in transformed
 
 
 # ----------------------------------------------------------------------------
@@ -1343,32 +1343,32 @@ new_code()
 
 def test_convert_code_format_single_backtick_display():
     """Test convert_code_format with single backtick prefix."""
-    text = """` <DISPLAY:python>
+    text = """` <display:python>
 print('hello')
-</DISPLAY>"""
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "<display:" not in transformed
 
 
 def test_convert_code_format_double_backtick_display():
     """Test convert_code_format with double backtick prefix."""
-    text = """`` <DISPLAY:python>
+    text = """`` <display:python>
 print('hello')
-</DISPLAY>"""
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "``python" in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "<display:" not in transformed
 
 
 def test_convert_code_format_multiple_displays_mixed():
     """Test convert_code_format with mixed display formats."""
-    text = """<DISPLAY:python>
+    text = """<display:python>
 first()
-</DISPLAY>
-```<DISPLAY:javascript>
+</display>
+```<display:javascript>
 second()
-```<END_DISPLAY_CODE>
+```<end_display_code>
 ```code:ruby
 third()
 ```"""
@@ -1390,19 +1390,19 @@ print('hello')
 
 def test_convert_code_format_empty_content():
     """Test convert_code_format with empty content."""
-    text = """<DISPLAY:python>
-</DISPLAY>"""
+    text = """<display:python>
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
-    assert "</DISPLAY>" not in transformed
+    assert "</display>" not in transformed
 
 
 def test_convert_code_format_unicode_in_display():
     """Test convert_code_format preserves unicode in display blocks."""
-    text = """<DISPLAY:python>
+    text = """<display:python>
 def hello():
     return "你好世界"
-</DISPLAY>"""
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
     assert "你好世界" in transformed
@@ -1410,11 +1410,11 @@ def hello():
 
 def test_convert_code_format_special_chars_in_display():
     """Test convert_code_format preserves special characters."""
-    text = '''<DISPLAY:python>
+    text = '''<display:python>
 x = "!@#$%^&*()"
 y = 'single quotes'
 z = "double quotes"
-</DISPLAY>'''
+</display>'''
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
     assert "!@#$%^&*()" in transformed
@@ -1422,36 +1422,36 @@ z = "double quotes"
 
 def test_convert_code_format_nested_display():
     """Test convert_code_format with nested-like content."""
-    text = """<DISPLAY:python>
+    text = """<display:python>
 def foo():
-    return "<DISPLAY:text>" * 5
-</DISPLAY>"""
+    return "<display:text>" * 5
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "<display:" not in transformed
 
 
 def test_convert_code_format_closing_tag_only():
     """Test convert_code_format with orphaned closing tags."""
     text = """Some text
-</DISPLAY>
+</display>
 More text"""
     transformed = core_agent_module.convert_code_format(text)
     # Should not replace orphan closing tag
-    assert "</DISPLAY>" not in transformed
+    assert "</display>" not in transformed
 
 
 def test_convert_code_format_mixed_backtick_counts():
     """Test convert_code_format with different backtick counts in opening."""
-    text1 = """` <DISPLAY:python>
+    text1 = """` <display:python>
 print('one')
-</DISPLAY>"""
-    text2 = """`` <DISPLAY:python>
+</display>"""
+    text2 = """`` <display:python>
 print('two')
-</DISPLAY>"""
-    text3 = """```<DISPLAY:python>
+</display>"""
+    text3 = """```<display:python>
 print('three')
-</DISPLAY>"""
+</display>"""
 
     t1 = core_agent_module.convert_code_format(text1)
     t2 = core_agent_module.convert_code_format(text2)
@@ -1465,32 +1465,32 @@ print('three')
 def test_convert_code_format_end_display_code_only():
     """Test convert_code_format with orphaned END_DISPLAY_CODE."""
     text = """Some text
-```<END_DISPLAY_CODE>
+```<end_display_code>
 More text"""
     transformed = core_agent_module.convert_code_format(text)
     # Should replace the orphaned END_DISPLAY_CODE
-    assert "```<END_DISPLAY_CODE>" not in transformed
+    assert "```<end_display_code>" not in transformed
 
 
 def test_convert_code_format_end_code_only():
     """Test convert_code_format with orphaned END_CODE."""
     text = """Some text
-```<END_CODE>
+```<end_code>
 More text"""
     transformed = core_agent_module.convert_code_format(text)
     # Should replace the orphaned END_CODE
-    assert "```<END_CODE>" not in transformed
+    assert "```<end_code>" not in transformed
 
 
 def test_convert_code_format_complex_real_world():
     """Test convert_code_format with complex real-world output."""
     text = """Here is the result of my analysis:
 
-```<DISPLAY:python>
+```<display:python>
 import json
 data = {"result": "success", "value": 42}
 print(json.dumps(data, indent=2))
-```<END_DISPLAY_CODE>
+```<end_display_code>
 
 This code demonstrates how to work with JSON in Python."""
 
@@ -1498,8 +1498,8 @@ This code demonstrates how to work with JSON in Python."""
 
     assert "```python" in transformed
     assert "import json" in transformed
-    assert "```<END_DISPLAY_CODE>" not in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "```<end_display_code>" not in transformed
+    assert "<display:" not in transformed
 
 
 # ----------------------------------------------------------------------------
@@ -1507,9 +1507,9 @@ This code demonstrates how to work with JSON in Python."""
 # ----------------------------------------------------------------------------
 
 def test_convert_code_format_display_no_closing_angle_bracket():
-    """Test convert_code_format handles <DISPLAY:language without closing > gracefully."""
+    """Test convert_code_format handles <display:language without closing > gracefully."""
     # This covers line 133: if lang_end == -1: break
-    text = """```<DISPLAY:python
+    text = """```<display:python
 print('hello')
 ```"""
     # The opening tag has no closing >, so it should be left as-is
@@ -1531,25 +1531,25 @@ print('hello')
 
 
 def test_convert_code_format_display_tag_no_closing_bracket():
-    """Test convert_code_format handles <DISPLAY:language without closing >."""
+    """Test convert_code_format handles <display:language without closing >."""
     # This covers line 163: if lang_end == -1: break
-    text = """<DISPLAY:python
+    text = """<display:python
 print('hello')
-</DISPLAY>"""
+</display>"""
     # The opening tag has no closing >, so conversion should stop
     transformed = core_agent_module.convert_code_format(text)
     # Should not crash, closing tag should still be converted
-    assert "</DISPLAY>" not in transformed
+    assert "</display>" not in transformed
 
 
 def test_convert_code_format_multiple_display_tags_partial():
     """Test convert_code_format with multiple display tags, some invalid."""
-    text = """<DISPLAY:python
+    text = """<display:python
 first()
-</DISPLAY>
-<DISPLAY:javascript
+</display>
+<display:javascript
 second()
-</DISPLAY>"""
+</display>"""
     # First has closing >, second doesn't
     transformed = core_agent_module.convert_code_format(text)
     assert isinstance(transformed, str)
@@ -2452,7 +2452,7 @@ class TestRunStreamRealExecution:
         agent.output_protocol = "final_envelope"
         agent.verification_controller = None
         response = SimpleNamespace(
-            content="<FINAL_ANSWER>ok</FINAL_ANSWER>",
+            content="<final_answer>ok</final_answer>",
             token_usage=None,
         )
         agent.model = MagicMock(return_value=response)
@@ -2486,7 +2486,7 @@ class TestRunStreamRealExecution:
         agent.verification_controller = None
         agent.model = MagicMock(
             return_value=SimpleNamespace(
-                content="<FINAL_ANSWER>ok</FINAL_ANSWER>",
+                content="<final_answer>ok</final_answer>",
                 token_usage=None,
             )
         )
@@ -2497,7 +2497,7 @@ class TestRunStreamRealExecution:
         assert len(actual_messages) == 3
         continuation = module.ChatMessage.call_args.kwargs["content"][0]["text"]
         assert "Do not repeat any completed action" in continuation
-        assert "<FINAL_ANSWER>" in continuation
+        assert "<final_answer>" in continuation
 
     def test_step_stream_rolls_back_interstitial_text_before_protocol_repair(self):
         """Text between executable blocks is rolled back before protocol repair."""
@@ -2576,7 +2576,7 @@ class TestRunStreamRealExecution:
         agent.stop_event = threading.Event()
 
         response = SimpleNamespace(
-            content="<FINAL_ANSWER>recovered</FINAL_ANSWER>",
+            content="<final_answer>recovered</final_answer>",
             token_usage=None,
             model_attempt_id="repair-attempt",
             model_attempt_number=2,
@@ -2984,7 +2984,7 @@ class TestHandleMaxStepsReached:
         # Mock the model to return a final answer
         mock_chat_message = MagicMock()
         mock_chat_message.role = "assistant"
-        mock_chat_message.content = "<FINAL_ANSWER>This is the summary after reaching max steps.</FINAL_ANSWER>"
+        mock_chat_message.content = "<final_answer>This is the summary after reaching max steps.</final_answer>"
         mock_chat_message.token_usage = MagicMock()
         mock_chat_message.token_usage.input_tokens = 100
         mock_chat_message.token_usage.output_tokens = 50
@@ -3521,18 +3521,18 @@ def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones()
     agent.managed_agents = {"planner": planner}
 
     assert module.CoreAgent._known_tool_names(agent) == {"search", "7", "planner"}
-    assert module.CoreAgent._managed_agent_names(agent) == {"planner"}
+    assert module.CoreAgent._worker_agent_names(agent) == {"planner"}
     assert module.CoreAgent._non_emitting_tool_names(agent) == {"7"}
 
     agent.tools = ["not-a-mapping"]
     agent.managed_agents = None
 
     assert module.CoreAgent._known_tool_names(agent) == set()
-    assert module.CoreAgent._managed_agent_names(agent) == set()
+    assert module.CoreAgent._worker_agent_names(agent) == set()
     assert module.CoreAgent._non_emitting_tool_names(agent) == set()
 
 
-def test_managed_agent_names_reads_names_from_sequence_containers():
+def test_worker_agent_names_reads_names_from_sequence_containers():
     """Collect managed-agent names when the registry is a sequence."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = type("Agent", (), {})()
@@ -3542,7 +3542,7 @@ def test_managed_agent_names_reads_names_from_sequence_containers():
         type("NamedAgent", (), {"name": "researcher"})(),
     ]
 
-    assert module.CoreAgent._managed_agent_names(agent) == {"planner", "researcher"}
+    assert module.CoreAgent._worker_agent_names(agent) == {"planner", "researcher"}
 
 
 def test_wrap_visible_tool_events_supports_sequence_containers_and_skips_hidden_tools():

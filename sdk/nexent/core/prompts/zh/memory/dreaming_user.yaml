@@ -32,3 +32,27 @@ user: |
 
   - 一条简短的记忆事实
   </summary>
+source_full: |-
+  ## Current Active User Memory
+
+  Source: {prior_source}
+
+  {prior}
+
+  ## Newly Promoted Evidence
+
+  {evidence}
+source_prior: |-
+  ## Current Active User Memory
+
+  Source: {prior_source}
+
+  {prior}
+source_evidence: |-
+  ### Evidence {unit_id}
+
+  {content}
+map_summary: |-
+  ## Map Summary {index}
+
+  {content}

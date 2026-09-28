@@ -93,3 +93,7 @@ USER_PROMPT_INSTRUCTION: |-
   Requirements:
   - Cover all core capabilities, leveraging KB data and uploaded documents for domain-relevant questions
   - Ensure at least 30% are application or reasoning questions
+AGENT_QUERY_USER_PROMPT: |-
+  {{ profile }}
+
+  Generate {{ count }} test cases for this agent.

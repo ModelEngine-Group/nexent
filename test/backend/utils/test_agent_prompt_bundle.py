@@ -49,7 +49,7 @@ def test_ut_be_dpr_001_fixed_sections_are_complete_and_localized(language, is_ma
         if language == "zh" else
         "Follow the user's requested response format strictly; do not add headings, paragraphs, or fields the user did not request.\n"
     )
-    assert format_override in execution
+    assert format_override in composer.render_system_section("final_answer_guidance")
     assert composer.render_system_section("sandbox_workspace_guidance")
     assert composer.render_system_section("self_verification_guidance")
     assert composer.render_system_section("skill_usage")
@@ -102,13 +102,13 @@ def test_ut_be_dpr_003_manager_orchestration_only_for_available_agents():
     manager_items = build_context_inputs(
         is_manager=True,
         language="en",
-        managed_agents={"worker": {"description": "available"}},
+        worker_agents={"worker": {"description": "available"}},
         prompt_bundle=manager,
     )
     leaf_items = build_context_inputs(is_manager=False, language="en", prompt_bundle=leaf)
     unavailable_items = build_context_inputs(
         is_manager=False, language="en",
-        managed_agents={"unavailable": {"description": "not authorized"}},
+        worker_agents={"unavailable": {"description": "not authorized"}},
         prompt_bundle=leaf,
     )
 
@@ -117,10 +117,10 @@ def test_ut_be_dpr_003_manager_orchestration_only_for_available_agents():
     assert "manager_agent" in manager.template
     assert "user's requested format" in manager_text.lower()
     assert "worker" in manager_text
-    assert "managed_agent:unavailable" not in manager_text
+    assert "worker_agent:unavailable" not in manager_text
     assert "manager_agent" not in leaf.template
     assert "delegate" not in leaf_text.lower()
-    assert "managed_agent:unavailable" not in str(unavailable_items)
+    assert "worker_agent:unavailable" not in str(unavailable_items)
 
 
 def test_ut_be_dpr_004_bundle_versions_and_fields_are_isolated():
@@ -156,7 +156,7 @@ def test_ut_be_cftp_002_production_prompts_use_only_the_final_tag_contract():
     assert prompt_paths
     for path in prompt_paths:
         content = path.read_text(encoding="utf-8")
-        assert "<FINAL_ANSWER>" in content, path
+        assert "<final_answer>" in content, path
         assert "<final>" not in content, path
         assert "</final>" not in content, path
         assert "final_answer(" not in content, path
@@ -271,7 +271,6 @@ def test_ut_be_dpr_008_common_role_sections_are_synchronized(language):
     managed = load_agent_prompt_bundle(is_manager=False, language=language)
     role_neutral_sections = {
         "header",
-        "memory_guidance",
         "planning_guidance",
         "sandbox_workspace_guidance",
         "skill_usage",
@@ -340,7 +339,7 @@ def test_ut_be_dpr_009_management_loader_is_a_thin_template_provider():
     assert "_REQUIRED_SECTIONS" not in loader_source
     assert "_FIELD_VARIABLES" not in loader_source
     assert "jinja2" not in loader_source
-    assert "AgentPromptBundle.from_mapping" in loader_source
+    assert "AgentPromptBundle.from_resource" in loader_source
 
 
 def test_ut_be_dpr_009_context_adapter_requires_an_explicit_bundle():

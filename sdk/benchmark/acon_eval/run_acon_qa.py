@@ -67,7 +67,7 @@ def build_qa_system_prompt(num_objectives: int) -> str:
     answer_slots = "; ".join(f"answer{i}" for i in range(1, num_objectives + 1))
 
     return f"""You are a multi-hop QA agent. The input contains multiple sub-questions separated by "; ".
-Answer them sequentially by actually calling `wikipedia_search`, then return the final result in `<FINAL_ANSWER>...</FINAL_ANSWER>`.
+Answer them sequentially by actually calling `wikipedia_search`, then return the final result in `<final_answer>...</final_answer>`.
 
 # Tools
 - `wikipedia_search(query: str, n_results: int = 3)` — searches the local 2018 Wikipedia retriever.
@@ -136,7 +136,7 @@ Never submit a partial answer.
 
 Return exactly:
 
-<FINAL_ANSWER>{answer_slots}</FINAL_ANSWER>
+<final_answer>{answer_slots}</final_answer>
 
 Start answering the real questions, starting with obtaining ANSWER_Q1.
 """

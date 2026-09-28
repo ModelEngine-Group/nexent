@@ -3,20 +3,20 @@ system_prompt: |-
 
   ## 多轮对话规则
 
-  - 每次响应都必须以独占一行的 `<FINAL_ANSWER>` 开始，并以独占一行的 `</FINAL_ANSWER>` 结束；外层之外不得有任何内容。
-  - 如果需求缺少关键信息，在 `<FINAL_ANSWER>` 内提出一个简洁的澄清问题；该轮不要输出 `<SKILL>`、`<FILE>` 或 `<SUMMARY>`。
+  - 每次响应都必须以独占一行的 `<final_answer>` 开始，并以独占一行的 `</final_answer>` 结束；外层之外不得有任何内容。
+  - 如果需求缺少关键信息，在 `<final_answer>` 内提出一个简洁的澄清问题；该轮不要输出 `<skill>`、`<file>` 或 `<summary>`。
   - 修改技能时同时参考对话历史和当前技能快照。
   {% if target_files %}
   - 本轮是定向文件修改。只能修改这些文件：{{ target_files | join(', ') }}。
-  - 每个目标文件必须且只能输出一个完整的 `<FILE path="...">...</FILE>` 块，随后输出 `<SUMMARY>`。
-  - 不要输出 `<SKILL>`，不得创建、重命名、删除或修改任何非目标文件。
+  - 每个目标文件必须且只能输出一个完整的 `<file path="...">...</file>` 块，随后输出 `<summary>`。
+  - 不要输出 `<skill>`，不得创建、重命名、删除或修改任何非目标文件。
   - 用户请求中的 Mention 标签只是文件选择器，不要把标签本身写入文件内容。
   {% else %}
   - 一旦生成或修改技能，必须输出最新的完整快照，不要只输出局部补丁。
-  - 输出顺序固定为 `<SKILL>`、零个或多个 `<FILE>`、`<SUMMARY>`。
+  - 输出顺序固定为 `<skill>`、零个或多个 `<file>`、`<summary>`。
   - 所有 XML 控制标签必须独占一行，控制块外不要包裹 Markdown 代码围栏。
   - 不要在澄清、思考或总结文本中引用或解释 XML 控制标签；它们只能作为真实结构独占一行输出。
-  - 输出结构时在 `<FINAL_ANSWER>` 后直接输出 `<SKILL>`，不要添加 Markdown 代码围栏或语言标识。
+  - 输出结构时在 `<final_answer>` 后直接输出 `<skill>`，不要添加 Markdown 代码围栏或语言标识。
   {% endif %}
 
   技能由多个文件组成，包括：核心描述文件（SKILL.md）、示例文档、脚本代码等。
@@ -55,14 +55,14 @@ system_prompt: |-
 
   **重要**：
 
-  - SKILL.md 内容必须用 `<SKILL>` 和 `</SKILL>` XML 分隔符包裹
-  - 除 SKILL.md 外的其他文件，用 `<FILE path="相对于技能根目录的路径">` 和 `</FILE>` 分隔符包裹
-  - 总结说明必须用 `<SUMMARY>` 和 `</SUMMARY>` XML 分隔符包裹
+  - SKILL.md 内容必须用 `<skill>` 和 `</skill>` XML 分隔符包裹
+  - 除 SKILL.md 外的其他文件，用 `<file path="相对于技能根目录的路径">` 和 `</file>` 分隔符包裹
+  - 总结说明必须用 `<summary>` 和 `</summary>` XML 分隔符包裹
 
   ### 单文件场景（仅需要 SKILL.md）
 
-  <FINAL_ANSWER>
-  <SKILL>
+  <final_answer>
+  <skill>
   ---
   name: your-skill-name
   description: 简短的第三人称描述，说明此 skill 的功能及何时应使用。包含触发词。
@@ -75,16 +75,16 @@ system_prompt: |-
   Agent 的分步指导。要简洁——假设 Agent 已具备相关知识。
   ## 示例（可选）
   具体的使用示例。
-  </SKILL>
-  <SUMMARY>
+  </skill>
+  <summary>
   这里是你对用户的友好说明，如技能已创建、功能亮点等
-  </SUMMARY>
-  </FINAL_ANSWER>
+  </summary>
+  </final_answer>
 
   ### 多文件场景（需要 SKILL.md + 其他文件）
 
-  <FINAL_ANSWER>
-  <SKILL>
+  <final_answer>
+  <skill>
   ---
   name: your-skill-name
   description: 简短的第三人称描述，说明此 skill 的功能及何时应使用。包含触发词。
@@ -101,19 +101,19 @@ system_prompt: |-
   ## 脚本（如必要）
   应该在指定条件下执行如下脚本，并输出结果。
   <use_script path="scripts/run.sh" />
-  </SKILL>
-  <FILE path="example.md">
+  </skill>
+  <file path="example.md">
   # 示例
   这里是使用示例的内容。
-  </FILE>
-  <FILE path="scripts/run.sh">
+  </file>
+  <file path="scripts/run.sh">
   #!/bin/bash
   # 脚本内容...
-  </FILE>
-  <SUMMARY>
+  </file>
+  <summary>
   这里是你对用户的友好说明，如技能已创建、功能亮点等
-  </SUMMARY>
-  </FINAL_ANSWER>
+  </summary>
+  </final_answer>
 
   ### 文件引用声明规则（重要）
 
@@ -242,8 +242,8 @@ user_prompt: |-
 
   **步骤 1**：判断是否需要多文件
 
-  - 如果技能仅需要 SKILL.md（描述、说明文字为主），只输出 `<SKILL>` 块
-  - 如果技能需要代码脚本、配置模板或独立示例，才使用 `<FILE>` 块创建额外文件
+  - 如果技能仅需要 SKILL.md（描述、说明文字为主），只输出 `<skill>` 块
+  - 如果技能需要代码脚本、配置模板或独立示例，才使用 `<file>` 块创建额外文件
 
   **步骤 2**：生成技能内容时，确保文件内容独立无重合
 

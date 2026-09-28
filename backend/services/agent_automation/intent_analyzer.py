@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from jinja2 import StrictUndefined, Template
 from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -17,7 +16,7 @@ from consts.const import (
     MODEL_CONFIG_MAPPING,
 )
 from database.model_management_db import get_model_by_model_id
-from nexent.core.prompts import load_prompt
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 
 from .intent_parser import has_automation_schedule_signal, parse_automation_intent
 from .models import ScheduleMode, ScheduleRuleType, ScheduleTrigger
@@ -283,7 +282,6 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
         from utils.config_utils import get_model_name_from_config
 
         language = detect_instruction_language(context.message)
-        prompt_template = load_prompt(language, "automation/agent")
         now = _analysis_time(context)
         values = {
             "message": context.message.strip(),
@@ -291,10 +289,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             "timezone": context.timezone,
             "min_interval_seconds": AGENT_AUTOMATION_MIN_INTERVAL_SECONDS,
         }
-        user_prompt = Template(
-            prompt_template["INTENT_ANALYSIS_USER_PROMPT"],
-            undefined=StrictUndefined,
-        ).render(**values).strip()
+        prompt = compose_auxiliary_prompt(language, "automation_intent", values)
         llm = OpenAIModel(
             observer=MessageObserver(),
             model_id=get_model_name_from_config(self._model_config),
@@ -312,9 +307,9 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
         response = llm([
             {
                 "role": MESSAGE_ROLE["SYSTEM"],
-                "content": prompt_template["INTENT_ANALYSIS_SYSTEM_PROMPT"],
+                "content": prompt.system,
             },
-            {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
+            {"role": MESSAGE_ROLE["USER"], "content": prompt.user.strip()},
         ])
         return getattr(response, "content", "") or ""
 

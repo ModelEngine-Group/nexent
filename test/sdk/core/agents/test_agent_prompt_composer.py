@@ -23,8 +23,12 @@ def _template(role: str = "managed") -> dict:
         stage["orchestration"] = "Coordinate available workers."
     return {
             "system_sections": {
+                "outline_identity": "## Identity and Goals",
+                "outline_execution": "## Execution Protocol",
+                "outline_constraints": "## Constraints and Environment",
                 "header": "### Header\nAgent", "code_norms": "### Code rules",
                 "execution_flow": "### Flow", "available_resources_header": "### Resources",
+                "final_answer_guidance": "### Final Answer Requirements\nFinish the task.",
                 "sandbox_workspace_guidance": "### Sandbox workspace\nUse /mnt/nexent/workdir/<run_id>/outputs.",
                 "planning_guidance": "### Planning\nCall create_plan.",
                 "self_verification_guidance": "### Self-verification\nUse Verification feedback.",
@@ -40,7 +44,6 @@ def _template(role: str = "managed") -> dict:
                 "footer": "### Examples\n{{few_shots}}",
                 "knowledge_guidance_scoped": "Use only scoped knowledge.",
                 "knowledge_guidance_unscoped": "Use available knowledge.",
-                "memory_guidance": "Use the provided memory.",
             },
             module: stage,
             "final_answer": {
@@ -235,7 +238,7 @@ def test_ut_sdk_dpr_003_two_context_snapshots_do_not_share_resources():
     first_items = first.compose_context_inputs(
         language="en", is_manager=True,
         tools={"weather": {"description": "forecast"}},
-        managed_agents={"worker": {"description": "helper"}},
+        worker_agents={"worker": {"description": "helper"}},
     )
     second_items = second.compose_context_inputs(
         language="en", is_manager=False,
@@ -243,11 +246,13 @@ def test_ut_sdk_dpr_003_two_context_snapshots_do_not_share_resources():
     )
 
     assert "tool:weather" in {item.id for item in first_items}
-    assert "managed_agent:worker" in {item.id for item in first_items}
+    assert "worker_agent:worker" in {item.id for item in first_items}
+    worker_item = next(item for item in first_items if item.id == "worker_agent:worker")
+    assert worker_item.metadata["render_group"] == "worker_agents"
     assert "tool:news" not in {item.id for item in first_items}
     assert "tool:news" in {item.id for item in second_items}
     assert "tool:weather" not in {item.id for item in second_items}
-    assert "managed_agent:worker" not in {item.id for item in second_items}
+    assert "worker_agent:worker" not in {item.id for item in second_items}
 
 
 def test_ut_sdk_dpr_001_nested_manager_call_uses_manager_role():
@@ -322,7 +327,7 @@ def test_ut_sdk_dpr_005_renders_runtime_specific_human_interaction_policy():
     native = composer.render_human_interaction(preserves_executor=True)
     durable = composer.render_human_interaction(preserves_executor=False)
 
-    assert native.instructions.startswith("You have a human-in-the-loop capability")
+    assert native.instructions.startswith("### Clarifying with the User")
     assert durable.instructions.endswith("Human approval never expands resource permissions.")
     assert native.questions_description.startswith("Include only 1-5 essential questions.")
     assert "ask_user" in native.instructions
@@ -384,8 +389,8 @@ def test_ut_sdk_dpr_006_localizes_tool_descriptions_and_schema(
     assert "single_choice" in rendered
 
 
-def test_ut_sdk_dpr_006_resources_are_nonempty_continuously_numbered_and_skills_not_duplicated():
-    """UT-SDK-DPR-006: resource groups are present once and numbered by actual presence."""
+def test_ut_sdk_dpr_006_resources_have_headings_and_skills_not_duplicated():
+    """UT-SDK-DPR-006: resource groups are present once with stable headings."""
     from nexent.core.agents.context.rendering import ContextItemRenderer
 
     composer = AgentPromptComposer(_bundle(language="en"))
@@ -406,9 +411,9 @@ def test_ut_sdk_dpr_006_resources_are_nonempty_continuously_numbered_and_skills_
     )
 
     assert rendered.count("Skill Usage") == 1
-    assert "1. Tools" in rendered
-    assert "2. Skills" in rendered
-    assert "3. Skills" not in rendered
+    assert "### Tools" in rendered
+    assert "### Skills" in rendered
+    assert "1. Tools" not in rendered
     assert 'read_skill_md(skill_name="skill-name", additional_files=[])' in rendered
     assert 'run_skill_script(skill_name="skill-name", script_path="scripts/example.py", params="", source="skill")' in rendered
 
