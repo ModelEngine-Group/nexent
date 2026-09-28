@@ -549,7 +549,7 @@ Before deployment, make sure that:
 
 1. Nexent has been deployed with Docker or Kubernetes;
 2. The `nexent-config` service is running and database initialization is complete;
-3. The deployment package contains `deploy/docker/assets/official-agents`;
+3. The deployment package contains `deploy/official-agents`;
 4. Docker deployments use Git Bash or WSL to run the script; Kubernetes deployments use a terminal with access to the target cluster.
 
 No additional environment variables are required, and users do not need to run Git commands, `docker cp`, or the synchronization API manually.
@@ -562,7 +562,7 @@ Run the following command from the Nexent repository root:
 bash deploy/deploy-official-agents.sh
 ```
 
-The script scans the actual first-level directories under `deploy/docker/assets/official-agents` and presents them as the available profiles. You can enter one profile, multiple profiles such as `2,3`, or `all` to install every profile. The script validates the directories and `agent.json` files. Invalid selections stop before any copy or synchronization operation.
+The script scans the actual first-level directories under `deploy/official-agents` and presents them as the available profiles. You can enter one profile, multiple profiles such as `2,3`, or `all` to install every profile. The script validates the directories and `agent.json` files. Invalid selections stop before any copy or synchronization operation.
 
 For Docker deployments, the selected profiles are copied to `/mnt/nexent/official-agents/` in the `nexent-config` container and then synchronized to the official agent repository.
 

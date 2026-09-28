@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-SOURCE_ROOT="$ROOT_DIR/deploy/docker/assets/official-agents"
+SOURCE_ROOT="$ROOT_DIR/deploy/official-agents"
 TARGET_CONTAINER="nexent-config"
 TARGET_CONTAINER_DIR="/mnt/nexent/official-agents"
 NAMESPACE="nexent"
@@ -19,7 +19,7 @@ usage() {
 Usage: deploy-official-agents.sh [options]
 
 Official Agent bundles are read from:
-  deploy/docker/assets/official-agents
+  deploy/official-agents
 
 Options:
   --kubernetes               Sync through kubectl instead of Docker

@@ -544,7 +544,7 @@ Nexent 主平台安装完成后，可以从部署包中的官方智能体资源�
 
 1. Nexent 已完成 Docker 或 Kubernetes 部署；
 2. `nexent-config` 服务已启动并完成数据库初始化；
-3. 部署包中存在 `deploy/docker/assets/official-agents` 目录；
+3. 部署包中存在 `deploy/official-agents` 目录；
 4. Docker 环境使用 Git Bash 或 WSL 执行脚本；Kubernetes 环境使用能够访问目标集群的终端执行脚本。
 
 官方智能体资源不需要额外配置环境变量，也不需要用户手工执行 Git、`docker cp` 或同步接口。
@@ -557,7 +557,7 @@ Nexent 主平台安装完成后，可以从部署包中的官方智能体资源�
 bash deploy/deploy-official-agents.sh
 ```
 
-脚本会扫描 `deploy/docker/assets/official-agents` 下实际存在的一级目录，并将这些目录作为可选 Profile 显示。可以输入单个 Profile、多个 Profile（例如 `2,3`），或输入 `all` 安装全部 Profile。脚本会校验目录和 `agent.json`，选择无效时不会执行复制或同步。
+脚本会扫描 `deploy/official-agents` 下实际存在的一级目录，并将这些目录作为可选 Profile 显示。可以输入单个 Profile、多个 Profile（例如 `2,3`），或输入 `all` 安装全部 Profile。脚本会校验目录和 `agent.json`，选择无效时不会执行复制或同步。
 
 Docker 部署时，脚本会将选中的 Profile 复制到 `nexent-config` 容器的 `/mnt/nexent/official-agents/`，然后同步到官方智能体仓库。
 
