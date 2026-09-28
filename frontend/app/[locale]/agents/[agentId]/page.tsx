@@ -37,6 +37,7 @@ import {
   type Nl2AgentConfigFocusTarget,
 } from "@/contexts/nl2AgentFlow";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
@@ -122,6 +123,10 @@ function AgentSetupContent() {
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const resetAgentStore = useAgentStore((state) => state.reset);
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId ?? null;
+  const previousTenantIdRef = useRef<string | null | undefined>(undefined);
   const requestedAgentId = Number(agentId);
   const isRequestedAgentLoading =
     Number.isInteger(requestedAgentId) &&
@@ -164,6 +169,22 @@ function AgentSetupContent() {
   useEffect(() => {
     resetFlow(currentAgentId);
   }, [currentAgentId, resetFlow]);
+
+  useEffect(() => {
+    if (previousTenantIdRef.current === undefined) {
+      previousTenantIdRef.current = tenantId;
+      return;
+    }
+
+    if (previousTenantIdRef.current === tenantId) return;
+
+    // Discard the previous tenant's draft before an agent id can be reused.
+    previousTenantIdRef.current = tenantId;
+    resetAgentStore();
+    snapshotRefreshQueue.current = Promise.resolve(true);
+    queryClient.removeQueries({ queryKey: ["agents"] });
+    queryClient.removeQueries({ queryKey: ["tools"] });
+  }, [queryClient, resetAgentStore, tenantId]);
 
   const enqueueSnapshotRefresh = useCallback(
     (agentId: number, focusTarget: Nl2AgentConfigFocusTarget | null = null) => {

@@ -1235,24 +1235,28 @@ export const conversationService = {
         try {
           const errorData = await response.json();
           const detail = errorData.detail;
-          if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-            code =
-              typeof detail.code === "string" ? detail.code : response.status;
-            errorMessage =
-              typeof detail.message === "string"
-                ? detail.message
-                : errorMessage;
-            details =
-              typeof detail.current_version === "number"
-                ? { current_version: detail.current_version }
-                : undefined;
-          } else {
-            errorMessage =
-              typeof detail === "string"
-                ? detail
-                : typeof errorData.message === "string"
-                  ? errorData.message
-                  : errorMessage;
+          const payload =
+            detail && typeof detail === "object" && !Array.isArray(detail)
+              ? detail
+              : errorData;
+          const payloadCode = payload?.code ?? errorData?.code;
+          if (
+            typeof payloadCode === "string" ||
+            typeof payloadCode === "number"
+          ) {
+            code = payloadCode;
+          }
+          const payloadMessage = payload?.message ?? errorData?.message;
+          if (typeof payloadMessage === "string") {
+            errorMessage = payloadMessage;
+          } else if (typeof detail === "string") {
+            errorMessage = detail;
+          }
+
+          if (payload?.details && typeof payload.details === "object") {
+            details = payload.details as Record<string, unknown>;
+          } else if (typeof payload?.current_version === "number") {
+            details = { current_version: payload.current_version };
           }
         } catch {
           // Preserve the HTTP status when the error response is not JSON.

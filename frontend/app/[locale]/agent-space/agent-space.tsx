@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MenuProps } from "antd";
 import { App, Button, Dropdown, Empty, Grid, Input, Modal, Spin } from "antd";
-import { Copy, Download, MoreHorizontal, PackageX, Search } from "lucide-react";
+import {
+  Copy,
+  Download,
+  MoreHorizontal,
+  PackageX,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -193,7 +200,12 @@ export function AgentSpace({ active }: { active: boolean }) {
     const toolCount = listing.tool_count ?? 0;
     const downloads = listing.downloads ?? 0;
     const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
-    const menuItems: MenuProps["items"] = showAdminMenu
+    const isOfficialListing = listing.is_official === true;
+    // Official templates are managed from the super-admin resource page.
+    // The ordinary repository status menu must not expose take-down actions
+    // for official listings to tenant administrators.
+    const canManageListing = showAdminMenu && !listing.is_official;
+    const menuItems: MenuProps["items"] = canManageListing
       ? [
           {
             key: "takeDown",
@@ -227,16 +239,26 @@ export function AgentSpace({ active }: { active: boolean }) {
           listing.description?.trim() || t("agentRepository.card.noDescription")
         }
         badge={
-          listing.version_label ? (
-            <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-              <span
-                className="size-1.5 shrink-0 rounded-full bg-primary"
-                aria-hidden
-              />
-              {t("agentRepository.mine.currentVersion", {
-                version: listing.version_label,
-              })}
-            </span>
+          isOfficialListing || listing.version_label ? (
+            <>
+              {isOfficialListing ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                  <ShieldCheck className="size-3" aria-hidden />
+                  {t("agentRepository.card.official")}
+                </span>
+              ) : null}
+              {listing.version_label ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  <span
+                    className="size-1.5 shrink-0 rounded-full bg-primary"
+                    aria-hidden
+                  />
+                  {t("agentRepository.mine.currentVersion", {
+                    version: listing.version_label,
+                  })}
+                </span>
+              ) : null}
+            </>
           ) : undefined
         }
         tags={
@@ -271,7 +293,7 @@ export function AgentSpace({ active }: { active: boolean }) {
               <Download className="size-3.5" aria-hidden />
               {downloads.toLocaleString()}
             </span>
-            {showAdminMenu ? (
+            {canManageListing ? (
               <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
                 <Button
                   type="text"
