@@ -210,12 +210,52 @@ export default function AgentPrompt() {
       setEditingOverrideValue(null);
       return;
     }
-    // Only override values are editable in this dialog; model-level defaults
-    // show up as placeholders via inheritedDefaults. Merging model defaults
-    // into the editing state made "deleted" overrides reappear (the model
-    // value was being re-merged as if the user had set it in the override).
     const overrideEntry = modelParamsOverride[String(configuringModel.id)] ?? {};
-    const base = advancedSettingsValueFromRecord(overrideEntry as any, inferenceSpecs, (configuringModel as any).type ?? "llm");
+    const modelDefaultsRecord = {
+      temperature: configuringModel.temperature,
+      top_p: configuringModel.topP,
+      extra_params: configuringModel.extraParams,
+      reasoning_capability: configuringModel.reasoningCapability,
+    };
+    const modelType = configuringModel.type ?? "llm";
+    const hasOverride = Object.keys(overrideEntry).length > 0;
+    const base = advancedSettingsValueFromRecord(
+      (hasOverride ? overrideEntry : modelDefaultsRecord) as any,
+      inferenceSpecs,
+      modelType,
+      configuringModel.reasoningCapability
+    );
+
+    // Reasoning is an agent-owned snapshot. For an existing partial override,
+    // fill only missing reasoning fields from the model so older agents and
+    // newly selected models start with the same value as the model page.
+    if (hasOverride) {
+      const modelReasoning = advancedSettingsValueFromRecord(
+        modelDefaultsRecord as any,
+        inferenceSpecs,
+        modelType,
+        configuringModel.reasoningCapability
+      );
+      if (
+        base.enable_thinking === undefined &&
+        modelReasoning.enable_thinking !== undefined
+      ) {
+        base.enable_thinking = modelReasoning.enable_thinking;
+      }
+      if (
+        base.reasoning_effort === undefined &&
+        modelReasoning.reasoning_effort !== undefined
+      ) {
+        base.reasoning_effort = modelReasoning.reasoning_effort;
+      }
+      if (
+        base.reasoning_budget_tokens === undefined &&
+        modelReasoning.reasoning_budget_tokens !== undefined
+      ) {
+        base.reasoning_budget_tokens = modelReasoning.reasoning_budget_tokens;
+      }
+    }
+
     // Custom params are the exception: model-level customs render as plain
     // editable rows (merged display). Deletion persists as a null marker in
     // the override entry, so deleted rows do NOT reappear on reopen.
@@ -224,11 +264,16 @@ export default function AgentPrompt() {
       (configuringModel as any).extraParams?.__custom__
     );
     setEditingOverrideValue(base);
+    // Do not reinitialize while the user edits the override entry; the model
+    // and field-spec changes are the transitions that require rehydration.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configuringModelId]);
+  }, [configuringModel, configuringModelId, inferenceSpecs]);
 
   const handleModelParamsOverrideChange = (modelId: number, next: ModelAdvancedSettingsValue) => {
-    const entry = buildModelOverrideEntry(next);
+    const entry = buildModelOverrideEntry(
+      next,
+      availableLlmModels.find((model) => model.id === modelId)?.reasoningCapability
+    );
     const updated: ModelOverrideMap = { ...modelParamsOverride };
     if (Object.keys(entry).length === 0) {
       delete updated[String(modelId)];
@@ -538,15 +583,27 @@ export default function AgentPrompt() {
                 temperature: (configuringModel as any).temperature,
                 top_p: (configuringModel as any).topP,
                 extra_params: (configuringModel as any).extraParams,
+                reasoning_capability: (configuringModel as any).reasoningCapability,
               },
               inferenceSpecs,
-              (configuringModel as any).type ?? "llm"
+              (configuringModel as any).type ?? "llm",
+              (configuringModel as any).reasoningCapability
             );
             const diffValue: ModelAdvancedSettingsValue = {};
             for (const [key, val] of Object.entries(editingOverrideValue)) {
               // Custom params are diffed per-key below (deleting an
               // inherited row must persist a removal, not drop the key).
               if (key === "__custom__") continue;
+              // Reasoning is an agent-owned snapshot under Scheme B. It must
+              // not be compared with the current model-level setting.
+              if (
+                key === "enable_thinking" ||
+                key === "reasoning_effort" ||
+                key === "reasoning_budget_tokens"
+              ) {
+                diffValue[key] = val;
+                continue;
+              }
               const modelVal = modelDefaults[key];
               if (JSON.stringify(modelVal) !== JSON.stringify(val)) {
                 diffValue[key] = val;
@@ -589,10 +646,19 @@ export default function AgentPrompt() {
                   (specs as any[]).filter((s) => s.key !== "tokenizer_family"),
                 ])
               )}
-              value={editingOverrideValue ?? advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm")}
+              value={
+                editingOverrideValue ??
+                advancedSettingsValueFromRecord(
+                  {},
+                  inferenceSpecs,
+                  (configuringModel as any).type ?? "llm",
+                  (configuringModel as any).reasoningCapability
+                )
+              }
               onChange={(next) => setEditingOverrideValue(next)}
               mode="override"
               disabled={!canManage && !isSpeedMode}
+              reasoningCapability={(configuringModel as any).reasoningCapability}
               // Show the model-level defaults as placeholders so "empty =
               // inherit" is visible (the override form starts blank).
               inheritedDefaults={{

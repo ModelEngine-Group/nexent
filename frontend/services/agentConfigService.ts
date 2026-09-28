@@ -1,8 +1,8 @@
 import {
   API_ENDPOINTS,
+  ApiError,
   fetchWithErrorHandling,
   toApiError,
-  type ApiError,
 } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
@@ -12,7 +12,11 @@ import log from "@/lib/logger";
 import yaml from "js-yaml";
 import type { SkillFileNode } from "@/types/skill";
 
-/** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
+/**
+ * Normalize tags field into a string array.
+ * Ant Design mode="tags" sends a string when only one tag is entered, and
+ * malformed/persisted skill data may also carry a non-array tags value.
+ */
 function normalizeTags(tags: unknown): string[] {
   if (Array.isArray(tags)) return tags;
   if (typeof tags === "string" && tags.trim() !== "") return [tags.trim()];
@@ -182,7 +186,9 @@ export const fetchAgentList = async (tenantId?: string) => {
       current_version_no: agent.current_version_no,
       is_a2a_server: agent.is_a2a_server || false,
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
+      tags: normalizeTags(agent.tags),
     }));
 
     return {
@@ -238,6 +244,7 @@ export const fetchPublishedAgentList = async () => {
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
       icon_url: agent.icon_url,
     }));
 
@@ -458,28 +465,30 @@ export interface UpdateAgentInfoPayload {
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.update, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.agent.update, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
     });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
     return {
       success: true,
       data: data,
       message: "Agent updated successfully",
+      error: undefined,
     };
   } catch (error) {
     log.error("Failed to update Agent:", error);
+    const apiError = toApiError(
+      error,
+      "Failed to update Agent, please try again later"
+    );
     return {
       success: false,
       data: null,
-      message: "Failed to update Agent, please try again later",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -683,17 +692,29 @@ export const importAgent = async (
       const errorData = await response.json().catch(() => ({}));
       const errMsg = errorData?.message ?? errorData?.detail;
       if (typeof errMsg === "object" && errMsg !== null) {
+        const apiError = new ApiError(
+          errorData?.code ?? response.status,
+          typeof errorData?.message === "string"
+            ? errorData.message
+            : errMsg?.type === "skill_duplicate"
+              ? "Skill name conflict detected"
+              : "Failed to import Agent, please try again later",
+          errorData?.details
+        );
         return {
           success: false,
           data: { detail: errMsg },
-          message:
-            errMsg?.type === "skill_duplicate"
-              ? "Skill name conflict detected"
-              : (errorData?.message ??
-                "Failed to import Agent, please try again later"),
+          message: apiError.message,
+          error: apiError,
         };
       }
-      const error = new Error(`Request failed: ${response.status}`);
+      const error = new ApiError(
+        errorData?.code ?? response.status,
+        typeof errMsg === "string"
+          ? errMsg
+          : `Request failed: ${response.status}`,
+        errorData?.details
+      );
       (error as any).detail = errMsg;
       throw error;
     }
@@ -703,13 +724,19 @@ export const importAgent = async (
       success: true,
       data: data,
       message: "Agent imported successfully",
+      error: undefined,
     };
   } catch (error) {
     log.error("Failed to import Agent:", error);
+    const apiError = toApiError(
+      error,
+      "Failed to import Agent, please try again later"
+    );
     return {
       success: false,
       data: (error as any).detail ? { detail: (error as any).detail } : null,
-      message: "Failed to import Agent, please try again later",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -1184,7 +1211,7 @@ export const fetchSkills = async (tenantId?: string | null) => {
       name: skill.name,
       description: skill.description || "",
       source: skill.source || "custom",
-      tags: skill.tags || [],
+      tags: normalizeTags(skill.tags),
       content: skill.content || "",
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,

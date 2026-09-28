@@ -18,6 +18,22 @@ from types import ModuleType, SimpleNamespace
 import pytest
 from fastapi.responses import StreamingResponse
 
+
+@pytest.fixture(autouse=True)
+def isolate_list_tag_projection(monkeypatch):
+    """Keep list tests independent from tag persistence, which has its own tests."""
+    module = types.ModuleType("services.resource_tag_projection")
+    def project_tags(resources, **kwargs):
+        assert kwargs["resource_type"] == "knowledge_base"
+        assert kwargs["id_field"] == "index_name"
+        return [{**resource, "tags": ["Catalog tag"]} for resource in resources]
+
+    module.project_authorized_resource_tags = MagicMock(
+        side_effect=project_tags
+    )
+    monkeypatch.setitem(sys.modules, "services.resource_tag_projection", module)
+    return module.project_authorized_resource_tags
+
 # Environment variables are now configured in conftest.py
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -1206,6 +1222,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["indices"]), 2)
         self.assertEqual(result["count"], 2)
         self.assertEqual(len(result["indices_info"]), 2)
+        projection = sys.modules["services.resource_tag_projection"].project_authorized_resource_tags
+        projection.assert_called_once()
+        assert [row["index_name"] for row in projection.call_args.args[0]] == ["index1", "index2"]
+        assert projection.call_args.kwargs["resource_type"] == "knowledge_base"
+        assert all(row["tags"] == ["Catalog tag"] for row in result["indices_info"])
 
         # Verify group_ids are included and correctly parsed
         self.assertEqual(result["indices_info"][0]["group_ids"], [1, 2])

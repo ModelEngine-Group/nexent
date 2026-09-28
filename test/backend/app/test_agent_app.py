@@ -4,6 +4,7 @@ Unit tests for backend.apps.agent_app module.
 Tests all agent management API endpoints including runtime and configuration operations.
 """
 import atexit
+from http import HTTPStatus
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
 import importlib.machinery
@@ -25,8 +26,10 @@ from consts.exceptions import (
     ForbiddenError,
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
+    TenantResourceLimitError,
     UnauthorizedError,
     ValidationError,
+    tenant_resource_limit_error_payload,
 )
 from consts.model import NL2AgentRunRequest
 from services.agent_draft_permission_service import AgentDraftEditError
@@ -81,7 +84,7 @@ for p in patches:
 # Import target endpoints with all external dependencies patched
 
 # Mock external dependencies before importing the modules that use them
-# Stub nexent.core.agents.agent_model.ToolConfig to satisfy type imports in consts.model
+# Stub agent model types used by consts.model and Workbench knowledge services.
 agent_model_stub = types.ModuleType("agent_model")
 
 
@@ -89,7 +92,12 @@ class ToolConfig:  # minimal stub for type reference
     pass
 
 
+class AgentConfig:  # minimal stub for type reference
+    pass
+
+
 agent_model_stub.ToolConfig = ToolConfig
+agent_model_stub.AgentConfig = AgentConfig
 
 # Define a decorator that simply returns the original function unchanged
 
@@ -145,7 +153,9 @@ sys.modules['services.prompt_service'] = MagicMock()
 from apps.agent_app import (
     agent_config_router,
     agent_runtime_router,
+    get_workbench_bootstrap_api,
     nl2agent_run_api,
+    require_agent_create_permission,
 )
 from apps.app_factory import register_exception_handlers
 
@@ -154,6 +164,7 @@ from apps.app_factory import register_exception_handlers
 # Create FastAPI apps for runtime and config routers
 runtime_app = FastAPI()
 runtime_app.include_router(agent_runtime_router)
+runtime_app.dependency_overrides[require_agent_create_permission] = lambda: None
 runtime_client = TestClient(runtime_app)
 
 config_app = FastAPI()
@@ -308,6 +319,17 @@ def test_agent_run_preserves_runtime_metadata_app_exceptions(
 
 
 @pytest.mark.asyncio
+async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
+    mocker.patch("apps.agent_app.ENABLE_AGENT_WORKBENCH", False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_workbench_bootstrap_api(authorization="Bearer test-token")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == {"code": "WORKBENCH_DISABLED"}
+
+
+@pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header
 ):
@@ -348,9 +370,58 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
     )
-    assert not hasattr(request, "conversation_id")
+    assert request.conversation_id is None
+    assert request.persist_history is False
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
+    mocker, mock_auth_header
+):
+    mocker.patch("apps.agent_app.ENABLE_AGENT_WORKBENCH", True)
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("user-a", "tenant-a", "en"),
+    )
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+
+    async def mock_stream():
+        yield 'data: {"type":"final_answer","content":"done"}\n\n'
+
+    mocker.patch(
+        "apps.agent_app.create_nl2agent_stream",
+        new_callable=AsyncMock,
+        return_value=mock_stream(),
+    )
+    prepare = mocker.patch(
+        "apps.agent_app.prepare_creation_history", return_value=(42, 1)
+    )
+    persist = mocker.patch(
+        "apps.agent_app.persist_creation_stream",
+        side_effect=lambda stream, **kwargs: stream,
+    )
+    response = await nl2agent_run_api(
+        nl2agent_request=NL2AgentRunRequest(
+            query="Build a weather agent",
+            agent_id=17,
+            persist_history=True,
+            workbench_config={
+                "schema_version": 3, "mode": "agent_create",
+                "generation_config": {"deep_thinking": False},
+                "agent_mounts": [], "skill_mounts": [],
+            },
+        ),
+        http_request=MagicMock(),
+        authorization=mock_auth_header["Authorization"],
+    )
+    assert response.headers["conversation_id"] == "42"
+    assert prepare.call_args.kwargs["agent_id"] == 17
+    assert persist.call_args.kwargs["assistant_index"] == 1
 
 
 @pytest.mark.asyncio
@@ -530,7 +601,8 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
         create_stream.call_args.kwargs["authorization"]
         == mock_auth_header["Authorization"]
     )
-    assert not hasattr(request, "conversation_id")
+    assert request.conversation_id is None
+    assert request.persist_history is False
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
 
@@ -907,6 +979,33 @@ def test_search_agent_info_api_exception(mocker, mock_auth_header):
     assert "Agent search info error" in response.json()["detail"]
 
 
+def test_search_agent_info_api_maps_system_agent_forbidden_without_disclosure(
+    mocker,
+    mock_auth_header,
+):
+    """UT-BE-SAL-010: ordinary detail returns a non-disclosing 403 response."""
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("user_id", "auth_tenant_id"),
+    )
+    mock_get_agent_info = mocker.patch(
+        "apps.agent_app.get_agent_info_impl",
+        new_callable=AsyncMock,
+    )
+    mock_get_agent_info.side_effect = ForbiddenError("Agent is not accessible")
+
+    response = config_client.post(
+        "/agent/search_info",
+        json={"agent_id": 7},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Agent is not accessible"}
+    assert "workbench_main" not in response.text
+    assert "auth_tenant_id" not in response.text
+
+
 def test_search_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test search_agent_info_api exception handling with explicit tenant_id query parameter and default version_no=0."""
     # Setup mocks using pytest-mock
@@ -1108,6 +1207,31 @@ def test_update_agent_info_api_exception(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert "Agent update error" in response.json()["detail"]
+
+
+def test_update_agent_info_api_returns_agent_quota_error(mocker, mock_auth_header):
+    """Agent quota failures must preserve the standard 429 error contract."""
+    limit_error = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant",
+        resource="agents",
+        scope="tenant",
+        limit=1000,
+        current_count=1000,
+    )
+    mock_update_agent = mocker.patch(
+        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock,
+        side_effect=limit_error,
+    )
+
+    response = config_client.post(
+        "/agent/update",
+        json={"display_name": "New Agent"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+    assert response.json() == tenant_resource_limit_error_payload(limit_error)
+    mock_update_agent.assert_called_once()
 
 
 # delete_agent_api Tests
@@ -1377,6 +1501,50 @@ def test_import_agent_api_success_without_skills(mocker, mock_auth_header):
         "agent_id": 456,
         "agent_id_mapping": {"123": 456},
     }
+
+
+def test_import_agent_api_returns_agent_quota_error(mocker, mock_auth_header):
+    """Agent import quota failures must preserve the standard 429 error contract."""
+    limit_error = TenantResourceLimitError(
+        "Tenant agent limit reached: maximum 1000 agents per tenant",
+        resource="agents",
+        scope="tenant",
+        limit=1000,
+        current_count=1000,
+    )
+    mock_import_agent = mocker.patch(
+        "apps.agent_app.import_agent_impl",
+        new_callable=AsyncMock,
+        side_effect=limit_error,
+    )
+
+    response = config_client.post(
+        "/agent/import",
+        json={
+            "agent_info": {
+                "agent_id": 123,
+                "agent_info": {
+                    "test_agent": {
+                        "agent_id": 123,
+                        "name": "ImportedAgent",
+                        "description": "Test description",
+                        "business_description": "Business desc",
+                        "max_steps": 10,
+                        "provide_run_summary": True,
+                        "enabled": True,
+                        "tools": [],
+                        "managed_agents": [],
+                    }
+                },
+                "mcp_info": [],
+            }
+        },
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+    assert response.json() == tenant_resource_limit_error_payload(limit_error)
+    mock_import_agent.assert_called_once()
 
 
 def test_import_agent_api_success_with_skills(mocker, mock_auth_header):

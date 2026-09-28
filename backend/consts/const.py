@@ -217,6 +217,9 @@ MAX_USERS_PER_TENANT = _positive_int_env("MAX_USERS_PER_TENANT", 10_000)
 MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
 MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
 MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
+MAX_CONVERSATION_TURNS = _positive_int_env("MAX_CONVERSATION_TURNS", 100)
+MAX_CONVERSATIONS_PER_USER = _positive_int_env("MAX_CONVERSATIONS_PER_USER", 1_000)
+MAX_AGENTS_PER_TENANT = _positive_int_env("MAX_AGENTS_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -262,6 +265,7 @@ IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
+ENABLE_AGENT_WORKBENCH = os.getenv("ENABLE_AGENT_WORKBENCH", "false").lower() in ("true", "1", "yes", "on")
 AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
 AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
 AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
@@ -859,6 +863,12 @@ MODEL_CATALOG_JSON_PATH = os.getenv(
     os.path.join(os.path.dirname(__file__), "..", "configs", "model_catalog.json")
 )
 """Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
+
+MODELS_DEV_CATALOG_JSON_PATH = os.getenv(
+    "MODELS_DEV_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "models_dev_catalog.json")
+)
+"""models.dev capability catalog downloaded during the backend image build."""
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

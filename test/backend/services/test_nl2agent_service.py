@@ -97,6 +97,7 @@ def _basic_draft_fields(**overrides):
 
 
 def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
+    """UT-BE-NCR-013: the first valid interactive card stops generation."""
     stop_event = Event()
     observer = _Nl2AgentBoundaryObserver(lang="en", stop_event=stop_event)
 
@@ -233,6 +234,66 @@ def test_update_agent_draft_initializes_generated_name_once(mocker):
         tenant_id="tenant-a",
         fields={"name": "research_assistant"},
     )
+
+
+def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[{
+            "agent_id": 22, "tenant_id": "tenant-a", "version_no": 0,
+            "delete_flag": "N", "created_by": "user-a", "name": None,
+            "display_name": "Workbench Draft abc123-abcdef", "description": "",
+        }],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=[{"agent_id": 22, "name": None}],
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields", return_value=1,
+    )
+
+    result = save_agent_draft_fields_impl(
+        22,
+        AgentDraftFields(name="customer_service_assistant", display_name="智能客服"),
+        "tenant-a", "user-a",
+    )
+
+    assert result["updated_fields"] == ["name", "display_name"]
+    update_fields.assert_called_once_with(
+        agent_id=22, tenant_id="tenant-a",
+        fields={"name": "customer_service_assistant", "display_name": "智能客服"},
+    )
+
+
+def test_nl2agent_cannot_rename_existing_display_name(mocker):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[{
+            "agent_id": 22, "tenant_id": "tenant-a", "version_no": 0,
+            "delete_flag": "N", "created_by": "user-a", "name": None,
+            "display_name": "Research Helper", "description": "",
+        }],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    update_fields = mocker.patch("services.nl2agent_service.update_agent_draft_fields")
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            22,
+            AgentDraftFields(name="research_assistant", display_name="New Name"),
+            "tenant-a", "user-a",
+        )
+
+    assert exc_info.value.code == "agent_display_name_immutable"
+    update_fields.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -1595,6 +1656,7 @@ async def test_validate_agent_generation_complete_requires_generated_name(mocker
 
 @pytest.mark.asyncio
 async def test_build_run_info_is_ephemeral(mocker):
+    """UT-BE-NCR-014 and UT-BE-NCR-015: verified headers and attachments."""
     default_model = {
         "model_factory": "openai",
         "model_name": "gpt-4o",
@@ -1912,6 +1974,7 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
 
 @pytest.mark.asyncio
 async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
+    """UT-BE-NCR-017: preserve Agent event order and stop semantics."""
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
     build_run_info = mocker.patch(
@@ -2114,6 +2177,7 @@ async def test_create_stream_ends_without_synthesizing_nl2a_fallback(mocker):
 
 @pytest.mark.asyncio
 async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
+    """UT-BE-NCR-018: runtime failures are redacted and terminate once."""
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
     mocker.patch(
@@ -2154,6 +2218,7 @@ async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
 
 @pytest.mark.asyncio
 async def test_create_stream_propagates_cancellation_and_stops_run(mocker):
+    """UT-BE-NCR-019: cancellation stops the specialized Agent run."""
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
     mocker.patch(

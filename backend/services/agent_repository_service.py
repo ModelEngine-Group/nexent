@@ -1248,7 +1248,8 @@ async def import_agent_from_repository_impl(
     tenant_id: str,
     authorization: str,
     skill_resolutions: Optional[List[SkillResolution]] = None,
-) -> Dict[int, int]:
+    return_root_id: bool = False,
+) -> Dict[int, int] | Dict[str, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     record = get_agent_repository_by_id(
         agent_repository_id,
@@ -1284,4 +1285,6 @@ async def import_agent_from_repository_impl(
             "(agent_repository_id=%s)",
             agent_repository_id,
         )
+    if return_root_id:
+        return {"agent_id": result[snapshot.agent_id]}
     return result

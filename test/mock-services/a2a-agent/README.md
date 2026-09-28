@@ -4,9 +4,25 @@ This directory contains a standalone A2A test double. It does not contain formal
 
 ## One-command deployment
 
-From the repository root, run `python3 test/mock-services/deploy.py up a2a`.
-Use `python` on Windows. For an existing stack under Compose project `compose`,
-add `--project compose` to avoid starting a second stack on occupied ports.
+Run from the repository root. On Windows (Git Bash or PowerShell), for the
+existing project named `compose`:
+
+```bash
+python test/mock-services/deploy.py list
+python test/mock-services/deploy.py up a2a --project compose
+python test/mock-services/deploy.py status a2a --project compose
+python test/mock-services/deploy.py logs a2a --project compose
+python test/mock-services/deploy.py stop a2a --project compose
+```
+
+Run only the operation needed: `stop` intentionally stops the Mock.
+For a fresh installation, omit `--project compose`. On Ubuntu/Linux use
+`python3` instead of `python`. Inspect `docker compose ls -a` first and use the
+same project for every operation; project names are not OS-specific.
+
+If Windows reports `Python was not found ... Microsoft Store`, `python3`
+points to a Windows placeholder and the script has not started. Verify
+`python --version` (or `py -3 --version`) and use that interpreter instead.
 See [the deployment guide](../README.md) for standalone mode, status, logs,
 stop commands, and registration of additional Mock services.
 
@@ -21,7 +37,12 @@ stop commands, and registration of additional Mock services.
 The `both` profile accepts either `X-HW-ID + X-HW-APPKEY` or `X-HW-ID + Authorization`. It does not require all three credentials.
 Protocol invocations must send the `A2A-Version: 1.0` header required by the official SDK.
 
-## Local container startup
+## Manual container startup (alternative)
+
+Prefer the unified deployment entry point above. The manual commands below
+use the legacy default project `compose`, start the base stack and proxy
+separately, and do not attach the product-network overlay. Do not mix them
+with a running `nexent-mock-a2a` project on the same ports.
 
 From the repository root:
 

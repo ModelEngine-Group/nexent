@@ -58,6 +58,8 @@ class SubAgentToolWrapper:
         "_observer",
         "_agent_id",
         "_agent_name",
+        "_invocation_name",
+        "_runtime_identity",
         "_task_extractor",
     })
 
@@ -67,7 +69,9 @@ class SubAgentToolWrapper:
         observer: MessageObserver,
         agent_id: Any = None,
         agent_name: str | None = None,
+        invocation_name: str | None = None,
         task_extractor: Callable[[Iterable[Any], dict], str | None] | None = None,
+        runtime_identity: dict | None = None,
     ):
         # Set attributes through ``object.__setattr__`` so the new
         # ``__setattr__`` below (which forwards everything to the inner
@@ -75,12 +79,21 @@ class SubAgentToolWrapper:
         object.__setattr__(self, "_inner", inner_agent)
         object.__setattr__(self, "_observer", observer)
         object.__setattr__(self, "_agent_id", agent_id)
+        object.__setattr__(self, "_runtime_identity", {
+            key: value for key, value in (runtime_identity or {}).items()
+            if key in {"runtime_ref", "version_no", "display_name", "origin"} and value is not None
+        })
         object.__setattr__(
             self,
             "_agent_name",
             agent_name
             if agent_name is not None
             else getattr(inner_agent, "name", None) or "subagent",
+        )
+        object.__setattr__(
+            self,
+            "_invocation_name",
+            invocation_name,
         )
         # Optional callable that extracts the task string from the parent's
         # call args. Default: read the first positional arg or the ``task``
@@ -145,11 +158,15 @@ class SubAgentToolWrapper:
         """Keep tracing and observer boundaries identical for both entry points."""
         task_text = self._task_extractor(args, kwargs)
         invocation_id = uuid.uuid4().hex
+        start_kwargs = dict(self._runtime_identity)
+        if self._invocation_name is not None:
+            start_kwargs["invocation_name"] = self._invocation_name
         self._observer.add_subagent_start(
             agent_id=self._agent_id,
             agent_name=self._agent_name,
             task=task_text,
             invocation_id=invocation_id,
+            **start_kwargs,
         )
         try:
             manager = get_monitoring_manager()
@@ -170,10 +187,14 @@ class SubAgentToolWrapper:
                 manager.set_openinference_output(result)
                 return result
         finally:
+            end_kwargs = dict(self._runtime_identity)
+            if self._invocation_name is not None:
+                end_kwargs["invocation_name"] = self._invocation_name
             self._observer.add_subagent_end(
                 agent_id=self._agent_id,
                 agent_name=self._agent_name,
                 invocation_id=invocation_id,
+                **end_kwargs,
             )
 
 

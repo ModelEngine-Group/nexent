@@ -51,12 +51,14 @@ def test_ut_sdk_trace_019_direct_sdk_execution(spans, mocker, display_name, expe
     assert run.attributes["agent.name"] == "knowledge_agent"
 
 
-def test_ut_sdk_trace_019_factory_passes_display_name(mocker):
+@pytest.mark.parametrize("invocation_name", [None, "agent_12_v4"])
+def test_ut_sdk_trace_019_factory_passes_display_name(mocker, invocation_name):
     factory = NexentAgent(observer=MessageObserver(), model_config_list=[], stop_event=Event())
     mocker.patch.object(factory, "create_model", return_value=mocker.Mock())
     config = AgentConfig(
         name="knowledge_agent", display_name="知识助手", description="test", model_name="model", tools=[],
+        invocation_name=invocation_name,
     )
     agent = factory.create_single_agent(config)
-    assert agent.name == "knowledge_agent"
+    assert agent.name == (invocation_name or "knowledge_agent")
     assert agent.display_name == "知识助手"

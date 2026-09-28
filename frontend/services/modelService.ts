@@ -15,6 +15,8 @@ import {
   ModelCatalogProfile,
   ModelCatalogFullPayload,
   InferenceFieldSpecsByType,
+  ReasoningCapability,
+  ReasoningEffort,
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -94,7 +96,7 @@ const buildCapacityRequestBody = (model: {
  * so callers don't need to convert between the two.
  */
 /** First defined value among the arguments, or undefined. */
-const firstDefined = <T,>(...values: (T | undefined)[]): T | undefined => {
+const firstDefined = <T>(...values: (T | undefined)[]): T | undefined => {
   for (const value of values) {
     if (value !== undefined) {
       return value;
@@ -131,6 +133,25 @@ const mapInferenceParamsFromApi = (model: any) => ({
   temperature: model.temperature,
   topP: model.top_p,
   extraParams: model.extra_params,
+  enableThinking:
+    model.extra_params?.enable_thinking === true ||
+    (model.extra_params?.enable_thinking === undefined &&
+      (typeof model.extra_params?.reasoning_effort === "string" ||
+        typeof model.extra_params?.reasoning_budget_tokens === "number")),
+  defaultReasoningEffort:
+    typeof model.extra_params?.reasoning_effort === "string" &&
+    [
+      "auto",
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ].includes(model.extra_params.reasoning_effort)
+      ? (model.extra_params.reasoning_effort as ReasoningEffort)
+      : undefined,
 });
 
 const mapCapacitySuggestionFromApi = (
@@ -148,6 +169,8 @@ const mapCapacitySuggestionFromApi = (
           tokenizerFamily: suggestion.suggestions.tokenizer_family,
         }
       : null,
+    reasoningCapability: (suggestion.reasoning_capability ?? undefined) as
+      ReasoningCapability | undefined,
     matchKind: suggestion.match_kind,
     matchConfidence: suggestion.match_confidence,
     matchExplanation: suggestion.match_explanation || "",
@@ -214,6 +237,18 @@ const authedFetch = async (
 export const isSessionExpiredError = (error: unknown): boolean =>
   error instanceof ModelError && error.code === 401;
 
+type ExistingModelForDuplicateCheck = {
+  displayName: string;
+  type?: ModelType;
+};
+
+const mapExistingModelForDuplicateCheck = (
+  model: any
+): ExistingModelForDuplicateCheck => ({
+  displayName: String(model.display_name || model.model_name || "").trim(),
+  type: model.model_type as ModelType | undefined,
+});
+
 // Model service
 export const modelService = {
   // Get all models (unified method)
@@ -245,6 +280,7 @@ export const modelService = {
           ...mapCapacityFieldsFromApi(model),
           // v2.6.0 inference params (model-level defaults)
           ...mapInferenceParamsFromApi(model),
+          reasoningCapability: model.reasoning_capability ?? undefined,
           // STT specific fields
           modelAppid: model.model_appid,
           accessToken: model.access_token,
@@ -257,6 +293,69 @@ export const modelService = {
       log.warn("Failed to load models:", error);
       return [];
     }
+  },
+
+  // Read every existing model strictly before a create preflight. Unlike the
+  // general list methods, this method must surface read failures so callers do
+  // not fall through to a create request without duplicate validation.
+  getExistingModelsForDuplicateCheck: async (
+    tenantId?: string
+  ): Promise<ExistingModelForDuplicateCheck[]> => {
+    if (!tenantId) {
+      const response = await authedFetch(API_ENDPOINTS.model.customModelList, {
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (
+        response.status !== STATUS_CODES.SUCCESS ||
+        !Array.isArray(result.data)
+      ) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to load model names",
+          response.status
+        );
+      }
+      return result.data.map(mapExistingModelForDuplicateCheck);
+    }
+
+    const models: ExistingModelForDuplicateCheck[] = [];
+    const pageSize = 100;
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+      const response = await authedFetch(API_ENDPOINTS.model.manageModelList, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          page,
+          page_size: pageSize,
+        }),
+      });
+      const result = await response.json();
+      const data = result.data;
+      if (
+        response.status !== STATUS_CODES.SUCCESS ||
+        !data ||
+        !Array.isArray(data.models)
+      ) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to load model names",
+          response.status
+        );
+      }
+
+      models.push(...data.models.map(mapExistingModelForDuplicateCheck));
+      const total = Number(data.total) || models.length;
+      totalPages = Number(data.total_pages) || Math.ceil(total / pageSize);
+      page += 1;
+    }
+
+    return models;
   },
 
   // Legacy methods for backward compatibility (will be removed after refactoring)
@@ -334,11 +433,14 @@ export const modelService = {
         requestBody.access_token = model.accessToken;
       }
 
-      const response = await authedFetch(API_ENDPOINTS.model.customModelCreate, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(requestBody),
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.customModelCreate,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(requestBody),
+        }
+      );
 
       const result = await response.json();
 
@@ -398,16 +500,19 @@ export const modelService = {
     models: any[];
   }): Promise<number> => {
     try {
-      const response = await authedFetch(API_ENDPOINTS.model.customModelBatchCreate, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          api_key: model.api_key,
-          models: model.models,
-          ...(model.type !== undefined ? { type: model.type } : {}),
-          provider: model.provider,
-        }),
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.customModelBatchCreate,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            api_key: model.api_key,
+            models: model.models,
+            ...(model.type !== undefined ? { type: model.type } : {}),
+            provider: model.provider,
+          }),
+        }
+      );
       const result = await response.json();
 
       if (response.status !== 200) {
@@ -742,19 +847,22 @@ export const modelService = {
   ): Promise<ModelConnectivityResult> => {
     try {
       if (!displayName) return { connectivity: false };
-      const response = await authedFetch(API_ENDPOINTS.model.manageModelHealthcheck, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          display_name: displayName,
-          model_type: modelType,
-        }),
-        signal,
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.manageModelHealthcheck,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: tenantId,
+            display_name: displayName,
+            model_type: modelType,
+          }),
+          signal,
+        }
+      );
       const result = await response.json();
       if (response.status === 200 && result.data) {
         return {
@@ -787,19 +895,22 @@ export const modelService = {
   ): Promise<boolean> => {
     try {
       if (!displayName) return false;
-      const response = await authedFetch(API_ENDPOINTS.model.manageModelHealthcheck, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          display_name: displayName,
-          model_type: modelType,
-        }),
-        signal,
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.manageModelHealthcheck,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: tenantId,
+            display_name: displayName,
+            model_type: modelType,
+          }),
+          signal,
+        }
+      );
       const result = await response.json();
       if (response.status === 200 && result.data) {
         return result.data.connectivity;
@@ -865,12 +976,15 @@ export const modelService = {
         requestBody.access_token = config.accessToken;
       }
 
-      const response = await authedFetch(API_ENDPOINTS.model.verifyModelConfig, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(requestBody),
-        signal,
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.verifyModelConfig,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(requestBody),
+          signal,
+        }
+      );
 
       const result = await response.json();
 
@@ -989,6 +1103,8 @@ export const modelService = {
           apiUrl: model.base_url || "",
           displayName: model.display_name || model.model_name || model.name,
           connect_status: model.connect_status as ModelConnectStatus,
+          ...mapInferenceParamsFromApi(model),
+          reasoningCapability: model.reasoning_capability ?? undefined,
         }));
       }
 
@@ -1047,6 +1163,7 @@ export const modelService = {
             ...mapCapacityFieldsFromApi(model),
             // v2.6.0 inference params (model-level defaults)
             ...mapInferenceParamsFromApi(model),
+            reasoningCapability: model.reasoning_capability ?? undefined,
             // STT specific fields
             modelAppid: model.model_appid,
             accessToken: model.access_token,
@@ -1150,14 +1267,17 @@ export const modelService = {
         requestBody.access_token = params.accessToken;
       }
 
-      const response = await authedFetch(API_ENDPOINTS.model.manageModelCreate, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.manageModelCreate,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        }
+      );
 
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {
@@ -1335,20 +1455,23 @@ export const modelService = {
     modelsCount: number;
   }> => {
     try {
-      const response = await authedFetch(API_ENDPOINTS.model.manageModelBatchCreate, {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: params.tenantId,
-          provider: params.provider,
-          ...(params.type !== undefined ? { type: params.type } : {}),
-          api_key: params.apiKey,
-          models: params.models,
-        }),
-      });
+      const response = await authedFetch(
+        API_ENDPOINTS.model.manageModelBatchCreate,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            provider: params.provider,
+            ...(params.type !== undefined ? { type: params.type } : {}),
+            api_key: params.apiKey,
+            models: params.models,
+          }),
+        }
+      );
 
       const result = await response.json();
       if (response.status !== STATUS_CODES.SUCCESS) {

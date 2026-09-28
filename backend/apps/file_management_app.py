@@ -3,7 +3,7 @@ import logging
 import re
 from datetime import datetime
 from http import HTTPStatus
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import httpx
@@ -115,7 +115,7 @@ async def options_route(full_path: str):
 @file_management_config_router.post("/upload")
 async def upload_files(
         file: List[UploadFile] = File(..., alias="file"),
-        destination: str = Form(...,
+        destination: Literal["local", "minio"] = Form(...,
                                 description="Upload destination: 'local' or 'minio'"),
         folder: str = Form(
             "attachments", description="Storage folder path for MinIO (optional)"),

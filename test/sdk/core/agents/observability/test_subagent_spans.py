@@ -28,7 +28,10 @@ def test_ut_sdk_trace_005_nested_agent_span_and_balanced_events(spans, mocker, e
                 raise ValueError("controlled failure")
             return "answer"
 
-    wrapped = SubAgentToolWrapper(child, observer, agent_id=2, agent_name="child")
+    wrapped = SubAgentToolWrapper(
+        child, observer, agent_id=2, agent_name="child", invocation_name="agent_2_v4",
+        runtime_identity={"runtime_ref": "agent:2:v4", "version_no": 4},
+    )
     parent_metadata = AgentRunMetadata(agent_id=1, tenant_id="tenant", conversation_id=42, agent_name="parent")
     with spans.manager.start_agent_run(parent_metadata):
         parent_span = trace.get_current_span()
@@ -56,6 +59,10 @@ def test_ut_sdk_trace_005_nested_agent_span_and_balanced_events(spans, mocker, e
     start = observer.add_subagent_start.call_args.kwargs
     end = observer.add_subagent_end.call_args.kwargs
     assert start["invocation_id"] == end["invocation_id"] == child_span.attributes["subagent.invocation_id"]
+    for event in (start, end):
+        assert event["invocation_name"] == "agent_2_v4"
+        assert event["runtime_ref"] == "agent:2:v4"
+        assert event["version_no"] == 4
     assert observer.add_subagent_start.call_count == observer.add_subagent_end.call_count == 1
 
 
@@ -85,11 +92,13 @@ def test_ut_sdk_trace_005_external_a2a_adapter_is_a_nested_agent(spans, mocker):
     def remote_call(query, history, context):
         with spans.tracer.start_as_current_span("a2a-client-operation"):
             assert get_agent_monitoring_context().agent_id == "remote-id"
+            assert context["user_context"] == {"user_id": "test-user"}
             return "remote answer"
 
     remote = object.__new__(ExternalA2AAgentWrapper)
     remote.name = "remote"
     remote._runtime_metadata = {"attempt": "synthetic"}
+    remote._user_context = {"user_id": "test-user"}
     remote._proxy = SimpleNamespace(sync_call=remote_call)
     wrapper = SubAgentToolWrapper(remote, mocker.Mock(), agent_id="remote-id", agent_name="remote")
     with spans.manager.start_agent_run(AgentRunMetadata(agent_id=1)):

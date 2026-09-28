@@ -3,7 +3,7 @@
 import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Collapse, Modal, Form, message } from "antd";
+import { Collapse, Modal, Form, Input, message } from "antd";
 import { SettingOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
@@ -74,12 +74,21 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       const descriptionChanged =
         description !== (knowledgeBase.description || "").trim();
 
-      const newPermission = isUser ? "PRIVATE" : values.ingroup_permission;
+      // The advanced permission fields are intentionally hidden for USER
+      // accounts. Keep a form-level fallback so metadata-only edits still
+      // submit a valid permission when those fields are not mounted.
+      const newPermission = isUser
+        ? "PRIVATE"
+        : values.ingroup_permission ||
+          knowledgeBase.ingroup_permission ||
+          "READ_ONLY";
       const newGroupIds: number[] = isUser
         ? []
         : Array.isArray(values.group_ids)
           ? values.group_ids
-          : [];
+          : Array.isArray(knowledgeBase.group_ids)
+            ? knowledgeBase.group_ids
+            : [];
       const originalPermission =
         knowledgeBase.ingroup_permission || "READ_ONLY";
       const originalGroupIds: number[] = Array.isArray(knowledgeBase.group_ids)
@@ -187,7 +196,7 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           style={{ padding: "20px 24px 8px" }}
         >
           <AidpKnowledgeBaseBasicFields t={t} />
-          {canConfigureGroupPermissions && (
+          {canConfigureGroupPermissions ? (
             <Collapse
               className="!rounded-xl !border-gray-200"
               activeKey={advancedOpen ? ["advanced"] : []}
@@ -201,6 +210,10 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
               items={[
                 {
                   key: "advanced",
+                  // Keep permission fields registered with the Form while
+                  // the Collapse is closed so metadata-only edits still
+                  // submit the existing group_ids value.
+                  forceRender: true,
                   label: (
                     <span className="flex items-center gap-2 text-sm font-medium text-gray-800">
                       <SettingOutlined />
@@ -220,6 +233,10 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
                 },
               ]}
             />
+          ) : (
+            <Form.Item name="ingroup_permission" hidden>
+              <Input type="hidden" />
+            </Form.Item>
           )}
         </Form>
       </div>
