@@ -1,15 +1,7 @@
 import React, { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  Button,
-  Pagination,
-  Popconfirm,
-  Tag,
-  Upload,
-  message,
-  Tooltip,
-} from "antd";
+import { Button, Popconfirm, Tag, Upload, message, Tooltip } from "antd";
 import {
   UploadOutlined,
   InboxOutlined,
@@ -29,6 +21,7 @@ import {
 } from "@/lib/aidpDocumentStatus";
 import { partitionAidpFiles } from "@/services/uploadService";
 import log from "@/lib/logger";
+import AidpPagination from "./AidpPagination";
 
 const { Dragger } = Upload;
 
@@ -513,43 +506,19 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
         )}
       </div>
 
-      {/* Server-side pagination.
-          AIDP exposes a dedicated Count API for documents which the backend
-          now calls alongside the list request. When Count succeeds,
-          `totalReliable` is true and we display the full pagination (page
-          numbers + "共 N 条"). When Count fails (e.g. the endpoint is not
-          available on a particular AIDP instance), `totalReliable` is false
-          and we fall back to simple prev/next mode without a total, using
-          `has_more` to decide whether the next-page button should enable. */}
-      {documents.length > 0 &&
-        (() => {
-          // When total is unreliable we still need antd to know when to
-          // enable "next": set total just past the current page if there is
-          // a next page, otherwise clamp to the current page end.
-          const effectiveTotal = totalReliable
-            ? totalDocs
-            : hasMore
-              ? currentPage * pageSize + 1
-              : currentPage * pageSize;
-          return (
-            <div className="px-4 py-2 border-b border-gray-200 flex justify-center">
-              <Pagination
-                current={currentPage}
-                pageSize={pageSize}
-                total={effectiveTotal || 1}
-                onChange={onPageChange}
-                showSizeChanger={false}
-                simple={!totalReliable}
-                showTotal={
-                  totalReliable
-                    ? (total) => t("aidpKnowledge.showTotal", { count: total })
-                    : undefined
-                }
-                size="small"
-              />
-            </div>
-          );
-        })()}
+      {/* Server-side pagination; see AidpPagination for the fallback rule. */}
+      {documents.length > 0 && (
+        <div className="px-4 py-2 border-b border-gray-200 flex justify-center">
+          <AidpPagination
+            currentPage={currentPage}
+            pageSize={pageSize}
+            total={totalDocs}
+            totalReliable={totalReliable}
+            hasMore={hasMore}
+            onPageChange={onPageChange}
+          />
+        </div>
+      )}
 
       {/* Upload area — gated by ``activeKb.permission`` and ``resource_status``.
 

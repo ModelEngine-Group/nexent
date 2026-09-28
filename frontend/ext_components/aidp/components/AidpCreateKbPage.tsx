@@ -247,6 +247,18 @@ const AidpCreateKbPage: React.FC = () => {
     });
   }, [form, isUser]);
 
+  /** Label with an optional hint tooltip; repeated by most configuration fields. */
+  const fieldLabel = (text: string, hint?: string) => (
+    <Space>
+      <span>{text}</span>
+      {hint ? (
+        <Tooltip title={hint}>
+          <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+        </Tooltip>
+      ) : null}
+    </Space>
+  );
+
   const steps = [
     { title: t("aidpKnowledge.createStepInfo") },
     { title: t("aidpKnowledge.createStepUpload") },
@@ -456,14 +468,10 @@ const AidpCreateKbPage: React.FC = () => {
       <Form.Item
         name="sensitive_intercept_enalbe"
         valuePropName="checked"
-        label={
-          <Space>
-            <span>{t("aidpKnowledge.createSafetyGuard")}</span>
-            <Tooltip title={t("aidpKnowledge.createSafetyGuardHint")}>
-              <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-            </Tooltip>
-          </Space>
-        }
+        label={fieldLabel(
+          t("aidpKnowledge.createSafetyGuard"),
+          t("aidpKnowledge.createSafetyGuardHint")
+        )}
       >
         <Switch />
       </Form.Item>
@@ -475,14 +483,10 @@ const AidpCreateKbPage: React.FC = () => {
       <Form.Item
         name="is_exist_graph"
         valuePropName="checked"
-        label={
-          <Space>
-            <span>{t("aidpKnowledge.createGraphEnable")}</span>
-            <Tooltip title={t("aidpKnowledge.createGraphEnableHint")}>
-              <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-            </Tooltip>
-          </Space>
-        }
+        label={fieldLabel(
+          t("aidpKnowledge.createGraphEnable"),
+          t("aidpKnowledge.createGraphEnableHint")
+        )}
       >
         <Switch />
       </Form.Item>
@@ -526,14 +530,10 @@ const AidpCreateKbPage: React.FC = () => {
           </Form.Item>
           <Form.Item
             name="llm_model_name"
-            label={
-              <Space>
-                <span>{t("aidpKnowledge.createGraphModel")}</span>
-                <Tooltip title={t("aidpKnowledge.createGraphModelHint")}>
-                  <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-                </Tooltip>
-              </Space>
-            }
+            label={fieldLabel(
+              t("aidpKnowledge.createGraphModel"),
+              t("aidpKnowledge.createGraphModelHint")
+            )}
             rules={[
               {
                 required: true,
@@ -560,14 +560,10 @@ const AidpCreateKbPage: React.FC = () => {
           <Form.Item
             name="graph_thinking"
             valuePropName="checked"
-            label={
-              <Space>
-                <span>{t("aidpKnowledge.createGraphThinking")}</span>
-                <Tooltip title={t("aidpKnowledge.createGraphThinkingHint")}>
-                  <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-                </Tooltip>
-              </Space>
-            }
+            label={fieldLabel(
+              t("aidpKnowledge.createGraphThinking"),
+              t("aidpKnowledge.createGraphThinkingHint")
+            )}
           >
             <Switch />
           </Form.Item>
@@ -590,14 +586,10 @@ const AidpCreateKbPage: React.FC = () => {
           </Form.Item>
           <Form.Item
             name="graph_prompt_text"
-            label={
-              <Space>
-                <span>{t("aidpKnowledge.createGraphPromptText")}</span>
-                <Tooltip title={t("aidpKnowledge.createGraphPromptHint")}>
-                  <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-                </Tooltip>
-              </Space>
-            }
+            label={fieldLabel(
+              t("aidpKnowledge.createGraphPromptText"),
+              t("aidpKnowledge.createGraphPromptHint")
+            )}
             rules={[
               {
                 validator: (_rule, value: string) => {
@@ -680,14 +672,10 @@ const AidpCreateKbPage: React.FC = () => {
       </Form.Item>
       <Form.Item
         name="chunk_overlap_percent"
-        label={
-          <Space>
-            <span>{t("aidpKnowledge.createOverlapPercent")}</span>
-            <Tooltip title={t("aidpKnowledge.createOverlapPercentHint")}>
-              <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-            </Tooltip>
-          </Space>
-        }
+        label={fieldLabel(
+          t("aidpKnowledge.createOverlapPercent"),
+          t("aidpKnowledge.createOverlapPercentHint")
+        )}
         rules={[
           {
             required: true,

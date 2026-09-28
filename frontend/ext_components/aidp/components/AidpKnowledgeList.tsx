@@ -5,7 +5,6 @@ import {
   Button,
   Checkbox,
   Input,
-  Pagination,
   Popover,
   Segmented,
   Table,
@@ -36,6 +35,7 @@ import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
 import AidpKnowledgeGuide from "./AidpKnowledgeGuide";
+import AidpPagination from "./AidpPagination";
 
 /** Overview presentation modes. Cards are the default. */
 export type AidpKbViewMode = "cards" | "table";
@@ -526,39 +526,19 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         {/* Body */}
         <div>{renderBody()}</div>
 
-        {/* Server-side pagination.
-            AIDP exposes a dedicated Count API for KBs which the backend calls
-            alongside the list request. When Count succeeds, `totalReliable`
-            is true and we display the full pagination (page numbers +
-            "共 N 条"). When Count fails (e.g. endpoint unavailable), we fall
-            back to simple prev/next mode using `has_more`. */}
-        {kbs.length > 0 &&
-          (() => {
-            const effectiveTotal = totalReliable
-              ? total
-              : hasMore
-                ? currentPage * pageSize + 1
-                : currentPage * pageSize;
-            return (
-              <div className="px-4 py-3 border-t border-gray-200 flex justify-center">
-                <Pagination
-                  current={currentPage}
-                  pageSize={pageSize}
-                  total={effectiveTotal || 1}
-                  onChange={onPageChange}
-                  showSizeChanger={false}
-                  simple={!totalReliable}
-                  showTotal={
-                    totalReliable
-                      ? (value) =>
-                          t("aidpKnowledge.showTotal", { count: value })
-                      : undefined
-                  }
-                  size="small"
-                />
-              </div>
-            );
-          })()}
+        {/* Server-side pagination; see AidpPagination for the fallback rule. */}
+        {kbs.length > 0 && (
+          <div className="px-4 py-3 border-t border-gray-200 flex justify-center">
+            <AidpPagination
+              currentPage={currentPage}
+              pageSize={pageSize}
+              total={total}
+              totalReliable={totalReliable}
+              hasMore={hasMore}
+              onPageChange={onPageChange}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
