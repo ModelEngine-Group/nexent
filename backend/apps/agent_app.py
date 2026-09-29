@@ -855,6 +855,7 @@ async def list_agent_page_api(
         kwargs = {
             "tenant_id": resolved_tenant_id,
             "user_id": user_id,
+            "caller_tenant_id": auth_tenant_id,
             "permission": permission,
             "tag": tag,
             "search": search,

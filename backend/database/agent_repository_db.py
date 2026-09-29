@@ -354,6 +354,7 @@ def list_agent_repository_by_agent_ids(
     *,
     statuses: Collection[str],
     publisher_tenant_id: str,
+    publisher_user_id: Optional[str] = None,
 ) -> List[dict]:
     """List repository rows for the given agents, scoped to publisher tenant and statuses."""
     if not agent_ids:
@@ -361,7 +362,7 @@ def list_agent_repository_by_agent_ids(
 
     status_list = list(statuses)
     with get_db_session() as session:
-        rows = (
+        query = (
             session.query(
                 AgentRepository.agent_repository_id,
                 AgentRepository.agent_id,
@@ -377,7 +378,11 @@ def list_agent_repository_by_agent_ids(
                 AgentRepository.agent_id.in_(agent_ids),
                 AgentRepository.status.in_(status_list),
             )
-            .order_by(
+        )
+        if publisher_user_id is not None:
+            query = query.filter(AgentRepository.publisher_user_id == publisher_user_id)
+        rows = (
+            query.order_by(
                 AgentRepository.agent_id,
                 AgentRepository.create_time.desc(),
             )

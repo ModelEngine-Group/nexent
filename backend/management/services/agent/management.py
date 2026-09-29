@@ -924,6 +924,7 @@ async def list_all_agent_info_impl(
 async def list_agent_page_impl(
     tenant_id: str,
     user_id: str,
+    caller_tenant_id: Optional[str] = None,
     permission: Optional[str] = None,
     tag: Optional[str] = None,
     search: Optional[str] = None,
@@ -1138,13 +1139,37 @@ async def list_agent_page_impl(
             ]
             if not scoped_agents:
                 continue
-            repository_records = list_agent_repository_by_agent_ids(
-                [int(agent["agent_id"]) for agent in scoped_agents],
-                statuses=(STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED),
+            scoped_agent_ids = [int(agent["agent_id"]) for agent in scoped_agents]
+            shared_records = list_agent_repository_by_agent_ids(
+                scoped_agent_ids,
+                statuses=(STATUS_SHARED,),
                 publisher_tenant_id=scope_tenant_id,
             )
+            publisher_records = []
+            if scope_tenant_id == caller_tenant_id and user_role == "ADMIN":
+                publisher_records = list_agent_repository_by_agent_ids(
+                    scoped_agent_ids,
+                    statuses=(STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED),
+                    publisher_tenant_id=scope_tenant_id,
+                )
+            elif scope_tenant_id == caller_tenant_id and user_role == "DEV":
+                publisher_records = list_agent_repository_by_agent_ids(
+                    scoped_agent_ids,
+                    statuses=(STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED),
+                    publisher_tenant_id=scope_tenant_id,
+                    publisher_user_id=user_id,
+                )
+            records_by_id = {
+                int(record["agent_repository_id"]): (record, False)
+                for record in shared_records
+                if record["status"] == STATUS_SHARED
+            }
+            records_by_id.update({
+                int(record["agent_repository_id"]): (record, True)
+                for record in publisher_records
+            })
             repository_by_agent_id: dict[int, list[dict]] = {}
-            for record in repository_records:
+            for record, is_publisher in records_by_id.values():
                 created_at = record.get("create_time")
                 repository_by_agent_id.setdefault(int(record["agent_id"]), []).append(
                     {
@@ -1157,8 +1182,16 @@ async def list_agent_page_impl(
                             if hasattr(created_at, "isoformat")
                             else created_at
                         ),
-                        "content": record.get("content"),
+                        "content": record.get("content") if is_publisher else None,
                     }
+                )
+            for records in repository_by_agent_id.values():
+                records.sort(
+                    key=lambda item: (
+                        str(item["create_time"] or ""),
+                        int(item["agent_repository_id"]),
+                    ),
+                    reverse=True,
                 )
             for agent in scoped_agents:
                 agent["repository_info"] = repository_by_agent_id.get(
