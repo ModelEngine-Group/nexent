@@ -206,16 +206,19 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   // Update selected key and expand parent menu when pathname changes
   useEffect(() => {
     const currentPath = getEffectiveRoutePath(pathname);
+    const routePath = currentPath.startsWith("/agents/")
+      ? "/agents"
+      : currentPath;
     const matchedKey =
-      currentPath === "/newchat"
+      routePath === "/newchat"
         ? "/chat"
-        : ROUTE_PATHS.includes(currentPath)
-          ? currentPath
+        : ROUTE_PATHS.includes(routePath)
+          ? routePath
           : null;
     setSelectedKey(matchedKey || "");
 
     // Auto-expand parent menu when visiting child page
-    const parentKey = findParentKey(currentPath);
+    const parentKey = findParentKey(routePath);
     setOpenKeys(parentKey ? [parentKey] : []);
   }, [pathname]);
 
