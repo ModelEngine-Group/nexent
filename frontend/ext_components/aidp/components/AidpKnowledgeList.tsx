@@ -359,12 +359,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                 {kb.description?.trim() || t("aidpKnowledge.noDescription")}
               </p>
             </div>
-            <div
-              className="-mr-2 -mt-2 shrink-0"
-              onClick={(event) => event.stopPropagation()}
-            >
-              {renderMoreMenu(kb)}
-            </div>
+            <div className="-mr-2 -mt-2 shrink-0">{renderMoreMenu(kb)}</div>
           </div>
 
           <div className="mt-auto pt-4">
