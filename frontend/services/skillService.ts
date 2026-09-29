@@ -11,6 +11,7 @@ import {
   deleteSkill,
 } from "@/services/agentConfigService";
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import { InstallableSkill } from "@/types/agentConfig";
 import {
   THINKING_STEPS_ZH,
@@ -61,6 +62,7 @@ export interface SkillListItem {
 export interface SkillOperationResult {
   success: boolean;
   message?: string;
+  error?: unknown;
 }
 
 /**
@@ -287,7 +289,7 @@ export const submitSkillForm = async (
       onCancel();
       return true;
     } else {
-      throw new Error(
+      throw (result as { error?: unknown }).error || new Error(
         result.message || t("skillManagement.message.submitFailed")
       );
     }
@@ -306,7 +308,7 @@ export const submitSkillFromFile = async (
   allSkills: SkillListItem[],
   onSuccess: () => void,
   onCancel: () => void,
-  t: (key: string) => string
+  t: (key: string, options?: Record<string, unknown>) => string
 ): Promise<boolean> => {
   try {
     const result = await createSkillFromFile(skillName.trim(), file, false);
@@ -317,14 +319,36 @@ export const submitSkillFromFile = async (
       onCancel();
       return true;
     } else {
+      const limitMessage = getTenantResourceLimitMessage(result.error, t);
+      const errorCode = result.error && typeof result.error === "object"
+        ? String((result.error as { code?: string | number }).code || "")
+        : "";
       message.error(
-        result.message || t("skillManagement.message.submitFailed")
+        limitMessage ||
+          (errorCode === "000403"
+            ? t("skillManagement.message.fileTooLarge", {
+                limit: (result.error as { details?: { limit_mb?: number } } | undefined)
+                  ?.details?.limit_mb ?? "",
+              })
+            : result.message || t("skillManagement.message.submitFailed"))
       );
       return false;
     }
   } catch (error) {
     log.error("Skill file upload error:", error);
-    message.error(t("skillManagement.message.submitFailed"));
+    const limitMessage = getTenantResourceLimitMessage(error, t);
+    const errorCode = error && typeof error === "object"
+      ? String((error as { code?: string | number }).code || "")
+      : "";
+    message.error(
+      limitMessage ||
+        (errorCode === "000403"
+          ? t("skillManagement.message.fileTooLarge", {
+              limit: (error as { details?: { limit_mb?: number } } | undefined)
+                ?.details?.limit_mb ?? "",
+            })
+          : t("skillManagement.message.submitFailed"))
+    );
     return false;
   }
 };

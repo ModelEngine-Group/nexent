@@ -7,6 +7,7 @@ import { CircleCheckBig, CircleOff, CircleDot, LoaderCircle } from "lucide-react
 
 import { fetchOfficialSkillsWithStatus, installOfficialSkills } from "@/services/skillService";
 import { InstallableSkill } from "@/types/agentConfig";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 interface InstallOfficialSkillsModalProps {
   open: boolean;
@@ -78,8 +79,11 @@ export function InstallOfficialSkillsModal({
       );
       onInstalled();
       setTimeout(onClose, 800);
-    } catch {
-      message.error("Failed to install skills");
+    } catch (error) {
+      message.error(
+        getTenantResourceLimitMessage(error, t) ||
+          t("skillManagement.message.submitFailed")
+      );
       setInstalling(new Set());
     }
   };

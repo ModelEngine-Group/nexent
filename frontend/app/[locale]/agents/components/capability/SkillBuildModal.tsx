@@ -41,6 +41,7 @@ import {
 } from "@/services/agentConfigService";
 import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import log from "@/lib/logger";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
@@ -523,7 +524,10 @@ export default function SkillBuildModal({
         ]);
         return;
       }
-      message.error(t("skillManagement.message.submitFailed"));
+      message.error(
+        getTenantResourceLimitMessage(error, t) ||
+          t("skillManagement.message.submitFailed")
+      );
     } finally {
       setIsSubmitting(false);
     }
