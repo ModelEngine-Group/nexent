@@ -926,7 +926,8 @@ export const fetchWithErrorHandling = async (
           if (errorData?.error === "TenantStorageFull") {
             throw new ApiError(
               413,
-              errorData.message || "Tenant storage limit reached"
+              errorData.message || "Tenant storage limit reached",
+              errorData
             );
           }
         } catch (error) {
@@ -936,7 +937,8 @@ export const fetchWithErrorHandling = async (
         }
         throw new ApiError(
           ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit."
+          "File size exceeds limit.",
+          errorDetails
         );
       }
 

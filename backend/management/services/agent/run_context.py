@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from nexent.monitor import AgentRunMetadata
-
 from services.memory_config_service import build_memory_context
 from utils.monitoring import monitoring_manager
+from utils.monitoring_identity import resolve_monitoring_user_email
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ def build_agent_run_context(request, user_id: str, tenant_id: str, language: str
         agent_id=request.agent_id,
         conversation_id=request.conversation_id,
         user_id=user_id,
+        user_email=resolve_monitoring_user_email(user_id, tenant_id),
         tenant_id=tenant_id,
         query=request.query,
         is_debug=request.is_debug,

@@ -1,0 +1,30 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+cases:
+  - case_id: CMSR-D5-001
+    feature_id: CMSR-005
+    requirement_ids: [CMSR-005]
+    business_rule_ids: [CMSR-RULE-014, CMSR-RULE-015, CMSR-RULE-016, CMSR-RULE-017, CMSR-RULE-018]
+    title: Repeated partial failures never leak across attempts or siblings
+    type: RELIABILITY
+    priority: P1
+    status: blocked
+    automation: automated
+    objective: Verify rollback isolation under repeated partial streams and parallel sub-agent output.
+    preconditions: [A controlled provider can interleave parent and sibling outputs.]
+    test_data: {profile: mock, failures: 4}
+    steps:
+      - {order: 1, action: Inject four partial failures and a fifth successful response while sibling output interleaves., expected: The retry budget is respected.}
+      - {order: 2, action: Inspect final UI and stored output., expected: Only fifth-attempt and sibling content remain.}
+      - {order: 3, action: Repeat with repeated invalid semantic outputs through the repair limit., expected: 'Every invalid attempt rolls back, the run terminates safely and logs contain no model content.'}
+      - {order: 4, action: Replay old late-label history and concurrent sibling invocations., expected: Labels remain with their owning step and terminal label-only cards disappear without deleting sibling content.}
+      - {order: 5, action: Inject repeated reasoning-only length responses with diagnostic preview disabled., expected: Each rejection is correlated to its budget and attempt while no raw reasoning or user text enters logs or persisted output.}
+    expected_results: [Successful and sibling content are complete., Failed attempts leave zero fragments.]
+    forbidden_side_effects: [No sixth provider call., No cross-invocation deletion., No failed-fragment persistence.]
+    risk_type: RELIABILITY
+    risk: Stale partial output can leak after repeated retries or corrupt sibling cards.
+    condition: [Four partial failures followed by a success., Parallel sibling output.]
+    metrics: [Provider request count., Failed-fragment count in SSE projection and persisted units.]
+    thresholds: [At most five physical requests., Zero failed fragments after rollback.]
+    recovery_expectations: [The committed attempt and sibling output remain readable after refresh.]

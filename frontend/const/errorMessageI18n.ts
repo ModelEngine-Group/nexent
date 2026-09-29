@@ -14,6 +14,7 @@ import log from "@/lib/logger";
 import type { TFunction } from "i18next";
 
 const TENANT_RESOURCE_LIMIT_CODE = "120104";
+
 const TENANT_RESOURCE_LIMIT_KEYS: Record<string, string> = {
   tenants: "tenantResources.limit.tenants",
   users: "tenantResources.limit.users",
@@ -21,29 +22,79 @@ const TENANT_RESOURCE_LIMIT_KEYS: Record<string, string> = {
   agents: "tenantResources.limit.agents",
   administrators: "tenantResources.limit.administrators",
   super_admins: "tenantResources.limit.superAdmins",
+  external_a2a_agents: "tenantResources.limit.externalA2aAgents",
 };
 
-/** Return a localized tenant quota message while preserving the server limit. */
 export const getTenantResourceLimitMessage = (
   error: unknown,
   t: TFunction
 ): string | null => {
-  if (!error || typeof error !== "object") return null;
+  if (!error || typeof error !== "object") {
+    return null;
+  }
 
   const apiError = error as {
     code?: string | number;
     details?: Record<string, unknown> | null;
   };
-  if (String(apiError.code) !== TENANT_RESOURCE_LIMIT_CODE) return null;
+
+  if (String(apiError.code) !== TENANT_RESOURCE_LIMIT_CODE) {
+    return null;
+  }
 
   const details = apiError.details || {};
   const resource = String(details.resource || "");
   const translationKey = TENANT_RESOURCE_LIMIT_KEYS[resource];
-  if (!translationKey) return t("errorCode.120104");
+
+  if (!translationKey) {
+    return t("errorCode.120104");
+  }
 
   return t(translationKey, {
     limit: details.limit ?? "",
   });
+};
+
+export const getKnowledgeResourceLimitMessage = (
+  error: unknown,
+  t: TFunction
+): string | undefined => {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  const candidate = error as {
+    code?: string | number;
+    details?: Record<string, unknown> | null;
+  };
+
+  const code = String(candidate.code ?? "");
+  const details = candidate.details || {};
+
+  if (code === ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED) {
+    const limit = Number(details.limit);
+    const translationKey =
+      details.scope === "tenant"
+        ? "knowledgeBase.message.tenantLimitExceeded"
+        : "knowledgeBase.message.userLimitExceeded";
+
+    return t(translationKey, {
+      limit: Number.isFinite(limit) ? limit : 0,
+    });
+  }
+
+  if (
+    code === ErrorCode.FILE_TOO_LARGE &&
+    details.resource === "knowledge_file"
+  ) {
+    const limit = Number(details.limit_mb);
+
+    return t("knowledgeBase.upload.fileTooLarge", {
+      limit: Number.isFinite(limit) ? limit : 100,
+    });
+  }
+
+  return undefined;
 };
 
 const CONVERSATION_RESOURCE_LIMIT_KEYS: Record<string, string> = {
@@ -67,7 +118,6 @@ const CONVERSATION_RESOURCE_LIMIT_PATTERNS: Array<{
   },
 ];
 
-/** Return a localized conversation quota message for structured or legacy errors. */
 export const getConversationResourceLimitMessage = (
   error: unknown,
   t: TFunction
@@ -81,15 +131,18 @@ export const getConversationResourceLimitMessage = (
           data?: unknown;
         })
       : undefined;
+
   const details =
     candidate?.details && typeof candidate.details === "object"
       ? (candidate.details as Record<string, unknown>)
       : candidate?.data && typeof candidate.data === "object"
         ? (candidate.data as Record<string, unknown>)
         : undefined;
+
   const resource = String(details?.resource || "");
   const limit = details?.limit;
   const translationKey = CONVERSATION_RESOURCE_LIMIT_KEYS[resource];
+
   if (
     String(candidate?.code) === TENANT_RESOURCE_LIMIT_CODE &&
     translationKey &&
@@ -106,8 +159,13 @@ export const getConversationResourceLimitMessage = (
         : error instanceof Error
           ? error.message
           : "";
-  for (const { resource: matchedResource, pattern } of CONVERSATION_RESOURCE_LIMIT_PATTERNS) {
+
+  for (const {
+    resource: matchedResource,
+    pattern,
+  } of CONVERSATION_RESOURCE_LIMIT_PATTERNS) {
     const match = messageText.match(pattern);
+
     if (match) {
       return t(CONVERSATION_RESOURCE_LIMIT_KEYS[matchedResource], {
         limit: match[1],

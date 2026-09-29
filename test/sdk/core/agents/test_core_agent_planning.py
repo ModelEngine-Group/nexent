@@ -290,6 +290,7 @@ output_protocol_spec.loader.exec_module(output_protocol_module)
 CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "core_agent.py"
 CORE_AGENT_NAME = "sdk.nexent.core.agents.core_agent"
 sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core")]
+sys.modules["sdk.nexent.core.utils"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core" / "utils")]
 spec = importlib.util.spec_from_file_location(CORE_AGENT_NAME, CORE_AGENT_PATH)
 core_agent_module = importlib.util.module_from_spec(spec)
 sys.modules[CORE_AGENT_NAME] = core_agent_module

@@ -10,6 +10,7 @@ from test.common.test_mocks import bootstrap_test_env
 
 env_state = bootstrap_test_env()
 consts_const = env_state["mock_const"]
+consts_const.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS = 120
 
 # Mock consts.model module with HistoryItem class
 from typing import List, Optional, Dict, Any
@@ -463,6 +464,9 @@ _mock_parallel_executor_tool_cls.__name__ = "ParallelExecutorTool"
 _mock_parallel_executor_tool_cls.name = "parallel_executor"
 _mock_parallel_executor_tool_cls.description = "Execute multiple independent calls in parallel."
 _mock_parallel_executor_tool_cls.inputs = {"tasks": {"type": "array"}}
+_mock_parallel_executor_tool_cls.inputs_for_timeout = lambda timeout: {
+    "tasks": {"type": "array"}, "timeout": {"type": "integer", "default": timeout}
+}
 _mock_parallel_executor_tool_cls.output_type = "any"
 _parallel_executor_mod = _create_stub_module(
     "nexent.core.tools.parallel_executor",
@@ -2104,6 +2108,7 @@ class TestCreateAgentConfig:
                 ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
+                "display_name": "知识助手",
                 "description": "test description",
                 "duty_prompt": "test duty",
                 "constraint_prompt": "test constraint",
@@ -2156,6 +2161,9 @@ class TestCreateAgentConfig:
         mocks["build_components"].assert_called_once()
         mocks["prepare_templates"].assert_awaited_once()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
+        # UT-BE-TRACE-021: preserve the UI name separately from the variable name.
+        assert mocks["agent_config"].call_args.kwargs["name"] == "test_agent"
+        assert mocks["agent_config"].call_args.kwargs["display_name"] == "知识助手"
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
         assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
 
@@ -2346,7 +2354,8 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS', 240):
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2357,7 +2366,8 @@ class TestCreateAgentConfig:
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
                 "model_ids": [123],
-                "provide_run_summary": True
+                "provide_run_summary": True,
+                "enable_protocol_repair_retry": False,
             }
             mock_query_sub.return_value = []
             mock_create_tools.return_value = []
@@ -2381,6 +2391,7 @@ class TestCreateAgentConfig:
             # Verify that AgentConfig was called correctly
             mock_agent_config.assert_called_once_with(
                 name="test_agent",
+                display_name=None,
                 description="test description",
                 prompt_templates={"system_prompt": "populated_system_prompt"},
                 tools=ANY,
@@ -2389,6 +2400,7 @@ class TestCreateAgentConfig:
                 model_name="test_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
+                enable_protocol_repair_retry=False,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,
@@ -2407,6 +2419,8 @@ class TestCreateAgentConfig:
             assert len(pe_calls) == 1
             assert pe_calls[0][1]["name"] == "parallel_executor"
             assert pe_calls[0][1]["source"] == "local"
+            assert pe_calls[0][1]["params"] == {"default_timeout_seconds": 240}
+            assert '"default": 240' in pe_calls[0][1]["inputs"]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):
@@ -2465,6 +2479,7 @@ class TestCreateAgentConfig:
                 # Verify that AgentConfig was called correctly, including sub-agents
                 mock_agent_config.assert_called_once_with(
                     name="test_agent",
+                    display_name=None,
                     description="test description",
                     prompt_templates={
                         "system_prompt": "populated_system_prompt"},
@@ -2474,6 +2489,7 @@ class TestCreateAgentConfig:
                     model_name="test_model",
                     provide_run_summary=True,
                     allow_chat_metadata=False,
+                    enable_protocol_repair_retry=False,
                     managed_agents=[mock_sub_agent_config],
                     external_a2a_agents=[],
                     context_manager_config=ANY,
@@ -2815,6 +2831,7 @@ class TestCreateAgentConfig:
 
             mock_agent_config.assert_called_with(
                 name="test_agent",
+                display_name=None,
                 description="test description",
                 prompt_templates={"system_prompt": "populated_system_prompt"},
                 tools=ANY,
@@ -2823,6 +2840,7 @@ class TestCreateAgentConfig:
                 model_name="main_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
+                enable_protocol_repair_retry=False,
                 managed_agents=[],
                 external_a2a_agents=[],
                 context_manager_config=ANY,

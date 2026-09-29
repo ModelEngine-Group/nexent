@@ -156,6 +156,8 @@ export default function AgentConfigActions({
         requested_output_tokens: detail.requested_output_tokens ?? null,
         is_main_agent: detail.is_main_agent ?? true,
         provide_run_summary: detail.provide_run_summary,
+        enable_protocol_repair_retry:
+          detail.enable_protocol_repair_retry ?? false,
         enabled: detail.enabled,
         business_description: detail.business_description,
         duty_prompt: detail.duty_prompt,
