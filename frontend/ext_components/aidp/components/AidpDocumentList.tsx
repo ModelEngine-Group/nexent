@@ -192,6 +192,8 @@ interface AidpDocumentListProps {
    *  each uploaded file reports a terminal processing status. */
   onDocsUploaded: (uploadedFileIds: string[]) => void;
   onRefresh: () => void;
+  /** Render only the existing permission-gated uploader inside an overview modal. */
+  uploadOnly?: boolean;
 }
 
 const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
@@ -206,6 +208,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   onPageChange,
   onDocsUploaded,
   onRefresh,
+  uploadOnly = false,
 }) => {
   const { t, i18n } = useTranslation();
   const [uploading, setUploading] = useState(false);
@@ -380,7 +383,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   return (
     <div className="w-full bg-white border border-gray-200 rounded-md overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200">
+      <div className={uploadOnly ? "hidden" : "p-4 border-b border-gray-200"}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Tooltip title={activeKb?.kds_name || ""}>
@@ -404,7 +407,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
       </div>
 
       {/* Document table */}
-      <div className="p-2 border-b border-gray-200">
+      <div className={uploadOnly ? "hidden" : "p-2 border-b border-gray-200"}>
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
@@ -507,7 +510,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
       </div>
 
       {/* Server-side pagination; see AidpPagination for the fallback rule. */}
-      {documents.length > 0 && (
+      {!uploadOnly && documents.length > 0 && (
         <div className="px-4 py-2 border-b border-gray-200 flex justify-center">
           <AidpPagination
             currentPage={currentPage}

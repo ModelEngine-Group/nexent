@@ -13,6 +13,7 @@ interface AidpPaginationProps {
   totalReliable: boolean;
   hasMore: boolean;
   onPageChange: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
 }
 
 /**
@@ -30,6 +31,7 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
   totalReliable,
   hasMore,
   onPageChange,
+  onPageSizeChange,
 }) => {
   const { t } = useTranslation();
   // When the total is unreliable the control still needs a value that enables
@@ -46,8 +48,15 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
       current={currentPage}
       pageSize={pageSize}
       total={effectiveTotal || 1}
-      onChange={onPageChange}
-      showSizeChanger={false}
+      onChange={(page, nextPageSize) => {
+        if (onPageSizeChange && nextPageSize !== pageSize) {
+          onPageSizeChange(nextPageSize);
+          return;
+        }
+        onPageChange(page);
+      }}
+      pageSizeOptions={onPageSizeChange ? [10, 20, 50, 100] : undefined}
+      showSizeChanger={Boolean(onPageSizeChange)}
       simple={!totalReliable}
       showTotal={
         totalReliable

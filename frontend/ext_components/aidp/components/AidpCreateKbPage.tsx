@@ -13,24 +13,15 @@ import { useParams, useRouter } from "next/navigation";
 
 import {
   Button,
-  Collapse,
+  Breadcrumb,
   Divider,
   Form,
-  Input,
-  InputNumber,
-  Select,
   Space,
   Steps,
-  Switch,
-  Tooltip,
   Upload,
   message,
 } from "antd";
-import {
-  ArrowLeftOutlined,
-  InboxOutlined,
-  QuestionCircleOutlined,
-} from "@ant-design/icons";
+import { InboxOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type {
@@ -39,10 +30,7 @@ import type {
 } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import { USER_ROLES } from "@/const/auth";
-import {
-  AIDP_ACCEPT_STRING,
-  AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
-} from "@/const/knowledgeBase";
+import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
 import { collectUploadedFileIds } from "@/lib/aidpDocumentStatus";
 import {
   partitionAidpFiles,
@@ -53,10 +41,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import log from "@/lib/logger";
 
-import {
-  AidpKnowledgeBaseBasicFields,
-  AidpKnowledgeBasePermissionFields,
-} from "./AidpKnowledgeBaseModalParts";
+import AidpCreateKbSections from "./AidpCreateKbSections";
 
 const { Dragger } = Upload;
 
@@ -99,16 +84,6 @@ const DEFAULT_GRAPH_PROMPT = `你作为专业知识图谱抽取引擎，仅执�
 实体名称应保持一致；同一实体使用统一表述，不合并无法确认是同一对象的实体。
 关系和属性使用明确、简洁的表述，保留原文中的否定、条件和范围限定。
 没有可提取信息时输出空数组 []。`;
-
-const GRAPH_PROMPT_MAX_BYTES = 2048;
-const CHUNK_TOKEN_MIN = 256;
-const CHUNK_TOKEN_MAX = 4096;
-const OVERLAP_PERCENT_MAX = 50;
-
-const byteLength = (value: string): number =>
-  typeof TextEncoder === "undefined"
-    ? value.length
-    : new TextEncoder().encode(value).length;
 
 /**
  * Dedicated AIDP knowledge base creation page.
@@ -217,10 +192,6 @@ const AidpCreateKbPage: React.FC = () => {
       : [AIDP_CREATE_DEFAULTS.embedding_model, ...advertised];
   }, [embeddingModelsData, modelNames]);
 
-  // ---- Conditional sections ----
-  const graphEnabled = Form.useWatch("is_exist_graph", form);
-  const captionEnabled = Form.useWatch("caption_enable", form);
-
   // ---- Defaults ----
   useEffect(() => {
     form.setFieldsValue({
@@ -246,18 +217,6 @@ const AidpCreateKbPage: React.FC = () => {
       group_ids: [],
     });
   }, [form, isUser]);
-
-  /** Label with an optional hint tooltip; repeated by most configuration fields. */
-  const fieldLabel = (text: string, hint?: string) => (
-    <Space>
-      <span>{text}</span>
-      {hint ? (
-        <Tooltip title={hint}>
-          <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-        </Tooltip>
-      ) : null}
-    </Space>
-  );
 
   const steps = [
     { title: t("aidpKnowledge.createStepInfo") },
@@ -441,358 +400,20 @@ const AidpCreateKbPage: React.FC = () => {
   };
 
   const renderStep0 = () => (
-    <Form form={form} layout="vertical" className="mt-4">
-      <h4 className="text-sm font-semibold text-gray-800 mb-2">
-        {t("aidpKnowledge.createSectionBasic")}
-      </h4>
-      <AidpKnowledgeBaseBasicFields t={t} />
-
-      {canConfigureGroupPermissions && (
-        <>
-          <Divider className="my-3" />
-          <h4 className="text-sm font-semibold text-gray-800 mb-2">
-            {t("aidpKnowledge.createSectionPermission")}
-          </h4>
-          <AidpKnowledgeBasePermissionFields
-            t={t}
-            groupOptions={groupOptions}
-            ingroupPermission={ingroupPermission}
-          />
-        </>
-      )}
-
-      <Divider className="my-3" />
-      <h4 className="text-sm font-semibold text-gray-800 mb-2">
-        {t("aidpKnowledge.createSectionSafety")}
-      </h4>
-      <Form.Item
-        name="sensitive_intercept_enalbe"
-        valuePropName="checked"
-        label={fieldLabel(
-          t("aidpKnowledge.createSafetyGuard"),
-          t("aidpKnowledge.createSafetyGuardHint")
-        )}
-      >
-        <Switch />
-      </Form.Item>
-
-      <Divider className="my-3" />
-      <h4 className="text-sm font-semibold text-gray-800 mb-2">
-        {t("aidpKnowledge.createSectionGraph")}
-      </h4>
-      <Form.Item
-        name="is_exist_graph"
-        valuePropName="checked"
-        label={fieldLabel(
-          t("aidpKnowledge.createGraphEnable"),
-          t("aidpKnowledge.createGraphEnableHint")
-        )}
-      >
-        <Switch />
-      </Form.Item>
-
-      {graphEnabled && (
-        <>
-          <Form.Item
-            name="graph_domain"
-            label={t("aidpKnowledge.createGraphDomain")}
-          >
-            <Select
-              options={[
-                {
-                  value: "general",
-                  label: t("aidpKnowledge.createGraphDomainGeneral"),
-                },
-                {
-                  value: "medical",
-                  label: t("aidpKnowledge.createGraphDomainMedical"),
-                },
-                {
-                  value: "finance",
-                  label: t("aidpKnowledge.createGraphDomainFinance"),
-                },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            name="graph_topk"
-            label={t("aidpKnowledge.createGraphTopk")}
-            rules={[{ type: "number", min: 1, max: 100 }]}
-          >
-            <InputNumber style={{ width: "100%" }} min={1} max={100} />
-          </Form.Item>
-          <Form.Item
-            name="graph_hop"
-            label={t("aidpKnowledge.createGraphHop")}
-            rules={[{ type: "number", min: 1, max: 3 }]}
-          >
-            <InputNumber style={{ width: "100%" }} min={1} max={3} />
-          </Form.Item>
-          <Form.Item
-            name="llm_model_name"
-            label={fieldLabel(
-              t("aidpKnowledge.createGraphModel"),
-              t("aidpKnowledge.createGraphModelHint")
-            )}
-            rules={[
-              {
-                required: true,
-                message: t("aidpKnowledge.createGraphModelRequired"),
-              },
-            ]}
-          >
-            <Select
-              showSearch
-              allowClear
-              loading={llmModelsLoading}
-              notFoundContent={
-                llmModelsLoading
-                  ? t("aidpKnowledge.createModelLoading")
-                  : t("aidpKnowledge.createModelNone")
-              }
-              placeholder={t("aidpKnowledge.createModelSearch")}
-              options={llmModelOptions.map((name) => ({
-                label: name,
-                value: name,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item
-            name="graph_thinking"
-            valuePropName="checked"
-            label={fieldLabel(
-              t("aidpKnowledge.createGraphThinking"),
-              t("aidpKnowledge.createGraphThinkingHint")
-            )}
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            name="graph_prompt_language"
-            label={t("aidpKnowledge.createGraphPromptLanguage")}
-          >
-            <Select
-              options={[
-                {
-                  value: "chinese",
-                  label: t("aidpKnowledge.createGraphPromptZh"),
-                },
-                {
-                  value: "english",
-                  label: t("aidpKnowledge.createGraphPromptEn"),
-                },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            name="graph_prompt_text"
-            label={fieldLabel(
-              t("aidpKnowledge.createGraphPromptText"),
-              t("aidpKnowledge.createGraphPromptHint")
-            )}
-            rules={[
-              {
-                validator: (_rule, value: string) => {
-                  if (byteLength(value || "") <= GRAPH_PROMPT_MAX_BYTES) {
-                    return Promise.resolve();
-                  }
-                  return Promise.reject(
-                    new Error(t("aidpKnowledge.createGraphPromptTooLong"))
-                  );
-                },
-              },
-            ]}
-          >
-            <Input.TextArea rows={8} />
-          </Form.Item>
-          <Form.Item
-            name="graph_synonym_merge"
-            valuePropName="checked"
-            label={t("aidpKnowledge.createGraphSynonymMerge")}
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            name="graph_disambiguation"
-            valuePropName="checked"
-            label={t("aidpKnowledge.createGraphDisambiguation")}
-          >
-            <Switch />
-          </Form.Item>
-        </>
-      )}
-
-      <Divider className="my-3" />
-      <h4 className="text-sm font-semibold text-gray-800 mb-2">
-        {t("aidpKnowledge.createSectionChunk")}
-      </h4>
-      <Form.Item
-        name="chunk_mode"
-        label={t("aidpKnowledge.createChunkMode")}
-        rules={[{ required: true }]}
-      >
-        <Select
-          options={[
-            {
-              value: 0,
-              label: t("aidpKnowledge.createChunkModeSmart"),
-            },
-            {
-              value: 1,
-              label: t("aidpKnowledge.createChunkModeLegal"),
-            },
-          ]}
-        />
-      </Form.Item>
-      <Form.Item
-        name="chunk_token_num"
-        label={t("aidpKnowledge.createChunkTokenNum")}
-        dependencies={["chunk_overlap_percent"]}
-        rules={[
-          {
-            required: true,
-            message: t("aidpKnowledge.createChunkTokenNumRequired"),
-          },
-          {
-            type: "number",
-            min: CHUNK_TOKEN_MIN,
-            max: CHUNK_TOKEN_MAX,
-            message: t("aidpKnowledge.createChunkTokenNumRange", {
-              min: CHUNK_TOKEN_MIN,
-              max: CHUNK_TOKEN_MAX,
-            }),
-          },
-        ]}
-      >
-        <InputNumber
-          style={{ width: "100%" }}
-          min={CHUNK_TOKEN_MIN}
-          max={CHUNK_TOKEN_MAX}
-        />
-      </Form.Item>
-      <Form.Item
-        name="chunk_overlap_percent"
-        label={fieldLabel(
-          t("aidpKnowledge.createOverlapPercent"),
-          t("aidpKnowledge.createOverlapPercentHint")
-        )}
-        rules={[
-          {
-            required: true,
-            message: t("aidpKnowledge.createOverlapPercentRequired"),
-          },
-          {
-            type: "number",
-            min: 0,
-            max: OVERLAP_PERCENT_MAX,
-            message: t("aidpKnowledge.createOverlapPercentRange", {
-              max: OVERLAP_PERCENT_MAX,
-            }),
-          },
-        ]}
-      >
-        <InputNumber
-          style={{ width: "100%" }}
-          min={0}
-          max={OVERLAP_PERCENT_MAX}
-          step={0.5}
-          addonAfter="%"
-        />
-      </Form.Item>
-
-      <Collapse
-        ghost
-        size="small"
-        items={[
-          {
-            key: "vector_and_retrieval",
-            label: t("aidpKnowledge.createAdvancedOptions"),
-            children: (
-              <>
-                <Form.Item
-                  name="embedding_model"
-                  label={t("aidpKnowledge.createEmbeddingModel")}
-                  rules={[{ required: true }]}
-                >
-                  <Select
-                    showSearch
-                    loading={embeddingModelsLoading}
-                    notFoundContent={
-                      embeddingModelsLoading
-                        ? t("aidpKnowledge.createModelLoading")
-                        : t("aidpKnowledge.createModelNone")
-                    }
-                    options={embeddingModelOptions.map((name) => ({
-                      label: name,
-                      value: name,
-                    }))}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="caption_enable"
-                  valuePropName="checked"
-                  label={
-                    <Space>
-                      <span>{t("aidpKnowledge.createCaptionEnable")}</span>
-                      <Tooltip
-                        title={t("aidpKnowledge.createCaptionEnableHint")}
-                      >
-                        <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-                      </Tooltip>
-                    </Space>
-                  }
-                >
-                  <Switch />
-                </Form.Item>
-                {captionEnabled && (
-                  <Form.Item
-                    name="vlm_model"
-                    label={t("aidpKnowledge.createVlmModel")}
-                  >
-                    <Select
-                      showSearch
-                      allowClear
-                      loading={vlmModelsLoading}
-                      notFoundContent={
-                        vlmModelsLoading
-                          ? t("aidpKnowledge.createModelLoading")
-                          : t("aidpKnowledge.createModelNone")
-                      }
-                      placeholder={t("aidpKnowledge.createModelSearch")}
-                      options={vlmModelOptions.map((name) => ({
-                        label: name,
-                        value: name,
-                      }))}
-                    />
-                  </Form.Item>
-                )}
-                <Form.Item
-                  name="similarity"
-                  label={t("aidpKnowledge.createSimilarity")}
-                  rules={[{ type: "number", min: 0, max: 1 }]}
-                >
-                  <InputNumber
-                    style={{ width: "100%" }}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="topk"
-                  label={t("aidpKnowledge.createTopk")}
-                  rules={[{ type: "number", min: 1, max: 100 }]}
-                >
-                  <InputNumber style={{ width: "100%" }} min={1} max={100} />
-                </Form.Item>
-              </>
-            ),
-          },
-        ]}
-      />
-    </Form>
+    <AidpCreateKbSections
+      form={form}
+      t={t}
+      canConfigureGroupPermissions={canConfigureGroupPermissions}
+      groupOptions={groupOptions}
+      ingroupPermission={ingroupPermission}
+      llmModelOptions={llmModelOptions}
+      llmModelsLoading={llmModelsLoading}
+      vlmModelOptions={vlmModelOptions}
+      vlmModelsLoading={vlmModelsLoading}
+      embeddingModelOptions={embeddingModelOptions}
+      embeddingModelsLoading={embeddingModelsLoading}
+    />
   );
-
   const renderStep1 = () => (
     <div className="mt-4">
       <Dragger
@@ -864,74 +485,80 @@ const AidpCreateKbPage: React.FC = () => {
   );
 
   return (
-    <div className="w-full h-full mx-auto relative flex flex-col max-w-3xl px-4">
-      <div className="flex-1 min-h-0 w-full mt-4 overflow-y-auto pb-4">
-        <div className="mb-3 flex items-center gap-2">
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={goBackToList}
-            size="small"
-            disabled={loading}
-          >
-            {t("aidpKnowledge.createBackToList")}
-          </Button>
-          <h2 className="text-base font-semibold text-gray-800">
-            {t("aidpKnowledge.createPageTitle")}
-          </h2>
-        </div>
+    <div className="relative flex h-full min-h-0 w-full flex-col">
+      <header className="shrink-0 px-4 pb-5 pt-4 md:px-7 md:pt-5">
+        <Breadcrumb
+          items={[
+            {
+              title: (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={goBackToList}
+                  className="text-gray-500 hover:text-blue-500 disabled:cursor-not-allowed"
+                >
+                  {t("aidpKnowledge.createBreadcrumbKnowledge")}
+                </button>
+              ),
+            },
+            { title: t("aidpKnowledge.createPageTitle") },
+          ]}
+        />
+        <Steps className="mt-6" current={current} items={steps} size="small" />
+      </header>
 
-        <div className="bg-white border border-gray-200 rounded-md p-4">
-          <Steps current={current} items={steps} size="small" />
-          <Divider className="my-3" />
-          {/* Keep the first step mounted: its field values must survive moving
-              back and forth between the two steps. */}
-          <div className={current === 0 ? "" : "hidden"}>{renderStep0()}</div>
-          {current === 1 && renderStep1()}
-        </div>
+      <Divider className="my-0 shrink-0" />
 
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <div>
-            {current === 1 && (
-              <Button onClick={handleBack} disabled={loading}>
-                {t("aidpKnowledge.createBack")}
-              </Button>
-            )}
-          </div>
-          <Space>
-            <Button onClick={goBackToList} disabled={loading}>
-              {t("common.cancel")}
-            </Button>
-            {current === 0 && (
-              <Button type="primary" onClick={handleNext}>
-                {t("aidpKnowledge.createNext")}
-              </Button>
-            )}
-            {current === 1 && (
-              <Button
-                type={fileList.length === 0 ? "primary" : "default"}
-                loading={loading}
-                onClick={() => void handleSubmit(true)}
-              >
-                {t("aidpKnowledge.createSkipUpload")}
-              </Button>
-            )}
-            {current === 1 && fileList.length > 0 && (
-              <Button
-                type="primary"
-                loading={loading}
-                onClick={() => void handleSubmit(false)}
-              >
-                {t("aidpKnowledge.createSubmit")}
-              </Button>
-            )}
-          </Space>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-7">
+        {/* Keep the first step mounted so form fields survive step changes. */}
+        <div className={current === 0 ? "w-full" : "hidden"}>
+          {renderStep0()}
         </div>
-        {loading && (
-          <div className="mt-2 text-xs text-gray-400 text-center">
-            {t("aidpKnowledge.createSubmitting")}
-          </div>
-        )}
+        {current === 1 && renderStep1()}
       </div>
+
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-200 bg-white px-4 py-3 md:px-7">
+        <div>
+          {current === 1 && (
+            <Button onClick={handleBack} disabled={loading}>
+              {t("aidpKnowledge.createBack")}
+            </Button>
+          )}
+        </div>
+        <Space wrap>
+          <Button onClick={goBackToList} disabled={loading}>
+            {t("common.cancel")}
+          </Button>
+          {current === 0 && (
+            <Button type="primary" onClick={handleNext}>
+              {t("aidpKnowledge.createNext")}
+            </Button>
+          )}
+          {current === 1 && (
+            <Button
+              type={fileList.length === 0 ? "primary" : "default"}
+              loading={loading}
+              onClick={() => void handleSubmit(true)}
+            >
+              {t("aidpKnowledge.createSkipUpload")}
+            </Button>
+          )}
+          {current === 1 && fileList.length > 0 && (
+            <Button
+              type="primary"
+              loading={loading}
+              onClick={() => void handleSubmit(false)}
+            >
+              {t("aidpKnowledge.createSubmit")}
+            </Button>
+          )}
+        </Space>
+      </footer>
+      {loading && (
+        <div className="absolute bottom-[4.5rem] left-1/2 -translate-x-1/2 rounded bg-white px-3 py-1 text-xs text-gray-500 shadow">
+          {t("aidpKnowledge.createSubmitting")}
+        </div>
+      )}
     </div>
   );
 };

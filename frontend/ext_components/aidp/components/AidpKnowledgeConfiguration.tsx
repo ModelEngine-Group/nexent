@@ -94,6 +94,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const KB_PAGE_SIZE = 10;
   const DOC_PAGE_SIZE = 10;
   const [kbPage, setKbPage] = useState(1);
+  const [kbPageSize, setKbPageSize] = useState(KB_PAGE_SIZE);
   const [docPage, setDocPage] = useState(1);
 
   // ---- Modal state ----
@@ -101,6 +102,13 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [editingKb, setEditingKb] = useState<AidpKnowledgeBaseItem | null>(
     null
   );
+  const [quickImportKb, setQuickImportKb] =
+    useState<AidpKnowledgeBaseItem | null>(null);
+  const [quickImportWatchKbId, setQuickImportWatchKbId] = useState<
+    string | null
+  >(null);
+  const quickImportPendingIdsRef = useRef<string[]>([]);
+  const quickImportWatchStartedAtRef = useRef(0);
 
   // ---- Keyword search state ----
   // `kbKeyword` is the raw input value and keeps the text field responsive;
@@ -118,13 +126,17 @@ const AidpKnowledgeConfiguration: React.FC = () => {
 
   // ---- Fetch KB list (server-side pagination: each page fetches page_size items + Count total) ----
   const fetchKbs = useCallback(
-    async (page: number = 1, keyword: string = "") => {
+    async (
+      page: number = 1,
+      keyword: string = "",
+      pageSize: number = KB_PAGE_SIZE
+    ) => {
       setLoadingKbs(true);
       setKbsLoadFailed(false);
       try {
         const result = await aidpKnowledgeService.listKbs(
           page,
-          KB_PAGE_SIZE,
+          pageSize,
           keyword
         );
         setKbs(result.value);
@@ -152,8 +164,8 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   // number is meaningless against a different result set and would otherwise
   // render an empty list whenever the filtered set is shorter than that page.
   useEffect(() => {
-    fetchKbs(1, debouncedKbKeyword);
-  }, [fetchKbs, debouncedKbKeyword]);
+    fetchKbs(1, debouncedKbKeyword, kbPageSize);
+  }, [fetchKbs, debouncedKbKeyword, kbPageSize]);
 
   // ---- Cleanup legacy localStorage credentials on mount ----
   // v7.1: AIDP credentials moved backend-side; frontends that pre-date the
@@ -376,7 +388,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             }
 
             // Refresh list, keeping the active search filter applied
-            void fetchKbs(kbPage, debouncedKbKeyword);
+            void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
           } catch (error) {
             appMessage.error(t("aidpKnowledge.deleteKbFailed"));
           }
@@ -389,6 +401,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       t,
       fetchKbs,
       kbPage,
+      kbPageSize,
       debouncedKbKeyword,
       clearFileView,
     ]
@@ -454,6 +467,58 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     },
     [activeKbId, fetchDocs, refreshActiveKbDetail, startUploadWatch]
   );
+
+  // Quick imports run from the overview card menu. Keep their status polling
+  // independent from the currently open document page so a late response can
+  // never replace another knowledge base's documents.
+  const handleQuickDocsUploaded = useCallback(
+    (uploadedFileIds: string[]) => {
+      if (!quickImportKb || uploadedFileIds.length === 0) return;
+      quickImportPendingIdsRef.current = uploadedFileIds;
+      quickImportWatchStartedAtRef.current = Date.now();
+      setQuickImportWatchKbId(quickImportKb.kds_id);
+      void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
+    },
+    [quickImportKb, fetchKbs, kbPage, debouncedKbKeyword, kbPageSize]
+  );
+
+  useEffect(() => {
+    if (!quickImportWatchKbId) return;
+    const timer = window.setInterval(() => {
+      if (
+        Date.now() - quickImportWatchStartedAtRef.current >
+        AIDP_DOC_UPLOAD_WATCH_TIMEOUT_MS
+      ) {
+        quickImportPendingIdsRef.current = [];
+        setQuickImportWatchKbId(null);
+        void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
+        return;
+      }
+      void aidpKnowledgeService
+        .listDocs(quickImportWatchKbId, 1, DOC_PAGE_SIZE)
+        .then((result) => {
+          quickImportPendingIdsRef.current = findPendingUploadIds(
+            quickImportPendingIdsRef.current,
+            result.value
+          );
+          if (
+            quickImportPendingIdsRef.current.length === 0 &&
+            (result.processing_count ?? 0) === 0
+          ) {
+            setQuickImportWatchKbId(null);
+            void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
+          }
+        })
+        .catch((error) =>
+          log.error("Failed to poll AIDP quick-import documents:", error)
+        );
+    }, AIDP_DOC_STATUS_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [quickImportWatchKbId, fetchKbs, kbPage, debouncedKbKeyword, kbPageSize]);
+
+  const handleKbPageSizeChange = useCallback((pageSize: number) => {
+    setKbPageSize(pageSize);
+  }, []);
 
   // ---- Manual refresh (refresh button) ----
   // Refreshes the visible page and the KB metadata but never starts an upload
@@ -537,7 +602,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       className="w-full h-full mx-auto relative flex flex-col"
       style={containerStyle}
     >
-      <div className="flex-1 min-h-0 w-full mt-4 overflow-y-auto">
+      <div className="flex-1 min-h-0 w-full mt-4 overflow-hidden">
         <AidpKnowledgeList
           kbs={kbs}
           isLoading={loadingKbs}
@@ -546,22 +611,55 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           totalReliable={kbTotalReliable}
           hasMore={kbHasMore}
           currentPage={kbPage}
-          pageSize={KB_PAGE_SIZE}
+          pageSize={kbPageSize}
           keyword={kbKeyword}
           viewMode={viewMode}
           visibleColumns={visibleColumns}
           onKeywordChange={setKbKeyword}
-          onPageChange={(page) => fetchKbs(page, debouncedKbKeyword)}
+          onPageChange={(page) =>
+            fetchKbs(page, debouncedKbKeyword, kbPageSize)
+          }
+          onPageSizeChange={handleKbPageSizeChange}
           onViewModeChange={setViewMode}
           onVisibleColumnsChange={setVisibleColumns}
           onSelect={handleSelectKb}
-          onRefresh={() => fetchKbs(kbPage, debouncedKbKeyword)}
+          onRefresh={() => fetchKbs(kbPage, debouncedKbKeyword, kbPageSize)}
           onCreateNew={handleCreateNew}
+          onImport={setQuickImportKb}
           onEdit={handleEditKb}
           onDelete={handleDeleteKb}
-          onRetry={() => fetchKbs(kbPage, debouncedKbKeyword)}
+          onRetry={() => fetchKbs(kbPage, debouncedKbKeyword, kbPageSize)}
         />
       </div>
+
+      <Modal
+        title={t("aidpKnowledge.importFileTitle", {
+          name: quickImportKb?.kds_name || "",
+        })}
+        open={Boolean(quickImportKb)}
+        onCancel={() => setQuickImportKb(null)}
+        footer={null}
+        destroyOnClose
+        width={760}
+        centered
+      >
+        {quickImportKb && (
+          <AidpDocumentList
+            activeKb={quickImportKb}
+            documents={[]}
+            totalDocs={0}
+            totalReliable={false}
+            hasMore={false}
+            isLoading={false}
+            currentPage={1}
+            pageSize={DOC_PAGE_SIZE}
+            onPageChange={() => undefined}
+            onDocsUploaded={handleQuickDocsUploaded}
+            onRefresh={() => fetchKbs(kbPage, debouncedKbKeyword, kbPageSize)}
+            uploadOnly
+          />
+        )}
+      </Modal>
 
       {/* Update KB Modal */}
       <AidpUpdateKbModal
