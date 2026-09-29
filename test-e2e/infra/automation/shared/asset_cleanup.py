@@ -77,7 +77,7 @@ async def _delete_partial_evaluation_runs(api: Any, *, assets: dict[str, Any],
     return deleted
 
 
-async def cleanup_registered_assets() -> list[dict[str, Any]]:
+async def cleanup_registered_assets(*, owner_case_ids: set[str] | None = None) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     identities: dict[str, Any] = {}
     entries: list[tuple[str, str, dict[str, Any]]] = []
@@ -91,6 +91,7 @@ async def cleanup_registered_assets() -> list[dict[str, Any]]:
                 and entry.get("source") == "dynamic"
                 and entry.get("cleanup")
                 and entry.get("state") != "DELETED"
+                and (owner_case_ids is None or entry.get("owner_case_id") in owner_case_ids)
             ):
                 entries.append((section, key, entry))
 

@@ -8,3 +8,8 @@ implementations:
   file: test-e2e/infra/automation/d5/scenarios/scenario_reliability_deployment_special.py
   selector: DEP-01
 notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []

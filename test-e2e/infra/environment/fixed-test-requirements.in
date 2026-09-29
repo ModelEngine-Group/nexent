@@ -1,0 +1,23 @@
+# Dependencies imported directly by fixed D1-D5 automation.
+# Historical extra requirements. This is NOT a reproducible lockfile.
+# Review and resolve against backend/uv.lock before enabling them in bootstrap.
+celery>=5.4,<6
+nest-asyncio>=1.6,<2
+psycopg2-binary>=2.9,<3
+smolagents[mcp]==1.23.0
+boto3==1.42.95
+pymysql>=1.1,<2
+elasticsearch==8.17.2
+# SDK-only dependencies omitted by its editable --no-deps installation.
+exa_py==1.14.0
+jieba>=0.42.1
+docker>=7.0.0
+kubernetes>=29.0.0
+tavily-python
+linkup-sdk
+paramiko>=3.4.0
+pymssql>=2.2.11
+ijson==3.5.0
+langchain-text-splitters==1.1.2
+ebooklib==0.20
+pypandoc==1.17

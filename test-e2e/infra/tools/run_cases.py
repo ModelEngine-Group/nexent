@@ -15,6 +15,19 @@ import re
 import shutil
 import subprocess
 import sys
+from xml.etree import ElementTree
+
+if __name__ == "__main__" and any(arg == "--test-home" or arg.startswith("--test-home=") for arg in sys.argv[1:]):
+    from launch_runtime import selected_python
+
+    try:
+        runtime = selected_python(["run", *sys.argv[1:]], Path(sys.executable))
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from None
+    if runtime is not None:
+        raise SystemExit(subprocess.call([str(runtime), str(Path(__file__).resolve()), *sys.argv[1:]],
+                                         env=os.environ.copy()))
 
 import yaml
 
@@ -109,7 +122,8 @@ def command_for(record: dict, repo: Path, result_dir: Path, env: dict[str, str])
         if not node:
             raise ValueError("node is required for D1 frontend cases")
         return [[node, str(binary), "run", "--config", str(package / "vitest.config.ts"),
-                 str(script), "--testNamePattern", entry["selector"]]], package
+                 str(script), "--testNamePattern", entry["selector"],
+                 "--reporter=junit", f"--outputFile={result_dir / 'junit.xml'}"]], package
     if framework == "playwright":
         package = repo / "test-e2e/infra/automation/d4"
         binary = package / "node_modules/playwright/cli.js"
@@ -134,37 +148,97 @@ def command_for(record: dict, repo: Path, result_dir: Path, env: dict[str, str])
             [sys.executable, str(control), "prepare", "--plan", str(plan), "--results", str(results),
              "--result-dir", str(result_dir), "--output", str(queue)],
             [node, str(binary), "test", "--config", str(package / "playwright.config.ts"),
-             str(script), "--grep", f"^{re.escape(entry['selector'])}$"],
+             str(script), "--grep", entry["selector"]],
             [sys.executable, str(control), "audit", "--queue", str(queue), "--results", str(results),
              "--result-dir", str(result_dir)],
         ], repo
     raise ValueError(f"Unsupported execution framework for {record['case_id']}: {framework}")
 
 
-def run_one(record: dict, repo: Path, home: Path, env: dict[str, str]) -> tuple[str, int, Path]:
+def junit_outcome(path: Path) -> tuple[str, dict[str, int]]:
+    if not path.is_file():
+        return "AUTOMATION_ERROR", {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    try:
+        cases = list(ElementTree.parse(path).getroot().iter("testcase"))
+    except ElementTree.ParseError:
+        return "AUTOMATION_ERROR", {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    counts = {
+        "tests": len(cases),
+        "failures": sum(case.find("failure") is not None for case in cases),
+        "errors": sum(case.find("error") is not None for case in cases),
+        "skipped": sum(case.find("skipped") is not None for case in cases),
+    }
+    if not counts["tests"]:
+        return "AUTOMATION_ERROR", counts
+    if counts["failures"] or counts["errors"]:
+        return "FAIL", counts
+    if counts["skipped"]:
+        return "BLOCKED", counts
+    return "PASS", counts
+
+
+def tap_outcome(path: Path) -> tuple[str, dict[str, int]]:
+    summary = dict((key, int(value)) for key, value in re.findall(
+        r"(?m)^# (tests|pass|fail|skipped|todo) (\d+)\s*$", path.read_text(encoding="utf-8", errors="replace")))
+    if not summary.get("tests"):
+        return "AUTOMATION_ERROR", summary
+    if summary.get("fail"):
+        return "FAIL", summary
+    if summary.get("skipped") or summary.get("todo"):
+        return "BLOCKED", summary
+    return ("PASS" if summary.get("pass") == summary["tests"] else "AUTOMATION_ERROR"), summary
+
+
+def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result_dir: Path | None = None) -> tuple[str, str, Path]:
     case_id = record["case_id"]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    result_dir = home / "runs" / "repository-local" / f"{stamp}-{case_id}"
-    result_dir.mkdir(parents=True, exist_ok=False)
+    if result_dir is None:
+        result_dir = home / "runs" / "repository-local" / f"{stamp}-{case_id}"
+        result_dir.mkdir(parents=True, exist_ok=False)
+    else:
+        result_dir = result_dir.resolve()
+        if not result_dir.is_relative_to(home.resolve() / "runs"):
+            raise ValueError("Case result directory must stay under test-home/runs")
+        result_dir.mkdir(parents=True, exist_ok=True)
     if os.name != "nt":
         result_dir.chmod(0o700)
     run_env = dict(env, RESULT_DIR=str(result_dir))
     commands, cwd = command_for(record, repo, result_dir, run_env)
+    framework = record["execution"]["implementations"][0]["framework"]
     exit_code = 0
+    last_log = result_dir / "step-1.log"
     for number, command in enumerate(commands, 1):
         log = result_dir / f"step-{number}.log"
+        last_log = log
         with log.open("w", encoding="utf-8") as output:
             result = subprocess.run(command, cwd=cwd, env=run_env, stdout=output, stderr=subprocess.STDOUT,
                                     check=False)
         if result.returncode:
             exit_code = result.returncode
             break
+    status = "PASS" if exit_code == 0 else "EXECUTION_FAILED"
+    summary = None
+    if framework in {"pytest", "vitest"}:
+        observed, summary = junit_outcome(result_dir / "junit.xml")
+        if observed != "PASS" or exit_code == 0:
+            status = observed
+    elif framework == "custom":
+        observed, summary = tap_outcome(last_log)
+        if observed != "PASS" or exit_code == 0:
+            status = observed
+    elif framework == "playwright" and exit_code == 0:
+        status_path = result_dir / "d4" / case_id / "status.json"
+        try:
+            status = "PASS" if json.loads(status_path.read_text(encoding="utf-8")).get("status") == "PASS" else "EXECUTION_FAILED"
+        except (OSError, ValueError):
+            status = "AUTOMATION_ERROR"
     (result_dir / "status.json").write_text(json.dumps({
         "schema_version": 1, "case_id": case_id,
-        "stage": record["stage"], "status": "PASS" if exit_code == 0 else "EXECUTION_FAILED",
+        "stage": record["stage"], "status": status,
         "exit_code": exit_code, "steps_completed": number,
+        **({"test_summary": summary} if summary is not None else {}),
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return case_id, exit_code, result_dir
+    return case_id, status, result_dir
 
 
 def main() -> int:
@@ -201,9 +275,9 @@ def main() -> int:
     env = machine_environment(home, repo)
     failed = 0
     for case_id in dict.fromkeys(args.case_ids):
-        actual_id, exit_code, result_dir = run_one(cases[case_id], repo, home, env)
-        print(f"{actual_id}: {'PASS' if exit_code == 0 else f'EXIT_{exit_code}'}; local evidence: {result_dir}")
-        failed += exit_code != 0
+        actual_id, status, result_dir = run_one(cases[case_id], repo, home, env)
+        print(f"{actual_id}: {status}; local evidence: {result_dir}")
+        failed += status != "PASS"
     return 1 if failed else 0
 
 

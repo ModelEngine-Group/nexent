@@ -5,3 +5,8 @@ implementations:
   file: test.py
   selector: API-AUTO-6A4110F4BD10BA0F
 notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

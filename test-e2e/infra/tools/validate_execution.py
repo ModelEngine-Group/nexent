@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from jsonschema import Draft202012Validator
 
 from test_asset_lib import (
     ValidationIssue, case_index, discover_documents, implementation_hash,
@@ -13,7 +14,7 @@ from test_asset_lib import (
 
 
 FRAMEWORKS = {"pytest", "vitest", "playwright", "custom"}
-EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes"}
+EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes", "preparation"}
 IMPLEMENTATION_FIELDS = {"framework", "file", "selector", "profiles"}
 
 
@@ -83,6 +84,13 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
                 "required_assets": raw.get("required_assets", []),
                 "required_mock_services": raw.get("required_mock_services", []),
             }
+            if "preparation" in raw:
+                schema = json.loads((root / "test-e2e/infra/schemas/preparation.schema.json").read_text(encoding="utf-8"))
+                errors = list(Draft202012Validator(schema).iter_errors(raw["preparation"]))
+                if errors:
+                    issues.append(ValidationIssue(execution_path, "preparation", "Invalid preparation declaration"))
+                else:
+                    record["execution"]["preparation"] = raw["preparation"]
     registry = {"schema_version": "1.0", "cases": [entries[key] for key in sorted(entries)]}
     return issues, registry
 

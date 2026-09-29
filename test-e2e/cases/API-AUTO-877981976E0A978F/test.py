@@ -11,6 +11,7 @@ from sqlalchemy import inspect
 from shared.auth import sign_in
 from shared.config import load_yaml
 from shared.http import assert_status, client
+from shared.factories.case_resources import cleanup_case, register_http
 
 
 def _asset_owner_enabled() -> bool:
@@ -33,7 +34,6 @@ if not _asset_owner_enabled():
 CASE_ID = 'API-AUTO-877981976E0A978F'
 NORTHBOUND_SERVICE = 'nexent-northbound'
 CONFIG_SERVICE = 'nexent-config'
-ASSET_OWNER_TENANT_ID = 'asset_owner_tenant_id'
 SCHEMA = 'nexent'
 
 
@@ -50,23 +50,32 @@ async def asset_owner_northbound_key(asset_owner):
         payload = created.json().get('data') or created.json()
         token_id = payload.get('token_id') or payload.get('id')
         secret = payload.get('access_key') or payload.get('token')
+        if token_id:
+            register_http(asset_owner, CASE_ID, 'owned_identity_tokens', token_id, f'/user/tokens/{token_id}')
         if not token_id or not secret:
             raise AssertionError('asset-owner token creation did not return token_id and access_key')
     try:
         yield str(secret)
     finally:
         async with client('config', token=asset_owner.access_token) as api:
-            await api.delete(f'/user/tokens/{token_id}')
+            deleted = await api.delete(f'/user/tokens/{token_id}')
+            assert_status(deleted, (200, 404))
 
 
-def _embedding_model_id():
+@pytest_asyncio.fixture
+async def owned_lifecycle_cleanup():
+    async with cleanup_case(CASE_ID):
+        yield
+
+
+def _embedding_model_id(identity):
     from database.model_management_db import get_model_records
 
     # The northbound create endpoint resolves the model inside the caller's
     # tenant (asset-owner tenant), so a system-tenant model id is rejected with
     # "Embedding model with id N not found".  The anchor provisions the
     # asset-owner anchor models for exactly this lookup.
-    records = get_model_records({'model_type': 'embedding'}, tenant_id=ASSET_OWNER_TENANT_ID)
+    records = get_model_records({'model_type': 'embedding'}, tenant_id=identity.tenant_id)
     if not records:
         return None
     return int(records[0]['model_id'])
@@ -92,7 +101,7 @@ def _set_uploading_older_than(file_id: str, cutoff: datetime) -> None:
 
 @pytest.mark.case_id(CASE_ID)
 @pytest.mark.stage('D3')
-async def test_upload_owner_service_isolation(asset_owner, asset_owner_northbound_key):
+async def test_upload_owner_service_isolation(owned_lifecycle_cleanup, asset_owner, asset_owner_northbound_key):
     from database.client import db_client
     from database.db_models import KnowledgeFileLifecycle
     from database.knowledge_file_lifecycle_db import (
@@ -113,7 +122,7 @@ async def test_upload_owner_service_isolation(asset_owner, asset_owner_northboun
     run_id = str(uuid4()).replace('-', '')[:12]
     index_name = f'kb-{run_id}'
 
-    embedding_model_id = _embedding_model_id()
+    embedding_model_id = _embedding_model_id(asset_owner)
     body = {'embedding_model_id': embedding_model_id} if embedding_model_id else None
 
     async with client('northbound', api_key=asset_owner_northbound_key) as nb:
@@ -124,9 +133,12 @@ async def test_upload_owner_service_isolation(asset_owner, asset_owner_northboun
         # service generates the internal index name.  The upload endpoints (and
         # the config-service upload, which resolves the name against
         # knowledge_t) take that internal name; a display name answers 404.
-        internal_name = str(
-            created_body.get('id') or created_body.get('index_name') or index_name
-        )
+        internal_name = str(created_body.get('id') or created_body.get('index_name') or '')
+        if not internal_name:
+            from shared.factories.knowledge import register_partial_knowledge
+            register_partial_knowledge(asset_owner, index_name, owner=CASE_ID, role=index_name)
+            raise AssertionError('northbound KB creation omitted its internal index ID')
+        register_http(asset_owner, CASE_ID, 'owned_knowledge', internal_name, f'/indices/{internal_name}')
 
         filename_a = f'file-a-{run_id}.txt'
         upload_a = await nb.post(
@@ -185,7 +197,5 @@ async def test_upload_owner_service_isolation(asset_owner, asset_owner_northboun
     assert asset_owner_northbound_key not in str(payload_b)
     assert asset_owner.access_token not in str(payload_b)
 
-    delete_file_record(row_a['file_id'])
-    delete_file_record(row_b['file_id'])
-    async with client('northbound', api_key=asset_owner_northbound_key) as nb:
-        await nb.delete(f'/nb/v1/knowledge/indices/{internal_name}')
+    # The fixture removes the owned KB through the product API, including files.
+    # Do not delete lifecycle rows first: that would discard object/task cleanup metadata.

@@ -5,3 +5,9 @@ implementations:
   file: test.py
   selector: API-128
 notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - automation_task
+  anchors: true
+  special_assets: false
+  d4_groups: []

@@ -1,0 +1,19 @@
+# Copy to machine-local config/test-assets.yaml; IDs are resolved per deployment.
+agents: {}
+skills: {}
+a2a: {}
+files:
+  basic_text: assets/documents/basic.txt
+  image: assets/images/vlm-marker.png
+audio:
+  stt_wav: assets/audio/stt-16k-mono.pcm
+  stt_expected: assets/expected/stt_expected.json
+video: {}
+images: {}
+evaluation: {}
+external_knowledge: {}
+sharing: {}
+security: {}
+performance: {}
+reliability: {}
+deployment: {}

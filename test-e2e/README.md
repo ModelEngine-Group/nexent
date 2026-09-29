@@ -37,15 +37,39 @@ The last command is read-only and fails on stale generated views. Design mode pe
 
 ## Run a developer-selected Case
 
-Each developer provides an absolute, machine-local test home outside this Git checkout. It contains `config/daily.env`, `config/secrets.env`, `config/environment.yaml`, and the assets referenced by that Case. Do not commit local credentials, assets, run IDs, results, or screenshots.
+Each developer provides an absolute, machine-local test home outside this Git checkout. For this Windows workstation use `D:\work\public\nexent-test-suite`; the existing Ubuntu Daily host continues to use `/home/jason/nexent-test-suite`. These are separate machine-local directories, not a shared path or a migration of the Ubuntu controller. The home contains `config/daily.env`, `config/secrets.env`, `config/environment.yaml`, and the assets referenced by a Case. Do not commit local credentials, assets, run IDs, results, or screenshots.
+
+The repository entrypoint can preview missing local configuration without writing anything, then create only missing templates when explicitly requested:
+
+```powershell
+python test-e2e/infra/scripts/run-suite.py onboard --test-home D:\work\public\nexent-test-suite
+python test-e2e/infra/scripts/run-suite.py onboard --test-home D:\work\public\nexent-test-suite --execute
+python test-e2e/infra/scripts/run-suite.py onboard --interactive --execute
+python test-e2e/infra/scripts/run-suite.py doctor --test-home D:\work\public\nexent-test-suite --case UT-SDK-001
+```
+
+In interactive mode, omitting `--test-home` prompts each developer for an absolute path (default: a `nexent-test-suite` sibling of that checkout), followed by service addresses and container hosts. Providing `--test-home` skips only the path prompt. Existing config is never overwritten. Fill any newly created placeholders and credentials locally. `doctor --live` also probes the configured HTTP services; plain `doctor` remains read-only and offline. Plan, doctor, run, resume and daily use only `<test-home>/runtime/test-venv`; bootstrap creates this same environment when needed. See [environment preparation](infra/environment/README.md).
 
 ```bash
 python test-e2e/infra/tools/run_cases.py --list
 python test-e2e/infra/tools/run_cases.py AGT-001 --test-home /absolute/path/to/my-test-home
 ```
 
-On Windows, use the installed Python launcher or the backend virtual environment's `python.exe`, and a Windows absolute path for `--test-home`. The runner creates results under `<test-home>/runs/repository-local/`. It does not install dependencies, deploy the product, or contact GitHub. D4 failure screenshots and traces are retained by the fixed Playwright journey; successful journeys do not retain them. D1 frontend cases require dependencies installed for `infra/automation/d1/frontend`; D4 requires Playwright under its package or the product frontend package.
+On Windows, the Python used to launch the command may be the installed Python launcher; the direct runner switches to `<test-home>/runtime/test-venv` before loading test dependencies. Use a Windows absolute path for `--test-home`. The runner creates results under `<test-home>/runs/repository-local/`. It does not install dependencies, deploy the product, or contact GitHub. D4 failure screenshots and traces are retained by the fixed Playwright journey; successful journeys do not retain them. D1 frontend cases require dependencies installed for `infra/automation/d1/frontend`; D4 requires Playwright under its package or the product frontend package.
 
-## Ubuntu Daily transition
+## Candidate batch entrypoint and Ubuntu Daily transition
+
+The candidate repository batch entrypoint is now available:
+
+```bash
+python test-e2e/infra/scripts/run-suite.py bootstrap --test-home /absolute/path/to/test-home
+python test-e2e/infra/scripts/run-suite.py doctor --test-home /absolute/path/to/test-home
+python test-e2e/infra/scripts/run-suite.py plan --test-home /absolute/path/to/test-home --stage D4
+python test-e2e/infra/scripts/run-suite.py run --test-home /absolute/path/to/test-home --case UT-SDK-001 --execute
+python test-e2e/infra/scripts/run-suite.py resume --test-home /absolute/path/to/test-home --batch-dir /absolute/path/to/interrupted-batch
+# Add --execute only after reviewing the resume preview and local environment.
+```
+
+`bootstrap`, `run`, `daily` and `resume` require `--execute` for side effects. Use `--feature` or `--change` for development selections. Local `resume` accepts only a cleanly finalized, interrupted `run` batch with matching product/test/config bytes and ready static assets; it creates a child batch and retains the source evidence. An interrupted in-flight Case or uncertain cleanup requires manual recovery, not automatic reuse. Daily resume is not enabled. The older `infra/tools/run_cases.py` remains a direct targeted runner and does not share this dry-run default. Batch prerequisites belong to each Case's `execution.yaml`; missing online preparation declarations block execution, but script-hash approval is not required. See [environment preparation](infra/environment/README.md) and the [remaining migration gates](infra/migration/runtime-migration-status.md) before attempting Daily cutover. No live cutover is implied by these commands.
 
 The existing Ubuntu Daily deployment, scheduling, report, and notification controller is external to this repository. Keep it on the existing validated test suite until it has been adapted to read these Case-local contracts and scripts and a same-commit, same-assets parity run passes. The repo's targeted runner is not a replacement for Daily deployment or D0–D6 orchestration. Daily may consume repository assets but must not rewrite them; fixes return through the product branch.

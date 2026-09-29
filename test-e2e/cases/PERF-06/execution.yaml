@@ -8,3 +8,8 @@ implementations:
   file: test-e2e/infra/automation/d5/scenarios/scenario_performance_special.py
   selector: PERF-06
 notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: true
+  special_assets: true
+  d4_groups: []

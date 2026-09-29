@@ -30,6 +30,7 @@ Paths are relative to the repository root. Authoritative assets live under `test
 | `bugfix` | Record a defect, explain the escaped gap, and add/reuse/strengthen regression coverage | [lifecycle.md](references/lifecycle.md), [bugfix.md](references/bugfix.md) |
 | `test-implementation` | Implement fixed scripts and case-local bindings | [test-implementation.md](references/test-implementation.md), [manifest.md](references/manifest.md) |
 | `migration` | Convert V5, fixed scripts, execution bindings, and referenced assets without changing behavior | [migration.md](references/migration.md) |
+| `runtime-migration` | Prepare and verify repository-owned local/Daily execution without switching the operational suite | [runtime-migration.md](references/runtime-migration.md) |
 | `mock-migration` | Add Mock/Real profiles after migration equivalence passes | [mock-profiles.md](references/mock-profiles.md) |
 
 Read only the references needed for the selected mode.

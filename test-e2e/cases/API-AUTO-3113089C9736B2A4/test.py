@@ -6,6 +6,8 @@ from uuid import uuid4
 import pytest
 
 from shared.http import assert_status, client
+from shared.factories.case_resources import owned_tag_client, register_http
+from prepare_d4_shared_assets import _controlled_tool_id
 
 CASE_ID = 'API-AUTO-3113089C9736B2A4'
 SERVICE = 'config'
@@ -39,37 +41,13 @@ async def _active_definition_count(api, bucket_id):
     return len(response.json())
 
 
-async def _discover_tool_resource_id(api):
-    for path in ('/tools', '/tool/list'):
-        response = await api.get(path)
-        if response.status_code == 404:
-            continue
-        assert_status(response, 200)
-        payload = response.json()
-        records = payload if isinstance(payload, list) else []
-        if not records and isinstance(payload, dict):
-            data = payload.get('data')
-            if isinstance(data, list):
-                records = data
-            elif isinstance(data, dict):
-                records = data.get('tools') or data.get('list') or data.get('items') or []
-            else:
-                records = payload.get('tools') or payload.get('list') or payload.get('items') or []
-        for record in records:
-            if isinstance(record, dict):
-                value = record.get('tool_id') or record.get('id')
-                if value is not None:
-                    return int(value)
-    raise AssertionError('no tool resource available for assignment-capacity assertions')
-
-
 @pytest.mark.case_id(CASE_ID)
 @pytest.mark.stage('D3')
-async def test_tag_capacity_and_single_select_constraints(tenant_a_admin, tag_asset_guard):
+async def test_tag_capacity_and_single_select_constraints(tenant_a_admin):
     run = uuid4().hex[:8]
     created_values_by_definition = {}
 
-    async with client(SERVICE, token=tenant_a_admin.access_token) as api:
+    async with owned_tag_client(tenant_a_admin, CASE_ID) as api:
         libraries = await api.get('/tag-libraries')
         assert_status(libraries, 200)
         default = next((lib for lib in libraries.json() if lib.get('bucket_key') == 'default_resource'), None)
@@ -158,7 +136,11 @@ async def test_tag_capacity_and_single_select_constraints(tenant_a_admin, tag_as
         assert details.get('scope') == 'value'
         assert details.get('limit') == VALUE_LIMIT
 
-        tool_resource_id = await _discover_tool_resource_id(api)
+        # Only mutate a tool exposed by this Case's freshly created MCP service.
+        tool_resource_id = await _controlled_tool_id(tenant_a_admin, 'deterministic_add')
+        register_http(tenant_a_admin, CASE_ID, 'owned_tag_assignments', tool_resource_id,
+                      f'/tag-libraries/assignments/tool/{tool_resource_id}',
+                      method='PUT', body={'value_ids': []})
 
         assigned = await api.put(
             f'/tag-libraries/assignments/tool/{tool_resource_id}',

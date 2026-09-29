@@ -3,6 +3,7 @@ import os
 import uuid
 import pytest
 from shared.http import assert_status, client
+from d3.assets import temporary_knowledge_base
 
 CASE_ID = 'API-AUTO-FDE1F77FE645881D'
 STAGE = 'D3'
@@ -22,35 +23,6 @@ def _new_index_name():
 def _lifecycle(file_id):
     from database.knowledge_file_lifecycle_db import get_file_record
     return get_file_record(file_id=file_id, include_hidden=True)
-
-
-def _ensure_knowledge_base(identity, index_name):
-    from database.knowledge_db import create_knowledge_record, get_knowledge_record
-    existing = get_knowledge_record({'index_name': index_name, 'tenant_id': identity.tenant_id})
-    if existing:
-        return str(existing.get('index_name') or index_name)
-    created = create_knowledge_record({
-        'index_name': index_name,
-        'knowledge_name': index_name,
-        'knowledge_describe': 'auto-test parent_task_id persistence',
-        'tenant_id': identity.tenant_id,
-        'user_id': identity.user_id,
-        'ingroup_permission': 'EDIT',
-    })
-    return str(created.get('index_name') or index_name)
-
-
-def _cleanup(index_name, identity):
-    try:
-        from database.knowledge_file_lifecycle_db import delete_file_records_for_knowledge_base
-        delete_file_records_for_knowledge_base(index_name=index_name, tenant_id=identity.tenant_id)
-    except Exception:
-        pass
-    try:
-        from database.knowledge_db import delete_knowledge_record
-        delete_knowledge_record({'index_name': index_name, 'user_id': identity.user_id})
-    except Exception:
-        pass
 
 
 async def _upload(api, index_name, docs):
@@ -80,8 +52,8 @@ def _process_body(index_name, entries):
 @pytest.mark.case_id(CASE_ID)
 async def test_process_persists_parent_task_id(tenant_a_admin):
     identity = tenant_a_admin
-    index_name = _ensure_knowledge_base(identity, _new_index_name())
-    try:
+    async with temporary_knowledge_base(identity, prefix='kb-parent-task') as knowledge:
+        index_name = knowledge['index_name']
         async with client('config', token=identity.access_token) as api:
             legacy_name = f'legacy-{_batch_token()}.txt'
             legacy_records = await _upload(api, index_name, [(legacy_name, b'legacy single file content')])
@@ -152,5 +124,3 @@ async def test_process_persists_parent_task_id(tenant_a_admin):
 
             assert identity.access_token not in legacy_resp.text
             assert identity.access_token not in batch_resp.text
-    finally:
-        _cleanup(index_name, identity)

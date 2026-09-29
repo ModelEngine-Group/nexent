@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "asset_id": "MISC-001",
+      "path": "Nexent_\u6d4b\u8bd5\u8d44\u4ea7\u51c6\u5907\u6e05\u5355.xlsx",
+      "sha256": "2cacb9a20526280760c5e6cca6cf8f132007927360971326299a705c482bcff1",
+      "bytes": 11459
+    },
+    {
+      "asset_id": "AGT-001",
+      "path": "agents/\u603b\u7ed3\u52a9\u624b.json",
+      "sha256": "ca0ca44d11de46a0720f355d55eba8f3ecab5bf46ad34c30ab08c67a9058a6a3",
+      "bytes": 2462
+    },
+    {
+      "asset_id": "AUD-001",
+      "path": "audio/stt-16k-mono.pcm",
+      "sha256": "2b82938eb2cf38e43fa0de2d1ce49615c46b1b3412b9dae6096751124f247b71",
+      "bytes": 169728
+    },
+    {
+      "asset_id": "AUD-002",
+      "path": "audio/stt_zh_number.wav",
+      "sha256": "684a24dafc6693962ba25d987bd522071f269392710bb7ec92e6f3bb09f6fd1b",
+      "bytes": 450284
+    },
+    {
+      "asset_id": "AUD-003",
+      "path": "audio/stt_zh_number_16k.pcm",
+      "sha256": "798657490e172ede2170274d8108e5ca69492090575ae083910a80c87872424c",
+      "bytes": 300160
+    },
+    {
+      "asset_id": "AUD-004",
+      "path": "audio/\u516b\u5b57\u5206\u6790.mp3",
+      "sha256": "b7fe031c7f6925934f133594d32e2b97e1268c449fc0127f2c6ec1553edf714a",
+      "bytes": 213077
+    },
+    {
+      "asset_id": "MISC-002",
+      "path": "d4/eval_set.xlsx",
+      "sha256": "021723deff6edee9266fdb7077dbcc43e220eaf97adfaa41bb608f0f1b6b1308",
+      "bytes": 1579
+    },
+    {
+      "asset_id": "MISC-003",
+      "path": "d4/invalid.pdf",
+      "sha256": "2cdb9deb423a4a71738ce3048b1cca4396eac7a66e1f9c908574897410ab0871",
+      "bytes": 16
+    },
+    {
+      "asset_id": "MISC-004",
+      "path": "d4/sample.pdf",
+      "sha256": "a310a10205a0a4ad3c85598bfeb4fe6501e58945be2fe04996dec85e9c52b57c",
+      "bytes": 597
+    },
+    {
+      "asset_id": "MISC-005",
+      "path": "d4/vlm_number_7429.png",
+      "sha256": "d6ba20a0ca191d4a1ecec6388bd95f7613ba2e01d27be1a1f2a6d3e7c58b3593",
+      "bytes": 444
+    },
+    {
+      "asset_id": "MISC-006",
+      "path": "deployment-sandbox/Dockerfile",
+      "sha256": "34543d5d679d2338152bea2611979a1de99465a432e5cb9fa11968f1b0f540a7",
+      "bytes": 208
+    },
+    {
+      "asset_id": "DOC-001",
+      "path": "documents/Nexent \u5168\u91cf\u6d4b\u8bd5\u7528\u4f8b\u5e93(B09\u6574\u5408\u7248)_\u6267\u884c\u8bb0\u5f55.xlsx",
+      "sha256": "8e67309d7360c639fcf728c7c7bac94958af6fdad146ae10c918c3255ecda19e",
+      "bytes": 20979
+    },
+    {
+      "asset_id": "DOC-002",
+      "path": "documents/\u65b0\u5efa DOC \u6587\u6863_20260609150857.pdf",
+      "sha256": "66b6c5e9e2d5b305be4c17de2e1a86cc6338f5ecbe7f5c55ffefddc4483f18df",
+      "bytes": 14488
+    },
+    {
+      "asset_id": "DOC-003",
+      "path": "documents/\u809d\u80c6\u4ecb\u7ecd.doc",
+      "sha256": "2500f64202d9d5909c1aa7b580ca53adeb3fb82faf85d6d70c4867e28d2c8a7c",
+      "bytes": 24576
+    },
+    {
+      "asset_id": "DOC-004",
+      "path": "documents/\u809d\u80c6\u4ecb\u7ecd.docx",
+      "sha256": "fe9d48e78754bc10486326eac35b2daaa1a5dfd82b8f14ff2d4bd9c20bf18d74",
+      "bytes": 24535
+    },
+    {
+      "asset_id": "EVAL-001",
+      "path": "evaluation/\u8bc4\u4f30\u96c6-\u574f\u6848\u4f8b.xlsx",
+      "sha256": "f016d37b2f983a6094c9302e22e84fd674b592c91d346ac08ee46d087e30e969",
+      "bytes": 12592
+    },
+    {
+      "asset_id": "ORACLE-001",
+      "path": "expected/stt_expected.json",
+      "sha256": "87439628005d1d3d2c19f5eb264d8bd7893471c67bdb64b58f58c4caff48d7ff",
+      "bytes": 115
+    },
+    {
+      "asset_id": "IMG-001",
+      "path": "images/\u809d\u810f\u56fe\u7247.jpg",
+      "sha256": "51d64d7b2984aec1831e26a56e18eb47ffa28f94d693d377eca014f8b1787dd9",
+      "bytes": 5753
+    },
+    {
+      "asset_id": "KB-001",
+      "path": "knowledge/alpha-nx-92831.txt",
+      "sha256": "d4fe6cf44abf1f75e9d54057f65fd545dc2b51e9aec4fc2f73a99efa98254d6f",
+      "bytes": 164
+    },
+    {
+      "asset_id": "KB-002",
+      "path": "knowledge/beta-nx-57264.txt",
+      "sha256": "fd2b77411fbb39ffc10b96a8e7e53178075f5b5eaca92fa4c5ce03ba07f80273",
+      "bytes": 191
+    },
+    {
+      "asset_id": "KB-003",
+      "path": "knowledge/\u809d\u810f\u4ecb\u7ecd.txt",
+      "sha256": "af679f2e149c16f40dbe6b90315918215f35652500989aa8ebafc1a53edcac8a",
+      "bytes": 1264
+    },
+    {
+      "asset_id": "SKILL-001",
+      "path": "skills/SKILL.md",
+      "sha256": "85e7b979a5936bc2a57f4649db11da67e1240ca5f9a2ca2797a331df41fe4b11",
+      "bytes": 2877
+    },
+    {
+      "asset_id": "VID-001",
+      "path": "video/20260829_110109.mp4",
+      "sha256": "2d9462d65aa67acad56e8ce6e7a5656cc2ee2d54b45f24b48acbdfd04d2cfd20",
+      "bytes": 904564
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+Nexent D4 knowledge retrieval fixture beta.
+
+The unrelated control marker is NX-57264. This document must not replace the
+alpha document when the query explicitly asks for the alpha marker.
+

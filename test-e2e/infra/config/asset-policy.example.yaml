@@ -1,0 +1,17 @@
+# Copy to machine-local config/asset-policy.yaml and review per deployment.
+timeouts:
+  http_request_seconds: 30
+  model_request_seconds: 300
+  async_task_seconds: 300
+  asset_branch_seconds: 900
+  cleanup_seconds: 120
+retry:
+  create_attempts: 2
+  poll_interval_seconds: 3
+cleanup:
+  retain_on_failure: false
+  failed_asset_ttl_hours: 24
+  successful_asset_ttl_hours: 0
+safety:
+  allow_mutating_deployment: false
+  require_isolated_environment: true

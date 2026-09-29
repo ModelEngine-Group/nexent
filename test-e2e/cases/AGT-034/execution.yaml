@@ -8,3 +8,9 @@ implementations:
   file: test-e2e/infra/automation/d3/scenarios/scenario_agent_runtime_scenarios.py
   selector: AGT-034
 notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - metadata_agent
+  anchors: true
+  special_assets: false
+  d4_groups: []

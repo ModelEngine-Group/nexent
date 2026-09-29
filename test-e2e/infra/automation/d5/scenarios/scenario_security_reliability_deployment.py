@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import pytest
 
-from d3.assets import temporary_conversation, temporary_knowledge_base
+from d3.assets import model_id, temporary_conversation, temporary_knowledge_base
 from d5.assets import asset_path, destructive_deployment_enabled, require_command, run_command, get_test_asset
 from shared.cases import case_params
 from shared.config import repo_root
@@ -28,7 +28,7 @@ from shared.factories.tenant import isolated_accounts
 CASES = ["SEC-001", "SEC-002", "SEC-003", "REL-001", "REL-002", "REL-003", "DEP-001", "DEP-002", "DEP-003", "DEP-004"]
 
 
-async def _file_acl(owner, attacker) -> None:
+async def _file_acl(owner, attacker, kb_owner) -> None:
     object_name = await _upload_attachment(owner)
     try:
         encoded = quote(object_name, safe="/")
@@ -48,7 +48,9 @@ async def _file_acl(owner, attacker) -> None:
         assert_status(still_exists, 200)
     finally:
         await _delete_attachment(owner, object_name)
-    async with temporary_knowledge_base(owner, prefix="d5-acl") as kb:
+    # Use a principal allowed to configure KBs; the file ACL still exercises a normal user's ownership.
+    embedding_model_id = await model_id("embedding", kb_owner)
+    async with temporary_knowledge_base(kb_owner, prefix="d5-acl", embedding_model_id=embedding_model_id) as kb:
         async with client("config", token=attacker.access_token) as api:
             denied = await api.get(f"/indices/{kb['index_name']}/files")
         assert_status(denied, (403, 404))
@@ -56,22 +58,36 @@ async def _file_acl(owner, attacker) -> None:
 
 async def _share_token(identity) -> None:
     async with temporary_conversation(identity, "D5 share") as conversation_id:
+        offset_timezone = timezone(timedelta(hours=8))
         async with client("runtime", token=identity.access_token) as api:
             shared = await api.post(
                 f"/share/conversation/{conversation_id}",
-                json={"mode": "all", "expire_time": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), "render_version": "legacy"},
+                json={"mode": "all", "expire_time": (datetime.now(offset_timezone) + timedelta(hours=1)).isoformat(),
+                      "render_version": "legacy"},
+            )
+            expired_share = await api.post(
+                f"/share/conversation/{conversation_id}",
+                json={"mode": "all", "expire_time": (datetime.now(offset_timezone) - timedelta(hours=1)).isoformat(),
+                      "render_version": "legacy"},
             )
         assert_status(shared, 200)
+        assert_status(expired_share, 200)
         token = str(shared.json().get("data", {}).get("share_id") or "")
-        assert token
+        expired_token = str(expired_share.json().get("data", {}).get("share_id") or "")
+        assert token and expired_token and token != expired_token
         register_asset("owned_shares", token, token, owner_case_id="SEC-002", sensitive=True,
                        cleanup={"kind": "revoke_owned_share", "identity": identity.id,
                                 "share_token": token})
+        register_asset("owned_shares", expired_token, expired_token, owner_case_id="SEC-002", sensitive=True,
+                       cleanup={"kind": "revoke_owned_share", "identity": identity.id,
+                                "share_token": expired_token})
         async with client("runtime") as public:
             fetched = await public.get(f"/share/{token}")
+            expired = await public.get(f"/share/{expired_token}")
             mutated = await public.get(f"/share/{token[:-1]}x")
             missing = await public.get("/share/not-a-valid-token")
         assert_status(fetched, 200)
+        assert_status(expired, 404)
         assert_status(mutated, 404)
         assert_status(missing, 404)
         assert "authorization" not in fetched.text.lower()
@@ -485,7 +501,7 @@ async def _v260_merged_migration_equivalence() -> None:
 async def execute_d5_main(case, tenant_a_admin, tenant_a_user, tenant_b_user):
     case_id = case["id"]
     if case_id == "SEC-001":
-        await _file_acl(tenant_a_user, tenant_b_user)
+        await _file_acl(tenant_a_user, tenant_b_user, tenant_a_admin)
     elif case_id == "SEC-002":
         await _share_token(tenant_a_user)
     elif case_id == "SEC-003":

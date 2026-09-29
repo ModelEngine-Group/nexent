@@ -165,7 +165,8 @@ def implementation_hash(root: Path, implementations: list[dict[str, Any]]) -> st
     fingerprints = []
     for implementation in sorted(implementations, key=lambda item: (item["file"], item["selector"])):
         path = root / implementation["file"]
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        # Git text files may be checked out as CRLF on Windows and LF on Linux.
+        digest = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
         fingerprints.append({"file": implementation["file"], "sha256": digest})
     return sha256_value(fingerprints)
 

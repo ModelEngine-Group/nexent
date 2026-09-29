@@ -8,3 +8,8 @@ implementations:
   file: test-e2e/infra/automation/d3/scenarios/scenario_market_skill_mcp_a2a_scenarios.py
   selector: AGT-041
 notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []

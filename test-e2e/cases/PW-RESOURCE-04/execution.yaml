@@ -5,3 +5,12 @@ implementations:
   file: test.spec.ts
   selector: PW-RESOURCE-04
 notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - configurable_skill
+  anchors: true
+  special_assets: false
+  d4_groups:
+  - basic_agent
+  - llm_model
+  - mcp

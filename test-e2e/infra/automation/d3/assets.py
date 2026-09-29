@@ -156,11 +156,12 @@ async def temporary_knowledge_base(
     prefix: str = "d3-kb",
     preserve_source_file: bool = True,
     quota_limit_bytes: int | None = None,
+    embedding_model_id: int | None = None,
 ) -> AsyncIterator[dict]:
     """Create an isolated real KB and remove its ES, DB and MinIO state afterward."""
     display_name = f"{prefix}-{uuid4().hex[:10]}"
     payload = {
-        "embedding_model_id": await model_id("embedding", identity),
+        "embedding_model_id": embedding_model_id if embedding_model_id is not None else await model_id("embedding", identity),
         "ingroup_permission": "PRIVATE",
         "group_ids": [],
         "preserve_source_file": preserve_source_file,

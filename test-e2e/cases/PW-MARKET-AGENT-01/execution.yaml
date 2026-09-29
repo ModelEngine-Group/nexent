@@ -5,3 +5,8 @@ implementations:
   file: test.spec.ts
   selector: PW-MARKET-AGENT-01
 notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []
