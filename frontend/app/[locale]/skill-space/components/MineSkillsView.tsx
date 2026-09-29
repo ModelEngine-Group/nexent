@@ -440,7 +440,7 @@ function getMineSkillMenuItems({
   if (canApplyListing) {
     items.push({
       key: "apply-listing",
-      label: t("repository.mine.applyForListing"),
+      label: t("skillRepository.mine.button.apply"),
       icon: <Upload className="size-3.5" aria-hidden />,
       onClick: onApplyListing,
     });
