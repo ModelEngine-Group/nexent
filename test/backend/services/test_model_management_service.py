@@ -1237,6 +1237,57 @@ async def test_update_single_model_for_tenant_success_single_model():
         )
 
 
+async def test_update_single_model_for_tenant_empty_voice_credentials_keep_existing():
+    """Empty-string model_appid / access_token must be dropped from the update
+    payload instead of overwriting the stored values.
+
+    List endpoints sanitize these fields, so an edit dialog the operator did
+    not touch submits empty strings; the "empty means keep" contract mirrors
+    api_key handling."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 9, "model_type": "stt", "display_name": "volc-stt"},
+    ]
+    model_data = {
+        "model_id": 9,
+        "display_name": "volc-stt",
+        "model_appid": "",
+        "access_token": "",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "volc-stt", model_data)
+
+        call_payload = mock_update.call_args[0][1]
+        assert "model_appid" not in call_payload
+        assert "access_token" not in call_payload
+
+
+async def test_update_single_model_for_tenant_new_voice_credentials_are_written():
+    """Non-empty model_appid / access_token pass through to the update call."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 9, "model_type": "stt", "display_name": "volc-stt"},
+    ]
+    model_data = {
+        "model_id": 9,
+        "display_name": "volc-stt",
+        "model_appid": "new-appid",
+        "access_token": "new-token",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "volc-stt", model_data)
+
+        call_payload = mock_update.call_args[0][1]
+        assert call_payload["model_appid"] == "new-appid"
+        assert call_payload["access_token"] == "new-token"
+
+
 async def test_update_single_model_for_tenant_splits_repo_prefix_from_model_name():
     """A repo-qualified model_name (as returned by the list endpoints) must be
     split on update, otherwise the model_name column accumulates a repo prefix

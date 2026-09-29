@@ -675,6 +675,63 @@ async def test_get_model_list_success(client, auth_header, user_credentials, moc
     mock_list.assert_called_once_with(user_credentials[1])
 
 
+@pytest.mark.asyncio
+async def test_get_model_list_strips_voice_model_credentials(client, auth_header, user_credentials, mocker):
+    """Voice-model credentials (model_appid / access_token) must never reach
+    an HTTP client, exactly like api_key: the pair is the full auth material
+    for Volcano Engine STT/TTS models."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_models(*args, **kwargs):
+        return [
+            {
+                "model_id": "stt1",
+                "model_name": "volc/stt-bigmodel",
+                "display_name": "Volc STT",
+                "model_type": "stt",
+                "api_key": "stored-secret",
+                "model_appid": "stored-appid",
+                "access_token": "stored-token",
+                "connect_status": "operational",
+            }
+        ]
+
+    mocker.patch('backend.apps.model_managment_app.list_models_for_tenant', side_effect=mock_list_models)
+
+    response = client.get("/model/list", headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    record = response.json()["data"][0]
+    assert record["model_name"] == "volc/stt-bigmodel"
+    for credential_field in ("api_key", "model_appid", "access_token"):
+        assert credential_field not in record
+
+
+def test_sanitize_model_credentials_strips_all_credential_fields():
+    """Unit-level contract: api_key, model_appid and access_token are removed
+    from dicts at any nesting depth; all other fields pass through."""
+    from backend.apps.model_managment_app import _sanitize_model_credentials
+
+    payload = {
+        "model_id": 1,
+        "api_key": "sk-secret",
+        "model_appid": "appid-secret",
+        "access_token": "token-secret",
+        "nested": {
+            "api_key": "sk-nested",
+            "model_appid": "appid-nested",
+            "keep": "me",
+        },
+    }
+
+    sanitized = _sanitize_model_credentials(payload)
+
+    assert sanitized == {
+        "model_id": 1,
+        "nested": {"keep": "me"},
+    }
+
+
 # Tests for /model/llm_list endpoint
 @pytest.mark.asyncio
 async def test_get_llm_model_list_success(client, auth_header, user_credentials, mocker):
