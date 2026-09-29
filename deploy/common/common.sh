@@ -137,6 +137,7 @@ deployment_i18n_format() {
       validation.https_materialize_failed) printf '%s' '准备 Nginx 证书文件失败（目标目录：%s）。' ;;
       validation.https_cert_expired) printf '%s' '证书已过期（到期时间：%s）。' ;;
       validation.https_cert_expiring_soon) printf '%s' '⚠️ 证书将在 30 天内到期（到期时间：%s），建议尽快更换。' ;;
+      validation.nodeport_out_of_range) printf '%s' 'Kubernetes 部署的端口必须在 30000-32767 范围内：%s（变量 %s）。' ;;
       tui.cancelled) printf '已取消部署配置。' ;;
       tui.components.title) printf '选择部署组件' ;;
       tui.components.subtitle) printf '选择要安装的服务组。infrastructure 为必选项，不能禁用。' ;;
@@ -232,6 +233,7 @@ deployment_i18n_format() {
       validation.https_materialize_failed) printf '%s' 'Failed to prepare the Nginx certificate files (target directory: %s).' ;;
       validation.https_cert_expired) printf '%s' 'Certificate has expired (notAfter: %s).' ;;
       validation.https_cert_expiring_soon) printf '%s' '⚠️ Certificate expires within 30 days (notAfter: %s); consider replacing it soon.' ;;
+      validation.nodeport_out_of_range) printf '%s' 'Port for Kubernetes deployment must be within 30000-32767: %s (variable %s).' ;;
       tui.cancelled) printf 'Deployment configuration cancelled.' ;;
       tui.components.title) printf 'Select deployment components' ;;
       tui.components.subtitle) printf 'Choose which service groups to install. infrastructure is required and cannot be disabled.' ;;
@@ -340,6 +342,25 @@ deployment_warn() {
 
 deployment_error() {
   printf '❌ %s\n' "$*" >&2
+}
+
+deployment_validate_nodeport_range() {
+  local port="$1"
+  local variable_name="$2"
+  if [ -z "$port" ]; then
+    return 0
+  fi
+  case "$port" in
+    ''|*[!0-9]*)
+      deployment_error "$(deployment_i18n validation.nodeport_out_of_range "$port" "$variable_name")"
+      return 1
+      ;;
+  esac
+  if [ "$port" -lt 30000 ] || [ "$port" -gt 32767 ]; then
+    deployment_error "$(deployment_i18n validation.nodeport_out_of_range "$port" "$variable_name")"
+    return 1
+  fi
+  return 0
 }
 
 deployment_csv_contains() {
@@ -2373,6 +2394,12 @@ deployment_render_k8s_port_values() {
   fi
 
   local web_type="NodePort"
+  local web_port_input="${NEXENT_WEB_PORT:-}"
+  local https_port_input="${NEXENT_HTTPS_PORT:-}"
+  deployment_validate_nodeport_range "$web_port_input" "NEXENT_WEB_PORT" || return 1
+  if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
+    deployment_validate_nodeport_range "$https_port_input" "NEXENT_HTTPS_PORT" || return 1
+  fi
   local web_node_port="${NEXENT_WEB_PORT:-30000}"
   local https_node_port="${NEXENT_HTTPS_PORT:-31000}"
   printf 'nexent-web:\n'
