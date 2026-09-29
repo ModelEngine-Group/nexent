@@ -11,10 +11,10 @@ import {
   Eye,
   MoreHorizontal,
   Pencil,
-  Power,
   Search,
   Tag,
   Trash2,
+  Upload,
 } from "lucide-react";
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
@@ -421,16 +421,26 @@ function getMineSkillMenuItems({
   canPublish,
   hasRepositoryInfo,
   t,
+  onApplyListing,
   onViewReview,
   onDelete,
 }: {
   canPublish: boolean;
   hasRepositoryInfo: boolean;
   t: (key: string) => string;
+  onApplyListing: () => void;
   onViewReview: () => void;
   onDelete: () => void;
 }): MenuProps["items"] {
   const items: MenuProps["items"] = [];
+  if (canPublish && !hasRepositoryInfo) {
+    items.push({
+      key: "apply-listing",
+      label: t("skillRepository.mine.button.apply"),
+      icon: <Upload className="size-3.5" aria-hidden />,
+      onClick: onApplyListing,
+    });
+  }
   if (canPublish && hasRepositoryInfo) {
     items.push({
       key: "review",
@@ -475,11 +485,11 @@ function MineSkillCard({
   const canPublish = skill.can_publish === true;
   const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
-  const canApplyListing = canPublish && !hasRepositoryInfo;
   const menuItems = getMineSkillMenuItems({
     canPublish,
     hasRepositoryInfo,
     t,
+    onApplyListing,
     onViewReview,
     onDelete,
   });
@@ -543,17 +553,6 @@ function MineSkillCard({
       }
       footer={
         <div className="flex items-center gap-2">
-          {canApplyListing ? (
-            <Button
-              type="primary"
-              size="small"
-              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
-              icon={<Power className="size-3.5" aria-hidden />}
-              onClick={onApplyListing}
-            >
-              {t("skillRepository.mine.button.apply")}
-            </Button>
-          ) : null}
           {canEdit ? (
             <Button
               type="text"
