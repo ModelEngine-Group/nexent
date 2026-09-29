@@ -158,7 +158,7 @@ deployment_i18n_format() {
       tui.monitoring.grafana) printf '本地 Grafana + Tempo traces 看板' ;;
       tui.monitoring.zipkin) printf '本地 Zipkin trace 浏览 UI' ;;
       tui.https.title) printf '选择 HTTPS 模式' ;;
-      tui.https.subtitle) printf '启用 HTTPS 后会额外安装一个 Nginx 反向代理容器，在独立端口终结 TLS（Docker 3100 / K8s 31000）；原 HTTP 入口 3000/30000 保持不变。' ;;
+      tui.https.subtitle) printf '启用 HTTPS 后会额外安装一个 Nginx 反向代理容器，在独立端口终结 TLS（Docker %s / K8s %s）；原 HTTP 入口保持不变。端口可通过 NEXENT_WEB_PORT / NEXENT_HTTPS_PORT 修改。' "${NEXENT_HTTPS_PORT:-3100}" "${NEXENT_HTTPS_PORT:-31000}" ;;
       tui.https.description) printf '自签证书自动生成（SAN 自动探测，无需输入）；custom 模式使用你自己的证书与私钥。' ;;
       tui.https.disabled) printf '不启用 HTTPS（默认，行为与现状一致）' ;;
       tui.https.self_signed) printf '自动生成自签证书（99 年有效期，浏览器会显示告警）' ;;
@@ -253,7 +253,7 @@ deployment_i18n_format() {
       tui.monitoring.grafana) printf 'local Grafana + Tempo dashboard for traces' ;;
       tui.monitoring.zipkin) printf 'local Zipkin UI for trace browsing' ;;
       tui.https.title) printf 'Select HTTPS mode' ;;
-      tui.https.subtitle) printf 'Enabling HTTPS installs an extra Nginx reverse-proxy container that terminates TLS on a dedicated port (Docker 3100 / K8s 31000); the plain HTTP entry 3000/30000 stays unchanged.' ;;
+      tui.https.subtitle) printf 'Enabling HTTPS installs an extra Nginx reverse-proxy container that terminates TLS on a dedicated port (Docker %s / K8s %s); the plain HTTP entry stays unchanged. Ports can be changed via NEXENT_WEB_PORT / NEXENT_HTTPS_PORT.' "${NEXENT_HTTPS_PORT:-3100}" "${NEXENT_HTTPS_PORT:-31000}" ;;
       tui.https.description) printf 'Self-signed certificates are generated automatically (SAN auto-detected, no input needed); custom mode uses your own certificate and key.' ;;
       tui.https.disabled) printf 'Keep HTTP only (default, same as before)' ;;
       tui.https.self_signed) printf 'Generate a self-signed certificate (99-year validity; browsers will warn)' ;;
@@ -2373,12 +2373,14 @@ deployment_render_k8s_port_values() {
   fi
 
   local web_type="NodePort"
+  local web_node_port="${NEXENT_WEB_PORT:-30000}"
+  local https_node_port="${NEXENT_HTTPS_PORT:-31000}"
   printf 'nexent-web:\n'
-  printf '  services:\n    web:\n      type: "%s"\n      nodePort: 30000\n' "$web_type"
+  printf '  services:\n    web:\n      type: "%s"\n      nodePort: %s\n' "$web_type" "$web_node_port"
   if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
     printf 'nexent-nginx:\n'
     printf '  enabled: true\n'
-    printf '  services:\n    nginx:\n      type: "NodePort"\n      entryPort: 31000\n      nodePort: 31000\n'
+    printf '  services:\n    nginx:\n      type: "NodePort"\n      entryPort: %s\n      nodePort: %s\n' "$https_node_port" "$https_node_port"
   fi
   printf 'nexent-northbound:\n'
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
@@ -2444,7 +2446,7 @@ deployment_render_helm_chart_values() {
   printf 'nexent-web:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
-  printf '  services:\n    web:\n      type: "%s"\n      nodePort: 30000\n' "$web_type"
+  printf '  services:\n    web:\n      type: "%s"\n      nodePort: %s\n' "$web_type" "${NEXENT_WEB_PORT:-30000}"
   printf 'nexent-data-process:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled data-process)"
   printf '  images:\n    dataProcess:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_DATA_PROCESS_IMAGE")" "$(deployment_image_tag "$NEXENT_DATA_PROCESS_IMAGE")" "$local_pull_policy"
@@ -2710,8 +2712,8 @@ deployment_persist_local_config() {
 
 deployment_print_summary() {
   local target="${1:-all}"
-  local https_entry_port="3100"
-  [ "$target" = "k8s" ] && https_entry_port="31000"
+  local https_entry_port="${NEXENT_HTTPS_PORT:-3100}"
+  [ "$target" = "k8s" ] && https_entry_port="${NEXENT_HTTPS_PORT:-31000}"
 
   deployment_log "$(deployment_i18n summary.components "$DEPLOYMENT_COMPONENTS")"
   deployment_log "$(deployment_i18n summary.port_policy "$DEPLOYMENT_PORT_POLICY")"
