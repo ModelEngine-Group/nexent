@@ -837,6 +837,9 @@ async def list_agent_page_api(
     search_tag_predicates: Optional[str] = Query(None, description="Text-search tag predicates as JSON"),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    include_repository_info: bool = Query(
+        False, description="Include repository listings for agents on this page"
+    ),
     authorization: Optional[str] = Header(None),
     request: Request = None,
 ):
@@ -857,6 +860,7 @@ async def list_agent_page_api(
             "search": search,
             "page": page,
             "page_size": page_size,
+            "include_repository_info": include_repository_info,
         }
         if created_by:
             kwargs["created_by"] = created_by

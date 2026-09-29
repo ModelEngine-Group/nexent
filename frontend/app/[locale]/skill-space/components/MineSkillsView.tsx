@@ -418,19 +418,33 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
 };
 
 function getMineSkillMenuItems({
+  canApplyListing,
+  canEdit,
   canPublish,
   hasRepositoryInfo,
   t,
+  onApplyListing,
   onViewReview,
   onDelete,
 }: {
+  canApplyListing: boolean;
+  canEdit: boolean;
   canPublish: boolean;
   hasRepositoryInfo: boolean;
   t: (key: string) => string;
+  onApplyListing: () => void;
   onViewReview: () => void;
   onDelete: () => void;
 }): MenuProps["items"] {
   const items: MenuProps["items"] = [];
+  if (canApplyListing) {
+    items.push({
+      key: "apply",
+      label: t("skillRepository.mine.button.apply"),
+      icon: <Power className="size-3.5" aria-hidden />,
+      onClick: onApplyListing,
+    });
+  }
   if (canPublish && hasRepositoryInfo) {
     items.push({
       key: "review",
@@ -439,13 +453,15 @@ function getMineSkillMenuItems({
       onClick: onViewReview,
     });
   }
-  items.push({
-    key: "delete",
-    label: t("common.delete"),
-    icon: <Trash2 className="size-3.5" aria-hidden />,
-    danger: true,
-    onClick: onDelete,
-  });
+  if (canEdit) {
+    items.push({
+      key: "delete",
+      label: t("common.delete"),
+      icon: <Trash2 className="size-3.5" aria-hidden />,
+      danger: true,
+      onClick: onDelete,
+    });
+  }
   return items;
 }
 
@@ -477,9 +493,12 @@ function MineSkillCard({
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
   const canApplyListing = canPublish && !hasRepositoryInfo;
   const menuItems = getMineSkillMenuItems({
+    canApplyListing,
+    canEdit,
     canPublish,
     hasRepositoryInfo,
     t,
+    onApplyListing,
     onViewReview,
     onDelete,
   });
@@ -488,6 +507,7 @@ function MineSkillCard({
     <ResourceCard
       title={skill.name || t("skillRepository.common.untitled")}
       className="h-full min-h-[200px] p-4"
+      onClick={onView}
       icon={
         <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Bot className="size-5" aria-hidden />
@@ -521,7 +541,7 @@ function MineSkillCard({
       footerLayout="inline"
       headerActions={
         <div className="flex flex-col items-end gap-1">
-          {canEdit ? (
+          {canEdit || canApplyListing ? (
             <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
               <Button
                 type="text"
@@ -543,17 +563,6 @@ function MineSkillCard({
       }
       footer={
         <div className="flex items-center gap-2">
-          {canApplyListing ? (
-            <Button
-              type="primary"
-              size="small"
-              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
-              icon={<Power className="size-3.5" aria-hidden />}
-              onClick={onApplyListing}
-            >
-              {t("skillRepository.mine.button.apply")}
-            </Button>
-          ) : null}
           {canEdit ? (
             <Button
               type="text"

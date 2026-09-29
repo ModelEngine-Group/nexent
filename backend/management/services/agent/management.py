@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from agents.create_agent_info import create_tool_config_list
 from utils.agent_transfer_utils import portable_tool_params, validate_import_tool_params
 from services.agent_version_service import publish_version_impl
+from consts.agent_repository import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
 from consts.const import TOOL_TYPE_MAPPING, \
     MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from consts.exceptions import (
@@ -67,6 +68,7 @@ from database.tool_db import (
 )
 from database import skill_db
 from management.services.skill.service import SkillService
+from database.agent_repository_db import list_agent_repository_by_agent_ids
 from database.agent_version_db import batch_search_version_names, query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -932,6 +934,7 @@ async def list_agent_page_impl(
     created_by_not: Optional[str] = None,
     tag_predicates: Optional[list] = None,
     search_tag_predicates: Optional[list] = None,
+    include_repository_info: bool = False,
 ) -> Dict[str, Any]:
     """List visible agents with server-side filters and pagination."""
     if created_by and created_by_not:
@@ -1127,6 +1130,40 @@ async def list_agent_page_impl(
             )
             agent["version_label"] = version.get("version_name")
             agent["version_create_time"] = version.get("create_time")
+    if include_repository_info:
+        for scope_tenant_id in tenant_ids:
+            scoped_agents = [
+                agent for scope, agent in paged_scoped_agents
+                if scope == scope_tenant_id
+            ]
+            if not scoped_agents:
+                continue
+            repository_records = list_agent_repository_by_agent_ids(
+                [int(agent["agent_id"]) for agent in scoped_agents],
+                statuses=(STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED),
+                publisher_tenant_id=scope_tenant_id,
+            )
+            repository_by_agent_id: dict[int, list[dict]] = {}
+            for record in repository_records:
+                created_at = record.get("create_time")
+                repository_by_agent_id.setdefault(int(record["agent_id"]), []).append(
+                    {
+                        "agent_repository_id": record["agent_repository_id"],
+                        "status": record["status"],
+                        "version_no": record["version_no"],
+                        "version_label": record.get("version_name"),
+                        "create_time": (
+                            created_at.isoformat()
+                            if hasattr(created_at, "isoformat")
+                            else created_at
+                        ),
+                        "content": record.get("content"),
+                    }
+                )
+            for agent in scoped_agents:
+                agent["repository_info"] = repository_by_agent_id.get(
+                    int(agent["agent_id"]), []
+                )
     paged_agents = [agent for _, agent in paged_scoped_agents]
     return {
         "items": paged_agents,

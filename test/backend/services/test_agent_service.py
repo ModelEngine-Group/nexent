@@ -3241,6 +3241,56 @@ async def test_list_agent_page_impl_filters_before_paginating(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_agent_page_includes_repository_info_only_for_current_page(monkeypatch):
+    agents = [
+        {"agent_id": 1, "name": "First", "created_by": "alice"},
+        {"agent_id": 2, "name": "Second", "created_by": "alice"},
+    ]
+    _mock_paged_agent_candidates(monkeypatch, agents)
+
+    async def enrich_page(*, agent_ids, **_kwargs):
+        return [{"agent_id": agent_id, "current_version_no": 3} for agent_id in agent_ids]
+
+    repository_calls = []
+
+    def repository_rows(agent_ids, *, statuses, publisher_tenant_id):
+        repository_calls.append((agent_ids, set(statuses), publisher_tenant_id))
+        return [
+            {"agent_repository_id": 12, "agent_id": 2, "status": "pending_review",
+             "version_no": 3, "version_name": "v3", "create_time": None, "content": "Update"},
+            {"agent_repository_id": 10, "agent_id": 2, "status": "shared",
+             "version_no": 1, "version_name": "v1", "create_time": None, "content": None},
+        ]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", enrich_page)
+    monkeypatch.setattr(agent_management, "batch_search_version_names", lambda *_args: [])
+    monkeypatch.setattr(agent_management, "list_agent_repository_by_agent_ids", repository_rows)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=2, page_size=1,
+        include_repository_info=True,
+    )
+
+    assert [item["agent_id"] for item in result["items"]] == [2]
+    assert repository_calls == [(
+        [2], {"pending_review", "rejected", "shared"}, "tenant_123"
+    )]
+    assert result["items"][0]["repository_info"] == [
+        {"agent_repository_id": 12, "status": "pending_review", "version_no": 3,
+         "version_label": "v3", "create_time": None, "content": "Update"},
+        {"agent_repository_id": 10, "status": "shared", "version_no": 1,
+         "version_label": "v1", "create_time": None, "content": None},
+    ]
+
+    empty_page = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=3, page_size=1,
+        include_repository_info=True,
+    )
+    assert empty_page["items"] == []
+    assert len(repository_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_list_agent_page_filters_creator_before_pagination(monkeypatch):
     agents = [
         {"agent_id": 1, "created_by": "alice"},

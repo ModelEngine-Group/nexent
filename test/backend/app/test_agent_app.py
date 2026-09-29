@@ -1704,6 +1704,7 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
             "search": "support",
             "page": 2,
             "page_size": 5,
+            "include_repository_info": "true",
         },
         headers=mock_auth_header,
     )
@@ -1718,6 +1719,7 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
         search="support",
         page=2,
         page_size=5,
+        include_repository_info=True,
     )
 
 

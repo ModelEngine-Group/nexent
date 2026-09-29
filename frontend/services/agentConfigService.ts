@@ -182,6 +182,7 @@ type AgentListApiItem = {
   enable_protocol_repair_retry?: boolean;
   model_params_override?: Agent["model_params_override"];
   icon_url?: string;
+  repository_info?: Agent["repository_info"];
 };
 
 const formatAgentListItem = (agent: AgentListApiItem): Agent =>
@@ -211,11 +212,13 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
     model_params_override: agent.model_params_override ?? null,
     icon_url: agent.icon_url,
+    repository_info: agent.repository_info,
   }) as unknown as Agent;
 
 export type AgentListFilters = {
   tenantId?: string | null;
   enabled?: boolean;
+  includeRepositoryInfo?: boolean;
   permission?: "EDIT" | "READ_ONLY";
   tag?: string;
   tagPredicates?: TagResourcePredicate[];
@@ -293,6 +296,8 @@ export const fetchPagedAgentList = async (
     if (filters.tag?.trim()) queryParams.set("tag", filters.tag.trim());
     if (filters.search?.trim())
       queryParams.set("search", filters.search.trim());
+    if (filters.includeRepositoryInfo)
+      queryParams.set("include_repository_info", "true");
     queryParams.set("page", String(filters.page ?? 1));
     queryParams.set("page_size", String(filters.pageSize ?? 20));
 
