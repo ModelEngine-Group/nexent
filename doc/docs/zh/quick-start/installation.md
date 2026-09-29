@@ -78,7 +78,7 @@ bash deploy.sh docker --image-source local-latest
 
 #### HTTPS（可选）
 
-Nexent 可通过随部署安装的 Nginx 反向代理终结 HTTPS。该选项默认关闭，启用后 HTTPS 使用独立入口端口：Docker 部署为 3100 端口，Kubernetes 部署为 NodePort 31000；原 HTTP 入口（Docker 3000 / K8s 30000）保持不变，两种入口可同时使用。
+Nexent 可通过随部署安装的 Nginx 反向代理终结 HTTPS。该选项默认关闭，启用后 HTTPS 使用独立入口端口：Docker 部署为 3100 端口，Kubernetes 部署为 NodePort 31000；原 HTTP 入口（Docker 3000 / K8s 30000）保持不变，两种入口可同时使用。如需修改入口端口，在 `deploy/env/.env` 中设置 `NEXENT_WEB_PORT`（HTTP 入口）或 `NEXENT_HTTPS_PORT`（HTTPS 入口）。
 
 可交互启用（安装器只询问一个问题：HTTPS 模式），也可非交互启用：
 
@@ -93,6 +93,7 @@ bash deploy.sh docker --defaults --https-mode custom --https-cert-file /path/to/
 - **self-signed**：安装器生成 99 年有效期的自签证书（私钥不加密），保存在 `<ROOT_DIR>/nginx/ssl/`，重复部署时自动复用。SAN 条目从部署主机网卡自动探测（排除回环与 Docker 网桥）；如需指定，在 `deploy/env/.env` 预填 `NEXENT_HTTPS_SAN`（例如 `NEXENT_HTTPS_SAN=10.0.0.5,example.com`）。浏览器会提示证书不受信任，将证书导入系统信任链后即可消除。
 - **custom**：通过 `NEXENT_HTTPS_CERT_FILE` 与 `NEXENT_HTTPS_KEY_FILE` 指定 PEM 证书与私钥。安装器在部署前校验证书对（PEM 格式、证书与私钥匹配、有效期）。支持加密私钥：通过 `NEXENT_HTTPS_KEY_PASSPHRASE` 或 `--https-key-passphrase` 提供密码；与其他部署凭证一致，密码以明文保存在 `deploy/env/.env` 中。
 - 启用 HTTPS 后，请同步更新 `deploy/env/.env` 中的 `SITE_URL`（例如 `SITE_URL=https://your-host:3100`），确保认证回调与生成的链接使用 HTTPS 入口。
+- 修改 HTTP/HTTPS 入口端口后，`OAUTH_CALLBACK_BASE_URL`、`CAS_CALLBACK_BASE_URL` 等回调地址若包含旧端口也需同步更新。
 - 再次禁用 HTTPS（`--https-mode disabled`）后，Nginx 容器会被移除；证书文件会保留，之后可重新启用。
 
 部署成功后，非敏感部署选项会保存到 `deploy/docker/deploy.options`。`--defaults` 会优先复用该文件；文件不存在时使用内置默认值。下次交互部署时可选择复用本地配置或重新全量配置。
@@ -261,8 +262,8 @@ Docker 卸载脚本会读取 `deploy/env/.env` 中的 `ROOT_DIR` 并清理 Compo
 
 | 服务 | 内部端口 | 外部端口 | 描述 |
 |---------|---------------|---------------|-------------|
-| Web 界面 | 3000 | 3000 | 主应用程序访问 |
-| HTTPS 入口 | 3100 | 3100 | 可选，启用 HTTPS 后的加密访问入口（Nginx） |
+| Web 界面 | 3000 | 3000（`NEXENT_WEB_PORT`） | 主应用程序访问 |
+| HTTPS 入口 | 3100 | 3100（`NEXENT_HTTPS_PORT`） | 可选，启用 HTTPS 后的加密访问入口（Nginx） |
 | 后端 API | 5010 | 5010 | 后端服务 |
 | Runtime API | 5014 | 5014 | 智能体运行时服务 |
 | MCP API | 5011/5015 | 5011/5015 | MCP 管理与工具服务 |

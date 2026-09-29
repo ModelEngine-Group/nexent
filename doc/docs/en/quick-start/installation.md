@@ -78,7 +78,7 @@ bash deploy.sh docker --image-source local-latest
 
 #### HTTPS (Optional)
 
-Nexent can terminate HTTPS at an Nginx reverse proxy installed alongside the stack. The option is disabled by default; when enabled, HTTPS uses a dedicated entry port: port 3100 for Docker deployments and NodePort 31000 for Kubernetes deployments. The plain HTTP entry (Docker 3000 / K8s 30000) stays unchanged, so both entries can be used at the same time.
+Nexent can terminate HTTPS at an Nginx reverse proxy installed alongside the stack. The option is disabled by default; when enabled, HTTPS uses a dedicated entry port: port 3100 for Docker deployments and NodePort 31000 for Kubernetes deployments. The plain HTTP entry (Docker 3000 / K8s 30000) stays unchanged, so both entries can be used at the same time. To change the entry ports, set `NEXENT_WEB_PORT` (HTTP entry) or `NEXENT_HTTPS_PORT` (HTTPS entry) in `deploy/env/.env`.
 
 Enable it interactively (the installer asks one question: the HTTPS mode) or non-interactively:
 
@@ -93,6 +93,7 @@ bash deploy.sh docker --defaults --https-mode custom --https-cert-file /path/to/
 - **self-signed**: the installer generates a 99-year certificate with an unencrypted private key under `<ROOT_DIR>/nginx/ssl/` and reuses it on redeployment. SAN entries are auto-detected from the host network interfaces (loopback and Docker bridges excluded); preset `NEXENT_HTTPS_SAN` in `deploy/env/.env` to override (for example `NEXENT_HTTPS_SAN=10.0.0.5,example.com`). Browsers show an untrusted-certificate warning; import the certificate into your trust store to silence it.
 - **custom**: point `NEXENT_HTTPS_CERT_FILE` and `NEXENT_HTTPS_KEY_FILE` at your PEM files. The installer validates the pair (PEM format, key/cert match, expiry) before deploying. Encrypted private keys are supported: provide the passphrase via `NEXENT_HTTPS_KEY_PASSPHRASE` or `--https-key-passphrase`; like other deployment credentials, it is stored in plain text in `deploy/env/.env`.
 - After enabling HTTPS, update `SITE_URL` in `deploy/env/.env` (for example `SITE_URL=https://your-host:3100`) so auth callbacks and generated links use the HTTPS entry point.
+- After changing the HTTP/HTTPS entry ports, update callback URLs such as `OAUTH_CALLBACK_BASE_URL` and `CAS_CALLBACK_BASE_URL` if they contain the old port.
 - Disabling HTTPS again (`--https-mode disabled`) removes the Nginx container; the certificate files are kept and can be reused later.
 
 After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. `--defaults` reuses that file when it exists, otherwise it uses built-in defaults. The next interactive deployment can reuse the local config or run a full reconfiguration.
@@ -265,8 +266,8 @@ The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and re
 
 | Service | Internal Port | External Port | Description |
 |---------|---------------|---------------|-------------|
-| Web Interface | 3000 | 3000 | Main application access |
-| HTTPS Entry | 3100 | 3100 | Optional encrypted entry via Nginx (when HTTPS is enabled) |
+| Web Interface | 3000 | 3000 (`NEXENT_WEB_PORT`) | Main application access |
+| HTTPS Entry | 3100 | 3100 (`NEXENT_HTTPS_PORT`) | Optional encrypted entry via Nginx (when HTTPS is enabled) |
 | Backend API | 5010 | 5010 | Backend service |
 | Runtime API | 5014 | 5014 | Agent runtime service |
 | MCP API | 5011/5015 | 5011/5015 | MCP management and tool service |

@@ -229,7 +229,7 @@ services:
     networks:
       - nexent
     ports:
-      - "${NEXENT_WEB_PORT_MAPPING-3000:3000}"
+      - "${NEXENT_WEB_PORT:-3000}:3000"
     volumes:
       - ${ROOT_DIR}/project-config:/mnt/nexent-data/project-config
     env_file:

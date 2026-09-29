@@ -1243,7 +1243,7 @@ deploy_https_nginx() {
         docker rm -f nexent-nginx 2>/dev/null || true
       fi
     fi
-    export NEXENT_WEB_PORT_MAPPING="3000:3000"
+    export NEXENT_WEB_PORT="${NEXENT_WEB_PORT:-3000}"
     return 0
   fi
 
@@ -2052,10 +2052,10 @@ main_deploy() {
 
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "🎉  部署完成！"
-    echo "🌐  现在可以访问应用：http://localhost:3000"
+    echo "🌐  现在可以访问应用：http://localhost:${NEXENT_WEB_PORT:-3000}"
   else
     echo "🎉  Deployment completed successfully!"
-    echo "🌐  You can now access the application at http://localhost:3000"
+    echo "🌐  You can now access the application at http://localhost:${NEXENT_WEB_PORT:-3000}"
   fi
 }
 
