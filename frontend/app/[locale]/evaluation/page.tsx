@@ -1,5 +1,12 @@
 "use client";
-import { useState, useEffect, useRef, useCallback, type Key } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type Key,
+  type ReactNode,
+} from "react";
 import {
   Tabs,
   Typography,
@@ -65,6 +72,36 @@ const EVALUATION_DELETE_ALL_ROLES = new Set<string>([
   USER_ROLES.SPEED,
   USER_ROLES.ASSET_OWNER,
 ]);
+
+/**
+ * Fire a body-less mutating request (DELETE / POST) and surface backend
+ * errors as a toast. Returns true only on success so callers can skip
+ * their success path (local row removal / list refresh).
+ */
+async function requestWithErrorToast(
+  url: string,
+  method: "DELETE" | "POST",
+  failKey: string,
+  t: (key: string) => string,
+  message: { error: (content: ReactNode) => void }
+): Promise<boolean> {
+  try {
+    const resp = await fetch(url, { method, headers: getAuthHeaders() });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      message.error(
+        d.code
+          ? getI18nErrorMessage(d.code, t)
+          : d.detail || d.message || t(failKey)
+      );
+      return false;
+    }
+    return true;
+  } catch {
+    message.error(t(failKey));
+    return false;
+  }
+}
 
 function useList(url: string) {
   /**
@@ -373,31 +410,19 @@ function RunsTab() {
             <Popconfirm
               title={t("agentEvaluation.deleteConfirm")}
               onConfirm={async () => {
-                try {
-                  const resp = await fetch(
-                    API_ENDPOINTS.agentEvaluations.delete(
-                      r.agent_evaluation_id
-                    ),
-                    { method: "DELETE", headers: getAuthHeaders() }
-                  );
-                  if (!resp.ok) {
-                    const d = await resp.json().catch(() => ({}));
-                    message.error(
-                      d.code
-                        ? getI18nErrorMessage(d.code, t)
-                        : d.detail ||
-                            d.message ||
-                            t("agentEvaluation.message.deleteRunFailed")
-                    );
-                    return;
-                  }
+                const ok = await requestWithErrorToast(
+                  API_ENDPOINTS.agentEvaluations.delete(r.agent_evaluation_id),
+                  "DELETE",
+                  "agentEvaluation.message.deleteRunFailed",
+                  t,
+                  message
+                );
+                if (ok) {
                   setRuns((prev) =>
                     prev.filter(
                       (x) => x.agent_evaluation_id !== r.agent_evaluation_id
                     )
                   );
-                } catch {
-                  message.error(t("agentEvaluation.message.deleteRunFailed"));
                 }
               }}
             >
@@ -891,6 +916,16 @@ function EvaluatorsTab() {
   const { message } = App.useApp();
   const currentLang = (i18n.language || "zh").startsWith("zh") ? "zh" : "en";
   const [evaluators, refreshEval] = useList(API_ENDPOINTS.evaluators.list);
+  // Shared by the table and card views; a failed delete keeps its row data
+  // out of the UI anyway because the refresh re-syncs from the server.
+  const deleteEvaluator = (evaluatorId: number) =>
+    requestWithErrorToast(
+      API_ENDPOINTS.evaluators.delete(evaluatorId),
+      "DELETE",
+      "agentEvaluation.deleteFailed",
+      t,
+      message
+    ).then(() => refreshEval());
   const { availableLlmModels } = useModelList();
   const [agents] = useList(API_ENDPOINTS.agent.list);
   const [drawer, setDrawer] = useState(false);
@@ -1125,27 +1160,7 @@ function EvaluatorsTab() {
           )}
           <Popconfirm
             title={t("agentEvaluation.deleteConfirm")}
-            onConfirm={async () => {
-              try {
-                const resp = await fetch(
-                  API_ENDPOINTS.evaluators.delete(e.evaluator_id),
-                  { method: "DELETE", headers: getAuthHeaders() }
-                );
-                if (!resp.ok) {
-                  const d = await resp.json().catch(() => ({}));
-                  message.error(
-                    d.code
-                      ? getI18nErrorMessage(d.code, t)
-                      : d.detail ||
-                          d.message ||
-                          t("agentEvaluation.deleteFailed")
-                  );
-                }
-              } catch {
-                message.error(t("agentEvaluation.deleteFailed"));
-              }
-              refreshEval();
-            }}
+            onConfirm={() => deleteEvaluator(e.evaluator_id)}
           >
             <Tooltip title={t("agentEvaluation.delete")}>
               <Button
@@ -1388,27 +1403,7 @@ function EvaluatorsTab() {
                     />
                     <Popconfirm
                       title={t("agentEvaluation.deleteConfirm")}
-                      onConfirm={async () => {
-                        try {
-                          const resp = await fetch(
-                            API_ENDPOINTS.evaluators.delete(e.evaluator_id),
-                            { method: "DELETE", headers: getAuthHeaders() }
-                          );
-                          if (!resp.ok) {
-                            const d = await resp.json().catch(() => ({}));
-                            message.error(
-                              d.code
-                                ? getI18nErrorMessage(d.code, t)
-                                : d.detail ||
-                                    d.message ||
-                                    t("agentEvaluation.deleteFailed")
-                            );
-                          }
-                        } catch {
-                          message.error(t("agentEvaluation.deleteFailed"));
-                        }
-                        refreshEval();
-                      }}
+                      onConfirm={() => deleteEvaluator(e.evaluator_id)}
                     >
                       <Button
                         type="text"
@@ -1422,26 +1417,14 @@ function EvaluatorsTab() {
                         type="link"
                         size="small"
                         onClick={async () => {
-                          try {
-                            const resp = await fetch(
-                              API_ENDPOINTS.evaluators.publish(e.evaluator_id),
-                              { method: "POST", headers: getAuthHeaders() }
-                            );
-                            if (!resp.ok) {
-                              const d = await resp.json().catch(() => ({}));
-                              message.error(
-                                d.code
-                                  ? getI18nErrorMessage(d.code, t)
-                                  : d.detail ||
-                                      d.message ||
-                                      t("agentEvaluation.publishFailed")
-                              );
-                              return;
-                            }
-                            refreshEval();
-                          } catch {
-                            message.error(t("agentEvaluation.publishFailed"));
-                          }
+                          const ok = await requestWithErrorToast(
+                            API_ENDPOINTS.evaluators.publish(e.evaluator_id),
+                            "POST",
+                            "agentEvaluation.publishFailed",
+                            t,
+                            message
+                          );
+                          if (ok) refreshEval();
                         }}
                       >
                         {t("agentEvaluation.publish")}
