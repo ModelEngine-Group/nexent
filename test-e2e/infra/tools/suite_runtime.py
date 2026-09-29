@@ -125,13 +125,17 @@ def fingerprint(repo):
 
 
 def config_fingerprint(home):
-    """Hash local config bytes without storing or printing their contents."""
+    """Pin operator configuration, excluding the refreshed anchor asset registry."""
     digest = hashlib.sha256()
     root = home / "config"
     for path in sorted(root.rglob("*")) if root.is_dir() else []:
         if path.is_symlink():
             raise ValueError("Machine config symlinks cannot be used for safe resume")
         if not path.is_file():
+            continue
+        # Per-case anchor preparation replaces this file with verified runtime IDs.
+        # It is an output of the batch, not immutable operator configuration.
+        if path.relative_to(root).as_posix() == "anchor-assets.yaml":
             continue
         digest.update(path.relative_to(root).as_posix().encode("utf-8"))
         digest.update(b"\0")

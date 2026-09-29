@@ -12,7 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import suite
 import suite_notify
-from suite_runtime import BatchLock, finalize, logged, save
+from suite_runtime import BatchLock, config_fingerprint, finalize, logged, save
 
 
 class SuiteTests(unittest.TestCase):
@@ -51,6 +51,55 @@ class SuiteTests(unittest.TestCase):
                         pass
             with BatchLock(path):
                 pass
+
+    def test_refreshed_anchor_registry_does_not_change_operator_config_identity(self):
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            config = home / "config"
+            config.mkdir()
+            (config / "pipeline.yaml").write_text("schema_version: 1\n", encoding="utf-8")
+            anchor = config / "anchor-assets.yaml"
+            anchor.write_text("tenant_a_id: old\n", encoding="utf-8")
+            original = config_fingerprint(home)
+
+            anchor.write_text("tenant_a_id: refreshed\n", encoding="utf-8")
+            self.assertEqual(config_fingerprint(home), original)
+
+            (config / "pipeline.yaml").write_text("schema_version: 2\n", encoding="utf-8")
+            self.assertNotEqual(config_fingerprint(home), original)
+
+    def test_batch_continues_after_case_refreshes_anchor_registry(self):
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            config = home / "config"
+            config.mkdir()
+            anchor = config / "anchor-assets.yaml"
+            anchor.write_text("tenant_a_id: old\n", encoding="utf-8")
+            records = [
+                {"case_id": "A-001", "stage": "D2", "status": "active", "execution": {"test": True}},
+                {"case_id": "A-002", "stage": "D2", "status": "active", "execution": {"test": True}},
+            ]
+
+            def command_result(command, cwd, env, log, timeout):
+                if "--batch-dir" in command:
+                    batch = Path(command[command.index("--batch-dir") + 1])
+                    case_id = command[command.index("--case") + 1]
+                    if case_id == "A-001":
+                        anchor.write_text("tenant_a_id: refreshed\n", encoding="utf-8")
+                    save(batch / "cases" / case_id / "receipt.json", {
+                        "case_id": case_id, "stage": "D2", "result": "PASS", "cleanup_exit_code": 0})
+                return 0
+
+            with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \
+                    patch.object(suite, "fingerprint", return_value={"head": "test"}), \
+                    patch.object(suite, "static_requirements", return_value=set()), \
+                    patch.object(suite, "static_inventory", return_value=[]), \
+                    patch.object(suite, "logged", side_effect=command_result):
+                self.assertEqual(suite.execute(home, home, records, {"hooks": {}, "case_timeout_seconds": 20}), 0)
+            batch = next((home / "runs/repository-daily").iterdir())
+            summary = json.loads((batch / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["counts"], {"PASS": 2})
+            self.assertTrue(summary["execution_complete"])
 
     def test_notification_refuses_incomplete(self):
         with tempfile.TemporaryDirectory() as root:
