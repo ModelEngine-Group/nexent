@@ -1169,6 +1169,7 @@ deployment_https_prepare || {
 }
 deployment_render_helm_chart_values > "$HTTPS_HELM_VALUES"
 assert_contains "$(cat "$HTTPS_HELM_VALUES")" $'nexent-nginx:\n  enabled: true' "helm values should enable the nginx subchart"
+assert_contains "$(cat "$HTTPS_HELM_VALUES")" $'nexent-nginx:\n  enabled: true\n  images:\n    nginx:\n      repository: "registry.local/nexent/nginx"\n      tag: "alpine"\n      pullPolicy: "IfNotPresent"\n  services:\n    nginx:\n      type: "NodePort"\n      entryPort: 31000\n      nodePort: 31000' "helm values should render the nginx NodePort from NEXENT_HTTPS_PORT"
 assert_contains "$(cat "$HTTPS_HELM_VALUES")" "BEGIN CERTIFICATE" "helm values should embed the certificate content"
 
 # Reset to disabled for the summary path
