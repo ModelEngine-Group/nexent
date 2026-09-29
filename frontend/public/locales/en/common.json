@@ -2618,7 +2618,6 @@
   "skillRepository.mine.applyForbidden": "The current account can only list Skills created by itself",
   "skillRepository.mine.applySuccess": "Listing request submitted",
   "skillRepository.mine.applyError": "Failed to submit review",
-  "skillRepository.mine.button.apply": "List",
   "skillRepository.mine.deleteTitle": "Delete Skill",
   "skillRepository.mine.deleteContent": "Delete {{name}}?",
   "skillRepository.mine.viewReviewProgress": "View review progress",
