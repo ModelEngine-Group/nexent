@@ -1,0 +1,63 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-06
+  feature_id: V5-DEP-06
+  business_rule_ids:
+  - V5-DEP-06-RULE-01
+  title: Docker/Kubernetes 备份脚本参数、空间预检、资产完整性与回滚前置契约
+  type: DEPLOYMENT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 升级前备份遗漏持久化目录、目标目录冲突、空间不足、交互式阻塞或生成不完整恢复资产。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  steps:
+  - order: 1
+    action: 执行 deploy/tests/test_docker_backup.sh。
+    expected: 两个仓库内确定性契约脚本均退出 0。
+  - order: 2
+    action: 执行 deploy/tests/test_k8s_backup.sh。
+    expected: 所有失败分支错误明确且未开始复制。
+  - order: 3
+    action: 校验缺参/未知参数/目录嵌套/名称冲突/空间不足均在复制前失败。
+    expected: 成功产物目录和文件完整。
+  - order: 4
+    action: 校验成功路径包含 ROOT_DIR、NEXENT_USER_DIR、Docker volume 或 Kubernetes PVC 数据和元数据。
+    expected: 无生产数据写入或残留。
+  - order: 5
+    action: 确认执行无交互提示、临时目录自动清理。
+    expected: 无生产数据写入或残留。
+  expected_results:
+  - 两个仓库内确定性契约脚本均退出 0。
+  - 所有失败分支错误明确且未开始复制。
+  - 成功产物目录和文件完整。
+  - 无生产数据写入或残留。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 35
+  risk_type: DEPLOYMENT
+  risk: 升级前备份遗漏持久化目录、目标目录冲突、空间不足、交互式阻塞或生成不完整恢复资产。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  metrics:
+  - 两个仓库内确定性契约脚本均退出 0。
+  - 所有失败分支错误明确且未开始复制。
+  - 成功产物目录和文件完整。
+  - 无生产数据写入或残留。
+  thresholds:
+  - 两个仓库内确定性契约脚本均退出 0。
+  - 所有失败分支错误明确且未开始复制。
+  - 成功产物目录和文件完整。
+  - 无生产数据写入或残留。
+  recovery_expectations:
+  - 两个仓库内确定性契约脚本均退出 0。
+  - 所有失败分支错误明确且未开始复制。
+  - 成功产物目录和文件完整。
+  - 无生产数据写入或残留。

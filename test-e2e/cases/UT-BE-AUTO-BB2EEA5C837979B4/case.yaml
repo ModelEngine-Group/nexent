@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-BB2EEA5C837979B4
+  feature_id: F-156
+  business_rule_ids:
+  - F-156-RULE-01
+  title: 文档删除栅栏 mark/is/clear 三态协调与 Redis 不可用回退｜核心与异常路径
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 文档删除栅栏 mark/is/clear 三态协调与 Redis 不可用回退｜核心与异常路径
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测对象为 RedisService 的文档删除栅栏方法（_document_fence_key/mark_document_delete_requested/is_document_delete_requested/clear_document_delete_fence）；Redis
+    客户端经 monkeypatch 注入 mock，不连接真实 Redis。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 在本地工作区导入 backend/services/redis_service.py 的 RedisService，构造实例并将 self._client（或 self.client）替换为 mock Redis 客户端；测试代码不读取生产凭据。
+    expected: _document_fence_key 对空 file_id 返回 None，否则返回 kb:delete:fence:file:{file_id}。
+  - order: 2
+    action: 验证 _document_fence_key：传入 file_id="doc-1" 断言返回 "kb:delete:fence:file:doc-1"；传入 None、"" 断言返回 None。
+    expected: mark_document_delete_requested 成功时返回 True 且通过 client.set（非 setex，无 TTL）写入；空 file_id 或 set 异常时返回 False 且不抛异常。
+  - order: 3
+    action: 验证 mark_document_delete_requested 正常路径：调用 mark_document_delete_requested(file_id="doc-1", requested_by="user-1")，断言返回
+      True，且 mock client.set 以 ("kb:delete:fence:file:doc-1", 含 file_id/requested_by/requested_at 的 JSON 串) 被调用一次，未调用 setex（栅栏无
+      TTL）。
+    expected: is_document_delete_requested 对 exists 命中/未命中分别返回 True/False；空 file_id 返回 False；Redis 异常 re-raise 以支持调用方回退 PG。
+  - order: 4
+    action: 验证 mark_document_delete_requested 边界与异常：file_id 为空（None/""）时返回 False 且不触碰 client；mock client.set 抛异常时返回 False
+      且不向上抛出。
+    expected: clear_document_delete_fence 返回被删除键数量；空 file_id 或 delete 异常时返回 0 且不抛异常。
+  - order: 5
+    action: 验证 is_document_delete_requested 正常路径：mock client.exists 返回 1 时断言返回 True，返回 0 时断言返回 False；file_id 为空断言返回 False
+      且不触碰 client。
+    expected: mark→is→clear→is 串联依次为 True→True→(删除数)→False，栅栏不会被无 TTL 过期或重复写入破坏。
+  - order: 6
+    action: 验证 is_document_delete_requested 异常路径：mock client.exists 抛异常时断言异常被重新抛出（re-raise），使调用方可区分“健康未命中”与“Redis 不可用”并回退
+      PG 生命周期状态。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 验证 clear_document_delete_fence：mock client.delete 返回 1/0 分别断言返回 1/0；file_id 为空断言返回 0 且不触碰 client；mock client.delete
+      抛异常断言返回 0 且不向上抛出。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 串联三态协调：在 mock 上用状态字典模拟键存在/删除，依次执行 mark→is 返回 True，clear 后 is 返回 False，确认栅栏仅由成功 finalizer 清除。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥；测试结束后释放 mock 对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - _document_fence_key 对空 file_id 返回 None，否则返回 kb:delete:fence:file:{file_id}。
+  - mark_document_delete_requested 成功时返回 True 且通过 client.set（非 setex，无 TTL）写入；空 file_id 或 set 异常时返回 False 且不抛异常。
+  - is_document_delete_requested 对 exists 命中/未命中分别返回 True/False；空 file_id 返回 False；Redis 异常 re-raise 以支持调用方回退 PG。
+  - clear_document_delete_fence 返回被删除键数量；空 file_id 或 delete 异常时返回 0 且不抛异常。
+  - mark→is→clear→is 串联依次为 True→True→(删除数)→False，栅栏不会被无 TTL 过期或重复写入破坏。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 411
+  unit_boundary: 文档删除
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  assertions:
+  - _document_fence_key 对空 file_id 返回 None，否则返回 kb:delete:fence:file:{file_id}。
+  - mark_document_delete_requested 成功时返回 True 且通过 client.set（非 setex，无 TTL）写入；空 file_id 或 set 异常时返回 False 且不抛异常。
+  - is_document_delete_requested 对 exists 命中/未命中分别返回 True/False；空 file_id 返回 False；Redis 异常 re-raise 以支持调用方回退 PG。
+  - clear_document_delete_fence 返回被删除键数量；空 file_id 或 delete 异常时返回 0 且不抛异常。
+  - mark→is→clear→is 串联依次为 True→True→(删除数)→False，栅栏不会被无 TTL 过期或重复写入破坏。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

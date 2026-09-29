@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MCP-LOCALIMG-01
+  feature_id: V5-PW-MCP-LOCALIMG-01
+  business_rule_ids:
+  - V5-PW-MCP-LOCALIMG-01-RULE-01
+  title: Mine新增Local Image MCP→启动/健康→删除
+  type: E2E
+  priority: P2
+  status: blocked
+  automation: automated
+  objective: 补足当前frontend枚举存在的LOCAL_IMAGE类型。
+  preconditions:
+  - 测试镜像预加载
+  - local_image_supported=true
+  test_data:
+    legacy_asset_declaration: config/mcp.yaml；本地测试镜像
+  steps:
+  - order: 1
+    action: Mine→Add确认Local Image类型存在。
+    expected: 仅能力声明支持时执行。
+  - order: 2
+    action: 选择Local Image，按真实表单选择/填写测试镜像和必要端口。
+    expected: 真实镜像健康。
+  - order: 3
+    action: 提交并等待启动。
+    expected: 删除后无残留。
+  - order: 4
+    action: 执行健康检查并查看Tool列表。
+    expected: 删除后无残留。
+  - order: 5
+    action: 停用/重新启用一次。
+    expected: 删除后无残留。
+  - order: 6
+    action: 删除run_id MCP并确认本地运行时无残留。
+    expected: 删除后无残留。
+  expected_results:
+  - 仅能力声明支持时执行。
+  - 真实镜像健康。
+  - 删除后无残留。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 31
+  actor: Nexent browser user
+  journey:
+  - Mine→Add确认Local Image类型存在。
+  - 选择Local Image，按真实表单选择/填写测试镜像和必要端口。
+  - 提交并等待启动。
+  - 执行健康检查并查看Tool列表。
+  - 停用/重新启用一次。
+  - 删除run_id MCP并确认本地运行时无残留。
+  final_business_result:
+  - 仅能力声明支持时执行。
+  - 真实镜像健康。
+  - 删除后无残留。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MCP-LOCALIMG-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

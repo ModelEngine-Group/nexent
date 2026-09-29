@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-171
+  name: agent/tool/context gateway 契约：上下文预算与压缩、受管 MCP/模型并发、沙箱桥接线程回收、工具与观察者消息
+  status: active
+  description: 'SDK与基础设施 / Core Agent: agent/tool/context gateway 契约：上下文预算与压缩、受管 MCP/模型并发、沙箱桥接线程回收、工具与观察者消息'
+  business_rules:
+  - rule_id: F-171-RULE-01
+    description: agent/tool/context gateway 契约：上下文预算与压缩、受管 MCP/模型并发、沙箱桥接线程回收、工具与观察者消息
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

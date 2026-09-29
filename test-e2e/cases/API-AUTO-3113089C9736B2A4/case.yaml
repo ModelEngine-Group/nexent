@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-3113089C9736B2A4
+  feature_id: F-177
+  business_rule_ids:
+  - F-177-RULE-01
+  title: 标签定义上限100/值上限1000/分配上限100 与 single_select 唯一性（DB触发器+service预检+active引用校验）
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: 标签定义上限100/值上限1000/分配上限100 与 single_select 唯一性（DB触发器+service预检+active引用校验）
+  preconditions:
+  - 真实后端服务与 PostgreSQL 数据库可访问，v2.5.2_unified_tag_management.sql 迁移已应用（含 enforce_tag_definition_limit / enforce_tag_value_limit
+    / enforce_resource_tag_assignment_rules 触发器及 tag_bucket/tag_definition/tag_value/resource_tag_assignment 表）。
+  - 使用具备 RESOURCE/TAG_LIBRARY/MANAGE 权限的管理账号（SU/ADMIN/SPEED/ASSET_OWNER）获取 authorization token。
+  - 目标租户已预置 default_resource 标签库（含 agent_category 预置定义）及六类资源类型绑定。
+  - 本次 run_id 已生成，所有新建标签定义/值/分配可被识别并在结束后清理，不影响既有数据。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml（含管理账号凭据）
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml（后端地址与数据库连接）
+
+      - 后端服务地址与 default_resource 库 bucket_id'
+  steps:
+  - order: 1
+    action: 以管理账号调用 GET /tag-libraries 获取 default_resource 库的 bucket_id。
+    expected: 定义第 100 个创建成功、第 101 个返回 409，details 为 {limit:100, scope:definition}，active 定义总数恰好 100 不被超写。
+  - order: 2
+    action: 定义容量边界：循环调用 POST /tag-libraries/{bucket_id}/definitions 创建 multi_select 定义（definition_name 唯一、initial_values 至少
+      1 个值），直到该库 active（非软删）定义总数达到 100，记录第 100 个返回 200；再次创建第 101 个定义，断言返回 409，响应 detail 含 message=Tag definition capacity
+      exceeded 且 details.scope=definition、details.limit=100。
+    expected: 值第 1000 个创建成功、第 1001 个返回 409，details 为 {limit:1000, scope:value}，active 值总数恰好 1000。
+  - order: 3
+    action: 值容量边界：对步骤 2 中某个 multi_select 定义，循环调用 POST /tag-libraries/{bucket_id}/definitions/{definition_id}/values 创建值（display_value
+      唯一），直到 active 值总数达到 1000，第 1000 个返回 200；再次创建第 1001 个值，断言返回 409 且 details.scope=value、details.limit=1000。
+    expected: 分配 100 个 value_id 成功且 assignment_count=100；101 个返回 409，details 为 {limit:100, scope:assignment}。
+  - order: 4
+    action: 分配容量边界：调用 PUT /tag-libraries/assignments/tool/{resource_id}（resource_id 为测试专用 tool 资源）携带 100 个合法 value_id，断言返回
+      200 且 assignment_count=100；再构造含 101 个 value_id 的替换请求，断言返回 409 且 details.scope=assignment、details.limit=100。
+    expected: single_select 定义同一资源仅允许 1 个分配，第二个分配被拒绝（400 或 409），GET 确认仅 1 个分配。
+  - order: 5
+    action: single_select 唯一性：创建 single_select 定义并预置两个值；先 PUT 分配单个 value_id 返回 200；再对同一 single_select 定义分配第二个不同 value_id（同一次替换请求带两个同定义
+      value_id），断言被拒绝（400 或 409），并通过 GET /tag-libraries/assignments/tool/{resource_id} 确认该定义下仅保留 1 个分配。
+    expected: 并发抢占最后一个名额时恰好一个成功、一个 409，最终计数不超过 100/1000/100，无半写入或重复副作用。
+  - order: 6
+    action: 并发终态：将定义（或值、分配）计数逼近上限-1，并发发起两个创建请求抢占最后一个名额；断言恰好一个成功（200），另一个返回 409，最终 active 计数恰好等于上限，无半写入。
+    expected: 所有失败路径返回明确错误码与 details，不出现半写入、跨租户泄露；日志不输出凭据。
+  - order: 7
+    action: 清理：删除本次创建的临时定义/值/分配，确认清理后 active 计数回退且可重复执行。
+    expected: 清理后临时资源被删除，用例可重复执行。
+  expected_results:
+  - 定义第 100 个创建成功、第 101 个返回 409，details 为 {limit:100, scope:definition}，active 定义总数恰好 100 不被超写。
+  - 值第 1000 个创建成功、第 1001 个返回 409，details 为 {limit:1000, scope:value}，active 值总数恰好 1000。
+  - 分配 100 个 value_id 成功且 assignment_count=100；101 个返回 409，details 为 {limit:100, scope:assignment}。
+  - single_select 定义同一资源仅允许 1 个分配，第二个分配被拒绝（400 或 409），GET 确认仅 1 个分配。
+  - 并发抢占最后一个名额时恰好一个成功、一个 409，最终计数不超过 100/1000/100，无半写入或重复副作用。
+  - 所有失败路径返回明确错误码与 details，不出现半写入、跨租户泄露；日志不输出凭据。
+  - 清理后临时资源被删除，用例可重复执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 524
+  integration_boundary:
+  - LOCAL_DB_REQUIRED：真实 PostgreSQL 持久化 + v2.5.2 迁移已应用；不使用公网模型或第三方外部服务。
+  observations:
+  - 定义第 100 个创建成功、第 101 个返回 409，details 为 {limit:100, scope:definition}，active 定义总数恰好 100 不被超写。
+  - 值第 1000 个创建成功、第 1001 个返回 409，details 为 {limit:1000, scope:value}，active 值总数恰好 1000。
+  - 分配 100 个 value_id 成功且 assignment_count=100；101 个返回 409，details 为 {limit:100, scope:assignment}。
+  - single_select 定义同一资源仅允许 1 个分配，第二个分配被拒绝（400 或 409），GET 确认仅 1 个分配。
+  - 并发抢占最后一个名额时恰好一个成功、一个 409，最终计数不超过 100/1000/100，无半写入或重复副作用。
+  - 所有失败路径返回明确错误码与 details，不出现半写入、跨租户泄露；日志不输出凭据。
+  - 清理后临时资源被删除，用例可重复执行。
+  cleanup:
+  - API 响应体（409/400 detail 含 message/details）、后端日志、数据库计数查询结果、并发测试日志。

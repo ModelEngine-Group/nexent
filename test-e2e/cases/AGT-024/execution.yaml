@@ -1,0 +1,10 @@
+schema_version: '1.0'
+case_id: AGT-024
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AGT-024
+- framework: pytest
+  file: test-e2e/infra/automation/d3/scenarios/scenario_agent_runtime_scenarios.py
+  selector: AGT-024
+notes: V5 source binding migrated; runtime parity is not yet certified.

@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-528B1E179F939E0B
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: 外部记忆 Provider 连通性测试面板：先 ingest 后 search 顺序、成功/失败结果展示与上游错误脱敏｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 外部记忆 Provider 连通性测试面板：先 ingest 后 search 顺序、成功/失败结果展示与上游错误脱敏｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求真实外部 provider 或模型服务在线，test-ingest/test-search 响应通过路由 mock 提供固定数据。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 记忆页 MemoryManager 已加载，存在至少一个已配置的外部记忆 Provider（含 provider_config_id 与 provider_name）。
+  - 当前用户拥有 MEM.PROVIDER:UPDATE 权限，Provider 行操作菜单中的“Test connection”项可见。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载记忆页 MemoryManager/ProviderConfigCard，注入最小 props、store 与本地固定 Provider 数据（provider_config_id、provider_name、enabled、last_error_code、params）。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 路由 mock /api/memory/providers 与 /api/memory/provider-plugins 返回固定 Provider 与插件列表；打开目标 Provider 行“More provider
+      actions”菜单，点击“Test connection”。
+    expected: 请求顺序固定为 ingest→search，仅当 ingest 成功后才发起 search；第二次运行再次产生 ingest→search 各一次。
+  - order: 3
+    action: 断言 ProviderTestPanel Drawer 打开，标题为“Test {provider_name}”，展示写入顺序警告 Alert，表单 content/query 预填样例值且均为必填。
+    expected: 成功时展示 duration/accepted/rejected/hits 四项结果；失败时展示通用错误文案，不展示半写入状态。
+  - order: 4
+    action: 填写 content 与 query，点击 footer“Write and search”，断言出现二次确认 modal（标题“Write test memory?”），点击确认按钮。
+    expected: 上游错误响应中的敏感 body 不以明文展示（错误脱敏）。
+  - order: 5
+    action: 断言先发出 test-ingest（POST /api/memory/providers/{id}/test-ingest，units[0].unit_type=user_message）再发出 test-search（POST
+      /api/memory/providers/{id}/test-search，body 为 {query, top_k:3}），记录请求顺序为 ingest→search。
+    expected: 日志、DOM、报告中不出现明文 API Key/Token/Password/模型密钥或上游 secret body。
+  - order: 6
+    action: 使 test-ingest 返回 {accepted:1, rejected:0}、test-search 返回 {count:2}，断言结果 Alert 为 success，依次展示 Duration、Accepted=1、Rejected=0、Hits=2。
+    expected: 日志、DOM、报告中不出现明文 API Key/Token/Password/模型密钥或上游 secret body。
+  - order: 7
+    action: 再次运行并将 test-search 改为返回 500（body 含上游敏感信息，如 {detail:"secret upstream body"}），断言结果 Alert 为 error，展示通用失败文案“The provider
+      request failed.”，且页面不出现上游 body 内容（“secret upstream body”不可见）。
+    expected: 日志、DOM、报告中不出现明文 API Key/Token/Password/模型密钥或上游 secret body。
+  - order: 8
+    action: 断言运行期间 loading 状态开启、结束后关闭，并触发 onTested 刷新 provider 列表。
+    expected: 日志、DOM、报告中不出现明文 API Key/Token/Password/模型密钥或上游 secret body。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 请求顺序固定为 ingest→search，仅当 ingest 成功后才发起 search；第二次运行再次产生 ingest→search 各一次。
+  - 成功时展示 duration/accepted/rejected/hits 四项结果；失败时展示通用错误文案，不展示半写入状态。
+  - 上游错误响应中的敏感 body 不以明文展示（错误脱敏）。
+  - 日志、DOM、报告中不出现明文 API Key/Token/Password/模型密钥或上游 secret body。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 431
+  unit_boundary: 外部记忆提供者测试面板
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 请求顺序固定为 ingest→search，仅当 ingest 成功后才发起 search；第二次运行再次产生 ingest→search 各一次。
+  - 成功时展示 duration/accepted/rejected/hits 四项结果；失败时展示通用错误文案，不展示半写入状态。
+  - 上游错误响应中的敏感 body 不以明文展示（错误脱敏）。
+  - 日志、DOM、报告中不出现明文 API Key/Token/Password/模型密钥或上游 secret body。

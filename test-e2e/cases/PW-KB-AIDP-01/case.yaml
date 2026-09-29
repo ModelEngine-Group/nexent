@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-KB-AIDP-01
+  feature_id: V5-PW-KB-AIDP-01
+  business_rule_ids:
+  - V5-PW-KB-AIDP-01-RULE-01
+  title: AIDP Knowledge页面→检索→Agent绑定/对话
+  type: E2E
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 独立验证AIDP分支，禁止同脚本locator猜Local/AIDP。
+  preconditions:
+  - AIDP模式
+  - AIDP测试知识空间有固定marker
+  - 真实LLM可用
+  test_data:
+    legacy_asset_declaration: config/environment.yaml；config/aidp.yaml；expected/kb_expected.json
+  steps:
+  - order: 1
+    action: 打开/knowledges，等待deployment config并确认AIDP UI。
+    expected: AIDP和Local分支互斥。
+  - order: 2
+    action: 按当前AIDP真实入口选择/创建/导入测试知识资源。
+    expected: 真实AIDP检索及Agent使用成功。
+  - order: 3
+    action: 使用检索/测试入口查询固定marker问题。
+    expected: 不出现Local quota控件。
+  - order: 4
+    action: 检查结果含expected文档/marker。
+    expected: 不出现Local quota控件。
+  - order: 5
+    action: 到/agents→Advanced Knowledge选择AIDP测试资源。
+    expected: 不出现Local quota控件。
+  - order: 6
+    action: 等待autosave并进入Debug/Chat。
+    expected: 不出现Local quota控件。
+  - order: 7
+    action: 发送固定问题并检查真实运行marker。
+    expected: 不出现Local quota控件。
+  - order: 8
+    action: 刷新/新会话检查知识作用域行为。
+    expected: 不出现Local quota控件。
+  expected_results:
+  - AIDP和Local分支互斥。
+  - 真实AIDP检索及Agent使用成功。
+  - 不出现Local quota控件。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 36
+  actor: Nexent browser user
+  journey:
+  - 打开/knowledges，等待deployment config并确认AIDP UI。
+  - 按当前AIDP真实入口选择/创建/导入测试知识资源。
+  - 使用检索/测试入口查询固定marker问题。
+  - 检查结果含expected文档/marker。
+  - 到/agents→Advanced Knowledge选择AIDP测试资源。
+  - 等待autosave并进入Debug/Chat。
+  - 发送固定问题并检查真实运行marker。
+  - 刷新/新会话检查知识作用域行为。
+  final_business_result:
+  - AIDP和Local分支互斥。
+  - 真实AIDP检索及Agent使用成功。
+  - 不出现Local quota控件。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-KB-AIDP-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-4DE990B773C33378
+  feature_id: F-065
+  business_rule_ids:
+  - F-065-RULE-01
+  title: landing选agent写线程元数据(updateCustom)并跨会话保留、返回列表switchToNewThread清理｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: landing选agent写线程元数据(updateCustom)并跨会话保留、返回列表switchToNewThread清理｜核心流程
+  preconditions:
+  - 本地前端组件测试环境可运行（node:test）；不要求外部模型/后端服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测前端源码位于仓库 frontend/app/[locale]/newchat 目录且可读取。
+  test_data:
+    legacy_asset_declaration: '- 无额外本地资产；测试读取 frontend/app/[locale]/newchat/page.tsx、frontend/app/[locale]/newchat/adapter/conversation-thread-list-adapter.tsx、frontend/app/[locale]/newchat/assistant-ui/thread.tsx
+      源码做静态断言。'
+  steps:
+  - order: 1
+    action: 读取 newchat page.tsx 源码，定位 handleAgentSelectedFromLanding 回调实现。
+    expected: 'handleAgentSelectedFromLanding 在写入 agentId 前先完成新线程 initialize，且 updateCustom 携带 { agentId: agent.id }。'
+  - order: 2
+    action: 断言从 landing 选择 agent 时先将 shouldRestoreAgentRef 置为 true，允许后续恢复所选 agent。
+    expected: 本地新线程在服务端尚无 conversation_id 时即可保存所选 agent，updateCustom 为 no-op，不要求后端会话 ID。
+  - order: 3
+    action: '断言通过 runtime.threads.switchToNewThread() 切到新线程后，用 getItemById(mainThreadId) 取得新线程，先 initialize() 再 updateCustom({
+      agentId: agent.id }) 写入 agentId。'
+    expected: 返回列表时 shouldRestoreAgentRef=false 且 switchToNewThread() 清理旧线程状态，onBack() 返回 landing。
+  - order: 4
+    action: 读取 conversation-thread-list-adapter.tsx，断言 updateCustom(_remoteId, _custom) 为可空签名（Record<string, unknown> | undefined）的
+      no-op，允许在服务端尚无 conversation_id 时本地保留元数据。
+    expected: 有历史消息的会话在标题下展示所选 agent 名称。
+  - order: 5
+    action: 断言 initialize() 返回空 remoteId/externalId，不在本地提前创建后端会话。
+    expected: 测试过程无未处理异常，日志不输出明文 API Key/Token/Password。
+  - order: 6
+    action: 读取 page.tsx 中 handleThreadBack 实现，断言先置 shouldRestoreAgentRef=false，再 switchToNewThread() 清理旧线程并 onBack() 返回 landing。
+    expected: 测试过程无未处理异常，日志不输出明文 API Key/Token/Password。
+  - order: 7
+    action: 读取 thread.tsx 渲染逻辑，断言有消息且非 embedded 时在会话标题下渲染所选 agent 的 displayName。
+    expected: 测试过程无未处理异常，日志不输出明文 API Key/Token/Password。
+  expected_results:
+  - 'handleAgentSelectedFromLanding 在写入 agentId 前先完成新线程 initialize，且 updateCustom 携带 { agentId: agent.id }。'
+  - 本地新线程在服务端尚无 conversation_id 时即可保存所选 agent，updateCustom 为 no-op，不要求后端会话 ID。
+  - 返回列表时 shouldRestoreAgentRef=false 且 switchToNewThread() 清理旧线程状态，onBack() 返回 landing。
+  - 有历史消息的会话在标题下展示所选 agent 名称。
+  - 测试过程无未处理异常，日志不输出明文 API Key/Token/Password。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 430
+  unit_boundary: 会话线程与Agent绑定
+  inputs:
+  - '- 无额外本地资产；测试读取 frontend/app/[locale]/newchat/page.tsx、frontend/app/[locale]/newchat/adapter/conversation-thread-list-adapter.tsx、frontend/app/[locale]/newchat/assistant-ui/thread.tsx
+    源码做静态断言。'
+  assertions:
+  - 'handleAgentSelectedFromLanding 在写入 agentId 前先完成新线程 initialize，且 updateCustom 携带 { agentId: agent.id }。'
+  - 本地新线程在服务端尚无 conversation_id 时即可保存所选 agent，updateCustom 为 no-op，不要求后端会话 ID。
+  - 返回列表时 shouldRestoreAgentRef=false 且 switchToNewThread() 清理旧线程状态，onBack() 返回 landing。
+  - 有历史消息的会话在标题下展示所选 agent 名称。
+  - 测试过程无未处理异常，日志不输出明文 API Key/Token/Password。

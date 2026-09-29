@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-A2A-DISCOVERY-01
+  feature_id: V5-PW-A2A-DISCOVERY-01
+  business_rule_ids:
+  - V5-PW-A2A-DISCOVERY-01-RULE-01
+  title: Advanced A2A发现→选择外部Agent→建立关系→Debug调用
+  type: E2E
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 依据Collaborative Agent真实Discovery入口测试外部A2A接入。
+  preconditions:
+  - Test A2A支持discovery/stream
+  - 认证Header/idkey/JWT本地配置
+  - 主Agent可编辑
+  test_data:
+    legacy_asset_declaration: config/a2a.yaml；services/test-a2a/；config/models.yaml
+  steps:
+  - order: 1
+    action: 主Agent→Advanced→Collaborative Agents。
+    expected: Search/Select是真实当前UI。
+  - order: 2
+    action: 点击A2A发现/添加外部Agent，打开Discovery Modal。
+    expected: 建立关系后可真实调用。
+  - order: 3
+    action: 填Test A2A URL及当前UI真实协议/认证/Header字段。
+    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  - order: 4
+    action: 点击【Search】真实发现。
+    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  - order: 5
+    action: 选中固定Test Agent并点击【Select Agent】。
+    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  - order: 6
+    action: 等待autosave，关闭再打开确认关系存在。
+    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  - order: 7
+    action: Debug发送触发外部Agent的问题。
+    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  - order: 8
+    action: 等待A2A流式/最终marker结果。
+    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  - order: 9
+    action: 检查Test A2A wire log。
+    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  - order: 10
+    action: 移除A2A关系并确认刷新消失。
+    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  expected_results:
+  - Search/Select是真实当前UI。
+  - 建立关系后可真实调用。
+  - Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 33
+  actor: Nexent browser user
+  journey:
+  - 主Agent→Advanced→Collaborative Agents。
+  - 点击A2A发现/添加外部Agent，打开Discovery Modal。
+  - 填Test A2A URL及当前UI真实协议/认证/Header字段。
+  - 点击【Search】真实发现。
+  - 选中固定Test Agent并点击【Select Agent】。
+  - 等待autosave，关闭再打开确认关系存在。
+  - Debug发送触发外部Agent的问题。
+  - 等待A2A流式/最终marker结果。
+  - 检查Test A2A wire log。
+  - 移除A2A关系并确认刷新消失。
+  final_business_result:
+  - Search/Select是真实当前UI。
+  - 建立关系后可真实调用。
+  - Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-A2A-DISCOVERY-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

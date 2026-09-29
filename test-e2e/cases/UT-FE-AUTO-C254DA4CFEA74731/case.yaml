@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-C254DA4CFEA74731
+  feature_id: F-024
+  business_rule_ids:
+  - F-024-RULE-01
+  title: 配额弹窗清空输入视为 unlimited（先存预警配置再 DELETE 硬限额），hard_limit_editable=false 禁止清空｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 配额弹窗清空输入视为 unlimited（先存预警配置再 DELETE 硬限额），hard_limit_editable=false 禁止清空｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 QuotaSettingsModal 与 SuQuotaModal，注入最小 props（open=true、tenantId、onCancel/onSuccess/onUsageChange stub），并
+      mock quotaService 的 getQuotaConfig/getQuotaUsage/getPlatformOverview/updateTenantQuota/deleteTenantQuota 返回固定测试数据。
+    expected: QuotaSettingsModal 中清空输入（quotaValue==null）在 hard_limit_editable!==false 时，先调用 updateTenantQuota（仅 warning_enabled/warning_threshold_pct/critical_threshold_pct）再调用
+      deleteTenantQuota，硬限额被删除且预警配置保留；SuQuotaModal 中清空输入直接调用 deleteTenantQuota。
+  - order: 2
+    action: 首次渲染后检查 QuotaSettingsModal 默认状态：quotaInput 回显 hard_limit_bytes 对应 GB/MB 值、unit 默认 GB、警告阈值滑块与 Switch 状态、loading
+      状态符合设计。
+    expected: 输入有效数值时仅调用 updateTenantQuota，请求体正确携带 hard_limit_gb 或 hard_limit_mb，不触发 DELETE。
+  - order: 3
+    action: QuotaSettingsModal：清空硬限额输入框（输入为空，quotaValue 为 null），点击保存，断言先调用 updateTenantQuota(tenantId, {warning_enabled, warning_threshold_pct,
+      critical_threshold_pct}) 保存预警配置，随后调用 deleteTenantQuota(tenantId)，且 updateTenantQuota 请求体不含 hard_limit_gb/hard_limit_mb。
+    expected: hard_limit_editable=false 时输入框与单位切换均 disabled，保存不引起硬限额清空（不调用 deleteTenantQuota、请求体不含 hard_limit 字段）。
+  - order: 4
+    action: QuotaSettingsModal：输入有效数值（GB=100），点击保存，断言仅调用一次 updateTenantQuota 且请求体包含 hard_limit_gb（单位切换为 MB 时包含 hard_limit_mb），不调用
+      deleteTenantQuota。
+    expected: 失败路径返回明确错误提示并复位 saving，不出现半写入、重复副作用或伪成功。
+  - order: 5
+    action: QuotaSettingsModal：将 config.hard_limit_editable 置为 false，断言硬限额输入框与 GB/MB Segmented 均 disabled；点击保存仅调用 updateTenantQuota（仅预警字段），请求体不含
+      hard_limit 字段且不调用 deleteTenantQuota。
+    expected: 组件状态与日志中不出现明文 API Key/Token/密码。
+  - order: 6
+    action: SuQuotaModal：清空输入后点击保存，断言仅调用 deleteTenantQuota(tenantId) 不调用 updateTenantQuota；再输入有效数值保存，断言调用 updateTenantQuota
+      且请求体含 hard_limit_gb/hard_limit_mb。
+    expected: 组件状态与日志中不出现明文 API Key/Token/密码。
+  - order: 7
+    action: 模拟 updateTenantQuota 或 deleteTenantQuota 返回 4xx/5xx（如 403「Tenant hard quota is managed by the platform administrator」或
+      PlatformCapacityExceeded 冲突码），断言错误提示文案映射正确、saving 状态复位、不吞异常、不出现成功提示。
+    expected: 组件状态与日志中不出现明文 API Key/Token/密码。
+  - order: 8
+    action: 重新渲染（关闭再打开）后确认初始数据回显与 getQuotaConfig 返回的 hard_limit_bytes 一致，清空与输入的受控状态正确。
+    expected: 组件状态与日志中不出现明文 API Key/Token/密码。
+  expected_results:
+  - QuotaSettingsModal 中清空输入（quotaValue==null）在 hard_limit_editable!==false 时，先调用 updateTenantQuota（仅 warning_enabled/warning_threshold_pct/critical_threshold_pct）再调用
+    deleteTenantQuota，硬限额被删除且预警配置保留；SuQuotaModal 中清空输入直接调用 deleteTenantQuota。
+  - 输入有效数值时仅调用 updateTenantQuota，请求体正确携带 hard_limit_gb 或 hard_limit_mb，不触发 DELETE。
+  - hard_limit_editable=false 时输入框与单位切换均 disabled，保存不引起硬限额清空（不调用 deleteTenantQuota、请求体不含 hard_limit 字段）。
+  - 失败路径返回明确错误提示并复位 saving，不出现半写入、重复副作用或伪成功。
+  - 组件状态与日志中不出现明文 API Key/Token/密码。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 452
+  unit_boundary: 配额UI
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - QuotaSettingsModal 中清空输入（quotaValue==null）在 hard_limit_editable!==false 时，先调用 updateTenantQuota（仅 warning_enabled/warning_threshold_pct/critical_threshold_pct）再调用
+    deleteTenantQuota，硬限额被删除且预警配置保留；SuQuotaModal 中清空输入直接调用 deleteTenantQuota。
+  - 输入有效数值时仅调用 updateTenantQuota，请求体正确携带 hard_limit_gb 或 hard_limit_mb，不触发 DELETE。
+  - hard_limit_editable=false 时输入框与单位切换均 disabled，保存不引起硬限额清空（不调用 deleteTenantQuota、请求体不含 hard_limit 字段）。
+  - 失败路径返回明确错误提示并复位 saving，不出现半写入、重复副作用或伪成功。
+  - 组件状态与日志中不出现明文 API Key/Token/密码。

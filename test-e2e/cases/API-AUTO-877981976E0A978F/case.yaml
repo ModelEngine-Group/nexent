@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-877981976E0A978F
+  feature_id: F-098
+  business_rule_ids:
+  - F-098-RULE-01
+  title: northbound 上传落库 upload_owner_service 与中断恢复按服务隔离｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: northbound 上传落库 upload_owner_service 与中断恢复按服务隔离｜核心流程
+  preconditions:
+  - 本地集成测试环境可运行：PostgreSQL、MinIO、northbound 服务与 config 服务（file_management_app）均已启动并可连通。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源（知识库 index_name、上传文件）名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - asset-owner 租户的 northbound API key 可用；config 服务需有效用户 JWT（users.yaml 中账号可登录），测试租户数据可被清理。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/assets/knowledge/（测试文件）、${NEXENT_TEST_HOME}/config/secrets.env。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 准备测试环境与 run_id：确认 PostgreSQL 中 knowledge_file_lifecycle_t 已应用 v2.5.1_upload_owner_service 迁移（存在 upload_owner_service
+      列与 idx_knowledge_file_lifecycle_upload_recovery 部分索引）。
+    expected: 步骤 3 接口返回 201，uploaded_filenames 包含文件 A 名称。
+  - order: 2
+    action: 以资产管理员 northbound 身份创建或选择归属 asset-owner 租户的知识库 index_name（通过 POST /nb/v1/knowledge/indices/{index_name}，index_name
+      带 run_id）。
+    expected: 步骤 4 中文件 A 的 lifecycle 行 upload_owner_service 为 'nexent-northbound'（非空），status 已落库（UPLOADED/PROCESSING/FAILED
+      等合法状态之一）。
+  - order: 3
+    action: '通过 POST /nb/v1/knowledge/file/upload（multipart: file + form index_name）上传测试文件 A，记录响应状态码与 uploaded_filenames。'
+    expected: 步骤 5 中文件 B 的 lifecycle 行 upload_owner_service 为 'nexent-config'，与文件 A 可区分。
+  - order: 4
+    action: 从数据库读取该文件对应的 knowledge_file_lifecycle_t 行（按 index_name、object_name 或返回 file_id），记录 upload_owner_service、status、create_time
+      字段。
+    expected: 数据库存在 upload_owner_service 列及 idx_knowledge_file_lifecycle_upload_recovery 部分索引（upload_owner_service, create_time）where
+      delete_flag='N' AND status='UPLOADING'。
+  - order: 5
+    action: '通过 config 服务 POST /file/upload（multipart: file + destination=minio + index_name，携带 Authorization JWT）上传测试文件 B，读取其
+      lifecycle 行记录 upload_owner_service。'
+    expected: 步骤 7 返回集合仅包含 upload_owner_service='nexent-northbound' 且 status='UPLOADING'、delete_flag='N'、create_time<cutoff
+      的记录，包含文件 A、不含文件 B（不跨服务抢占）。
+  - order: 6
+    action: 构造中断恢复场景：将文件 A、B 的 lifecycle 行置为 status='UPLOADING'、delete_flag='N'，并确保 create_time < 指定 cutoff。
+    expected: 步骤 8 返回集合仅包含文件 B，不含文件 A。
+  - order: 7
+    action: 调用 list_uploading_files_created_before(cutoff, 'nexent-northbound')，记录返回记录集合。
+    expected: 步骤 9 传入空 upload_owner_service 抛出 ValueError。
+  - order: 8
+    action: 调用 list_uploading_files_created_before(cutoff, 'nexent-config')，记录返回记录集合。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/用户密码。
+  - order: 9
+    action: 以空字符串调用 list_uploading_files_created_before(cutoff, '')，记录是否抛出 ValueError。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/用户密码。
+  - order: 10
+    action: 清理：删除本次上传文件、lifecycle 记录与测试知识库，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/用户密码。
+  expected_results:
+  - 步骤 3 接口返回 201，uploaded_filenames 包含文件 A 名称。
+  - 步骤 4 中文件 A 的 lifecycle 行 upload_owner_service 为 'nexent-northbound'（非空），status 已落库（UPLOADED/PROCESSING/FAILED 等合法状态之一）。
+  - 步骤 5 中文件 B 的 lifecycle 行 upload_owner_service 为 'nexent-config'，与文件 A 可区分。
+  - 数据库存在 upload_owner_service 列及 idx_knowledge_file_lifecycle_upload_recovery 部分索引（upload_owner_service, create_time）where
+    delete_flag='N' AND status='UPLOADING'。
+  - 步骤 7 返回集合仅包含 upload_owner_service='nexent-northbound' 且 status='UPLOADING'、delete_flag='N'、create_time<cutoff 的记录，包含文件
+    A、不含文件 B（不跨服务抢占）。
+  - 步骤 8 返回集合仅包含文件 B，不含文件 A。
+  - 步骤 9 传入空 upload_owner_service 抛出 ValueError。
+  - 日志、Trace、报告中不出现明文 API Key/Token/用户密码。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 529
+  integration_boundary:
+  - NO_EXTERNAL_PROVIDER：仅使用本地 PostgreSQL、MinIO、northbound 与 config 服务及固定 fixture；不访问公网模型与第三方 Provider。
+  observations:
+  - 步骤 3 接口返回 201，uploaded_filenames 包含文件 A 名称。
+  - 步骤 4 中文件 A 的 lifecycle 行 upload_owner_service 为 'nexent-northbound'（非空），status 已落库（UPLOADED/PROCESSING/FAILED 等合法状态之一）。
+  - 步骤 5 中文件 B 的 lifecycle 行 upload_owner_service 为 'nexent-config'，与文件 A 可区分。
+  - 数据库存在 upload_owner_service 列及 idx_knowledge_file_lifecycle_upload_recovery 部分索引（upload_owner_service, create_time）where
+    delete_flag='N' AND status='UPLOADING'。
+  - 步骤 7 返回集合仅包含 upload_owner_service='nexent-northbound' 且 status='UPLOADING'、delete_flag='N'、create_time<cutoff 的记录，包含文件
+    A、不含文件 B（不跨服务抢占）。
+  - 步骤 8 返回集合仅包含文件 B，不含文件 A。
+  - 步骤 9 传入空 upload_owner_service 抛出 ValueError。
+  - 日志、Trace、报告中不出现明文 API Key/Token/用户密码。
+  cleanup:
+  - pytest JUnit/XML、stdout/stderr、失败堆栈、API 响应体、knowledge_file_lifecycle_t 查询快照与断言差异。

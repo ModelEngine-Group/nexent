@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-AUTO-F4D28F8271C36B99
+  name: 外部记忆 Provider 权限校验与跨租户 IDOR 防护（get/update/delete/test-search/test-ingest）
+  status: active
+  description: 越权访问（IDOR + 缺失 MEM.PROVIDER 后端授权）：get/update/delete/test-search/test-ingest 端点仅按 provider_config_id 读取、未按 tenant_id
+    过滤且未做 MEM.PROVIDER 权限校验，任何已认证但非 ADMIN/SPEED 的用户可绕过前端隐藏直接调用，跨租户读取/篡改/删除他人 provider 配置或触发他人外部 provider 的 search/ingest 调用。
+  business_rules:
+  - rule_id: V5-SEC-AUTO-F4D28F8271C36B99-RULE-01
+    description: 外部记忆 Provider 权限校验与跨租户 IDOR 防护（get/update/delete/test-search/test-ingest）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

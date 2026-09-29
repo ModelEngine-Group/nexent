@@ -1,0 +1,70 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-40B60A7E416881CF
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: 受管线程状态变更 OpenTelemetry span 属性（lane/execution/counts）与 OTel 不可用/导出失败静默降级｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 受管线程状态变更 OpenTelemetry span 属性（lane/execution/counts）与 OTel 不可用/导出失败静默降级｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线，也不要求真实 OpenTelemetry 后端（exporter/collector）在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - OTel 依赖以打桩/mock 注入：可用态使用 fake tracer 记录 start_span/set_status/end 调用与属性；缺失态模拟 opentelemetry 导入失败或 trace 为 None。
+  test_data:
+    legacy_asset_declaration: 无（纯逻辑 SDK 单元测试，OTel 依赖以 mock 注入，不读取本地配置、模型或凭据）
+  steps:
+  - order: 1
+    action: 在本地工作区导入 sdk/nexent/core/concurrency/telemetry.py 与 sdk/nexent/core/concurrency/manager.py 对应类/函数（OpenTelemetryThreadTelemetry、ThreadManager、LanePolicy、ManagedTaskSpec），构造最小有效输入与必要依赖对象。
+    expected: 每次受管状态变更（thread.queued/thread.started/thread.finished 等）各发出一个名称为 thread.manager.snapshot 的 INTERNAL span，属性含
+      lane/execution/counts 稳定标签。
+  - order: 2
+    action: 用 fake tracer 打桩 OpenTelemetryThreadTelemetry，记录 start_span/set_status/end 的调用次数、span 名称与 attributes，并将该实例通过 ThreadManager(telemetry=...)
+      注入。
+    expected: 失败类状态变更（failed/timed_out/stuck/rejected/submit_failed）的 span 被标记为 ERROR 状态码。
+  - order: 3
+    action: 提交一个受管任务并等待其依次经过 queued/started/finished 状态，收集每次状态变更产生的 span 与属性。
+    expected: OTel 不可用（_tracer 为 None）时 record_snapshot 立即返回，不抛异常、不崩溃。
+  - order: 4
+    action: 断言每个 span 名称为 thread.manager.snapshot，且属性包含 thread.lane、thread.execution.id、thread.state，以及 thread.counts.managed_active/queued/running/stuck、thread.counts.python_active_threads。
+    expected: span 启动/结束/设置状态抛异常时被静默捕获，线程调度/取消/排空流程照常完成，无未处理异常向上传播。
+  - order: 5
+    action: 对失败/超时/卡死/拒绝/提交失败结果（failed/timed_out/stuck/rejected/submit_failed）的状态变更，断言对应 span 被设置为 ERROR 状态码。
+    expected: 测试过程无未处理异常，日志/Trace/报告中不出现明文密钥。
+  - order: 6
+    action: 模拟 OTel 不可用（opentelemetry 导入失败或 trace 为 None 使 _tracer 为 None），调用 record_snapshot，断言立即返回且不抛异常。
+    expected: 测试过程无未处理异常，日志/Trace/报告中不出现明文密钥。
+  - order: 7
+    action: 模拟 start_span/set_status/end 抛出异常，断言异常被静默捕获、ThreadManager.submit/run_sync 等调度操作照常完成，不向调用方传播。
+    expected: 测试过程无未处理异常，日志/Trace/报告中不出现明文密钥。
+  - order: 8
+    action: 确认日志/Trace 中不输出 API Key、Token、用户密码或模型密钥；测试结束释放临时对象，确保可重复执行。
+    expected: 测试过程无未处理异常，日志/Trace/报告中不出现明文密钥。
+  expected_results:
+  - 每次受管状态变更（thread.queued/thread.started/thread.finished 等）各发出一个名称为 thread.manager.snapshot 的 INTERNAL span，属性含 lane/execution/counts
+    稳定标签。
+  - 失败类状态变更（failed/timed_out/stuck/rejected/submit_failed）的 span 被标记为 ERROR 状态码。
+  - OTel 不可用（_tracer 为 None）时 record_snapshot 立即返回，不抛异常、不崩溃。
+  - span 启动/结束/设置状态抛异常时被静默捕获，线程调度/取消/排空流程照常完成，无未处理异常向上传播。
+  - 测试过程无未处理异常，日志/Trace/报告中不出现明文密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 462
+  unit_boundary: 并发管理
+  inputs:
+  - 无（纯逻辑 SDK 单元测试，OTel 依赖以 mock 注入，不读取本地配置、模型或凭据）
+  assertions:
+  - 每次受管状态变更（thread.queued/thread.started/thread.finished 等）各发出一个名称为 thread.manager.snapshot 的 INTERNAL span，属性含 lane/execution/counts
+    稳定标签。
+  - 失败类状态变更（failed/timed_out/stuck/rejected/submit_failed）的 span 被标记为 ERROR 状态码。
+  - OTel 不可用（_tracer 为 None）时 record_snapshot 立即返回，不抛异常、不崩溃。
+  - span 启动/结束/设置状态抛异常时被静默捕获，线程调度/取消/排空流程照常完成，无未处理异常向上传播。
+  - 测试过程无未处理异常，日志/Trace/报告中不出现明文密钥。

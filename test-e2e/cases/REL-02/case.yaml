@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-02
+  feature_id: V5-REL-02
+  business_rule_ids:
+  - V5-REL-02-RULE-01
+  title: Provider 429/5xx/timeout降级
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: 模型上游故障
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/assets/images/
+
+    - ${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/images/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml'
+  steps:
+  - order: 1
+    action: 先在无故障情况下执行“Provider 429/5xx/timeout降级”基线并确认正常通过。
+    expected: 错误稳定、重试有限、stream终态正确。
+  - order: 2
+    action: fake provider注入429/500/timeout/断流。
+    expected: 错误稳定、重试有限、stream终态正确。
+  - order: 3
+    action: 故障注入期间持续记录 run/task/connection 状态和前端/后端日志。
+    expected: 错误稳定、重试有限、stream终态正确。
+  - order: 4
+    action: 恢复依赖后等待系统自恢复，检查锁、重试、状态机、未完成任务和用户可见状态是否收敛。
+    expected: 错误稳定、重试有限、stream终态正确。
+  - order: 5
+    action: 再执行一次正常请求验证系统没有进入永久坏状态。
+    expected: 错误稳定、重试有限、stream终态正确。
+  - order: 6
+    action: 保存故障开始/结束时间、恢复耗时、关键日志与状态快照。
+    expected: 错误稳定、重试有限、stream终态正确。
+  expected_results:
+  - 错误稳定、重试有限、stream终态正确。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 23
+  risk_type: RELIABILITY
+  risk: 模型上游故障
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/assets/images/
+
+    - ${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml'
+  metrics:
+  - 错误稳定、重试有限、stream终态正确。
+  thresholds:
+  - 错误稳定、重试有限、stream终态正确。
+  recovery_expectations:
+  - 错误稳定、重试有限、stream终态正确。

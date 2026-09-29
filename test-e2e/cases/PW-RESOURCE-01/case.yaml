@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-RESOURCE-01
+  feature_id: V5-PW-RESOURCE-01
+  business_rule_ids:
+  - V5-PW-RESOURCE-01-RULE-01
+  title: SU创建租户→可选管理员→选择租户→资源Tab加载
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证资源管理租户创建与上下文切换。
+  preconditions:
+  - SU storageState
+  - run_id租户名唯一
+  - 测试数据库
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/secrets.env
+  steps:
+  - order: 1
+    action: SU打开/resource-manage等待租户列表。
+    expected: 租户可创建/读取/编辑/删除。
+  - order: 2
+    action: 点击创建租户，填写run_id名称/描述。
+    expected: Tab集合随角色和Local/AIDP模式正确。
+  - order: 3
+    action: 若弹窗有【生成管理员账号】则启用并填写测试管理员。
+    expected: 生成管理员属于正确租户。
+  - order: 4
+    action: 提交后等待列表出现新租户。
+    expected: 级联完整性由API-IT。
+  - order: 5
+    action: 点击新租户进入详情。
+    expected: 级联完整性由API-IT。
+  - order: 6
+    action: 依次切Users、Groups、Models、Agents、MCP、Skills、Invitations；Local模式还应有Knowledge Base。
+    expected: 级联完整性由API-IT。
+  - order: 7
+    action: 刷新并重新选择租户，确认上下文可恢复。
+    expected: 级联完整性由API-IT。
+  - order: 8
+    action: 编辑可编辑字段并提交，再刷新确认。
+    expected: 级联完整性由API-IT。
+  - order: 9
+    action: 删除run_id租户并确认。
+    expected: 级联完整性由API-IT。
+  expected_results:
+  - 租户可创建/读取/编辑/删除。
+  - Tab集合随角色和Local/AIDP模式正确。
+  - 生成管理员属于正确租户。
+  - 级联完整性由API-IT。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 7
+  actor: Nexent browser user
+  journey:
+  - SU打开/resource-manage等待租户列表。
+  - 点击创建租户，填写run_id名称/描述。
+  - 若弹窗有【生成管理员账号】则启用并填写测试管理员。
+  - 提交后等待列表出现新租户。
+  - 点击新租户进入详情。
+  - 依次切Users、Groups、Models、Agents、MCP、Skills、Invitations；Local模式还应有Knowledge Base。
+  - 刷新并重新选择租户，确认上下文可恢复。
+  - 编辑可编辑字段并提交，再刷新确认。
+  - 删除run_id租户并确认。
+  final_business_result:
+  - 租户可创建/读取/编辑/删除。
+  - Tab集合随角色和Local/AIDP模式正确。
+  - 生成管理员属于正确租户。
+  - 级联完整性由API-IT。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-RESOURCE-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

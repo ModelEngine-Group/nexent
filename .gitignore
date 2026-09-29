@@ -79,6 +79,18 @@ sdk/benchmark/.env
 /docker/.env.bak
 
 .venv
+node_modules/
+
+# Formal test runtime data stays on each developer/runner machine.
+test-e2e/**/secrets.env
+test-e2e/**/node_modules/
+test-e2e/**/test-results/
+test-e2e/**/.playwright-internal/
+test-e2e/**/__pycache__/
+test-e2e/**/.pytest_cache/
+test-e2e/**/runs/
+/test-e2e/config/
+/test-e2e/runs/
 
 .pytest-tmp
 test/ext_components/aidp/mock_servers/_state/

@@ -1,0 +1,90 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-03
+  feature_id: V5-DEP-03
+  business_rule_ids:
+  - V5-DEP-03-RULE-01
+  title: Kubernetes/Helm 基础设施与应用双 Release install+rolling restart
+  type: DEPLOYMENT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 生产形态部署
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  steps:
+  - order: 1
+    action: 使用 ${NEXENT_TEST_HOME}/config/environment.yaml 中的本地测试部署参数，记录当前 develop commit 和数据库版本，确认 kubectl/helm 可用。
+    expected: 基础设施 release（nexent-infrastructure）四个组件 Pod ready，应用 release（nexent）全部工作负载 ready。
+  - order: 2
+    action: 执行基础设施 Helm 部署：bash deploy.sh --release-scope infrastructure，校验 helm upgrade --install nexent-infrastructure（依赖
+      chart：nexent-infrastructure-common、nexent-elasticsearch、nexent-postgresql、nexent-redis、nexent-minio），等待 elasticsearch/postgresql/redis/minio
+      四个 deployment rollout 就绪（wait_for_infrastructure_ready，默认 600s 超时）。
+    expected: ES 集群健康为 green/yellow，ELASTICSEARCH_API_KEY 认证返回 200 且同步至 deploy/env/.env。
+  - order: 3
+    action: 校验基础设施 chart 的 validate.yaml 约束：四个基础设施组件保持单副本（replicaCount>1 触发 fail），persistence.mode 必须为 local/dynamic/existing，dynamic
+      需 storageClassName、existing 需 existingClaim。
+    expected: validate.yaml 校验通过：基础设施组件保持单副本、persistence.mode 合法。
+  - order: 4
+    action: 执行 ES 初始化：bash deploy/k8s/init-elasticsearch.sh，等待 ES _cluster/health 为 green/yellow，生成或校验 ELASTICSEARCH_API_KEY（/_security/_authenticate
+      返回 200）并同步至 deploy/env/.env。
+    expected: 服务可达，readiness/service/ingress 探针正确，滚动重启后所有 deployment 重新 Ready。
+  - order: 5
+    action: 执行应用 Helm 部署：bash deploy.sh --release-scope nexent（或 all），校验 helm upgrade --install nexent，等待 nexent-config/nexent-runtime/nexent-mcp/nexent-northbound/nexent-web（及按需的
+      data-process/supabase/monitoring）deployment rollout 就绪，并同步官方技能 zip 到 workspace PVC（SHA-256 校验）。
+    expected: 持久化数据与 schema version 无丢失，重启/升级不丢数据。
+  - order: 6
+    action: 部署完成后依次检查 frontend、backend、DB、对象存储、向量库、worker/scheduler health 及 readiness/service/ingress 探针；执行最小真实 Smoke：登录→真实
+      LLM Chat，涉及 KB 时再执行一次真实 Embedding 检索。
+    expected: uninstall.sh 按选项正确清理 Helm release/namespace/本地数据，并在基础设施 release 仍存在时拒绝单独卸载。
+  - order: 7
+    action: 检查持久化数据与 schema version（SQL 迁移与 rolloutChecksums），确认重启/升级不丢数据；执行滚动重启验证 deployment 滚动更新与探针正确。
+    expected: uninstall.sh 按选项正确清理 Helm release/namespace/本地数据，并在基础设施 release 仍存在时拒绝单独卸载。
+  - order: 8
+    action: 卸载清理：bash deploy/k8s/uninstall.sh（delete/delete-all/clean 或 --release-scope all/infrastructure/nexent），确认 Helm
+      release、namespace 与本地 PV 数据按选项正确清理，且基础设施 release 仍存在时拒绝单独卸载。
+    expected: uninstall.sh 按选项正确清理 Helm release/namespace/本地数据，并在基础设施 release 仍存在时拒绝单独卸载。
+  - order: 9
+    action: 保存安装日志、容器/Pod 状态、migration 输出、ES 初始化产物和 Smoke 结果到当次 run 目录。
+    expected: uninstall.sh 按选项正确清理 Helm release/namespace/本地数据，并在基础设施 release 仍存在时拒绝单独卸载。
+  expected_results:
+  - 基础设施 release（nexent-infrastructure）四个组件 Pod ready，应用 release（nexent）全部工作负载 ready。
+  - ES 集群健康为 green/yellow，ELASTICSEARCH_API_KEY 认证返回 200 且同步至 deploy/env/.env。
+  - validate.yaml 校验通过：基础设施组件保持单副本、persistence.mode 合法。
+  - 服务可达，readiness/service/ingress 探针正确，滚动重启后所有 deployment 重新 Ready。
+  - 持久化数据与 schema version 无丢失，重启/升级不丢数据。
+  - uninstall.sh 按选项正确清理 Helm release/namespace/本地数据，并在基础设施 release 仍存在时拒绝单独卸载。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 29
+  risk_type: DEPLOYMENT
+  risk: 生产形态部署
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  metrics:
+  - 基础设施 release（nexent-infrastructure）四个组件 Pod ready，应用 release（nexent）全部工作负载 ready。
+  - ES 集群健康为 green/yellow，ELASTICSEARCH_API_KEY 认证返回 200 且同步至 deploy/env/.env。
+  - validate.yaml 校验通过：基础设施组件保持单副本、persistence.mode 合法。
+  - 服务可达，readiness/service/ingress 探针正确，滚动重启后所有 deployment 重新 Ready。
+  - 持久化数据与 schema version 无丢失，重启/升级不丢数据。
+  - uninstall.sh 按选项正确清理 Helm release/namespace/本地数据，并在基础设施 release 仍存在时拒绝单独卸载。
+  thresholds:
+  - 基础设施 release（nexent-infrastructure）四个组件 Pod ready，应用 release（nexent）全部工作负载 ready。
+  - ES 集群健康为 green/yellow，ELASTICSEARCH_API_KEY 认证返回 200 且同步至 deploy/env/.env。
+  - validate.yaml 校验通过：基础设施组件保持单副本、persistence.mode 合法。
+  - 服务可达，readiness/service/ingress 探针正确，滚动重启后所有 deployment 重新 Ready。
+  - 持久化数据与 schema version 无丢失，重启/升级不丢数据。
+  - uninstall.sh 按选项正确清理 Helm release/namespace/本地数据，并在基础设施 release 仍存在时拒绝单独卸载。
+  recovery_expectations:
+  - 基础设施 release（nexent-infrastructure）四个组件 Pod ready，应用 release（nexent）全部工作负载 ready。
+  - ES 集群健康为 green/yellow，ELASTICSEARCH_API_KEY 认证返回 200 且同步至 deploy/env/.env。
+  - validate.yaml 校验通过：基础设施组件保持单副本、persistence.mode 合法。
+  - 服务可达，readiness/service/ingress 探针正确，滚动重启后所有 deployment 重新 Ready。
+  - 持久化数据与 schema version 无丢失，重启/升级不丢数据。
+  - uninstall.sh 按选项正确清理 Helm release/namespace/本地数据，并在基础设施 release 仍存在时拒绝单独卸载。

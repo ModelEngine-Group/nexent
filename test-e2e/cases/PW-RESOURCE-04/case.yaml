@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-RESOURCE-04
+  feature_id: V5-PW-RESOURCE-04
+  business_rule_ids:
+  - V5-PW-RESOURCE-04-RULE-01
+  title: 租户资源Tab：Models/Agents/MCP/Skills可见性Smoke
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证资源管理聚合视图的列表/搜索/租户过滤。
+  preconditions:
+  - 目标租户已有可用模型，并为本用例准备智能体、MCP、Skill 样本资源。
+  - 另一个租户存在，且与目标租户不同。
+  test_data:
+    legacy_asset_declaration: config/users.yaml；预置run_id资源
+  steps:
+  - order: 1
+    action: 选择目标租户。
+    expected: 每个Tab使用当前租户上下文。
+  - order: 2
+    action: 在模型 Tab 的列表中定位预置可用模型，确认其可见。
+    expected: 切租户无旧缓存残留。
+  - order: 3
+    action: 在智能体、Skills Tab 搜索本用例资源；在 MCP Tab 列表中定位本用例服务，确认均可见。
+    expected: 专业CRUD由各模块Journey。
+  - order: 4
+    action: 打开一个详情/操作菜单后关闭。
+    expected: 专业CRUD由各模块Journey。
+  - order: 5
+    action: 切换到另一租户，确认目标租户专属资源不出现。
+    expected: 专业CRUD由各模块Journey。
+  - order: 6
+    action: 切回目标租户并刷新，确认资源列表重新加载正确。
+    expected: 专业CRUD由各模块Journey。
+  expected_results:
+  - 每个Tab使用当前租户上下文。
+  - 切租户无旧缓存残留。
+  - 专业CRUD由各模块Journey。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 10
+  actor: Nexent browser user
+  journey:
+  - 选择目标租户。
+  - 在模型 Tab 的列表中定位预置可用模型，确认其可见。
+  - 在智能体、Skills Tab 搜索本用例资源；在 MCP Tab 列表中定位本用例服务，确认均可见。
+  - 打开一个详情/操作菜单后关闭。
+  - 切换到另一租户，确认目标租户专属资源不出现。
+  - 切回目标租户并刷新，确认资源列表重新加载正确。
+  final_business_result:
+  - 每个Tab使用当前租户上下文。
+  - 切租户无旧缓存残留。
+  - 专业CRUD由各模块Journey。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-RESOURCE-04/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

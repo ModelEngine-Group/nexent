@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-MCP-LOCALIMG-01
+  name: Mine新增Local Image MCP→启动/健康→删除
+  status: active
+  description: 补足当前frontend枚举存在的LOCAL_IMAGE类型。
+  business_rules:
+  - rule_id: V5-PW-MCP-LOCALIMG-01-RULE-01
+    description: Mine新增Local Image MCP→启动/健康→删除
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-027
+  name: SU 对指定租户设置/删除 hard quota
+  status: active
+  description: '租户与资源权限 / 平台配额: SU 对指定租户设置/删除 hard quota'
+  business_rules:
+  - rule_id: F-027-RULE-01
+    description: SU 对指定租户设置/删除 hard quota
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

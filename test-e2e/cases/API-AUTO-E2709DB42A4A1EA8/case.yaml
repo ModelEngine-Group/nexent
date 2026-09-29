@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-E2709DB42A4A1EA8
+  feature_id: F-112
+  business_rule_ids:
+  - F-112-RULE-01
+  title: generate_title 的 model_id 入参：租户级模型生成标题、模型不可用/非LLM 返回 422、默认模型回退｜端点契约
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: generate_title 的 model_id 入参：租户级模型生成标题、模型不可用/非LLM 返回 422、默认模型回退｜端点契约
+  preconditions:
+  - 本地后端服务可运行并可访问 /conversation 接口；测试租户数据可被清理。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内；当次 run_id 已生成，所有新建资源名称带 run_id。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/users.yaml
+  - 测试租户下已配置至少一个 model_type=llm 的可用模型、一个 model_type 非 llm 的模型，可获取各自 model_id。
+  - users.yaml 中隔离账号可登录，Authorization 有效。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/users.yaml'
+  steps:
+  - order: 1
+    action: 使用 users.yaml 中隔离账号登录获取 Authorization，确认目标测试租户可操作且可清理。
+    expected: 正常路径返回 HTTP 200，code=0、message="success"，data 为非空标题字符串，且会话标题被更新为该返回值。
+  - order: 2
+    action: 从 models.yaml 读取测试租户下 model_type=llm 模型的 model_id、非 llm 模型的 model_id，并准备一个不存在的 model_id（如 999999999）。
+    expected: 模型不可用（model_id 不存在）返回 HTTP 422，detail 包含 "Selected model is unavailable"，会话标题不变、无半写入。
+  - order: 3
+    action: 通过 PUT /conversation/create 创建会话，取得有效 conversation_id 作为前置数据。
+    expected: 非 LLM 模型返回 HTTP 422，detail 包含 "Selected model is not an LLM model"，会话标题不变。
+  - order: 4
+    action: 正常路径：POST /conversation/generate_title，body 携带 {conversation_id, question, model_id=<llm 模型 id>}，记录 HTTP 状态码与响应
+      JSON。
+    expected: 默认回退（不带 model_id）返回 HTTP 200，code=0，data 为非空标题，使用租户默认 LLM 模型（tenant_config_manager.get_model_config(llm)）生成，回退路径不受
+      model_id 校验影响。
+  - order: 5
+    action: 模型不可用：POST /conversation/generate_title，body 携带 {conversation_id, question, model_id=999999999}（不存在的 model_id），记录状态码与
+      detail。
+    expected: 所有路径日志/Trace/报告中不输出明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 非 LLM 模型：POST /conversation/generate_title，body 携带 {conversation_id, question, model_id=<非 llm 模型 id>}，记录状态码与
+      detail。
+    expected: 所有路径日志/Trace/报告中不输出明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 默认回退：POST /conversation/generate_title，body 仅携带 {conversation_id, question}（不带 model_id），记录状态码与响应。
+    expected: 所有路径日志/Trace/报告中不输出明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 对每个响应断言 HTTP 状态码、ConversationResponse 的 code/message、data 类型及错误 detail 文案，并确认 422 分支未更新会话标题。
+    expected: 所有路径日志/Trace/报告中不输出明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 正常路径返回 HTTP 200，code=0、message="success"，data 为非空标题字符串，且会话标题被更新为该返回值。
+  - 模型不可用（model_id 不存在）返回 HTTP 422，detail 包含 "Selected model is unavailable"，会话标题不变、无半写入。
+  - 非 LLM 模型返回 HTTP 422，detail 包含 "Selected model is not an LLM model"，会话标题不变。
+  - 默认回退（不带 model_id）返回 HTTP 200，code=0，data 为非空标题，使用租户默认 LLM 模型（tenant_config_manager.get_model_config(llm)）生成，回退路径不受 model_id
+    校验影响。
+  - 所有路径日志/Trace/报告中不输出明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 511
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 使用 users.yaml 中隔离账号登录获取 Authorization，确认目标测试租户可操作且可清理。
+    - 从 models.yaml 读取测试租户下 model_type=llm 模型的 model_id、非 llm 模型的 model_id，并准备一个不存在的 model_id（如 999999999）。
+    - 通过 PUT /conversation/create 创建会话，取得有效 conversation_id 作为前置数据。
+    - 正常路径：POST /conversation/generate_title，body 携带 {conversation_id, question, model_id=<llm 模型 id>}，记录 HTTP 状态码与响应 JSON。
+    - 模型不可用：POST /conversation/generate_title，body 携带 {conversation_id, question, model_id=999999999}（不存在的 model_id），记录状态码与
+      detail。
+    - 非 LLM 模型：POST /conversation/generate_title，body 携带 {conversation_id, question, model_id=<非 llm 模型 id>}，记录状态码与 detail。
+    - 默认回退：POST /conversation/generate_title，body 仅携带 {conversation_id, question}（不带 model_id），记录状态码与响应。
+    - 对每个响应断言 HTTP 状态码、ConversationResponse 的 code/message、data 类型及错误 detail 文案，并确认 422 分支未更新会话标题。
+    response_expectations:
+    - 正常路径返回 HTTP 200，code=0、message="success"，data 为非空标题字符串，且会话标题被更新为该返回值。
+    - 模型不可用（model_id 不存在）返回 HTTP 422，detail 包含 "Selected model is unavailable"，会话标题不变、无半写入。
+    - 非 LLM 模型返回 HTTP 422，detail 包含 "Selected model is not an LLM model"，会话标题不变。
+    - 默认回退（不带 model_id）返回 HTTP 200，code=0，data 为非空标题，使用租户默认 LLM 模型（tenant_config_manager.get_model_config(llm)）生成，回退路径不受 model_id
+      校验影响。
+    - 所有路径日志/Trace/报告中不输出明文 API Key/Token/Password/模型密钥。

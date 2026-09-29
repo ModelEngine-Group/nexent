@@ -1,0 +1,105 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-CB6D1F33A0BA0636
+  feature_id: F-079
+  business_rule_ids:
+  - F-079-RULE-01
+  title: 仓库/我的技能列表 tag 精确过滤与 tag_predicates 谓词过滤｜命中/不命中·非法JSON 400·授权集合与跨租户隔离
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 仓库/我的技能列表 tag 精确过滤与 tag_predicates 谓词过滤｜命中/不命中·非法JSON 400·授权集合与跨租户隔离
+  preconditions:
+  - 本地接口集成测试环境可运行，后端服务与本地数据库已启动；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中准备两个租户 TenantA 与 TenantB 的 DEV/Admin 账号；TenantA 已创建带指定标签（tag-a、tag-b）的技能并发布仓库 listing，TenantB 拥有独立技能与标签数据，用于跨租户隔离断言。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 前置造数：以 TenantA 的 DEV/Admin 账号创建技能 S1（tags 含 tag-a）、S2（tags 含 tag-b）、S3（tags 含 tag-a、tag-b），分别发布为仓库 listing；记录
+      skill_id 与 skill_repository_id。
+    expected: 仓库 listing 接口响应结构为 {"items":[...],"pagination":{"page":int,"page_size":int,"total":int,"total_pages":int}}，状态码
+      200；item 含 skill_repository_id、skill_id、name、description、source、status、category_id、tags、icon、downloads、content、created_at
+      序列化字段。
+  - order: 2
+    action: 调用 GET /repository/skill?tag=tag-a（携带 authorization 头），断言返回 200，items 中每条 listing 的 tags 数组均包含 tag-a（SkillRepository.tags.any
+      精确元素匹配），pagination.total 与 TenantA 命中数量一致。
+    expected: tag 精确过滤按已给定 tag 进行元素包含匹配，命中时所有返回 item 的 tags 含该 tag，不命中时 items 为空且 total=0。
+  - order: 3
+    action: 调用 GET /repository/skill?tag=not-exist，断言返回 200，items 为空数组且 pagination.total 为 0（不命中返回空集而非报错）。
+    expected: tag_predicates 结构化谓词过滤将结果约束到标签授权 ID 集合（filter_authorized_resource_ids 以 tenant_id/"skill"/skill_ids/tag_predicates
+      求交集），命中/不命中与授权集合一致。
+  - order: 4
+    action: 构造合法 JSON 编码的 tag_predicates（list of TagAssignmentFilter，每项经 TagAssignmentFilter.model_validate 校验），调用 GET /repository/skill?tag_predicates=<合法谓词>，断言
+      200 且仅返回经 TagManagementDB.filter_authorized_resource_ids(tenant_id,"skill",visible_skill_ids,tag_predicates) 授权的技能对应
+      listing。
+    expected: 非法 JSON 或非列表的 tag_predicates 返回 400，detail 分别为 "tag_predicates must be valid JSON" 与 "tag_predicates must be
+      a list"，不返回 200 或 500。
+  - order: 5
+    action: 传入非法 JSON 的 tag_predicates（如 tag_predicates={invalid），断言返回 400 且 detail 为 "tag_predicates must be valid JSON"。
+    expected: 我的技能接口响应结构为 {"items":[...],"counts":{"all":int,"created":int,"others":int},"pagination":{"page":int,"page_size":int,"total":int,"total_pages":int}}，tag_predicates
+      过滤后 items 与 counts 均基于过滤后集合。
+  - order: 6
+    action: 传入非列表 JSON 的 tag_predicates（如 {"a":1}），断言返回 400 且 detail 为 "tag_predicates must be a list"。
+    expected: 跨租户隔离：TenantB 请求不返回 TenantA 的 listing 或技能，标签统计与过滤不跨租户泄露。
+  - order: 7
+    action: 调用 GET /repository/skill/mine?tag_predicates=<合法谓词>（同一 TenantA 用户），断言 200，items 仅包含授权技能，counts.all/created/others
+      按过滤后集合统计。
+    expected: 跨租户隔离：TenantB 请求不返回 TenantA 的 listing 或技能，标签统计与过滤不跨租户泄露。
+  - order: 8
+    action: 调用 GET /repository/skill/mine?tag_predicates=<非法 JSON>，断言返回 400 且 detail 提示 tag_predicates 无效。
+    expected: 跨租户隔离：TenantB 请求不返回 TenantA 的 listing 或技能，标签统计与过滤不跨租户泄露。
+  - order: 9
+    action: 跨租户：以 TenantB 账号分别调用 GET /repository/skill、GET /repository/skill?tag=tag-a、GET /repository/skill/mine，断言均返回 200
+      且结果中不出现 TenantA 的 listing/skill（publisher_tenant_id 隔离），无跨租户标签数据泄露。
+    expected: 跨租户隔离：TenantB 请求不返回 TenantA 的 listing 或技能，标签统计与过滤不跨租户泄露。
+  expected_results:
+  - 仓库 listing 接口响应结构为 {"items":[...],"pagination":{"page":int,"page_size":int,"total":int,"total_pages":int}}，状态码 200；item
+    含 skill_repository_id、skill_id、name、description、source、status、category_id、tags、icon、downloads、content、created_at 序列化字段。
+  - tag 精确过滤按已给定 tag 进行元素包含匹配，命中时所有返回 item 的 tags 含该 tag，不命中时 items 为空且 total=0。
+  - tag_predicates 结构化谓词过滤将结果约束到标签授权 ID 集合（filter_authorized_resource_ids 以 tenant_id/"skill"/skill_ids/tag_predicates 求交集），命中/不命中与授权集合一致。
+  - 非法 JSON 或非列表的 tag_predicates 返回 400，detail 分别为 "tag_predicates must be valid JSON" 与 "tag_predicates must be a list"，不返回
+    200 或 500。
+  - 我的技能接口响应结构为 {"items":[...],"counts":{"all":int,"created":int,"others":int},"pagination":{"page":int,"page_size":int,"total":int,"total_pages":int}}，tag_predicates
+    过滤后 items 与 counts 均基于过滤后集合。
+  - 跨租户隔离：TenantB 请求不返回 TenantA 的 listing 或技能，标签统计与过滤不跨租户泄露。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 506
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 前置造数：以 TenantA 的 DEV/Admin 账号创建技能 S1（tags 含 tag-a）、S2（tags 含 tag-b）、S3（tags 含 tag-a、tag-b），分别发布为仓库 listing；记录 skill_id
+      与 skill_repository_id。
+    - 调用 GET /repository/skill?tag=tag-a（携带 authorization 头），断言返回 200，items 中每条 listing 的 tags 数组均包含 tag-a（SkillRepository.tags.any
+      精确元素匹配），pagination.total 与 TenantA 命中数量一致。
+    - 调用 GET /repository/skill?tag=not-exist，断言返回 200，items 为空数组且 pagination.total 为 0（不命中返回空集而非报错）。
+    - 构造合法 JSON 编码的 tag_predicates（list of TagAssignmentFilter，每项经 TagAssignmentFilter.model_validate 校验），调用 GET /repository/skill?tag_predicates=<合法谓词>，断言
+      200 且仅返回经 TagManagementDB.filter_authorized_resource_ids(tenant_id,"skill",visible_skill_ids,tag_predicates) 授权的技能对应
+      listing。
+    - 传入非法 JSON 的 tag_predicates（如 tag_predicates={invalid），断言返回 400 且 detail 为 "tag_predicates must be valid JSON"。
+    - 传入非列表 JSON 的 tag_predicates（如 {"a":1}），断言返回 400 且 detail 为 "tag_predicates must be a list"。
+    - 调用 GET /repository/skill/mine?tag_predicates=<合法谓词>（同一 TenantA 用户），断言 200，items 仅包含授权技能，counts.all/created/others 按过滤后集合统计。
+    - 调用 GET /repository/skill/mine?tag_predicates=<非法 JSON>，断言返回 400 且 detail 提示 tag_predicates 无效。
+    - 跨租户：以 TenantB 账号分别调用 GET /repository/skill、GET /repository/skill?tag=tag-a、GET /repository/skill/mine，断言均返回 200 且结果中不出现
+      TenantA 的 listing/skill（publisher_tenant_id 隔离），无跨租户标签数据泄露。
+    response_expectations:
+    - 仓库 listing 接口响应结构为 {"items":[...],"pagination":{"page":int,"page_size":int,"total":int,"total_pages":int}}，状态码 200；item
+      含 skill_repository_id、skill_id、name、description、source、status、category_id、tags、icon、downloads、content、created_at 序列化字段。
+    - tag 精确过滤按已给定 tag 进行元素包含匹配，命中时所有返回 item 的 tags 含该 tag，不命中时 items 为空且 total=0。
+    - tag_predicates 结构化谓词过滤将结果约束到标签授权 ID 集合（filter_authorized_resource_ids 以 tenant_id/"skill"/skill_ids/tag_predicates 求交集），命中/不命中与授权集合一致。
+    - 非法 JSON 或非列表的 tag_predicates 返回 400，detail 分别为 "tag_predicates must be valid JSON" 与 "tag_predicates must be a list"，不返回
+      200 或 500。
+    - 我的技能接口响应结构为 {"items":[...],"counts":{"all":int,"created":int,"others":int},"pagination":{"page":int,"page_size":int,"total":int,"total_pages":int}}，tag_predicates
+      过滤后 items 与 counts 均基于过滤后集合。
+    - 跨租户隔离：TenantB 请求不返回 TenantA 的 listing 或技能，标签统计与过滤不跨租户泄露。

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-05
+  name: Config sync部分失败
+  status: active
+  description: 配置跨服务一致性
+  business_rules:
+  - rule_id: V5-REL-05-RULE-01
+    description: Config sync部分失败
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

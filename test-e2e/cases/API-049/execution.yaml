@@ -1,0 +1,10 @@
+schema_version: '1.0'
+case_id: API-049
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-049
+- framework: pytest
+  file: test-e2e/infra/automation/d3/scenarios/scenario_model_multimodal_scenarios.py
+  selector: API-049
+notes: V5 source binding migrated; runtime parity is not yet certified.

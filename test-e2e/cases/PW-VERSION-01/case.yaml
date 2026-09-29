@@ -1,0 +1,95 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-VERSION-01
+  feature_id: V5-PW-VERSION-01
+  business_rule_ids:
+  - V5-PW-VERSION-01-RULE-01
+  title: Publish→Version Manage→切换/比较→回到Draft
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证发布和版本管理真实生命周期。
+  preconditions:
+  - Draft Agent通过必填校验
+  - 真实模型和资源可用
+  test_data:
+    legacy_asset_declaration: config/models.yaml
+  steps:
+  - order: 1
+    action: 确认Agent为Draft状态。
+    expected: Publish前validate+save guard。
+  - order: 2
+    action: 点击底部【Publish】，填写版本名等当前必填项。
+    expected: 已发布版本与后续Draft隔离。
+  - order: 3
+    action: 确认发布并等待成功。
+    expected: '版本面板刷新后一致。
+
+      refetch 返回第二版本的 version_name，UI 当前标签及两条历史记录一致。'
+  - order: 4
+    action: 检查current version Tag和版本总数出现。
+    expected: '版本面板刷新后一致。
+
+      refetch 返回第二版本的 version_name，UI 当前标签及两条历史记录一致。'
+  - order: 5
+    action: 点击Tag/Version Manage打开版本面板。
+    expected: '版本面板刷新后一致。
+
+      refetch 返回第二版本的 version_name，UI 当前标签及两条历史记录一致。'
+  - order: 6
+    action: 查看刚发布版本详情；按当前UI执行compare/切换/回滚之一。
+    expected: '版本面板刷新后一致。
+
+      refetch 返回第二版本的 version_name，UI 当前标签及两条历史记录一致。'
+  - order: 7
+    action: 回Config修改字段，确认形成Draft语义而非改历史版本。
+    expected: '版本面板刷新后一致。
+
+      refetch 返回第二版本的 version_name，UI 当前标签及两条历史记录一致。'
+  - order: 8
+    action: '刷新后版本历史仍在。
+
+      473b6526：发布第二版本后重新加载页面，捕获 current_version 请求并再次打开版本管理。'
+    expected: '版本面板刷新后一致。
+
+      refetch 返回第二版本的 version_name，UI 当前标签及两条历史记录一致。'
+  expected_results:
+  - Publish前validate+save guard。
+  - 已发布版本与后续Draft隔离。
+  - '版本面板刷新后一致。
+
+    refetch 返回第二版本的 version_name，UI 当前标签及两条历史记录一致。'
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 24
+  actor: Nexent browser user
+  journey:
+  - 确认Agent为Draft状态。
+  - 点击底部【Publish】，填写版本名等当前必填项。
+  - 确认发布并等待成功。
+  - 检查current version Tag和版本总数出现。
+  - 点击Tag/Version Manage打开版本面板。
+  - 查看刚发布版本详情；按当前UI执行compare/切换/回滚之一。
+  - 回Config修改字段，确认形成Draft语义而非改历史版本。
+  - '刷新后版本历史仍在。
+
+    473b6526：发布第二版本后重新加载页面，捕获 current_version 请求并再次打开版本管理。'
+  final_business_result:
+  - Publish前validate+save guard。
+  - 已发布版本与后续Draft隔离。
+  - '版本面板刷新后一致。
+
+    refetch 返回第二版本的 version_name，UI 当前标签及两条历史记录一致。'
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-VERSION-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

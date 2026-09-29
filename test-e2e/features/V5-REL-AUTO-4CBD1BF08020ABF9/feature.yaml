@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-4CBD1BF08020ABF9
+  name: 中断上传恢复的服务归属隔离（仅清理重启服务自身记录，排除其他归属与NULL归属）
+  status: active
+  description: 恢复流程将非本服务归属（其他upload_owner_service或历史NULL归属）或宽限期内的UPLOADING记录误标为FAILED并删除其MinIO对象，造成跨服务/跨租户上传数据丢失与状态误判；或本服务归属的过期UPLOADING记录未被清理，遗留悬挂对象。
+  business_rules:
+  - rule_id: V5-REL-AUTO-4CBD1BF08020ABF9-RULE-01
+    description: 中断上传恢复的服务归属隔离（仅清理重启服务自身记录，排除其他归属与NULL归属）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

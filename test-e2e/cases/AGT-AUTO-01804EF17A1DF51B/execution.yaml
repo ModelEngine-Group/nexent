@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: AGT-AUTO-01804EF17A1DF51B
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AGT-AUTO-01804EF17A1DF51B
+notes: V5 source binding migrated; runtime parity is not yet certified.

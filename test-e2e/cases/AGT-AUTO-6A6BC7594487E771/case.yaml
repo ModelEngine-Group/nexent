@@ -1,0 +1,90 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-AUTO-6A6BC7594487E771
+  feature_id: F-045
+  business_rule_ids:
+  - F-045-RULE-01
+  title: 已完成草稿按意图最小流程：update_fields/manage_resources/optimize_conversation/clarify_requirements 均不进入完整生成链｜核心流程
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 已完成草稿按意图最小流程：update_fields/manage_resources/optimize_conversation/clarify_requirements 均不进入完整生成链｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - 已通过 NL2Agent 完整生成流程产出一个 draft_complete 草稿：name、description、duty_prompt、constraint_prompt、few_shots_prompt、greeting_message、example_questions
+    均已保存且收到 agent_generation_completed 事件。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/documents/'
+  steps:
+  - order: 1
+    action: 准备真实测试用户与 models.yaml 中可用 LLM；通过实际 API 创建一个带唯一 RunID 后缀的临时 Agent 草稿，并用 NL2Agent 完整生成流程将其推进到 draft_complete（name/description/Prompt
+      字段与 greeting_message/example_questions 已保存），记录 agent_id 与初始字段快照。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 在 NL2Agent 对话面板（frontend/app/[locale]/newchat/assistant-ui/nl2agent-chat-panel.tsx）对已完成草稿提交 update_fields 意图（例如“把职责描述改为X”），断言模型只调用一次
+      save_agent_draft_fields 保存用户明确指定字段，updated_fields 仅含该字段，未出澄清卡、未搜索资源、未进入完整生成链。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 提交 manage_resources 意图（例如“新增一个能查天气的工具”），断言模型只执行两阶段资源搜索（search_installed_resources/search_uninstalled_resources）与
+      recommend_resources/wrapper 的安装或绑定建议卡，不重算 description/Prompt，不触发完整生成链；无匹配资源时只输出澄清或放弃引导，不声称能力已绑定。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 提交 optimize_conversation 意图（例如“优化欢迎语和推荐问题”），断言模型只保存 greeting_message 与 example_questions，updated_fields 仅含这两个字段，且输出“修订总结”而非
+      agent_generation_completed 完成总结。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 提交 clarify_requirements 意图（用户明确要求澄清需求），断言模型仅通过 nl2a_wrapper 输出 requirement_clarification 澄清卡（question_id/question_type/title/required/options
+      结构完整），不调用保存工具、不搜索资源、不进入完整生成链。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 6
+    action: 每个局部任务执行后重新读取 Agent 详情，断言除本轮明确修改字段外，其余字段（name/description/其他 Prompt/资源绑定）与初始快照一致，验证“省略字段保持数据库原值”。
+    expected: update_fields/manage_resources/optimize_conversation/clarify_requirements 各局部任务只执行对应最小流程，均不进入完整生成链、不产生 agent_generation_completed
+      事件。
+  - order: 7
+    action: 对 update_fields 中文本改动可能影响其他 Prompt 且用户未指定同步字段的场景，断言先出 requirement_clarification 多选题列出可能受影响字段，收到提交 action 后仅保存原字段加用户确认字段，禁止自动级联。
+    expected: update_fields/manage_resources/optimize_conversation/clarify_requirements 各局部任务只执行对应最小流程，均不进入完整生成链、不产生 agent_generation_completed
+      事件。
+  - order: 8
+    action: 异常场景提交 name/display_name/模型设置等白名单外字段修改，断言模型引导用户到右侧表单而非调用保存工具；对 draft_incomplete 草稿仅当缺失内容为当前局部任务前置条件时才澄清。
+    expected: update_fields/manage_resources/optimize_conversation/clarify_requirements 各局部任务只执行对应最小流程，均不进入完整生成链、不产生 agent_generation_completed
+      事件。
+  - order: 9
+    action: 删除临时 Agent 并确认未产生新的会话/资源。
+    expected: update_fields/manage_resources/optimize_conversation/clarify_requirements 各局部任务只执行对应最小流程，均不进入完整生成链、不产生 agent_generation_completed
+      事件。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - update_fields/manage_resources/optimize_conversation/clarify_requirements 各局部任务只执行对应最小流程，均不进入完整生成链、不产生 agent_generation_completed
+    事件。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 519
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - update_fields/manage_resources/optimize_conversation/clarify_requirements 各局部任务只执行对应最小流程，均不进入完整生成链、不产生 agent_generation_completed
+    事件。
+  cleanup:
+  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。

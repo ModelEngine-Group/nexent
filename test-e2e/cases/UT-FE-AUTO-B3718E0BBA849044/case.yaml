@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-B3718E0BBA849044
+  feature_id: F-086
+  business_rule_ids:
+  - F-086-RULE-01
+  title: MCP 结构化标签分配/展示：详情弹窗赋值、Mine 卡片 Chips 展示、发布只读继承与权限编辑｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: MCP 结构化标签分配/展示：详情弹窗赋值、Mine 卡片 Chips 展示、发布只读继承与权限编辑｜核心流程
+  preconditions:
+  - 本地组件测试环境可运行（Vitest + React Testing Library）；不要求后端服务或外部模型在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - useTagLibraries/useTagDefinitions/useTagAssignments/tagManagementApi 以最小 mock 注入固定标签库（bucket_key=default_resource）、标签定义与
+    mcp_service 结构化标签分配数据。
+  test_data:
+    legacy_asset_declaration: '- frontend 组件测试固定 fixture：标签库（bucket_key=default_resource）、标签定义、mcp_service 资源标签分配数据；不含生产凭据。'
+  steps:
+  - order: 1
+    action: 渲染 MineMcpServiceCard，注入 kind="local" 的 McpServiceItem 最小 props（含 mcpId、name、tags、permission），并 mock 该资源的标签分配数据。
+    expected: 详情弹窗与 Mine 卡片通过 ResourceTagChips（resourceType="mcp_service"）正确展示结构化标签，数量/截断符合 max 参数，无自由文本 tags 混用。
+  - order: 2
+    action: 首次渲染后检查卡片基础信息（deploymentLabel、toolCount、reviewBadge）与自由文本 tags 截断展示，同时检查 ResourceTagChips 以 resourceType="mcp_service"、resourceId=mcpId、max=3
+      渲染结构化标签。
+    expected: EDIT 权限允许打开标签分配与管理弹窗；READ_ONLY 权限下编辑标签、保存与管理入口均禁用，标签只读。
+  - order: 3
+    action: 渲染 McpServiceDetailModal，selectedService.permission="EDIT"：检查标签区 ResourceTagChips 展示与“编辑标签”按钮可用；使用真实用户事件点击后断言
+      ResourceTagAssignmentModal 以 resourceType="mcp_service"、resourceId 打开且 canEdit=true。
+    expected: 标签分配确认后 service 调用携带正确 resource_type/resource_id 与标签定义变化，关闭弹窗触发刷新，详情与保存后的标签状态一致。
+  - order: 4
+    action: 在 ResourceTagAssignmentModal 中通过真实用户事件选择/移除标签定义并确认，断言标签分配 service 调用参数（resource_type 与资源 id 正确、definition 列表变化），弹窗关闭后
+      tagPreviewRefreshKey 自增触发 Chips 刷新。
+    expected: 发布确认弹窗标签只读继承自 mcp_service 结构化标签，提交 tags 与继承标签一致，不可在发布时编辑。
+  - order: 5
+    action: 点击“管理标签定义”进入 TagDefinitionManagementModal，断言使用 default_resource 库 bucketId/bucketName，canManage 随权限传递；关闭后触发 assignDefinitions
+      刷新。
+    expected: 结构化标签筛选/搜索通过 filterResourceIds 正确过滤 Mine 列表，无匹配时回退空态且不误报。
+  - order: 6
+    action: 以 selectedService.permission="READ_ONLY" 重新渲染详情弹窗，检查“编辑标签”按钮与保存/发布相关编辑入口 disabled，assign/edit 组件 canEdit/canManage=false，标签只读展示。
+    expected: 接口异常路径返回明确错误/空态，不出现半写入、重复副作用或跨资源标签泄露。
+  - order: 7
+    action: 渲染 PublishConfirmModal 并注入 source（含 mcpId）：断言标签区以 useTagAssignments 继承结果渲染为只读 TagChips，无编辑输入，显示继承 hint；确认发布时 onConfirm
+      的 tags 等于继承标签而非可编辑覆盖。
+    expected: 日志/DOM 快照不输出 API Key、Token、密码等敏感信息。
+  - order: 8
+    action: 在 mcp-space page 组合中构造 tagPredicates/searchTagPredicates：断言 filterResourceIds("mcp_service", ...) 被调用并按 matched_resource_ids
+      过滤 Mine 列表，结构化标签搜索命中由 matchedSearchTagIds 补充。
+    expected: 日志/DOM 快照不输出 API Key、Token、密码等敏感信息。
+  - order: 9
+    action: 模拟标签接口 4xx/5xx 或未返回：断言错误被捕获、标签区回退为空态/—、列表不崩溃且不出现半提交或错误资源标签。
+    expected: 日志/DOM 快照不输出 API Key、Token、密码等敏感信息。
+  - order: 10
+    action: 卸载/重新渲染后确认初始数据回显与服务端标签分配数据映射一致，Chips 数量与单行/截断行为符合 max 参数。
+    expected: 日志/DOM 快照不输出 API Key、Token、密码等敏感信息。
+  expected_results:
+  - 详情弹窗与 Mine 卡片通过 ResourceTagChips（resourceType="mcp_service"）正确展示结构化标签，数量/截断符合 max 参数，无自由文本 tags 混用。
+  - EDIT 权限允许打开标签分配与管理弹窗；READ_ONLY 权限下编辑标签、保存与管理入口均禁用，标签只读。
+  - 标签分配确认后 service 调用携带正确 resource_type/resource_id 与标签定义变化，关闭弹窗触发刷新，详情与保存后的标签状态一致。
+  - 发布确认弹窗标签只读继承自 mcp_service 结构化标签，提交 tags 与继承标签一致，不可在发布时编辑。
+  - 结构化标签筛选/搜索通过 filterResourceIds 正确过滤 Mine 列表，无匹配时回退空态且不误报。
+  - 接口异常路径返回明确错误/空态，不出现半写入、重复副作用或跨资源标签泄露。
+  - 日志/DOM 快照不输出 API Key、Token、密码等敏感信息。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 446
+  unit_boundary: 结构化标签
+  inputs:
+  - '- frontend 组件测试固定 fixture：标签库（bucket_key=default_resource）、标签定义、mcp_service 资源标签分配数据；不含生产凭据。'
+  assertions:
+  - 详情弹窗与 Mine 卡片通过 ResourceTagChips（resourceType="mcp_service"）正确展示结构化标签，数量/截断符合 max 参数，无自由文本 tags 混用。
+  - EDIT 权限允许打开标签分配与管理弹窗；READ_ONLY 权限下编辑标签、保存与管理入口均禁用，标签只读。
+  - 标签分配确认后 service 调用携带正确 resource_type/resource_id 与标签定义变化，关闭弹窗触发刷新，详情与保存后的标签状态一致。
+  - 发布确认弹窗标签只读继承自 mcp_service 结构化标签，提交 tags 与继承标签一致，不可在发布时编辑。
+  - 结构化标签筛选/搜索通过 filterResourceIds 正确过滤 Mine 列表，无匹配时回退空态且不误报。
+  - 接口异常路径返回明确错误/空态，不出现半写入、重复副作用或跨资源标签泄露。
+  - 日志/DOM 快照不输出 API Key、Token、密码等敏感信息。

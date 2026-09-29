@@ -1,0 +1,54 @@
+schema_version: '1.0'
+stage: D1
+module: CHAT-MESSAGE
+case:
+  case_id: CMSR-D1-002
+  feature_id: CMSR-005
+  requirement_ids:
+  - CMSR-005
+  business_rule_ids:
+  - CMSR-RULE-014
+  - CMSR-RULE-015
+  title: Running step labels precede reasoning and survive retry rollback
+  type: FE-COMP
+  priority: P0
+  status: active
+  automation: automated
+  objective: Verify immediate running labels, rollback preservation, legacy history and removal of terminal label-only cards.
+  preconditions:
+  - Create the streaming adapter with a controlled SSE fixture.
+  test_data:
+    profile: mock
+    sequences:
+    - step 1, failed attempt, rollback, successful raw code, parse
+    - legacy content before step label
+  steps:
+  - order: 1
+    action: Emit a step label before any model content.
+    expected: A running reasoning card displays Step 1 immediately.
+  - order: 2
+    action: Roll back a partial attempt and stream successful raw code.
+    expected: Step 1 remains during rollback and only successful raw code follows it.
+  - order: 3
+    action: Parse and reload both new and legacy-order history.
+    expected: One code card and one labeled nonempty reasoning card remain; a terminal label-only card is absent.
+  expected_results:
+  - Step label appears before first token.
+  - Rollback preserves the label.
+  - Successful original content remains after the label.
+  - Old history prepends late labels.
+  forbidden_side_effects:
+  - No failed-attempt content.
+  - No duplicate code card.
+  - No sibling invocation mutation.
+  unit_boundary: Frontend live and history reasoning projection
+  inputs:
+  - step_count
+  - model_attempt_control
+  - model_output_thinking
+  - parse
+  assertions:
+  - Running label is visible before content.
+  - Terminal label-only step is hidden.
+  - Successful code is visible after the label before commit.
+  - History equals live output.

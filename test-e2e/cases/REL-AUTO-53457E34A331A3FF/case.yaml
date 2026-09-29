@@ -1,0 +1,92 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-53457E34A331A3FF
+  feature_id: V5-REL-AUTO-53457E34A331A3FF
+  business_rule_ids:
+  - V5-REL-AUTO-53457E34A331A3FF-RULE-01
+  title: config 服务 lifespan 启动任务恢复/中断上传清理、优雅 shutdown 线程管理器、/internal/thread-capacity 容量探针
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 配置服务冷启动必须恢复上次中断的任务并清理中断上传，避免任务永久卡在中间态或孤儿上传残留；关闭时必须优雅 shutdown 线程管理器并清理默认管理器，避免任务丢失/线程泄漏；/internal/thread-capacity
+    必须返回真实容量快照供可信服务探测，防止调度/容量误判。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env（含 REDIS_URL/POSTGRES_* 本地服务地址）
+
+    - 本地 Redis/数据库可用，供任务恢复状态与中断上传清理读写'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env（含 REDIS_URL/POSTGRES_* 本地服务地址）
+
+      - 本地 Redis/数据库可用，供任务恢复状态与中断上传清理读写'
+  steps:
+  - order: 1
+    action: 设置 NEXENT_TEST_HOME，加载 backend/apps/config_app.py 的 app 与 config_lifespan，准备可重复启停的本地 config 服务实例。
+    expected: 启动后中断任务被恢复至可用状态、中断上传被清理，存储层与内存层状态一致，无未处理异常。
+  - order: 2
+    action: 预置一条处于中断中间态的任务与一条中断上传记录，启动应用触发 config_lifespan 的 startup 路径（config_app.py:124-131）。
+    expected: /internal/thread-capacity 返回线程管理器真实快照，不泄露敏感信息。
+  - order: 3
+    action: 断言 startup 通过 config_thread_manager.run("control-io", ManagedTaskSpec(task_name="recover-config-tasks"), recover_config_tasks)
+      恢复中断任务，并 start_eval_maintenance、schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME="nexent-config") 清理中断上传（config_app.py:79-95）。
+    expected: 关闭按约定顺序执行，线程管理器停止且默认管理器被清空。
+  - order: 4
+    action: 请求 GET /internal/thread-capacity，断言返回 config_thread_manager.snapshot() 的真实容量/占用快照（config_app.py:158-161）。
+    expected: shutdown 使用 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时（const.py:315-317）。
+  - order: 5
+    action: 触发关闭进入 lifespan finally 路径，断言按 stop_dreaming_scheduler → stop_eval_maintenance → config_thread_manager.shutdown(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+      → clear_default_thread_manager 顺序执行（config_app.py:132-146）。
+    expected: 日志中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 断言关闭后线程管理器进入停止态、默认线程管理器已清空，无悬挂任务或资源泄漏。
+    expected: 日志中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 边界/异常：无中断任务时的空恢复不抛错、shutdown 异常时 finally 仍清理默认管理器。
+    expected: 日志中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 全程检查日志不含 API Key、Token、用户密码或模型密钥。
+    expected: 日志中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 启动后中断任务被恢复至可用状态、中断上传被清理，存储层与内存层状态一致，无未处理异常。
+  - /internal/thread-capacity 返回线程管理器真实快照，不泄露敏感信息。
+  - 关闭按约定顺序执行，线程管理器停止且默认管理器被清空。
+  - shutdown 使用 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时（const.py:315-317）。
+  - 日志中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 54
+  risk_type: RELIABILITY
+  risk: 配置服务冷启动必须恢复上次中断的任务并清理中断上传，避免任务永久卡在中间态或孤儿上传残留；关闭时必须优雅 shutdown 线程管理器并清理默认管理器，避免任务丢失/线程泄漏；/internal/thread-capacity
+    必须返回真实容量快照供可信服务探测，防止调度/容量误判。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env（含 REDIS_URL/POSTGRES_* 本地服务地址）
+
+    - 本地 Redis/数据库可用，供任务恢复状态与中断上传清理读写'
+  metrics:
+  - 启动后中断任务被恢复至可用状态、中断上传被清理，存储层与内存层状态一致，无未处理异常。
+  - /internal/thread-capacity 返回线程管理器真实快照，不泄露敏感信息。
+  - 关闭按约定顺序执行，线程管理器停止且默认管理器被清空。
+  - shutdown 使用 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时（const.py:315-317）。
+  - 日志中不出现明文 API Key/Token/Password/模型密钥。
+  thresholds:
+  - 启动后中断任务被恢复至可用状态、中断上传被清理，存储层与内存层状态一致，无未处理异常。
+  - /internal/thread-capacity 返回线程管理器真实快照，不泄露敏感信息。
+  - 关闭按约定顺序执行，线程管理器停止且默认管理器被清空。
+  - shutdown 使用 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时（const.py:315-317）。
+  - 日志中不出现明文 API Key/Token/Password/模型密钥。
+  recovery_expectations:
+  - 启动后中断任务被恢复至可用状态、中断上传被清理，存储层与内存层状态一致，无未处理异常。
+  - /internal/thread-capacity 返回线程管理器真实快照，不泄露敏感信息。
+  - 关闭按约定顺序执行，线程管理器停止且默认管理器被清空。
+  - shutdown 使用 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时（const.py:315-317）。
+  - 日志中不出现明文 API Key/Token/Password/模型密钥。

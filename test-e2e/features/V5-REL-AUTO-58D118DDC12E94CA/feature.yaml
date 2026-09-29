@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-58D118DDC12E94CA
+  name: 单副本重启后孤儿运行恢复与调度锁释放（recover_orphaned_runs / release_all_task_locks）
+  status: active
+  description: 可靠性：单副本 runtime 重启后，RUNNING 运行被置为 TIMEOUT、QUEUED 运行被保留，所有残留调度锁被释放，任务可被调度器继续消费，不因残留锁卡死。
+  business_rules:
+  - rule_id: V5-REL-AUTO-58D118DDC12E94CA-RULE-01
+    description: 单副本重启后孤儿运行恢复与调度锁释放（recover_orphaned_runs / release_all_task_locks）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: API-069
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-069
+notes: V5 source binding migrated; runtime parity is not yet certified.

@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: CTR-022
+implementations:
+- framework: pytest
+  file: test.py
+  selector: CTR-022
+notes: V5 source binding migrated; runtime parity is not yet certified.

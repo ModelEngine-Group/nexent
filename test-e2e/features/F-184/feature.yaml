@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-184
+  name: 前端服务启动、反向代理、项目配置(Logo/自定义多语言)持久化与内置回退、仓库标签过滤与统计接口
+  status: active
+  description: '前端与全局UI / 构建与服务基础设施: 前端服务启动、反向代理、项目配置(Logo/自定义多语言)持久化与内置回退、仓库标签过滤与统计接口'
+  business_rules:
+  - rule_id: F-184-RULE-01
+    description: 前端服务启动、反向代理、项目配置(Logo/自定义多语言)持久化与内置回退、仓库标签过滤与统计接口
+  required_test_stages:
+  - D1
+  - D2
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

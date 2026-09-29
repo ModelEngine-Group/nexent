@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-08A289290B55F524
+  feature_id: F-185
+  business_rule_ids:
+  - F-185-RULE-01
+  title: Agent 图标上传/读取契约：内容类型白名单、2MB上限、EDIT权限约束、非法/缺失图标错误与icon_url写回｜核心流程与异常/边界/越权
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Agent 图标上传/读取契约：内容类型白名单、2MB上限、EDIT权限约束、非法/缺失图标错误与icon_url写回｜核心流程与异常/边界/越权
+  preconditions:
+  - 本地依赖/组件测试环境可运行，后端服务、MinIO 与 PostgreSQL 可用；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  - 已存在一个对当前账号 permission=EDIT 的测试 Agent，以及一个对当前账号无 EDIT 权限的 Agent 用于越权断言。
+  - 本地图标资产齐备：有效 PNG/JPEG/GIF/WebP 各一份、非法类型文件一份（如 .txt）、超过 2MB 的图片一份。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/images/（png/jpeg/gif/webp 有效样本、非法类型样本、超 2MB 样本）'
+  steps:
+  - order: 1
+    action: 调用 upload_agent_icon_impl(agent_id, png_bytes, tenant_id, user_id)，传入有效 PNG 内容，记录返回值。
+    expected: '上传有效 PNG 返回 {"icon_url": "/api/agent/{agent_id}/icon", "content_type": "image/png"}，测试过程无未处理异常。'
+  - order: 2
+    action: 分别用有效 JPEG/GIF/WebP 内容重复调用，记录各次返回的 content_type 与 icon_url。
+    expected: JPEG/GIF/WebP 分别返回 content_type 为 image/jpeg、image/gif、image/webp，icon_url 均形如 /api/agent/{agent_id}/icon。
+  - order: 3
+    action: 传入空内容（b""）调用，捕获并记录异常类型与消息。
+    expected: 空内容抛出 ValueError，消息为 "Agent icon file is empty"，不产生图标写入。
+  - order: 4
+    action: 传入超过 2MB 的图片内容调用，捕获并记录异常类型与消息。
+    expected: 超 2MB 内容抛出 ValueError，消息为 "Agent icon must not exceed 2 MB"。
+  - order: 5
+    action: 传入非法类型文件内容（如 .txt 字节）调用，捕获并记录异常类型与消息。
+    expected: 非法类型内容抛出 ValueError，消息为 "Agent icon must be a PNG, JPEG, GIF, or WebP image"。
+  - order: 6
+    action: 以无 EDIT 权限的账号（如 UserB 对非其创建的 Agent）传入合法 PNG 调用，捕获并记录异常类型与消息。
+    expected: 无 EDIT 权限抛出 ForbiddenError，消息为 "You do not have permission to edit this agent"，且不产生图标写入。
+  - order: 7
+    action: 上传成功后调用 get_agent_icon_impl(agent_id, tenant_id, user_id)，校验返回字节与 content_type。
+    expected: get_agent_icon_impl 返回的字节内容与上传内容一致，content_type 与上传时一致。
+  - order: 8
+    action: 对一个 icon_url 为空的 Agent 调用 get_agent_icon_impl，捕获并记录异常类型与消息。
+    expected: icon_url 为空时抛出 FileNotFoundError，消息为 "Agent icon not found"。
+  - order: 9
+    action: 上传成功后读取 agent 详情（get_agent_info_impl），校验 icon_url 写回结果。
+    expected: 上传成功后 agent 记录 icon_url 写回为 /api/agent/{agent_id}/icon。
+  expected_results:
+  - '上传有效 PNG 返回 {"icon_url": "/api/agent/{agent_id}/icon", "content_type": "image/png"}，测试过程无未处理异常。'
+  - JPEG/GIF/WebP 分别返回 content_type 为 image/jpeg、image/gif、image/webp，icon_url 均形如 /api/agent/{agent_id}/icon。
+  - 空内容抛出 ValueError，消息为 "Agent icon file is empty"，不产生图标写入。
+  - 超 2MB 内容抛出 ValueError，消息为 "Agent icon must not exceed 2 MB"。
+  - 非法类型内容抛出 ValueError，消息为 "Agent icon must be a PNG, JPEG, GIF, or WebP image"。
+  - 无 EDIT 权限抛出 ForbiddenError，消息为 "You do not have permission to edit this agent"，且不产生图标写入。
+  - get_agent_icon_impl 返回的字节内容与上传内容一致，content_type 与上传时一致。
+  - icon_url 为空时抛出 FileNotFoundError，消息为 "Agent icon not found"。
+  - 上传成功后 agent 记录 icon_url 写回为 /api/agent/{agent_id}/icon。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 487
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 调用 upload_agent_icon_impl(agent_id, png_bytes, tenant_id, user_id)，传入有效 PNG 内容，记录返回值。
+    - 分别用有效 JPEG/GIF/WebP 内容重复调用，记录各次返回的 content_type 与 icon_url。
+    - 传入空内容（b""）调用，捕获并记录异常类型与消息。
+    - 传入超过 2MB 的图片内容调用，捕获并记录异常类型与消息。
+    - 传入非法类型文件内容（如 .txt 字节）调用，捕获并记录异常类型与消息。
+    - 以无 EDIT 权限的账号（如 UserB 对非其创建的 Agent）传入合法 PNG 调用，捕获并记录异常类型与消息。
+    - 上传成功后调用 get_agent_icon_impl(agent_id, tenant_id, user_id)，校验返回字节与 content_type。
+    - 对一个 icon_url 为空的 Agent 调用 get_agent_icon_impl，捕获并记录异常类型与消息。
+    - 上传成功后读取 agent 详情（get_agent_info_impl），校验 icon_url 写回结果。
+    response_expectations:
+    - '上传有效 PNG 返回 {"icon_url": "/api/agent/{agent_id}/icon", "content_type": "image/png"}，测试过程无未处理异常。'
+    - JPEG/GIF/WebP 分别返回 content_type 为 image/jpeg、image/gif、image/webp，icon_url 均形如 /api/agent/{agent_id}/icon。
+    - 空内容抛出 ValueError，消息为 "Agent icon file is empty"，不产生图标写入。
+    - 超 2MB 内容抛出 ValueError，消息为 "Agent icon must not exceed 2 MB"。
+    - 非法类型内容抛出 ValueError，消息为 "Agent icon must be a PNG, JPEG, GIF, or WebP image"。
+    - 无 EDIT 权限抛出 ForbiddenError，消息为 "You do not have permission to edit this agent"，且不产生图标写入。
+    - get_agent_icon_impl 返回的字节内容与上传内容一致，content_type 与上传时一致。
+    - icon_url 为空时抛出 FileNotFoundError，消息为 "Agent icon not found"。
+    - 上传成功后 agent 记录 icon_url 写回为 /api/agent/{agent_id}/icon。

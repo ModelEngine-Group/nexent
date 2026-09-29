@@ -1,0 +1,108 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-AUTO-03A2CF91A730FDBE
+  feature_id: V5-DEP-AUTO-03A2CF91A730FDBE
+  business_rule_ids:
+  - V5-DEP-AUTO-03A2CF91A730FDBE-RULE-01
+  title: cas-mock 服务 smoke：启动、健康检查、/cas/login 表单认证与 CASTGC 会话、/cas/p3/serviceValidate 票据校验与 TTL 过期、/cas/logout 撤销及与 Nexent
+    CAS 回调集成
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 新增的本地 CAS 2.0 mock 服务是 Nexent 本地 SSO 单点登录与回调集成的测试依赖；若该服务启动失败、/healthz 不通过、CASTGC 会话建立/撤销或 serviceValidate 票据校验行为错误，将导致本地
+    SSO 登录/回调集成全面不可用，且难以区分是 Nexent 侧还是 mock 侧问题。
+  preconditions:
+  - deploy/cas-mock/docker-compose.yml（镜像 nexent/cas-mock:latest，端口 3001:8080，环境变量 CAS_MOCK_USERNAME/CAS_MOCK_PASSWORD/CAS_MOCK_EMAIL/CAS_MOCK_ROLE/CAS_MOCK_TENANT_ID，healthcheck
+    以 urllib 请求 http://localhost:8080/healthz）；deploy/cas-mock/server.py 依据 CAS_MOCK_PASSWORD 环境变量初始化用户（server.py:282-294）。
+  test_data:
+    legacy_asset_declaration: deploy/cas-mock/docker-compose.yml（镜像 nexent/cas-mock:latest，端口 3001:8080，环境变量 CAS_MOCK_USERNAME/CAS_MOCK_PASSWORD/CAS_MOCK_EMAIL/CAS_MOCK_ROLE/CAS_MOCK_TENANT_ID，healthcheck
+      以 urllib 请求 http://localhost:8080/healthz）；deploy/cas-mock/server.py 依据 CAS_MOCK_PASSWORD 环境变量初始化用户（server.py:282-294）。
+  steps:
+  - order: 1
+    action: 启动 cas-mock：在 deploy/cas-mock 目录执行 docker compose up -d --build，等待容器健康（healthcheck 每 5s 检查 /healthz，重试 10 次），读取容器日志确认
+      "CAS mock listening on <host>:<port>/cas"（server.py:302）。
+    expected: /healthz 返回 HTTP 200 且响应体为 "ok"。
+  - order: 2
+    action: 验证健康检查：GET http://localhost:3001/healthz，依据 server.py:87-89 断言 HTTP 200 且响应体为 "ok"。
+    expected: 无会话 GET /cas/login 返回 200 登录表单；错误密码 POST 返回 401 并提示 "用户名或密码错误"。
+  - order: 3
+    action: 验证登录表单：无 CASTGC Cookie 时 GET http://localhost:3001/cas/login?service=<service>，依据 server.py:115-129 断言返回 200 且
+      HTML 表单 action=/cas/login，含 username/password 输入框与 service 隐藏域。
+    expected: 正确登录返回 302，Location 含 ticket=ST- 参数，且 Set-Cookie 携带 HttpOnly、SameSite=Lax 的 CASTGC 会话。
+  - order: 4
+    action: 验证错误密码：POST http://localhost:3001/cas/login（username=casuser, password=错误值），依据 server.py:131-135 断言返回 401 且表单提示
+      "用户名或密码错误"。
+    expected: serviceValidate 首次校验返回 authenticationSuccess，cas:user、email、displayName、role、tenant_id、SessionIndex 与配置值一致；同一票据二次校验返回
+      INVALID_TICKET。
+  - order: 5
+    action: '验证正确登录与会话：POST http://localhost:3001/cas/login（username=casuser, password=casuser, service=<service>），依据 server.py:136-138
+      及 server.py:182-191 断言返回 302 重定向至 service 且 Location 带 ticket=ST- 参数，响应带 Set-Cookie: CASTGC=TGC-...; Path=/; HttpOnly;
+      SameSite=Lax。'
+    expected: 过期（超过 300 秒）或已消费票据校验返回 authenticationFailure/INVALID_TICKET。
+  - order: 6
+    action: 验证票据校验回调集成：GET http://localhost:3001/cas/p3/serviceValidate?ticket=<ticket>&service=<service>，依据 server.py:140-170
+      断言返回 200 application/xml，包含 <cas:authenticationSuccess>、<cas:user>casuser</cas:user> 及 uid/email/displayName/role/tenant_id/SessionIndex
+      属性与配置值一致。
+    expected: /cas/logout 清除 CASTGC（Set-Cookie Max-Age=0），注销后再次登录需重新认证。
+  - order: 7
+    action: 验证票据单次使用：用同一 ticket 再次请求 serviceValidate，依据 server.py:64-70（consume_ticket 弹出票据）断言返回 <cas:authenticationFailure
+      code="INVALID_TICKET">。
+    expected: 全程无未处理异常，日志中不输出明文密码。
+  - order: 8
+    action: '验证注销撤销：携带 CASTGC Cookie 请求 GET http://localhost:3001/cas/logout，依据 server.py:172-180 断言响应 Set-Cookie: CASTGC=;
+      Max-Age=0 且会话被移除；随后访问 /cas/login 应返回登录表单而非直接带票重定向。'
+    expected: 全程无未处理异常，日志中不输出明文密码。
+  - order: 9
+    action: 验证 TTL 过期：依据 server.py:19（TICKET_TTL_SECONDS=300）与 server.py:66，将 ServiceTicket.issued_at 置为超过 300 秒前（或在单测中构造过期票据），断言
+      consume_ticket 返回 None 且校验响应为 authenticationFailure/INVALID_TICKET。
+    expected: 全程无未处理异常，日志中不输出明文密码。
+  expected_results:
+  - /healthz 返回 HTTP 200 且响应体为 "ok"。
+  - 无会话 GET /cas/login 返回 200 登录表单；错误密码 POST 返回 401 并提示 "用户名或密码错误"。
+  - 正确登录返回 302，Location 含 ticket=ST- 参数，且 Set-Cookie 携带 HttpOnly、SameSite=Lax 的 CASTGC 会话。
+  - serviceValidate 首次校验返回 authenticationSuccess，cas:user、email、displayName、role、tenant_id、SessionIndex 与配置值一致；同一票据二次校验返回
+    INVALID_TICKET。
+  - 过期（超过 300 秒）或已消费票据校验返回 authenticationFailure/INVALID_TICKET。
+  - /cas/logout 清除 CASTGC（Set-Cookie Max-Age=0），注销后再次登录需重新认证。
+  - 全程无未处理异常，日志中不输出明文密码。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 37
+  risk_type: DEPLOYMENT
+  risk: 新增的本地 CAS 2.0 mock 服务是 Nexent 本地 SSO 单点登录与回调集成的测试依赖；若该服务启动失败、/healthz 不通过、CASTGC 会话建立/撤销或 serviceValidate 票据校验行为错误，将导致本地
+    SSO 登录/回调集成全面不可用，且难以区分是 Nexent 侧还是 mock 侧问题。
+  condition:
+  - deploy/cas-mock/docker-compose.yml（镜像 nexent/cas-mock:latest，端口 3001:8080，环境变量 CAS_MOCK_USERNAME/CAS_MOCK_PASSWORD/CAS_MOCK_EMAIL/CAS_MOCK_ROLE/CAS_MOCK_TENANT_ID，healthcheck
+    以 urllib 请求 http://localhost:8080/healthz）；deploy/cas-mock/server.py 依据 CAS_MOCK_PASSWORD 环境变量初始化用户（server.py:282-294）。
+  metrics:
+  - /healthz 返回 HTTP 200 且响应体为 "ok"。
+  - 无会话 GET /cas/login 返回 200 登录表单；错误密码 POST 返回 401 并提示 "用户名或密码错误"。
+  - 正确登录返回 302，Location 含 ticket=ST- 参数，且 Set-Cookie 携带 HttpOnly、SameSite=Lax 的 CASTGC 会话。
+  - serviceValidate 首次校验返回 authenticationSuccess，cas:user、email、displayName、role、tenant_id、SessionIndex 与配置值一致；同一票据二次校验返回
+    INVALID_TICKET。
+  - 过期（超过 300 秒）或已消费票据校验返回 authenticationFailure/INVALID_TICKET。
+  - /cas/logout 清除 CASTGC（Set-Cookie Max-Age=0），注销后再次登录需重新认证。
+  - 全程无未处理异常，日志中不输出明文密码。
+  thresholds:
+  - /healthz 返回 HTTP 200 且响应体为 "ok"。
+  - 无会话 GET /cas/login 返回 200 登录表单；错误密码 POST 返回 401 并提示 "用户名或密码错误"。
+  - 正确登录返回 302，Location 含 ticket=ST- 参数，且 Set-Cookie 携带 HttpOnly、SameSite=Lax 的 CASTGC 会话。
+  - serviceValidate 首次校验返回 authenticationSuccess，cas:user、email、displayName、role、tenant_id、SessionIndex 与配置值一致；同一票据二次校验返回
+    INVALID_TICKET。
+  - 过期（超过 300 秒）或已消费票据校验返回 authenticationFailure/INVALID_TICKET。
+  - /cas/logout 清除 CASTGC（Set-Cookie Max-Age=0），注销后再次登录需重新认证。
+  - 全程无未处理异常，日志中不输出明文密码。
+  recovery_expectations:
+  - /healthz 返回 HTTP 200 且响应体为 "ok"。
+  - 无会话 GET /cas/login 返回 200 登录表单；错误密码 POST 返回 401 并提示 "用户名或密码错误"。
+  - 正确登录返回 302，Location 含 ticket=ST- 参数，且 Set-Cookie 携带 HttpOnly、SameSite=Lax 的 CASTGC 会话。
+  - serviceValidate 首次校验返回 authenticationSuccess，cas:user、email、displayName、role、tenant_id、SessionIndex 与配置值一致；同一票据二次校验返回
+    INVALID_TICKET。
+  - 过期（超过 300 秒）或已消费票据校验返回 authenticationFailure/INVALID_TICKET。
+  - /cas/logout 清除 CASTGC（Set-Cookie Max-Age=0），注销后再次登录需重新认证。
+  - 全程无未处理异常，日志中不输出明文密码。

@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-A2A0CB86E6D3E2F3
+  feature_id: F-054
+  business_rule_ids:
+  - F-054-RULE-01
+  title: 多模型优先级拖拽/键盘重排、首位主模型语义、重排后 model_ids/model/model_names 更新并 autosave、只读/无权限禁用排序｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 多模型优先级拖拽/键盘重排、首位主模型语义、重排后 model_ids/model/model_names 更新并 autosave、只读/无权限禁用排序｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 AgentPrompt 组件（frontend/app/[locale]/agents/components/agent-prompt.tsx），注入最小 props、useAgentStore 状态（editedAgent.model_ids
+      包含至少两个可用模型 id）、mock useModelList 返回固定可用模型列表、useAuthorizationContext 的 user.role 与 useDeployment 的 isSpeedMode。
+    expected: 组件交互结果与 dnd-kit 排序契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 首次渲染后断言：多选 Select 回显模型顺序与 editedAgent.model_ids 一致；model_ids 为空时回退 defaultLlmConfig.id；selectedModels.length>=2
+      且未禁用时显示优先级排序入口（ListOrdered），否则入口 disabled。
+    expected: 拖拽/键盘重排后 model_ids 按 active→over 重排，首位模型为主模型（model 取首位展示名、model_names 与重排顺序一致），updateAgent 被调用且参数正确。
+  - order: 3
+    action: 对 SortableModelItem 列表分别执行 DndContext 拖拽（PointerSensor，activationConstraint distance 6）与 KeyboardSensor（sortableKeyboardCoordinates）键盘移动，记录
+      active.id 与 over.id。
+    expected: 只读/无权限时拖拽手柄与多选 Select 均 disabled，无法调整优先级；模型数少于 2 时排序入口 disabled。
+  - order: 4
+    action: 断言 handleModelPriorityChange 在 over 存在时以 (selectedModelIds, active.id, over.id) 调用 reorderModelIds 得到新 model_ids，并调用
+      updateModelSelection(modelIds)。
+    expected: autosave（updateAgent/updateAgentConfig）被触发，重排后优先级状态被提交。
+  - order: 5
+    action: 断言 updateModelSelection 执行 form.setFieldValue("model_ids", ...) 且调用 updateAgent(resolveModelSelection(modelIds,
+      modelOptions))；store 中 model_ids 重排、model（首位模型展示名）与 model_names 同步更新，重排后首位模型（index===0）渲染“主模型”标签。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 断言重排通过 updateAgent/updateAgentConfig 触发 autosave（draft 提交）并持久化新优先级。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 只读/无权限场景：令 canManageModels(user.role) 返回 false 且 isSpeedMode=false，断言 isModelSelectionDisabled=true，多选 Select
+      与 SortableModelItem 拖拽手柄均 disabled，优先级排序入口 disabled 且 Popover 不渲染。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 边界：selectedModels.length<2 时断言排序入口 disabled；刷新后断言 model_ids 按可用模型过滤（剔除已下线模型 id）并同步 model/model_names。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 组件交互结果与 dnd-kit 排序契约一致，测试过程无未处理异常。
+  - 拖拽/键盘重排后 model_ids 按 active→over 重排，首位模型为主模型（model 取首位展示名、model_names 与重排顺序一致），updateAgent 被调用且参数正确。
+  - 只读/无权限时拖拽手柄与多选 Select 均 disabled，无法调整优先级；模型数少于 2 时排序入口 disabled。
+  - autosave（updateAgent/updateAgentConfig）被触发，重排后优先级状态被提交。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 444
+  unit_boundary: 配置前端
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - 组件交互结果与 dnd-kit 排序契约一致，测试过程无未处理异常。
+  - 拖拽/键盘重排后 model_ids 按 active→over 重排，首位模型为主模型（model 取首位展示名、model_names 与重排顺序一致），updateAgent 被调用且参数正确。
+  - 只读/无权限时拖拽手柄与多选 Select 均 disabled，无法调整优先级；模型数少于 2 时排序入口 disabled。
+  - autosave（updateAgent/updateAgentConfig）被触发，重排后优先级状态被提交。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

@@ -1,0 +1,10 @@
+schema_version: '1.0'
+case_id: API-141
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-141
+- framework: pytest
+  file: test-e2e/infra/automation/d3/scenarios/scenario_evaluation_scenarios.py
+  selector: API-141
+notes: V5 source binding migrated; runtime parity is not yet certified.

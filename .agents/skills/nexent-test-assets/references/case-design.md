@@ -1,6 +1,6 @@
 # D1-D5 case design
 
-Use `test/schemas/test-case.schema.json` as the exact file contract.
+Use the Case structure in `test-e2e/cases/<Case-ID>/case.yaml`. The validator checks its stage-specific contract against `test-e2e/infra/schemas/legacy/test-case.schema.json` after normalizing the single-Case wrapper; directory name and `case_id` must match.
 
 | Stage | Primary proof | Required boundary |
 | --- | --- | --- |

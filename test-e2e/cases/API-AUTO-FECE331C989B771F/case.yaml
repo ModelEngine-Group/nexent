@@ -1,0 +1,104 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-FECE331C989B771F
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AIDP文档上传/列表：50文件上限、20MB/1GB大小校验、部分成功汇总、计数失败降级｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: AIDP文档上传/列表：50文件上限、20MB/1GB大小校验、部分成功汇总、计数失败降级｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  - AIDP 服务凭据经 AIDP_SERVER_URL/AIDP_API_KEY 注入并指向本地/测试 AIDP 服务（计数接口支持故障注入以便验证降级）；已存在一个归属当前租户、登录用户具备 EDIT 权限的测试知识库（kds_id）。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/documents/'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）与租户关系；密码/Token 仅从 secrets.env 注入，AIDP 凭据经 AIDP_SERVER_URL/AIDP_API_KEY
+      注入并指向本地/测试 AIDP 服务。
+    expected: 数量上限：提交 51 个文件返回 HTTP 200，summary.success=0、summary.failed=51，每个失败项 reason_zh="单次最多上传 50 个文件"、reason_en="You
+      can upload up to 50 files at a time"，且校验在调用 AIDP 前完成、不产生 AIDP 写入。
+  - order: 2
+    action: 创建或选定一个测试知识库并记录其 kds_id、归属租户与当前登录用户具备的 EDIT/READ 权限。
+    expected: 大小上限：txt/xls/xlsx/csv 超过 20MB 时失败项 reason 含"文件大小不能超过 20 MB"/"File size must not exceed 20 MB"；其它类型超过 1GB 时失败项
+      reason 含"1024 MB"，均进入 failed_list 且不触发 AIDP 写入。
+  - order: 3
+    action: 数量上限：向 POST /aidp-mgmt/knowledge-bases/{kds_id}/documents 一次提交 51 个文件，记录 HTTP 状态、summary(total/success/failed)
+      与 failed_list 每个成员的 file_name/reason_zh/reason_en。
+    expected: 部分成功：summary.total 等于提交文件总数，success 与 failed 分别等于 success_list、failed_list 长度且两者之和等于 total；合法文件进入 success_list、超限文件进入
+      failed_list。
+  - order: 4
+    action: 大小上限：分别提交超过 20MB 的 txt/xls/xlsx/csv 小文件类型，以及超过 1GB 的其它类型（如 pdf）文件，记录每个失败项的 file_name/reason_zh/reason_en。
+    expected: 列表分页：HTTP 200，value 长度不超过 page_size，total_count 与 has_more 与页内数据及真实总数一致。
+  - order: 5
+    action: 部分成功：混合提交 1 个合法文件与 2 个超限文件，记录 summary(total/success/failed) 与 success_list、failed_list 的成员归属。
+    expected: 计数降级：AIDP 文档 Count API 失败时返回 total_reliable=false，total_count 退化为页内条数，has_more 依据 next_link 存在或 page_count>=page_size
+      推断。
+  - order: 6
+    action: 列表分页：上传若干合法文件后调用 GET /aidp-mgmt/knowledge-bases/{kds_id}/documents?page=1&page_size=10，记录 value/total_count/has_more。
+    expected: 越权与隔离：仅 READ 账号上传、无权限账号访问分别返回 403/404（未认证返回 401），不出现跨租户数据泄露。
+  - order: 7
+    action: 计数降级：将 AIDP 文档计数接口指向失败 stub 或注入异常，再次调用列表端点，记录 total_reliable、total_count、has_more 与 next_link。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 越权：以仅 READ 权限账号调用上传端点、以无权限账号调用列表端点，记录 401/403/404 与租户隔离。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 检查日志与错误响应不含明文 password/token/API key；清理临时知识库与上传文档。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 数量上限：提交 51 个文件返回 HTTP 200，summary.success=0、summary.failed=51，每个失败项 reason_zh="单次最多上传 50 个文件"、reason_en="You can upload
+    up to 50 files at a time"，且校验在调用 AIDP 前完成、不产生 AIDP 写入。
+  - 大小上限：txt/xls/xlsx/csv 超过 20MB 时失败项 reason 含"文件大小不能超过 20 MB"/"File size must not exceed 20 MB"；其它类型超过 1GB 时失败项 reason 含"1024
+    MB"，均进入 failed_list 且不触发 AIDP 写入。
+  - 部分成功：summary.total 等于提交文件总数，success 与 failed 分别等于 success_list、failed_list 长度且两者之和等于 total；合法文件进入 success_list、超限文件进入
+    failed_list。
+  - 列表分页：HTTP 200，value 长度不超过 page_size，total_count 与 has_more 与页内数据及真实总数一致。
+  - 计数降级：AIDP 文档 Count API 失败时返回 total_reliable=false，total_count 退化为页内条数，has_more 依据 next_link 存在或 page_count>=page_size
+    推断。
+  - 越权与隔离：仅 READ 账号上传、无权限账号访问分别返回 403/404（未认证返回 401），不出现跨租户数据泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 517
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）与租户关系；密码/Token 仅从 secrets.env 注入，AIDP 凭据经 AIDP_SERVER_URL/AIDP_API_KEY
+      注入并指向本地/测试 AIDP 服务。
+    - 创建或选定一个测试知识库并记录其 kds_id、归属租户与当前登录用户具备的 EDIT/READ 权限。
+    - 数量上限：向 POST /aidp-mgmt/knowledge-bases/{kds_id}/documents 一次提交 51 个文件，记录 HTTP 状态、summary(total/success/failed) 与 failed_list
+      每个成员的 file_name/reason_zh/reason_en。
+    - 大小上限：分别提交超过 20MB 的 txt/xls/xlsx/csv 小文件类型，以及超过 1GB 的其它类型（如 pdf）文件，记录每个失败项的 file_name/reason_zh/reason_en。
+    - 部分成功：混合提交 1 个合法文件与 2 个超限文件，记录 summary(total/success/failed) 与 success_list、failed_list 的成员归属。
+    - 列表分页：上传若干合法文件后调用 GET /aidp-mgmt/knowledge-bases/{kds_id}/documents?page=1&page_size=10，记录 value/total_count/has_more。
+    - 计数降级：将 AIDP 文档计数接口指向失败 stub 或注入异常，再次调用列表端点，记录 total_reliable、total_count、has_more 与 next_link。
+    - 越权：以仅 READ 权限账号调用上传端点、以无权限账号调用列表端点，记录 401/403/404 与租户隔离。
+    - 检查日志与错误响应不含明文 password/token/API key；清理临时知识库与上传文档。
+    response_expectations:
+    - 数量上限：提交 51 个文件返回 HTTP 200，summary.success=0、summary.failed=51，每个失败项 reason_zh="单次最多上传 50 个文件"、reason_en="You can upload
+      up to 50 files at a time"，且校验在调用 AIDP 前完成、不产生 AIDP 写入。
+    - 大小上限：txt/xls/xlsx/csv 超过 20MB 时失败项 reason 含"文件大小不能超过 20 MB"/"File size must not exceed 20 MB"；其它类型超过 1GB 时失败项 reason
+      含"1024 MB"，均进入 failed_list 且不触发 AIDP 写入。
+    - 部分成功：summary.total 等于提交文件总数，success 与 failed 分别等于 success_list、failed_list 长度且两者之和等于 total；合法文件进入 success_list、超限文件进入
+      failed_list。
+    - 列表分页：HTTP 200，value 长度不超过 page_size，total_count 与 has_more 与页内数据及真实总数一致。
+    - 计数降级：AIDP 文档 Count API 失败时返回 total_reliable=false，total_count 退化为页内条数，has_more 依据 next_link 存在或 page_count>=page_size
+      推断。
+    - 越权与隔离：仅 READ 账号上传、无权限账号访问分别返回 403/404（未认证返回 401），不出现跨租户数据泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

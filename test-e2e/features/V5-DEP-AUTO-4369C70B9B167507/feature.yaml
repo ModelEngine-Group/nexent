@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-4369C70B9B167507
+  name: v2.5.3 引导幂等迁移：role_permission 序列 setval 重同步与统一标签空租户跳过
+  status: active
+  description: 显式种子 ID 写入 nexent.role_permission_t 时不推进 SERIAL 序列，若序列落后于当前 MAX，后续插入 role_permission_id 会与已有主键冲突（unique violation），导致权限数据写入失败；平台超管预留的空租户映射若被触发预置统一标签桶，会污染预留映射。
+  business_rules:
+  - rule_id: V5-DEP-AUTO-4369C70B9B167507-RULE-01
+    description: v2.5.3 引导幂等迁移：role_permission 序列 setval 重同步与统一标签空租户跳过
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

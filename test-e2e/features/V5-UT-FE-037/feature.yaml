@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-037
+  name: token 注入、401 refresh、forced login、request cancellation
+  status: active
+  description: token 注入、401 refresh、forced login、request cancellation
+  business_rules:
+  - rule_id: V5-UT-FE-037-RULE-01
+    description: token 注入、401 refresh、forced login、request cancellation
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

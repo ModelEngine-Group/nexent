@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: REL-AUTO-4045B602F3B5254D
+implementations:
+- framework: pytest
+  file: test.py
+  selector: REL-AUTO-4045B602F3B5254D
+notes: V5 source binding migrated; runtime parity is not yet certified.

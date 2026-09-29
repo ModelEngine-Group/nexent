@@ -1,0 +1,74 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-55E9952C32F60844
+  feature_id: F-112
+  business_rule_ids:
+  - F-112-RULE-01
+  title: history summary status=compacting 展示瞬时加载步骤，accepted/idle 清除瞬时步骤并渲染最终摘要｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: history summary status=compacting 展示瞬时加载步骤，accepted/idle 清除瞬时步骤并渲染最终摘要｜核心流程
+  preconditions:
+  - 本地前端组件/单元测试环境（Vitest/Jest + React Testing Library）可运行；不要求后端或外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 被测函数 upsertHistorySummaryInMessages（frontend/app/[locale]/chat/streaming/chatStreamHandler.tsx）与组件 HistorySummaryEvent（frontend/app/[locale]/chat/streaming/taskWindow.tsx）可直接从源码导入，chatConfig.messageTypes.HISTORY_SUMMARY
+    与 MESSAGE_ROLES.ASSISTANT 常量可解析。
+  - 固定 ChatMessageType[] fixture 与 history summary 状态 JSON 随测试代码内联，不使用真实会话数据。
+  test_data:
+    legacy_asset_declaration: 无独立本地资产；固定消息 fixture 与 history summary 状态 JSON 内联于测试代码。
+  steps:
+  - order: 1
+    action: 在组件测试环境导入 upsertHistorySummaryInMessages（frontend/app/[locale]/chat/streaming/chatStreamHandler.tsx）与 HistorySummaryEvent（frontend/app/[locale]/chat/streaming/taskWindow.tsx），构造含
+      assistant 消息的 ChatMessageType[] fixture 与 history summary 状态 JSON。
+    expected: status="compacting" 时，最后一条 assistant 消息新增唯一瞬态 step id="history-summary-compacting"（title="History Summary"），组件渲染加载图标与
+      compacting 文案，无摘要标题/正文。
+  - order: 2
+    action: 传入 status="compacting" 的 content 调用 upsertHistorySummaryInMessages，检查返回最后一条 assistant 消息的 steps 出现瞬态 step（id="history-summary-compacting"、标题
+      "History Summary"、类型 HISTORY_SUMMARY）。
+    expected: status="accepted" 且 covered_through_message_id 为数字时，瞬态 step 被移除，对应 assistant 消息持久 step id="history-summary-<covered_through_message_id>"
+      被写入（重复 accepted 时替换而非追加）；组件渲染最终摘要标题、covered_through、trigger 与摘要正文。
+  - order: 3
+    action: 渲染 HistorySummaryEvent 且 payload.status="compacting"，检查显示加载动画与 compacting 文案，且不显示摘要标题/covered_through/trigger/摘要正文。
+    expected: status="idle" 时移除瞬态 step，不新增/修改持久摘要步骤。
+  - order: 4
+    action: 传入 status="accepted" 且 covered_through_message_id 为数字的 content 调用 upsertHistorySummaryInMessages，检查瞬态 step 被清除，并在
+      message_id 等于 covered_through_message_id 的 assistant 消息上写入/替换持久 step（id="history-summary-<covered_through_message_id>"）。
+    expected: 非法 JSON 返回原 messages，无未处理异常、无副作用。
+  - order: 5
+    action: 渲染 HistorySummaryEvent（accepted 且带 summary 对象/字符串），检查渲染摘要标题、covered_through、trigger 与最终摘要正文。
+    expected: 全过程不出现明文 API Key/Token/密码等敏感信息。
+  - order: 6
+    action: 传入 status="idle" 的 content 调用 upsertHistorySummaryInMessages，检查仅清除瞬态 step，不新增、不修改任何持久摘要步骤。
+    expected: 全过程不出现明文 API Key/Token/密码等敏感信息。
+  - order: 7
+    action: 传入无法 JSON.parse 的 content，检查返回原 messages 数组不变、不抛异常、无副作用。
+    expected: 全过程不出现明文 API Key/Token/密码等敏感信息。
+  expected_results:
+  - status="compacting" 时，最后一条 assistant 消息新增唯一瞬态 step id="history-summary-compacting"（title="History Summary"），组件渲染加载图标与
+    compacting 文案，无摘要标题/正文。
+  - status="accepted" 且 covered_through_message_id 为数字时，瞬态 step 被移除，对应 assistant 消息持久 step id="history-summary-<covered_through_message_id>"
+    被写入（重复 accepted 时替换而非追加）；组件渲染最终摘要标题、covered_through、trigger 与摘要正文。
+  - status="idle" 时移除瞬态 step，不新增/修改持久摘要步骤。
+  - 非法 JSON 返回原 messages，无未处理异常、无副作用。
+  - 全过程不出现明文 API Key/Token/密码等敏感信息。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 432
+  unit_boundary: 前端流式状态
+  inputs:
+  - 无独立本地资产；固定消息 fixture 与 history summary 状态 JSON 内联于测试代码。
+  assertions:
+  - status="compacting" 时，最后一条 assistant 消息新增唯一瞬态 step id="history-summary-compacting"（title="History Summary"），组件渲染加载图标与
+    compacting 文案，无摘要标题/正文。
+  - status="accepted" 且 covered_through_message_id 为数字时，瞬态 step 被移除，对应 assistant 消息持久 step id="history-summary-<covered_through_message_id>"
+    被写入（重复 accepted 时替换而非追加）；组件渲染最终摘要标题、covered_through、trigger 与摘要正文。
+  - status="idle" 时移除瞬态 step，不新增/修改持久摘要步骤。
+  - 非法 JSON 返回原 messages，无未处理异常、无副作用。
+  - 全过程不出现明文 API Key/Token/密码等敏感信息。

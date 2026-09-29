@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: CTR-AUTO-9ACCCB74F6E72CCC
+implementations:
+- framework: pytest
+  file: test.py
+  selector: CTR-AUTO-9ACCCB74F6E72CCC
+notes: V5 source binding migrated; runtime parity is not yet certified.

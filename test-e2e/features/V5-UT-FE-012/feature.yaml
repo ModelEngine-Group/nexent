@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-012
+  name: quota 单位转换、unlimited 空输入走 DELETE、source_size/ES 物理容量展示、warning/hard-limit 冲突提示
+  status: active
+  description: quota 单位转换、unlimited 空输入走 DELETE、source_size/ES 物理容量展示、warning/hard-limit 冲突提示
+  business_rules:
+  - rule_id: V5-UT-FE-012-RULE-01
+    description: quota 单位转换、unlimited 空输入走 DELETE、source_size/ES 物理容量展示、warning/hard-limit 冲突提示
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

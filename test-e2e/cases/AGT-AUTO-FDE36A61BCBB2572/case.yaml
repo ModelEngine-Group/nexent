@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-AUTO-FDE36A61BCBB2572
+  feature_id: F-137
+  business_rule_ids:
+  - F-137-RULE-01
+  title: 多 LLM evaluator 经 runtime 评估通道并行评分与单失败隔离｜核心流程
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 多 LLM evaluator 经 runtime 评估通道并行评分与单失败隔离｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop，执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/evaluation/
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中 Judge/LLM 凭据有效，预检连通性通过。
+  - runtime/config 进程已启动，ManagedThreadManager 的 evaluation 托管通道可用；config→runtime 内部 JWT 鉴权链路（verify_internal_runtime_jwt）可用。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/evaluation/'
+  steps:
+  - order: 1
+    action: 从 ${NEXENT_TEST_HOME}/assets/evaluation/ 读取固定评估集与 Expected Oracle，准备真实被评 Agent 与真实 Judge/LLM 配置；准备 2 个已 PUBLISHED
+      的 LLM 型 Evaluator（不同 name）作为多 evaluator 并行评分输入，记录各自 evaluator_id/evaluator_type。
+    expected: Evaluation Run 创建/派发成功，run 状态由 PENDING 迁往 RUNNING 并最终到达 COMPLETED/FAILED，测试过程无未处理异常。
+  - order: 2
+    action: 通过实际 API（backend/apps/agent_evaluation_app.py）创建/选取评估集与 Evaluator，确认 case 数与输入一致。
+    expected: 多 LLM evaluator 的评分经 runtime evaluation 托管通道（task_name=agent-evaluation-judge）并行提交；关键状态在 API 返回、数据库 case 结果与后续读取中保持一致。
+  - order: 3
+    action: 发起一条 Evaluation Run（携带 agent_id、agent_version_no、judge_model_id 及上述 2 个 LLM evaluator_ids），记录返回的 agent_evaluation_id，等待后台任务经
+      runtime 评估通道（task_name=agent-evaluation-dispatch）调度执行。
+    expected: 聚合 scores/reasons 的键集合覆盖全部 code+llm evaluator 名称，每个 llm evaluator 的 score 为 float、reason 为非空字符串，聚合分数/原因与逐 evaluator
+      结果一致。
+  - order: 4
+    action: 轮询 run 状态直至到达终端态（COMPLETED/FAILED），期间观察 runtime 进程日志，确认多 LLM evaluator 经 runtime_thread_manager.submit("evaluation",
+      ManagedTaskSpec(task_name="agent-evaluation-judge")) 并行提交，而非旧的裸线程池 _LLM_EVAL_EXECUTOR。
+    expected: 单 evaluator 失败时：失败 evaluator 记 0.0 且 reason 说明失败原因，其余 evaluator 的 score/reason 不受影响，case run 不因单一 evaluator
+      失败而中断或丢失其他结果。
+  - order: 5
+    action: 查询 case 级结果（get_evaluation_case_scores / 结果列表接口），核对每个 evaluator 的 score、reason 是否按 name 分别落地，聚合得分/原因与逐 evaluator
+      结果一致。
+    expected: 失败路径返回明确错误/原因，不出现半写入、重复副作用或跨租户泄露；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 故障隔离场景：调整其中一个 LLM evaluator 使其经 judge 返回空响应或非法 JSON（命中 _call_one_llm_evaluator 防御式解析路径），再次执行单 case run，观察该 evaluator
+      落 0.0 且 reason 说明失败原因，其余 evaluator 仍正常返回分数、run 不中断。
+    expected: 清理后再次查询临时 agent_evaluation/evaluator/评估集返回不存在或空，无残留。
+  - order: 7
+    action: 清理：hard_delete 本次 agent_evaluation 与临时 evaluator/评估集，确认再查询为空，避免残留影响后续每日 CI。
+    expected: 清理后再次查询临时 agent_evaluation/evaluator/评估集返回不存在或空，无残留。
+  expected_results:
+  - Evaluation Run 创建/派发成功，run 状态由 PENDING 迁往 RUNNING 并最终到达 COMPLETED/FAILED，测试过程无未处理异常。
+  - 多 LLM evaluator 的评分经 runtime evaluation 托管通道（task_name=agent-evaluation-judge）并行提交；关键状态在 API 返回、数据库 case 结果与后续读取中保持一致。
+  - 聚合 scores/reasons 的键集合覆盖全部 code+llm evaluator 名称，每个 llm evaluator 的 score 为 float、reason 为非空字符串，聚合分数/原因与逐 evaluator 结果一致。
+  - 单 evaluator 失败时：失败 evaluator 记 0.0 且 reason 说明失败原因，其余 evaluator 的 score/reason 不受影响，case run 不因单一 evaluator 失败而中断或丢失其他结果。
+  - 失败路径返回明确错误/原因，不出现半写入、重复副作用或跨租户泄露；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 清理后再次查询临时 agent_evaluation/evaluator/评估集返回不存在或空，无残留。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 522
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；单 evaluator 失败通过 judge 防御式解析路径（空响应/非法
+    JSON）真实触发，Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - Evaluation Run 创建/派发成功，run 状态由 PENDING 迁往 RUNNING 并最终到达 COMPLETED/FAILED，测试过程无未处理异常。
+  - 多 LLM evaluator 的评分经 runtime evaluation 托管通道（task_name=agent-evaluation-judge）并行提交；关键状态在 API 返回、数据库 case 结果与后续读取中保持一致。
+  - 聚合 scores/reasons 的键集合覆盖全部 code+llm evaluator 名称，每个 llm evaluator 的 score 为 float、reason 为非空字符串，聚合分数/原因与逐 evaluator 结果一致。
+  - 单 evaluator 失败时：失败 evaluator 记 0.0 且 reason 说明失败原因，其余 evaluator 的 score/reason 不受影响，case run 不因单一 evaluator 失败而中断或丢失其他结果。
+  - 失败路径返回明确错误/原因，不出现半写入、重复副作用或跨租户泄露；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 清理后再次查询临时 agent_evaluation/evaluator/评估集返回不存在或空，无残留。
+  cleanup:
+  - JUnit/XML、完整 Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。

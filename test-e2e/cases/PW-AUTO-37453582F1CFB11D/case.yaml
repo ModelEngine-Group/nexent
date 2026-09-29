@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AUTO-37453582F1CFB11D
+  feature_id: V5-PW-AUTO-37453582F1CFB11D
+  business_rule_ids:
+  - V5-PW-AUTO-37453582F1CFB11D-RULE-01
+  title: 技能空间仓库 Tab 浏览、搜索与标签过滤、详情弹窗、安装复制改名冲突(409)
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证用户从技能空间「仓库」Tab 进入后，能浏览共享技能列表、按关键字搜索、按 tag_predicates 标签过滤、查看详情弹窗，并在复制安装时通过已占用目标名获得 409 重名冲突提示，改名后成功安装，形成浏览→过滤→详情→改名闭环。
+  preconditions:
+  - 以 DEV 或 ADMIN 账号登录（前置准备：租户内已有至少 2 条 status=shared listing，其中一条含唯一标签 X；另有一条已存在技能名 Y 用于触发 409 重名冲突）。
+  test_data:
+    legacy_asset_declaration: 无需额外本地预置文件；仓库 listing 数据由共享记录提供，标签过滤依赖统一标签库 default_resource（page.tsx 中 useTagDefinitions）。
+  steps:
+  - order: 1
+    action: 以 DEV 或 ADMIN 账号登录系统，访问路由 /[locale]/skill-space，默认停留在「仓库」Tab（frontend/app/[locale]/skill-space/page.tsx:98-100）。
+    expected: 「仓库」Tab 默认可见，GET /repository/skill?status=shared 返回非空 items，摘要 total 与分页 total 一致。
+  - order: 2
+    action: 等待共享列表加载完成（GET /repository/skill?status=shared&page=1&page_size=6），断言摘要区显示总条数且卡片按网格渲染（RepositoryView.tsx:77-90）。
+    expected: 输入搜索关键字后列表请求携带 search 参数，列表仅显示名称/描述/来源/提交者/标签匹配项。
+  - order: 3
+    action: 在搜索框（placeholder=skillRepository.searchPlaceholder）输入关键字，等待 300ms 防抖后触发带 search 参数的列表请求，断言仅展示名称/描述/来源/提交者/标签匹配的条目（page.tsx:164-202）。
+    expected: 选择标签 X 后列表请求携带 tag_predicates，返回条目 tags 均包含标签 X。
+  - order: 4
+    action: 点击标签过滤（TagFilterPopover）选择唯一标签 X，触发 tag_predicates 过滤请求，断言列表只显示含标签 X 的 listing 且过滤按钮高亮（RepositoryView.tsx:70-74；page.tsx:197-199）。
+    expected: 详情弹窗展示选中 listing 的 name、description 与 tags。
+  - order: 5
+    action: 点击列表卡片「详情」按钮，断言 SkillRepositoryDetailModal 弹出并回填 listing 的名称、描述与标签（page.tsx:729-737）。
+    expected: 目标名 Y 已存在时，复制安装请求得到 409 响应，UI 依据 detail.type=skill_duplicate 显示重名冲突文案，不出现成功提示。
+  - order: 6
+    action: 关闭详情，点击卡片「复制」按钮，弹出复用名称 Modal（RepositoryView.tsx:103-113；page.tsx:738）。
+    expected: 改名 Z 后安装成功出现成功提示，副本可在「我的」Tab 被搜索到并完成清理。
+  - order: 7
+    action: 在名称输入框填入当前租户已存在的技能名 Y 并点击确认，断言触发 POST /repository/skill/{id}/install 并返回 409，输入框下方显示重名冲突提示而非成功提示（skillRepository.copy.duplicateWithNames，page.tsx:420-431；backend/apps/skill_repository_app.py:362-372）。
+    expected: 改名 Z 后安装成功出现成功提示，副本可在「我的」Tab 被搜索到并完成清理。
+  - order: 8
+    action: 将名称改为唯一值 Z 重新确认，断言出现安装成功提示；切换到「我的」Tab 可按名搜索到该副本，随后删除该副本完成清理。
+    expected: 改名 Z 后安装成功出现成功提示，副本可在「我的」Tab 被搜索到并完成清理。
+  expected_results:
+  - 「仓库」Tab 默认可见，GET /repository/skill?status=shared 返回非空 items，摘要 total 与分页 total 一致。
+  - 输入搜索关键字后列表请求携带 search 参数，列表仅显示名称/描述/来源/提交者/标签匹配项。
+  - 选择标签 X 后列表请求携带 tag_predicates，返回条目 tags 均包含标签 X。
+  - 详情弹窗展示选中 listing 的 name、description 与 tags。
+  - 目标名 Y 已存在时，复制安装请求得到 409 响应，UI 依据 detail.type=skill_duplicate 显示重名冲突文案，不出现成功提示。
+  - 改名 Z 后安装成功出现成功提示，副本可在「我的」Tab 被搜索到并完成清理。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 54
+  actor: Nexent browser user
+  journey:
+  - 以 DEV 或 ADMIN 账号登录系统，访问路由 /[locale]/skill-space，默认停留在「仓库」Tab（frontend/app/[locale]/skill-space/page.tsx:98-100）。
+  - 等待共享列表加载完成（GET /repository/skill?status=shared&page=1&page_size=6），断言摘要区显示总条数且卡片按网格渲染（RepositoryView.tsx:77-90）。
+  - 在搜索框（placeholder=skillRepository.searchPlaceholder）输入关键字，等待 300ms 防抖后触发带 search 参数的列表请求，断言仅展示名称/描述/来源/提交者/标签匹配的条目（page.tsx:164-202）。
+  - 点击标签过滤（TagFilterPopover）选择唯一标签 X，触发 tag_predicates 过滤请求，断言列表只显示含标签 X 的 listing 且过滤按钮高亮（RepositoryView.tsx:70-74；page.tsx:197-199）。
+  - 点击列表卡片「详情」按钮，断言 SkillRepositoryDetailModal 弹出并回填 listing 的名称、描述与标签（page.tsx:729-737）。
+  - 关闭详情，点击卡片「复制」按钮，弹出复用名称 Modal（RepositoryView.tsx:103-113；page.tsx:738）。
+  - 在名称输入框填入当前租户已存在的技能名 Y 并点击确认，断言触发 POST /repository/skill/{id}/install 并返回 409，输入框下方显示重名冲突提示而非成功提示（skillRepository.copy.duplicateWithNames，page.tsx:420-431；backend/apps/skill_repository_app.py:362-372）。
+  - 将名称改为唯一值 Z 重新确认，断言出现安装成功提示；切换到「我的」Tab 可按名搜索到该副本，随后删除该副本完成清理。
+  final_business_result:
+  - 「仓库」Tab 默认可见，GET /repository/skill?status=shared 返回非空 items，摘要 total 与分页 total 一致。
+  - 输入搜索关键字后列表请求携带 search 参数，列表仅显示名称/描述/来源/提交者/标签匹配项。
+  - 选择标签 X 后列表请求携带 tag_predicates，返回条目 tags 均包含标签 X。
+  - 详情弹窗展示选中 listing 的 name、description 与 tags。
+  - 目标名 Y 已存在时，复制安装请求得到 409 响应，UI 依据 detail.type=skill_duplicate 显示重名冲突文案，不出现成功提示。
+  - 改名 Z 后安装成功出现成功提示，副本可在「我的」Tab 被搜索到并完成清理。
+  failure_evidence:
+  - Playwright trace、失败截图、网络日志（检查 GET /repository/skill 的 search/tag_predicates 请求参数、POST /{id}/install 的 409 响应体 detail.type=skill_duplicate
+    与 duplicate_skills）。

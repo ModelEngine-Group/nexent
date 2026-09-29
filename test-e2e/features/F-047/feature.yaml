@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-047
+  name: section optimize：选择范围、feedback、mode、资源上下文
+  status: active
+  description: '智能体配置 / Prompt优化: section optimize：选择范围、feedback、mode、资源上下文'
+  business_rules:
+  - rule_id: F-047-RULE-01
+    description: section optimize：选择范围、feedback、mode、资源上下文
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

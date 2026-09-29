@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-EVAL-SET-01
+  feature_id: V5-PW-EVAL-SET-01
+  business_rule_ids:
+  - V5-PW-EVAL-SET-01-RULE-01
+  title: Evaluation Set创建/上传→数据查看→模板/标签Smoke
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 把Evaluation Set资产管理从Run超级Journey拆开。
+  preconditions:
+  - 固定Evaluation Excel
+  - run_id评估集名
+  - 有评估权限
+  test_data:
+    legacy_asset_declaration: assets/evaluation/eval_set.xlsx；expected/evaluation_expected.json
+  steps:
+  - order: 1
+    action: 打开/evaluation，进入当前页面评估集/数据集管理入口。
+    expected: Evaluation Set真实创建/上传可读。
+  - order: 2
+    action: 点击创建Evaluation Set，填run_id名称并提交。
+    expected: Excel case数量/marker正确。
+  - order: 3
+    action: 打开上传/导入，setInputFiles上传eval_set.xlsx。
+    expected: 模板为真实download。
+  - order: 4
+    action: 等待解析完成，检查行数/关键case marker。
+    expected: 解析边界由API-IT。
+  - order: 5
+    action: 若提供模板下载，捕获download并确认非空。
+    expected: 解析边界由API-IT。
+  - order: 6
+    action: 打开评估集详情检查query/expected映射。
+    expected: 解析边界由API-IT。
+  - order: 7
+    action: 进入当前页面Annotation Labels入口（若角色可见），新增run_id label。
+    expected: 解析边界由API-IT。
+  - order: 8
+    action: 刷新确认评估集/label持久化。
+    expected: 解析边界由API-IT。
+  - order: 9
+    action: 删除run_id资产。
+    expected: 解析边界由API-IT。
+  expected_results:
+  - Evaluation Set真实创建/上传可读。
+  - Excel case数量/marker正确。
+  - 模板为真实download。
+  - 解析边界由API-IT。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 47
+  actor: Nexent browser user
+  journey:
+  - 打开/evaluation，进入当前页面评估集/数据集管理入口。
+  - 点击创建Evaluation Set，填run_id名称并提交。
+  - 打开上传/导入，setInputFiles上传eval_set.xlsx。
+  - 等待解析完成，检查行数/关键case marker。
+  - 若提供模板下载，捕获download并确认非空。
+  - 打开评估集详情检查query/expected映射。
+  - 进入当前页面Annotation Labels入口（若角色可见），新增run_id label。
+  - 刷新确认评估集/label持久化。
+  - 删除run_id资产。
+  final_business_result:
+  - Evaluation Set真实创建/上传可读。
+  - Excel case数量/marker正确。
+  - 模板为真实download。
+  - 解析边界由API-IT。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-EVAL-SET-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

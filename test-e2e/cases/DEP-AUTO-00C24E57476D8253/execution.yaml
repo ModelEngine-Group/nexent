@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: DEP-AUTO-00C24E57476D8253
+implementations:
+- framework: pytest
+  file: test.py
+  selector: DEP-AUTO-00C24E57476D8253
+notes: V5 source binding migrated; runtime parity is not yet certified.

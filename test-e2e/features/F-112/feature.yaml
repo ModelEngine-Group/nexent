@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-112
+  name: create/list pagination buckets/rename/batch-delete/history；source citation highlight；model-scoped title generation；history
+    compaction summary；对话线程运行态统一回收
+  status: active
+  description: '会话与分享 / 会话: create/list pagination buckets/rename/batch-delete/history；source citation highlight；model-scoped
+    title generation；history compaction summary；对话线程运行态统一回收'
+  business_rules:
+  - rule_id: F-112-RULE-01
+    description: create/list pagination buckets/rename/batch-delete/history；source citation highlight；model-scoped title generation；history
+      compaction summary；对话线程运行态统一回收
+  required_test_stages:
+  - D1
+  - D2
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

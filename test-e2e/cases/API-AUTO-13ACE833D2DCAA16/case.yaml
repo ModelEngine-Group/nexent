@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-13ACE833D2DCAA16
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: Agent仓库标签统计：仅返回本租户共享 listing 标签值及计数、大小写不敏感排序、跨租户隔离｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Agent仓库标签统计：仅返回本租户共享 listing 标签值及计数、大小写不敏感排序、跨租户隔离｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - 存在至少两个隔离租户（TenantA/TenantB）可登录；TenantA 已创建多个状态为 shared 的 marketplace listing（标签覆盖大小写变体与重复标签），并存在非 shared（pending_review/rejected/not_shared）listing
+    用于排除；TenantB 存在自己的 shared listing。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 与 secrets.env 读取 TenantA/TenantB 隔离账号及 Authorization Token（仅注入，不写入报告）。
+    expected: 200 OK，响应体结构为 {"items":[{"tag":<string>, "count":<int>}]}，字段类型正确。
+  - order: 2
+    action: 准备数据：在 TenantA 中为多个 agent 构造状态为 shared 的仓库 listing，标签分别组合为 ["NLP","nlp","RAG"]、["rag","多模态"]、["RAG"]；另构造 pending_review/rejected/not_shared
+      listing（标签含 "draft"）用于排除；在 TenantB 中构造 shared listing（标签含 "tenantB-only"）。
+    expected: 仅返回调用租户（publisher_tenant_id=当前租户）状态为 shared 的 listing 的标签值及计数；非 shared 状态与其他租户的标签均不出现（跨租户隔离）。
+  - order: 3
+    action: 以 TenantA 身份发起 GET /repository/agent/tags，Authorization 携带有效 Token，记录 HTTP 状态码与完整响应体。
+    expected: count 等于该标签值在共享 listing 中的出现次数；空白标签被忽略；大小写不同按不同标签值计数。
+  - order: 4
+    action: 校验响应结构：响应体顶层为 {"items":[…] }，items 每个元素仅含 tag(string) 与 count(int) 两个字段，无多余字段。
+    expected: items 按 tag 值大小写不敏感（tag.lower()）升序排序。
+  - order: 5
+    action: 校验计数聚合：同一标签值在多个 shared listing 出现时 count 累加；大小写不同视为不同标签值（NLP 与 nlp 各自计数）；非 shared 状态的 "draft" 标签不出现；空白标签被忽略。
+    expected: 缺失或非法 Authorization 返回 401 Unauthorized。
+  - order: 6
+    action: 校验排序：items 按 tag 值大小写不敏感（等价 tag.lower()）升序排列，如 "多模态"、"NLP"、"nlp"、"RAG"、"rag" 的相对顺序。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 校验租户隔离：以 TenantB 身份重放同一请求，断言返回 items 不含 TenantA 的标签（NLP/nlp/RAG/rag/多模态），且包含 TenantB 自身 "tenantB-only"。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 以缺失 Authorization 或非法 Token 发起请求，断言返回 401 Unauthorized，响应 detail 为错误说明且不含明文密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 检查服务日志与响应中不含明文 Token/密钥；清理本次临时创建的仓库 listing 数据。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 200 OK，响应体结构为 {"items":[{"tag":<string>, "count":<int>}]}，字段类型正确。
+  - 仅返回调用租户（publisher_tenant_id=当前租户）状态为 shared 的 listing 的标签值及计数；非 shared 状态与其他租户的标签均不出现（跨租户隔离）。
+  - count 等于该标签值在共享 listing 中的出现次数；空白标签被忽略；大小写不同按不同标签值计数。
+  - items 按 tag 值大小写不敏感（tag.lower()）升序排序。
+  - 缺失或非法 Authorization 返回 401 Unauthorized。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 489
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 与 secrets.env 读取 TenantA/TenantB 隔离账号及 Authorization Token（仅注入，不写入报告）。
+    - 准备数据：在 TenantA 中为多个 agent 构造状态为 shared 的仓库 listing，标签分别组合为 ["NLP","nlp","RAG"]、["rag","多模态"]、["RAG"]；另构造 pending_review/rejected/not_shared
+      listing（标签含 "draft"）用于排除；在 TenantB 中构造 shared listing（标签含 "tenantB-only"）。
+    - 以 TenantA 身份发起 GET /repository/agent/tags，Authorization 携带有效 Token，记录 HTTP 状态码与完整响应体。
+    - 校验响应结构：响应体顶层为 {"items":[…] }，items 每个元素仅含 tag(string) 与 count(int) 两个字段，无多余字段。
+    - 校验计数聚合：同一标签值在多个 shared listing 出现时 count 累加；大小写不同视为不同标签值（NLP 与 nlp 各自计数）；非 shared 状态的 "draft" 标签不出现；空白标签被忽略。
+    - 校验排序：items 按 tag 值大小写不敏感（等价 tag.lower()）升序排列，如 "多模态"、"NLP"、"nlp"、"RAG"、"rag" 的相对顺序。
+    - 校验租户隔离：以 TenantB 身份重放同一请求，断言返回 items 不含 TenantA 的标签（NLP/nlp/RAG/rag/多模态），且包含 TenantB 自身 "tenantB-only"。
+    - 以缺失 Authorization 或非法 Token 发起请求，断言返回 401 Unauthorized，响应 detail 为错误说明且不含明文密钥。
+    - 检查服务日志与响应中不含明文 Token/密钥；清理本次临时创建的仓库 listing 数据。
+    response_expectations:
+    - 200 OK，响应体结构为 {"items":[{"tag":<string>, "count":<int>}]}，字段类型正确。
+    - 仅返回调用租户（publisher_tenant_id=当前租户）状态为 shared 的 listing 的标签值及计数；非 shared 状态与其他租户的标签均不出现（跨租户隔离）。
+    - count 等于该标签值在共享 listing 中的出现次数；空白标签被忽略；大小写不同按不同标签值计数。
+    - items 按 tag 值大小写不敏感（tag.lower()）升序排序。
+    - 缺失或非法 Authorization 返回 401 Unauthorized。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

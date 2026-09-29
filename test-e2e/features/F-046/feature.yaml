@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-046
+  name: 基于任务/模型/工具/子Agent/KB生成系统Prompt SSE
+  status: active
+  description: '智能体配置 / Prompt生成: 基于任务/模型/工具/子Agent/KB生成系统Prompt SSE'
+  business_rules:
+  - rule_id: F-046-RULE-01
+    description: 基于任务/模型/工具/子Agent/KB生成系统Prompt SSE
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

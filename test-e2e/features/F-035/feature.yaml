@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-035
+  name: 已保存模型 healthcheck 与 temporary_healthcheck
+  status: active
+  description: '模型与多模态 / 健康检查: 已保存模型 healthcheck 与 temporary_healthcheck'
+  business_rules:
+  - rule_id: F-035-RULE-01
+    description: 已保存模型 healthcheck 与 temporary_healthcheck
+  required_test_stages: []
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

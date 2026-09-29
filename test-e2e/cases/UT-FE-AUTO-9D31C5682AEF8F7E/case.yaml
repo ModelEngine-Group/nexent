@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-9D31C5682AEF8F7E
+  feature_id: F-098
+  business_rule_ids:
+  - F-098-RULE-01
+  title: formatKnowledgeBaseDeleteError 阻断文件/无明细/非该码回退及 deleteKnowledgeBase 原始错误透传与 toast 展示
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: formatKnowledgeBaseDeleteError 阻断文件/无明细/非该码回退及 deleteKnowledgeBase 原始错误透传与 toast 展示
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 测试使用 mock 的 knowledgeBaseService 与 stub 翻译函数 t，不访问真实后端与生产凭据。
+  test_data:
+    legacy_asset_declaration: '- 无额外本地资产：基于前端源码 + mock service/stub t；不读取生产凭据。'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 frontend/lib/knowledgeBaseDeleteError.ts 的 formatKnowledgeBaseDeleteError 纯函数与 frontend/app/[locale]/knowledges/contexts/KnowledgeBaseContext.tsx
+      的 deleteKnowledgeBase，注入 mock knowledgeBaseService 与 stub 翻译函数 t。
+    expected: formatKnowledgeBaseDeleteError 名称/状态逐文件拼接与各分支返回符合代码契约，测试无未处理异常。
+  - order: 2
+    action: '构造 code 等于 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 且 details.blocking_files=[{file_name,status},...] 的错误对象，调用 formatKnowledgeBaseDeleteError，断言返回
+      t("knowledgeBase.message.deleteBlockedWithFiles", {files: "name (status), ..."})。'
+    expected: 无明细时回退 deleteBlocked；非该码回退 error.message；其余回退 fallbackKey。
+  - order: 3
+    action: 构造 KNOWLEDGE_DELETE_BLOCKED 但 blocking_files 缺失/为空数组/含空 file_name 项的错误，断言回退返回 t("knowledgeBase.message.deleteBlocked")。
+    expected: deleteKnowledgeBase 抛出的原始错误保留 EDS code/details，不出现吞异常后返回伪成功。
+  - order: 4
+    action: 构造非该错误码的 Error 实例（携带 message），断言返回 error.message；再构造既非该码也无 message 的输入，断言返回 t(fallbackKey)。
+    expected: 失败路径 toast 展示的是原始错误的格式化结果，而非通用请求失败文案。
+  - order: 5
+    action: 令 mock knowledgeBaseService.deleteKnowledgeBase 抛出携带 EDS code/details 的原始错误，调用 deleteKnowledgeBase，断言其 rethrow
+      的错误为同一对象（code/details 不变），未被吞或替换为通用文案。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 校验 deleteKnowledgeBase 仍 dispatch KNOWLEDGE_BASE_ACTION_TYPES.ERROR 通用动作；触发 KnowledgeBaseConfiguration 的 handleDelete
+      删除失败路径，断言 message.error 被调用且参数为 formatKnowledgeBaseDeleteError(error, t, "knowledgeBase.message.deleteError") 的返回值。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 确认日志、报告不输出明文 API Key/Token/Password/模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - formatKnowledgeBaseDeleteError 名称/状态逐文件拼接与各分支返回符合代码契约，测试无未处理异常。
+  - 无明细时回退 deleteBlocked；非该码回退 error.message；其余回退 fallbackKey。
+  - deleteKnowledgeBase 抛出的原始错误保留 EDS code/details，不出现吞异常后返回伪成功。
+  - 失败路径 toast 展示的是原始错误的格式化结果，而非通用请求失败文案。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 442
+  unit_boundary: KB删除错误格式化
+  inputs:
+  - '- 无额外本地资产：基于前端源码 + mock service/stub t；不读取生产凭据。'
+  assertions:
+  - formatKnowledgeBaseDeleteError 名称/状态逐文件拼接与各分支返回符合代码契约，测试无未处理异常。
+  - 无明细时回退 deleteBlocked；非该码回退 error.message；其余回退 fallbackKey。
+  - deleteKnowledgeBase 抛出的原始错误保留 EDS code/details，不出现吞异常后返回伪成功。
+  - 失败路径 toast 展示的是原始错误的格式化结果，而非通用请求失败文案。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

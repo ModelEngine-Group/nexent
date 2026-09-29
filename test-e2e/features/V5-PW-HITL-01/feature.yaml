@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-HITL-01
+  name: '[已退役] 真实对话触发旧 HITL 审批、暂停引导与终止'
+  status: active
+  description: 保留原审批 Journey 的历史验收范围；现行 NL2Agent 澄清 Journey 由 PW-NL2AGENT-01 验证。
+  business_rules:
+  - rule_id: V5-PW-HITL-01-RULE-01
+    description: '[已退役] 真实对话触发旧 HITL 审批、暂停引导与终止'
+  required_test_stages: []
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

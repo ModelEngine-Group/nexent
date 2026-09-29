@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-028
+  name: 轮询状态、失败stage/error、重新处理
+  status: active
+  description: 轮询状态、失败stage/error、重新处理
+  business_rules:
+  - rule_id: V5-UT-FE-028-RULE-01
+    description: 轮询状态、失败stage/error、重新处理
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

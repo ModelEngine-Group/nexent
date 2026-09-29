@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: REL-11
+implementations:
+- framework: pytest
+  file: test.py
+  selector: REL-11
+notes: V5 source binding migrated; runtime parity is not yet certified.

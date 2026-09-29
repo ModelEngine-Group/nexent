@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-A311B5BCB0E23EFF
+  feature_id: F-054
+  business_rule_ids:
+  - F-054-RULE-01
+  title: 创建 Agent 由 name+display_name 收敛为单一展示名｜单字段创建契约与消费方一致性
+  type: CONTRACT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 创建 Agent 由 name+display_name 收敛为单一展示名｜单字段创建契约与消费方一致性
+  preconditions:
+  - 契约/静态检查环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测契约源文件可读取：frontend/components/agent/CreateAgentModal.tsx、frontend/services/agentConfigService.ts、frontend/app/[locale]/agent-space/components/MineAgentsView.tsx。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 读取创建 Agent 弹窗组件 frontend/components/agent/CreateAgentModal.tsx，采集 CreatedAgentResult 类型定义（15-18 行）与 handleSubmit
+      提交负载（46-56 行）。
+    expected: 创建 Agent 请求负载仅含 display_name，不含 name 字段。
+  - order: 2
+    action: 校验提交负载字段集合：断言 updateAgentInfo 调用对象仅包含 display_name、description、author、max_steps、is_main_agent、provide_run_summary、enabled，不包含
+      name 字段（创建入口收敛为单一展示名）。
+    expected: 'CreatedAgentResult 类型定义为 { agentId: number; displayName: string }，不含 name 字段。'
+  - order: 3
+    action: 校验表单仅暴露 displayName 单一输入项（81-116 行），其校验规则基于 isValidAgentDisplayName 与 display_name 冲突校验（frontend/hooks/agent/useSaveGuard.ts）。
+    expected: agent-space 消费方 onCreated 回调仅依赖 agentId，不存在 name 相关引用。
+  - order: 4
+    action: 校验服务层 frontend/services/agentConfigService.ts 的 updateAgentInfo（497-523 行）与 UpdateAgentInfoPayload 类型（456-495
+      行）：创建请求经 POST API_ENDPOINTS.agent.update，应答 data 使用 agent_id。
+    expected: 创建成功后应答使用 data.agent_id，前端与后端 create_agent_info 收敛契约一致。
+  - order: 5
+    action: 校验消费方 frontend/app/[locale]/agent-space/components/MineAgentsView.tsx 的 handleAgentCreated（146-153 行）：断言其仅解构 {
+      agentId }，未引用 name 字段，创建成功后按 agentId 跳转 agents 路由。
+    expected: 创建成功后应答使用 data.agent_id，前端与后端 create_agent_info 收敛契约一致。
+  - order: 6
+    action: 汇总契约结论：创建 Agent 仅需 display_name（name 由后端派生），CreatedAgentResult 不含 name，前后端无残留 name 引用。
+    expected: 创建成功后应答使用 data.agent_id，前端与后端 create_agent_info 收敛契约一致。
+  expected_results:
+  - 创建 Agent 请求负载仅含 display_name，不含 name 字段。
+  - 'CreatedAgentResult 类型定义为 { agentId: number; displayName: string }，不含 name 字段。'
+  - agent-space 消费方 onCreated 回调仅依赖 agentId，不存在 name 相关引用。
+  - 创建成功后应答使用 data.agent_id，前端与后端 create_agent_info 收敛契约一致。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 502
+  contract:
+    protocol: V5 protocol contract
+    request_expectations:
+    - 读取创建 Agent 弹窗组件 frontend/components/agent/CreateAgentModal.tsx，采集 CreatedAgentResult 类型定义（15-18 行）与 handleSubmit 提交负载（46-56
+      行）。
+    - 校验提交负载字段集合：断言 updateAgentInfo 调用对象仅包含 display_name、description、author、max_steps、is_main_agent、provide_run_summary、enabled，不包含
+      name 字段（创建入口收敛为单一展示名）。
+    - 校验表单仅暴露 displayName 单一输入项（81-116 行），其校验规则基于 isValidAgentDisplayName 与 display_name 冲突校验（frontend/hooks/agent/useSaveGuard.ts）。
+    - 校验服务层 frontend/services/agentConfigService.ts 的 updateAgentInfo（497-523 行）与 UpdateAgentInfoPayload 类型（456-495 行）：创建请求经
+      POST API_ENDPOINTS.agent.update，应答 data 使用 agent_id。
+    - 校验消费方 frontend/app/[locale]/agent-space/components/MineAgentsView.tsx 的 handleAgentCreated（146-153 行）：断言其仅解构 { agentId
+      }，未引用 name 字段，创建成功后按 agentId 跳转 agents 路由。
+    - 汇总契约结论：创建 Agent 仅需 display_name（name 由后端派生），CreatedAgentResult 不含 name，前后端无残留 name 引用。
+    response_expectations:
+    - 创建 Agent 请求负载仅含 display_name，不含 name 字段。
+    - 'CreatedAgentResult 类型定义为 { agentId: number; displayName: string }，不含 name 字段。'
+    - agent-space 消费方 onCreated 回调仅依赖 agentId，不存在 name 相关引用。
+    - 创建成功后应答使用 data.agent_id，前端与后端 create_agent_info 收敛契约一致。

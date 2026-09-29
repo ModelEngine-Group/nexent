@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CMSR-BUG-001
+  change_type: bugfix
+  bug_id: CMSR-BUG-001
+  title: Silent retry produces blank steps and delayed successful output
+  description: Correct model stream delivery and label-only reasoning while preserving attempt rollback.
+  observed_behavior: Short successful retry content can be delayed to completion; failed output rollback can leave a label-only
+    reasoning card.
+  expected_behavior: Safe successful content is visible before completion; no failed fragment or label-only card remains.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: Existing tests assert final rollback but not visibility before the next provider fragment or code-only step
+      rendering.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added:
+    - CMSR-005
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - CMSR-D1-001
+    - CMSR-D1-002
+    - CMSR-D2-001
+    - CMSR-D3-001
+    - CMSR-D4-001
+    - CMSR-D5-001
+    modified: []
+    retired: []

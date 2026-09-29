@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AUTH-03
+  feature_id: V5-PW-AUTH-03
+  business_rule_ids:
+  - V5-PW-AUTH-03-RULE-01
+  title: OAuth授权→callback/pending完成→账号绑定/解绑
+  type: E2E
+  priority: P1
+  status: skipped_by_policy
+  automation: not_applicable
+  objective: 验证真实浏览器redirect/callback/state保持及账号关联UI。
+  preconditions:
+  - Test OAuth Provider健康
+  - 准备未绑定OAuth身份
+  - redirect URI正确
+  test_data:
+    legacy_asset_declaration: config/auth-providers.yaml；config/users.yaml；config/secrets.env
+  steps:
+  - order: 1
+    action: 清理登录态打开登录页，点击测试OAuth Provider。
+    expected: redirect/state/callback完整且不串用户。
+  - order: 2
+    action: 等待跳转本地Provider并完成授权。
+    expected: 绑定/解绑刷新后一致。
+  - order: 3
+    action: 等待回到/oauth/complete；如出现pending account表单则补全并提交。
+    expected: OAuth secret不出现在业务文本/console。
+  - order: 4
+    action: 确认最终进入受保护页且用户信息正确。
+    expected: state重放由SEC直接验证。
+  - order: 5
+    action: 进入/users账号安全区找到第三方账号区域。
+    expected: state重放由SEC直接验证。
+  - order: 6
+    action: 若支持第二Provider则执行绑定并完成真实redirect/callback。
+    expected: state重放由SEC直接验证。
+  - order: 7
+    action: 刷新确认绑定列表持久化。
+    expected: state重放由SEC直接验证。
+  - order: 8
+    action: 解绑一个非最后登录方式；尝试破坏最后登录方式时验证系统按设计阻止。
+    expected: state重放由SEC直接验证。
+  expected_results:
+  - redirect/state/callback完整且不串用户。
+  - 绑定/解绑刷新后一致。
+  - OAuth secret不出现在业务文本/console。
+  - state重放由SEC直接验证。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 4
+  actor: Nexent browser user
+  journey:
+  - 清理登录态打开登录页，点击测试OAuth Provider。
+  - 等待跳转本地Provider并完成授权。
+  - 等待回到/oauth/complete；如出现pending account表单则补全并提交。
+  - 确认最终进入受保护页且用户信息正确。
+  - 进入/users账号安全区找到第三方账号区域。
+  - 若支持第二Provider则执行绑定并完成真实redirect/callback。
+  - 刷新确认绑定列表持久化。
+  - 解绑一个非最后登录方式；尝试破坏最后登录方式时验证系统按设计阻止。
+  final_business_result:
+  - redirect/state/callback完整且不串用户。
+  - 绑定/解绑刷新后一致。
+  - OAuth secret不出现在业务文本/console。
+  - state重放由SEC直接验证。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-AUTH-03/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

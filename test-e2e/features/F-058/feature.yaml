@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-058
+  name: tool call→observation→final；失败重试、malformed tool args、max steps
+  status: active
+  description: '智能体运行时与对话 / ReAct: tool call→observation→final；失败重试、malformed tool args、max steps'
+  business_rules:
+  - rule_id: F-058-RULE-01
+    description: tool call→observation→final；失败重试、malformed tool args、max steps
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

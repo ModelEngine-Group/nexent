@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-FDE1F77FE645881D
+  feature_id: F-099
+  business_rule_ids:
+  - F-099-RULE-01
+  title: process 提交经 persist_submit_task 持久化 parent_task_id 使删除可撤销排队链（批量 SUBMITTED + legacy 单文件）｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: process 提交经 persist_submit_task 持久化 parent_task_id 使删除可撤销排队链（批量 SUBMITTED + legacy 单文件）｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过（含 data-process 服务与 PostgreSQL/Redis/MinIO）。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/
+  - users.yaml 中 SU/Admin/UserA 等隔离账号可登录；已创建带 run_id 前缀的测试知识库 index_name，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/documents/'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号与租户关系，密码/Token 仅从 secrets.env 注入；准备带 run_id 前缀的测试知识库 index_name 和 ${NEXENT_TEST_HOME}/assets/documents/
+      下的固定测试文档。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 通过 POST /file/upload（destination=minio、folder=knowledge_base、index_name）上传单个测试文档，记录返回的 file_id 与 object_name，并确认
+      knowledge_file_lifecycle_t 中该行 status=UPLOADED、upload_owner_service=CONFIG_SERVICE_NAME。
+    expected: legacy 单文件与批量 SUBMITTED 两条路径提交后，knowledge_file_lifecycle_t 中对应文件的 parent_task_id 均与 data-process 返回的 task_id
+      一致。
+  - order: 3
+    action: legacy 单文件路径：以单个文件调用 POST /file/process，等待 data-process 返回 task_id 后，重新查询 knowledge_file_lifecycle_t 该 file_id
+      行，断言 parent_task_id 已持久化为返回的 task_id，且 status 仍处于 UPLOADED/PROCESSING/FORWARDING 等活跃状态。
+    expected: mismatched 行被跳过并输出告警日志，未造成父链 ID 误写或覆盖其他文件记录。
+  - order: 4
+    action: 批量 SUBMITTED 路径：一次上传多个测试文档，再以 files 数组批量调用 POST /file/process，逐条核对 results 中 status=SUBMITTED 的每个 file_id，断言各自
+      lifecycle 行 parent_task_id 均已持久化为对应 task_id；status=FAILED 的文件行不被写入 parent_task_id 而是被标记 FAILED。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致；不出现半写入、重复副作用或跨租户泄露。
+  - order: 5
+    action: mismatched 行跳过：构造请求中 file_id 与库内实际记录 file_id 不一致的提交，确认日志出现 "Ignoring mismatched lifecycle row" 告警，且该记录 parent_task_id
+      保持不变（未被误写），不影响其他文件的正常持久化。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 删除撤销链可用性：对已持久化 parent_task_id 的文件执行删除，确认排队链可被撤销/取消（或触发 data-process 重启恢复时按 parent_task_id 取消对应任务），无残留 UPLOADING/PROCESSING
+      半态。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 检查日志与响应不含明文 token/password/API key；清理本次上传的对象、lifecycle 记录和临时知识库，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - legacy 单文件与批量 SUBMITTED 两条路径提交后，knowledge_file_lifecycle_t 中对应文件的 parent_task_id 均与 data-process 返回的 task_id 一致。
+  - mismatched 行被跳过并输出告警日志，未造成父链 ID 误写或覆盖其他文件记录。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致；不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 535
+  integration_boundary:
+  - LOCAL_FULL_STACK：使用本地真实 PostgreSQL/Redis/对象存储/向量库/当前部署环境（含 data-process 服务）；不得以纯 Mock 代替核心链路。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - legacy 单文件与批量 SUBMITTED 两条路径提交后，knowledge_file_lifecycle_t 中对应文件的 parent_task_id 均与 data-process 返回的 task_id 一致。
+  - mismatched 行被跳过并输出告警日志，未造成父链 ID 误写或覆盖其他文件记录。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致；不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、knowledge_file_lifecycle_t 数据库快照、对象存储状态快照。

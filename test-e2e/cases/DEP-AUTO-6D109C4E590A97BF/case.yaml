@@ -1,0 +1,90 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-AUTO-6D109C4E590A97BF
+  feature_id: V5-DEP-AUTO-6D109C4E590A97BF
+  business_rule_ids:
+  - V5-DEP-AUTO-6D109C4E590A97BF-RULE-01
+  title: 验证迁移为 conversation_source_search_t 新增 retrieval_highlight_terms JSONB 列并将 score_overall 放宽为 numeric(14,6)，高精度相关度分与高亮词可无损持久化与回读
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 迁移升级中 score_overall 精度放宽与 retrieval_highlight_terms 列新增若执行失败或写入时发生精度截断，将导致会话来源卡引用高亮丢失、相关度分精度丢失或历史数据读取异常；验证迁移成功、列类型正确且高精度分/高亮词可无损持久化与回读。
+  preconditions:
+  - '- deploy/sql/migrations/v2.5.0_0813_conversation_source_search_citation.sql
+
+    - 本地 PostgreSQL 测试库（可重建 conversation_source_search_t 迁移前后 schema）
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  test_data:
+    legacy_asset_declaration: '- deploy/sql/migrations/v2.5.0_0813_conversation_source_search_citation.sql
+
+      - 本地 PostgreSQL 测试库（可重建 conversation_source_search_t 迁移前后 schema）
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 在本地 PostgreSQL 测试库确认 conversation_source_search_t 表存在，记录迁移前 score_overall 精度与无 retrieval_highlight_terms 列的现状。
+    expected: 迁移脚本执行成功且无错误，retrieval_highlight_terms 列为 jsonb 类型。
+  - order: 2
+    action: 执行迁移脚本 deploy/sql/migrations/v2.5.0_0813_conversation_source_search_citation.sql，记录是否成功、耗时及报错信息。
+    expected: score_overall 列类型为 numeric(14,6)。
+  - order: 3
+    action: 迁移后查询 information_schema.columns 确认 conversation_source_search_t 新增 retrieval_highlight_terms 列且类型为 jsonb，score_overall
+      列类型为 numeric(14,6)。
+    expected: 写入的高精度相关度分（14 位总长、6 位小数）读回后完全一致，无截断或四舍五入丢失。
+  - order: 4
+    action: 写入一行测试数据：score_overall 赋 14 位总长、6 位小数的高精度值（如 12345678.123456），retrieval_highlight_terms 赋 JSONB 数组，提交事务。
+    expected: retrieval_highlight_terms 的 JSONB 数组写入读回后元素与顺序完全一致。
+  - order: 5
+    action: 读回该行，比对 score_overall 与 retrieval_highlight_terms 是否完整无损（精度无截断、JSONB 元素与顺序一致）。
+    expected: 历史数据行迁移后可正常读取，不出现类型转换错误或数据丢失。
+  - order: 6
+    action: 对迁移前已存在的历史数据行执行读操作，确认旧数据仍可正常读取、无 NULL 破坏或类型转换错误。
+    expected: 迁移脚本可安全重入，重复执行不产生重复列或错误。
+  - order: 7
+    action: 重复执行迁移脚本验证幂等性，确认不会因列已存在而报错或产生重复列。
+    expected: 迁移脚本可安全重入，重复执行不产生重复列或错误。
+  expected_results:
+  - 迁移脚本执行成功且无错误，retrieval_highlight_terms 列为 jsonb 类型。
+  - score_overall 列类型为 numeric(14,6)。
+  - 写入的高精度相关度分（14 位总长、6 位小数）读回后完全一致，无截断或四舍五入丢失。
+  - retrieval_highlight_terms 的 JSONB 数组写入读回后元素与顺序完全一致。
+  - 历史数据行迁移后可正常读取，不出现类型转换错误或数据丢失。
+  - 迁移脚本可安全重入，重复执行不产生重复列或错误。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 43
+  risk_type: DEPLOYMENT
+  risk: 迁移升级中 score_overall 精度放宽与 retrieval_highlight_terms 列新增若执行失败或写入时发生精度截断，将导致会话来源卡引用高亮丢失、相关度分精度丢失或历史数据读取异常；验证迁移成功、列类型正确且高精度分/高亮词可无损持久化与回读。
+  condition:
+  - '- deploy/sql/migrations/v2.5.0_0813_conversation_source_search_citation.sql
+
+    - 本地 PostgreSQL 测试库（可重建 conversation_source_search_t 迁移前后 schema）
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  metrics:
+  - 迁移脚本执行成功且无错误，retrieval_highlight_terms 列为 jsonb 类型。
+  - score_overall 列类型为 numeric(14,6)。
+  - 写入的高精度相关度分（14 位总长、6 位小数）读回后完全一致，无截断或四舍五入丢失。
+  - retrieval_highlight_terms 的 JSONB 数组写入读回后元素与顺序完全一致。
+  - 历史数据行迁移后可正常读取，不出现类型转换错误或数据丢失。
+  - 迁移脚本可安全重入，重复执行不产生重复列或错误。
+  thresholds:
+  - 迁移脚本执行成功且无错误，retrieval_highlight_terms 列为 jsonb 类型。
+  - score_overall 列类型为 numeric(14,6)。
+  - 写入的高精度相关度分（14 位总长、6 位小数）读回后完全一致，无截断或四舍五入丢失。
+  - retrieval_highlight_terms 的 JSONB 数组写入读回后元素与顺序完全一致。
+  - 历史数据行迁移后可正常读取，不出现类型转换错误或数据丢失。
+  - 迁移脚本可安全重入，重复执行不产生重复列或错误。
+  recovery_expectations:
+  - 迁移脚本执行成功且无错误，retrieval_highlight_terms 列为 jsonb 类型。
+  - score_overall 列类型为 numeric(14,6)。
+  - 写入的高精度相关度分（14 位总长、6 位小数）读回后完全一致，无截断或四舍五入丢失。
+  - retrieval_highlight_terms 的 JSONB 数组写入读回后元素与顺序完全一致。
+  - 历史数据行迁移后可正常读取，不出现类型转换错误或数据丢失。
+  - 迁移脚本可安全重入，重复执行不产生重复列或错误。

@@ -1,0 +1,10 @@
+schema_version: '1.0'
+case_id: SEC-10
+implementations:
+- framework: pytest
+  file: test.py
+  selector: SEC-10
+- framework: pytest
+  file: test-e2e/infra/automation/d5/scenarios/scenario_security_special.py
+  selector: SEC-10
+notes: V5 source binding migrated; runtime parity is not yet certified.

@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MARKET-AGENT-01
+  feature_id: V5-PW-MARKET-AGENT-01
+  business_rule_ids:
+  - V5-PW-MARKET-AGENT-01-RULE-01
+  title: Mine申请上架→Admin Review→Repository→其他租户Copy
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 按/agent-space Repository/Mine/Review三Tab验证市场闭环。
+  preconditions:
+  - 作者已发布run_id Agent
+  - Admin reviewer
+  - 消费者租户
+  test_data:
+    legacy_asset_declaration: config/users.yaml
+  steps:
+  - order: 1
+    action: 作者进入/agent-space→Mine，定位run_id Agent并申请上架。
+    expected: Review仅管理员可见。
+  - order: 2
+    action: 确认状态进入审核中。
+    expected: 批准后Repository可见。
+  - order: 3
+    action: Admin进入Review，打开申请并批准。
+    expected: Copy后资源归消费者租户。
+  - order: 4
+    action: 消费者进入Repository搜索run_id Agent。
+    expected: Copy后资源归消费者租户。
+  - order: 5
+    action: 打开详情并执行Copy/导入。
+    expected: Copy后资源归消费者租户。
+  - order: 6
+    action: 到/agents确认复制得到消费者可编辑副本。
+    expected: Copy后资源归消费者租户。
+  - order: 7
+    action: 清理时下架/删除测试发布项。
+    expected: Copy后资源归消费者租户。
+  expected_results:
+  - Review仅管理员可见。
+  - 批准后Repository可见。
+  - Copy后资源归消费者租户。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 25
+  actor: Nexent browser user
+  journey:
+  - 作者进入/agent-space→Mine，定位run_id Agent并申请上架。
+  - 确认状态进入审核中。
+  - Admin进入Review，打开申请并批准。
+  - 消费者进入Repository搜索run_id Agent。
+  - 打开详情并执行Copy/导入。
+  - 到/agents确认复制得到消费者可编辑副本。
+  - 清理时下架/删除测试发布项。
+  final_business_result:
+  - Review仅管理员可见。
+  - 批准后Repository可见。
+  - Copy后资源归消费者租户。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MARKET-AGENT-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

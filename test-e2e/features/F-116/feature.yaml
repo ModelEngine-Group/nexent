@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-116
+  name: selected/all message snapshot、render_version、expire_time
+  status: active
+  description: '会话与分享 / 分享快照: selected/all message snapshot、render_version、expire_time'
+  business_rules:
+  - rule_id: F-116-RULE-01
+    description: selected/all message snapshot、render_version、expire_time
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

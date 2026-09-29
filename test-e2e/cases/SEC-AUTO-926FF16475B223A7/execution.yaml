@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: SEC-AUTO-926FF16475B223A7
+implementations:
+- framework: pytest
+  file: test.py
+  selector: SEC-AUTO-926FF16475B223A7
+notes: V5 source binding migrated; runtime parity is not yet certified.

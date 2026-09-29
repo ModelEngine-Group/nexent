@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-110
+  name: conversation knowledge-scope replace/validation/permission
+  status: active
+  description: '知识库与文件 / 会话知识范围: conversation knowledge-scope replace/validation/permission'
+  business_rules:
+  - rule_id: F-110-RULE-01
+    description: conversation knowledge-scope replace/validation/permission
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-TASK-01
+  feature_id: V5-PW-TASK-01
+  business_rule_ids:
+  - V5-PW-TASK-01-RULE-01
+  title: Agent Tasks→Create in Chat→提案→Run/History/Edit/Pause/Resume/Delete
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 按/agent-tasks真实入口设计完整Journey。
+  preconditions:
+  - 有可用于任务的Agent
+  - 使用手动/短周期避免长等
+  - run_id任务名
+  test_data:
+    legacy_asset_declaration: config/models.yaml；config/users.yaml
+  steps:
+  - order: 1
+    action: 打开/agent-tasks。
+    expected: Create in Chat真实创建任务。
+  - order: 2
+    action: 点击【Create in Chat】，确认跳/newchat?entry=automation。
+    expected: Run/History/Edit/Pause/Resume/Delete可达且状态正确。
+  - order: 3
+    action: 输入固定自然语言任务需求。
+    expected: 准时触发/锁/misfire由API/REL。
+  - order: 4
+    action: 等待任务proposal并检查title/instruction/schedule后确认创建。
+    expected: 准时触发/锁/misfire由API/REL。
+  - order: 5
+    action: 回/agent-tasks搜索run_id任务。
+    expected: 准时触发/锁/misfire由API/REL。
+  - order: 6
+    action: 点击【Run】立即执行。
+    expected: 准时触发/锁/misfire由API/REL。
+  - order: 7
+    action: More→【History】查看status/trigger/scheduled/error。
+    expected: 准时触发/锁/misfire由API/REL。
+  - order: 8
+    action: 【Edit】修改instruction和mode/rule/interval或cron/timeout中当前字段并保存。
+    expected: 准时触发/锁/misfire由API/REL。
+  - order: 9
+    action: 点击【Pause】后再【Resume】。
+    expected: 准时触发/锁/misfire由API/REL。
+  - order: 10
+    action: History中按当前UI测试active cancel或已完成run删除之一。
+    expected: 准时触发/锁/misfire由API/REL。
+  - order: 11
+    action: 最后【Delete】任务并确认。
+    expected: 准时触发/锁/misfire由API/REL。
+  expected_results:
+  - Create in Chat真实创建任务。
+  - Run/History/Edit/Pause/Resume/Delete可达且状态正确。
+  - 准时触发/锁/misfire由API/REL。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 46
+  actor: Nexent browser user
+  journey:
+  - 打开/agent-tasks。
+  - 点击【Create in Chat】，确认跳/newchat?entry=automation。
+  - 输入固定自然语言任务需求。
+  - 等待任务proposal并检查title/instruction/schedule后确认创建。
+  - 回/agent-tasks搜索run_id任务。
+  - 点击【Run】立即执行。
+  - More→【History】查看status/trigger/scheduled/error。
+  - 【Edit】修改instruction和mode/rule/interval或cron/timeout中当前字段并保存。
+  - 点击【Pause】后再【Resume】。
+  - History中按当前UI测试active cancel或已完成run删除之一。
+  - 最后【Delete】任务并确认。
+  final_business_result:
+  - Create in Chat真实创建任务。
+  - Run/History/Edit/Pause/Resume/Delete可达且状态正确。
+  - 准时触发/锁/misfire由API/REL。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-TASK-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

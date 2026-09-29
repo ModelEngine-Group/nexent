@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-F34799011F9FBC82
+  feature_id: F-115
+  business_rule_ids:
+  - F-115-RULE-01
+  title: 来源卡选中据 retrieval_highlight_terms/引用上下文提取检索词、按句与表行以 <mark> 渲染且无匹配原样输出｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 来源卡选中据 retrieval_highlight_terms/引用上下文提取检索词、按句与表行以 <mark> 渲染且无匹配原样输出｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务或后端在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 无需本地外部资产；测试数据为内存固定 fixture（source text、retrieval_highlight_terms、citationContext 样例）。
+  test_data:
+    legacy_asset_declaration: 无本地资产；使用内存固定 fixture（source text、retrieval_highlight_terms、citationContext 样例）。
+  steps:
+  - order: 1
+    action: 加载 frontend/components/common/highlightedSourceText.tsx 的 HighlightedChunkText 组件（或 frontend/app/[locale]/newchat/ui/sources-panel.tsx
+      的 SourceCardBody），注入最小 props（text、terms）与固定 fixture。
+    expected: 选中来源卡后，命中检索词的句子或 Markdown 表行被独立包裹为 <mark>（黄色高亮样式）输出，未命中的片段以 <span> 原样渲染。
+  - order: 2
+    action: 构造含多个句子和至少一行 Markdown 表格行的 source text，terms 同时包含命中与未命中的检索词，渲染后检查命中的句子/表行是否分别被 <mark> 包裹、未命中的以 <span> 原样输出。
+    expected: 无匹配或无检索词时整段 text 原样渲染，不产生 <mark>，不抛异常。
+  - order: 3
+    action: 对 terms 传入长度小于 2、大小写不敏感命中 sourceText、存在重复的候选，验证 retrievalHighlightTerms 的筛选行为（trim、长度≥2、sourceText.toLowerCase()
+      包含、去重）。
+    expected: 检索词筛选符合契约：trim 后长度≥2、以 sourceText 大小写不敏感包含为准、去重；合并时按长度降序、剔除已保留项的子串、最多保留 8 条。
+  - order: 4
+    action: 对 terms 传入相互包含的候选以及超过 8 条候选，验证 mergeHighlightTerms 按长度降序、丢弃已保留项的子串、并截断至最多 8 条。
+    expected: 从 citationContext 抽取的词仅在该词同时出现在 sourceText 时才被用于高亮（中文 3 字起按最大匹配、IP/版本号/标识符字面量）。
+  - order: 5
+    action: 传入 citationContext（含中文短语、IP、版本号等字面量）与 sourceText，验证 extractHighlightTerms 仅保留同时出现在 sourceText 中的词（中文 3-12 字最大匹配、字面量正则）。
+    expected: 渲染过程不发任何额外检索、模型或网络请求，服务调用次数保持 0。
+  - order: 6
+    action: 传入空 terms、空 text 或 terms 全部不命中，验证 HighlightedChunkText 返回原样文本（不产生 <mark>）且不抛异常。
+    expected: 渲染过程不发任何额外检索、模型或网络请求，服务调用次数保持 0。
+  - order: 7
+    action: 对选中来源卡后的整条渲染链路 mock service/api，断言渲染过程不产生任何网络、检索或模型请求，服务调用次数为 0。
+    expected: 渲染过程不发任何额外检索、模型或网络请求，服务调用次数保持 0。
+  - order: 8
+    action: 断言 ENABLE_CITATION_CLICK_HIGHLIGHT=false 时点击引用角标不触发跳转定位高亮（保持关闭）。
+    expected: 渲染过程不发任何额外检索、模型或网络请求，服务调用次数保持 0。
+  expected_results:
+  - 选中来源卡后，命中检索词的句子或 Markdown 表行被独立包裹为 <mark>（黄色高亮样式）输出，未命中的片段以 <span> 原样渲染。
+  - 无匹配或无检索词时整段 text 原样渲染，不产生 <mark>，不抛异常。
+  - 检索词筛选符合契约：trim 后长度≥2、以 sourceText 大小写不敏感包含为准、去重；合并时按长度降序、剔除已保留项的子串、最多保留 8 条。
+  - 从 citationContext 抽取的词仅在该词同时出现在 sourceText 时才被用于高亮（中文 3 字起按最大匹配、IP/版本号/标识符字面量）。
+  - 渲染过程不发任何额外检索、模型或网络请求，服务调用次数保持 0。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 456
+  unit_boundary: 引用与来源高亮
+  inputs:
+  - 无本地资产；使用内存固定 fixture（source text、retrieval_highlight_terms、citationContext 样例）。
+  assertions:
+  - 选中来源卡后，命中检索词的句子或 Markdown 表行被独立包裹为 <mark>（黄色高亮样式）输出，未命中的片段以 <span> 原样渲染。
+  - 无匹配或无检索词时整段 text 原样渲染，不产生 <mark>，不抛异常。
+  - 检索词筛选符合契约：trim 后长度≥2、以 sourceText 大小写不敏感包含为准、去重；合并时按长度降序、剔除已保留项的子串、最多保留 8 条。
+  - 从 citationContext 抽取的词仅在该词同时出现在 sourceText 时才被用于高亮（中文 3 字起按最大匹配、IP/版本号/标识符字面量）。
+  - 渲染过程不发任何额外检索、模型或网络请求，服务调用次数保持 0。

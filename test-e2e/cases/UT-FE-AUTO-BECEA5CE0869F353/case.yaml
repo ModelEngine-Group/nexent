@@ -1,0 +1,77 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-BECEA5CE0869F353
+  feature_id: F-098
+  business_rule_ids:
+  - F-098-RULE-01
+  title: 知识库列表标签筛选、行内标签、只读分配、标签定义管理｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 知识库列表标签筛选、行内标签、只读分配、标签定义管理｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - 组件测试注入最小 props（knowledgeBases、activeKnowledgeBase、getModelDisplayName）与本地固定数据；mock useTagLibraries 返回 default_resource
+    库、useTagDefinitions 返回固定标签定义、tagManagementApi.filterResourceIds 返回可控 matched_resource_ids。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 KnowledgeBaseList 组件，注入最小 props（knowledgeBases 固定列表、activeKnowledgeBase、getModelDisplayName），mock useTagLibraries
+      返回 default_resource 库、useTagDefinitions 返回固定标签定义、tagManagementApi.filterResourceIds 返回可控 matched_resource_ids。
+    expected: 无谓词时标签筛选按钮为 default 类型且列表不过滤；选择谓词后按钮为 primary 并出现清空入口。
+  - order: 2
+    action: 首次渲染断言默认状态：无标签谓词时筛选按钮为 default 类型、无清空入口、matchedTagIds 为 null、列表全量渲染。
+    expected: filterResourceIds 以 resource_type=knowledge_base 和当前 KB id 列表为参数调用，其 matched_resource_ids 驱动列表过滤，谓词清空后恢复全量。
+  - order: 3
+    action: 点击标签筛选按钮打开 Popover，在 TagFilterControls 中选择谓词条件，断言 setTagPredicates 更新 tagPredicates 状态、按钮切换为 primary 类型并出现清空按钮。
+    expected: 行内以 knowledge_base 资源类型渲染 ResourceTagChips，正确展示资源关联标签。
+  - order: 4
+    action: 断言 tagManagementApi.filterResourceIds 以 resource_type="knowledge_base"、当前 KB id 字符串数组、当前 tagPredicates 为参数被调用。
+    expected: kb:update 权限才展示标签分配入口；READ_ONLY 权限 KB 的分配为只读禁用（canEdit=false）。
+  - order: 5
+    action: 注入 filterResourceIds 返回部分 KB 的 matched_resource_ids，断言列表仅渲染匹配 KB；点击清空后 tagPredicates 置空、matchedTagIds 置 null、列表恢复全量。
+    expected: 标签定义管理 Modal 使用 default_resource 库的 bucketId 打开，关闭时触发标签定义刷新。
+  - order: 6
+    action: 断言每行以 ResourceTagChips(resourceType="knowledge_base", resourceId=kb.id, max=3) 渲染行内标签。
+    expected: 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。
+  - order: 7
+    action: '在 kb:update 权限下点击行内标签分配按钮，断言 setAssignTarget 设置为 {indexName: kb.id, canEdit: kb.permission !== "READ_ONLY"}；对
+      permission=READ_ONLY 的 KB 断言 canEdit=false 且 ResourceTagAssignmentModal 只读禁用。'
+    expected: 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。
+  - order: 8
+    action: 点击标签管理按钮打开 TagDefinitionManagementModal，断言以 bucketId=defaultLibrary.bucket_id、canManage=true 打开；关闭 Modal 时断言调用
+      refreshAssignDefinitions 刷新标签定义。
+    expected: 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。
+  expected_results:
+  - 无谓词时标签筛选按钮为 default 类型且列表不过滤；选择谓词后按钮为 primary 并出现清空入口。
+  - filterResourceIds 以 resource_type=knowledge_base 和当前 KB id 列表为参数调用，其 matched_resource_ids 驱动列表过滤，谓词清空后恢复全量。
+  - 行内以 knowledge_base 资源类型渲染 ResourceTagChips，正确展示资源关联标签。
+  - kb:update 权限才展示标签分配入口；READ_ONLY 权限 KB 的分配为只读禁用（canEdit=false）。
+  - 标签定义管理 Modal 使用 default_resource 库的 bucketId 打开，关闭时触发标签定义刷新。
+  - 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 451
+  unit_boundary: 标签筛选与分配
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - 无谓词时标签筛选按钮为 default 类型且列表不过滤；选择谓词后按钮为 primary 并出现清空入口。
+  - filterResourceIds 以 resource_type=knowledge_base 和当前 KB id 列表为参数调用，其 matched_resource_ids 驱动列表过滤，谓词清空后恢复全量。
+  - 行内以 knowledge_base 资源类型渲染 ResourceTagChips，正确展示资源关联标签。
+  - kb:update 权限才展示标签分配入口；READ_ONLY 权限 KB 的分配为只读禁用（canEdit=false）。
+  - 标签定义管理 Modal 使用 default_resource 库的 bucketId 打开，关闭时触发标签定义刷新。
+  - 测试过程无未处理异常，mock service 调用参数与组件状态迁移一致，无明文密钥泄露。

@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: PW-AUTO-37453582F1CFB11D
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: PW-AUTO-37453582F1CFB11D
+notes: V5 source binding migrated; runtime parity is not yet certified.

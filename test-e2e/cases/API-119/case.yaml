@@ -1,0 +1,94 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-119
+  feature_id: F-119
+  business_rule_ids:
+  - F-119-RULE-01
+  title: memory config load、dreaming switch、disable agent/user-agent、external_provider_top_k｜异常/边界/越权
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: memory config load、dreaming switch、disable agent/user-agent、external_provider_top_k｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/users.yaml
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/users.yaml'
+  steps:
+  - order: 1
+    action: 准备固定测试用户、测试 Agent 与真实 LLM；清空该测试命名空间已有记忆，保证用例初始状态可控。
+    expected: POST /memory/config/set 对 EXTERNAL_PROVIDER_TOP_K_KEY 提交非整数（如 "abc"）返回 406 NOT_ACCEPTABLE，detail 提示期望整数。
+  - order: 2
+    action: 通过实际 API 配置用户级/Agent级记忆策略、开关和阈值。
+    expected: 提交 external_provider_top_k 越界值（0、-1、101）时 set_external_provider_top_k 返回 False，接口返回 400 BAD_REQUEST（detail "Failed
+      to update configuration"），数据库中不产生该配置写入。
+  - order: 3
+    action: 通过 POST /memory/config/set 提交 external_provider_top_k 非法值（非整数 "abc"、0、-1、101），分别记录 HTTP 状态码与响应 detail，确认请求被拒绝且不写入。
+    expected: '提交合法值（1、100、50）返回 200 {"success": true}，后续 GET /memory/config/load 或 build_memory_context 读取到对应 top_k 值。'
+  - order: 4
+    action: '通过 POST /memory/config/set 提交 external_provider_top_k 边界合法值 1、100 及常规值 50，确认返回 {"success": true}，并通过 GET /memory/config/load
+      读取确认生效。'
+    expected: 失败请求重试不产生重复资源、半写入或脏状态；再次合法设置可正常覆盖。
+  - order: 5
+    action: 在非法设置失败后，再次以合法值设置并读取，确认失败请求未产生半写入、重复资源或脏状态。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 6
+    action: 按“memory config load、dreaming switch、disable agent/user-agent、external_provider_top_k｜异常/边界/越权”执行一到多轮真实对话，输入包含唯一记忆
+      marker（如 MEM-92831）。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 7
+    action: 等待记忆写入/总结任务完成，查询 memory record/version/status 并检查作用域。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 新建会话再次提问，确认 Runtime context 能取回正确 marker，且其他用户/Agent 不可见。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 9
+    action: Dreaming/长期记忆类检查版本、合并/总结结果和禁用后的行为变化。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 10
+    action: 对删除/禁用操作再次运行对话，确认旧记忆不再进入上下文。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 11
+    action: '保存脱敏 trace 后清理测试记忆。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  expected_results:
+  - POST /memory/config/set 对 EXTERNAL_PROVIDER_TOP_K_KEY 提交非整数（如 "abc"）返回 406 NOT_ACCEPTABLE，detail 提示期望整数。
+  - 提交 external_provider_top_k 越界值（0、-1、101）时 set_external_provider_top_k 返回 False，接口返回 400 BAD_REQUEST（detail "Failed to
+    update configuration"），数据库中不产生该配置写入。
+  - '提交合法值（1、100、50）返回 200 {"success": true}，后续 GET /memory/config/load 或 build_memory_context 读取到对应 top_k 值。'
+  - 失败请求重试不产生重复资源、半写入或脏状态；再次合法设置可正常覆盖。
+  - 功能结果与代码契约一致，测试过程无未处理异常；关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 230
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - POST /memory/config/set 对 EXTERNAL_PROVIDER_TOP_K_KEY 提交非整数（如 "abc"）返回 406 NOT_ACCEPTABLE，detail 提示期望整数。
+  - 提交 external_provider_top_k 越界值（0、-1、101）时 set_external_provider_top_k 返回 False，接口返回 400 BAD_REQUEST（detail "Failed to
+    update configuration"），数据库中不产生该配置写入。
+  - '提交合法值（1、100、50）返回 200 {"success": true}，后续 GET /memory/config/load 或 build_memory_context 读取到对应 top_k 值。'
+  - 失败请求重试不产生重复资源、半写入或脏状态；再次合法设置可正常覆盖。
+  - 功能结果与代码契约一致，测试过程无未处理异常；关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

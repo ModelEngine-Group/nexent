@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-C0F44F945573C769
+  feature_id: F-137
+  business_rule_ids:
+  - F-137-RULE-01
+  title: materialize_virtual_evaluation_set_for_run 单事务物化 no-set 虚拟集并挂接 pending run｜核心流程与异常回滚
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: materialize_virtual_evaluation_set_for_run 单事务物化 no-set 虚拟集并挂接 pending run｜核心流程与异常回滚
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 本地测试数据库可用，可建立隔离租户及 AgentEvaluation/EvaluationSet/EvaluationSetCase 记录，测试数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- 本地测试数据库（隔离租户 + 评测表记录 fixture，测试后可清理）'
+  steps:
+  - order: 1
+    action: 导入 backend/database/evaluation_set_db.py 的 materialize_virtual_evaluation_set_for_run，准备隔离 tenant_id 与一条 status=PENDING、delete_flag=N
+      的 AgentEvaluation 记录作为 fixture。
+    expected: 成功路径返回正整数 evaluation_set_id；新建 EvaluationSet 的 source_filename="__no_set_virtual__"、case_count=len(cases)、generation_status="DONE"、generation_progress=100。
+  - order: 2
+    action: 构造 name 与 cases 列表（每条含 inputs/label，部分带 order_no/session_id/turn_order），调用函数并记录返回的 evaluation_set_id。
+    expected: EvaluationSetCase 按传入顺序写入且 inputs/label/order_no/session_id/turn_order 映射正确。
+  - order: 3
+    action: 重新查询 EvaluationSet，断言 source_filename、case_count、generation_status、generation_progress 与创建参数一致。
+    expected: AgentEvaluation 的 evaluation_set_id 指向新建虚拟集、progress_total=len(cases)。
+  - order: 4
+    action: 查询 EvaluationSetCase，断言写入的 case 数量以及 inputs/label/order_no/session_id/turn_order 与传入 cases 一致。
+    expected: run 不存在或非 PENDING 时抛出 AppException(COMMON_RESOURCE_NOT_FOUND, "Pending agent evaluation not found")。
+  - order: 5
+    action: 查询该 AgentEvaluation，断言 evaluation_set_id 指向新建虚拟集且 progress_total 等于 len(cases)。
+    expected: 异常路径无半写入：不新增 EvaluationSet/EvaluationSetCase 记录，run 未被修改。
+  - order: 6
+    action: 分别以不存在的 agent_evaluation_id、status 非 PENDING（如 RUNNING/FAILED）的 run 再次调用，断言抛出 AppException 且错误码为 COMMON_RESOURCE_NOT_FOUND。
+    expected: 异常路径无半写入：不新增 EvaluationSet/EvaluationSetCase 记录，run 未被修改。
+  - order: 7
+    action: 断言异常路径未新增 EvaluationSet/EvaluationSetCase 行（无半写入），原 run 状态与字段未被修改。
+    expected: 异常路径无半写入：不新增 EvaluationSet/EvaluationSetCase 记录，run 未被修改。
+  - order: 8
+    action: 测试结束后清理临时租户与评测记录，确保可重复执行。
+    expected: 异常路径无半写入：不新增 EvaluationSet/EvaluationSetCase 记录，run 未被修改。
+  expected_results:
+  - 成功路径返回正整数 evaluation_set_id；新建 EvaluationSet 的 source_filename="__no_set_virtual__"、case_count=len(cases)、generation_status="DONE"、generation_progress=100。
+  - EvaluationSetCase 按传入顺序写入且 inputs/label/order_no/session_id/turn_order 映射正确。
+  - AgentEvaluation 的 evaluation_set_id 指向新建虚拟集、progress_total=len(cases)。
+  - run 不存在或非 PENDING 时抛出 AppException(COMMON_RESOURCE_NOT_FOUND, "Pending agent evaluation not found")。
+  - 异常路径无半写入：不新增 EvaluationSet/EvaluationSetCase 记录，run 未被修改。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 414
+  unit_boundary: 评测数据集
+  inputs:
+  - '- 本地测试数据库（隔离租户 + 评测表记录 fixture，测试后可清理）'
+  assertions:
+  - 成功路径返回正整数 evaluation_set_id；新建 EvaluationSet 的 source_filename="__no_set_virtual__"、case_count=len(cases)、generation_status="DONE"、generation_progress=100。
+  - EvaluationSetCase 按传入顺序写入且 inputs/label/order_no/session_id/turn_order 映射正确。
+  - AgentEvaluation 的 evaluation_set_id 指向新建虚拟集、progress_total=len(cases)。
+  - run 不存在或非 PENDING 时抛出 AppException(COMMON_RESOURCE_NOT_FOUND, "Pending agent evaluation not found")。
+  - 异常路径无半写入：不新增 EvaluationSet/EvaluationSetCase 记录，run 未被修改。

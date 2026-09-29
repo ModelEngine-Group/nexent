@@ -1,0 +1,50 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-072
+  feature_id: F-179
+  business_rule_ids:
+  - F-179-RULE-01
+  title: '[已退役] 旧 Agent 工具审批、暂停、引导、重连与终止'
+  type: AGENT-IT
+  priority: P0
+  status: retired
+  automation: not_applicable
+  objective: '[已退役] 旧 Agent 工具审批、暂停、引导、重连与终止'
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  - models.yaml 中所需真实 Provider 通过预检，名称与凭据不得硬编码。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 对照 develop 确认旧 HITL 审批、暂停、引导接口及 UI 已删除。
+    expected: 本行标记为 RETIRED_BY_PRODUCT，不进入每日执行计划和跳过统计。
+  - order: 2
+    action: 保留本行用于追溯原审批验收范围；不执行旧接口调用。
+    expected: 不把旧审批能力缺失计为当前产品失败或通过；现行澄清用例仍须独立执行。
+  - order: 3
+    action: 当前澄清能力由 AGT-003、AGT-AUTO-6A6BC7594487E771 和 PW-NL2AGENT-01 独立验证。若产品恢复审批能力，重新建立用例及实现。
+    expected: 不把旧审批能力缺失计为当前产品失败或通过；现行澄清用例仍须独立执行。
+  expected_results:
+  - 本行标记为 RETIRED_BY_PRODUCT，不进入每日执行计划和跳过统计。
+  - 不把旧审批能力缺失计为当前产品失败或通过；现行澄清用例仍须独立执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 386
+  integration_boundary:
+  - RETIRED_BY_PRODUCT：当前 develop 已删除旧 HITL 审批、暂停与引导能力；保留历史用例行供追溯。
+  observations:
+  - 本行标记为 RETIRED_BY_PRODUCT，不进入每日执行计划和跳过统计。
+  - 不把旧审批能力缺失计为当前产品失败或通过；现行澄清用例仍须独立执行。
+  cleanup:
+  - JUnit、run_id、stream/tool/retrieval trace、脱敏模型快照。

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-097
+  name: 创建 KB：embedding model/dim/preserve_source/quota/group permission
+  status: active
+  description: '知识库与文件 / 知识库: 创建 KB：embedding model/dim/preserve_source/quota/group permission'
+  business_rules:
+  - rule_id: F-097-RULE-01
+    description: 创建 KB：embedding model/dim/preserve_source/quota/group permission
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-2D0252F1DB402184
+  name: MCP 标签历史数据迁移完整性（mcp_record.tags / mcp_community.tags / mcp_market.tags → 统一标签管理 backfill）
+  status: active
+  description: 风险：v2.5.2 迁移将 mcp_record.tags / mcp_community.tags / mcp_market.tags 迁入统一标签管理（utm_legacy_source → tag_definition
+    'keywords' / tag_value / resource_tag_assignment）时，历史数据若存在空标签、软删除（delete_flag='Y'）记录或无法唯一归属的社区/市场关联（source_mcp_id 缺失或多匹配）记录，可能导致标签丢失、重复、软删除记录复活为
+    active、跨租户/跨资源串标，或迁移静默丢弃数据后 MCP 服务的 list 与 tag stats 读取与源数据不一致，影响标签筛选与已发布详情展示。
+  business_rules:
+  - rule_id: V5-DEP-AUTO-2D0252F1DB402184-RULE-01
+    description: MCP 标签历史数据迁移完整性（mcp_record.tags / mcp_community.tags / mcp_market.tags → 统一标签管理 backfill）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

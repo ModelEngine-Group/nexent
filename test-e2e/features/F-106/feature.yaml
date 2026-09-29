@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-106
+  name: attachments owner、KB ACL、asset_owner、DELETE 权限、batch URLs
+  status: active
+  description: '知识库与文件 / 文件权限: attachments owner、KB ACL、asset_owner、DELETE 权限、batch URLs'
+  business_rules:
+  - rule_id: F-106-RULE-01
+    description: attachments owner、KB ACL、asset_owner、DELETE 权限、batch URLs
+  required_test_stages:
+  - D5
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

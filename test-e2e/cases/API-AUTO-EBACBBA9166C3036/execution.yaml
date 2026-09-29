@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: API-AUTO-EBACBBA9166C3036
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-AUTO-EBACBBA9166C3036
+notes: V5 source binding migrated; runtime parity is not yet certified.

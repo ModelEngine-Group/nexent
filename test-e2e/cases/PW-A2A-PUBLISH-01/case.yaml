@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-A2A-PUBLISH-01
+  feature_id: V5-PW-A2A-PUBLISH-01
+  business_rule_ids:
+  - V5-PW-A2A-PUBLISH-01-RULE-01
+  title: 本地Agent发布为A2A→外部发现/调用Smoke
+  type: E2E
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 把v4混在一起的“发现外部Agent”和“发布本地Agent”拆开。
+  preconditions:
+  - run_id Agent配置完整
+  - A2A server/registry依赖启用
+  - Test Client可发现
+  test_data:
+    legacy_asset_declaration: config/a2a.yaml；services/test-a2a-client/；config/models.yaml
+  steps:
+  - order: 1
+    action: 打开run_id Agent Basic，定位Publish Attributes。
+    expected: 发布与Agent/version绑定。
+  - order: 2
+    action: 启用/填写当前UI真实A2A发布属性并等待autosave。
+    expected: 外部真实可发现/调用。
+  - order: 3
+    action: 点击【Publish】完成版本发布。
+    expected: 状态变化按设计生效。
+  - order: 4
+    action: 记录Agent/version。
+    expected: 状态变化按设计生效。
+  - order: 5
+    action: 用本地Test A2A Client真实执行发现。
+    expected: 状态变化按设计生效。
+  - order: 6
+    action: 确认已发布Agent出现在发现结果。
+    expected: 状态变化按设计生效。
+  - order: 7
+    action: Test Client发送固定消息并检查marker。
+    expected: 状态变化按设计生效。
+  - order: 8
+    action: 若UI支持下线/状态变化，执行后再次发现确认变化。
+    expected: 状态变化按设计生效。
+  expected_results:
+  - 发布与Agent/version绑定。
+  - 外部真实可发现/调用。
+  - 状态变化按设计生效。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 34
+  actor: Nexent browser user
+  journey:
+  - 打开run_id Agent Basic，定位Publish Attributes。
+  - 启用/填写当前UI真实A2A发布属性并等待autosave。
+  - 点击【Publish】完成版本发布。
+  - 记录Agent/version。
+  - 用本地Test A2A Client真实执行发现。
+  - 确认已发布Agent出现在发现结果。
+  - Test Client发送固定消息并检查marker。
+  - 若UI支持下线/状态变化，执行后再次发现确认变化。
+  final_business_result:
+  - 发布与Agent/version绑定。
+  - 外部真实可发现/调用。
+  - 状态变化按设计生效。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-A2A-PUBLISH-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-AUTO-8213435EA30EB371
+  feature_id: V5-DEP-AUTO-8213435EA30EB371
+  business_rule_ids:
+  - V5-DEP-AUTO-8213435EA30EB371-RULE-01
+  title: 纠正性迁移幂等与数据一致性：role_permission_t 序列重同步 + user_tenant 触发器空租户跳过预置
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: '1. 显式种子 ID 不推进 SERIAL 序列，后续插入可能与既有种子 ID 冲突，造成 role_permission_id 主键冲突/数据错位。
+
+    2. 平台超管预留的空 tenant_id 映射若被当作真实租户，触发器会为不存在的租户调用 provision_unified_tag_management 预置统一标签桶，产生脏数据。'
+  preconditions:
+  - '- deploy/sql/migrations/v2.5.3_database_bootstrap_idempotency.sql
+
+    - deploy/tests/test_database_bootstrap_idempotency.sh'
+  test_data:
+    legacy_asset_declaration: '- deploy/sql/migrations/v2.5.3_database_bootstrap_idempotency.sql
+
+      - deploy/tests/test_database_bootstrap_idempotency.sh'
+  steps:
+  - order: 1
+    action: 检查迁移脚本通过 pg_get_serial_sequence('nexent.role_permission_t','role_permission_id') 与 COALESCE(MAX(role_permission_id),1)
+      执行 setval，将序列重同步到当前 MAX（空表回退到 1）。
+    expected: 序列同步使用 COALESCE(MAX(role_permission_id),1) 且以 MAX 非空作为 is_called 条件，空表安全回退到 1，迁移可幂等重复执行。
+  - order: 2
+    action: 检查触发器 provision_unified_tag_management_after_user_tenant_insert 仅在 COALESCE(NEW.delete_flag,'N')<>'Y' 且 NULLIF(btrim(NEW.tenant_id),'')
+      IS NOT NULL 时才调用 provision_unified_tag_management；空/仅空白 tenant_id 或 delete_flag='Y' 时跳过预置。
+    expected: delete_flag≠'Y' 且 btrim(tenant_id) 非空的活动租户仍正常触发统一标签桶预置；空/仅空白 tenant_id 的预留超管映射与 delete_flag='Y' 行均不触发预置。
+  - order: 3
+    action: 执行 deploy/tests/test_database_bootstrap_idempotency.sh，静态断言序列同步、空租户跳过、幂等（CREATE OR REPLACE 函数仅出现一次）与事务边界（BEGIN/COMMIT）契约。
+    expected: 校验脚本输出 "Database bootstrap idempotency contract passed."，无任何 FAIL 项。
+  expected_results:
+  - 序列同步使用 COALESCE(MAX(role_permission_id),1) 且以 MAX 非空作为 is_called 条件，空表安全回退到 1，迁移可幂等重复执行。
+  - delete_flag≠'Y' 且 btrim(tenant_id) 非空的活动租户仍正常触发统一标签桶预置；空/仅空白 tenant_id 的预留超管映射与 delete_flag='Y' 行均不触发预置。
+  - 校验脚本输出 "Database bootstrap idempotency contract passed."，无任何 FAIL 项。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 45
+  risk_type: DEPLOYMENT
+  risk: '1. 显式种子 ID 不推进 SERIAL 序列，后续插入可能与既有种子 ID 冲突，造成 role_permission_id 主键冲突/数据错位。
+
+    2. 平台超管预留的空 tenant_id 映射若被当作真实租户，触发器会为不存在的租户调用 provision_unified_tag_management 预置统一标签桶，产生脏数据。'
+  condition:
+  - '- deploy/sql/migrations/v2.5.3_database_bootstrap_idempotency.sql
+
+    - deploy/tests/test_database_bootstrap_idempotency.sh'
+  metrics:
+  - 序列同步使用 COALESCE(MAX(role_permission_id),1) 且以 MAX 非空作为 is_called 条件，空表安全回退到 1，迁移可幂等重复执行。
+  - delete_flag≠'Y' 且 btrim(tenant_id) 非空的活动租户仍正常触发统一标签桶预置；空/仅空白 tenant_id 的预留超管映射与 delete_flag='Y' 行均不触发预置。
+  - 校验脚本输出 "Database bootstrap idempotency contract passed."，无任何 FAIL 项。
+  thresholds:
+  - 序列同步使用 COALESCE(MAX(role_permission_id),1) 且以 MAX 非空作为 is_called 条件，空表安全回退到 1，迁移可幂等重复执行。
+  - delete_flag≠'Y' 且 btrim(tenant_id) 非空的活动租户仍正常触发统一标签桶预置；空/仅空白 tenant_id 的预留超管映射与 delete_flag='Y' 行均不触发预置。
+  - 校验脚本输出 "Database bootstrap idempotency contract passed."，无任何 FAIL 项。
+  recovery_expectations:
+  - 序列同步使用 COALESCE(MAX(role_permission_id),1) 且以 MAX 非空作为 is_called 条件，空表安全回退到 1，迁移可幂等重复执行。
+  - delete_flag≠'Y' 且 btrim(tenant_id) 非空的活动租户仍正常触发统一标签桶预置；空/仅空白 tenant_id 的预留超管映射与 delete_flag='Y' 行均不触发预置。
+  - 校验脚本输出 "Database bootstrap idempotency contract passed."，无任何 FAIL 项。

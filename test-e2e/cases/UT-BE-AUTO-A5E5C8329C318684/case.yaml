@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-A5E5C8329C318684
+  feature_id: F-131
+  business_rule_ids:
+  - F-131-RULE-01
+  title: thread_lifecycle_service 定义 runtime/config/northbound/mcp 四个 ThreadManager 的 lane policy 及跨 lane/跨 manager 隔离｜核心流程
+  type: BE-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: thread_lifecycle_service 定义 runtime/config/northbound/mcp 四个 ThreadManager 的 lane policy 及跨 lane/跨 manager 隔离｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 可正常导入 backend/services/thread_lifecycle_service.py 及 nexent.core.concurrency（LanePolicy/ThreadManager/ManagerState/ManagedTaskSpec），不依赖
+    Redis、外部模型或外部服务。
+  test_data:
+    legacy_asset_declaration: '- 无额外本地文件资产；lane policy 参数硬编码于 backend/services/thread_lifecycle_service.py，常量派生参数来自 backend/consts/const.py（导入时解析）。'
+  steps:
+  - order: 1
+    action: 导入 backend/services/thread_lifecycle_service.py，获取 runtime_thread_manager、config_thread_manager、northbound_thread_manager、mcp_thread_manager，并导入
+      LanePolicy/ThreadManager/ManagerState/ManagedTaskSpec。
+    expected: 四个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、northbound、api-to-mcp。
+  - order: 2
+    action: 断言四个 manager 为独立实例，service_name 依次为 runtime、config、northbound、api-to-mcp。
+    expected: 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 consts.const
+      对应常量相等。
+  - order: 3
+    action: 断言四个 manager 使用当前实现的 _policies 内部策略映射，键集合及 LanePolicy.name 与源码一致，不再访问不存在的 lane_policies 属性。
+    expected: runtime 7 lane、config 4 lane、northbound 2 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+  - order: 4
+    action: 断言 runtime：control-io worker16/queue32/cancel2，sandbox worker200/queue8/cancel5，evaluation worker6/queue12/cancel5。
+    expected: 四个 manager 的 lane policy 相互隔离、不共享可变状态，同名 lane control-io 不跨 manager 串扰；控制类 lane 的 shutdown_grace 分别绑定各自 RUNTIME/NORTHBOUND
+      shutdown_grace 常量。
+  - order: 5
+    action: 断言 agent-run、model-tool-io 及 shutdown_grace 等常量派生参数与 consts.const 一致。
+    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  - order: 6
+    action: 断言 config：control-io worker16/queue32/cancel2，background-service worker12/queue8/cancel5，evaluation worker6/queue12/cancel5，model-tool-io
+      worker6/queue16/cancel5。
+    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  - order: 7
+    action: 断言 northbound：control-io 使用 NORTHBOUND_* 常量，background-service worker12/queue8/cancel2。
+    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  - order: 8
+    action: 断言 mcp：control-io worker8/queue16/cancel5，background-service worker12/queue8/cancel5。
+    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  - order: 9
+    action: 断言各 manager 的 _policies 与同名 LanePolicy 实例互不共享。
+    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  - order: 10
+    action: 启动 runtime manager，在 control-io 提交阻塞任务，同时在 evaluation lane 提交立即返回任务，确认跨 lane 不互阻塞；最后关闭 manager。
+    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  - order: 11
+    action: 确认日志不泄露凭据，测试可重复执行。
+    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  expected_results:
+  - 四个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、northbound、api-to-mcp。
+  - 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 consts.const 对应常量相等。
+  - runtime 7 lane、config 4 lane、northbound 2 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+  - 四个 manager 的 lane policy 相互隔离、不共享可变状态，同名 lane control-io 不跨 manager 串扰；控制类 lane 的 shutdown_grace 分别绑定各自 RUNTIME/NORTHBOUND
+    shutdown_grace 常量。
+  - 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 410
+  unit_boundary: 线程生命周期与 lane 隔离
+  inputs:
+  - '- 无额外本地文件资产；lane policy 参数硬编码于 backend/services/thread_lifecycle_service.py，常量派生参数来自 backend/consts/const.py（导入时解析）。'
+  assertions:
+  - 四个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、northbound、api-to-mcp。
+  - 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 consts.const 对应常量相等。
+  - runtime 7 lane、config 4 lane、northbound 2 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+  - 四个 manager 的 lane policy 相互隔离、不共享可变状态，同名 lane control-io 不跨 manager 串扰；控制类 lane 的 shutdown_grace 分别绑定各自 RUNTIME/NORTHBOUND
+    shutdown_grace 常量。
+  - 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。

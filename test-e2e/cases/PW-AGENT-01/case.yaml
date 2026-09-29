@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AGENT-01
+  feature_id: V5-PW-AGENT-01
+  business_rule_ids:
+  - V5-PW-AGENT-01-RULE-01
+  title: 创建Draft（单展示名）→三Tab配置（基础/工具与技能/高级）→autosave→切换恢复→Debug
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 按当前Agent autosave/save-guard语义验证核心配置，不假设通用保存按钮。
+  preconditions:
+  - 真实LLM已配置
+  - 展示名(display_name)与Agent名(name)均使用run_id派生唯一值
+  - 首次tour按真实UI处理
+  test_data:
+    legacy_asset_declaration: config/models.yaml；config/users.yaml
+  steps:
+  - order: 1
+    action: 打开/agents，从AgentSelectorHeader点击【新建】打开CreateAgentModal，仅填写展示名(display_name，用run_id)并确认创建Draft。
+    expected: CreateAgentModal仅收集单一展示名创建Draft成功；基础Tab补填Agent名后通过validate。
+  - order: 2
+    action: 确认新Agent被选中，NL2Agent不再显示不可用提示。
+    expected: 基础/工具与技能/高级三Tab按预期分区：工具与技能在独立Tab，运行策略/发布属性在高级Tab。
+  - order: 3
+    action: 基础Tab→展示信息(Display Info)填写Agent名(name，用run_id派生合法标识符)与描述；角色与模型选择真实LLM并填核心Prompt。
+    expected: Debug前真实validate+save guard。
+  - order: 4
+    action: 工具与技能Tab→按最小可运行配置设置工具与技能。
+    expected: 真实LLM Debug完成。
+  - order: 5
+    action: 高级Tab→按最小可运行配置设置运行策略、发布属性（协同代理/护栏默认可跳过）。
+    expected: 不存在虚构通用Save按钮。
+  - order: 6
+    action: 等待autosave idle。
+    expected: 不存在虚构通用Save按钮。
+  - order: 7
+    action: 切换另一Agent再切回基础Tab，确认展示信息与角色模型配置从服务端恢复。
+    expected: 不存在虚构通用Save按钮。
+  - order: 8
+    action: 点击【Debug】；若校验失败先修正，再次点击。
+    expected: 不存在虚构通用Save按钮。
+  - order: 9
+    action: Debug发送固定问题，等待真实模型完成。
+    expected: 不存在虚构通用Save按钮。
+  - order: 10
+    action: 刷新/agents重新选择，确认Draft配置未丢。
+    expected: 不存在虚构通用Save按钮。
+  expected_results:
+  - CreateAgentModal仅收集单一展示名创建Draft成功；基础Tab补填Agent名后通过validate。
+  - 基础/工具与技能/高级三Tab按预期分区：工具与技能在独立Tab，运行策略/发布属性在高级Tab。
+  - Debug前真实validate+save guard。
+  - 真实LLM Debug完成。
+  - 不存在虚构通用Save按钮。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 17
+  actor: Nexent browser user
+  journey:
+  - 打开/agents，从AgentSelectorHeader点击【新建】打开CreateAgentModal，仅填写展示名(display_name，用run_id)并确认创建Draft。
+  - 确认新Agent被选中，NL2Agent不再显示不可用提示。
+  - 基础Tab→展示信息(Display Info)填写Agent名(name，用run_id派生合法标识符)与描述；角色与模型选择真实LLM并填核心Prompt。
+  - 工具与技能Tab→按最小可运行配置设置工具与技能。
+  - 高级Tab→按最小可运行配置设置运行策略、发布属性（协同代理/护栏默认可跳过）。
+  - 等待autosave idle。
+  - 切换另一Agent再切回基础Tab，确认展示信息与角色模型配置从服务端恢复。
+  - 点击【Debug】；若校验失败先修正，再次点击。
+  - Debug发送固定问题，等待真实模型完成。
+  - 刷新/agents重新选择，确认Draft配置未丢。
+  final_business_result:
+  - CreateAgentModal仅收集单一展示名创建Draft成功；基础Tab补填Agent名后通过validate。
+  - 基础/工具与技能/高级三Tab按预期分区：工具与技能在独立Tab，运行策略/发布属性在高级Tab。
+  - Debug前真实validate+save guard。
+  - 真实LLM Debug完成。
+  - 不存在虚构通用Save按钮。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-AGENT-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

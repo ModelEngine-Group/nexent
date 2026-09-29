@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-179
+  name: 旧 HITL 控制字段被拒绝，普通对话与消息分组继续可用；审批、暂停、引导功能已移除
+  status: active
+  description: '智能体运行与对话 / Human-in-the-loop: 旧 HITL 控制字段被拒绝，普通对话与消息分组继续可用；审批、暂停、引导功能已移除'
+  business_rules:
+  - rule_id: F-179-RULE-01
+    description: 旧 HITL 控制字段被拒绝，普通对话与消息分组继续可用；审批、暂停、引导功能已移除
+  required_test_stages:
+  - D1
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

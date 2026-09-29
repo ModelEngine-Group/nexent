@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-159
+  name: 所有 develop 页面路由可达、权限菜单/直接URL拦截
+  status: active
+  description: '前端与全局UI / 路由导航: 所有 develop 页面路由可达、权限菜单/直接URL拦截'
+  business_rules:
+  - rule_id: F-159-RULE-01
+    description: 所有 develop 页面路由可达、权限菜单/直接URL拦截
+  required_test_stages: []
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

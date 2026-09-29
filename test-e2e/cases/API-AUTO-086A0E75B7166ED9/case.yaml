@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-086A0E75B7166ED9
+  feature_id: F-024
+  business_rule_ids:
+  - F-024-RULE-01
+  title: 配额计量 source-only 与 es_physical_* 观测字段：usage/breakdown/personal/platform-overview/self-capacity 序列化契约｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 配额计量 source-only 与 es_physical_* 观测字段：usage/breakdown/personal/platform-overview/self-capacity 序列化契约｜核心流程
+  preconditions:
+  - 本地后端集成测试环境可运行（FastAPI/MySQL/ES/MinIO 组件已启动）；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，已存在一个含知识库并配置了硬限额的测试租户，其源文件账本字节与 ES 物理索引容量均有可观测数据。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 启动本地后端集成环境，以 SU 账号登录获取 Authorization，准备一个已配置硬限额、含知识库与个人知识库的测试租户（run_id 前缀），确保源文件账本与 ES 物理索引容量均有数据。
+    expected: usage 响应顶层含 es_physical_bytes(int|null) 与 es_physical_readable(str|null)；detail=true 时 breakdown[] 每项含 es_physical_bytes/es_physical_readable，与
+      frontend/types/quota.ts 的 QuotaUsageResponse/KBQuotaStatus 一致。
+  - order: 2
+    action: 调用 GET /tenants/{tenant_id}/quota/usage 并置 detail=true、force_refresh=true，记录顶层字段及 breakdown[] 元素字段。
+    expected: /platform/quota/overview 的 tenants[] 每项含 es_physical_bytes/es_physical_readable，顶层含 total_es_physical_bytes/total_es_physical_readable。
+  - order: 3
+    action: 调用 GET /platform/quota/overview（SU/ASSET_OWNER/SPEED 角色），记录顶层汇总字段及 tenants[] 元素字段。
+    expected: /capacity/personal/me 返回 es_physical_bytes/es_physical_readable；/capacity/personal/users 的 items[] 每项含 es_physical_bytes/es_physical_readable；/capacity/personal/summary
+      含 total_es_physical_bytes/total_es_physical_readable。
+  - order: 4
+    action: 以 kb.capacity:read 权限账号调用 GET /capacity/personal/me、GET /capacity/personal/users?page=1&page_size=20 及 GET /capacity/personal/summary，记录
+      items[]/kbs[] 与汇总字段。
+    expected: total_bytes、actual_bytes、used_bytes、total_actual_bytes 等配额计量字段等于源文件账本字节（get_committed_bytes_by_kb/get_tenant_committed_source_bytes），不包含
+      es_physical_bytes。
+  - order: 5
+    action: 对照 backend/services/quota_service.py 序列化实现逐字段核对 es_physical_bytes/es_physical_readable 的字段名与可空性，并核对 total_bytes/actual_bytes/used_bytes/total_actual_bytes
+      的取值语义。
+    expected: usage_pct/usage_rate/available_bytes/is_over_quota 均仅以源文件字节计算，与 es_physical_bytes 互相独立。
+  - order: 6
+    action: 依据硬限额与返回的 total_bytes 反推 usage_pct、available_bytes 与 is_over_quota，确认计算仅基于源文件账本字节，es_physical_bytes 未参与。
+    expected: 各请求返回 HTTP 200；越权或缺权限返回 403/401，不产生半写入或跨租户数据泄露。
+  expected_results:
+  - usage 响应顶层含 es_physical_bytes(int|null) 与 es_physical_readable(str|null)；detail=true 时 breakdown[] 每项含 es_physical_bytes/es_physical_readable，与
+    frontend/types/quota.ts 的 QuotaUsageResponse/KBQuotaStatus 一致。
+  - /platform/quota/overview 的 tenants[] 每项含 es_physical_bytes/es_physical_readable，顶层含 total_es_physical_bytes/total_es_physical_readable。
+  - /capacity/personal/me 返回 es_physical_bytes/es_physical_readable；/capacity/personal/users 的 items[] 每项含 es_physical_bytes/es_physical_readable；/capacity/personal/summary
+    含 total_es_physical_bytes/total_es_physical_readable。
+  - total_bytes、actual_bytes、used_bytes、total_actual_bytes 等配额计量字段等于源文件账本字节（get_committed_bytes_by_kb/get_tenant_committed_source_bytes），不包含
+    es_physical_bytes。
+  - usage_pct/usage_rate/available_bytes/is_over_quota 均仅以源文件字节计算，与 es_physical_bytes 互相独立。
+  - 各请求返回 HTTP 200；越权或缺权限返回 403/401，不产生半写入或跨租户数据泄露。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 486
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 启动本地后端集成环境，以 SU 账号登录获取 Authorization，准备一个已配置硬限额、含知识库与个人知识库的测试租户（run_id 前缀），确保源文件账本与 ES 物理索引容量均有数据。
+    - 调用 GET /tenants/{tenant_id}/quota/usage 并置 detail=true、force_refresh=true，记录顶层字段及 breakdown[] 元素字段。
+    - 调用 GET /platform/quota/overview（SU/ASSET_OWNER/SPEED 角色），记录顶层汇总字段及 tenants[] 元素字段。
+    - 以 kb.capacity:read 权限账号调用 GET /capacity/personal/me、GET /capacity/personal/users?page=1&page_size=20 及 GET /capacity/personal/summary，记录
+      items[]/kbs[] 与汇总字段。
+    - 对照 backend/services/quota_service.py 序列化实现逐字段核对 es_physical_bytes/es_physical_readable 的字段名与可空性，并核对 total_bytes/actual_bytes/used_bytes/total_actual_bytes
+      的取值语义。
+    - 依据硬限额与返回的 total_bytes 反推 usage_pct、available_bytes 与 is_over_quota，确认计算仅基于源文件账本字节，es_physical_bytes 未参与。
+    response_expectations:
+    - usage 响应顶层含 es_physical_bytes(int|null) 与 es_physical_readable(str|null)；detail=true 时 breakdown[] 每项含 es_physical_bytes/es_physical_readable，与
+      frontend/types/quota.ts 的 QuotaUsageResponse/KBQuotaStatus 一致。
+    - /platform/quota/overview 的 tenants[] 每项含 es_physical_bytes/es_physical_readable，顶层含 total_es_physical_bytes/total_es_physical_readable。
+    - /capacity/personal/me 返回 es_physical_bytes/es_physical_readable；/capacity/personal/users 的 items[] 每项含 es_physical_bytes/es_physical_readable；/capacity/personal/summary
+      含 total_es_physical_bytes/total_es_physical_readable。
+    - total_bytes、actual_bytes、used_bytes、total_actual_bytes 等配额计量字段等于源文件账本字节（get_committed_bytes_by_kb/get_tenant_committed_source_bytes），不包含
+      es_physical_bytes。
+    - usage_pct/usage_rate/available_bytes/is_over_quota 均仅以源文件字节计算，与 es_physical_bytes 互相独立。
+    - 各请求返回 HTTP 200；越权或缺权限返回 403/401，不产生半写入或跨租户数据泄露。

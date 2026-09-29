@@ -22,7 +22,7 @@ Before editing or reviewing these areas, read the linked skill and only its appl
 | Backend endpoints, services, database access, backend/SDK configuration, SQL migrations | [.agents/skills/nexent-backend/SKILL.md](.agents/skills/nexent-backend/SKILL.md) |
 | Frontend pages, UI, hooks, API services, types, styles, localization | [.agents/skills/nexent-frontend/SKILL.md](.agents/skills/nexent-frontend/SKILL.md) |
 | Requirement or bug lifecycle, SPEC traceability, and delivery gates | [.agents/skills/nexent-spec-coding/SKILL.md](.agents/skills/nexent-spec-coding/SKILL.md) |
-| Requirement-driven feature catalog, D1-D5 cases, automation, manifest, and generated Excel baseline | [.agents/skills/nexent-test-assets/SKILL.md](.agents/skills/nexent-test-assets/SKILL.md) |
+| Requirement-driven Feature catalog, D1-D5 case-local tests and bindings, generated registry and Excel view under `test-e2e/` | [.agents/skills/nexent-test-assets/SKILL.md](.agents/skills/nexent-test-assets/SKILL.md) |
 | Maintaining the existing implementation-oriented Python unit tests | [.agents/skills/nexent-python-tests/SKILL.md](.agents/skills/nexent-python-tests/SKILL.md) |
 
 These Markdown files are the maintained rules. `.cursor/rules/` contains compatibility entry points with the original Cursor triggers. Edit canonical rules when changing policy. See [migration decisions](docs/agent-rules-migration.md) when maintaining this setup.
@@ -31,6 +31,7 @@ These Markdown files are the maintained rules. `.cursor/rules/` contains compati
 
 - Backend setup uses Python 3.11. From `backend/`, run `uv sync --extra data-process --extra test`; install the SDK with `uv pip install -e "../sdk[dev]"`.
 - Run targeted tests from the root using the configured backend environment, for example `pytest test/backend/apps/test_agent_app.py -v`. The broader runner is `python test/run_all_test.py`. Confirm the interpreter works before testing.
+- Formal D1-D5 assets live in `test-e2e/`; use `python test-e2e/infra/tools/validate_test_assets.py --phase implementation` to check generated views and `python test-e2e/infra/tools/run_cases.py <Case-ID> --test-home <local-test-data>` for targeted execution. Keep machine-local configuration and results outside Git.
 - From `frontend/`, `npm run dev` starts development. `npm run check-all` runs type-check, lint, format checking, and build; individual checks are in `frontend/package.json`.
 - Match verification to changed behavior and report checks actually run or blocked. For instruction-only edits, validate paths, skill metadata, scope, and rule coverage; application suites are unnecessary.
 - Python imports follow standard library, third-party, then project order. SDK Ruff configuration uses a 119-character line limit.

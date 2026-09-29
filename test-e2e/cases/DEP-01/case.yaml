@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-01
+  feature_id: V5-DEP-01
+  business_rule_ids:
+  - V5-DEP-01-RULE-01
+  title: Docker fresh install smoke
+  type: DEPLOYMENT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 新环境可部署
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - deploy/env/.env（部署运行参数，缺省由 deploy/env/.env.example 初始化）'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+      - deploy/env/.env（部署运行参数，缺省由 deploy/env/.env.example 初始化）'
+  steps:
+  - order: 1
+    action: 使用 ${NEXENT_TEST_HOME}/config/environment.yaml 中的本地测试部署参数，记录当前 develop commit 和数据库版本；确认 deploy/env/.env 已由 deploy/env/.env.example
+      初始化。
+    expected: 所有核心服务 ready（nexent-config/runtime/mcp/northbound/web/data-process 及 Elasticsearch、PostgreSQL、MinIO、Redis）。
+  - order: 2
+    action: 从空 ROOT_DIR（默认 ~/nexent-data）执行 bash deploy/docker/deploy.sh，指定 --components infrastructure,application,data-process
+      与 --sandbox-mode lightweight（另验证 disabled/full），并核对沙箱模式默认值来自 deploy/common/common.sh 的 lightweight。
+    expected: ROOT_DIR 下持久化卷与 memory-provider-plugins、project-config、logs 目录存在且权限正确。
+  - order: 3
+    action: 核对脚本将 LOG_DIR 覆盖为 /mnt/nexent-data/logs，并在 ROOT_DIR 下初始化 elasticsearch、postgresql、minio/data、redis、memory-provider-plugins、project-config、volumes/db
+      等目录及权限。
+    expected: deploy/env/.env 中 LOG_DIR=/mnt/nexent-data/logs。
+  - order: 4
+    action: 从空 volume 启动 deploy/docker/compose/docker-compose.yml 编排，执行 health/login/model fake/agent chat smoke。
+    expected: 基础 Journey 可跑。
+  - order: 5
+    action: 部署/重启/迁移后依次检查 frontend、backend、DB、对象存储、向量库、worker/scheduler health。
+    expected: 基础 Journey 可跑。
+  - order: 6
+    action: 执行最小真实 Smoke：登录→真实 LLM Chat；如本用例涉及 KB 再执行一次真实 Embedding 检索。
+    expected: 基础 Journey 可跑。
+  - order: 7
+    action: 检查持久化数据和 schema version，确认重启/升级不会丢数据；并核对 project-config 遗留迁移（nexent-web 内 modelengine-logo/locales）在全新安装中被保留或由镜像默认值接管。
+    expected: 基础 Journey 可跑。
+  - order: 8
+    action: 保存安装日志、容器/Pod状态、migration输出和Smoke结果到当次 run 目录。
+    expected: 基础 Journey 可跑。
+  expected_results:
+  - 所有核心服务 ready（nexent-config/runtime/mcp/northbound/web/data-process 及 Elasticsearch、PostgreSQL、MinIO、Redis）。
+  - ROOT_DIR 下持久化卷与 memory-provider-plugins、project-config、logs 目录存在且权限正确。
+  - deploy/env/.env 中 LOG_DIR=/mnt/nexent-data/logs。
+  - 基础 Journey 可跑。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 27
+  risk_type: DEPLOYMENT
+  risk: 新环境可部署
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - deploy/env/.env（部署运行参数，缺省由 deploy/env/.env.example 初始化）'
+  metrics:
+  - 所有核心服务 ready（nexent-config/runtime/mcp/northbound/web/data-process 及 Elasticsearch、PostgreSQL、MinIO、Redis）。
+  - ROOT_DIR 下持久化卷与 memory-provider-plugins、project-config、logs 目录存在且权限正确。
+  - deploy/env/.env 中 LOG_DIR=/mnt/nexent-data/logs。
+  - 基础 Journey 可跑。
+  thresholds:
+  - 所有核心服务 ready（nexent-config/runtime/mcp/northbound/web/data-process 及 Elasticsearch、PostgreSQL、MinIO、Redis）。
+  - ROOT_DIR 下持久化卷与 memory-provider-plugins、project-config、logs 目录存在且权限正确。
+  - deploy/env/.env 中 LOG_DIR=/mnt/nexent-data/logs。
+  - 基础 Journey 可跑。
+  recovery_expectations:
+  - 所有核心服务 ready（nexent-config/runtime/mcp/northbound/web/data-process 及 Elasticsearch、PostgreSQL、MinIO、Redis）。
+  - ROOT_DIR 下持久化卷与 memory-provider-plugins、project-config、logs 目录存在且权限正确。
+  - deploy/env/.env 中 LOG_DIR=/mnt/nexent-data/logs。
+  - 基础 Journey 可跑。

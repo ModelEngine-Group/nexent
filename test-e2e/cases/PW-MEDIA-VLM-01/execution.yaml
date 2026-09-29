@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: PW-MEDIA-VLM-01
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: PW-MEDIA-VLM-01
+notes: V5 source binding migrated; runtime parity is not yet certified.

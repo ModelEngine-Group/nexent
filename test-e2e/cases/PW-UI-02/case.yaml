@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-UI-02
+  feature_id: V5-PW-UI-02
+  business_rule_ids:
+  - V5-PW-UI-02-RULE-01
+  title: 键盘可访问性Smoke：导航→Dialog→表单→关闭
+  type: E2E
+  priority: P2
+  status: active
+  automation: automated
+  objective: 对真实核心页面做keyboard/focus smoke。
+  preconditions:
+  - 稳定登录态
+  - 使用keyboard API
+  test_data:
+    legacy_asset_declaration: config/users.yaml
+  steps:
+  - order: 1
+    action: 从页面顶部连续Tab，确认焦点进入导航和内容。
+    expected: 主要交互键盘可达。
+  - order: 2
+    action: Agents页仅用Enter/Space打开安全的选择器/弹窗。
+    expected: Dialog焦点管理正确。
+  - order: 3
+    action: 用Tab在弹窗输入/按钮移动，确认焦点不逃逸背景。
+    expected: 发送可键盘触发。
+  - order: 4
+    action: 按Escape关闭，焦点返回触发元素。
+    expected: 发送可键盘触发。
+  - order: 5
+    action: Models页重复一个表单Dialog。
+    expected: 发送可键盘触发。
+  - order: 6
+    action: newchat键盘聚焦Composer、输入文本、Tab到发送并触发短消息。
+    expected: 发送可键盘触发。
+  - order: 7
+    action: 检查关键交互元素有可读accessible name。
+    expected: 发送可键盘触发。
+  expected_results:
+  - 主要交互键盘可达。
+  - Dialog焦点管理正确。
+  - 发送可键盘触发。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 51
+  actor: Nexent browser user
+  journey:
+  - 从页面顶部连续Tab，确认焦点进入导航和内容。
+  - Agents页仅用Enter/Space打开安全的选择器/弹窗。
+  - 用Tab在弹窗输入/按钮移动，确认焦点不逃逸背景。
+  - 按Escape关闭，焦点返回触发元素。
+  - Models页重复一个表单Dialog。
+  - newchat键盘聚焦Composer、输入文本、Tab到发送并触发短消息。
+  - 检查关键交互元素有可读accessible name。
+  final_business_result:
+  - 主要交互键盘可达。
+  - Dialog焦点管理正确。
+  - 发送可键盘触发。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-UI-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

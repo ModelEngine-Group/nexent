@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-038
+  name: locale路由、fallback文案、菜单权限配置
+  status: active
+  description: locale路由、fallback文案、菜单权限配置
+  business_rules:
+  - rule_id: V5-UT-FE-038-RULE-01
+    description: locale路由、fallback文案、菜单权限配置
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

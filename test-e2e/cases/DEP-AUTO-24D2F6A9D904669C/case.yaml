@@ -1,0 +1,98 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-AUTO-24D2F6A9D904669C
+  feature_id: V5-DEP-AUTO-24D2F6A9D904669C
+  business_rule_ids:
+  - V5-DEP-AUTO-24D2F6A9D904669C-RULE-01
+  title: Docker 部署数据目录持久化、遗留配置迁移与目录初始化幂等
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 升级/重启/重装时出现数据丢失或半迁移状态：1) LOG_DIR 沿用本地开发默认值 logs 被写入容器临时层，容器重建后日志静默丢失；2) 旧版 nexent-web 容器中的 project-config 遗留配置未迁移导致品牌/自定义配置回退；3)
+    memory-provider-plugins 目录缺失导致插件加载失败；4) 重复执行部署导致配置被覆盖或产生不幂等副作用。
+  preconditions:
+  - '- 本用例独占的临时 ROOT_DIR（位于 Nexent 仓库之外，运行结束清理）（隔离临时 ROOT_DIR，位于 Nexent 仓库之外）
+
+    - deploy/env/.env（由 deploy.sh 生成，用于校验 LOG_DIR/ROOT_DIR 写入）
+
+    - 预置 nexent-web 容器（遗留 project-config 源：/opt/frontend-dist/public 下 modelengine-logo.png、modelengine-logo2.png、locales/zh/custom.json、locales/en/custom.json）
+
+    - 可用的 dockerd 环境'
+  test_data:
+    legacy_asset_declaration: '- 本用例独占的临时 ROOT_DIR（位于 Nexent 仓库之外，运行结束清理）（隔离临时 ROOT_DIR，位于 Nexent 仓库之外）
+
+      - deploy/env/.env（由 deploy.sh 生成，用于校验 LOG_DIR/ROOT_DIR 写入）
+
+      - 预置 nexent-web 容器（遗留 project-config 源：/opt/frontend-dist/public 下 modelengine-logo.png、modelengine-logo2.png、locales/zh/custom.json、locales/en/custom.json）
+
+      - 可用的 dockerd 环境'
+  steps:
+  - order: 1
+    action: 准备隔离测试环境：设置 ${NEXENT_TEST_HOME} 位于 Nexent 仓库之外，创建 ROOT_DIR=本用例独占的临时目录（位于 Nexent 仓库之外），确认 dockerd 可用且无残留 nexent
+      容器。
+    expected: 首装后 deploy/env/.env 中 LOG_DIR 精确为 "/mnt/nexent-data/logs"，${ROOT_DIR}/logs、${ROOT_DIR}/memory-provider-plugins、${ROOT_DIR}/project-config
+      均存在且权限为 775。
+  - order: 2
+    action: 首装场景：以 --root-dir ${ROOT_DIR} --defaults 运行 deploy/docker/deploy.sh（development 模式），记录脚本 stdout/stderr、退出码及运行前后
+      deploy/env/.env 差异。
+    expected: 升级场景迁移后 project-config 遗留文件完整落地且非空，目录权限 775、文件权限 664，无空文件错误或半迁移状态。
+  - order: 3
+    action: 校验 LOG_DIR 覆盖：读取 deploy/env/.env，断言 LOG_DIR 精确等于 "/mnt/nexent-data/logs"；断言 ${ROOT_DIR}/logs 目录存在且权限为 775。
+    expected: 幂等：重复执行时 LOG_DIR 不被改写为其它值，已非空的 project-config 目录不被覆盖，脚本退出码为 0。
+  - order: 4
+    action: 校验目录初始化：断言 ${ROOT_DIR}/memory-provider-plugins 与 ${ROOT_DIR}/project-config 目录均存在且权限为 775。
+    expected: 全程无未处理异常；迁移失败时脚本以非零退出码终止并保留迁移暂存目录，不产生半写入。
+  - order: 5
+    action: 升级/遗留迁移场景：预置名为 nexent-web 的容器，在其 /opt/frontend-dist/public 下放置遗留 project-config 文件（modelengine-logo.png、locales/zh/custom.json
+      等），再次运行 deploy.sh，断言迁移后 ${ROOT_DIR}/project-config 下存在对应非空文件，目录权限 775、文件权限 664。
+    expected: 全程无未处理异常；迁移失败时脚本以非零退出码终止并保留迁移暂存目录，不产生半写入。
+  - order: 6
+    action: 幂等/重启场景：不清空 ROOT_DIR 再次执行 deploy.sh，断言 LOG_DIR 仍为 /mnt/nexent-data/logs 且不被改写；断言已非空的 project-config 目录不被迁移覆盖（输出
+      legacy migration skipped）；断言脚本退出码为 0。
+    expected: 全程无未处理异常；迁移失败时脚本以非零退出码终止并保留迁移暂存目录，不产生半写入。
+  - order: 7
+    action: 记录每次运行的 stdout/stderr、.env 前后差异与 ${ROOT_DIR} 目录权限快照作为失败证据。
+    expected: 全程无未处理异常；迁移失败时脚本以非零退出码终止并保留迁移暂存目录，不产生半写入。
+  expected_results:
+  - 首装后 deploy/env/.env 中 LOG_DIR 精确为 "/mnt/nexent-data/logs"，${ROOT_DIR}/logs、${ROOT_DIR}/memory-provider-plugins、${ROOT_DIR}/project-config
+    均存在且权限为 775。
+  - 升级场景迁移后 project-config 遗留文件完整落地且非空，目录权限 775、文件权限 664，无空文件错误或半迁移状态。
+  - 幂等：重复执行时 LOG_DIR 不被改写为其它值，已非空的 project-config 目录不被覆盖，脚本退出码为 0。
+  - 全程无未处理异常；迁移失败时脚本以非零退出码终止并保留迁移暂存目录，不产生半写入。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 39
+  risk_type: DEPLOYMENT
+  risk: 升级/重启/重装时出现数据丢失或半迁移状态：1) LOG_DIR 沿用本地开发默认值 logs 被写入容器临时层，容器重建后日志静默丢失；2) 旧版 nexent-web 容器中的 project-config 遗留配置未迁移导致品牌/自定义配置回退；3)
+    memory-provider-plugins 目录缺失导致插件加载失败；4) 重复执行部署导致配置被覆盖或产生不幂等副作用。
+  condition:
+  - '- 本用例独占的临时 ROOT_DIR（位于 Nexent 仓库之外，运行结束清理）（隔离临时 ROOT_DIR，位于 Nexent 仓库之外）
+
+    - deploy/env/.env（由 deploy.sh 生成，用于校验 LOG_DIR/ROOT_DIR 写入）
+
+    - 预置 nexent-web 容器（遗留 project-config 源：/opt/frontend-dist/public 下 modelengine-logo.png、modelengine-logo2.png、locales/zh/custom.json、locales/en/custom.json）
+
+    - 可用的 dockerd 环境'
+  metrics:
+  - 首装后 deploy/env/.env 中 LOG_DIR 精确为 "/mnt/nexent-data/logs"，${ROOT_DIR}/logs、${ROOT_DIR}/memory-provider-plugins、${ROOT_DIR}/project-config
+    均存在且权限为 775。
+  - 升级场景迁移后 project-config 遗留文件完整落地且非空，目录权限 775、文件权限 664，无空文件错误或半迁移状态。
+  - 幂等：重复执行时 LOG_DIR 不被改写为其它值，已非空的 project-config 目录不被覆盖，脚本退出码为 0。
+  - 全程无未处理异常；迁移失败时脚本以非零退出码终止并保留迁移暂存目录，不产生半写入。
+  thresholds:
+  - 首装后 deploy/env/.env 中 LOG_DIR 精确为 "/mnt/nexent-data/logs"，${ROOT_DIR}/logs、${ROOT_DIR}/memory-provider-plugins、${ROOT_DIR}/project-config
+    均存在且权限为 775。
+  - 升级场景迁移后 project-config 遗留文件完整落地且非空，目录权限 775、文件权限 664，无空文件错误或半迁移状态。
+  - 幂等：重复执行时 LOG_DIR 不被改写为其它值，已非空的 project-config 目录不被覆盖，脚本退出码为 0。
+  - 全程无未处理异常；迁移失败时脚本以非零退出码终止并保留迁移暂存目录，不产生半写入。
+  recovery_expectations:
+  - 首装后 deploy/env/.env 中 LOG_DIR 精确为 "/mnt/nexent-data/logs"，${ROOT_DIR}/logs、${ROOT_DIR}/memory-provider-plugins、${ROOT_DIR}/project-config
+    均存在且权限为 775。
+  - 升级场景迁移后 project-config 遗留文件完整落地且非空，目录权限 775、文件权限 664，无空文件错误或半迁移状态。
+  - 幂等：重复执行时 LOG_DIR 不被改写为其它值，已非空的 project-config 目录不被覆盖，脚本退出码为 0。
+  - 全程无未处理异常；迁移失败时脚本以非零退出码终止并保留迁移暂存目录，不产生半写入。

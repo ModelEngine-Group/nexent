@@ -30,7 +30,7 @@ Create or update `design.md` according to [SPEC maintenance guidance](spec-maint
 
 ## Test Implementation Strategy
 
-<Describe intended repository boundaries and frameworks for fixed scripts. Scripts and manifest entries are implemented after product code stabilizes, except for an optional focused bug reproduction. State how IDs will be bound and how affected cases will run locally. Keep Legacy UT separate.>
+<Describe intended repository boundaries and frameworks for fixed scripts. Scripts and case-local execution bindings are implemented after product code stabilizes, except for an optional focused bug reproduction. State how IDs will be bound and how affected Cases will run locally. Keep Legacy UT separate.>
 
 ## Risks / Trade-offs
 

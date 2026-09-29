@@ -1,0 +1,96 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: SEC-AUTO-F4D28F8271C36B99
+  feature_id: V5-SEC-AUTO-F4D28F8271C36B99
+  business_rule_ids:
+  - V5-SEC-AUTO-F4D28F8271C36B99-RULE-01
+  title: 外部记忆 Provider 权限校验与跨租户 IDOR 防护（get/update/delete/test-search/test-ingest）
+  type: SECURITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: 越权访问（IDOR + 缺失 MEM.PROVIDER 后端授权）：get/update/delete/test-search/test-ingest 端点仅按 provider_config_id 读取、未按 tenant_id
+    过滤且未做 MEM.PROVIDER 权限校验，任何已认证但非 ADMIN/SPEED 的用户可绕过前端隐藏直接调用，跨租户读取/篡改/删除他人 provider 配置或触发他人外部 provider 的 search/ingest 调用。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml（含 ADMIN、SPEED、无 MEM.PROVIDER 权限的普通 USER，以及 A/B 两个隔离租户账号）
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/provider_fixture.yaml（plugin.name=mem0 及最小合法参数）'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml（含 ADMIN、SPEED、无 MEM.PROVIDER 权限的普通 USER，以及 A/B 两个隔离租户账号）
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/provider_fixture.yaml（plugin.name=mem0 及最小合法参数）'
+  steps:
+  - order: 1
+    action: 在本地工作区准备隔离测试环境，读取 users.yaml 中四类账号：ADMIN、SPEED、无 MEM.PROVIDER 权限的普通 USER、A/B 两租户各自账号；测试代码不读取生产凭据。
+    expected: 无 MEM.PROVIDER 权限的普通 USER 对 provider CRUD 与 test-search/test-ingest 端点一律返回 403，拒绝不依赖前端隐藏。
+  - order: 2
+    action: 权限矩阵测试：分别以 ADMIN、SPEED、普通 USER 令牌调用 POST/GET /memory/providers、GET/PUT/DELETE /memory/providers/{id}、POST test-search
+      与 test-ingest、GET /memory/provider-plugins，记录每个角色每端点的 HTTP 状态码与响应体。
+    expected: ADMIN/SPEED 返回 200 且能完成对应 CRUD/测试操作，行为与产品契约一致。
+  - order: 3
+    action: 断言无 MEM.PROVIDER:CREATE/READ/UPDATE/DELETE 的普通 USER 对所有 CRUD 与 test-search/test-ingest 端点返回 403，且响应不返回任何 provider
+      配置或参数（含掩码后的 secret）。
+    expected: 跨租户请求（B 租户访问 A 的 provider_id）返回 403 或 404，A 的配置、参数与外部调用均不被泄露或触发。
+  - order: 4
+    action: 跨租户 IDOR 测试：租户 A 创建 provider 得到 provider_config_id=X；有 MEM.PROVIDER 权限但属租户 B 的账号对 X 分别发起 GET/PUT/DELETE/test-search/test-ingest，断言返回
+      403 或 404，不泄露 A 的参数、不回写 A 的 last_error_code、不触发对 A 外部 provider 的 search/ingest 调用。
+    expected: 服务层与 DB 层读取均携带 tenant_id 过滤，未出现仅按 provider_config_id 的越权读取路径。
+  - order: 5
+    action: 验证服务层与 DB 层按 tenant_id 过滤：检查 memory_provider_config_service.get_provider/update_provider/delete_provider 与 memory_provider_config_db
+      的查询是否同时携带 provider_config_id 与 tenant_id 条件（对照当前仅按 provider_config_id 读取的缺陷）。
+    expected: 前端权限键与后端 MEM.PROVIDER 四类操作一致，无权限时对应操作入口隐藏或禁用。
+  - order: 6
+    action: 前端 Can 守卫一致性：加载 MemoryManager/ProviderConfigCard，对无 create/update/delete 权限的角色断言"添加 Provider"按钮隐藏、启用开关 disabled、更多操作入口隐藏，权限键
+      mem.provider:create/update/delete 与后端 MEM.PROVIDER 四类操作一一对应且不依赖前端隐藏作为唯一防线。
+    expected: 日志、Trace、响应中不出现明文 api_key/token/password。
+  - order: 7
+    action: 确认日志、Trace、响应体不输出明文 api_key/token/password；失败路径返回明确 4xx，不吞异常伪装成功。
+    expected: 日志、Trace、响应中不出现明文 api_key/token/password。
+  expected_results:
+  - 无 MEM.PROVIDER 权限的普通 USER 对 provider CRUD 与 test-search/test-ingest 端点一律返回 403，拒绝不依赖前端隐藏。
+  - ADMIN/SPEED 返回 200 且能完成对应 CRUD/测试操作，行为与产品契约一致。
+  - 跨租户请求（B 租户访问 A 的 provider_id）返回 403 或 404，A 的配置、参数与外部调用均不被泄露或触发。
+  - 服务层与 DB 层读取均携带 tenant_id 过滤，未出现仅按 provider_config_id 的越权读取路径。
+  - 前端权限键与后端 MEM.PROVIDER 四类操作一致，无权限时对应操作入口隐藏或禁用。
+  - 日志、Trace、响应中不出现明文 api_key/token/password。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 72
+  risk_type: SECURITY
+  risk: 越权访问（IDOR + 缺失 MEM.PROVIDER 后端授权）：get/update/delete/test-search/test-ingest 端点仅按 provider_config_id 读取、未按 tenant_id
+    过滤且未做 MEM.PROVIDER 权限校验，任何已认证但非 ADMIN/SPEED 的用户可绕过前端隐藏直接调用，跨租户读取/篡改/删除他人 provider 配置或触发他人外部 provider 的 search/ingest 调用。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml（含 ADMIN、SPEED、无 MEM.PROVIDER 权限的普通 USER，以及 A/B 两个隔离租户账号）
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/provider_fixture.yaml（plugin.name=mem0 及最小合法参数）'
+  metrics:
+  - 无 MEM.PROVIDER 权限的普通 USER 对 provider CRUD 与 test-search/test-ingest 端点一律返回 403，拒绝不依赖前端隐藏。
+  - ADMIN/SPEED 返回 200 且能完成对应 CRUD/测试操作，行为与产品契约一致。
+  - 跨租户请求（B 租户访问 A 的 provider_id）返回 403 或 404，A 的配置、参数与外部调用均不被泄露或触发。
+  - 服务层与 DB 层读取均携带 tenant_id 过滤，未出现仅按 provider_config_id 的越权读取路径。
+  - 前端权限键与后端 MEM.PROVIDER 四类操作一致，无权限时对应操作入口隐藏或禁用。
+  - 日志、Trace、响应中不出现明文 api_key/token/password。
+  thresholds:
+  - 无 MEM.PROVIDER 权限的普通 USER 对 provider CRUD 与 test-search/test-ingest 端点一律返回 403，拒绝不依赖前端隐藏。
+  - ADMIN/SPEED 返回 200 且能完成对应 CRUD/测试操作，行为与产品契约一致。
+  - 跨租户请求（B 租户访问 A 的 provider_id）返回 403 或 404，A 的配置、参数与外部调用均不被泄露或触发。
+  - 服务层与 DB 层读取均携带 tenant_id 过滤，未出现仅按 provider_config_id 的越权读取路径。
+  - 前端权限键与后端 MEM.PROVIDER 四类操作一致，无权限时对应操作入口隐藏或禁用。
+  - 日志、Trace、响应中不出现明文 api_key/token/password。
+  recovery_expectations:
+  - 无 MEM.PROVIDER 权限的普通 USER 对 provider CRUD 与 test-search/test-ingest 端点一律返回 403，拒绝不依赖前端隐藏。
+  - ADMIN/SPEED 返回 200 且能完成对应 CRUD/测试操作，行为与产品契约一致。
+  - 跨租户请求（B 租户访问 A 的 provider_id）返回 403 或 404，A 的配置、参数与外部调用均不被泄露或触发。
+  - 服务层与 DB 层读取均携带 tenant_id 过滤，未出现仅按 provider_config_id 的越权读取路径。
+  - 前端权限键与后端 MEM.PROVIDER 四类操作一致，无权限时对应操作入口隐藏或禁用。
+  - 日志、Trace、响应中不出现明文 api_key/token/password。

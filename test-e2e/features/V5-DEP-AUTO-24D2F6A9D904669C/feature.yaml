@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-24D2F6A9D904669C
+  name: Docker 部署数据目录持久化、遗留配置迁移与目录初始化幂等
+  status: active
+  description: 升级/重启/重装时出现数据丢失或半迁移状态：1) LOG_DIR 沿用本地开发默认值 logs 被写入容器临时层，容器重建后日志静默丢失；2) 旧版 nexent-web 容器中的 project-config 遗留配置未迁移导致品牌/自定义配置回退；3)
+    memory-provider-plugins 目录缺失导致插件加载失败；4) 重复执行部署导致配置被覆盖或产生不幂等副作用。
+  business_rules:
+  - rule_id: V5-DEP-AUTO-24D2F6A9D904669C-RULE-01
+    description: Docker 部署数据目录持久化、遗留配置迁移与目录初始化幂等
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,10 @@
+schema_version: '1.0'
+case_id: API-119
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-119
+- framework: pytest
+  file: test-e2e/infra/automation/d3/scenarios/scenario_memory_title_automation_scenarios.py
+  selector: API-119
+notes: V5 source binding migrated; runtime parity is not yet certified.

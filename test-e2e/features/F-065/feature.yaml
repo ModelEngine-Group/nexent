@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-065
+  name: 消息、工具卡片、Plan/ReAct/并行卡片、停止按钮、错误恢复；执行代码块(parse)、可恢复告警(warning)、历史摘要(history_summary)、引用角标(citation key)与句级高亮、模型可用性过滤、线程Agent绑定
+  status: active
+  description: '智能体运行时与对话 / 前端流式状态: 消息、工具卡片、Plan/ReAct/并行卡片、停止按钮、错误恢复；执行代码块(parse)、可恢复告警(warning)、历史摘要(history_summary)、引用角标(citation
+    key)与句级高亮、模型可用性过滤、线程Agent绑定'
+  business_rules:
+  - rule_id: F-065-RULE-01
+    description: 消息、工具卡片、Plan/ReAct/并行卡片、停止按钮、错误恢复；执行代码块(parse)、可恢复告警(warning)、历史摘要(history_summary)、引用角标(citation key)与句级高亮、模型可用性过滤、线程Agent绑定
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

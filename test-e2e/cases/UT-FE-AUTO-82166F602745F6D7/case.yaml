@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-82166F602745F6D7
+  feature_id: F-065
+  business_rule_ids:
+  - F-065-RULE-01
+  title: 引用角标组合key匹配、旧角标兼容、句级高亮与来源字段透传｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 引用角标组合key匹配、旧角标兼容、句级高亮与来源字段透传｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 前端 newchat 消息渲染相关组件源码可读取：frontend/app/[locale]/newchat/ui/markdown-text.tsx 及其引用的 sources-panel 组合 key 生成函数。
+  test_data:
+    legacy_asset_declaration: 无（纯前端组件逻辑，固定测试数据内联于测试代码）
+  steps:
+  - order: 1
+    action: '在组件测试环境加载 newchat 消息 Markdown 渲染组件，注入含 [[a1]][[b1]] 引用角标与对应 source content（sourceA: citeIndex=1/toolSign=''a''；sourceB:
+      citeIndex=1/toolSign=''b''）的固定消息数据。'
+    expected: 组合 key 精确匹配各自来源，a1 与 b1 互不混淆并返回对应 SearchSource。
+  - order: 2
+    action: 断言 findCiteSource 使用 getCitationKey({citeIndex, toolSign}) 精确匹配 a1、b1 各自唯一来源，不因 citeIndex 相同而互相混淆。
+    expected: 纯数字旧角标回退匹配到相等 citeIndex 来源，历史会话保持可读。
+  - order: 3
+    action: 注入纯数字旧角标 [[1]] 的历史消息（source 仅含 citeIndex、无 toolSign），断言回退到 /^\d+$/ 分支按 citeIndex 精确匹配，角标仍解析到对应来源。
+    expected: 开启句级高亮时 citationContext 返回角标前一句完整 scope 文本，且不跨段落/跨表格单元扩展。
+  - order: 4
+    action: 开启 ENABLE_CITATION_CLICK_HIGHLIGHT 时点击 a1 角标，断言 citationContext 返回该角标前一完整句子的 scope 文本，且换行/表格单元分隔符能停止 scope 扩展。
+    expected: 高亮开启与关闭情况下点击角标均能用 selectedCitationKey 选中并滚动到来源。
+  - order: 5
+    action: 关闭 ENABLE_CITATION_CLICK_HIGHLIGHT 时点击 a1 角标，断言 selectedCitationKey 仍为组合 key（a1），面板选中并滚动到对应来源卡，citationContext
+      为 undefined。
+    expected: retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
+  - order: 6
+    action: 断言 resolveCiteSources/toPanelSource 将 source 的 retrievalHighlightTerms 与 publishedDate 原样透传至面板来源项。
+    expected: retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
+  - order: 7
+    action: 对匹配不到来源的角标断言 loading 状态正确、不抛出未处理异常。
+    expected: retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
+  expected_results:
+  - 组合 key 精确匹配各自来源，a1 与 b1 互不混淆并返回对应 SearchSource。
+  - 纯数字旧角标回退匹配到相等 citeIndex 来源，历史会话保持可读。
+  - 开启句级高亮时 citationContext 返回角标前一句完整 scope 文本，且不跨段落/跨表格单元扩展。
+  - 高亮开启与关闭情况下点击角标均能用 selectedCitationKey 选中并滚动到来源。
+  - retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 437
+  unit_boundary: 引用标注与来源面板
+  inputs:
+  - 无（纯前端组件逻辑，固定测试数据内联于测试代码）
+  assertions:
+  - 组合 key 精确匹配各自来源，a1 与 b1 互不混淆并返回对应 SearchSource。
+  - 纯数字旧角标回退匹配到相等 citeIndex 来源，历史会话保持可读。
+  - 开启句级高亮时 citationContext 返回角标前一句完整 scope 文本，且不跨段落/跨表格单元扩展。
+  - 高亮开启与关闭情况下点击角标均能用 selectedCitationKey 选中并滚动到来源。
+  - retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。

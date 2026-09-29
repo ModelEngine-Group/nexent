@@ -1,0 +1,10 @@
+schema_version: '1.0'
+case_id: DEP-02
+implementations:
+- framework: pytest
+  file: test.py
+  selector: DEP-02
+- framework: pytest
+  file: test-e2e/infra/automation/d5/scenarios/scenario_reliability_deployment_special.py
+  selector: DEP-02
+notes: V5 source binding migrated; runtime parity is not yet certified.

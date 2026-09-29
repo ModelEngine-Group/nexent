@@ -1,6 +1,6 @@
 # D1-D5 Test Design Guide
 
-Use this guide while writing or revising `design.md`. Formal Nexent acceptance assets are designed from requirements before product implementation and stored as structured feature and case files. Fixed automation scripts and manifest entries are implemented after product code exposes stable interfaces, except that a focused bug reproduction may be written earlier.
+Use this guide while writing or revising `design.md`. Formal Nexent acceptance assets are designed from requirements before product implementation and stored as case-local Feature and Case files. Fixed automation scripts and execution bindings are implemented after product code exposes stable interfaces, except that a focused bug reproduction may be written earlier.
 
 ## Required design content
 
@@ -39,10 +39,10 @@ Use the lowest stage that proves a behavior, then add higher stages only when th
 ## Lifecycle
 
 1. During requirement or bug design, update the feature inventory and formal D1-D5 case contracts.
-2. Run `python test/tools/validate_test_assets.py --phase design --generate-excel` before product implementation begins.
+2. Run `python test-e2e/infra/tools/validate_test_assets.py --phase design --generate` before product implementation begins.
 3. Implement product behavior.
-4. Implement fixed scripts and manifest entries after interfaces stabilize. Bind every automated case ID to its implementation.
+4. Implement fixed scripts and case-local `execution.yaml` after interfaces stabilize. Bind every automated Case ID to its own primary script.
 5. Run affected cases locally, then the applicable broader stage groups.
-6. Run `python test/tools/validate_test_assets.py --phase implementation --generate-excel` before closeout.
+6. Run `python test-e2e/infra/tools/validate_test_assets.py --phase implementation --generate` before closeout.
 
-Legacy implementation-oriented tests remain separate. They may continue to run during transition, but they are not formal D1-D5 assets and cannot satisfy formal case or manifest coverage.
+Legacy implementation-oriented tests remain separate. They may continue to run during transition, but they are not formal D1-D5 assets and cannot satisfy formal Case or execution-binding coverage.

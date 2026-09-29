@@ -7,12 +7,12 @@ Before implementation, record affected feature IDs, business rules, acceptance c
 ## Verification rules
 
 - Run schema and traceability validation before product implementation.
-- After product implementation, add or update fixed scripts and manifest entries for affected automated cases.
+- After product implementation, add or update fixed scripts and case-local `execution.yaml` bindings for affected automated cases.
 - A case passes only when all expected results and forbidden-side-effect assertions pass.
 - Missing, unimplemented, skipped or expected-failure required cases remain incomplete. Required P0/P1 cases cannot be accepted that way.
 - Keep product, environment, provider, asset and test-implementation failures distinguishable.
 - If implementation reveals a requirement change, revise the requirement and structured case contract explicitly; never silently weaken assertions.
-- Legacy UT may supply transition evidence but cannot satisfy formal D1-D5 manifest coverage.
+- Legacy UT may supply transition evidence but cannot satisfy formal D1-D5 Case coverage.
 
 ## Choose the proof surface
 
@@ -42,4 +42,4 @@ A2A can be proved at D2 protocol, D3 integration, D4 full journey and D5 fault/s
 
 ## Closeout
 
-Run affected tests, the unified asset validator and deterministic Excel regeneration/check. Confirm every automated affected case has a valid manifest binding and that only changed/incremental entries were regenerated. Preserve historical cases and evidence unless explicitly retired with rationale.
+Run affected tests, the unified asset validator and deterministic Excel regeneration/check. Confirm every automated affected Case has a valid case-local binding. Regenerate derived views from the complete authoritative Case set; modify only affected source Case directories. Preserve historical Cases and evidence unless explicitly retired with rationale.

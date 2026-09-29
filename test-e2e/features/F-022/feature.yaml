@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-022
+  name: 邀请码 CRUD、分页、唯一性检查
+  status: active
+  description: '租户与资源权限 / 邀请码: 邀请码 CRUD、分页、唯一性检查'
+  business_rules:
+  - rule_id: F-022-RULE-01
+    description: 邀请码 CRUD、分页、唯一性检查
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

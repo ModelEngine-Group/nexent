@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-04
+  name: 旧版本升级、迁移幂等、大数据统一标签与 HITL 条件表/触发器兼容性
+  status: active
+  description: 大数据迁移超时或重复写；HITL 能力关闭/开启时表和触发器状态错误；重复升级破坏已有数据。
+  business_rules:
+  - rule_id: V5-DEP-04-RULE-01
+    description: 旧版本升级、迁移幂等、大数据统一标签与 HITL 条件表/触发器兼容性
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

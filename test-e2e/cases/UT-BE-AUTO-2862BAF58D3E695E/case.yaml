@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-2862BAF58D3E695E
+  feature_id: F-131
+  business_rule_ids:
+  - F-131-RULE-01
+  title: runtime_state_service 阻塞 Redis 操作经 control-io 受管线程执行、未注入 manager 回退直调且 stop/resume/取消/流事件读写一致｜核心流程
+  type: BE-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: runtime_state_service 阻塞 Redis 操作经 control-io 受管线程执行、未注入 manager 回退直调且 stop/resume/取消/流事件读写一致｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务或真实 Redis 在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 通过 monkeypatch 注入 fake ThreadManager 与 fake Redis client，并设置 RUNTIME_STATE_REDIS_URL 使 enabled=True；测试代码不得读取生产凭据。
+  test_data:
+    legacy_asset_declaration: '- 无外部本地资产；使用测试内联 fake ThreadManager / fake Redis client，并通过 monkeypatch 控制 consts.RUNTIME_STATE_REDIS_URL。'
+  steps:
+  - order: 1
+    action: 导入 backend/services/runtime_state_service.py 的 RuntimeStateService，实例化被测对象；构造 fake Redis client（hset/hgetall/get/set/setex/xadd/xrange/xread/delete/expire/pipeline
+      等方法可注入返回值），monkeypatch RUNTIME_STATE_REDIS_URL 使 enabled=True。
+    expected: 注入 manager 时所有异步封装方法均经 lane="control-io"、owner="services.runtime_state_service" 与对应固定 task_name 的 ManagedTaskSpec
+      调用 ThreadManager.run，不发生直接同步调用。
+  - order: 2
+    action: 构造 fake ThreadManager（run(lane, spec, fn, *args, **kwargs) 返回可 await 的结果并记录 lane/spec/fn/args），通过 set_thread_manager
+      注入。
+    expected: 未注入 manager 时回退为直接调用对应同步方法，返回值与同步方法一致。
+  - order: 3
+    action: 逐一调用 reset_stream_async / get_run_state_async / is_cancelled_async / append_stream_event_async / mark_stream_completed_async
+      / get_stream_status_async / read_stream_events_async / wait_for_stream_events_async / acquire_idempotency_async / release_idempotency_async
+      / consume_rate_limit_async，断言均以 lane="control-io"、spec.owner="services.runtime_state_service"、spec.task_name 为各自固定任务名、fn
+      为对应同步方法、args 与入参一致调用 manager.run，并透传返回结果。
+    expected: managed 与 direct 两条路径对 stop/resume、取消信号、流事件读写的 Redis 写入/读取结果一致，多副本状态不丢失。
+  - order: 4
+    action: 将 _thread_manager 置回 None，再次调用上述异步方法，断言 _run_managed 直接调用对应同步方法（同步返回、不路由到 manager），返回值与同步方法直接调用一致（回退分支）。
+    expected: 同步方法捕获异常后返回安全默认值（{} / None / False / []），不向上抛出未处理异常；client 在缺失 RUNTIME_STATE_REDIS_URL 或未安装 redis 时抛 ValueError。
+  - order: 5
+    action: 覆盖同步方法契约：register_run 写入 run key(hset) 并 expire 且删除 cancel key；set_cancel_signal 写 cancel key 并返回 True；append_stream_event
+      执行 xadd(maxlen=RUNTIME_STREAM_MAX_LEN, approximate=True) 并 expire、返回 event_id；read_stream_events 按 after_id 构造 xrange
+      min_id（无 after_id 为 "-"，有 after_id 为 "(<id>"）并返回 (event_id, chunk) 列表；wait_for_stream_events 经 xread 返回事件列表。
+    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 验证 stop/resume 一致性：mark_run_finished(status) 写入 status 与 updated_at 并调用 _expire_completed_runtime_keys 对 run/cancel/stream/stream:done
+      四个 key 设置 expire；随后 get_run_state 读回一致 status，且 managed 与 direct 两条路径产生相同 Redis 写入与读取结果。
+    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 覆盖异常分支：fake Redis client 抛异常时，同步方法捕获后返回安全默认值（{} / None / False / []）且不向上抛出；client 属性在 RUNTIME_STATE_REDIS_URL
+      为空或 redis 包未安装时抛 ValueError。
+    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 确认日志不输出 API Key/Token/用户密码/模型密钥；测试结束还原 monkeypatch 与临时对象，确保可重复执行。
+    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 注入 manager 时所有异步封装方法均经 lane="control-io"、owner="services.runtime_state_service" 与对应固定 task_name 的 ManagedTaskSpec 调用 ThreadManager.run，不发生直接同步调用。
+  - 未注入 manager 时回退为直接调用对应同步方法，返回值与同步方法一致。
+  - managed 与 direct 两条路径对 stop/resume、取消信号、流事件读写的 Redis 写入/读取结果一致，多副本状态不丢失。
+  - 同步方法捕获异常后返回安全默认值（{} / None / False / []），不向上抛出未处理异常；client 在缺失 RUNTIME_STATE_REDIS_URL 或未安装 redis 时抛 ValueError。
+  - 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 392
+  unit_boundary: 运行时状态
+  inputs:
+  - '- 无外部本地资产；使用测试内联 fake ThreadManager / fake Redis client，并通过 monkeypatch 控制 consts.RUNTIME_STATE_REDIS_URL。'
+  assertions:
+  - 注入 manager 时所有异步封装方法均经 lane="control-io"、owner="services.runtime_state_service" 与对应固定 task_name 的 ManagedTaskSpec 调用 ThreadManager.run，不发生直接同步调用。
+  - 未注入 manager 时回退为直接调用对应同步方法，返回值与同步方法一致。
+  - managed 与 direct 两条路径对 stop/resume、取消信号、流事件读写的 Redis 写入/读取结果一致，多副本状态不丢失。
+  - 同步方法捕获异常后返回安全默认值（{} / None / False / []），不向上抛出未处理异常；client 在缺失 RUNTIME_STATE_REDIS_URL 或未安装 redis 时抛 ValueError。
+  - 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。

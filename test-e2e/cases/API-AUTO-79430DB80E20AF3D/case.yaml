@@ -1,0 +1,87 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-79430DB80E20AF3D
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: 仓库详情接口解析快照返回 model_name/duty_prompt/tools/icon/downloads｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 仓库详情接口解析快照返回 model_name/duty_prompt/tools/icon/downloads｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 准备本地真实测试环境与“仓库详情接口解析快照返回 model_name/duty_prompt/tools/icon/downloads”要求的最小数据：使用 SU/Admin 测试账号，通过实际 Agent 版本发布/申请
+      listing 流程创建一条带唯一 RunID 的仓库 listing（含 icon、tags、content 卡片字段），记录 agent_repository_id、agent_id 与发布版本快照。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 调用 GET /repository/agent/{agent_repository_id} 真实详情接口，记录 HTTP 状态码与完整响应 JSON。
+    expected: GET /repository/agent/{id} 返回 200，响应包含 model_name、duty_prompt、tools、icon、downloads，且与仓库快照、卡片字段、下载聚合一致。
+  - order: 3
+    action: 断言返回 200 OK，且响应含 agent_repository_id、agent_id、name、display_name、description、author、icon、status、version_label、downloads、created_at
+      等基础字段。
+    expected: 快照缺失/畸形时安全降级为 model_name=null、duty_prompt=null、tools=[]，接口不抛 500。
+  - order: 4
+    action: 断言 model_name 等于仓库快照根 Agent（agent_info_json.agent_info[root agent_id]）的 model_name；duty_prompt 等于根 Agent 的 duty_prompt。
+    expected: 不存在资源返回 404，未认证返回 401，失败路径不出现半写入、重复副作用或跨租户泄露。
+  - order: 5
+    action: 断言 tools 为根 Agent 快照中工具显示名列表（优先取 origin_name，回退 name），元素均为非空字符串。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 断言 icon 与创建 listing 提交的卡片字段一致；downloads 为按 agent_id 聚合的下载总数（无下载时为 0）。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 构造快照缺失/畸形场景（agent_info_json 非 dict、缺 agent_id/agent_info、tools 含非 dict 元素），确认接口仍返回 200，且 model_name/duty_prompt
+      安全降级为 null、tools 降级为空列表，不出现 500。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 用不存在的 agent_repository_id 调用详情接口，断言 404；用未认证/无权限 token 调用断言 401，且错误响应不泄露资源是否真实存在。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 检查服务日志不泄露 API Key/Token/密码，并清理本次创建的临时 listing 与版本数据。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - GET /repository/agent/{id} 返回 200，响应包含 model_name、duty_prompt、tools、icon、downloads，且与仓库快照、卡片字段、下载聚合一致。
+  - 快照缺失/畸形时安全降级为 model_name=null、duty_prompt=null、tools=[]，接口不抛 500。
+  - 不存在资源返回 404，未认证返回 401，失败路径不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 498
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 准备本地真实测试环境与“仓库详情接口解析快照返回 model_name/duty_prompt/tools/icon/downloads”要求的最小数据：使用 SU/Admin 测试账号，通过实际 Agent 版本发布/申请 listing
+      流程创建一条带唯一 RunID 的仓库 listing（含 icon、tags、content 卡片字段），记录 agent_repository_id、agent_id 与发布版本快照。
+    - 调用 GET /repository/agent/{agent_repository_id} 真实详情接口，记录 HTTP 状态码与完整响应 JSON。
+    - 断言返回 200 OK，且响应含 agent_repository_id、agent_id、name、display_name、description、author、icon、status、version_label、downloads、created_at
+      等基础字段。
+    - 断言 model_name 等于仓库快照根 Agent（agent_info_json.agent_info[root agent_id]）的 model_name；duty_prompt 等于根 Agent 的 duty_prompt。
+    - 断言 tools 为根 Agent 快照中工具显示名列表（优先取 origin_name，回退 name），元素均为非空字符串。
+    - 断言 icon 与创建 listing 提交的卡片字段一致；downloads 为按 agent_id 聚合的下载总数（无下载时为 0）。
+    - 构造快照缺失/畸形场景（agent_info_json 非 dict、缺 agent_id/agent_info、tools 含非 dict 元素），确认接口仍返回 200，且 model_name/duty_prompt 安全降级为
+      null、tools 降级为空列表，不出现 500。
+    - 用不存在的 agent_repository_id 调用详情接口，断言 404；用未认证/无权限 token 调用断言 401，且错误响应不泄露资源是否真实存在。
+    - 检查服务日志不泄露 API Key/Token/密码，并清理本次创建的临时 listing 与版本数据。
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - GET /repository/agent/{id} 返回 200，响应包含 model_name、duty_prompt、tools、icon、downloads，且与仓库快照、卡片字段、下载聚合一致。
+    - 快照缺失/畸形时安全降级为 model_name=null、duty_prompt=null、tools=[]，接口不抛 500。
+    - 不存在资源返回 404，未认证返回 401，失败路径不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

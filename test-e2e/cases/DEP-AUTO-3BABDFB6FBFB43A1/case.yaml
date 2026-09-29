@@ -1,0 +1,103 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-AUTO-3BABDFB6FBFB43A1
+  feature_id: V5-DEP-AUTO-3BABDFB6FBFB43A1
+  business_rule_ids:
+  - V5-DEP-AUTO-3BABDFB6FBFB43A1-RULE-01
+  title: v2.5.4_0910_context_budget_v2.sql 列重命名/合并/回填幂等与一致性校验阻断
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 升级部署到 Context Budget V2 时，防止 model_monitoring_record_t 列重命名/合并造成监控元数据丢失或被错误覆盖；防止 V1 历史回填与代码契约(compaction target
+    0.6 与 FLOOR 公式)不一致；防止表/列缺失或回填不一致被静默绕过，确保迁移失败可 RAISE 阻断并整体回滚。
+  preconditions:
+  - '- deploy/sql/migrations/v2.5.4_0910_context_budget_v2.sql
+
+    - 本地/CI PostgreSQL 测试库(schema=nexent, 表 model_monitoring_record_t)
+
+    - 迁移 fixture：纯旧列库态、旧列+新列并存库态、含 V1 历史数据行库态、表缺失空库态'
+  test_data:
+    legacy_asset_declaration: '- deploy/sql/migrations/v2.5.4_0910_context_budget_v2.sql
+
+      - 本地/CI PostgreSQL 测试库(schema=nexent, 表 model_monitoring_record_t)
+
+      - 迁移 fixture：纯旧列库态、旧列+新列并存库态、含 V1 历史数据行库态、表缺失空库态'
+  steps:
+  - order: 1
+    action: 准备可重启的本地/CI PostgreSQL 测试库，schema=nexent，包含 model_monitoring_record_t 表；构造四种初始库态 fixture：(a) 仅含旧列(provider_input_limit_tokens、budget_provider_input_limit_tokens、budget_soft_limit_ratio、budget_soft_input_budget_tokens，目标新列缺失)；(b)
+      旧列与新列并存的混合库态(模拟 init.sql 新装 + 历史迁移补齐旧列)；(c) 含 V1 历史数据行(budget_fingerprint/budget_effective_input_limit_tokens/budget_compaction_trigger_threshold_tokens
+      非空)；(d) 不含 model_monitoring_record_t 表的空库态。
+    expected: 旧列重命名：四种旧列在目标列缺失时被正确重命名为目标列，原数据未丢失；既有目标列时旧列合并后 DROP，合并值正确(目标 NULL 时取源值)。
+  - order: 2
+    action: 对 (a) 库态执行迁移脚本，断言 provider_input_limit_tokens→effective_input_limit_tokens、budget_provider_input_limit_tokens→budget_effective_input_limit_tokens、budget_soft_limit_ratio→budget_compaction_trigger_ratio、budget_soft_input_budget_tokens→budget_compaction_trigger_threshold_tokens
+      完成重命名，旧列不残留且原数据保留。
+    expected: 新增预算五列全部存在(IF NOT EXISTS 幂等)，且旧硬输入预算列 budget_hard_input_budget_tokens 被删除。
+  - order: 3
+    action: 对 (b) 库态执行迁移，断言并存列按“先 UPDATE 合并(目标为 NULL 且源非 NULL 时取源值)再 DROP 源列”顺序处理，合并后目标列值等于源列值，源列被删除且无数据丢失。
+    expected: V1 历史回填符合契约：schema_version=1，trigger_ratio_source='legacy_payload'，target_ratio=0.6 且 target_ratio_source='code_default'，target_tokens=FLOOR(effective_input_limit_tokens*0.6)。
+  - order: 4
+    action: 对 (a)/(b) 执行后校验 ADD COLUMN IF NOT EXISTS 新增列 budget_schema_version、budget_compaction_trigger_ratio_source、budget_compaction_target_ratio、budget_compaction_target_ratio_source、budget_compaction_target_tokens
+      全部存在。
+    expected: 回填一致性校验：任何 target_ratio 偏离 0.6 或 target_tokens 偏离公式的历史行触发 RAISE 并整批回滚，不留半迁移状态。
+  - order: 5
+    action: 对 (c) 的 V1 历史行验证回填：budget_schema_version=1、budget_compaction_trigger_ratio_source='legacy_payload'、budget_compaction_target_ratio=0.6、budget_compaction_target_ratio_source='code_default'、budget_compaction_target_tokens=FLOOR(budget_effective_input_limit_tokens*0.6)::INTEGER。
+    expected: 表缺失时 RAISE 阻断，迁移不静默通过，不产生部分 DDL。
+  - order: 6
+    action: 对已回填库态重复执行迁移脚本，断言幂等：不重复重命名/不重复 DROP、不覆盖已回填值(COALESCE 保序)，且再次执行无 RAISE。
+    expected: 迁移脚本可重复执行(幂等)，第二次执行无异常、无重复副作用。
+  - order: 7
+    action: 构造回填不一致场景(人为将 budget_compaction_target_ratio 置为 0.7，或使 budget_compaction_target_tokens 偏离 FLOOR(budget_effective_input_limit_tokens*0.6))，执行迁移断言
+      RAISE EXCEPTION 'Context Budget V2 historical backfill consistency check failed'，并因 BEGIN/COMMIT 包裹实现整批回滚、不留下半迁移状态。
+    expected: 迁移脚本可重复执行(幂等)，第二次执行无异常、无重复副作用。
+  - order: 8
+    action: 对 (d) 空库态(表缺失)执行迁移，断言 RAISE EXCEPTION 'nexent.model_monitoring_record_t must exist before Context Budget V2 migration'，且不产生部分
+      DDL。
+    expected: 迁移脚本可重复执行(幂等)，第二次执行无异常、无重复副作用。
+  - order: 9
+    action: 校验旧列 budget_hard_input_budget_tokens 被 DROP COLUMN IF EXISTS 移除，迁移结果与“停服后应用”部署约定一致。
+    expected: 迁移脚本可重复执行(幂等)，第二次执行无异常、无重复副作用。
+  expected_results:
+  - 旧列重命名：四种旧列在目标列缺失时被正确重命名为目标列，原数据未丢失；既有目标列时旧列合并后 DROP，合并值正确(目标 NULL 时取源值)。
+  - 新增预算五列全部存在(IF NOT EXISTS 幂等)，且旧硬输入预算列 budget_hard_input_budget_tokens 被删除。
+  - V1 历史回填符合契约：schema_version=1，trigger_ratio_source='legacy_payload'，target_ratio=0.6 且 target_ratio_source='code_default'，target_tokens=FLOOR(effective_input_limit_tokens*0.6)。
+  - 回填一致性校验：任何 target_ratio 偏离 0.6 或 target_tokens 偏离公式的历史行触发 RAISE 并整批回滚，不留半迁移状态。
+  - 表缺失时 RAISE 阻断，迁移不静默通过，不产生部分 DDL。
+  - 迁移脚本可重复执行(幂等)，第二次执行无异常、无重复副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 41
+  risk_type: DEPLOYMENT
+  risk: 升级部署到 Context Budget V2 时，防止 model_monitoring_record_t 列重命名/合并造成监控元数据丢失或被错误覆盖；防止 V1 历史回填与代码契约(compaction target 0.6
+    与 FLOOR 公式)不一致；防止表/列缺失或回填不一致被静默绕过，确保迁移失败可 RAISE 阻断并整体回滚。
+  condition:
+  - '- deploy/sql/migrations/v2.5.4_0910_context_budget_v2.sql
+
+    - 本地/CI PostgreSQL 测试库(schema=nexent, 表 model_monitoring_record_t)
+
+    - 迁移 fixture：纯旧列库态、旧列+新列并存库态、含 V1 历史数据行库态、表缺失空库态'
+  metrics:
+  - 旧列重命名：四种旧列在目标列缺失时被正确重命名为目标列，原数据未丢失；既有目标列时旧列合并后 DROP，合并值正确(目标 NULL 时取源值)。
+  - 新增预算五列全部存在(IF NOT EXISTS 幂等)，且旧硬输入预算列 budget_hard_input_budget_tokens 被删除。
+  - V1 历史回填符合契约：schema_version=1，trigger_ratio_source='legacy_payload'，target_ratio=0.6 且 target_ratio_source='code_default'，target_tokens=FLOOR(effective_input_limit_tokens*0.6)。
+  - 回填一致性校验：任何 target_ratio 偏离 0.6 或 target_tokens 偏离公式的历史行触发 RAISE 并整批回滚，不留半迁移状态。
+  - 表缺失时 RAISE 阻断，迁移不静默通过，不产生部分 DDL。
+  - 迁移脚本可重复执行(幂等)，第二次执行无异常、无重复副作用。
+  thresholds:
+  - 旧列重命名：四种旧列在目标列缺失时被正确重命名为目标列，原数据未丢失；既有目标列时旧列合并后 DROP，合并值正确(目标 NULL 时取源值)。
+  - 新增预算五列全部存在(IF NOT EXISTS 幂等)，且旧硬输入预算列 budget_hard_input_budget_tokens 被删除。
+  - V1 历史回填符合契约：schema_version=1，trigger_ratio_source='legacy_payload'，target_ratio=0.6 且 target_ratio_source='code_default'，target_tokens=FLOOR(effective_input_limit_tokens*0.6)。
+  - 回填一致性校验：任何 target_ratio 偏离 0.6 或 target_tokens 偏离公式的历史行触发 RAISE 并整批回滚，不留半迁移状态。
+  - 表缺失时 RAISE 阻断，迁移不静默通过，不产生部分 DDL。
+  - 迁移脚本可重复执行(幂等)，第二次执行无异常、无重复副作用。
+  recovery_expectations:
+  - 旧列重命名：四种旧列在目标列缺失时被正确重命名为目标列，原数据未丢失；既有目标列时旧列合并后 DROP，合并值正确(目标 NULL 时取源值)。
+  - 新增预算五列全部存在(IF NOT EXISTS 幂等)，且旧硬输入预算列 budget_hard_input_budget_tokens 被删除。
+  - V1 历史回填符合契约：schema_version=1，trigger_ratio_source='legacy_payload'，target_ratio=0.6 且 target_ratio_source='code_default'，target_tokens=FLOOR(effective_input_limit_tokens*0.6)。
+  - 回填一致性校验：任何 target_ratio 偏离 0.6 或 target_tokens 偏离公式的历史行触发 RAISE 并整批回滚，不留半迁移状态。
+  - 表缺失时 RAISE 阻断，迁移不静默通过，不产生部分 DDL。
+  - 迁移脚本可重复执行(幂等)，第二次执行无异常、无重复副作用。

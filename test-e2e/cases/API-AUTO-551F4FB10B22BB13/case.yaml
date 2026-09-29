@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-551F4FB10B22BB13
+  feature_id: F-168
+  business_rule_ids:
+  - F-168-RULE-01
+  title: hybrid_search 端点 tag_predicates 透传与 tenant 隔离、空值保持原行为｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: hybrid_search 端点 tag_predicates 透传与 tenant 隔离、空值保持原行为｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/assets/knowledge/；${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+  - 至少准备两个隔离租户各一个已配置 embedding 模型、写入带标签固定文档的知识库，models.yaml 中本用例所需真实向量/模型已配置且预检连通通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离账号与租户关系，准备租户 A、租户 B 的知识库，写入带不同标签的固定文档；密码/Token 仅从 secrets.env 注入。
+    expected: 缺省/空 tag_predicates 时返回 200，搜索行为与请求结构同改动前一致，不注入 tag_predicates 参数。
+  - order: 2
+    action: 用租户 A 账号调用 POST /indices/search/hybrid，请求体不携带 tag_predicates（缺省），记录响应状态与结果列表结构（每项 score/document/index/scores/highlight_terms
+      等）。
+    expected: 非空 tag_predicates 时返回 200，结果列表仅包含满足标签过滤条件的文档，且 tenant_id 隔离共同生效。
+  - order: 3
+    action: 用租户 A 账号再次调用同一接口，携带非空 tag_predicates 过滤条件（命中部分文档标签），断言结果仅包含满足标签条件的文档。
+    expected: 无读权限租户访问返回 403，跨租户文档不出现；不存在的知识库返回 404。
+  - order: 4
+    action: 用租户 B 账号请求租户 A 的知识库执行 hybrid_search，验证逐 KB 读权限拦截（403）且结果不泄露跨租户文档；请求不存在的知识库名称，验证映射为 404。
+    expected: 未配置 embedding 模型的知识库返回 409，detail.error_type 为 KNOWLEDGE_BASE_NEEDS_MODEL_CONFIG。
+  - order: 5
+    action: 对未配置 embedding 模型的知识库发起 hybrid_search，验证 409 且 detail.error_type 为 KNOWLEDGE_BASE_NEEDS_MODEL_CONFIG。
+    expected: 失败路径返回明确错误，无半写入、重复副作用或跨租户泄露；日志与响应不含明文凭据。
+  - order: 6
+    action: 对比 tag_predicates 为空与缺省两种请求，确认不注入 tag_predicates 参数，搜索行为与请求结构与改动前一致。
+    expected: 失败路径返回明确错误，无半写入、重复副作用或跨租户泄露；日志与响应不含明文凭据。
+  - order: 7
+    action: 检查日志与错误响应不含明文 password/token/API key；清理临时知识库与账号数据。
+    expected: 失败路径返回明确错误，无半写入、重复副作用或跨租户泄露；日志与响应不含明文凭据。
+  expected_results:
+  - 缺省/空 tag_predicates 时返回 200，搜索行为与请求结构同改动前一致，不注入 tag_predicates 参数。
+  - 非空 tag_predicates 时返回 200，结果列表仅包含满足标签过滤条件的文档，且 tenant_id 隔离共同生效。
+  - 无读权限租户访问返回 403，跨租户文档不出现；不存在的知识库返回 404。
+  - 未配置 embedding 模型的知识库返回 409，detail.error_type 为 KNOWLEDGE_BASE_NEEDS_MODEL_CONFIG。
+  - 失败路径返回明确错误，无半写入、重复副作用或跨租户泄露；日志与响应不含明文凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 496
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取隔离账号与租户关系，准备租户 A、租户 B 的知识库，写入带不同标签的固定文档；密码/Token 仅从 secrets.env 注入。
+    - 用租户 A 账号调用 POST /indices/search/hybrid，请求体不携带 tag_predicates（缺省），记录响应状态与结果列表结构（每项 score/document/index/scores/highlight_terms
+      等）。
+    - 用租户 A 账号再次调用同一接口，携带非空 tag_predicates 过滤条件（命中部分文档标签），断言结果仅包含满足标签条件的文档。
+    - 用租户 B 账号请求租户 A 的知识库执行 hybrid_search，验证逐 KB 读权限拦截（403）且结果不泄露跨租户文档；请求不存在的知识库名称，验证映射为 404。
+    - 对未配置 embedding 模型的知识库发起 hybrid_search，验证 409 且 detail.error_type 为 KNOWLEDGE_BASE_NEEDS_MODEL_CONFIG。
+    - 对比 tag_predicates 为空与缺省两种请求，确认不注入 tag_predicates 参数，搜索行为与请求结构与改动前一致。
+    - 检查日志与错误响应不含明文 password/token/API key；清理临时知识库与账号数据。
+    response_expectations:
+    - 缺省/空 tag_predicates 时返回 200，搜索行为与请求结构同改动前一致，不注入 tag_predicates 参数。
+    - 非空 tag_predicates 时返回 200，结果列表仅包含满足标签过滤条件的文档，且 tenant_id 隔离共同生效。
+    - 无读权限租户访问返回 403，跨租户文档不出现；不存在的知识库返回 404。
+    - 未配置 embedding 模型的知识库返回 409，detail.error_type 为 KNOWLEDGE_BASE_NEEDS_MODEL_CONFIG。
+    - 失败路径返回明确错误，无半写入、重复副作用或跨租户泄露；日志与响应不含明文凭据。

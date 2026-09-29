@@ -2,7 +2,7 @@
 
 ## Usage guide
 
-Create or update `task.md` according to [SPEC maintenance guidance](spec-maintenance-guide.md). The dependency order is formal test design, product implementation, fixed test implementation and manifest binding, local verification, then source/view closeout. Use numbered groups and checkboxes. Do not merge Legacy UT obligations into formal D1-D5 coverage.
+Create or update `task.md` according to [SPEC maintenance guidance](spec-maintenance-guide.md). The dependency order is formal test design, product implementation, fixed test implementation and case-local binding, local verification, then source/view closeout. Use numbered groups and checkboxes. Do not merge Legacy UT obligations into formal D1-D5 coverage.
 
 # Tasks — <Feature Name>
 
@@ -19,7 +19,7 @@ Create or update `task.md` according to [SPEC maintenance guidance](spec-mainten
 ## 3. Fixed Test Implementation
 
 - [ ] 3.1 Implement affected D1-D5 scripts after stable interfaces exist; bind case IDs in test metadata. [AC-001]
-- [ ] 3.2 Add or update manifest entries and hashes for only affected cases. [AC-001]
+- [ ] 3.2 Add or update `execution.yaml` for only affected Case directories; regenerate derived hashes. [AC-001]
 - [ ] 3.3 For a bug fix, retain a focused regression reproduction; an earlier reproduction script is allowed when it helps prove the defect. [AC-001]
 
 ## 4. Verification
@@ -39,7 +39,7 @@ Use `PENDING`, `PASS`, `FAIL` or `BLOCKED`. `N/A` applies only to an irrelevant 
 ## 6. Completion Check
 
 - [ ] 6.1 Every affected requirement and business rule has validated structured cases at every required stage.
-- [ ] 6.2 Every automated affected case has a valid manifest binding and executable fixed script.
+- [ ] 6.2 Every automated affected Case has a valid case-local binding and executable fixed script.
 - [ ] 6.3 No required P0/P1 case is missing, skipped, expected failure or unimplemented.
 - [ ] 6.4 The generated Excel view matches structured assets and was not manually maintained.
 - [ ] 6.5 Proposal, design, tasks, product behavior and formal assets agree; remaining risks are explicit.

@@ -1,0 +1,74 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-F2215F8782D68127
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: GlobalThreadPool 删除后 run_async 迁移 ThreadManager、导入/异步提交/关停回归｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: GlobalThreadPool 删除后 run_async 迁移 ThreadManager、导入/异步提交/关停回归｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - nest_asyncio 在测试环境中不可用，或由测试 monkeypatch 令其导入抛 ImportError，以覆盖事件循环内的 fallback 分支。
+  - openjiuwen 允许未安装（适配器模块级已做 import 保护），不因此影响本用例断言。
+  test_data:
+    legacy_asset_declaration: '- 无额外本地资产依赖；测试内构造最小 LanePolicy（含 model-tool-io lane）与简单协程 fixture。'
+  steps:
+  - order: 1
+    action: 导入 adapters/jiuwen_sdk_adapter 模块，确认其模块级加载不引用已删除的 backend/utils/thread_utils（GlobalThreadPool/submit/pool），且 run_async
+      可正常访问。
+    expected: 旧 backend/utils/thread_utils（GlobalThreadPool、submit、pool）已删除，模块不可导入且仓库内无残留引用。
+  - order: 2
+    action: 断言旧模块已移除：importlib.util.find_spec("backend.utils.thread_utils") 返回 None；对 backend 目录源码无 GlobalThreadPool、thread_utils.submit
+      残留引用。
+    expected: run_async 无运行事件循环时返回协程结果；事件循环内且 nest_asyncio 缺失时经 ThreadManager 在 model-tool-io lane 受管线程返回协程结果，任务名 jiuwen-coroutine、owner
+      runtime。
+  - order: 3
+    action: 构造最小 async 协程，在无运行事件循环的同步上下文调用 run_async(coro)，记录返回值并确认走 asyncio.run 分支。
+    expected: nexent.core.concurrency 暴露 ManagedTaskSpec、get_current_thread_manager、ThreadManager；manager start/run_sync/shutdown
+      全链路正常，shutdown 后 manager.state 为 CLOSED（无 stuck），无活跃执行。
+  - order: 4
+    action: 用 monkeypatch 令 nest_asyncio 导入抛 ImportError，并在运行中的事件循环内调用 run_async(coro)，验证走 manager.run_sync("model-tool-io",
+      ManagedTaskSpec(task_name="jiuwen-coroutine", owner="runtime"), run_in_thread) 分支，记录返回值、目标 lane 与任务名。
+    expected: 异常路径抛出明确领域异常（KeyError 未知 lane、ThreadManagerNotRunning 未启动），不返回伪成功。
+  - order: 5
+    action: 验证 from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager 可导入；构造含 model-tool-io Lane
+      的 ThreadManager，依次执行 start → run_sync 提交闭包 → shutdown，记录 manager.state 与活跃执行数。
+    expected: 日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 异常路径：向未知 lane 提交断言抛 KeyError；manager 未 start 直接 submit 断言抛 ThreadManagerNotRunning，不吞异常返回伪成功。
+    expected: 日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 确认日志/遥测不输出明文 API Key/Token/模型密钥；测试结束释放临时事件循环与对象，确保可重复执行。
+    expected: 日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 旧 backend/utils/thread_utils（GlobalThreadPool、submit、pool）已删除，模块不可导入且仓库内无残留引用。
+  - run_async 无运行事件循环时返回协程结果；事件循环内且 nest_asyncio 缺失时经 ThreadManager 在 model-tool-io lane 受管线程返回协程结果，任务名 jiuwen-coroutine、owner
+    runtime。
+  - nexent.core.concurrency 暴露 ManagedTaskSpec、get_current_thread_manager、ThreadManager；manager start/run_sync/shutdown 全链路正常，shutdown
+    后 manager.state 为 CLOSED（无 stuck），无活跃执行。
+  - 异常路径抛出明确领域异常（KeyError 未知 lane、ThreadManagerNotRunning 未启动），不返回伪成功。
+  - 日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 420
+  unit_boundary: SDK并发调度
+  inputs:
+  - '- 无额外本地资产依赖；测试内构造最小 LanePolicy（含 model-tool-io lane）与简单协程 fixture。'
+  assertions:
+  - 旧 backend/utils/thread_utils（GlobalThreadPool、submit、pool）已删除，模块不可导入且仓库内无残留引用。
+  - run_async 无运行事件循环时返回协程结果；事件循环内且 nest_asyncio 缺失时经 ThreadManager 在 model-tool-io lane 受管线程返回协程结果，任务名 jiuwen-coroutine、owner
+    runtime。
+  - nexent.core.concurrency 暴露 ManagedTaskSpec、get_current_thread_manager、ThreadManager；manager start/run_sync/shutdown 全链路正常，shutdown
+    后 manager.state 为 CLOSED（无 stuck），无活跃执行。
+  - 异常路径抛出明确领域异常（KeyError 未知 lane、ThreadManagerNotRunning 未启动），不返回伪成功。
+  - 日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。

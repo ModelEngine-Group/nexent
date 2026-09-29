@@ -12,7 +12,7 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 - Treat `nexent/` as the Git-managed product repository and its sibling `nexent-doc/` as the document repository.
 - Never run Git commands in the document repository or move SPEC documents into the product repository.
 - Preserve unrelated changes. Record the initial branch/status, applicable repository instructions, build configuration, and test layout.
-- Keep the existing tests under `test/backend`, `test/sdk`, and `test/ext_components` as Legacy UT. Do not map them into the formal D1-D5 manifest.
+- Keep the existing tests under `test/backend`, `test/sdk`, and `test/ext_components` as Legacy UT. Do not map them into the formal D1-D5 registry.
 
 ## Read the right references
 
@@ -24,7 +24,7 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 | Create or revise `task.md` | [task-template.md](references/task-template.md) |
 | Plan, execute, or close verification | [verification-guide.md](references/verification-guide.md) |
 
-Use `nexent-test-assets` for the concrete feature-catalog, case, automation, manifest, schema, and Excel formats. `proposal.md` owns the current-change acceptance criteria, `design.md` owns design rationale and test strategy, and `task.md` owns the change-level traceability and evidence record.
+Use `nexent-test-assets` for the concrete Feature, Case, execution binding, schema, and Excel formats. `proposal.md` owns the current-change acceptance criteria, `design.md` owns design rationale and test strategy, and `task.md` owns the change-level traceability and evidence record.
 
 ## Gated workflow
 
@@ -36,7 +36,7 @@ Search existing SPECs and choose the maintenance mode. Inspect the relevant code
 
 Create or update `proposal.md`, `design.md`, and `task.md`. Update the product feature catalog and define observable acceptance criteria. Design every applicable D1-D5 case before product implementation. Each case must have a stable Case ID, owning Feature ID, priority, precise preconditions, steps, expected results, forbidden side effects, and the stage-specific fields required by the repository schemas.
 
-Create a requirement change record under `test/changes/requirements/` or a lightweight bug record under `test/changes/bugs/`. Run the formal asset validators and regenerate the Excel view. Do not invent final script paths, selectors, implementation hashes, or passing results during design.
+Create a requirement change record under `test-e2e/changes/requirements/` or a lightweight bug record under `test-e2e/changes/bugs/`. Put lasting Feature and Case contracts in `test-e2e/features/` and `test-e2e/cases/`, not only in the change record. Run the design-phase validator and regenerate the Excel view. Do not invent final script paths, selectors, implementation hashes, or passing results during design.
 
 The design gate fails when an in-scope behavior lacks an applicable case or justified exclusion, a case lacks executable assertions, stage boundaries are violated, affected Feature/Case declarations are stale, or schema and traceability validation fail. Resolve material behavior conflicts before implementation. No separate manual test-case approval is required by this workflow.
 
@@ -44,9 +44,9 @@ The design gate fails when an in-scope behavior lacks an applicable case or just
 
 Implement the minimum change needed to satisfy the defined behavior, following existing architecture and contracts. If implementation reveals that a requirement, product rule, Scenario, or test contract is wrong, update and validate the formal design assets before continuing. Do not silently weaken a case to fit the implementation.
 
-### 4. Implement fixed tests and the manifest
+### 4. Implement fixed tests and case-local bindings
 
-After product implementation, implement the affected formal D1-D5 scripts under `test/automation/d1` through `test/automation/d5`. Bind each automated script or test item to its Case ID and incrementally update only the affected entries in `test/manifests/d1-d5.yaml`. Then run full manifest and traceability validation.
+After product implementation, implement each affected D1-D5 primary script beside `test-e2e/cases/<Case-ID>/case.yaml`; keep reusable helpers under `test-e2e/infra/automation/`. Add or update that Case's `execution.yaml` with framework, file, selector, and declared profile/asset needs. Then run full binding and traceability validation. Do not hand-edit the derived registry.
 
 For a confirmed bug, a focused failing reproduction may be implemented before the product fix when that is the clearest way to preserve the regression. Existing formal cases should be strengthened instead of duplicated when they already own the behavior.
 
@@ -60,7 +60,7 @@ Record sanitized commands, results, evidence paths, and unresolved blockers in `
 
 ### 6. Close out
 
-Run the unified formal-asset validator, deterministic Excel check, affected tests, and relevant product checks. Confirm SPEC, feature catalog, cases, change record, scripts, manifest, implementation, and evidence agree. Report changed files, Case results, remaining risks, and unverified items. Formal completion requires every current required acceptance criterion to pass.
+Run the unified formal-asset validator, deterministic Excel check, affected tests, and relevant product checks. Confirm SPEC, Feature, Case, change record, scripts, case-local bindings, implementation, and evidence agree. Report changed files, Case results, remaining risks, and unverified items. Formal completion requires every current required acceptance criterion to pass.
 
 ## Stop conditions
 

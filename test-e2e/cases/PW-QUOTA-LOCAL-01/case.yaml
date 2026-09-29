@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-QUOTA-LOCAL-01
+  feature_id: V5-PW-QUOTA-LOCAL-01
+  business_rule_ids:
+  - V5-PW-QUOTA-LOCAL-01-RULE-01
+  title: Local Knowledge容量：平台配额→租户阈值→上传触顶→释放
+  type: E2E
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 验证Local Knowledge模式平台/租户容量UI和真实上传限额。
+  preconditions:
+  - enableAidpKnowledge=false
+  - SU+Tenant Admin
+  - 准备不同大小quota测试文件
+  test_data:
+    legacy_asset_declaration: config/environment.yaml；assets/documents/quota_*.bin；config/users.yaml
+  steps:
+  - order: 1
+    action: SU在/owner-manage Knowledge/PlatformQuotaPanel记录原值并设置测试平台容量。
+    expected: 仅Local模式出现对应quota UI。
+  - order: 2
+    action: 到/resource-manage设置测试租户warning/hard quota。
+    expected: warning告警、hard limit真实拒绝。
+  - order: 3
+    action: 到/knowledges创建/选择测试KB。
+    expected: 删除后usage回落。
+  - order: 4
+    action: 上传文件使usage接近warning，等待usage刷新。
+    expected: 并发quota竞争由API/REL。
+  - order: 5
+    action: 确认告警/使用量显示。
+    expected: 并发quota竞争由API/REL。
+  - order: 6
+    action: 继续上传超过hard limit的文件。
+    expected: 并发quota竞争由API/REL。
+  - order: 7
+    action: 确认明确失败且无半文件。
+    expected: 并发quota竞争由API/REL。
+  - order: 8
+    action: 删除已上传文件并等待usage回落。
+    expected: 并发quota竞争由API/REL。
+  - order: 9
+    action: 再次上传小文件确认恢复。
+    expected: 并发quota竞争由API/REL。
+  - order: 10
+    action: 恢复原始quota。
+    expected: 并发quota竞争由API/REL。
+  expected_results:
+  - 仅Local模式出现对应quota UI。
+  - warning告警、hard limit真实拒绝。
+  - 删除后usage回落。
+  - 并发quota竞争由API/REL。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 12
+  actor: Nexent browser user
+  journey:
+  - SU在/owner-manage Knowledge/PlatformQuotaPanel记录原值并设置测试平台容量。
+  - 到/resource-manage设置测试租户warning/hard quota。
+  - 到/knowledges创建/选择测试KB。
+  - 上传文件使usage接近warning，等待usage刷新。
+  - 确认告警/使用量显示。
+  - 继续上传超过hard limit的文件。
+  - 确认明确失败且无半文件。
+  - 删除已上传文件并等待usage回落。
+  - 再次上传小文件确认恢复。
+  - 恢复原始quota。
+  final_business_result:
+  - 仅Local模式出现对应quota UI。
+  - warning告警、hard limit真实拒绝。
+  - 删除后usage回落。
+  - 并发quota竞争由API/REL。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-QUOTA-LOCAL-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

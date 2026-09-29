@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-CHAT-04
+  feature_id: V5-PW-CHAT-04
+  business_rule_ids:
+  - V5-PW-CHAT-04-RULE-01
+  title: 多Agent协作卡片→部分失败/完成展示
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 只验证用户可见多Agent展示，不用UI证明后端并行。
+  preconditions:
+  - 主Agent绑定2+协作Agent
+  - 有固定多协作任务
+  test_data:
+    legacy_asset_declaration: config/models.yaml；可选services/test-a2a/
+  steps:
+  - order: 1
+    action: 选择多Agent主Agent。
+    expected: 多Agent可见状态和最终结果一致。
+  - order: 2
+    action: 发送触发多个协作Agent的固定任务。
+    expected: 部分失败不丢其他结果。
+  - order: 3
+    action: 等待多个Agent执行卡片/步骤出现。
+    expected: 刷新恢复。
+  - order: 4
+    action: 确认卡片名称与配置协作Agent对应。
+    expected: 真实并行由timestamp/trace判断。
+  - order: 5
+    action: 等待正常场景完成，各卡片进入终态且主回答出现。
+    expected: 真实并行由timestamp/trace判断。
+  - order: 6
+    action: 执行一个受控部分失败场景，观察失败卡片与成功卡片同时保留。
+    expected: 真实并行由timestamp/trace判断。
+  - order: 7
+    action: 刷新会话确认终态展示恢复。
+    expected: 真实并行由timestamp/trace判断。
+  expected_results:
+  - 多Agent可见状态和最终结果一致。
+  - 部分失败不丢其他结果。
+  - 刷新恢复。
+  - 真实并行由timestamp/trace判断。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 41
+  actor: Nexent browser user
+  journey:
+  - 选择多Agent主Agent。
+  - 发送触发多个协作Agent的固定任务。
+  - 等待多个Agent执行卡片/步骤出现。
+  - 确认卡片名称与配置协作Agent对应。
+  - 等待正常场景完成，各卡片进入终态且主回答出现。
+  - 执行一个受控部分失败场景，观察失败卡片与成功卡片同时保留。
+  - 刷新会话确认终态展示恢复。
+  final_business_result:
+  - 多Agent可见状态和最终结果一致。
+  - 部分失败不丢其他结果。
+  - 刷新恢复。
+  - 真实并行由timestamp/trace判断。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-CHAT-04/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

@@ -1,0 +1,92 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-CCF3D3CB5D0FC268
+  feature_id: V5-REL-AUTO-CCF3D3CB5D0FC268
+  business_rule_ids:
+  - V5-REL-AUTO-CCF3D3CB5D0FC268-RULE-01
+  title: 持久 PENDING 评测运行重派发闭环与运行时幂等 claim
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 威胁/风险：服务重启会丢失内存中运行的评测任务线程（ManagedThreadManager 托管通道不持久），持久 PENDING 运行若不在启动后经后台维护被可靠重派发将永久滞留 PENDING；重派发缺 tenant/creator
+    或运行时服务暂不可用会中断调度，或对同一运行多次派发造成重复执行。测试目标：验证 list_dispatchable_pending_runs 仅取回持久 PENDING（evaluation_set_id>0、delete_flag='N'）并按
+    create_time 升序；_dispatch_pending_runs 对缺失 tenant/created_by 的运行跳过、对字段完整运行以 agent_evaluation_id(int)/user_id(str)/tenant_id(str)
+    调用 dispatch_agent_evaluation_run；派发异常保持 PENDING 供下轮重试；claim_agent_evaluation_run 条件更新(PENDING→RUNNING)幂等，保证重试不重复启动同一运行。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/secrets.env（本地组件测试环境参数，不含生产凭据）
+
+    - 本地测试数据库 fixture：多条 status=PENDING、evaluation_set_id>0、delete_flag=''N'' 的 AgentEvaluation 记录（create_time 错开；包含缺 tenant_id、缺
+    created_by 的异常记录）
+
+    - mock services.runtime_proxy_service.dispatch_agent_evaluation_run 记录调用参数'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/secrets.env（本地组件测试环境参数，不含生产凭据）
+
+      - 本地测试数据库 fixture：多条 status=PENDING、evaluation_set_id>0、delete_flag=''N'' 的 AgentEvaluation 记录（create_time 错开；包含缺 tenant_id、缺
+      created_by 的异常记录）
+
+      - mock services.runtime_proxy_service.dispatch_agent_evaluation_run 记录调用参数'
+  steps:
+  - order: 1
+    action: 准备本地测试数据库，写入多条持久 PENDING 运行：AgentEvaluation status=PENDING、evaluation_set_id>0、delete_flag='N'，create_time 错开，其中至少一条缺
+      tenant_id、一条缺 created_by；另插入一条 evaluation_set_id=0 的 no-set 行作为对照组。
+    expected: list_dispatchable_pending_runs 仅返回 status=PENDING、evaluation_set_id>0、delete_flag='N' 的运行，并按 create_time 升序。
+  - order: 2
+    action: 调用 database.agent_evaluation_db.list_dispatchable_pending_runs()，断言返回值仅包含 status=PENDING、evaluation_set_id>0、delete_flag='N'
+      的行，且按 create_time 升序排列，不包含 no-set 行。
+    expected: 字段完整运行按要求被重派发；缺 tenant_id/created_by 运行被跳过且不中断本轮调度。
+  - order: 3
+    action: mock services.runtime_proxy_service.dispatch_agent_evaluation_run 记录调用参数，将第 2 步结果传入 services.evaluation_maintenance._dispatch_pending_runs()。
+    expected: 派发异常被捕获，运行保持 PENDING，下轮可重试；不出现半写入或状态丢失。
+  - order: 4
+    action: 断言 tenant_id 与 created_by 均完整的运行以 agent_evaluation_id=int、user_id=str、tenant_id=str 调用 dispatch_agent_evaluation_run；缺
+      tenant_id 或 created_by 的运行被跳过（不调用）并输出 warning 日志。
+    expected: 运行时 claim 幂等：同一运行仅能由 PENDING 置为 RUNNING 一次，重复派发不重复执行。
+  - order: 5
+    action: 使 dispatch_agent_evaluation_run 抛异常后再次调用 _dispatch_pending_runs()，断言异常被捕获、该运行状态仍为 PENDING，且下一轮 list_dispatchable_pending_runs
+      仍能取回该行供重试。
+    expected: 运行时 claim 幂等：同一运行仅能由 PENDING 置为 RUNNING 一次，重复派发不重复执行。
+  - order: 6
+    action: 对同一 PENDING 运行先后两次调用 database.agent_evaluation_db.claim_agent_evaluation_run，断言第一次返回 True 且状态置为 RUNNING，第二次返回
+      False（条件更新不生效），保证重试不会重复启动同一运行。
+    expected: 运行时 claim 幂等：同一运行仅能由 PENDING 置为 RUNNING 一次，重复派发不重复执行。
+  expected_results:
+  - list_dispatchable_pending_runs 仅返回 status=PENDING、evaluation_set_id>0、delete_flag='N' 的运行，并按 create_time 升序。
+  - 字段完整运行按要求被重派发；缺 tenant_id/created_by 运行被跳过且不中断本轮调度。
+  - 派发异常被捕获，运行保持 PENDING，下轮可重试；不出现半写入或状态丢失。
+  - 运行时 claim 幂等：同一运行仅能由 PENDING 置为 RUNNING 一次，重复派发不重复执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 59
+  risk_type: RELIABILITY
+  risk: 威胁/风险：服务重启会丢失内存中运行的评测任务线程（ManagedThreadManager 托管通道不持久），持久 PENDING 运行若不在启动后经后台维护被可靠重派发将永久滞留 PENDING；重派发缺 tenant/creator
+    或运行时服务暂不可用会中断调度，或对同一运行多次派发造成重复执行。测试目标：验证 list_dispatchable_pending_runs 仅取回持久 PENDING（evaluation_set_id>0、delete_flag='N'）并按
+    create_time 升序；_dispatch_pending_runs 对缺失 tenant/created_by 的运行跳过、对字段完整运行以 agent_evaluation_id(int)/user_id(str)/tenant_id(str)
+    调用 dispatch_agent_evaluation_run；派发异常保持 PENDING 供下轮重试；claim_agent_evaluation_run 条件更新(PENDING→RUNNING)幂等，保证重试不重复启动同一运行。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/secrets.env（本地组件测试环境参数，不含生产凭据）
+
+    - 本地测试数据库 fixture：多条 status=PENDING、evaluation_set_id>0、delete_flag=''N'' 的 AgentEvaluation 记录（create_time 错开；包含缺 tenant_id、缺
+    created_by 的异常记录）
+
+    - mock services.runtime_proxy_service.dispatch_agent_evaluation_run 记录调用参数'
+  metrics:
+  - list_dispatchable_pending_runs 仅返回 status=PENDING、evaluation_set_id>0、delete_flag='N' 的运行，并按 create_time 升序。
+  - 字段完整运行按要求被重派发；缺 tenant_id/created_by 运行被跳过且不中断本轮调度。
+  - 派发异常被捕获，运行保持 PENDING，下轮可重试；不出现半写入或状态丢失。
+  - 运行时 claim 幂等：同一运行仅能由 PENDING 置为 RUNNING 一次，重复派发不重复执行。
+  thresholds:
+  - list_dispatchable_pending_runs 仅返回 status=PENDING、evaluation_set_id>0、delete_flag='N' 的运行，并按 create_time 升序。
+  - 字段完整运行按要求被重派发；缺 tenant_id/created_by 运行被跳过且不中断本轮调度。
+  - 派发异常被捕获，运行保持 PENDING，下轮可重试；不出现半写入或状态丢失。
+  - 运行时 claim 幂等：同一运行仅能由 PENDING 置为 RUNNING 一次，重复派发不重复执行。
+  recovery_expectations:
+  - list_dispatchable_pending_runs 仅返回 status=PENDING、evaluation_set_id>0、delete_flag='N' 的运行，并按 create_time 升序。
+  - 字段完整运行按要求被重派发；缺 tenant_id/created_by 运行被跳过且不中断本轮调度。
+  - 派发异常被捕获，运行保持 PENDING，下轮可重试；不出现半写入或状态丢失。
+  - 运行时 claim 幂等：同一运行仅能由 PENDING 置为 RUNNING 一次，重复派发不重复执行。
