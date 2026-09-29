@@ -2740,6 +2740,7 @@
   "skillRepository.mine.applyForbidden": "当前账号只能上架自己创建的 Skill",
   "skillRepository.mine.applySuccess": "已提交上架申请",
   "skillRepository.mine.applyError": "提交审批失败",
+  "skillRepository.mine.button.apply": "申请上架",
   "skillRepository.mine.deleteTitle": "删除 Skill",
   "skillRepository.mine.deleteContent": "确认删除 {{name}}？",
   "skillRepository.mine.viewReviewProgress": "查看审批进度",
