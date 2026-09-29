@@ -39,6 +39,10 @@ import {
 } from "lucide-react";
 import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
+import {
+  DEFAULT_EVALUATION_SET_FILE_SIZE_MB,
+  evaluationSetFileSizeToBytes,
+} from "@/const/agentEvaluation";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
@@ -2000,7 +2004,12 @@ function SetsTab() {
   const [ulDesc, setUlDesc] = useState("");
   const [ulFile, setUlFile] = useState<File | null>(null);
   const [fileErr, setFileErr] = useState("");
+  const [evaluationFileSizeMb, setEvaluationFileSizeMb] = useState(
+    DEFAULT_EVALUATION_SET_FILE_SIZE_MB
+  );
   const fileRef = useRef<HTMLInputElement>(null);
+  const evaluationFileSizeBytes =
+    evaluationSetFileSizeToBytes(evaluationFileSizeMb);
 
   const validateFile = (file: File) => {
     const ext = file.name.split(".").pop()?.toLowerCase();
@@ -2008,8 +2017,12 @@ function SetsTab() {
       setFileErr(t("agentEvaluation.uploadFileInvalid"));
       return false;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      setFileErr(t("agentEvaluation.uploadFileTooBig"));
+    if (file.size > evaluationFileSizeBytes) {
+      setFileErr(
+        t("agentEvaluation.uploadFileTooBig", {
+          limit: evaluationFileSizeMb,
+        })
+      );
       return false;
     }
     setFileErr("");
@@ -2102,6 +2115,24 @@ function SetsTab() {
       .then((d) => {
         setSets(d.data || d.items || []);
       });
+
+  useEffect(() => {
+    let active = true;
+    fetch(API_ENDPOINTS.evaluationSets.config, { headers: getAuthHeaders() })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        const configuredLimit = Number(payload?.data?.max_file_size_mb);
+        if (active && Number.isFinite(configuredLimit) && configuredLimit > 0) {
+          setEvaluationFileSizeMb(configuredLimit);
+        }
+      })
+      .catch(() => {
+        // Keep the backend default fallback when the config endpoint is unavailable.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -2697,7 +2728,9 @@ function SetsTab() {
               {t("agentEvaluation.uploadSetFile")} <Text type="danger">*</Text>
             </Text>
             <Text className="text-xs" type="secondary">
-              {t("agentEvaluation.uploadSetHint")}
+              {t("agentEvaluation.uploadSetHint", {
+                maxSizeMb: evaluationFileSizeMb,
+              })}
             </Text>
             <div
               style={{
@@ -2801,6 +2834,14 @@ function SetsTab() {
                     refreshSets();
                   } else {
                     const d = await r.json();
+                    if (String(d?.code) === "000403") {
+                      setFileErr(
+                        t("agentEvaluation.uploadFileTooBig", {
+                          limit: d?.details?.limit_mb ?? evaluationFileSizeMb,
+                        })
+                      );
+                      return;
+                    }
                     const arrayDetail = Array.isArray(d?.detail)
                       ? d.detail
                           .map(
@@ -2809,7 +2850,9 @@ function SetsTab() {
                           .join("; ")
                       : t("agentEvaluation.uploadErrorFormat");
                     const msg =
-                      typeof d?.detail === "string" ? d.detail : arrayDetail;
+                      typeof d?.detail === "string"
+                        ? d.detail
+                        : d?.message || arrayDetail;
                     setFileErr(msg);
                   }
                 } catch {
@@ -3071,11 +3114,16 @@ function SetsTab() {
                       setGenTargetSetId(undefined);
                       refreshSets();
                     } else {
-                      // Backend errors carry {code, message, details}; read
-                      // the real reason instead of a generic fallback.
-                      message.error(
-                        d?.message || t("agentEvaluation.createFailedShort")
-                      );
+                      const errorMessage =
+                        String(d?.code) === "000403"
+                          ? t("agentEvaluation.uploadFileTooBig", {
+                              limit:
+                                d?.details?.limit_mb ?? evaluationFileSizeMb,
+                            })
+                          : d?.detail ||
+                            d?.message ||
+                            t("agentEvaluation.createFailedShort");
+                      message.error(errorMessage);
                     }
                   } catch {
                   } finally {

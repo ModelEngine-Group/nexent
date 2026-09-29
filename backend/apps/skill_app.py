@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
-from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
+from consts.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
 from consts.const import ENABLE_AGENT_WORKBENCH
 from consts.model import (
     NL2SkillRunRequest,
@@ -157,6 +157,8 @@ async def install_skills(
             "installed": installed_names,
             "total": len(installed_names)
         })
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Error installing skills: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -197,6 +199,8 @@ async def create_skill(
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except AppException:
+        raise
     except SkillException as e:
         error_msg = str(e).lower()
         if "already exists" in error_msg:
@@ -246,6 +250,8 @@ async def create_skill_from_file(
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized: {e}")
         raise HTTPException(status_code=401, detail=str(e))
+    except AppException:
+        raise
     except ForbiddenError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
@@ -381,6 +387,8 @@ async def update_skill_from_file(
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except AppException:
+        raise
     except ForbiddenError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:

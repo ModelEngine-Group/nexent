@@ -186,6 +186,7 @@ export const API_ENDPOINTS = {
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
+    config: `${API_BASE_URL}/evaluation-sets/config`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
@@ -935,9 +936,11 @@ export const fetchWithErrorHandling = async (
             throw error;
           }
         }
+        // Preserve structured FILE_TOO_LARGE responses so upload callers can
+        // display the configured limit from details.limit_mb.
         throw new ApiError(
-          ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit.",
+          errorCode,
+          errorMessage || "File size exceeds limit.",
           errorDetails
         );
       }
