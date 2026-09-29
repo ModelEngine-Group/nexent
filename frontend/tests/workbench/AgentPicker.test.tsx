@@ -53,6 +53,21 @@ beforeEach(() => {
   });
   vi.mocked(importAgentFromRepository).mockResolvedValue({ agent_id: 99 });
 });
+it("opens the selected Agent's configuration route from the picker", async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <AgentPicker
+        open
+        agents={[agent]}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    </QueryClientProvider>
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+  expect(routerPush).toHaveBeenCalledWith("/zh/agents/8");
+});
 it("paginates six agents and resets the page on search", async () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
@@ -132,7 +147,7 @@ function mount() {
 it("opens the selected Agent's editor from the edit button", async () => {
   mount();
   await userEvent.click(screen.getByRole("button", { name: "编辑" }));
-  expect(routerPush).toHaveBeenCalledWith("/agents/8");
+  expect(routerPush).toHaveBeenCalledWith("/zh/agents/8");
 });
 it("shows the backend unavailable reason and only one published version badge", async () => {
   const select = vi.fn();

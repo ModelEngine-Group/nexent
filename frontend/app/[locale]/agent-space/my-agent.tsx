@@ -398,7 +398,7 @@ export function MyAgent({
     if (permission === "READ_ONLY") {
       return;
     }
-    router.push(`/${locale}/agents/${agentId}`);
+    router.push(`/${locale}/agents/${agentId}?from=agent-space&tab=mine`);
   };
 
   const handleDeleteAgent = (agent: MyEditableAgentItem) => {

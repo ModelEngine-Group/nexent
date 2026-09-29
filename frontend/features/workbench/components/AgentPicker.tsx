@@ -68,7 +68,10 @@ export function AgentPicker({
     );
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const locale = (i18n.resolvedLanguage || i18n.language).startsWith("en")
+    ? "en"
+    : "zh";
   const [tab, setTab] = useState("mine");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -358,7 +361,9 @@ export function AgentPicker({
                     <Button
                       size="small"
                       aria-label="编辑"
-                      onClick={() => router.push(`/agents/${agent.id}`)}
+                      onClick={() =>
+                        router.push(`/${locale}/agents/${agent.id}`)
+                      }
                     >
                       编辑
                     </Button>
