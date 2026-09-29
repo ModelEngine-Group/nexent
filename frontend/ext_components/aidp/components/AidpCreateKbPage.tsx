@@ -497,7 +497,7 @@ const AidpCreateKbPage: React.FC = () => {
                   onClick={goBackToList}
                   className="text-gray-500 hover:text-blue-500 disabled:cursor-not-allowed"
                 >
-                  {t("aidpKnowledge.createBreadcrumbKnowledge")}
+                  {t("aidpKnowledge.breadcrumbKnowledgeBase")}
                 </button>
               ),
             },

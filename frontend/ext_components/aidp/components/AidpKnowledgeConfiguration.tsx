@@ -10,8 +10,8 @@ import React, {
 import { useTranslation } from "react-i18next";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
-import { App, Button, Modal, Tag } from "antd";
-import { ArrowLeftOutlined, InfoCircleFilled } from "@ant-design/icons";
+import { App, Breadcrumb, Button, Modal, Tag } from "antd";
+import { InfoCircleFilled } from "@ant-design/icons";
 
 import { SETUP_PAGE_CONTAINER, STANDARD_CARD } from "@/const/layoutConstants";
 import { KB_SEARCH_DEBOUNCE_MS } from "@/const/knowledgeBase";
@@ -555,23 +555,34 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         style={containerStyle}
       >
         <div className="flex-1 min-h-0 w-full mt-4 overflow-y-auto">
-          <div className="mb-3 flex items-center gap-2 flex-wrap">
-            <Button
-              icon={<ArrowLeftOutlined />}
-              onClick={handleBackToList}
-              size="small"
-            >
-              {t("aidpKnowledge.backToList")}
-            </Button>
-            <h2 className="text-base font-semibold text-gray-800 truncate">
-              {activeKbItem.kds_name}
-            </h2>
-            {isUnavailable && (
-              <Tag color="default">{t("aidpKnowledge.kbUnavailable")}</Tag>
-            )}
-            {activeKbItem.permission === "READ_ONLY" && !isUnavailable && (
-              <Tag color="default">{t("aidpKnowledge.kbReadOnly")}</Tag>
-            )}
+          <div className="mb-3">
+            <Breadcrumb
+              items={[
+                {
+                  title: (
+                    <button
+                      type="button"
+                      onClick={handleBackToList}
+                      className="text-gray-500 hover:text-blue-500"
+                    >
+                      {t("aidpKnowledge.breadcrumbKnowledgeBase")}
+                    </button>
+                  ),
+                },
+                { title: t("aidpKnowledge.breadcrumbUploadFiles") },
+              ]}
+            />
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-semibold text-gray-800 truncate">
+                {activeKbItem.kds_name}
+              </h2>
+              {isUnavailable && (
+                <Tag color="default">{t("aidpKnowledge.kbUnavailable")}</Tag>
+              )}
+              {activeKbItem.permission === "READ_ONLY" && !isUnavailable && (
+                <Tag color="default">{t("aidpKnowledge.kbReadOnly")}</Tag>
+              )}
+            </div>
           </div>
           <AidpDocumentList
             activeKb={activeKbItem}

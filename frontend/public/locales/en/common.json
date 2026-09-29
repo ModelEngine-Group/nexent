@@ -4702,6 +4702,8 @@
   "aidpKnowledge.safetyGuardUnknown": "The remote response did not report this setting; saving submits the switch value explicitly",
   "aidpKnowledge.viewCards": "Cards",
   "aidpKnowledge.viewTable": "Table",
+  "aidpKnowledge.breadcrumbKnowledgeBase": "Knowledge bases",
+  "aidpKnowledge.breadcrumbUploadFiles": "Upload files",
   "project.config.description": "{productName} is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities.",
   "dreaming.description": "Automatically distill short-term memories into rollback-capable long-term versions.",
   "dreaming.alwaysOn.description": "Dreaming is always available and turns stable short-term memories into long-term memory. It does not run automatically unless you enable the schedule; you can also run it manually at any time.",

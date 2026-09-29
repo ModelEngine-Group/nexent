@@ -4713,6 +4713,8 @@
   "aidpKnowledge.safetyGuardUnknown": "远端未返回该设置，保存时将按当前开关显式提交",
   "aidpKnowledge.viewCards": "卡片",
   "aidpKnowledge.viewTable": "表格",
+  "aidpKnowledge.breadcrumbKnowledgeBase": "知识库",
+  "aidpKnowledge.breadcrumbUploadFiles": "上传文件",
   "quota.sourceFileUsage": "源文件用量",
   "quota.esPhysicalIndex": "ES 物理索引",
   "quota.personalKbUploadBlocked": "上传已阻止 — 个人知识库配额已达到上限",
