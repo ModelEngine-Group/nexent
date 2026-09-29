@@ -11,10 +11,10 @@ import {
   Eye,
   MoreHorizontal,
   Pencil,
-  Power,
   Search,
   Tag,
   Trash2,
+  Upload,
 } from "lucide-react";
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
@@ -439,9 +439,9 @@ function getMineSkillMenuItems({
   const items: MenuProps["items"] = [];
   if (canApplyListing) {
     items.push({
-      key: "apply",
-      label: t("skillRepository.mine.button.apply"),
-      icon: <Power className="size-3.5" aria-hidden />,
+      key: "apply-listing",
+      label: t("repository.mine.applyForListing"),
+      icon: <Upload className="size-3.5" aria-hidden />,
       onClick: onApplyListing,
     });
   }
