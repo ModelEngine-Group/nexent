@@ -160,14 +160,16 @@ export function MyAgentCard({
       onClick={onView}
       subtitle={
         versionLabel != null ? (
-          <span className="inline-flex items-center gap-1.5 truncate">
+          <span className="flex min-w-0 items-center gap-1.5">
             <span
               className="size-1.5 shrink-0 rounded-full bg-primary"
               aria-hidden
             />
-            {t("agentRepository.mine.currentVersion", {
-              version: versionLabel,
-            })}
+            <span className="min-w-0 truncate">
+              {t("agentRepository.mine.currentVersion", {
+                version: versionLabel,
+              })}
+            </span>
           </span>
         ) : undefined
       }
@@ -188,29 +190,24 @@ export function MyAgentCard({
           </>
         ) : undefined
       }
-      headerActions={
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          {menuItems.length > 0 ? (
-            <Dropdown
-              menu={{ items: menuItems }}
-              open={guideMenuOpen}
-              onOpenChange={onGuideMenuOpenChange}
-              trigger={["click"]}
-            >
-              <Button
-                type="text"
-                size="small"
-                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-                icon={<MoreHorizontal className="size-4" aria-hidden />}
-                aria-label={t("agentRepository.mine.menu.more")}
-                aria-haspopup="menu"
-              />
-            </Dropdown>
-          ) : null}
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
+      statusRow={
+        <div className="flex w-full min-w-0 items-center gap-2">
+          <span
+            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+              published
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+            }`}
+          >
+            {published
+              ? t("agentRepository.mine.lifecycle.published")
+              : t("agentRepository.mine.lifecycle.draft")}
+          </span>
+          <div className="flex min-w-0 flex-1 justify-end">
             {repositoryBadge ? (
               <span
-                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                aria-label={`${t(repositoryBadge.labelKey)}${repositoryBadge.versionLabel ? ` · ${repositoryBadge.versionLabel}` : ""}`}
+                className={`block w-fit max-w-full truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
                   repositoryBadge.variant === "pending"
                     ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
                     : repositoryBadge.variant === "rejected"
@@ -224,39 +221,56 @@ export function MyAgentCard({
                   : null}
               </span>
             ) : null}
-            {agent.is_available === false ? (
-              <Tooltip
-                title={
-                  unavailableReasonLabels.length > 0
-                    ? unavailableReasonLabels.join(", ")
-                    : t("agentSelector.agentUnavailable")
-                }
-              >
-                <span
-                  className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
-                  aria-label={
-                    unavailableReasonLabels.join(", ") ||
-                    t("agentSelector.agentUnavailable")
-                  }
-                >
-                  {t("mcpConfig.status.unavailable")}
-                </span>
-              </Tooltip>
-            ) : null}
-            <span
-              className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-                published
-                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                  : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
-              }`}
-            >
-              {published
-                ? t("agentRepository.mine.lifecycle.published")
-                : t("agentRepository.mine.lifecycle.draft")}
-            </span>
           </div>
         </div>
       }
+      headerActions={
+        menuItems.length > 0 || agent.is_available === false ? (
+          <div className="grid h-[60px] grid-rows-2">
+            <div className="flex items-center justify-end">
+              {menuItems.length > 0 ? (
+                <Dropdown
+                  menu={{ items: menuItems }}
+                  open={guideMenuOpen}
+                  onOpenChange={onGuideMenuOpenChange}
+                  trigger={["click"]}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                    icon={<MoreHorizontal className="size-4" aria-hidden />}
+                    aria-label={t("agentRepository.mine.menu.more")}
+                    aria-haspopup="menu"
+                  />
+                </Dropdown>
+              ) : null}
+            </div>
+            {agent.is_available === false ? (
+              <div className="flex items-center justify-end">
+                <Tooltip
+                  title={
+                    unavailableReasonLabels.length > 0
+                      ? unavailableReasonLabels.join(", ")
+                      : t("agentSelector.agentUnavailable")
+                  }
+                >
+                  <span
+                    className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                    aria-label={
+                      unavailableReasonLabels.join(", ") ||
+                      t("agentSelector.agentUnavailable")
+                    }
+                  >
+                    {t("mcpConfig.status.unavailable")}
+                  </span>
+                </Tooltip>
+              </div>
+            ) : null}
+          </div>
+        ) : undefined
+      }
+      fixedHeaderLayout
       footerLayout="inline"
       meta={
         footerDate ? (
