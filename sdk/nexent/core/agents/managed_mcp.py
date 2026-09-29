@@ -10,7 +10,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Callable
 
 from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
-from ...consts.mcp_errors import MCPToolTimeoutError
+from ...consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
 
 
 logger = logging.getLogger("managed_mcp")
@@ -40,12 +40,15 @@ class ManagedMCPToolCollection:
             raise ValueError("MCP connect timeout must be greater than zero")
         if request_timeout_seconds is not None and request_timeout_seconds <= 0:
             raise ValueError("MCP request timeout must be greater than zero")
+        # Keep the old keyword as a compatibility alias, but use it only for
+        # session startup. It must never become a per-tool request timeout.
+        if request_timeout_seconds is not None and connect_timeout_seconds == 30.0:
+            connect_timeout_seconds = request_timeout_seconds
         self.manager = manager
         self.server_parameters = server_parameters
         self.cancellation_scope = cancellation_scope
         self.tool_timeout_seconds = tool_timeout_seconds
         self.close_timeout_seconds = close_timeout_seconds
-        self.request_timeout_seconds = request_timeout_seconds
         self.connect_timeout_seconds = connect_timeout_seconds
         self._session_context_factory = session_context_factory
         self._tool_adapter_factory = tool_adapter_factory
@@ -114,12 +117,20 @@ class ManagedMCPToolCollection:
         async with AsyncExitStack() as stack:
             connections = []
             for parameters in self.server_parameters:
-                connection = await stack.enter_async_context(
-                    session_factory(
-                        parameters,
-                        client_session_timeout_seconds=self.request_timeout_seconds,
+                try:
+                    connection = await asyncio.wait_for(
+                        stack.enter_async_context(
+                            session_factory(
+                                parameters,
+                                client_session_timeout_seconds=None,
+                            )
+                        ),
+                        timeout=self.connect_timeout_seconds,
                     )
-                )
+                except asyncio.TimeoutError as exc:
+                    raise MCPConnectionTimeoutError(
+                        f"MCP connection timed out after {self.connect_timeout_seconds:g} seconds"
+                    ) from exc
                 connections.append(connection)
 
             tools = []
@@ -187,13 +198,8 @@ class ManagedMCPToolCollection:
                         wait_timeout=self.close_timeout_seconds,
                         mark_stuck_on_timeout=True,
                     )
-                    timeout_label = (
-                        f"{self.request_timeout_seconds:g}"
-                        if self.request_timeout_seconds is not None
-                        else f"{self.tool_timeout_seconds:g}"
-                    )
                     raise MCPToolTimeoutError(
-                        f"MCP tool request timed out after {timeout_label} seconds"
+                        f"MCP tool request timed out after {self.tool_timeout_seconds:g} seconds"
                     ) from exc
 
             tool.forward = managed_forward
@@ -261,7 +267,9 @@ class ManagedMCPToolCollection:
                     "TimeoutError",
                 )
                 self.close()
-                raise TimeoutError("MCP session startup timed out")
+                raise MCPConnectionTimeoutError(
+                    f"MCP connection timed out after {self.connect_timeout_seconds:g} seconds"
+                )
 
         with self._lock:
             startup_error = self._startup_error

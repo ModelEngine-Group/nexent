@@ -393,7 +393,10 @@ class AgentRunInfo(BaseModel):
         default=None,
     )
     mcp_request_timeout_seconds: Optional[float] = Field(
-        description="Hard timeout in seconds for one MCP tool request.",
+        description=(
+            "Maximum seconds allowed to establish an MCP connection and complete "
+            "the initialization handshake. It does not limit tool execution."
+        ),
         default=None,
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)

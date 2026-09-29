@@ -313,6 +313,7 @@ with patch.dict("sys.modules", module_mocks):
     )  # noqa: E402
     import sdk.nexent.core.agents.run_agent as run_agent  # noqa: E402
     from sdk.nexent.consts.mcp_errors import (  # noqa: E402
+        is_mcp_connection_timeout_error,
         MCPToolTimeoutError,
         is_mcp_timeout_error,
         propagate_mcp_timeout,
@@ -532,7 +533,7 @@ def test_agent_run_thread_mcp_flow(
         managed_mcp_factory.call_args.kwargs["server_parameters"]
         == expected_client_list
     )
-    assert managed_mcp_factory.call_args.kwargs["request_timeout_seconds"] == 10.0
+    assert managed_mcp_factory.call_args.kwargs["connect_timeout_seconds"] == 10.0
 
     # NexentAgent should be instantiated with mcp_tool_collection
     run_agent.NexentAgent.assert_called_once_with(
@@ -871,6 +872,13 @@ def test_mcp_timeout_classifier_handles_native_and_legacy_errors():
     assert is_mcp_timeout_error(wrapped)
     assert not is_mcp_timeout_error(RuntimeError("ordinary MCP failure"))
 
+    assert is_mcp_connection_timeout_error(
+        RuntimeError("MCP connection timed out after 10 seconds")
+    )
+    assert is_mcp_connection_timeout_error(
+        RuntimeError("MCP session startup timed out")
+    )
+
 
 @pytest.mark.parametrize("invalid_timeout", [None, 0, -1, "invalid", float("inf")])
 def test_resolve_mcp_request_timeout_seconds_uses_safe_default(
@@ -883,14 +891,14 @@ def test_resolve_mcp_request_timeout_seconds_uses_safe_default(
 
 
 def test_mcp_timeout_message_uses_english_and_effective_timeout(basic_agent_run_info):
-    """The English timeout response includes the effective request timeout."""
+    """The English timeout response includes the tool execution timeout."""
     basic_agent_run_info.observer.lang = "en"
-    basic_agent_run_info.mcp_request_timeout_seconds = 2.5
+    basic_agent_run_info.mcp_tool_timeout_seconds = 2.5
 
     message = run_agent._mcp_timeout_message(basic_agent_run_info)
 
     assert message == (
-        "MCP tool request timed out after 2.5 seconds. "
+        "MCP tool execution timed out after 2.5 seconds. "
         "Please check the service response and try again."
     )
 
@@ -1236,7 +1244,7 @@ def test_agent_run_thread_mcp_timeout_error_is_localized(basic_agent_run_info, m
 
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     mock_nexent_instance.create_single_agent.side_effect = MCPToolTimeoutError(
-        "MCP tool request timed out after 10 seconds"
+        "MCP tool request timed out after 60 seconds"
     )
     monkeypatch.setattr(
         run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
@@ -1246,7 +1254,7 @@ def test_agent_run_thread_mcp_timeout_error_is_localized(basic_agent_run_info, m
         run_agent.agent_run_thread(basic_agent_run_info)
 
     final_message = basic_agent_run_info.observer.add_message.call_args.args[2]
-    assert final_message == "MCP 工具调用超时（10 秒）。请确认服务响应状态后重试。"
+    assert final_message == "MCP 工具调用超时（60 秒）。请确认服务响应状态后重试。"
 
 
 def test_agent_run_thread_chinese_lang(basic_agent_run_info, monkeypatch):

@@ -33,7 +33,10 @@ from ..concurrency.cancellation import RunTerminated
 from ..model_errors import ModelInvocationTerminalError
 from .agent_model import AgentRunInfo
 from .managed_mcp import ManagedMCPToolCollection
-from ...consts.mcp_errors import is_mcp_timeout_error
+from ...consts.mcp_errors import (
+    is_mcp_connection_timeout_error,
+    is_mcp_timeout_error,
+)
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 from .output_protocol import ModelOutputProtocolExhaustedError
 
@@ -54,13 +57,24 @@ def _resolve_mcp_request_timeout_seconds(agent_run_info: AgentRunInfo) -> float:
 
 
 def _mcp_timeout_message(agent_run_info: AgentRunInfo) -> str:
-    """Return a localized MCP timeout message for the current run."""
-    timeout_label = f"{_resolve_mcp_request_timeout_seconds(agent_run_info):g}"
+    """Return a localized MCP tool-execution timeout message."""
+    timeout_label = f"{agent_run_info.mcp_tool_timeout_seconds:g}"
     if getattr(agent_run_info.observer, "lang", "en") == "zh":
         return f"MCP 工具调用超时（{timeout_label} 秒）。请确认服务响应状态后重试。"
     return (
-        f"MCP tool request timed out after {timeout_label} seconds. "
+        f"MCP tool execution timed out after {timeout_label} seconds. "
         "Please check the service response and try again."
+    )
+
+
+def _mcp_connection_timeout_message(agent_run_info: AgentRunInfo) -> str:
+    """Return a localized MCP connection-timeout message for the current run."""
+    timeout_label = f"{_resolve_mcp_request_timeout_seconds(agent_run_info):g}"
+    if getattr(agent_run_info.observer, "lang", "en") == "zh":
+        return f"MCP 服务连接超时（{timeout_label} 秒）。请确认服务地址和网络连通性后重试。"
+    return (
+        f"MCP connection timed out after {timeout_label} seconds. "
+        "Please check the service address and network connectivity, then try again."
     )
 
 
@@ -390,7 +404,7 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 cancellation_scope=mcp_cancellation_scope,
                 tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
                 close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
-                request_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
+                connect_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
             ) as tool_collection:
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
@@ -433,7 +447,11 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         raise
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
-        if mcp_host and is_mcp_timeout_error(e):
+        if mcp_host and is_mcp_connection_timeout_error(e):
+            agent_run_info.observer.add_message(
+                "", ProcessType.FINAL_ANSWER, _mcp_connection_timeout_message(agent_run_info)
+            )
+        elif mcp_host and is_mcp_timeout_error(e):
             agent_run_info.observer.add_message(
                 "", ProcessType.FINAL_ANSWER, _mcp_timeout_message(agent_run_info)
             )

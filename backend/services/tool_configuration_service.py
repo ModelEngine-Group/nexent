@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import AsyncExitStack
 import importlib
 import inspect
 import json
@@ -22,6 +23,7 @@ from consts.const import (
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
     MCP_REQUEST_TIMEOUT_SECONDS,
+    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     TOKEN,
 )
 from utils.mcp_url_utils import get_tenant_local_mcp_server
@@ -713,13 +715,14 @@ async def get_tool_from_remote_mcp_server(
 
     try:
         transport = _create_mcp_transport(remote_mcp_server, authorization_token, custom_headers)
-        client = Client(transport=transport, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
-        async with client:
-            # List available operations
-            tools = await asyncio.wait_for(
-                client.list_tools(),
+        client = Client(transport=transport, timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS)
+        async with AsyncExitStack() as stack:
+            await asyncio.wait_for(
+                stack.enter_async_context(client),
                 timeout=MCP_REQUEST_TIMEOUT_SECONDS,
             )
+            # List available operations
+            tools = await client.list_tools()
 
             for tool in tools:
                 if isinstance(tool.meta, dict) and tool.meta.get("nexent_internal") is True:
@@ -964,8 +967,12 @@ async def _call_mcp_tool(
         MCPConnectionError: If MCP connection fails
     """
     transport = _create_mcp_transport(mcp_url, authorization_token, custom_headers)
-    client = Client(transport=transport, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
-    async with client:
+    client = Client(transport=transport, timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS)
+    async with AsyncExitStack() as stack:
+        await asyncio.wait_for(
+            stack.enter_async_context(client),
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+        )
         # Check if connected
         if not client.is_connected():
             logger.error("Failed to connect to MCP server")
@@ -974,15 +981,12 @@ async def _call_mcp_tool(
         # Call the tool
         try:
             result = await asyncio.wait_for(
-                client.call_tool(
-                    name=tool_name,
-                    arguments=inputs,
-                ),
-                timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                client.call_tool(name=tool_name, arguments=inputs),
+                timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError as exc:
             raise MCPConnectionError(
-                f"MCP request timed out after {MCP_REQUEST_TIMEOUT_SECONDS} seconds"
+                f"MCP tool execution timed out after {RUNTIME_MCP_TOOL_TIMEOUT_SECONDS:g} seconds"
             ) from exc
         return result.content[0].text
 

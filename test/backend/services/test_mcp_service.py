@@ -618,7 +618,7 @@ class TestRegisterOpenapiService:
         assert result is True
         mock_async_client.assert_called_once_with(
             base_url="https://api.example.com",
-            timeout=10,
+            timeout=120.0,
             headers=headers_template
         )
         mock_fastmcp.from_openapi.assert_called_once()

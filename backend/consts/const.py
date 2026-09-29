@@ -582,7 +582,8 @@ MAX_MCP_SERVICES_PER_TENANT = parse_positive_int(
     "MAX_MCP_SERVICES_PER_TENANT",
     1_000,
 )
-# Hard timeout for a request made to a configured MCP service at runtime.
+# Maximum time allowed to establish a connection and complete the MCP
+# initialization handshake. This does not limit tool execution time.
 MCP_REQUEST_TIMEOUT_SECONDS = parse_positive_float(
     os.getenv("MCP_REQUEST_TIMEOUT_SECONDS"),
     "MCP_REQUEST_TIMEOUT_SECONDS",

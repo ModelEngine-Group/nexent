@@ -8,7 +8,7 @@ import mcp.types
 import mcpadapt.core
 import pytest
 from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
-from nexent.consts.mcp_errors import MCPToolTimeoutError
+from nexent.consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 
 
@@ -172,7 +172,7 @@ def test_ut_sdk_tlm_032_tool_deadline_cancels_active_call_future(monkeypatch):
     assert cancelled.wait(1)
     assert exited.wait(1)
     assert context.exit_count == 1
-    assert session_factory.call_args.kwargs["client_session_timeout_seconds"] == 10
+    assert session_factory.call_args.kwargs["client_session_timeout_seconds"] is None
     sync_mcpadapt.assert_not_called()
     assert manager.snapshot().active_count == 0
     asyncio.run(manager.shutdown(timeout=1))
@@ -196,13 +196,40 @@ def test_ut_sdk_mcp_tool_deadline_raises_mcp_timeout_error():
             request_timeout_seconds=10,
             session_context_factory=_async_context_factory(context),
         ) as collection,
-        pytest.raises(MCPToolTimeoutError, match="10 seconds"),
+        pytest.raises(MCPToolTimeoutError, match="0.02 seconds"),
     ):
         collection.tools[0].forward()
 
     assert entered.is_set()
     assert cancelled.wait(1)
     assert exited.wait(1)
+    asyncio.run(manager.shutdown(timeout=1))
+
+
+def test_ut_sdk_mcp_connection_deadline_only_covers_session_startup():
+    manager = _manager()
+    scope = RunCancellationScope()
+
+    class SlowConnectContext:
+        async def __aenter__(self):
+            await asyncio.sleep(1)
+            return _BlockingAsyncSession(threading.Event(), threading.Event()), []
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return False
+
+    with pytest.raises(MCPConnectionTimeoutError, match="0.01 seconds"):
+        with ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[{"url": "http://mcp.invalid/mcp"}],
+            cancellation_scope=scope,
+            tool_timeout_seconds=1,
+            close_timeout_seconds=0.5,
+            connect_timeout_seconds=0.01,
+            session_context_factory=lambda *_args, **_kwargs: SlowConnectContext(),
+        ):
+            pass
+
     asyncio.run(manager.shutdown(timeout=1))
 
 
