@@ -26,7 +26,8 @@ vi.mock("@/features/workbench/hooks/useResourceTags", () => ({
     visibleIds: null,
   }),
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const routerPush = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) }));
 const empty = vi.hoisted(() => []);
 const agent = {
   id: "8",
@@ -128,6 +129,11 @@ function mount() {
   );
   return onSelect;
 }
+it("opens the selected Agent's editor from the edit button", async () => {
+  mount();
+  await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+  expect(routerPush).toHaveBeenCalledWith("/agents/8");
+});
 it("shows the backend unavailable reason and only one published version badge", async () => {
   const select = vi.fn();
   render(

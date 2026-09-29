@@ -60,7 +60,7 @@ export function AgentCreationResultCard({
   const displayDescription = description || agentDetails?.description;
   return (
     <Link
-      href={`/agents?agent_id=${agentId}`}
+      href={`/agents/${agentId}`}
       className="group my-4 block w-full min-w-0 overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:border-primary/45 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <div className="flex items-start gap-3 p-4">

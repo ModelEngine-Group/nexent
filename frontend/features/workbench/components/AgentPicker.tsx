@@ -358,9 +358,7 @@ export function AgentPicker({
                     <Button
                       size="small"
                       aria-label="编辑"
-                      onClick={() =>
-                        router.push(`/agents?agent_id=${agent.id}`)
-                      }
+                      onClick={() => router.push(`/agents/${agent.id}`)}
                     >
                       编辑
                     </Button>
