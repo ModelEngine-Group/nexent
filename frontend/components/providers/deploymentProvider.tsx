@@ -18,6 +18,7 @@ interface DeploymentContextType {
   deploymentVersion: string;
   enableAidpKnowledge: boolean;
   enableAgentWorkbench: boolean;
+  hideHomePage: boolean;
   aidpEnabled: boolean;
 }
 
@@ -28,6 +29,7 @@ const DeploymentContext = createContext<DeploymentContextType>({
   deploymentVersion: "",
   enableAidpKnowledge: false,
   enableAgentWorkbench: false,
+  hideHomePage: false,
   aidpEnabled: false,
 });
 
@@ -36,6 +38,7 @@ interface DeploymentVersionResponse {
   app_version: string;
   enable_aidp_knowledge?: boolean;
   enable_agent_workbench?: boolean;
+  hide_home_page?: boolean;
   status: string;
 }
 
@@ -46,6 +49,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
   const [deploymentVersion, setDeploymentVersion] = useState("");
   const [enableAidpKnowledge, setEnableAidpKnowledge] = useState(false);
   const [enableAgentWorkbench, setEnableAgentWorkbench] = useState(false);
+  const [hideHomePage, setHideHomePage] = useState(false);
 
   useEffect(() => {
     const fetchDeploymentInfo = async () => {
@@ -58,6 +62,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         setIsSpeedMode(data.deployment_version === "speed");
         setEnableAidpKnowledge(data.enable_aidp_knowledge ?? false);
         setEnableAgentWorkbench(data.enable_agent_workbench ?? false);
+        setHideHomePage(data.hide_home_page ?? false);
         if (data.app_version) {
           setAppVersion(data.app_version);
         }
@@ -81,6 +86,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         deploymentVersion,
         enableAidpKnowledge,
         enableAgentWorkbench,
+        hideHomePage,
         aidpEnabled: enableAidpKnowledge,
       }}
     >
