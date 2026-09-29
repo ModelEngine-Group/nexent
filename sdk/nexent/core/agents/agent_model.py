@@ -392,6 +392,13 @@ class AgentRunInfo(BaseModel):
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",
         default=None,
     )
+    mcp_request_timeout_seconds: Optional[float] = Field(
+        description=(
+            "Maximum seconds allowed to establish an MCP connection and complete "
+            "the initialization handshake. It does not limit tool execution."
+        ),
+        default=None,
+    )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
     cancellation_scope: Optional[Any] = Field(
