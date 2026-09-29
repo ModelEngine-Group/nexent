@@ -66,7 +66,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/chat",
     Icon: Bot,
     labelKey: "sidebar.startChat",
-    order: 1,
+    order: 1.5,
     parentKey: null,
     navigationPath: "/newchat",
   },
@@ -74,7 +74,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/workbench",
     Icon: Zap,
     labelKey: "sidebar.agentWorkbench",
-    order: 1.5,
+    order: 1,
     parentKey: null,
   },
   {
@@ -256,6 +256,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     }
 
     const filtered = ROUTE_CONFIG.filter((route) => {
+      if (route.path === "/" && enableAgentWorkbench) return false;
       if (route.path === "/workbench" && !enableAgentWorkbench) return false;
       return (
         accessibleRoutes.includes(route.path) ||

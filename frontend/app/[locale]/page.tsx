@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import {
@@ -23,15 +24,23 @@ import { useGlobalConfigStore } from "@/stores/global";
  */
 export default function Homepage() {
   const { t } = useTranslation("common");
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, isDeploymentReady, enableAgentWorkbench } =
+    useDeployment();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
   const router = useRouter();
   const { config } = useGlobalConfigStore();
+
+  useEffect(() => {
+    if (isDeploymentReady && enableAgentWorkbench) {
+      router.replace("/workbench");
+    }
+  }, [isDeploymentReady, enableAgentWorkbench, router]);
+
   /**
- * Navigate to a route with permission pre-check
- * Returns true if navigation is allowed, false if permission is denied
- */
+   * Navigate to a route with permission pre-check
+   * Returns true if navigation is allowed, false if permission is denied
+   */
   const navigateWithPermissionCheck = (route: string): boolean => {
     // Check authentication first
     if (!isAuthenticated && !isSpeedMode) {
@@ -52,9 +61,12 @@ export default function Homepage() {
 
   const navigateToChat = () => navigateWithPermissionCheck("/newchat");
   const navigateToAgent = () => navigateWithPermissionCheck("/agents");
-  const navigateToRepository = () => navigateWithPermissionCheck("/agent-space");
+  const navigateToRepository = () =>
+    navigateWithPermissionCheck("/agent-space");
   const canShowQuickAction = (route: string) =>
     !isAuthenticated || canAccessRoute(route);
+
+  if (!isDeploymentReady || enableAgentWorkbench) return null;
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
@@ -127,7 +139,7 @@ export default function Homepage() {
         </motion.div>
 
         {/* Data protection notice - only shown in full version */}
-        {!isSpeedMode && config.aboutConfig === 'open' && (
+        {!isSpeedMode && config.aboutConfig === "open" && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -161,7 +173,6 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.8 }}
           className="grid grid-cols-1 md:grid-cols-2 gap-4 "
         >
-
           {(
             t("page.features", { returnObjects: true }) as Array<{
               title: string;
@@ -197,8 +208,6 @@ export default function Homepage() {
               </motion.div>
             );
           })}
-
-
         </motion.div>
       </motion.section>
     </div>
