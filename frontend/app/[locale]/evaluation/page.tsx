@@ -45,6 +45,8 @@ import {
 } from "@/const/agentEvaluation";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
 import {
   buildEvaluationTaskQuery,
@@ -53,6 +55,16 @@ import {
 } from "@/lib/evaluationTaskFilters";
 import AnnotationLabels from "./components/AnnotationLabels";
 const { Text, Title } = Typography;
+
+// Roles allowed to delete ANY evaluation run. Mirrors the backend's
+// CAN_EDIT_ALL_USER_ROLES (backend/consts/const.py); all other roles can
+// only delete runs they created themselves.
+const EVALUATION_DELETE_ALL_ROLES = new Set<string>([
+  USER_ROLES.SU,
+  USER_ROLES.ADMIN,
+  USER_ROLES.SPEED,
+  USER_ROLES.ASSET_OWNER,
+]);
 
 function useList(url: string) {
   /**
@@ -104,6 +116,14 @@ function RunsTab() {
   const { availableLlmModels } = useModelList();
   const [evalSets, setEvalSets] = useState<any[]>([]);
   const [evaluators, setEvaluators] = useState<any[]>([]);
+
+  // The backend rejects DELETE for non-creators outside the admin-like
+  // roles (error 160208), so hide the delete button for those users
+  // instead of letting them hit the rejection.
+  const { user } = useAuthorizationContext();
+  const canDeleteRun = (r: any) =>
+    (user?.id != null && r?.created_by === user.id) ||
+    EVALUATION_DELETE_ALL_ROLES.has(user?.role ?? "");
 
   // ── Drawer (create-evaluation form) state ─────────────────────────────
   // Short variable names intentionally match the drawer inputs one-to-one:
@@ -349,29 +369,48 @@ function RunsTab() {
               }
             />
           </Tooltip>
-          <Popconfirm
-            title={t("agentEvaluation.deleteConfirm")}
-            onConfirm={async () => {
-              await fetch(
-                API_ENDPOINTS.agentEvaluations.delete(r.agent_evaluation_id),
-                { method: "DELETE", headers: getAuthHeaders() }
-              );
-              setRuns((prev) =>
-                prev.filter(
-                  (x) => x.agent_evaluation_id !== r.agent_evaluation_id
-                )
-              );
-            }}
-          >
-            <Tooltip title={t("agentEvaluation.delete")}>
-              <Button
-                type="link"
-                size="small"
-                danger
-                icon={<Trash2 className="size-3.5" />}
-              />
-            </Tooltip>
-          </Popconfirm>
+          {canDeleteRun(r) && (
+            <Popconfirm
+              title={t("agentEvaluation.deleteConfirm")}
+              onConfirm={async () => {
+                try {
+                  const resp = await fetch(
+                    API_ENDPOINTS.agentEvaluations.delete(
+                      r.agent_evaluation_id
+                    ),
+                    { method: "DELETE", headers: getAuthHeaders() }
+                  );
+                  if (!resp.ok) {
+                    const d = await resp.json().catch(() => ({}));
+                    message.error(
+                      d.code
+                        ? getI18nErrorMessage(d.code, t)
+                        : d.detail ||
+                            d.message ||
+                            t("agentEvaluation.message.deleteRunFailed")
+                    );
+                    return;
+                  }
+                  setRuns((prev) =>
+                    prev.filter(
+                      (x) => x.agent_evaluation_id !== r.agent_evaluation_id
+                    )
+                  );
+                } catch {
+                  message.error(t("agentEvaluation.message.deleteRunFailed"));
+                }
+              }}
+            >
+              <Tooltip title={t("agentEvaluation.delete")}>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<Trash2 className="size-3.5" />}
+                />
+              </Tooltip>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -1087,10 +1126,24 @@ function EvaluatorsTab() {
           <Popconfirm
             title={t("agentEvaluation.deleteConfirm")}
             onConfirm={async () => {
-              await fetch(API_ENDPOINTS.evaluators.delete(e.evaluator_id), {
-                method: "DELETE",
-                headers: getAuthHeaders(),
-              });
+              try {
+                const resp = await fetch(
+                  API_ENDPOINTS.evaluators.delete(e.evaluator_id),
+                  { method: "DELETE", headers: getAuthHeaders() }
+                );
+                if (!resp.ok) {
+                  const d = await resp.json().catch(() => ({}));
+                  message.error(
+                    d.code
+                      ? getI18nErrorMessage(d.code, t)
+                      : d.detail ||
+                          d.message ||
+                          t("agentEvaluation.deleteFailed")
+                  );
+                }
+              } catch {
+                message.error(t("agentEvaluation.deleteFailed"));
+              }
               refreshEval();
             }}
           >
@@ -1336,10 +1389,24 @@ function EvaluatorsTab() {
                     <Popconfirm
                       title={t("agentEvaluation.deleteConfirm")}
                       onConfirm={async () => {
-                        await fetch(
-                          API_ENDPOINTS.evaluators.delete(e.evaluator_id),
-                          { method: "DELETE", headers: getAuthHeaders() }
-                        );
+                        try {
+                          const resp = await fetch(
+                            API_ENDPOINTS.evaluators.delete(e.evaluator_id),
+                            { method: "DELETE", headers: getAuthHeaders() }
+                          );
+                          if (!resp.ok) {
+                            const d = await resp.json().catch(() => ({}));
+                            message.error(
+                              d.code
+                                ? getI18nErrorMessage(d.code, t)
+                                : d.detail ||
+                                    d.message ||
+                                    t("agentEvaluation.deleteFailed")
+                            );
+                          }
+                        } catch {
+                          message.error(t("agentEvaluation.deleteFailed"));
+                        }
                         refreshEval();
                       }}
                     >
@@ -1355,11 +1422,26 @@ function EvaluatorsTab() {
                         type="link"
                         size="small"
                         onClick={async () => {
-                          await fetch(
-                            API_ENDPOINTS.evaluators.publish(e.evaluator_id),
-                            { method: "POST", headers: getAuthHeaders() }
-                          );
-                          refreshEval();
+                          try {
+                            const resp = await fetch(
+                              API_ENDPOINTS.evaluators.publish(e.evaluator_id),
+                              { method: "POST", headers: getAuthHeaders() }
+                            );
+                            if (!resp.ok) {
+                              const d = await resp.json().catch(() => ({}));
+                              message.error(
+                                d.code
+                                  ? getI18nErrorMessage(d.code, t)
+                                  : d.detail ||
+                                      d.message ||
+                                      t("agentEvaluation.publishFailed")
+                              );
+                              return;
+                            }
+                            refreshEval();
+                          } catch {
+                            message.error(t("agentEvaluation.publishFailed"));
+                          }
                         }}
                       >
                         {t("agentEvaluation.publish")}

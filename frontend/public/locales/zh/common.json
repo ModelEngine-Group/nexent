@@ -4851,6 +4851,7 @@
   "agentEvaluation.pagination.total": "共 {{total}} 条",
   "agentEvaluation.progressLabel": "进度",
   "agentEvaluation.publish": "发布",
+  "agentEvaluation.publishFailed": "发布失败",
   "agentEvaluation.published": "已发布",
   "agentEvaluation.queryCountRequired": "请选择至少一个运行时评估器",
   "agentEvaluation.save": "保存",
