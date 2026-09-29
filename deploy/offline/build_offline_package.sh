@@ -149,7 +149,7 @@ parse_args() {
         DRY_RUN="true"
         shift
         ;;
-      --components|--image-source|--registry-profile|--image-registry-prefix|--registry-prefix|--image-registry|--app-version|--monitoring-provider|--port-policy|--local-config|--https-mode|--https-cert-file|--https-key-file|--https-key-passphrase|--https-san)
+      --components|--image-source|--registry-profile|--image-registry-prefix|--registry-prefix|--image-registry|--app-version|--monitoring-provider|--port-policy|--local-config)
         COMMON_ARGS+=("$1" "$2")
         shift 2
         ;;
@@ -294,15 +294,12 @@ get_third_party_images() {
     echo ""
   }
 
-  # HTTPS termination proxy is only consumed when the user opts in during install
-  if [ "$DEPLOYMENT_HTTPS_MODE" != "disabled" ]; then
-    echo_image_ref "nginx:alpine"
-  fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "infrastructure"; then
     echo "$ELASTICSEARCH_IMAGE"
     echo "$POSTGRESQL_IMAGE"
     echo "$REDIS_IMAGE"
     echo "$MINIO_IMAGE"
+    echo_image_ref "nginx:alpine"
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
     echo "$SUPABASE_KONG"
