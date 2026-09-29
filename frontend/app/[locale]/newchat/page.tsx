@@ -724,9 +724,14 @@ const HomeContent: FC<{
 
   const handleThreadBack = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
-    await runtime.threads.switchToNewThread();
-    await runtime.threads.reload();
-    onBack();
+    try {
+      await runtime.threads.switchToNewThread();
+      await runtime.threads.reload();
+    } catch (error) {
+      log.error("[HomeContent] Failed to return to agent list:", error);
+    } finally {
+      onBack();
+    }
   }, [onBack, runtime]);
 
   const handlePrepareNewConversation = useCallback(() => {
@@ -737,9 +742,14 @@ const HomeContent: FC<{
 
   const handleNewConversation = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
-    await runtime.threads.switchToNewThread();
-    await runtime.threads.reload();
-    onBack();
+    try {
+      await runtime.threads.switchToNewThread();
+      await runtime.threads.reload();
+    } catch (error) {
+      log.error("[HomeContent] Failed to start a new conversation:", error);
+    } finally {
+      onBack();
+    }
   }, [onBack, runtime]);
 
   const handleAgentSelectedFromLanding = useCallback(
