@@ -83,6 +83,25 @@ def _is_mcp_timeout_error(error: BaseException) -> bool:
     return is_mcp_timeout_error(error)
 
 
+def _agent_run_error_message(
+    agent_run_info: AgentRunInfo,
+    mcp_host: list | None,
+    error: BaseException,
+) -> str:
+    """Build the user-facing message for a failed Agent run."""
+    if mcp_host and is_mcp_connection_timeout_error(error):
+        return _mcp_connection_timeout_message(agent_run_info)
+    if mcp_host and is_mcp_timeout_error(error):
+        return _mcp_timeout_message(agent_run_info)
+    if "Couldn't connect to the MCP server" in str(error):
+        return (
+            "MCP服务器连接超时。"
+            if agent_run_info.observer.lang == "zh"
+            else "Couldn't connect to the MCP server."
+        )
+    return f"Run Agent Error: {error}"
+
+
 class DeferredAgentRun:
     """Managed worker target that waits for request preparation to bind run data."""
 
@@ -447,23 +466,11 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         raise
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
-        if mcp_host and is_mcp_connection_timeout_error(e):
-            agent_run_info.observer.add_message(
-                "", ProcessType.FINAL_ANSWER, _mcp_connection_timeout_message(agent_run_info)
-            )
-        elif mcp_host and is_mcp_timeout_error(e):
-            agent_run_info.observer.add_message(
-                "", ProcessType.FINAL_ANSWER, _mcp_timeout_message(agent_run_info)
-            )
-        elif "Couldn't connect to the MCP server" in str(e):
-            mcp_connect_error_str = (
-                "MCP服务器连接超时。"
-                if agent_run_info.observer.lang == "zh"
-                else "Couldn't connect to the MCP server."
-            )
-            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
-        else:
-            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
+        agent_run_info.observer.add_message(
+            "",
+            ProcessType.FINAL_ANSWER,
+            _agent_run_error_message(agent_run_info, mcp_host, e),
+        )
         raise ValueError(f"Error in agent_run_thread: {e}")
     finally:
         # Agent construction, MCP setup, and executor initialization can fail

@@ -302,7 +302,8 @@ sys.modules[MCP_ERRORS_NAME] = mcp_errors_module
 consts_mod = sys.modules.setdefault("sdk.nexent.consts", ModuleType("sdk.nexent.consts"))
 consts_mod.__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "consts")]
 consts_mod.mcp_errors = mcp_errors_module
-assert mcp_errors_spec and mcp_errors_spec.loader
+assert mcp_errors_spec is not None
+assert mcp_errors_spec.loader is not None
 mcp_errors_spec.loader.exec_module(mcp_errors_module)
 sys.modules["sdk.nexent.core.utils"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core" / "utils")]
 spec = importlib.util.spec_from_file_location(CORE_AGENT_NAME, CORE_AGENT_PATH)

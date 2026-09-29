@@ -576,8 +576,9 @@ def test_step_stream_wrapped_mcp_timeout_bypasses_agent_retry():
     )
     agent.verification_controller.config.step_verification_enabled = False
 
+    stream = agent._step_stream(MagicMock())
     with pytest.raises(MCPToolTimeoutError):
-        next(agent._step_stream(MagicMock()))
+        next(stream)
 
 
 def test_step_stream_generic_timeout_remains_agent_execution_error():
@@ -591,8 +592,9 @@ def test_step_stream_generic_timeout_remains_agent_execution_error():
     agent.python_executor.side_effect = TimeoutError("local code execution timed out")
     agent.verification_controller.config.step_verification_enabled = False
 
+    stream = agent._step_stream(MagicMock())
     with pytest.raises(AgentExecutionError):
-        next(agent._step_stream(MagicMock()))
+        next(stream)
 
 
 def test_step_stream_native_mcp_timeout_preserves_error_identity():
@@ -607,8 +609,9 @@ def test_step_stream_native_mcp_timeout_preserves_error_identity():
     agent.python_executor.side_effect = timeout_error
     agent.verification_controller.config.step_verification_enabled = False
 
+    stream = agent._step_stream(MagicMock())
     with pytest.raises(MCPToolTimeoutError) as exc_info:
-        next(agent._step_stream(MagicMock()))
+        next(stream)
 
     assert exc_info.value is timeout_error
 

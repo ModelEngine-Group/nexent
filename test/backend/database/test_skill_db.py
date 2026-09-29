@@ -1346,7 +1346,7 @@ class TestCreateSkill:
         monkeypatch.setattr(
             "backend.database.skill_db.get_db_session", lambda: mock_ctx)
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(AppException) as exc_info:
             create_skill({"name": "blocked"}, "tenant1")
 
         assert "Tenant skill limit reached" in str(exc_info.value)

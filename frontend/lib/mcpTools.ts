@@ -185,7 +185,11 @@ export const getMcpAddErrorMessage = (
     errorCode === TENANT_RESOURCE_EXCEEDED_CODE ||
     (errorCode === "429" && errorDetails.resource === "mcp_services")
   ) {
-    const limit = String(errorDetails.limit ?? 1000);
+    const rawLimit = errorDetails.limit;
+    const limit =
+      typeof rawLimit === "number" || typeof rawLimit === "string"
+        ? String(rawLimit)
+        : "1000";
     const fallback = `This tenant has reached the MCP service limit (maximum ${limit} services).`;
     const translated = t("mcpTools.add.error.tenantLimit", {
       defaultValue: fallback,

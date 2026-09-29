@@ -28,7 +28,7 @@ class ManagedMCPToolCollection:
         tool_timeout_seconds: float,
         close_timeout_seconds: float,
         request_timeout_seconds: float | None = None,
-        connect_timeout_seconds: float = 30.0,
+        connect_timeout_seconds: float | None = None,
         session_context_factory: Callable[..., Any] | None = None,
         tool_adapter_factory: Callable[[], Any] | None = None,
     ):
@@ -36,14 +36,14 @@ class ManagedMCPToolCollection:
             raise ValueError("MCP tool timeout must be greater than zero")
         if close_timeout_seconds <= 0:
             raise ValueError("MCP close timeout must be greater than zero")
-        if connect_timeout_seconds <= 0:
-            raise ValueError("MCP connect timeout must be greater than zero")
         if request_timeout_seconds is not None and request_timeout_seconds <= 0:
             raise ValueError("MCP request timeout must be greater than zero")
         # Keep the old keyword as a compatibility alias, but use it only for
         # session startup. It must never become a per-tool request timeout.
-        if request_timeout_seconds is not None and connect_timeout_seconds == 30.0:
-            connect_timeout_seconds = request_timeout_seconds
+        if connect_timeout_seconds is None:
+            connect_timeout_seconds = request_timeout_seconds or 30.0
+        if connect_timeout_seconds <= 0:
+            raise ValueError("MCP connect timeout must be greater than zero")
         self.manager = manager
         self.server_parameters = server_parameters
         self.cancellation_scope = cancellation_scope
