@@ -109,7 +109,10 @@ interface AidpKnowledgeListProps {
   onRetry: () => void;
 }
 
-interface ResizableTitleProps extends React.ThHTMLAttributes<HTMLTableCellElement> {
+interface ResizableTitleProps extends Omit<
+  React.ThHTMLAttributes<HTMLTableCellElement>,
+  "onResize"
+> {
   width?: number;
   onResize?: (width: number) => void;
 }
