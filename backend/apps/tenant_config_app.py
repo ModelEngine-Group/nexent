@@ -4,7 +4,13 @@ from http import HTTPStatus
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from consts.const import DEPLOYMENT_VERSION, APP_VERSION, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH
+from consts.const import (
+    APP_VERSION,
+    DEPLOYMENT_VERSION,
+    ENABLE_AIDP_KNOWLEDGE,
+    ENABLE_AGENT_WORKBENCH,
+    HIDE_HOME_PAGE,
+)
 
 logger = logging.getLogger("tenant_config_app")
 router = APIRouter(prefix="/tenant_config")
@@ -22,6 +28,7 @@ def get_deployment_version():
                      "app_version": APP_VERSION,
                      "enable_aidp_knowledge": ENABLE_AIDP_KNOWLEDGE,
                      "enable_agent_workbench": ENABLE_AGENT_WORKBENCH,
+                     "hide_home_page": HIDE_HOME_PAGE,
                      "status": "success"}
         )
     except Exception as e:
