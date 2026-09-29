@@ -418,6 +418,8 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
 };
 
 function getMineSkillMenuItems({
+  canApplyListing,
+  canEdit,
   canPublish,
   hasRepositoryInfo,
   t,
@@ -425,6 +427,8 @@ function getMineSkillMenuItems({
   onViewReview,
   onDelete,
 }: {
+  canApplyListing: boolean;
+  canEdit: boolean;
   canPublish: boolean;
   hasRepositoryInfo: boolean;
   t: (key: string) => string;
@@ -433,7 +437,7 @@ function getMineSkillMenuItems({
   onDelete: () => void;
 }): MenuProps["items"] {
   const items: MenuProps["items"] = [];
-  if (canPublish && !hasRepositoryInfo) {
+  if (canApplyListing) {
     items.push({
       key: "apply-listing",
       label: t("skillRepository.mine.button.apply"),
@@ -449,13 +453,15 @@ function getMineSkillMenuItems({
       onClick: onViewReview,
     });
   }
-  items.push({
-    key: "delete",
-    label: t("common.delete"),
-    icon: <Trash2 className="size-3.5" aria-hidden />,
-    danger: true,
-    onClick: onDelete,
-  });
+  if (canEdit) {
+    items.push({
+      key: "delete",
+      label: t("common.delete"),
+      icon: <Trash2 className="size-3.5" aria-hidden />,
+      danger: true,
+      onClick: onDelete,
+    });
+  }
   return items;
 }
 
@@ -485,7 +491,10 @@ function MineSkillCard({
   const canPublish = skill.can_publish === true;
   const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
+  const canApplyListing = canPublish && !hasRepositoryInfo;
   const menuItems = getMineSkillMenuItems({
+    canApplyListing,
+    canEdit,
     canPublish,
     hasRepositoryInfo,
     t,
@@ -498,6 +507,7 @@ function MineSkillCard({
     <ResourceCard
       title={skill.name || t("skillRepository.common.untitled")}
       className="h-full min-h-[200px] p-4"
+      onClick={onView}
       icon={
         <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Bot className="size-5" aria-hidden />
@@ -531,7 +541,7 @@ function MineSkillCard({
       footerLayout="inline"
       headerActions={
         <div className="flex flex-col items-end gap-1">
-          {canEdit ? (
+          {canEdit || canApplyListing ? (
             <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
               <Button
                 type="text"

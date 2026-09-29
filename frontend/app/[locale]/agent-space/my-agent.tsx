@@ -158,6 +158,7 @@ export function MyAgent({
     (): AgentListFilters => ({
       tenantId: user?.tenantId ?? null,
       enabled: active,
+      includeRepositoryInfo: true,
       page,
       pageSize,
       search: searchQuery.trim() || undefined,
@@ -697,15 +698,7 @@ export function MyAgent({
             }`}
           >
             {t(ownershipLabelKey[filter])}
-            <span
-              className={`rounded px-1.5 text-xs ${
-                ownership === filter
-                  ? "bg-white/20"
-                  : "bg-white/70 text-slate-500 dark:bg-slate-900/50 dark:text-slate-400"
-              }`}
-            >
-              {counts[filter]}
-            </span>
+            <span className="text-xs opacity-80">{counts[filter]}</span>
           </button>
         ))}
       </div>
@@ -888,7 +881,7 @@ function toMyAgentItem(agent: Agent): MyEditableAgentItem {
     version_create_time: agent.version_create_time ?? null,
     permission: agent.permission,
     tags: agent.tags,
-    repository_info: [],
+    repository_info: agent.repository_info ?? [],
   };
 }
 

@@ -1,9 +1,7 @@
 "use client";
 
-import { Button, Dropdown, Spin, Tooltip } from "antd";
+import { Button, Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
-import { useState } from "react";
-import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
   ClipboardCheck,
   Clock,
@@ -21,7 +19,7 @@ import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import {
   formatMineDate,
   getMineCardMenuActions,
-  toMineRepositoryInfo,
+  getMineCardRepositoryStatusBadge,
   type MineCardMenuAction,
 } from "@/lib/agentRepositoryMine";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
@@ -69,16 +67,6 @@ export function MyAgentCard({
   isDeleting = false,
 }: MyAgentCardProps) {
   const { t } = useTranslation("common");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const {
-    data: listingData,
-    isLoading: isListingLoading,
-    isError: isListingError,
-    refetch,
-  } = useAgentRepositoryListings(
-    { agent_id: agent.agent_id, page: 1, page_size: 100 },
-    menuOpen || guideMenuOpen === true
-  );
 
   const title = agent.name?.trim() || t("agentRepository.card.untitled");
   const description =
@@ -88,8 +76,6 @@ export function MyAgentCard({
     agent.unavailable_reasons ?? [],
     t
   );
-  const repositoryInfo = toMineRepositoryInfo(listingData?.items ?? []);
-  const agentWithRepository = { ...agent, repository_info: repositoryInfo };
   const { canOpen: published } = getAgentUsageGuideAccess({
     currentVersionNo: agent.current_version_no,
     permission: agent.permission,
@@ -99,9 +85,10 @@ export function MyAgentCard({
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
   const canEvaluate = canView;
-  const menuActions = listingData
-    ? getMineCardMenuActions(agentWithRepository)
-    : [];
+  const menuActions = getMineCardMenuActions(agent);
+  const repositoryBadge = getMineCardRepositoryStatusBadge(
+    agent.repository_info
+  );
 
   const menuItems: MenuProps["items"] = menuActions.map((action) => {
     const icon =
@@ -122,28 +109,12 @@ export function MyAgentCard({
           return;
         }
         onViewReview(
-          agentWithRepository,
+          agent,
           action === "reviewUpdate" ? "reviewUpdate" : "review"
         );
       },
     };
   });
-
-  if (isListingLoading) {
-    menuItems.unshift({
-      key: "loading",
-      label: <Spin size="small" />,
-      disabled: true,
-    });
-  } else if (isListingError) {
-    menuItems.unshift({
-      key: "retry",
-      label: t("repository.common.retry"),
-      onClick: () => {
-        void refetch();
-      },
-    });
-  }
 
   if (canEvaluate) {
     menuItems.push({
@@ -223,7 +194,7 @@ export function MyAgentCard({
             <Dropdown
               menu={{ items: menuItems }}
               open={guideMenuOpen}
-              onOpenChange={onGuideMenuOpenChange ?? setMenuOpen}
+              onOpenChange={onGuideMenuOpenChange}
               trigger={["click"]}
             >
               <Button
@@ -236,7 +207,23 @@ export function MyAgentCard({
               />
             </Dropdown>
           ) : null}
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            {repositoryBadge ? (
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                  repositoryBadge.variant === "pending"
+                    ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                    : repositoryBadge.variant === "rejected"
+                      ? "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                      : "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"
+                }`}
+              >
+                {t(repositoryBadge.labelKey)}
+                {repositoryBadge.versionLabel
+                  ? ` · ${repositoryBadge.versionLabel}`
+                  : null}
+              </span>
+            ) : null}
             {agent.is_available === false ? (
               <Tooltip
                 title={
