@@ -2501,6 +2501,7 @@ deployment_render_helm_chart_values() {
     printf 'nexent-nginx:\n'
     printf '  enabled: true\n'
     printf '  images:\n    nginx:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$NGINX_IMAGE")" "$(deployment_image_tag "$NGINX_IMAGE")"
+    printf '  services:\n    nginx:\n      type: "NodePort"\n      entryPort: %s\n      nodePort: %s\n' "${NEXENT_HTTPS_PORT:-31000}" "${NEXENT_HTTPS_PORT:-31000}"
     if [ -r "${DEPLOYMENT_HTTPS_CERT_PATH:-}" ] && [ -r "${DEPLOYMENT_HTTPS_KEY_PATH:-}" ]; then
       printf '  tls:\n'
       # Render PEM contents as a YAML literal block: multi-line certificates
