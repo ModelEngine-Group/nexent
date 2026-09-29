@@ -71,6 +71,7 @@ class RunnerOutcomeTests(unittest.TestCase):
             with patch.object(run_cases.shutil, "which", return_value="/usr/bin/node"):
                 commands, _ = run_cases.command_for(record, repo, repo / "results", {})
             command = commands[1]
+            self.assertEqual(command[command.index("--config") + 2], "PW-AUTH-01/test.spec.ts")
             self.assertEqual(command[command.index("--grep") + 1], "PW-AUTH-01")
 
 

@@ -2,6 +2,8 @@
 
 This directory is the Git-owned source of truth for requirement-driven tests. The existing `test/backend`, `test/sdk`, and `test/ext_components` suites remain separate Legacy UT.
 
+For setup, failure diagnosis, Case/script changes and local verification, see the [developer guide (中文)](DEVELOPER_GUIDE.zh-CN.md).
+
 ## Layout
 
 ```text

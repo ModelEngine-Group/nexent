@@ -31,7 +31,7 @@ python test-e2e/infra/scripts/run-suite.py bootstrap --test-home /path/outside/r
 # Add --execute to install. Without it, only the command plan is printed.
 ```
 
-Bootstrap consumes `backend/uv.lock` with `uv sync --frozen` into `<test-home>/runtime/test-venv`, installs the SDK source there without re-resolving backend versions, uses `npm ci` for the product/frontend/D4 packages, and installs Chromium into the local test home. It does not download an unpinned uv installer or run sudo. Linux browser OS libraries must be provisioned by the host administrator.
+Bootstrap consumes `backend/uv.lock` with `uv sync --frozen` into `<test-home>/runtime/test-venv`, then installs the editable SDK and its declared dependencies. This second step may resolve shared versions again; run `doctor` and `uv pip check --python <test-python>` afterwards. Bootstrap uses `npm ci` for the product/frontend/D4 packages and installs Chromium into the local test home. It does not download an unpinned uv installer or run sudo. Linux browser OS libraries must be provisioned by the host administrator.
 
 The old fixed-test-requirements file was not a lock: many entries are ranges or unversioned. `fixed-test-requirements.in` preserves that input for review, but bootstrap deliberately does not install its unconstrained additions. Resolve and verify the SDK-only dependency closure against the backend graph before calling the new runtime reproducible. `doctor` checks missing SDK distributions and backend version constraints; it does not certify every native library or network service.
 

@@ -148,7 +148,7 @@ def command_for(record: dict, repo: Path, result_dir: Path, env: dict[str, str])
             [sys.executable, str(control), "prepare", "--plan", str(plan), "--results", str(results),
              "--result-dir", str(result_dir), "--output", str(queue)],
             [node, str(binary), "test", "--config", str(package / "playwright.config.ts"),
-             str(script), "--grep", entry["selector"]],
+             script.relative_to(repo / "test-e2e/cases").as_posix(), "--grep", entry["selector"]],
             [sys.executable, str(control), "audit", "--queue", str(queue), "--results", str(results),
              "--result-dir", str(result_dir)],
         ], repo
