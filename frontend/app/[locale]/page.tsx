@@ -24,7 +24,7 @@ import { useGlobalConfigStore } from "@/stores/global";
  */
 export default function Homepage() {
   const { t } = useTranslation("common");
-  const { isSpeedMode, isDeploymentReady, enableAgentWorkbench } =
+  const { isSpeedMode, isDeploymentReady, enableAgentWorkbench, hideHomePage } =
     useDeployment();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
@@ -32,10 +32,10 @@ export default function Homepage() {
   const { config } = useGlobalConfigStore();
 
   useEffect(() => {
-    if (isDeploymentReady && enableAgentWorkbench) {
-      router.replace("/workbench");
+    if (isDeploymentReady && hideHomePage) {
+      router.replace(enableAgentWorkbench ? "/workbench" : "/chat");
     }
-  }, [isDeploymentReady, enableAgentWorkbench, router]);
+  }, [isDeploymentReady, hideHomePage, enableAgentWorkbench, router]);
 
   /**
    * Navigate to a route with permission pre-check
@@ -66,7 +66,7 @@ export default function Homepage() {
   const canShowQuickAction = (route: string) =>
     !isAuthenticated || canAccessRoute(route);
 
-  if (!isDeploymentReady || enableAgentWorkbench) return null;
+  if (!isDeploymentReady || hideHomePage) return null;
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
