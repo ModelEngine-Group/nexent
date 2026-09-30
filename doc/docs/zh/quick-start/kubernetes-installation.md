@@ -106,11 +106,11 @@ bash deploy.sh k8s
 
 ### 离线部署
 
-目标集群无法访问公网镜像仓库时，可从 GitHub Actions 获取已经打包好的离线部署包：
+目标集群无法访问公网镜像仓库时，可从 Nexent Releases 下载已经打包好的离线部署包：
 
-1. 登录 GitHub，打开 [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml)。
-2. 选择目标版本对应的成功运行记录，在 **Artifacts** 中下载与集群节点架构匹配的 `nexent-<version>-<platform>.zip`。
-3. 将压缩包复制到可以访问目标集群的管理节点并解压。工作流产物默认保留 30 天；产物过期时，可联系维护者重新运行工作流。
+1. 打开 [Nexent Releases](https://github.com/ModelEngine-Group/nexent/releases)。
+2. 在 Release 列表中找到需要的版本，并在该版本的 **Assets** 中下载与集群节点架构匹配的 `nexent-<version>-<platform>.zip`。
+3. 将压缩包复制到可以访问目标集群的管理节点并解压（v2.6.0及以后的版本支持此离线部署方法）。
 
 解压离线部署包：
 
