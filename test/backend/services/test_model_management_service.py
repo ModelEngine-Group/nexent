@@ -2770,14 +2770,17 @@ async def test_usm_embedding_localhost_replaced_before_url_resolution():
 # ============================================================================
 
 
-def _model_row(model_id, model_type, display_name, connect_status="available", context=None):
-    return {
+def _model_row(model_id, model_type, display_name, connect_status="available", context=None, created=None):
+    row = {
         "model_id": model_id,
         "model_type": model_type,
         "display_name": display_name,
         "connect_status": connect_status,
         "context_window_tokens": context,
     }
+    if created is not None:
+        row["create_time"] = created
+    return row
 
 
 def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, updated=None, new_model_ids=None):
@@ -3021,3 +3024,76 @@ def test_backfill_legacy_callers_without_new_ids_keep_all_candidates():
 
     llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
     assert llm_entry["model_id"] == 1
+
+
+def test_backfill_swaps_fresh_occupant_within_batch_window():
+    """Mid-batch (occupant created seconds before the new models): the swap
+    still converges to the better freshly-added model."""
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 9, 30, 12, 0, 0)
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "first-created", context=262144,
+                   created=now - timedelta(seconds=30)),
+        _model_row(2, "llm", "larger-context", context=1048576, created=now),
+    ]
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2},
+        new_model_ids={2})
+
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 2
+    assert (100, "2") in updated
+
+
+def test_backfill_freezes_stale_auto_occupant():
+    """An auto-configured occupant from an earlier import session (older
+    than the swap window) must not be moved by newly added models."""
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 9, 30, 12, 0, 0)
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "settled-occupant", context=262144,
+                   created=now - timedelta(hours=1)),
+        _model_row(2, "llm", "new-better", context=1048576, created=now),
+    ]
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2},
+        new_model_ids={2})
+
+    assert result == []
+    assert inserted == []
+    assert updated == []
+
+
+def test_backfill_swap_pool_never_resurrects_old_models():
+    """Even with a fresh occupant, the swap only considers the occupant and
+    the newly created models -- an older, larger model the user passed over
+    must not resurface through the swap path."""
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 9, 30, 12, 0, 0)
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-giant", context=2097152,
+                   created=now - timedelta(days=30)),
+        _model_row(2, "llm", "fresh-occupant", context=262144,
+                   created=now - timedelta(seconds=30)),
+        _model_row(3, "llm", "new-model", context=32000, created=now),
+    ]
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "2", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2, 3},
+        new_model_ids={3})
+
+    # The old giant (1M) is not in the swap pool, and the new model (32K)
+    # does not beat the fresh occupant (256K): nothing changes.
+    assert result == []
+    assert updated == []
