@@ -58,8 +58,7 @@ const getStatusDotStyle = (
   status?: ModelConnectStatus
 ): React.CSSProperties => {
   const color =
-    (status && CONNECT_STATUS_COLORS[status]) ||
-    CONNECT_STATUS_COLORS.default;
+    (status && CONNECT_STATUS_COLORS[status]) || CONNECT_STATUS_COLORS.default;
   const base: React.CSSProperties = {
     width: 10,
     height: 10,
@@ -108,7 +107,13 @@ const getSourceMeta = (source: ModelSource) => {
         label: "SiliconFlow",
         bg: "bg-purple-50",
         text: "text-purple-600",
-        icon: <img src={publicAsset("/siliconflow.png")} alt="" className="w-5 h-5" />,
+        icon: (
+          <img
+            src={publicAsset("/siliconflow.png")}
+            alt=""
+            className="w-5 h-5"
+          />
+        ),
       };
     case MODEL_SOURCES.MODELENGINE:
       return {
@@ -162,8 +167,56 @@ const getSourceMeta = (source: ModelSource) => {
         bg: "bg-pink-50",
         text: "text-pink-600",
         icon: (
-          <img src={publicAsset("/volcengine.png")} alt="" className="w-5 h-5" />
+          <img
+            src={publicAsset("/volcengine.png")}
+            alt=""
+            className="w-5 h-5"
+          />
         ),
+      };
+    case MODEL_SOURCES.DEEPSEEK:
+      return {
+        label: "DeepSeek",
+        bg: "bg-cyan-50",
+        text: "text-cyan-600",
+        icon: (
+          <img src={publicAsset("/deepseek.png")} alt="" className="w-5 h-5" />
+        ),
+      };
+    case MODEL_SOURCES.ZHIPU:
+      return {
+        label: "智谱 Z.AI",
+        bg: "bg-slate-50",
+        text: "text-slate-600",
+        icon: <span className="text-sm leading-none">🧠</span>,
+      };
+    case MODEL_SOURCES.ANTHROPIC:
+      return {
+        label: "Anthropic Claude",
+        bg: "bg-amber-50",
+        text: "text-amber-700",
+        icon: <span className="text-sm leading-none">◈</span>,
+      };
+    case MODEL_SOURCES.GOOGLE:
+      return {
+        label: "Google Gemini",
+        bg: "bg-blue-50",
+        text: "text-blue-600",
+        icon: <span className="text-sm leading-none">✦</span>,
+      };
+    case MODEL_SOURCES.MISTRAL:
+      return {
+        label: "Mistral",
+        bg: "bg-orange-50",
+        text: "text-orange-600",
+        icon: <span className="text-sm leading-none">✳</span>,
+      };
+    case MODEL_SOURCES.XAI:
+      return {
+        label: "xAI Grok",
+        bg: "bg-neutral-100",
+        text: "text-neutral-700",
+        icon: <span className="text-sm leading-none">𝕏</span>,
       };
     default:
       return {
@@ -310,8 +363,12 @@ export const ModelItemCard = ({
         <Tooltip title={statusTooltip}>
           <button
             type="button"
-            aria-label={t("modelConfig.tag.verify", { defaultValue: "验证连通性" })}
-            onClick={() => onVerify(model.displayName || model.name, model.type)}
+            aria-label={t("modelConfig.tag.verify", {
+              defaultValue: "验证连通性",
+            })}
+            onClick={() =>
+              onVerify(model.displayName || model.name, model.type)
+            }
             style={{
               ...getStatusDotStyle(status),
               cursor: "pointer",
@@ -355,7 +412,9 @@ export const ModelItemCard = ({
       </div>
 
       {/* Tags: model type + source */}
-      <div style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 4 }}>
+      <div
+        style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 4 }}
+      >
         <Tag
           color={MODEL_TYPE_TAG_COLORS[model.type] ?? "default"}
           style={{ margin: 0 }}
@@ -425,7 +484,9 @@ export const ModelItemCard = ({
         {canUpdate ? (
           <Space size={4}>
             <Tooltip
-              title={t("modelConfig.button.editModel", { defaultValue: "编辑" })}
+              title={t("modelConfig.button.editModel", {
+                defaultValue: "编辑",
+              })}
             >
               <Button
                 type="text"

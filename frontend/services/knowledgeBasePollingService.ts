@@ -44,7 +44,7 @@ class KnowledgeBasePollingService {
         if (!isExtendedPolling) {
           pollCount++;
         }
-        
+
         // If there is an active knowledge base and polling knowledge base doesn't match active one, stop polling
         if (this.activeKnowledgeBaseId !== null && this.activeKnowledgeBaseId !== kbId) {
           this.stopPolling(kbId);

@@ -47,7 +47,7 @@ export default function AddMcpServiceModal({
       centered
       width={MCP_ADD_SERVICE_MODAL_WIDTH_MARKETS}
       onCancel={handleClose}
-      maskClosable={!submittingRef.current}
+      mask={{ closable: !submittingRef.current }}
       wrapClassName="[&_.ant-modal]:transition-[width] [&_.ant-modal]:duration-300 [&_.ant-modal]:ease-in-out"
       styles={{
         mask: { background: "rgba(4, 4, 4, 0.6)", backdropFilter: "blur(2px)" },

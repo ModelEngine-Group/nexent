@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "metadata": {
-    "updated_at": "2026-08-05",
+    "updated_at": "2026-09-18",
     "description": "Nexent 预置模型目录 - 自动填充模型配置，减少用户手动输入"
   },
   "providers": {
@@ -171,6 +171,7 @@
     "dashscope": {
       "display_name": "阿里灵积 DashScope",
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+      "model_factory": "dashscope",
       "models": {
         "qwen-plus": {
           "model_type": "llm",
@@ -211,6 +212,32 @@
           "default_output_reserve_tokens": 4096,
           "tokenizer_family": "qwen",
           "capability_profile_version": "qwen/qwen-long@1"
+        },
+        "qwen3.8-max": {
+          "model_type": "llm",
+          "display_name": "千问3.8-Max",
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen3.8-max@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "xhigh"],
+            "default": "xhigh",
+            "source": "catalog"
+          }
+        },
+        "qwen3.8-flash": {
+          "model_type": "llm",
+          "display_name": "千问3.8-Flash",
+          "tokenizer_family": "qwen",
+          "capability_profile_version": "qwen/qwen3.8-flash@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "xhigh"],
+            "default": "medium",
+            "source": "catalog"
+          }
         },
         "qwen-vl-max": {
           "model_type": "vlm",
@@ -332,6 +359,23 @@
           "tokenizer_family": "o200k_base",
           "capability_profile_version": "openai/gpt-4.1-mini@1"
         },
+        "o3-mini": {
+          "model_type": "llm",
+          "display_name": "o3-mini",
+          "context_window_tokens": 200000,
+          "max_input_tokens": 185000,
+          "max_output_tokens": 100000,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/o3-mini@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "high"],
+            "default": "medium",
+            "source": "catalog"
+          }
+        },
         "o3": {
           "model_type": "llm",
           "display_name": "o3",
@@ -340,7 +384,82 @@
           "max_output_tokens": 100000,
           "default_output_reserve_tokens": 16384,
           "tokenizer_family": "o200k_base",
-          "capability_profile_version": "openai/o3@1"
+          "capability_profile_version": "openai/o3@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "high"],
+            "default": "medium",
+            "source": "catalog"
+          }
+        },
+        "o4-mini": {
+          "model_type": "llm",
+          "display_name": "o4-mini",
+          "context_window_tokens": 200000,
+          "max_input_tokens": 185000,
+          "max_output_tokens": 100000,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/o4-mini@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "high"],
+            "default": "medium",
+            "source": "catalog"
+          }
+        },
+        "gpt-5": {
+          "model_type": "llm",
+          "display_name": "GPT-5",
+          "context_window_tokens": 400000,
+          "max_input_tokens": 272000,
+          "max_output_tokens": 128000,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/gpt-5@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["minimal", "low", "medium", "high"],
+            "default": "medium",
+            "source": "catalog"
+          }
+        },
+        "gpt-5-mini": {
+          "model_type": "llm",
+          "display_name": "GPT-5 Mini",
+          "context_window_tokens": 400000,
+          "max_input_tokens": 272000,
+          "max_output_tokens": 128000,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/gpt-5-mini@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["minimal", "low", "medium", "high"],
+            "default": "medium",
+            "source": "catalog"
+          }
+        },
+        "gpt-5.1": {
+          "model_type": "llm",
+          "display_name": "GPT-5.1",
+          "context_window_tokens": 400000,
+          "max_input_tokens": 272000,
+          "max_output_tokens": 128000,
+          "default_output_reserve_tokens": 16384,
+          "tokenizer_family": "o200k_base",
+          "capability_profile_version": "openai/gpt-5.1@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["none", "low", "medium", "high"],
+            "default": "none",
+            "source": "catalog"
+          }
         },
         "text-embedding-3-large": {
           "model_type": "embedding",
@@ -365,7 +484,22 @@
     "volcengine": {
       "display_name": "火山引擎",
       "base_url": "https://ark.cn-beijing.volces.com/api/v3/",
+      "model_factory": "volcengine",
       "models": {
+        "doubao-seed-2-1-pro-260628": {
+          "model_type": "llm",
+          "display_name": "豆包 Seed 2.1 Pro",
+          "tokenizer_family": "doubao",
+          "capability_profile_version": "volcengine/doubao-seed-2-1-pro@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "toggle",
+            "levels": ["none", "high"],
+            "default": "high",
+            "wire_format": "thinking_toggle",
+            "source": "catalog"
+          }
+        },
         "speech_istreaming": {
           "model_type": "stt",
           "display_name": "火山流式语音识别",
@@ -400,6 +534,7 @@
     "deepseek": {
       "display_name": "DeepSeek 官方平台",
       "base_url": "https://api.deepseek.com/v1/",
+      "model_factory": "deepseek",
       "models": {
         "deepseek-v4-pro": {
           "model_type": "llm",
@@ -411,7 +546,14 @@
           "tokenizer_family": "deepseek",
           "capability_profile_version": "deepseek/v4-pro@1",
           "timeout_seconds": 300,
-          "concurrency_limit": 10
+          "concurrency_limit": 10,
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "high", "max"],
+            "default": "high",
+            "source": "catalog"
+          }
         },
         "deepseek-v4-flash": {
           "model_type": "llm",
@@ -423,7 +565,241 @@
           "tokenizer_family": "deepseek",
           "capability_profile_version": "deepseek/v4-flash@1",
           "timeout_seconds": 240,
-          "concurrency_limit": 16
+          "concurrency_limit": 16,
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "high", "max"],
+            "default": "high",
+            "source": "catalog"
+          }
+        }
+      }
+    },
+    "zhipu": {
+      "display_name": "智谱 Z.AI",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+      "model_factory": "zhipu",
+      "models": {
+        "glm-5.3": {
+          "model_type": "llm",
+          "display_name": "GLM-5.3",
+          "tokenizer_family": "glm",
+          "capability_profile_version": "zhipu/glm-5.3@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "toggle",
+            "levels": ["high"],
+            "default": "high",
+            "wire_format": "thinking_toggle",
+            "source": "catalog"
+          }
+        },
+        "glm-5.2": {
+          "model_type": "llm",
+          "display_name": "GLM-5.2",
+          "tokenizer_family": "glm",
+          "capability_profile_version": "zhipu/glm-5.2@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "toggle",
+            "levels": ["none", "high"],
+            "default": "high",
+            "wire_format": "thinking_toggle",
+            "source": "catalog"
+          }
+        },
+        "glm-4.7": {
+          "model_type": "llm",
+          "display_name": "GLM-4.7",
+          "tokenizer_family": "glm",
+          "capability_profile_version": "zhipu/glm-4.7@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "toggle",
+            "levels": ["none", "high"],
+            "default": "high",
+            "wire_format": "thinking_toggle",
+            "source": "catalog"
+          }
+        },
+        "glm-4.5-air": {
+          "model_type": "llm",
+          "display_name": "GLM-4.5-Air",
+          "tokenizer_family": "glm",
+          "capability_profile_version": "zhipu/glm-4.5-air@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "toggle",
+            "levels": ["none", "high"],
+            "default": "high",
+            "wire_format": "thinking_toggle",
+            "source": "catalog"
+          }
+        }
+      }
+    },
+    "anthropic": {
+      "display_name": "Anthropic Claude",
+      "base_url": "https://api.anthropic.com/v1/",
+      "model_factory": "anthropic",
+      "models": {
+        "claude-opus-4-5-20251101": {
+          "model_type": "llm",
+          "display_name": "Claude Opus 4.5",
+          "tokenizer_family": "claude",
+          "capability_profile_version": "anthropic/claude-opus-4-5@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["none", "low", "medium", "high"],
+            "default": "medium",
+            "wire_format": "thinking_budget",
+            "effort_budgets": {"low": 2048, "medium": 8192, "high": 16384},
+            "source": "catalog"
+          }
+        },
+        "claude-sonnet-4-5-20250929": {
+          "model_type": "llm",
+          "display_name": "Claude Sonnet 4.5",
+          "tokenizer_family": "claude",
+          "capability_profile_version": "anthropic/claude-sonnet-4-5@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["none", "low", "medium", "high"],
+            "default": "medium",
+            "wire_format": "thinking_budget",
+            "effort_budgets": {"low": 2048, "medium": 8192, "high": 16384},
+            "source": "catalog"
+          }
+        },
+        "claude-haiku-4-5-20251001": {
+          "model_type": "llm",
+          "display_name": "Claude Haiku 4.5",
+          "tokenizer_family": "claude",
+          "capability_profile_version": "anthropic/claude-haiku-4-5@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["none", "low", "medium", "high"],
+            "default": "low",
+            "wire_format": "thinking_budget",
+            "effort_budgets": {"low": 2048, "medium": 8192, "high": 16384},
+            "source": "catalog"
+          }
+        }
+      }
+    },
+    "google": {
+      "display_name": "Google Gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "model_factory": "google",
+      "models": {
+        "gemini-3.8-flash": {
+          "model_type": "llm",
+          "display_name": "Gemini 3.8 Flash",
+          "tokenizer_family": "gemini",
+          "capability_profile_version": "google/gemini-3.8-flash@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "high"],
+            "default": "medium",
+            "source": "catalog"
+          }
+        },
+        "gemini-3.1-pro-preview": {
+          "model_type": "llm",
+          "display_name": "Gemini 3.1 Pro Preview",
+          "tokenizer_family": "gemini",
+          "capability_profile_version": "google/gemini-3.1-pro-preview@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "high"],
+            "default": "high",
+            "source": "catalog"
+          }
+        },
+        "gemini-2.5-pro": {
+          "model_type": "llm",
+          "display_name": "Gemini 2.5 Pro",
+          "tokenizer_family": "gemini",
+          "capability_profile_version": "google/gemini-2.5-pro@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "high"],
+            "default": "high",
+            "source": "catalog"
+          }
+        }
+      }
+    },
+    "mistral": {
+      "display_name": "Mistral AI",
+      "base_url": "https://api.mistral.ai/v1/",
+      "model_factory": "mistral",
+      "models": {
+        "mistral-small-latest": {
+          "model_type": "llm",
+          "display_name": "Mistral Small",
+          "tokenizer_family": "mistral",
+          "capability_profile_version": "mistral/mistral-small-latest@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["none", "high"],
+            "default": "high",
+            "source": "catalog"
+          }
+        },
+        "mistral-medium-3-5": {
+          "model_type": "llm",
+          "display_name": "Mistral Medium 3.5",
+          "tokenizer_family": "mistral",
+          "capability_profile_version": "mistral/mistral-medium-3-5@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["none", "high"],
+            "default": "high",
+            "source": "catalog"
+          }
+        }
+      }
+    },
+    "xai": {
+      "display_name": "xAI",
+      "base_url": "https://api.x.ai/v1/",
+      "model_factory": "xai",
+      "models": {
+        "grok-4.6": {
+          "model_type": "llm",
+          "display_name": "Grok 4.6",
+          "tokenizer_family": "grok",
+          "capability_profile_version": "xai/grok-4.6@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "high", "xhigh"],
+            "default": "high",
+            "source": "catalog"
+          }
+        },
+        "grok-4.5": {
+          "model_type": "llm",
+          "display_name": "Grok 4.5",
+          "tokenizer_family": "grok",
+          "capability_profile_version": "xai/grok-4.5@1",
+          "reasoning_capability": {
+            "status": "supported",
+            "control": "effort",
+            "levels": ["low", "medium", "high"],
+            "default": "high",
+            "source": "catalog"
+          }
         }
       }
     }

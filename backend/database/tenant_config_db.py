@@ -7,11 +7,29 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database.client import get_db_session
 from database.db_models import TenantConfig, TenantGroupInfo
-from consts.const import DEFAULT_GROUP_ID, MAX_TENANT_COUNT, TENANT_ID, TENANT_NAME
+from consts.const import (
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_GROUP_ID,
+    DEFAULT_TENANT_ID,
+    MAX_TENANT_COUNT,
+    TENANT_ID,
+    TENANT_NAME,
+)
 from consts.exceptions import TenantResourceLimitError
 
 
 logger = logging.getLogger("tenant_config_db")
+
+
+def _count_real_tenants(session) -> int:
+    """Count active tenant identities, excluding virtual/system tenants."""
+    return session.query(TenantConfig.tenant_id).filter(
+        TenantConfig.config_key == TENANT_ID,
+        TenantConfig.delete_flag == "N",
+        TenantConfig.tenant_id.isnot(None),
+        TenantConfig.tenant_id.notin_(("", DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID)),
+    ).distinct().count()
+
 
 def get_all_configs_by_tenant_id(tenant_id: str):
     with get_db_session() as session:
@@ -80,7 +98,12 @@ def get_single_config_info(tenant_id: str, select_key: str):
         if result:
             record_info = {
                 "config_value": result.config_value,
-                "tenant_config_id": result.tenant_config_id
+                "tenant_config_id": result.tenant_config_id,
+                # The UI config-save path (set_single_config) stamps the
+                # acting user here; auto-backfilled rows leave it empty.
+                # Consumers use it to tell "user chose this" from "system
+                # picked a placeholder".
+                "user_id": result.user_id,
             }
 
             return record_info
@@ -96,14 +119,16 @@ def insert_config(insert_data: Dict[str, Any]):
                     text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
                     {"lock_key": "tenant-count-limit"},
                 )
-                tenant_count = session.query(TenantConfig.tenant_id).filter(
-                    TenantConfig.config_key == TENANT_ID,
-                    TenantConfig.delete_flag == "N",
-                ).distinct().count()
+                tenant_count = _count_real_tenants(session)
                 if tenant_count >= MAX_TENANT_COUNT:
-                    raise TenantResourceLimitError(
+                    error = TenantResourceLimitError(
                         f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
                     )
+                    error.resource = "tenants"
+                    error.scope = "platform"
+                    error.limit = MAX_TENANT_COUNT
+                    error.current_count = tenant_count
+                    raise error
             session.add(TenantConfig(**insert_data))
             session.commit()
             return True
@@ -124,14 +149,16 @@ def create_tenant_with_default_group(
             text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
             {"lock_key": "tenant-count-limit"},
         )
-        tenant_count = session.query(TenantConfig.tenant_id).filter(
-            TenantConfig.config_key == TENANT_ID,
-            TenantConfig.delete_flag == "N",
-        ).distinct().count()
+        tenant_count = _count_real_tenants(session)
         if tenant_count >= MAX_TENANT_COUNT:
-            raise TenantResourceLimitError(
+            error = TenantResourceLimitError(
                 f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants"
             )
+            error.resource = "tenants"
+            error.scope = "platform"
+            error.limit = MAX_TENANT_COUNT
+            error.current_count = tenant_count
+            raise error
 
         session.add(TenantConfig(
             tenant_id=tenant_id,

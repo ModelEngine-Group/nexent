@@ -72,13 +72,7 @@ export default function McpToolsSearchFilterBar({
       }`}
     >
       <span>{item.label}</span>
-      <span
-        className={`ml-1.5 rounded-full px-1.5 text-xs ${
-          selected ? "bg-white/20 text-white" : "bg-white text-slate-500"
-        }`}
-      >
-        {item.count}
-      </span>
+      <span className="ml-1 text-xs opacity-80">{item.count}</span>
     </button>
   );
 
@@ -118,7 +112,7 @@ export default function McpToolsSearchFilterBar({
             }
             allowClear
             prefix={<Search className="h-4 w-4 text-slate-400" />}
-            className="h-10 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
+            className="h-8 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
           />
           {searchActions ? (
             <div className="shrink-0">{searchActions}</div>
@@ -127,7 +121,7 @@ export default function McpToolsSearchFilterBar({
             <Select
               value={status}
               onChange={onStatusChange}
-              className="h-10 w-full min-w-[150px]"
+              className="h-8 w-full min-w-[150px]"
               popupMatchSelectWidth={false}
               options={statusOptions}
             />

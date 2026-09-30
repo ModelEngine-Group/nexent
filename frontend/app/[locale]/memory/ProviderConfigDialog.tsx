@@ -376,7 +376,8 @@ export function ProviderConfigDialog({
       }
       onClose={onClose}
       destroyOnHidden
-      width={680}
+      forceRender
+      size={680}
       extra={
         <Button onClick={onClose}>{t("memory.external.actions.cancel")}</Button>
       }

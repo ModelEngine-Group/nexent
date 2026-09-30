@@ -563,7 +563,7 @@ export default function McpServiceDetailModal({
               <Alert
                 type="info"
                 showIcon
-                message={t("mcpTools.addModal.unsupportedTitle")}
+                title={t("mcpTools.addModal.unsupportedTitle")}
                 description={t("mcpTools.detail.deploymentChangeUnsupported")}
               />
             ) : null}

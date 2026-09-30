@@ -52,6 +52,7 @@ RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sh
     uv pip install --link-mode copy "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR")
 
 FROM base AS final
+ARG MODELS_DEV_CATALOG_URL=https://models.dev/catalog.json
 
 ENV VIRTUAL_ENV=/opt/backend/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
@@ -67,6 +68,11 @@ COPY backend /opt/backend
 COPY VERSION /opt/nexent/VERSION
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh
+
+# Bundle the models.dev reasoning capability catalog at build time so runtime
+# model matching works without requiring outbound network access.
+RUN curl -fsSL --proto '=https' -o /opt/backend/configs/models_dev_catalog.json \
+    "$MODELS_DEV_CATALOG_URL"
 
 # Bundle the LiteLLM model catalog (3818 models) so suggest_capacity can look
 # up context/max_output for models not in capability_profiles.py. Fetched at

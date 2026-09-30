@@ -5,15 +5,16 @@ Handles API calls to AIDP for paginated knowledge base listing.
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, NoReturn
 from urllib.parse import quote, urljoin
 
 import httpx
+from nexent.utils.http_client_manager import http_client_manager
 
 from consts.const import AIDP_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from nexent.utils.http_client_manager import http_client_manager
+
 
 logger = logging.getLogger("aidp_service")
 
@@ -64,6 +65,39 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
     if not reason:
         return None
     return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
+
+
+def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
+    """Map an AIDP HTTP error to the common application exception format."""
+    response = error.response
+    upstream_reason = _extract_upstream_error(response)
+    logger.exception(
+        "AIDP %s HTTP error: status_code=%s upstream_reason=%s",
+        operation,
+        response.status_code,
+        upstream_reason or "unavailable",
+    )
+    details = {
+        "upstream_status": response.status_code,
+        "upstream_reason": upstream_reason,
+    }
+    error_code = {
+        401: ErrorCode.AIDP_AUTH_ERROR,
+        403: ErrorCode.AIDP_AUTH_ERROR,
+        429: ErrorCode.AIDP_RATE_LIMIT,
+    }.get(response.status_code, ErrorCode.AIDP_SERVICE_ERROR)
+    fallback_message = {
+        ErrorCode.AIDP_AUTH_ERROR: f"AIDP authentication failed: {str(error)}",
+        ErrorCode.AIDP_RATE_LIMIT: f"AIDP rate limit exceeded: {str(error)}",
+    }.get(
+        error_code,
+        f"AIDP API HTTP error {response.status_code}: {str(error)}",
+    )
+    raise AppException(
+        error_code,
+        upstream_reason or fallback_message,
+        details=details,
+    )
 
 
 def _extract_upload_failures(response: httpx.Response) -> List[Dict[str, str]]:
@@ -207,20 +241,68 @@ def _extract_list_payload(payload: Any) -> list | None:
     return None
 
 
+def _timestamp_or_iso(value: Any) -> str | None:
+    """Return an ISO-8601 string for a Unix timestamp or an already-ISO value.
+
+    AIDP spells the creation time two ways: the document listing reports
+    ``first_upload_time`` / ``create_time`` as Unix seconds, while the
+    knowledge-file history already sends the canonical ``created_at`` as an ISO
+    string. Both spellings have to survive normalization, otherwise the history
+    rows lose a column the listing rows keep.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            float(text)
+        except ValueError:
+            # Already an ISO-8601 string: keep it verbatim.
+            return text
+        value = text
+    return _timestamp_to_iso(value)
+
+
+# Spellings AIDP uses for a document timestamp, in priority order. The history
+# endpoint sends the canonical ``created_at``, the listing reports the upload
+# stamp, and ``update_time`` closes the chain because a file AIDP has not
+# finished registering yet reports no creation time at all — for a freshly
+# uploaded file the update stamp is the moment it was accepted, which beats
+# leaving the column empty.
+_CREATED_AT_KEYS = ("first_upload_time", "create_time", "created_at", "update_time")
+_UPDATED_AT_KEYS = ("update_time", "updated_at")
+
+
+def _first_reported(raw: Dict[str, Any], keys: tuple[str, ...]) -> Any:
+    """Return the first value ``raw`` reports for ``keys``, skipping blanks.
+
+    ``None``, an empty string and ``False`` all mean "not reported": AIDP sends
+    any of them for unset fields. Treating the blank spelling as a value would
+    shadow the next key in the chain, which is how an empty ``create_time`` hid a
+    populated ``created_at`` and left the creation time null.
+    """
+    for key in keys:
+        value = raw.get(key)
+        if value is None or value == "" or value is False:
+            continue
+        return value
+    return None
+
+
 def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Map an AIDP document item to the shape the frontend expects.
 
-    AIDP returns ``first_upload_time`` / ``create_time`` as the creation timestamp
-    and ``update_time`` as the last-modified timestamp. The frontend schema
-    expects ``created_at`` (ISO string). This mapper performs that conversion
-    and carries through all other fields unchanged.
+    AIDP spells the timestamps several ways: the document listing reports
+    ``first_upload_time`` / ``create_time`` as Unix seconds, while the
+    knowledge-file history already sends the canonical ``created_at`` as an ISO
+    string, and either side may send an unset field as ``""``. Both spellings
+    therefore have to be accepted, and blank ones skipped, so a history row keeps
+    the creation time instead of losing it here. All other fields are carried
+    through unchanged.
     """
     out = dict(raw)
-    created_raw = raw.get("first_upload_time") or raw.get("create_time")
-    out["created_at"] = _timestamp_to_iso(created_raw)
-
-    updated_raw = raw.get("update_time")
-    out["updated_at"] = _timestamp_to_iso(updated_raw)
+    out["created_at"] = _timestamp_or_iso(_first_reported(raw, _CREATED_AT_KEYS))
+    out["updated_at"] = _timestamp_or_iso(_first_reported(raw, _UPDATED_AT_KEYS))
     return out
 
 
@@ -330,6 +412,7 @@ _AIDP_RETRY_MAX_ATTEMPTS = 3
 _AIDP_RETRY_BACKOFF_FACTOR = 0.5
 _AIDP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 _AIDP_READ_TIMEOUT_SECONDS = 30.0
+_AIDP_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
 
 def _request_with_retry(
@@ -1214,6 +1297,107 @@ def upload_aidp_docs_impl(
         )
 
 
+def remove_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+) -> Dict[str, Any]:
+    """Remove one or more documents from an AIDP knowledge base."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    remove_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Remove"
+    remove_url = urljoin(f"{normalized_url}/", remove_path)
+    logger.info("Removing %d AIDP documents from %s", len(file_uuids), remove_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                remove_url,
+                headers=headers,
+                json={"file_uuids": file_uuids},
+            ),
+            context=f"remove-docs:{kds_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP document removal request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "document removal")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP document removal response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+async def stream_aidp_doc_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuid: str,
+) -> httpx.Response:
+    """Open a streaming response for one AIDP document."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    download_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Download"
+    download_url = urljoin(f"{normalized_url}/", download_path)
+    logger.info("Downloading AIDP document %s from %s", file_uuid, download_url)
+
+    response: httpx.Response | None = None
+    try:
+        client = http_client_manager.get_async_client(
+            base_url=normalized_url,
+            timeout=_AIDP_DOWNLOAD_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = await client.send(
+            client.build_request(
+                "POST",
+                download_url,
+                headers=headers,
+                json={"file_uuid": file_uuid},
+            ),
+            stream=True,
+        )
+        if response.status_code >= 400:
+            await response.aread()
+        response.raise_for_status()
+        return response
+    except httpx.RequestError as e:
+        if response is not None:
+            await response.aclose()
+        logger.exception("AIDP document download request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        if response is not None:
+            await response.aclose()
+        _raise_aidp_http_error(e, "document download")
+
+
 def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
     """Get total document count in a KB via AIDP POST .../Count endpoint.
 
@@ -1596,18 +1780,25 @@ def list_aidp_doc_history_impl(
     dir_path: str,
     kds_id: str,
     tenant_id: str | None = None,
+    page: int = 1,
 ) -> Dict[str, Any]:
-    """List every file in a channel directory regardless of processing status.
+    """List a page of a channel directory regardless of processing status.
 
     Endpoint: ``POST /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{kds_id}/KnowledgeFiles/History``
-    Body: ``{"fs_id": <str>, "dir_path": <str>}``
+    Body: ``{"fs_id": <str>, "dir_path": <str>, "page": <int>}``
     Response: ``{"value": [<document with status>, ...]}``
 
     Unlike ``list_aidp_docs_impl`` this returns files that are still being
     chunked/embedded (``PROCESSING``) or that failed (``FAILED``), which is what
     lets the UI show an upload immediately instead of only after ingestion.
+
+    The endpoint is paginated (``page`` is one-based) and sorts files that are
+    still being processed to the front, so a burst of simultaneous uploads can
+    spill past the first page: callers must walk the pages instead of reading
+    only the first one.
     """
     normalized_url = _validate_params(server_url, api_key)
+    normalized_page = page if isinstance(page, int) and page > 0 else 1
 
     if not isinstance(kds_id, str) or not kds_id.strip():
         raise AppException(
@@ -1646,7 +1837,11 @@ def list_aidp_doc_history_impl(
             lambda: client.post(
                 history_url,
                 headers=headers,
-                json={"fs_id": normalized_fs_id, "dir_path": normalized_dir_path},
+                json={
+                    "fs_id": normalized_fs_id,
+                    "dir_path": normalized_dir_path,
+                    "page": normalized_page,
+                },
             ),
             context=f"list-doc-history:{normalized_fs_id}",
         )
@@ -1823,3 +2018,81 @@ def list_aidp_models_impl(
             ErrorCode.AIDP_RESPONSE_ERROR,
             f"Failed to parse AIDP models response: {str(e)}",
         )
+
+
+def _get_retrieval_path(tenant_id: str | None = None) -> str:
+    """Build the tenant-scoped retrieval (FusionSearch) API path."""
+    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/Retrieval/FusionSearch"
+
+
+def fusion_search_impl(
+    server_url: str,
+    api_key: str,
+    tenant_id: str | None = None,
+    query: str = "",
+    kds_list: list[str] | None = None,
+    search_method: str = "hybrid_search",
+    top_k: int = 3,
+    score_threshold: float = 0.0,
+    reranking_enable: bool = True,
+    rewrite_enable: bool = False,
+    related_search_enable: bool = False,
+    multi_modal: bool = False,
+) -> list[dict[str, Any]]:
+    """Run one FusionSearch retrieval against AIDP and return raw hit records.
+
+    Mirrors the SDK ``AidpSearchTool`` wire contract so server-side callers
+    (evaluation case generation) retrieve through the same channel as agents.
+    Records come back as ``{title, text, score, file_url, chunk_type, ...}``.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "query": query,
+        "kds_list": [str(kds_id) for kds_id in kds_list],
+        "search_method": search_method,
+        "reranking_enable": reranking_enable,
+        "rewrite_enable": rewrite_enable,
+        "related_search_enable": related_search_enable,
+        "score_threshold": score_threshold,
+        "top_k": top_k,
+        "multi_modal": multi_modal,
+    }
+    retrieval_url = urljoin(f"{normalized_url}/", _get_retrieval_path(tenant_id))
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(retrieval_url, headers=headers, json=payload),
+            context="fusion-search",
+        )
+        response.raise_for_status()
+        result = response.json()
+    except httpx.RequestError as e:
+        logger.exception("AIDP fusion search request failed")
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP fusion search request failed: {e!s}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "fusion search")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP fusion search response")
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP fusion search response: {e!s}",
+        )
+
+    records = result.get("result", []) if isinstance(result, dict) else []
+    if not isinstance(records, list):
+        logger.warning("AIDP fusion search returned non-list result field")
+        return []
+    return records

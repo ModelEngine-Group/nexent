@@ -21,7 +21,9 @@ Before editing or reviewing these areas, read the linked skill and only its appl
 | --- | --- |
 | Backend endpoints, services, database access, backend/SDK configuration, SQL migrations | [.agents/skills/nexent-backend/SKILL.md](.agents/skills/nexent-backend/SKILL.md) |
 | Frontend pages, UI, hooks, API services, types, styles, localization | [.agents/skills/nexent-frontend/SKILL.md](.agents/skills/nexent-frontend/SKILL.md) |
-| Writing, debugging, or reviewing Python unit tests | [.agents/skills/nexent-python-tests/SKILL.md](.agents/skills/nexent-python-tests/SKILL.md) |
+| Requirement or bug lifecycle, SPEC traceability, and delivery gates | [.agents/skills/nexent-spec-coding/SKILL.md](.agents/skills/nexent-spec-coding/SKILL.md) |
+| Requirement-driven feature catalog, D1-D5 cases, automation, manifest, and generated Excel baseline | [.agents/skills/nexent-test-assets/SKILL.md](.agents/skills/nexent-test-assets/SKILL.md) |
+| Maintaining the existing implementation-oriented Python unit tests | [.agents/skills/nexent-python-tests/SKILL.md](.agents/skills/nexent-python-tests/SKILL.md) |
 
 These Markdown files are the maintained rules. `.cursor/rules/` contains compatibility entry points with the original Cursor triggers. Edit canonical rules when changing policy. See [migration decisions](docs/agent-rules-migration.md) when maintaining this setup.
 

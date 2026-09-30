@@ -1,11 +1,13 @@
 ---
 name: nexent-python-tests
-description: Use when writing, debugging, or reviewing Nexent Python unit tests under test/backend, test/sdk, or other test Python modules. Covers pytest fixtures, lookup-site mocking, async behavior, isolation, and regression assertions. Skip frontend checks and live-service functional or model-runtime verification.
+description: Maintain the legacy implementation-oriented Nexent Python unit tests under test/backend, test/sdk, and test/ext_components. Use for pytest fixtures, lookup-site mocking, async behavior, isolation, and regression assertions in those existing suites. Do not create or maintain the requirement-driven D1-D5 baseline, automation, or manifest.
 ---
 
-# Nexent Python unit tests
+# Nexent legacy Python unit tests
 
 Paths below are relative to the repository root.
+
+These tests are a legacy suite kept separate from the requirement-driven D1-D5 system. Do not assign formal D1-D5 case IDs to them, add them to `test/manifests/d1-d5.yaml`, or count them in the generated functional baseline. Use `nexent-test-assets` for new D1-D5 work.
 
 1. Identify the unit and behavior. Inspect neighboring tests, `test/conftest.py`, and `test/pytest.ini` before changing fixture/import setup.
 2. Use pytest exclusively, pytest assertions, fixtures, and `pytest-mock`. Files/functions start with `test_`; test classes start with `Test`. Keep files below 500 lines or split by feature using `test_<module>_<feature>.py`; split package directories include `__init__.py`.

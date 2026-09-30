@@ -1,11 +1,19 @@
 import types
 import importlib.machinery
+import importlib.util
+import logging
 import pytest
 import sys
 import os
 
 # Import exception classes and models
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    ValidationError,
+    UnauthorizedError,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -63,6 +71,17 @@ sys.modules["services"] = services_module
 sys.modules["services.tenant_service"] = tenant_service_module
 sys.modules["utils"] = utils_module
 sys.modules["utils.auth_utils"] = auth_utils_module
+
+# The `services` stub above is not a package, so the audit submodule is loaded from
+# its file: without it collection fails, and the audit assertions further down would
+# observe a mock instead of real audit lines.
+_audit_spec = importlib.util.spec_from_file_location(
+    "services.audit_service",
+    os.path.join(os.path.dirname(__file__), "../../../backend/services/audit_service.py"),
+)
+_audit_service = importlib.util.module_from_spec(_audit_spec)
+_audit_spec.loader.exec_module(_audit_service)
+sys.modules["services.audit_service"] = _audit_service
 
 from apps.tenant_app import router
 
@@ -138,6 +157,36 @@ class TestTenantExceptions:
         with pytest.raises(UnauthorizedError) as exc_info:
             raise UnauthorizedError("Invalid token")
         assert "Invalid token" in str(exc_info.value)
+
+    def test_tenant_limit_returns_standard_429_payload(self):
+        tenant_service_module.create_tenant.reset_mock(side_effect=True, return_value=True)
+        auth_utils_module.get_current_user_id.return_value = ("user-1", "tenant-1")
+        tenant_service_module.create_tenant.side_effect = TenantResourceLimitError(
+            "Tenant limit reached: maximum 100 tenants",
+            resource="tenants",
+            scope="platform",
+            limit=100,
+            current_count=100,
+        )
+
+        response = client.post(
+            "/tenants",
+            json={"tenant_name": "Second tenant"},
+            headers={"Authorization": "Bearer token"},
+        )
+
+        assert response.status_code == 429
+        assert response.json() == {
+            "code": "120104",
+            "message": "Tenant limit reached: maximum 100 tenants",
+            "details": {
+                "resource": "tenants",
+                "scope": "platform",
+                "limit": 100,
+                "current_count": 100,
+            },
+        }
+        tenant_service_module.create_tenant.side_effect = None
 
 
 class TestTenantResponsePatterns:
@@ -576,3 +625,50 @@ class TestTenantEndpointMappings:
             tenant_service_module.delete_tenant.side_effect = exception
             response = client.delete("/tenants/tenant-1")
             assert response.status_code == status_code
+
+    def test_create_success_records_audit_entry(self, caplog):
+        """Test successful tenant creation records a security audit entry"""
+        tenant_service_module.create_tenant.return_value = {"tenant_id": "new-tenant"}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.post("/tenants", json={"tenant_name": "New tenant"})
+
+        assert response.status_code == 201
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tenant_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=user-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"tenant_id":"new-tenant","tenant_name":"New tenant"}' in messages[0]
+
+    def test_update_success_records_audit_entry(self, caplog):
+        """Test successful tenant update records a security audit entry"""
+        tenant_service_module.update_tenant_info.return_value = {"tenant_name": "Updated"}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.put("/tenants/tenant-1", json={"tenant_name": "Updated"})
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tenant_update" in messages[0]
+        assert "user_id=user-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"tenant_id":"tenant-1","tenant_name":"Updated"}' in messages[0]
+
+    def test_delete_success_records_audit_entry(self, caplog):
+        """Test successful tenant deletion records a security audit entry"""
+        tenant_service_module.delete_tenant.return_value = True
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.delete("/tenants/tenant-1")
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tenant_delete" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=user-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"tenant_id":"tenant-1"}' in messages[0]

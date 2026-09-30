@@ -128,7 +128,8 @@ test("CMSR-003 rollback preserves interleaved sibling output", () => {
   ]);
 });
 
-test("a new model step starts below display content even when no tool ran", () => {
+test("a new model step starts below guidance even when no tool ran", () => {
+
   const parts: unknown[] = [];
   const reasoning = createReasoningAccumulator(parts);
   reasoning.append("Step 1: original thought");

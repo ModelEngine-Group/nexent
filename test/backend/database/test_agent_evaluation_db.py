@@ -54,6 +54,8 @@ def _make_query_chain(session, results):
     method calls terminate at ``.all()`` (or ``.first()`` / ``.scalar()``)
     returning the provided values.
     """
+    queries = []
+
     def _query(*_args, **kwargs):
         query = MagicMock(name="query")
         query.filter.return_value = query
@@ -67,9 +69,11 @@ def _make_query_chain(session, results):
         query.scalar.return_value = results[0] if results else None
         query.update = MagicMock(return_value=len(results))
         session.add = MagicMock()
+        queries.append(query)
         return query
 
     session.query.side_effect = _query
+    session.test_queries = queries
     return _query
 
 
@@ -431,7 +435,7 @@ class TestListAgentEvaluationsByAgent:
                             lambda _r: {"agent_evaluation_id": 1})
 
         results = agent_evaluation_db.list_agent_evaluations_by_agent(
-            agent_id=42, tenant_id="t1",
+            agent_ids=[42, 43], tenant_id="t1",
         )
         assert len(results) == 2
         assert results[0]["case_count"] == 10
@@ -439,6 +443,8 @@ class TestListAgentEvaluationsByAgent:
         assert results[0]["fail_count"] == 3
         assert results[1]["case_count"] == 5
         assert results[1]["fail_count"] == 5
+        filters = session.test_queries[0].filter.call_args.args
+        assert any(getattr(condition.operator, "__name__", "") == "in_op" for condition in filters)
 
     def test_handles_none_counts(self, session_factory, monkeypatch):
         from backend.database import agent_evaluation_db
@@ -454,11 +460,13 @@ class TestListAgentEvaluationsByAgent:
                             lambda _r: {"agent_evaluation_id": 1})
 
         results = agent_evaluation_db.list_agent_evaluations_by_agent(
-            agent_id=42, tenant_id="t1",
+            agent_ids=[], tenant_id="t1",
         )
         assert results[0]["case_count"] == 0
         assert results[0]["pass_count"] == 0
         assert results[0]["fail_count"] == 0
+        filters = session.test_queries[0].filter.call_args.args
+        assert not any(getattr(condition.operator, "__name__", "") == "in_op" for condition in filters)
 
 
 # ---------------------------------------------------------------------------

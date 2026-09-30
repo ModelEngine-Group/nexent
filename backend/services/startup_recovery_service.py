@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_RECOVERY_GRACE_SECONDS = 30 * 60
 _upload_cleanup_tasks: set[asyncio.Task] = set()
+_system_agent_backfill_tasks: set[asyncio.Task] = set()
 
 
 def recover_runtime_tasks() -> dict[str, int]:
@@ -186,3 +187,19 @@ async def schedule_interrupted_upload_cleanup(upload_owner_service: str) -> None
     task = asyncio.create_task(_delayed_cleanup())
     _upload_cleanup_tasks.add(task)
     task.add_done_callback(_upload_cleanup_tasks.discard)
+
+
+def schedule_workbench_main_backfill() -> None:
+    """Run historical tenant system-Agent bootstrap without blocking startup."""
+
+    async def _backfill() -> None:
+        from services.tenant_service import backfill_workbench_main_agents
+
+        try:
+            await asyncio.to_thread(backfill_workbench_main_agents)
+        except Exception:
+            logger.exception("Workbench system Agent backfill failed")
+
+    task = asyncio.create_task(_backfill())
+    _system_agent_backfill_tasks.add(task)
+    task.add_done_callback(_system_agent_backfill_tasks.discard)

@@ -15,7 +15,8 @@ from nexent.core.agents.agent_model import (
     GuardrailConfig,
     GuardrailRule,
 )
-from nexent.core.agents.core_agent import CoreAgent, ToolInputBlockedError
+from nexent.core.agents.core_agent import CoreAgent, NonterminalThoughtTurn, ToolInputBlockedError
+from nexent.consts.mcp_errors import MCPToolTimeoutError
 from nexent.core.agents.verification import VerificationController
 
 KEYWORD = "机密信息"
@@ -223,6 +224,7 @@ def _make_step_agent(rule, messages, model_output="ok"):
     agent._context_tools = MagicMock(return_value=[])
     agent._use_structured_outputs_internally = False
     agent.output_protocol = "code_action"
+    agent.enable_protocol_repair_retry = True
     agent._consecutive_protocol_errors = 0
     agent._ephemeral_system_messages = None
     agent.verification_controller = controller
@@ -230,9 +232,17 @@ def _make_step_agent(rule, messages, model_output="ok"):
     agent.python_executor = MagicMock()
     agent.context_runtime = MagicMock()
     agent.context_runtime.chars_per_token = 1.0
-    mock_context = MagicMock()
-    mock_context.messages = messages
-    agent.context_runtime.prepare_step = MagicMock(return_value=mock_context)
+    def prepare_step(**kwargs):
+        context = MagicMock()
+        context.messages = [
+            *kwargs.get("request_system_messages", []),
+            *messages,
+            *kwargs.get("request_tail_messages", []),
+        ]
+        context.memory_messages = messages
+        return context
+
+    agent.context_runtime.prepare_step = MagicMock(side_effect=prepare_step)
     agent.context_runtime.truncate_observation = MagicMock()
     agent.enable_planning = False
     agent.model = MagicMock()
@@ -267,9 +277,8 @@ def test_step_stream_checkpoint1_mask():
     rule = GuardrailRule(name="pii", pattern="机密信息", severity="mask")
     agent = _make_step_agent(rule, messages=[_msg("user", "这是机密信息内容")])
     action_step = MagicMock()
-    with pytest.raises(ModelOutputProtocolError) as exc_info:
+    with pytest.raises(NonterminalThoughtTurn):
         next(agent._step_stream(action_step))
-    assert exc_info.value.reason is ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION
     assert agent.model.call_count == 1  # model was called (with masked input)
     called_messages = agent.model.call_args[0][0]
     masked_text = "".join(
@@ -285,9 +294,8 @@ def test_step_stream_checkpoint1_pass():
     rule = GuardrailRule(name="pii", pattern="机密信息", severity="block")
     agent = _make_step_agent(rule, messages=[_msg("user", "hello world")])
     action_step = MagicMock()
-    with pytest.raises(ModelOutputProtocolError) as exc_info:
+    with pytest.raises(NonterminalThoughtTurn):
         next(agent._step_stream(action_step))
-    assert exc_info.value.reason is ProtocolErrorReason.MISSING_EXPLICIT_TERMINATION
     assert agent.model.call_count == 1  # model called
 
 
@@ -299,13 +307,13 @@ def test_step_stream_checkpoint1_pass():
     ],
 )
 def test_step_stream_rejects_non_executable_action_record(model_output):
-    """Action-shaped parse failures must retry through AgentError, not terminate as final answers."""
+    """Non-executable text remains a thought turn, not a final answer."""
     rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
     agent = _make_step_agent(rule, messages=[_msg("user", "solve this")], model_output=model_output)
     action_step = MagicMock()
     action_step.is_final_answer = False
 
-    with pytest.raises(ModelOutputProtocolError):
+    with pytest.raises(NonterminalThoughtTurn):
         next(agent._step_stream(action_step))
 
     assert action_step.model_output == model_output
@@ -327,6 +335,7 @@ def test_run_stream_silently_retries_invalid_action_then_returns_real_final_answ
     agent.memory = SimpleNamespace(steps=[])
     agent.logger = MagicMock()
     agent.enable_planning = False
+    agent.enable_protocol_repair_retry = True
     agent.final_answer_checks = None
     agent.verification_config = AgentVerificationConfig(enabled=False)
     agent._finalize_step = MagicMock()
@@ -389,13 +398,20 @@ def test_fault_injected_model_outputs_silently_repair_then_execute_explicit_fina
     assert agent.memory.steps[0].error is None
     assert agent.memory.steps[0].step_number == 1
     assert agent.memory.steps[0].is_final_answer is True
-    final_model_messages = agent.model.call_args_list[-1].args[0]
+    repair_messages = agent.model.call_args_list[1].args[0]
     repair_text = "\n".join(
+        str(message.get("content") if isinstance(message, dict) else message.content)
+        for message in repair_messages
+    )
+    assert "unsupported_or_tag_only_output" in repair_text
+    final_model_messages = agent.model.call_args_list[-1].args[0]
+    continuation_text = "\n".join(
         str(message.get("content") if isinstance(message, dict) else message.content)
         for message in final_model_messages
     )
-    assert "unsupported_or_tag_only_output" in repair_text
-    assert "missing_explicit_termination" in repair_text
+    assert "Do not return only text again" in continuation_text
+    assert "unsupported_or_tag_only_output" not in continuation_text
+    assert "bare answer" not in continuation_text
     assert isinstance(results[-1], FinalAnswerStep)
     assert results[-1].output == "42"
 
@@ -546,6 +562,58 @@ def test_step_stream_generic_exec_error_raises_agent_execution_error():
     with pytest.raises(AgentExecutionError):
         next(agent._step_stream(action_step))
     assert action_step.model_output != "exec boom"  # refusal path not taken
+
+
+def test_step_stream_wrapped_mcp_timeout_bypasses_agent_retry():
+    """A timeout wrapped by the local executor must escape as a non-retryable error."""
+    rule = GuardrailRule(name="pii", pattern="鏈哄瘑淇℃伅", severity="block")
+    agent = _make_step_agent(
+        rule, messages=[_msg("user", "hello")], model_output="<code>slow_tool()</code>",
+    )
+    agent.python_executor.side_effect = RuntimeError(
+        "Code execution failed: MCPToolTimeoutError: "
+        "MCP tool request timed out after 10 seconds"
+    )
+    agent.verification_controller.config.step_verification_enabled = False
+
+    stream = agent._step_stream(MagicMock())
+    with pytest.raises(MCPToolTimeoutError):
+        next(stream)
+
+
+def test_step_stream_generic_timeout_remains_agent_execution_error():
+    """A non-MCP executor timeout must not be reported as an MCP timeout."""
+    from nexent.core.agents.core_agent import AgentExecutionError
+
+    rule = GuardrailRule(name="pii", pattern="機密信息", severity="block")
+    agent = _make_step_agent(
+        rule, messages=[_msg("user", "hello")], model_output="<code>slow_code()</code>",
+    )
+    agent.python_executor.side_effect = TimeoutError("local code execution timed out")
+    agent.verification_controller.config.step_verification_enabled = False
+
+    stream = agent._step_stream(MagicMock())
+    with pytest.raises(AgentExecutionError):
+        next(stream)
+
+
+def test_step_stream_native_mcp_timeout_preserves_error_identity():
+    """A native MCP timeout is re-raised unchanged by the executor guard."""
+    rule = GuardrailRule(name="pii", pattern="机密信息", severity="block")
+    agent = _make_step_agent(
+        rule, messages=[_msg("user", "hello")], model_output="<code>slow_tool()</code>",
+    )
+    timeout_error = MCPToolTimeoutError(
+        "MCP tool request timed out after 10 seconds"
+    )
+    agent.python_executor.side_effect = timeout_error
+    agent.verification_controller.config.step_verification_enabled = False
+
+    stream = agent._step_stream(MagicMock())
+    with pytest.raises(MCPToolTimeoutError) as exc_info:
+        next(stream)
+
+    assert exc_info.value is timeout_error
 
 
 def test_step_stream_precheck_action_scope_blocking_raises_before_exec():

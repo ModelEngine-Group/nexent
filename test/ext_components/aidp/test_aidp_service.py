@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 from types import ModuleType
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -914,6 +914,58 @@ class TestNormalizeAidpDoc:
         result = normalize({"create_time": 1700000000})
         assert result["created_at"] is not None
 
+    def test_keeps_an_iso_created_at_the_payload_reports(self, normalize):
+        """The history endpoint already spells the creation time ``created_at``."""
+        result = normalize({"created_at": "2024-06-10T06:20:00Z", "file_name": "a.txt"})
+        assert result["created_at"] == "2024-06-10T06:20:00Z"
+        assert result["file_name"] == "a.txt"
+
+    def test_keeps_an_iso_updated_at_the_payload_reports(self, normalize):
+        result = normalize({"updated_at": "2024-06-10T06:20:00Z"})
+        assert result["updated_at"] == "2024-06-10T06:20:00Z"
+
+    def test_numeric_upload_time_wins_over_a_reported_created_at(self, normalize):
+        """A listing row reports both; the upload timestamp stays authoritative."""
+        result = normalize({
+            "first_upload_time": 1700000000,
+            "created_at": "2024-06-10T06:20:00Z",
+        })
+        assert "2023-11-14" in result["created_at"]
+
+    def test_numeric_string_timestamp_is_converted(self, normalize):
+        result = normalize({"created_at": "1700000000"})
+        assert "2023-11-14" in result["created_at"]
+
+    def test_history_item_keeps_its_created_at(self, aidp_service_module):
+        """Regression: the history's ``created_at`` used to be blanked to null."""
+        result = aidp_service_module._normalize_history_doc({
+            "file_uuid": "uuid-1",
+            "created_at": "2024-06-10T06:20:00Z",
+            "status": "uploading",
+        })
+        assert result["created_at"] == "2024-06-10T06:20:00Z"
+        assert result["status"] == "UPLOADING"
+
+    def test_empty_create_time_does_not_hide_a_reported_created_at(self, normalize):
+        """A blank ``create_time`` means "not reported", not a value to keep."""
+        result = normalize({
+            "create_time": "",
+            "created_at": "2024-06-10T06:20:00Z",
+            "update_time": 1700000000,
+        })
+        assert result["created_at"] == "2024-06-10T06:20:00Z"
+        assert "2023-11-14" in result["updated_at"]
+
+    def test_empty_first_upload_time_does_not_hide_create_time(self, normalize):
+        result = normalize({"first_upload_time": "", "create_time": 1700000000})
+        assert "2023-11-14" in result["created_at"]
+
+    def test_falls_back_to_update_time_when_no_creation_time_is_reported(self, normalize):
+        """A file AIDP has not registered yet reports only its update time."""
+        result = normalize({"update_time": 1700000000})
+        assert result["created_at"] is not None
+        assert result["created_at"] == result["updated_at"]
+
     def test_uses_update_time_for_updated_at(self, normalize):
         result = normalize({"update_time": 1700000000, "first_upload_time": 1600000000})
         assert result["updated_at"] is not None
@@ -1197,6 +1249,16 @@ def _setup_mock_client(aidp_service_module, method="get", response=None, side_ef
         getattr(mock_client, method).return_value = response
     mock_manager = MagicMock()
     mock_manager.get_sync_client.return_value = mock_client
+    aidp_service_module.http_client_manager = mock_manager
+    return mock_client
+
+
+def _setup_mock_async_client(aidp_service_module, response=None, side_effect=None):
+    """Create and wire an async mock client into the service module manager."""
+    mock_client = MagicMock()
+    mock_client.send = AsyncMock(side_effect=side_effect, return_value=response)
+    mock_manager = MagicMock()
+    mock_manager.get_async_client.return_value = mock_client
     aidp_service_module.http_client_manager = mock_manager
     return mock_client
 
@@ -2105,7 +2167,7 @@ class TestListAidpDocsImpl:
     def test_success_normalizes_docs(self, aidp_service_module):
         mock_resp = _make_success_response({
             "value": [
-                {"name": "doc1", "first_upload_time": 1700000000},
+                {"name": "doc1", "file_uuid": "uuid-1", "first_upload_time": 1700000000},
                 {"name": "doc2", "create_time": 1700100000, "update_time": 1700200000},
             ],
             "total_count": 2,
@@ -2122,6 +2184,7 @@ class TestListAidpDocsImpl:
         assert len(result["value"]) == 2
         # Normalization adds created_at / updated_at
         assert result["value"][0]["created_at"] is not None
+        assert result["value"][0]["file_uuid"] == "uuid-1"
         assert result["value"][1]["updated_at"] is not None
 
     def test_success_non_list_value_not_normalized(self, aidp_service_module):
@@ -2189,6 +2252,147 @@ class TestListAidpDocsImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+# ---------------------------------------------------------------------------
+# remove_aidp_docs_impl / download_aidp_doc_impl tests
+# ---------------------------------------------------------------------------
+class TestAidpDocumentFileOperations:
+    def test_remove_sends_uuid_array_and_preserves_partial_result(
+        self, aidp_service_module
+    ):
+        expected = {
+            "summary": {"total": 2, "success": 1, "failed": 1},
+            "success_list": [{"file_uuid": "uuid-1"}],
+            "failed_list": [{"file_uuid": "uuid-2"}],
+        }
+        mock_client = _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            response=_make_success_response(expected),
+        )
+
+        result = aidp_service_module.remove_aidp_docs_impl(
+            "http://127.0.0.1:30081",
+            "jwt-token",
+            "kb-1",
+            ["uuid-1", "uuid-2"],
+        )
+
+        assert result == expected
+        call = mock_client.post.call_args
+        assert call.args[0].endswith(
+            "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Remove"
+        )
+        assert call.kwargs["json"] == {"file_uuids": ["uuid-1", "uuid-2"]}
+
+    def test_remove_maps_request_error(self, aidp_service_module):
+        request = httpx.Request("POST", "http://127.0.0.1:30081")
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.remove_aidp_docs_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", ["uuid-1"]
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    def test_remove_maps_invalid_json(self, aidp_service_module):
+        mock_response = _make_success_response({})
+        mock_response.json.side_effect = ValueError("bad json")
+        _setup_mock_client(aidp_service_module, method="post", response=mock_response)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.remove_aidp_docs_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", ["uuid-1"]
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    @pytest.mark.parametrize("status_code", [401, 403, 500])
+    def test_remove_maps_upstream_http_errors(self, aidp_service_module, status_code):
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=_make_http_error(status_code, "POST"),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.remove_aidp_docs_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", ["uuid-1"]
+            )
+        expected_code = (
+            ErrorCode.AIDP_AUTH_ERROR
+            if status_code in (401, 403)
+            else ErrorCode.AIDP_SERVICE_ERROR
+        )
+        assert exc_info.value.error_code == expected_code
+
+    @pytest.mark.asyncio
+    async def test_download_streams_binary_content_and_headers(self, aidp_service_module):
+        mock_response = httpx.Response(
+            200,
+            headers={
+                "Content-Type": "text/plain",
+                "Content-Disposition": 'attachment; filename="a.txt"',
+                "X-File-Size": "16",
+            },
+            content=b"downloaded bytes",
+            request=httpx.Request("POST", "http://127.0.0.1:30081"),
+        )
+        mock_client = _setup_mock_async_client(aidp_service_module, response=mock_response)
+
+        response = await aidp_service_module.stream_aidp_doc_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+        )
+        chunks = [chunk async for chunk in response.aiter_bytes()]
+
+        assert b"".join(chunks) == b"downloaded bytes"
+        assert response.headers["Content-Type"] == "text/plain"
+        assert response.headers["Content-Disposition"] == 'attachment; filename="a.txt"'
+        assert response.headers["X-File-Size"] == "16"
+        request = mock_client.build_request.call_args
+        assert request.args[0] == "POST"
+        assert request.args[1].endswith(
+            "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Download"
+        )
+        assert request.kwargs["json"] == {"file_uuid": "uuid-1"}
+        await response.aclose()
+        assert mock_response.is_closed
+
+    @pytest.mark.asyncio
+    async def test_download_maps_request_error(self, aidp_service_module):
+        request = httpx.Request("POST", "http://127.0.0.1:30081")
+        _setup_mock_async_client(
+            aidp_service_module,
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_doc_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    @pytest.mark.asyncio
+    async def test_download_maps_upstream_http_error(self, aidp_service_module):
+        response = httpx.Response(
+            404,
+            json={"error": "file not found"},
+            request=httpx.Request("POST", "http://127.0.0.1:30081"),
+        )
+        _setup_mock_async_client(
+            aidp_service_module,
+            response=response,
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_doc_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
 
 # ---------------------------------------------------------------------------
@@ -2673,6 +2877,7 @@ class TestListAidpDocHistoryImpl:
         assert call_args.kwargs["json"] == {
             "fs_id": "fs-1",
             "dir_path": "/aidp/knowledge/kb-1",
+            "page": 1,
         }
         assert call_args.kwargs["headers"]["Authorization"] == "Bearer jwt-token"
 

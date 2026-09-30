@@ -28,18 +28,20 @@ import {
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
-import { compositeAttachmentAdapter } from "./adapter/attachment-adapter";
+import { createNewChatAttachmentAdapter } from "./adapter/attachment-adapter";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
+import { resolveAgentDeepLinkAction } from "@/lib/agentUsageGuide";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
 import { conversationService } from "@/services/conversationService";
 import { useTranslation } from "react-i18next";
+import { useConversationRouteGuard } from "@/features/workbench/hooks/useConversationRouteGuard";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -51,9 +53,11 @@ import type {
 function useLocalChatRuntime(
   dictationAdapter: ServerDictationAdapter
 ): AssistantRuntime {
+  const attachmentAdapter = useMemo(() => createNewChatAttachmentAdapter(), []);
+
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
-      attachments: compositeAttachmentAdapter,
+      attachments: attachmentAdapter,
       dictation: dictationAdapter,
     },
   });
@@ -72,10 +76,15 @@ export default function Home() {
 }
 
 const PersistentChatHome: FC = () => {
+  useConversationRouteGuard("agent_chat");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
+  const [deepLinkedAgentId, setDeepLinkedAgentId] = useState<number | null>(
+    null
+  );
+  const consumedDeepLinkRef = useRef(false);
   const { modelConfig } = useConfig();
   const dictationAdapter = useMemo(
     () => new ServerDictationAdapter(() => modelConfig?.stt),
@@ -87,6 +96,12 @@ const PersistentChatHome: FC = () => {
     const threadId =
       searchParams.get("thread_id") ?? searchParams.get("conversation_id");
     setRequestedThreadId(threadId || undefined);
+    const agentId = searchParams.get("agent_id");
+    setDeepLinkedAgentId(
+      agentId && Number.isInteger(Number(agentId)) && Number(agentId) > 0
+        ? Number(agentId)
+        : null
+    );
   }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
@@ -99,10 +114,37 @@ const PersistentChatHome: FC = () => {
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
 
-  const handleAgentSelected = useCallback((agent: Agent) => {
-    setSelectedAgent(agent);
-    log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
-  }, []);
+  const switchToNewAgentThread = useCallback(async () => {
+    await runtime.threads.switchToNewThread();
+  }, [runtime]);
+
+  const handleAgentSelected = useCallback(
+    (agent: Agent) => {
+      setSelectedAgent(agent);
+      log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
+      void switchToNewAgentThread().catch((error) => {
+        log.error("[Home] Failed to switch to a new agent thread:", error);
+      });
+    },
+    [switchToNewAgentThread]
+  );
+
+  useEffect(() => {
+    const action = resolveAgentDeepLinkAction({
+      agentId: deepLinkedAgentId,
+      agents,
+      consumed: consumedDeepLinkRef.current,
+      isLoading: isLoadingAgents,
+      getAgentId: (agent) => Number((agent as { agent_id?: number }).agent_id),
+    });
+    if (action.action === "wait") return;
+    if (deepLinkedAgentId != null) {
+      consumedDeepLinkRef.current = true;
+    }
+    if (action.action === "select") {
+      handleAgentSelected(action.agent);
+    }
+  }, [agents, deepLinkedAgentId, handleAgentSelected, isLoadingAgents]);
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
@@ -118,7 +160,6 @@ const PersistentChatHome: FC = () => {
           setSelectedAgent={setSelectedAgent}
           isLoadingAgents={isLoadingAgents}
           agents={agents}
-          onAgentSelected={handleAgentSelected}
           onBack={handleBack}
           isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
         />
@@ -137,7 +178,6 @@ const HomeContent: FC<{
   setSelectedAgent: (agent: Agent | null) => void;
   isLoadingAgents: boolean;
   agents: Agent[];
-  onAgentSelected: (agent: Agent) => void;
   onBack: () => void;
   isDictationConfigured: boolean;
 }> = ({
@@ -146,7 +186,6 @@ const HomeContent: FC<{
   setSelectedAgent,
   isLoadingAgents,
   agents,
-  onAgentSelected,
   onBack,
   isDictationConfigured,
 }) => {
@@ -205,7 +244,9 @@ const HomeContent: FC<{
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
     new Map()
   );
-  const [, forceServerIdTick] = useState(0);
+  const [serverConversationIds, setServerConversationIds] = useState<
+    Map<string, string>
+  >(new Map());
 
   const handleServerConversationId = useCallback(
     (threadId: string, serverId: string, initialQuestion?: string) => {
@@ -215,10 +256,8 @@ const HomeContent: FC<{
       if (previous !== numericId) {
         map.set(threadId, numericId);
         cacheHistoricalChatMode(numericId, chatMode);
-        // Trigger a re-render so the `setRunConfig` effect below picks up the
-        // new id. We don't store the map in state because we never need to
-        // diff/render it directly — only react when an entry changes.
-        forceServerIdTick((tick) => tick + 1);
+        // Keep the sidebar and run configuration in sync with the server id.
+        setServerConversationIds(new Map(map));
       }
 
       if (initialQuestion && previous !== numericId) {
@@ -227,6 +266,7 @@ const HomeContent: FC<{
             setGeneratedTitles((titles) => {
               const next = new Map(titles);
               next.set(threadId, title);
+              next.set(numericId, title);
               return next;
             });
           })
@@ -537,6 +577,7 @@ const HomeContent: FC<{
         onRuntimeMetadataSent: handleRuntimeMetadataSent,
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         onGenerationStopped: handleGenerationStopped,
+
         enablePlan: chatMode === "planning",
         ...(activeThreadId
           ? {
@@ -683,8 +724,14 @@ const HomeContent: FC<{
 
   const handleThreadBack = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
-    await runtime.threads.switchToNewThread();
-    onBack();
+    try {
+      await runtime.threads.switchToNewThread();
+      await runtime.threads.reload();
+    } catch (error) {
+      log.error("[HomeContent] Failed to return to agent list:", error);
+    } finally {
+      onBack();
+    }
   }, [onBack, runtime]);
 
   const handlePrepareNewConversation = useCallback(() => {
@@ -694,22 +741,28 @@ const HomeContent: FC<{
   }, [onBack]);
 
   const handleNewConversation = useCallback(async () => {
-    handlePrepareNewConversation();
-    await runtime.threads.switchToNewThread();
-  }, [handlePrepareNewConversation, runtime]);
+    shouldRestoreAgentRef.current = false;
+    try {
+      await runtime.threads.switchToNewThread();
+      await runtime.threads.reload();
+    } catch (error) {
+      log.error("[HomeContent] Failed to start a new conversation:", error);
+    } finally {
+      onBack();
+    }
+  }, [onBack, runtime]);
 
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
-      await runtime.threads.switchToNewThread();
       const thread = runtime.threads.getItemById(
         runtime.threads.getState().mainThreadId
       );
       await thread.initialize();
       await thread.updateCustom({ agentId: agent.id });
-      onAgentSelected(agent);
+      setSelectedAgent(agent);
     },
-    [runtime, onAgentSelected]
+    [runtime, setSelectedAgent]
   );
 
   // Conditional rendering must happen after all hooks
@@ -727,6 +780,7 @@ const HomeContent: FC<{
         <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar
             generatedTitles={generatedTitles}
+            serverConversationIds={serverConversationIds}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
           />

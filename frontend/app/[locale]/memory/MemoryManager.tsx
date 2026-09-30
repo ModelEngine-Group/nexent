@@ -482,41 +482,46 @@ export function MemoryManager() {
       <Text type="secondary">
         {t("memoryManageModal.baseSettingsDescription")}
       </Text>
-      <Card className="memory-config-card" loading={configLoading}>
-        <Flex align="center" justify="space-between" gap={24}>
-          <Flex align="center" gap={12}>
-            <Settings size={20} />
-            <div>
-              <Text strong>{t("memoryManageModal.memoryAbility")}</Text>
-              <Text type="secondary" className="memory-setting-description">
-                {t("memoryManageModal.memoryAbilityDescription")}
-              </Text>
-            </div>
+      <Flex vertical gap={24} className="memory-config-stack">
+        <Card className="memory-config-card" loading={configLoading}>
+          <Flex align="center" justify="space-between" gap={24}>
+            <Flex align="center" gap={12}>
+              <Settings size={20} />
+              <div>
+                <Text strong>{t("memoryManageModal.memoryAbility")}</Text>
+                <Text type="secondary" className="memory-setting-description">
+                  {t("memoryManageModal.memoryAbilityDescription")}
+                </Text>
+              </div>
+            </Flex>
+            <Switch
+              checked={config.memoryEnabled}
+              loading={savingConfig}
+              onChange={updateMemoryEnabled}
+            />
           </Flex>
-          <Switch
-            checked={config.memoryEnabled}
-            loading={savingConfig}
-            onChange={updateMemoryEnabled}
-          />
-        </Flex>
-      </Card>
-      <DreamingConfigCards />
-      <ProviderConfigCard
-        memoryEnabled={config.memoryEnabled}
-        topK={config.externalProviderTopK}
-        savingTopK={savingConfig}
-        onTopKChange={(value) =>
-          setConfig((current) => ({ ...current, externalProviderTopK: value }))
-        }
-        onTopKSave={async () => {
-          setSavingConfig(true);
-          try {
-            await setExternalProviderTopK(config.externalProviderTopK);
-          } finally {
-            setSavingConfig(false);
+        </Card>
+        <DreamingConfigCards />
+        <ProviderConfigCard
+          memoryEnabled={config.memoryEnabled}
+          topK={config.externalProviderTopK}
+          savingTopK={savingConfig}
+          onTopKChange={(value) =>
+            setConfig((current) => ({
+              ...current,
+              externalProviderTopK: value,
+            }))
           }
-        }}
-      />
+          onTopKSave={async () => {
+            setSavingConfig(true);
+            try {
+              await setExternalProviderTopK(config.externalProviderTopK);
+            } finally {
+              setSavingConfig(false);
+            }
+          }}
+        />
+      </Flex>
     </div>
   );
 
@@ -710,6 +715,7 @@ export function MemoryManager() {
         onOk={saveMemory}
         onCancel={() => setEditorOpen(false)}
         destroyOnHidden
+        forceRender
       >
         <Form
           form={form}

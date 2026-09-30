@@ -16,6 +16,7 @@ from pydantic import EmailStr
 from utils.auth_utils import (
     get_supabase_client,
     get_supabase_admin_client,
+    delete_supabase_user,
     calculate_expires_at,
     get_jwt_expiry_seconds,
     ensure_cas_session_active_from_authorization,
@@ -40,6 +41,7 @@ from consts.exceptions import (
     IncorrectInviteCodeException,
     UserRegistrationException,
     UnauthorizedError,
+    TenantResourceLimitError,
     ValidationError,
 )
 from consts.error_code import ErrorCode
@@ -249,8 +251,14 @@ async def signup_user_with_invitation(email: EmailStr,
         is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
         # Create user tenant relationship
-        insert_user_tenant(
-            user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
+        try:
+            insert_user_tenant(
+                user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
+        except TenantResourceLimitError:
+            # Supabase auth creation happens before the local tenant-limit check.
+            # Remove the auth identity so a rejected registration is fully rolled back.
+            delete_supabase_user(user_id)
+            raise
 
         # Use invitation code now that we have the real user_id
         if invitation_info:

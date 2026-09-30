@@ -112,6 +112,7 @@ class ErrorCode(Enum):
     KNOWLEDGE_STORAGE_COMMIT_FAILED = "060107"  # Source object ledger commit failed
     KNOWLEDGE_TASK_SUBMIT_FAILED = "060108"  # Data-process task submission failed
     KNOWLEDGE_DELETE_BLOCKED = "060109"  # Delete blocked by in-flight file processing
+    KNOWLEDGE_RESOURCE_EXCEEDED = "060110"  # Knowledge resource limit exceeded
 
     # ==================== 07 MCPTools / MCP 工具 ====================
     # 01 - Tool
@@ -300,18 +301,20 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.COMMON_MISSING_REQUIRED_FIELD: 400,
     # Common - Rate Limit
     ErrorCode.COMMON_RATE_LIMIT_EXCEEDED: 429,
+    # Tenant resource quotas
+    ErrorCode.TENANT_RESOURCE_EXCEEDED: 429,
     # Common - Resource
     ErrorCode.COMMON_RESOURCE_NOT_FOUND: 404,
     ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS: 409,
     ErrorCode.COMMON_RESOURCE_DISABLED: 403,
     # Knowledge base lifecycle
     ErrorCode.KNOWLEDGE_DELETE_BLOCKED: 409,
+    ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED: 429,
     # Chat - Runtime metadata
     ErrorCode.CHAT_METADATA_NOT_ALLOWED: 400,
     ErrorCode.CHAT_METADATA_INVALID: 422,
     ErrorCode.CHAT_METADATA_TOO_LARGE: 413,
     ErrorCode.CHAT_METADATA_VERSION_CONFLICT: 409,
-    # Tenant resource - personal KB quota
     ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED: 403,
     ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE: 503,
     ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE: 400,

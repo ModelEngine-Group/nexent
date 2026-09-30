@@ -1,6 +1,7 @@
 """Unit tests for backend.apps.northbound_app module."""
 import sys
 import os
+from http import HTTPStatus
 
 # The conftest.py sets up all mocks
 
@@ -23,6 +24,7 @@ from consts.exceptions import (
     RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError,
     RuntimeUpstreamError,
+    TenantResourceLimitError,
     NotFoundException,
     UnauthorizedError,
     SignatureValidationError,
@@ -185,6 +187,39 @@ def test_create_api_users_batch_endpoint_is_exposed_by_northbound_router():
         group_id=None,
         count=1,
     )
+
+
+def test_create_api_users_batch_returns_tenant_limit_error():
+    ctx = MagicMock(user_id="admin-1", tenant_id="tenant-1", request_id="req-123")
+    limit_error = TenantResourceLimitError(
+        "Tenant user limit reached: maximum 10000 users per tenant",
+        resource="users",
+        scope="tenant",
+        limit=10000,
+        current_count=10000,
+    )
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock) as mock_ctx, \
+            patch("apps.northbound_app._role_for_context", return_value="ADMIN"), \
+            patch("apps.northbound_app.create_api_users_batch", side_effect=limit_error):
+        mock_ctx.return_value = ctx
+
+        response = client.post(
+            "/nb/v1/api-users/batch",
+            headers=_build_headers(),
+            json={"role": "USER", "count": 1},
+        )
+
+    assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+    assert response.json() == {
+        "code": "120104",
+        "message": "Tenant user limit reached: maximum 10000 users per tenant",
+        "details": {
+            "resource": "users",
+            "scope": "tenant",
+            "limit": 10000,
+            "current_count": 10000,
+        },
+    }
 
 
 def test_create_api_users_batch_endpoint_maps_validation_error():

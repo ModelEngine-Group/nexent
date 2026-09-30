@@ -86,7 +86,7 @@ export function MemoryEmbeddingMonitor() {
       title={t("embedding.memoryUnavailableWarningModal.title")}
       onCancel={() => setOpen(false)}
       closable={!saving}
-      maskClosable={false}
+      mask={{ closable: false }}
       keyboard={!saving}
       footer={[
         <Button key="disable" loading={saving} onClick={disableMemory}>

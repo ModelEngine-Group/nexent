@@ -1,0 +1,7 @@
+---
+description: Formal Nexent feature catalog, D1-D5 cases, automation, manifest, generated Excel, migration, and Mock profiles
+globs: test/features/**,test/cases/**,test/changes/**,test/automation/**,test/manifests/**,test/schemas/**,test/tools/**,test/mock-services/**
+alwaysApply: false
+---
+
+Read [.agents/skills/nexent-test-assets/SKILL.md](mdc:.agents/skills/nexent-test-assets/SKILL.md) before working in this rule scope.

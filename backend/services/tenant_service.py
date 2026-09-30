@@ -35,9 +35,17 @@ from consts.const import (
     TENANT_ID,
     TENANT_NAME,
     IS_SPEED_MODE,
+    ENABLE_AGENT_WORKBENCH,
 )
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UserRegistrationException
+from consts.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    TenantResourceLimitError,
+    UserRegistrationException,
+    ValidationError,
+)
 from management.services.skill.service import install_skills_from_zip_for_tenant
+from management.services.agent.system_agent_provider import ensure_workbench_main_agent
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +228,48 @@ def get_tenants_paginated_for_user(
     return get_tenants_paginated(page=page, page_size=page_size)
 
 
+def backfill_workbench_main_agents() -> Dict[str, int]:
+    """Ensure the tenant-scoped workbench Agent for every existing real tenant.
+
+    The operation is deliberately reentrant. Each tenant is isolated so that a
+    malformed or temporarily unavailable tenant does not prevent the remaining
+    tenants from being upgraded.
+    """
+    if not ENABLE_AGENT_WORKBENCH:
+        return {"total": 0, "succeeded": 0, "failed": 0}
+
+    tenant_ids = [
+        tenant_id
+        for tenant_id in get_all_tenant_ids()
+        if _is_displayable_tenant_id(tenant_id)
+    ]
+    succeeded = 0
+    failed = 0
+
+    for tenant_id in tenant_ids:
+        try:
+            ensure_workbench_main_agent(
+                tenant_id=tenant_id,
+                user_id="system",
+            )
+            succeeded += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning(
+                "Failed to backfill workbench_main for tenant %s: %s",
+                tenant_id,
+                exc,
+            )
+
+    result = {
+        "total": len(tenant_ids),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+    logger.info("Workbench system Agent backfill completed: %s", result)
+    return result
+
+
 def create_tenant(
     tenant_name: str,
     created_by: Optional[str] = None,
@@ -289,6 +339,22 @@ def create_tenant(
                 logger.warning(
                     f"Failed to install skills by IDs for tenant {tenant_id}: {e}")
 
+        if ENABLE_AGENT_WORKBENCH:
+            try:
+                ensure_workbench_main_agent(
+                    tenant_id=tenant_id,
+                    user_id=created_by or "system",
+                    locale=locale,
+                )
+            except Exception as e:
+                # Tenant creation remains recoverable because Workbench runtime also
+                # calls the provider lazily before using the system Agent.
+                logger.warning(
+                    "Failed to provision workbench_main for tenant %s: %s",
+                    tenant_id,
+                    e,
+                )
+
         tenant_info = {
             "tenant_id": tenant_id,
             "tenant_name": tenant_name.strip(),
@@ -300,6 +366,8 @@ def create_tenant(
             f"Created tenant {tenant_id} with name '{tenant_name}' and default group {default_group_id}")
         return tenant_info
 
+    except TenantResourceLimitError:
+        raise
     except Exception as e:
         logger.error(f"Failed to create tenant {tenant_id}: {str(e)}")
         raise ValidationError(f"Failed to create tenant: {str(e)}")
@@ -511,10 +579,20 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 agent_id = agent.get("agent_id")
                 # Delete tool instances first
                 delete_tools_by_agent_id(
-                    agent_id, tenant_id, deleted_by or "system", version_no=0)
+                    agent_id,
+                    tenant_id,
+                    deleted_by or "system",
+                    version_no=0,
+                    allow_system=True,
+                )
                 # Delete agent relationships
                 delete_agent_relationship(
-                    agent_id, tenant_id, deleted_by or "system", version_no=0)
+                    agent_id,
+                    tenant_id,
+                    deleted_by or "system",
+                    version_no=0,
+                    allow_system=True,
+                )
                 # Delete the agent
                 delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
             except Exception as e:
@@ -528,9 +606,19 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
             try:
                 agent_id = agent.get("agent_id")
                 delete_tools_by_agent_id(
-                    agent_id, tenant_id, deleted_by or "system", version_no=1)
+                    agent_id,
+                    tenant_id,
+                    deleted_by or "system",
+                    version_no=1,
+                    allow_system=True,
+                )
                 delete_agent_relationship(
-                    agent_id, tenant_id, deleted_by or "system", version_no=1)
+                    agent_id,
+                    tenant_id,
+                    deleted_by or "system",
+                    version_no=1,
+                    allow_system=True,
+                )
                 delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
             except Exception as e:
                 logger.warning(

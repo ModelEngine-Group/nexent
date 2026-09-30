@@ -70,6 +70,42 @@ Agents can use tools and skills to complete tasks, including local capabilities 
 
 On the **Select Agent Tools** tab, click **MCP Config** to connect a remote or containerized MCP service, or convert an existing API into MCP tools. For all three connection methods, OpenAPI requirements, service management, and tool testing, see [Integrate MCP Services](../../integration/integration-in/mcp.md).
 
+### 🔐 Pass User Information to Tools (Tool-side Authorization)
+
+For MCP tools, the platform injects the **current caller's user information** only when the tool declares the conventional fields below. External A2A agents receive the same trusted snapshot under `metadata.user_context`.
+
+🔔 **Platform boundary**: the platform itself performs no authorization for tools; it only passes through the authenticated session identity. Authorization is the tool's responsibility.
+
+**How to declare**: if a tool's input schema defines any of the conventional field names below, the platform treats it as requesting that user information and fills the field with the current user's value at call time:
+
+| Conventional field | Meaning |
+|--------------------|---------|
+| `tenant_id` | Tenant ID |
+| `tenant_name` | Tenant name |
+| `user_id` | User ID |
+| `user_name` | Login name (currently the user's email) |
+| `user_account` | User account (email) |
+| `user_groups` | List of user-group names the user belongs to |
+
+**Example**: a data query tool that enforces data permissions by caller account and groups only needs to declare `user_account` and `user_groups` in its inputSchema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": { "type": "string", "description": "Query content" },
+    "user_account": { "type": "string", "description": "Caller account (injected by the platform)" },
+    "user_groups": { "type": "array", "items": { "type": "string" }, "description": "Caller user groups (injected by the platform)" }
+  }
+}
+```
+
+> 💡 **Notes**:
+>
+> - These conventional fields are removed from both the model-visible tool signature and rendered tool context: the model neither sees nor fills them, and injected values come only from the current authenticated session, so they cannot be forged
+> - Undeclared conventional fields are never injected and do not affect the tool's existing parameters
+> - External A2A agents receive the trusted snapshot under `metadata.user_context`; a same-named value in chat metadata is ignored
+
 ### ⚙️ Custom Tools
 
 You can refer to the following guides to develop your own tools and integrate them into Nexent to enrich agent capabilities:

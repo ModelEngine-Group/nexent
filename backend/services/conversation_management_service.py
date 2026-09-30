@@ -7,10 +7,11 @@ from typing import Any, Dict, List, Optional
 
 from jinja2 import StrictUndefined, Template
 from nexent.core.concurrency import run_blocking
+from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, MessageRequest, MessageUnit
-from consts.exceptions import ConversationNotFoundError, ValidationError
+from consts.exceptions import AppException, ConversationNotFoundError, ValidationError
 from database.conversation_db import (
     CHAT_MODE_VALUES,
     create_conversation,
@@ -38,6 +39,8 @@ from database.conversation_db import (
     update_conversation_agent_id,
     update_conversation_chat_mode,
     update_conversation_knowledge_scope,
+    replace_conversation_workbench_config,
+    replace_conversation_workbench_and_metadata,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -46,13 +49,13 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from database.model_management_db import get_model_by_model_id
-from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.model_gateway_service import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
 
 logger = logging.getLogger("conversation_management_service")
+monitoring_manager = get_monitoring_manager()
 
 
 def save_message(request: MessageRequest, user_id: str, tenant_id: str,
@@ -402,6 +405,7 @@ def create_new_conversation(
     chat_mode: Optional[str] = None,
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
+    workbench_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -424,11 +428,59 @@ def create_new_conversation(
             create_kwargs["knowledge_scope"] = knowledge_scope
         if runtime_metadata is not None:
             create_kwargs["runtime_metadata"] = runtime_metadata
+        if workbench_config is not None:
+            create_kwargs["workbench_config"] = workbench_config
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
+    except AppException:
+        raise
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise Exception(str(e))
+
+
+def update_conversation_workbench_config_service(
+    conversation_id: int,
+    config: Dict[str, Any],
+    expected_version: int,
+    user_id: str,
+    only_if_changed: bool = False,
+) -> Dict[str, Any]:
+    """Validate and atomically replace a conversation Workbench declaration."""
+
+    from consts.model import WorkbenchSessionConfig
+
+    normalized = WorkbenchSessionConfig.model_validate(config).model_dump(mode="json")
+    return replace_conversation_workbench_config(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        config=normalized,
+        expected_version=expected_version,
+        only_if_changed=only_if_changed,
+    )
+
+
+def update_conversation_workbench_and_metadata_service(
+    conversation_id: int,
+    config: Dict[str, Any],
+    expected_config_version: int,
+    metadata: Dict[str, Any],
+    expected_metadata_version: Optional[int],
+    user_id: str,
+) -> Dict[str, Any]:
+    """Validate Workbench config and commit it with runtime metadata atomically."""
+
+    from consts.model import WorkbenchSessionConfig
+
+    normalized = WorkbenchSessionConfig.model_validate(config).model_dump(mode="json")
+    return replace_conversation_workbench_and_metadata(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        config=normalized,
+        expected_config_version=expected_config_version,
+        metadata=metadata,
+        expected_metadata_version=expected_metadata_version,
+    )
 
 
 def get_conversation_service(
@@ -511,6 +563,7 @@ def update_conversation_knowledge_scope_service(
     knowledge_scope: Optional[Dict[str, Any]],
     user_id: str,
     tenant_id: str,
+    expected_workbench_config_version: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Validate, preview, and replace a user-owned conversation knowledge scope."""
     conversation = get_conversation(
@@ -522,6 +575,24 @@ def update_conversation_knowledge_scope_service(
         raise ConversationNotFoundError(
             f"Conversation {conversation_id} does not exist or is not accessible"
         )
+    canonical = conversation.get("workbench_config")
+    if isinstance(canonical, dict):
+        from services.workbench_service import assert_workbench_version
+
+        assert_workbench_version(conversation, expected_workbench_config_version)
+        next_config = {**canonical, "knowledge_scope": knowledge_scope}
+        updated = update_conversation_workbench_config_service(
+            conversation_id=conversation_id,
+            config=next_config,
+            expected_version=expected_workbench_config_version,
+            user_id=user_id,
+        )
+        return {
+            **updated,
+            "desired_scope": knowledge_scope,
+            "effective_preview": None,
+            "warnings": [],
+        }
     effective_preview = None
     warnings: List[Dict[str, Any]] = []
     if knowledge_scope is not None and conversation.get("agent_id") is not None:
@@ -926,6 +997,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'knowledge_scope': history_data.get('knowledge_scope'),
             'runtime_metadata': history_data.get('runtime_metadata') or {},
             'runtime_metadata_version': int(history_data.get('runtime_metadata_version') or 0),
+            'workbench_config': history_data.get('workbench_config'),
+            'workbench_config_version': int(history_data.get('workbench_config_version') or 0),
             'create_time': history_data['create_time'],
             'message': messages
         }
@@ -1045,6 +1118,7 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
         }
 
 
+@monitoring_manager.monitor_endpoint("conversation.generate_title", include_params=False)
 async def generate_conversation_title_service(conversation_id: int, question: str, user_id: str, tenant_id: str,
                                               language: str = LANGUAGE["ZH"],
                                               model_id: Optional[int] = None) -> str:
@@ -1065,6 +1139,12 @@ async def generate_conversation_title_service(conversation_id: int, question: st
     Returns:
         str: Generated title
     """
+    monitoring_manager.set_span_attributes(**monitoring_manager.build_openinference_attributes(
+        span_kind="CHAIN",
+        input_value=question,
+        session_id=conversation_id,
+        attributes={"langfuse.trace.name": "生成会话标题", "tenant.id": tenant_id},
+    ))
     try:
         # Call LLM to generate title from question in a separate thread to avoid blocking
         title = await run_blocking(
@@ -1080,6 +1160,7 @@ async def generate_conversation_title_service(conversation_id: int, question: st
 
         # Update conversation title
         update_conversation_title(conversation_id, title, user_id)
+        monitoring_manager.set_openinference_output(title)
 
         return title
 

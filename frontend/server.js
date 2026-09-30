@@ -10,6 +10,7 @@ import path from "node:path";
 import multiparty from "multiparty";
 import dotenv from "dotenv";
 import { BASE_PATH } from "./base-path.mjs";
+import { buildPublicFrontendConfig } from "./base-path.mjs";
 import {
   ensureDir,
   readLocaleConfig,
@@ -44,6 +45,7 @@ dotenv.config({
 
 const app = next({
   dev,
+  turbo: dev,
   ...(nextConfig && { conf: nextConfig }),
 });
 const handle = app.getRequestHandler();
@@ -53,16 +55,18 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
+// Reuse the existing northbound service address, which conventionally ends with /api.
+const NORTHBOUND_HTTP_BACKEND = (
+  process.env.NORTHBOUND_API_SERVER || "http://localhost:5013"
+).replace(/\/api$/, ""); // northbound
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
-const SHARE_BASE_URL =
-  process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
 
 const BUILT_IN_PUBLIC_DIR = path.resolve(__dirname, "./public");
 const PROJECT_CONFIG_DIR = path.resolve(
   process.env.PROJECT_CONFIG_DIR || BUILT_IN_PUBLIC_DIR
 );
 const ICON_UPLOAD_DIR = PROJECT_CONFIG_DIR;
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const PROJECT_CONFIG_ASSETS = {
   "/modelengine-logo.png": {
@@ -574,6 +578,13 @@ proxy.on("proxyReq", (proxyReq, req) => {
   }
 });
 
+proxy.on("error", (err, req, res) => {
+  console.error("[Proxy] Forward error:", err.message);
+  if (!res || res.headersSent || res.destroyed) return;
+  res.writeHead(502, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ detail: "Backend unavailable" }));
+});
+
 // ============================================================================
 // Server setup
 // ============================================================================
@@ -586,6 +597,7 @@ app.prepare().then(() => {
 
     const isProxyRequest =
       internalPathname.startsWith("/api/") ||
+      internalPathname.startsWith("/nb/") ||
       (internalPathname.includes("/attachments/") &&
         !internalPathname.startsWith("/api/"));
     if (isProxyRequest && BASE_PATH) {
@@ -597,6 +609,7 @@ app.prepare().then(() => {
     if (handleProjectConfigAsset(internalPathname, req, res)) return;
     if (await handleProjectConfigApi(internalPathname, req, res)) return;
     if (handleAttachmentProxy(internalPathname, req, res)) return;
+    if (handleNorthboundProxy(internalPathname, req, res)) return;
     if (handleAllApiProxy(internalPathname, req, res)) return;
 
     // Fallback: let Next.js render pages and framework resources with basePath intact.
@@ -625,10 +638,6 @@ app.prepare().then(() => {
           socket.destroy();
         }
       );
-    } else {
-      console.log(
-        `[Proxy] Ignoring non-voice WebSocket upgrade for: ${pathname}`
-      );
     }
   });
 
@@ -651,7 +660,7 @@ function handleFrontendConfigApi(pathname, req, res) {
   if (pathname !== "/api/frontend-config") return false;
 
   res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify({ shareBaseUrl: SHARE_BASE_URL }));
+  res.end(JSON.stringify(buildPublicFrontendConfig(process.env)));
   return true;
 }
 
@@ -717,6 +726,21 @@ function handleAttachmentProxy(pathname, req, res) {
   if (!isAttachmentRoute) return false;
 
   proxy.web(req, res, { target: MINIO_BACKEND });
+  return true;
+}
+
+/**
+ * Keep northbound calls on the same public origin as the web application.
+ */
+function handleNorthboundProxy(pathname, req, res) {
+  if (!pathname.startsWith("/nb/")) return false;
+
+  proxy.web(req, res, {
+    target: NORTHBOUND_HTTP_BACKEND,
+    changeOrigin: true,
+    proxyTimeout: SSE_PROXY_TIMEOUT_MS,
+    timeout: SSE_PROXY_TIMEOUT_MS,
+  });
   return true;
 }
 

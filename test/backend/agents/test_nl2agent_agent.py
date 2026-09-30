@@ -38,13 +38,13 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
         (
             "en",
             "### Role",
-            "only when the authoritative draft `name` is absent",
+            "When `name` is absent, empty, or whitespace-only",
             "generate only `description`",
         ),
         (
             "zh",
             "### 核心职责",
-            "仅当权威草稿中的 `name` 缺失",
+            "当 `name` 缺失、为空字符串或只包含空白时",
             "只生成 `description`",
         ),
     ],
