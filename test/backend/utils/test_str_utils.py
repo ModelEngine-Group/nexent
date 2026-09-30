@@ -19,7 +19,7 @@ class TestStrUtils:
 
     def test_remove_think_blocks_with_closing_tag_only(self):
         """Only closing tag: no opening tag -> no removal"""
-        text = ""
+        text = "The model said: hello </think> world"
         result = remove_think_blocks(text)
         assert result == text  # unchanged
 
@@ -33,7 +33,7 @@ class TestStrUtils:
         """Multiple blocks should all be removed"""
         text = "<think>First thought</think> Normal text <think>Second thought</think>"
         result = remove_think_blocks(text)
-        assert result == ""
+        assert result == " Normal text "
 
     def test_remove_think_blocks_empty_string(self):
         """Empty string"""
