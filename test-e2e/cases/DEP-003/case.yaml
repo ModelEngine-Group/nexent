@@ -17,36 +17,29 @@ case:
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml
+  - 当前批次所需的应用、Sandbox 和第三方依赖镜像均已在本机；离线打包不得从镜像仓库拉取。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml'
   steps:
   - order: 1
-    action: 准备本地真实测试环境和“offline packaging/镜像/依赖完整性｜核心流程”要求的最小数据，所有可变资源使用 RunID 前缀。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: 用离线打包脚本的 dry-run 获取镜像清单，逐个确认镜像已在本机。
+    expected: 清单非空；缺少镜像时明确阻断，不进行远端拉取。
   - order: 2
-    action: 通过 deploy 对外暴露的真实入口执行目标操作，不直接修改最终数据库状态绕过业务逻辑。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: 使用本地 latest 镜像和隔离的用例结果目录执行离线打包，不拉取远端镜像。
+    expected: 打包成功，manifest 标明 latest 和 local-latest，包含计划中的全部镜像。
   - order: 3
-    action: 记录请求参数、返回状态、资源ID和关键副作用。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    action: 校验镜像 tar、manifest 与全部产物的校验和，并保留打包日志。
+    expected: 产物非空，校验和覆盖全部产物且逐一匹配。
   - order: 4
-    action: 重新查询详情/列表/持久化状态，验证写入与读取一致。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 5
-    action: 执行对应边界/错误输入，确认错误码和失败原子性。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 6
-    action: 如涉及外部服务，优先使用本地真实协议服务或真实Provider；Mock仅限故障注入。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 7
-    action: 检查日志不泄露 secret，并清理临时数据。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 检查打包日志，确认未触发镜像拉取；保留本地结果用于失败定位。
+    expected: 日志无拉取记录，包仅写入当前用例的结果目录。
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  forbidden_side_effects: []
+  - 离线包只使用当前批次的本地 latest 镜像，manifest 清单与计划一致。
+  - 镜像 tar 非空，校验和覆盖所有产物且全部匹配。
+  - 缺少本地镜像时阻断，打包过程不拉取远端镜像、不写入仓库目录。
+  forbidden_side_effects:
+  - 从远端镜像仓库拉取镜像。
+  - 将离线包写入 Nexent Git 仓库。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
@@ -58,18 +51,12 @@ case:
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml
+  - 当前批次所需的应用、Sandbox 和第三方依赖镜像均已在本机；离线打包不得从镜像仓库拉取。
   metrics:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - manifest 中的镜像数量与 dry-run 计划一致，且版本和镜像源均为本地 latest。
+  - 校验和覆盖所有产物且全部匹配。
   thresholds:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 所有计划镜像均已在本机，离线包产物完整且全部校验通过。
+  - 打包日志无远端拉取记录。
   recovery_expectations:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 缺少镜像时以 BLOCKED 收口；打包失败或超时保留用例日志及部分产物以供定位。

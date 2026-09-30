@@ -101,6 +101,30 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(summary["counts"], {"PASS": 2})
             self.assertTrue(summary["execution_complete"])
 
+    def test_case_local_timeout_overrides_machine_default(self):
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            records = [{"case_id": "DEP-003", "stage": "D5", "status": "active",
+                        "execution": {"test": True, "timeout_seconds": 4800}}]
+            observed = []
+
+            def command_result(command, cwd, env, log, timeout):
+                if "--batch-dir" in command:
+                    observed.append(timeout)
+                    batch = Path(command[command.index("--batch-dir") + 1])
+                    save(batch / "cases/DEP-003/receipt.json", {
+                        "case_id": "DEP-003", "stage": "D5", "result": "PASS", "cleanup_exit_code": 0})
+                return 0
+
+            with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \
+                    patch.object(suite, "fingerprint", return_value={"head": "test"}), \
+                    patch.object(suite, "static_requirements", return_value=set()), \
+                    patch.object(suite, "static_inventory", return_value=[]), \
+                    patch.object(suite, "logged", side_effect=command_result):
+                self.assertEqual(suite.execute(home, home, records,
+                                               {"hooks": {}, "case_timeout_seconds": 1800}), 0)
+            self.assertEqual(observed, [4800])
+
     def test_notification_refuses_incomplete(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)

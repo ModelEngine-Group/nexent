@@ -1,18 +1,19 @@
 """D5 main security, reliability and deployment smoke scenarios."""
 
 from __future__ import annotations
-from shared.factories.files import _remove_object as _delete_attachment, _upload_attachment
-
 import asyncio
 import hashlib
 import json
+import os
 import re
+import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 import pytest
+import yaml
 
 from d3.assets import model_id, temporary_conversation, temporary_knowledge_base
 from d5.assets import asset_path, destructive_deployment_enabled, require_command, run_command, get_test_asset
@@ -22,6 +23,7 @@ from shared.http import assert_no_server_error, assert_status, client, config_sa
 from shared.asset_registry import register_asset
 from shared.asset_registry import AssetDependencyError
 from shared.factories.compose import product_compose_args
+from shared.factories.files import _remove_object as _delete_attachment, _upload_attachment
 from shared.factories.tenant import isolated_accounts
 
 
@@ -206,16 +208,88 @@ async def _kubernetes_deployment() -> None:
     assert code == 0 and '"phase": "Failed"' not in output, output
 
 
+def _offline_plan_images(output: str) -> list[str]:
+    image_ref = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*:[A-Za-z0-9._-]+")
+    images = list(dict.fromkeys(line.strip() for line in output.splitlines()
+                                if image_ref.fullmatch(line.strip())))
+    assert images, "offline dry-run did not declare any images"
+    return images
+
+
+def _offline_archive_names(images: list[str]) -> set[str]:
+    names = set()
+    for image in images:
+        base = image.rsplit("/", 1)[-1]
+        name = base.split(":", 1)[0]
+        tag = image.rsplit(":", 1)[-1].replace("RELEASE.", "").replace(".", "-")
+        names.add(f"{name}-{tag}.tar")
+    assert len(names) == len(images), "offline package image archive names collide"
+    return names
+
+
+def _offline_bash() -> str:
+    if os.name != "nt":
+        return require_command("bash")
+    git = shutil.which("git")
+    candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe" if git else None
+    if candidate and candidate.is_file():
+        return str(candidate)
+    pytest.skip("BLOCKED: Git Bash is required for Windows offline packaging")
+
+
 async def _offline_package() -> None:
     destructive_deployment_enabled()
-    bash = require_command("bash")
+    bash = _offline_bash()
+    docker = require_command("docker")
     script = repo_root() / "deploy" / "offline" / "build_offline_package.sh"
-    code, output = await run_command(bash, str(script), timeout=3600)
+    result_dir = Path(os.environ["RESULT_DIR"]).resolve()
+    package = result_dir / "d5" / "offline-package"
+    script_arg = script.as_posix() if os.name == "nt" else str(script)
+    output_arg = package.as_posix() if os.name == "nt" else str(package)
+    options = ("--version", "latest", "--image-source", "local-latest",
+               "--image-registry-prefix", "", "--defaults",
+               "--output-dir", output_arg, "--compress", "false")
+    code, output = await run_command(bash, script_arg, *options, "--dry-run", timeout=120)
     assert code == 0, output
-    expected = get_test_asset("deployment", "offline_package_path")
-    package = Path(str(expected))
-    package = package if package.is_absolute() else repo_root() / package
-    assert package.is_file() and package.stat().st_size > 0
+    images = _offline_plan_images(output)
+    missing = []
+    for image in images:
+        inspect_code, _ = await run_command(docker, "image", "inspect", image, timeout=30)
+        if inspect_code:
+            missing.append(image)
+    if missing:
+        pytest.skip("BLOCKED: offline package requires local images; no registry pull is allowed: " +
+                    ", ".join(missing))
+
+    build_log = result_dir / "logs" / "offline-package.log"
+    code, output = await run_command(bash, script_arg, *options, timeout=3600, log_path=build_log)
+    assert code == 0, output
+    assert "Pulling image:" not in build_log.read_text(encoding="utf-8", errors="replace"), (
+        "offline build contacted an image registry; inspect offline-package.log"
+    )
+    manifest_path = package / "manifest.yaml"
+    checksum_path = package / "checksums.txt"
+    assert manifest_path.is_file() and checksum_path.is_file(), "offline package lacks manifest or checksums"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    assert manifest.get("version") == "latest" and manifest.get("imageSource") == "local-latest"
+    assert not manifest.get("imageRegistryPrefix"), "offline package used a remote registry prefix"
+    assert set(manifest.get("images") or []) == set(images), "offline package image inventory differs from plan"
+    archives = list((package / "images").glob("*.tar"))
+    assert {path.name for path in archives} == _offline_archive_names(images), "offline package image archives missing"
+    assert all(path.stat().st_size > 0 for path in archives), "offline package image archive is empty"
+
+    verified = set()
+    for line in checksum_path.read_text(encoding="utf-8").splitlines():
+        match = re.fullmatch(r"([0-9a-fA-F]{64})  (.+)", line)
+        assert match, "invalid offline checksum entry"
+        file_path = (package / match.group(2)).resolve()
+        assert file_path.is_relative_to(package.resolve()) and file_path.is_file()
+        with file_path.open("rb") as source:
+            assert hashlib.file_digest(source, "sha256").hexdigest() == match.group(1).lower(), file_path.name
+        verified.add(file_path)
+    expected_files = {path.resolve() for path in package.rglob("*")
+                      if path.is_file() and path != checksum_path}
+    assert verified == expected_files, "offline package checksum coverage is incomplete"
 
 
 async def _migration_idempotency() -> None:

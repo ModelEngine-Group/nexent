@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: DEP-003
+timeout_seconds: 4800
 implementations:
 - framework: pytest
   file: test.py

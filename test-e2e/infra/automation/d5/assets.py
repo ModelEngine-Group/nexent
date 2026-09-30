@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,19 +34,47 @@ def require_command(name: str) -> str:
     return path
 
 
-async def run_command(*args: str, timeout: float = 600, cwd: Path | None = None) -> tuple[int, str]:
-    process = await asyncio.create_subprocess_exec(
-        *args,
-        cwd=str(cwd or repo_root()),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    try:
-        output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        raise AssertionError(f"command timed out after {timeout}s: {args}")
+async def run_command(*args: str, timeout: float = 600, cwd: Path | None = None,
+                      log_path: Path | None = None) -> tuple[int, str]:
+    if log_path is None:
+        process = await asyncio.create_subprocess_exec(
+            *args, cwd=str(cwd or repo_root()), stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            raise AssertionError(f"command timed out after {timeout}s: {args}")
+        return int(process.returncode or 0), output.decode("utf-8", errors="replace")
+
+    # Long deployment commands must stream evidence and terminate their entire tree on timeout.
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w+b") as log:
+        options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+                   else {"start_new_session": True})
+        process = await asyncio.create_subprocess_exec(
+            *args, cwd=str(cwd or repo_root()), stdout=log, stderr=asyncio.subprocess.STDOUT, **options,
+        )
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout)
+        except TimeoutError:
+            if os.name == "nt":
+                terminated = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                if terminated.returncode and process.returncode is None:
+                    process.kill()
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            await process.wait()
+            raise AssertionError(f"command timed out after {timeout}s; inspect {log_path}")
+        log.flush()
+        log.seek(max(0, log.tell() - 8192))
+        output = log.read()
     return int(process.returncode or 0), output.decode("utf-8", errors="replace")
 
 

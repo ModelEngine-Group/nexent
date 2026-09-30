@@ -14,7 +14,7 @@ from test_asset_lib import (
 
 
 FRAMEWORKS = {"pytest", "vitest", "playwright", "custom"}
-EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes", "preparation"}
+EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes", "preparation", "timeout_seconds"}
 IMPLEMENTATION_FIELDS = {"framework", "file", "selector", "profiles"}
 
 
@@ -40,6 +40,9 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
             continue
         if raw.get("case_id") != case_id:
             issues.append(ValidationIssue(execution_path, "case_id", "Execution Case ID differs from its directory"))
+        timeout_seconds = raw.get("timeout_seconds")
+        if timeout_seconds is not None and (type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 7200):
+            issues.append(ValidationIssue(execution_path, "timeout_seconds", "Case timeout must be an integer from 1 to 7200 seconds"))
         if case.get("status") in {"retired", "skipped_by_policy", "manual"}:
             issues.append(ValidationIssue(execution_path, "", "Inactive or manual case must not have executable metadata"))
         implementations = raw.get("implementations")
@@ -84,6 +87,8 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
                 "required_assets": raw.get("required_assets", []),
                 "required_mock_services": raw.get("required_mock_services", []),
             }
+            if isinstance(timeout_seconds, int) and not isinstance(timeout_seconds, bool) and 1 <= timeout_seconds <= 7200:
+                record["execution"]["timeout_seconds"] = timeout_seconds
             if "preparation" in raw:
                 schema = json.loads((root / "test-e2e/infra/schemas/preparation.schema.json").read_text(encoding="utf-8"))
                 errors = list(Draft202012Validator(schema).iter_errors(raw["preparation"]))

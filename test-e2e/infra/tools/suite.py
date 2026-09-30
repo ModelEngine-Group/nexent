@@ -311,7 +311,8 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
                     case_dir = directory / "cases" / case_id
                     code = logged([sys.executable, str(Path(__file__)), "worker", "--test-home", str(home),
                                    "--case", case_id, "--batch-dir", str(directory)], repo, env,
-                                  directory / "logs" / f"{case_id}.log", settings["case_timeout_seconds"])
+                                  directory / "logs" / f"{case_id}.log",
+                                  record["execution"].get("timeout_seconds", settings["case_timeout_seconds"]))
                     receipt = case_dir / "receipt.json"
                     row = json.loads(receipt.read_text(encoding="utf-8")) if receipt.exists() else {
                         "case_id": case_id, "stage": stage, "result": "TIMEOUT" if code == 124 else "AUTOMATION_ERROR",
