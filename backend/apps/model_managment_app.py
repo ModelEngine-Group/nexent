@@ -21,6 +21,7 @@ import re
 
 from consts.model import (
     BatchCreateModelsRequest,
+    BackfillDefaultsRequest,
     CapacitySuggestionFields,
     ModelRequest,
     ModelProbeRequest,
@@ -65,6 +66,8 @@ from services.model_management_service import (
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
     get_model_reasoning_capability,
+    _ids_for_created_models,
+    _backfill_default_model_slots,
 )
 from permissions.depends import authenticate, require
 from permissions.models import CurrentUser
@@ -266,9 +269,14 @@ async def create_model(
         user_id, tenant_id = current_user.user_id, current_user.tenant_id
         model_data = request.model_dump()
         accept_signal = pop_capacity_accept_signal(model_data)
+        # Batch-import flow control flag: popped here so it never reaches
+        # the service/DB layer (same contract as the accept-signal fields).
+        skip_backfill = bool(model_data.pop("skip_default_backfill", None))
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
-        create_result = await create_model_for_tenant(user_id, tenant_id, model_data)
+        create_result = await create_model_for_tenant(
+            user_id, tenant_id, model_data,
+            skip_default_backfill=skip_backfill)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
@@ -286,6 +294,39 @@ async def create_model(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/backfill_defaults")
+async def backfill_default_model_slots(
+    request: BackfillDefaultsRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
+    """Finalize default-model auto-configuration after a batch import.
+
+    The batch dialog creates its rows one HTTP call at a time with
+    skip_default_backfill set; this endpoint runs the auto-configuration
+    ONCE with the whole batch's models as candidates, so empty slots get
+    the best model of the batch instead of whichever row happened to be
+    created first. Occupied slots (user- or system-configured) are never
+    touched.
+    """
+    try:
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
+        created_ids = _ids_for_created_models(
+            request.display_names, tenant_id)
+        auto_configured = _backfill_default_model_slots(
+            user_id, tenant_id, new_model_ids=created_ids)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": auto_configured,
+            "message": "Default model backfill completed"
+        })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to backfill default model slots: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 

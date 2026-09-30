@@ -578,6 +578,23 @@ class ModelRequest(BaseModel):
     # forwards them to model_capacity_suggestion_accept_total.
     accepted_suggestion_match_kind: Optional[str] = None
     accepted_capability_profile_version: Optional[str] = None
+    # Batch-import flow control (never persisted). The batch dialog creates
+    # rows one HTTP call at a time; rows marked skip_default_backfill leave
+    # default-model slots untouched so a single finalize call (after the
+    # loop) can fill empty slots from the whole batch at once. Popped by
+    # the app layer before the dict reaches the service/DB layer.
+    skip_default_backfill: Optional[bool] = None
+
+
+class BackfillDefaultsRequest(BaseModel):
+    """Request payload for POST /model/backfill_defaults only.
+
+    Finalizes default-model auto-configuration after a batch import: empty
+    slots are filled from the best model among the given display names.
+    Occupied slots (user- or system-configured) are never touched.
+    """
+    display_names: List[str] = Field(
+        ..., description="Display names of the models created in the batch")
 
 
 class ModelProbeRequest(ModelRequest):
