@@ -33,7 +33,7 @@ The backend implements a clean layered architecture:
   - `agent_app.py` - Agent CRUD, version management, streaming execution
   - `conversation_management_app.py` - Multi-turn dialogue, history tracking
   - `api_key_app.py` / `quota_app.py` - API key and capacity management
-  - `model_managment_app.py` - Model configuration, health checks
+  - `model_management_app.py` - Model configuration, health checks
   - `skill_app.py` - Skill creation and management
   - `knowledge_summary_app.py` - Knowledge base operations
   - `remote_mcp_app.py` - Remote MCP tool management
