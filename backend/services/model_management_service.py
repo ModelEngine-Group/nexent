@@ -528,7 +528,11 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                 f"Model {model_data['display_name']} created successfully")
 
         # Auto-configure default-model slots that the tenant never set.
-        auto_configured = _backfill_default_model_slots(user_id, tenant_id)
+        # Only the models created by THIS call are eligible for empty slots.
+        created_ids = _ids_for_created_models(
+            [model_data["display_name"]], tenant_id, model_data.get("model_type"))
+        auto_configured = _backfill_default_model_slots(
+            user_id, tenant_id, new_model_ids=created_ids)
         return {"auto_configured_defaults": auto_configured}
     except ValueError:
         # Let the API layer map conflicts to 409 instead of 500.
@@ -663,7 +667,38 @@ def _resolve_existing_slot_config(tenant_id: str, config_key: str):
     return None, False, row
 
 
-def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+def _ids_for_created_models(
+    display_names: List[str],
+    tenant_id: str,
+    model_type: Optional[str] = None,
+) -> set:
+    """Resolve the ids of freshly created models from their display names.
+
+    create_model_record returns only a bool, so the ids are recovered by
+    display-name lookup. An optional model_type restricts the match; for
+    multi_embedding creates the embedding twin is included automatically
+    (both records share the display name).
+    """
+    accepted_types = None
+    if model_type:
+        accepted_types = {model_type}
+        if model_type == "multi_embedding":
+            accepted_types.add("embedding")
+    ids = set()
+    for name in display_names:
+        if not name:
+            continue
+        for record in get_models_by_display_name(name, tenant_id):
+            if accepted_types is None or record.get("model_type") in accepted_types:
+                ids.add(record["model_id"])
+    return ids
+
+
+def _backfill_default_model_slots(
+    user_id: str,
+    tenant_id: str,
+    new_model_ids: Optional[set] = None,
+) -> List[Dict[str, Any]]:
     """Auto-configure default-model slots after models are created.
 
     Slot handling:
@@ -675,8 +710,15 @@ def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str
       larger context window) converge on the best candidate once the whole
       batch has landed. The first user save flips the row to a user-owned
       row (user_id stamped), locking the choice.
-    - Dangling rows (model deleted) are repaired in place; never-configured
-      slots get a new row.
+    - An empty slot (never configured, or deliberately cleared by the user)
+      is filled ONLY from the models created in the current call
+      (new_model_ids). Resurrecting an older model the user passed over
+      (e.g. after clearing a default) would silently override that choice.
+      Legacy callers that omit new_model_ids keep the old all-candidates
+      behaviour.
+    - Dangling rows (model deleted) are repaired from the full candidate
+      pool: the previous choice is gone, so the best remaining replacement
+      is appropriate.
 
     Failures are logged and skipped so backfill can never break the create
     flow.
@@ -695,6 +737,12 @@ def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str
                 continue
 
             candidates = get_model_records({"model_type": model_type}, tenant_id)
+
+            if live_model_id is None and row is None and new_model_ids is not None:
+                # Empty slot: only consider what this create call added.
+                candidates = [
+                    m for m in candidates if m["model_id"] in new_model_ids
+                ]
             if not candidates:
                 continue
 
@@ -768,6 +816,7 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
         model_type = batch_payload["type"]
         model_list: List[Dict[str, Any]] = batch_payload.get("models", [])
         model_api_key: str = batch_payload.get("api_key", "")
+        created_display_names: List[str] = []
 
         if provider == ProviderEnum.SILICON.value:
             model_url = SILICON_BASE_URL
@@ -874,10 +923,16 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             apply_catalog_defaults(model_dict, provider)
             _apply_model_reasoning_default(model_dict, provider)
             create_model_record(model_dict, user_id, tenant_id)
+            if model_dict.get("display_name"):
+                created_display_names.append(model_dict["display_name"])
             logging.debug(f"Model {model['id']} created successfully")
 
         # Auto-configure default-model slots that the tenant never set.
-        auto_configured = _backfill_default_model_slots(user_id, tenant_id)
+        # Only the models created by THIS call are eligible for empty slots.
+        created_ids = _ids_for_created_models(
+            created_display_names, tenant_id)
+        auto_configured = _backfill_default_model_slots(
+            user_id, tenant_id, new_model_ids=created_ids)
         return {"auto_configured_defaults": auto_configured}
     except ValueError:
         # Let the API layer map invalid entries to 422 instead of 500.

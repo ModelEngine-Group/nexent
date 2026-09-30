@@ -635,8 +635,10 @@ async def test_create_model_for_tenant_success_llm():
 
         await svc.create_model_for_tenant(user_id, tenant_id, model_data)
 
-        mock_get_by_display.assert_called_once_with(
-            "huggingface/llama", tenant_id)
+        # Called twice: once for the display-name conflict check and once by
+        # _ids_for_created_models to resolve the new model's id for backfill.
+        mock_get_by_display.assert_any_call("huggingface/llama", tenant_id)
+        assert mock_get_by_display.call_count == 2
         # create_model_record called once for non-multimodal
         assert mock_create.call_count == 1
 
@@ -2778,7 +2780,7 @@ def _model_row(model_id, model_type, display_name, connect_status="available", c
     }
 
 
-def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, updated=None):
+def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, updated=None, new_model_ids=None):
     inserted = []
     updated = updated if updated is not None else []
     live_ids = live_model_ids if live_model_ids is not None else {
@@ -2808,7 +2810,8 @@ def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, upda
             mock.patch.object(svc, "insert_config", side_effect=fake_insert_config), \
             mock.patch.object(svc, "update_config_by_tenant_config_id", side_effect=fake_update_config), \
             mock.patch.object(svc, "get_model_by_model_id", side_effect=fake_get_model_by_model_id):
-        result = svc._backfill_default_model_slots("u1", "t1")
+        result = svc._backfill_default_model_slots(
+            "u1", "t1", new_model_ids=new_model_ids)
     return result, inserted, updated
 
 
@@ -2970,3 +2973,51 @@ def test_create_model_for_tenant_returns_backfill_result():
         result = __import__("asyncio").run(
             svc.create_model_for_tenant("u1", "t1", model_data))
     assert result == {"auto_configured_defaults": backfill_result}
+
+
+def test_backfill_empty_slot_only_considers_new_models():
+    """An empty slot (never configured or deliberately cleared) is filled
+    only from the models created in the current call -- an older, larger
+    model the user passed over must not be resurrected."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-giant", context=1048576),
+        _model_row(2, "llm", "new-small", context=32000),
+    ]
+    result, inserted, _ = _run_backfill(
+        svc, rows, existing_config={}, new_model_ids={2})
+
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 2
+
+
+def test_backfill_empty_slot_stays_empty_without_new_candidates():
+    """When the current create added no model of the slot's type, an empty
+    slot stays empty instead of falling back to pre-existing models."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-llm", context=1048576),
+        _model_row(2, "embedding", "new-emb"),
+    ]
+    # Only an embedding model was created; the empty LLM slot must not be
+    # filled from the old LLM.
+    result, inserted, _ = _run_backfill(
+        svc, rows, existing_config={}, new_model_ids={2})
+
+    assert all(e["config_key"] != "LLM_ID" for e in result)
+    assert all(d["config_key"] != "LLM_ID" for d in inserted)
+    assert any(e["config_key"] == "EMBEDDING_ID" for e in result)
+
+
+def test_backfill_legacy_callers_without_new_ids_keep_all_candidates():
+    """Callers that omit new_model_ids (legacy path) keep the old
+    best-of-all behaviour for empty slots."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-giant", context=1048576),
+        _model_row(2, "llm", "new-small", context=32000),
+    ]
+    result, _, _ = _run_backfill(svc, rows, existing_config={})
+
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 1
