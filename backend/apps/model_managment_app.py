@@ -10,7 +10,8 @@ layer contract:
 Authorization: Mutating endpoints require RBAC permissions (model:create /
 model:update / model:delete) via ``permissions.depends.require``; read endpoints
 require ``model:read``. Cross-tenant ``/manage/*`` endpoints additionally
-require the SU role. Identity is resolved from the bearer token into a
+require the SU role, or the ADMIN role when the targeted tenant is the
+caller's own. Identity is resolved from the bearer token into a
 ``CurrentUser`` and propagated as ``user_id`` / ``tenant_id`` to services.
 """
 
@@ -77,9 +78,11 @@ MODEL_CREATE_PERMISSION = "model:create"
 MODEL_READ_PERMISSION = "model:read"
 MODEL_UPDATE_PERMISSION = "model:update"
 MODEL_DELETE_PERMISSION = "model:delete"
-# Cross-tenant manage endpoints are SU-only; ADMIN shares the same MODEL seeds
-# so permission strings cannot separate them.
-_MANAGE_ALLOWED_ROLES = ("SU",)
+# Roles allowed on the cross-tenant /manage/* endpoints. ADMIN shares the same
+# MODEL permission seeds as SU, so permission strings cannot separate the two
+# and the role itself must be checked. ADMIN is scoped to its own tenant by
+# ``_require_manage_scope``; SU may target any tenant.
+_MANAGE_ALLOWED_ROLES = ("SU", "ADMIN")
 
 # Model Catalog loader (with graceful fallback)
 try:
@@ -154,12 +157,25 @@ def _log_safe(value: Any) -> str:
     return _LOG_UNSAFE_CHARS.sub("", str(value))
 
 
-def _require_manage_role(current_user: CurrentUser) -> None:
-    """Restrict cross-tenant manage endpoints to super admins."""
-    if current_user.normalized_role not in _MANAGE_ALLOWED_ROLES:
+def _require_manage_scope(current_user: CurrentUser, target_tenant_id: str) -> None:
+    """Authorize a /manage/* call against the tenant it targets.
+
+    SU may manage any tenant. ADMIN may manage only the tenant its token
+    belongs to -- the tenant-resource page always passes the caller's own
+    tenant_id, so restricting ADMIN outright would break tenant admins
+    managing their own models while blocking no cross-tenant access. Any
+    other role, or an ADMIN naming a foreign tenant, is rejected.
+    """
+    role = current_user.normalized_role
+    if role not in _MANAGE_ALLOWED_ROLES:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
-            detail="This operation requires SU role",
+            detail="This operation requires SU or tenant ADMIN role",
+        )
+    if role != "SU" and target_tenant_id != current_user.tenant_id:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Tenant admins may only manage models of their own tenant",
         )
 
 
@@ -723,7 +739,7 @@ async def manage_check_model_health(
     Returns:
         Connectivity check result with updated status.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to check model connectivity for tenant, user_id: {current_user.user_id}, "
@@ -767,7 +783,7 @@ async def manage_create_model(
     Returns:
         Success message on successful creation.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -818,7 +834,7 @@ async def manage_update_model(
     Returns:
         Success message on successful update.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -870,7 +886,7 @@ async def manage_delete_model(
     Returns:
         Success message with deleted model name.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -915,7 +931,7 @@ async def manage_batch_create_models(
     Returns:
         Success message on completion.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -967,7 +983,7 @@ async def manage_list_models(
     Returns:
         Paginated model list for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to list models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
@@ -1008,7 +1024,7 @@ async def manage_list_provider_models(
     Returns:
         List of available provider models for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to list provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
@@ -1046,7 +1062,7 @@ async def manage_create_provider_models(
     Returns:
         List of available provider models for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to create provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "

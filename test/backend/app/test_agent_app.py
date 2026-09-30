@@ -1704,6 +1704,7 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
             "search": "support",
             "page": 2,
             "page_size": 5,
+            "include_repository_info": "true",
         },
         headers=mock_auth_header,
     )
@@ -1713,11 +1714,13 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
     mock_list_agent_page.assert_awaited_once_with(
         tenant_id="tenant_123",
         user_id="test_user",
+        caller_tenant_id="auth_tenant",
         permission="EDIT",
         tag="support",
         search="support",
         page=2,
         page_size=5,
+        include_repository_info=True,
     )
 
 
@@ -1774,6 +1777,7 @@ def test_list_agent_page_api_forwards_creator_and_asset_owner_tenant(
     assert response.status_code == 200
     kwargs = mock_list.await_args.kwargs
     assert kwargs["tenant_id"] == "auth_tenant"
+    assert kwargs["caller_tenant_id"] == "auth_tenant"
     assert kwargs["created_by"] == "author-7"
     assert kwargs["additional_tenant_id"] == "asset_owner"
 
