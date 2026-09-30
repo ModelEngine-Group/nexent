@@ -9,10 +9,9 @@ import pytest
 
 from management.services.agent import run as agent_run_service
 
+pytestmark = [pytest.mark.case_id("CMSR-D2-001"), pytest.mark.stage("D2")]
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("failure_kind", ["transport", "semantic"])
-async def test_cmsr_d2_001_success_delta_is_published_before_completion(monkeypatch, failure_kind):
+async def _success_delta_is_published_before_completion(monkeypatch, failure_kind):
     release_provider = asyncio.Event()
     persisted_batches = []
     failed_content = "failed text" if failure_kind == "transport" else "<code></code>"
@@ -85,8 +84,7 @@ async def test_cmsr_d2_001_success_delta_is_published_before_completion(monkeypa
     assert any("<code>print(1)</code>" in content for content in contents)
 
 
-@pytest.mark.asyncio
-async def test_oc_030_exhausted_raw_answer_streams_before_commit(monkeypatch):
+async def _exhausted_raw_answer_streams_before_commit(monkeypatch):
     """OC-030: final fallback stays live and persists only the accepted attempt."""
     release_provider = asyncio.Event()
     persisted_batches = []
@@ -145,3 +143,13 @@ async def test_oc_030_exhausted_raw_answer_streams_before_commit(monkeypatch):
     contents = [unit["unit_content"] for unit in persisted_batches[0]["message_units"]]
     assert "rejected" not in "".join(contents)
     assert any("final answer" in content for content in contents)
+
+
+@pytest.mark.asyncio
+async def test_cmsr_d2_001(monkeypatch):
+    """Publish one Case receipt only after all original stream contracts finish."""
+    for failure_kind in ("transport", "semantic"):
+        with monkeypatch.context() as isolated:
+            await _success_delta_is_published_before_completion(isolated, failure_kind)
+    with monkeypatch.context() as isolated:
+        await _exhausted_raw_answer_streams_before_commit(isolated)

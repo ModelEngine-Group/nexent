@@ -12,6 +12,7 @@ from nexent.core.agents.core_agent import CoreAgent
 from nexent.core.agents.output_protocol import ModelOutputProtocolError
 from nexent.core.utils.observer import MessageObserver
 
+pytestmark = [pytest.mark.case_id("CMSR-D1-003"), pytest.mark.stage("D1")]
 
 def _events(observer):
     return [json.loads(raw) for raw in observer.get_cached_message()]
@@ -63,7 +64,7 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
     agent.model = ControlledModel()
     agent.context_runtime = MagicMock()
     agent.context_runtime.prepare_step.return_value = SimpleNamespace(
-        messages=[], evidence=None
+        messages=[], memory_messages=None, evidence=None
     )
     agent.context_runtime.token_counts.return_value = {}
     agent._history_step_count = 0
@@ -75,6 +76,7 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
     agent._protocol_repair_messages = []
     agent._consecutive_protocol_errors = 0
     agent.output_protocol = "code_action"
+    agent.enable_protocol_repair_retry = True
     agent.verification_controller = None
     agent.stop_event = threading.Event()
     agent.enable_planning = False

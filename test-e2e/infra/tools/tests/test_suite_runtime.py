@@ -258,6 +258,60 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(receipt["result"], "TIMEOUT")
             self.assertEqual(receipt["cleanup_exit_code"], 0)
 
+    def test_worker_preserves_journey_reason_and_separate_cleanup_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root) / "run"
+            record = {"case_id": "PW-TEST-01", "stage": "D4", "execution": {
+                "preparation": {"families": []}}}
+
+            def run(record, repo, home, env, *, result_dir):
+                save(result_dir / "status.json", {"reason": "STEP-02: configured element not found",
+                     "evidence": ["d4/PW-TEST-01/trace.zip"], "cleanup_failed": True})
+                save(result_dir / "runtime/resolved-assets.yaml", {})
+                return "PW-TEST-01", "AUTOMATION_ERROR", result_dir
+
+            with patch.object(suite, "machine_environment", return_value={}), \
+                    patch.object(suite, "run_one", side_effect=run), \
+                    patch.object(suite, "logged", return_value=0):
+                self.assertEqual(suite.worker(Path(root), Path(root), record, directory,
+                                               {"command_timeout_seconds": 10}), 1)
+            receipt = json.loads((directory / "receipt.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["result"], "CLEANUP_FAILED")
+            self.assertEqual(receipt["test_result"], "AUTOMATION_ERROR")
+            self.assertEqual(receipt["cleanup_exit_code"], 1)
+            self.assertIn("STEP-02", receipt["reason"])
+            self.assertEqual(receipt["test_evidence"], ["d4/PW-TEST-01/trace.zip"])
+
+    def test_d5_cleanup_failure_stops_remaining_cases_and_finalizes_incomplete(self):
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            records = [{"case_id": name, "stage": "D5", "status": "active", "execution": {"test": True}}
+                       for name in ("SEC-002", "SEC-003")]
+            started = []
+
+            def command_result(command, cwd, env, log, timeout):
+                if "--batch-dir" in command:
+                    batch = Path(command[command.index("--batch-dir") + 1])
+                    case_id = command[command.index("--case") + 1]
+                    started.append(case_id)
+                    save(batch / "cases" / case_id / "receipt.json", {
+                        "case_id": case_id, "stage": "D5", "result": "CLEANUP_FAILED",
+                        "test_result": "PASS", "cleanup_exit_code": 1})
+                    return 1
+                return 0
+
+            with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \
+                    patch.object(suite, "fingerprint", return_value={"head": "test"}), \
+                    patch.object(suite, "static_requirements", return_value=set()), \
+                    patch.object(suite, "static_inventory", return_value=[]), \
+                    patch.object(suite, "logged", side_effect=command_result):
+                self.assertEqual(suite.execute(home, home, records, {"hooks": {}, "case_timeout_seconds": 20}), 1)
+            summary = json.loads(next((home / "runs/repository-daily").iterdir()).joinpath("summary.json").read_text())
+            self.assertEqual(started, ["SEC-002"])
+            self.assertEqual(summary["counts"], {"CLEANUP_FAILED": 1, "NOT_EXECUTED": 1})
+            self.assertFalse(summary["execution_complete"])
+            self.assertTrue(summary["d6_complete"])
+
     def test_batch_continues_after_case_failure(self):
         with tempfile.TemporaryDirectory() as root:
             home = Path(root)

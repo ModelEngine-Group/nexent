@@ -17,6 +17,7 @@ case:
   objective: A protocol-invalid first attempt rolls back while its single preceding step label survives and the corrected
     result streams and commits.
   preconditions:
+  - Protocol repair retry is enabled for the controlled Agent.
   - A controlled model yields an invalid response then a pausable valid code action at step one.
   test_data:
     profile: mock

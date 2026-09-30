@@ -21,7 +21,7 @@ export class AgentPage {
     const id = Number(body?.agent_id || body?.data?.agent_id);
     if (!Number.isInteger(id) || id <= 0) throw new Error("agent create response omitted agent_id");
     try {
-      await expect(this.page.getByText(displayName, { exact: true }).first()).toBeVisible();
+      await expect(this.page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(displayName);
       await this.dismissCreationGuidance();
       // Creation accepts only the display name; edit the variable name on the
       // configuration page and wait for its persisted autosave before returning.

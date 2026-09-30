@@ -2,8 +2,11 @@
 
 import json
 
+import pytest
+
 from nexent.core.utils.observer import MessageObserver, ProcessType
 
+pytestmark = [pytest.mark.case_id("CMSR-D1-001"), pytest.mark.stage("D1")]
 
 def _model_events(observer: MessageObserver) -> list[dict]:
     return [
@@ -13,7 +16,7 @@ def _model_events(observer: MessageObserver) -> list[dict]:
     ]
 
 
-def test_cmsr_d1_001_safe_content_streams_before_completion():
+def _safe_content_streams_before_completion():
     observer = MessageObserver(lang="en")
     observer.begin_model_attempt("first", 1)
     observer.add_model_new_token("visible now")
@@ -27,7 +30,7 @@ def test_cmsr_d1_001_safe_content_streams_before_completion():
     ]
 
 
-def test_cmsr_d1_001_retry_resets_split_marker_state():
+def _retry_resets_split_marker_state():
     observer = MessageObserver(lang="en")
     observer.begin_model_attempt("failed", 1)
     observer.add_model_new_token("<thi")
@@ -47,7 +50,7 @@ def test_cmsr_d1_001_retry_resets_split_marker_state():
     assert any(event["type"] == ProcessType.MODEL_OUTPUT_THINKING.value for event in events)
 
 
-def test_cmsr_d1_001_legacy_fence_survives_fragmentation_and_long_spacing():
+def _legacy_fence_survives_fragmentation_and_long_spacing():
     observer = MessageObserver(lang="en")
     observer.begin_model_attempt("legacy", 1)
     for fragment in ("First", " Co", "de:", " " * 40, "`", "``python", "\nprint(1)"):
@@ -60,10 +63,18 @@ def test_cmsr_d1_001_legacy_fence_survives_fragmentation_and_long_spacing():
     assert events[-1]["type"] == ProcessType.MODEL_OUTPUT_CODE.value
 
 
-def test_cmsr_d1_001_raw_code_is_visible_before_flush():
+def _raw_code_is_visible_before_flush():
     observer = MessageObserver(lang="en")
     observer.begin_model_attempt("code", 1)
     observer.add_model_new_token("<code>print(1)")
     events = _model_events(observer)
     assert "".join(event["content"] for event in events) == "<code>print(1)"
     assert events[-1]["attempt_id"] == "code"
+
+
+def test_cmsr_d1_001():
+    """Keep one terminal Case result while checking every original sub-scenario."""
+    _safe_content_streams_before_completion()
+    _retry_resets_split_marker_state()
+    _legacy_fence_survives_fragmentation_and_long_spacing()
+    _raw_code_is_visible_before_flush()

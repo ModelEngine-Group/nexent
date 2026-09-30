@@ -173,6 +173,7 @@ def worker(repo, home, record, directory, settings):
         return 1
     outcome = "AUTOMATION_ERROR"
     reason = None
+    test_details = {}
     services = controlled_services(repo, directory, env, bool((review or {}).get("anchors")))
     services_started = False
     try:
@@ -212,10 +213,14 @@ def worker(repo, home, record, directory, settings):
                 key, value = parts[0].split("=", 1)
                 env[key] = value
         _, outcome, _ = run_one(record, repo, home, env, result_dir=directory)
+        status_path = directory / "status.json"
+        if status_path.is_file():
+            test_details = json.loads(status_path.read_text(encoding="utf-8"))
+            reason = test_details.get("reason")
     except Exception as exc:
         reason = type(exc).__name__
     finally:
-        cleanup_code = 0
+        cleanup_code = 1 if test_details.get("cleanup_failed") else 0
         registry = directory / "runtime/resolved-assets.yaml"
         if registry.exists():
             # Preserve failure evidence for the existing cleanup retention policy.
@@ -224,9 +229,10 @@ def worker(repo, home, record, directory, settings):
                 checkpoint.parent.mkdir(parents=True, exist_ok=True)
                 checkpoint.write_text(json.dumps({"case_id": record["case_id"], "result": outcome}) + "\n", encoding="utf-8")
             try:
-                cleanup_code = run_logged([sys.executable, "-m", "shared.asset_cleanup", "--output",
+                registered_cleanup_code = run_logged([sys.executable, "-m", "shared.asset_cleanup", "--output",
                                        str(directory / "runtime/cleanup-results.jsonl")], repo, env,
                                       directory / "logs/cleanup.log", settings["command_timeout_seconds"])
+                cleanup_code = cleanup_code or registered_cleanup_code
             except Exception:
                 cleanup_code = 2
         if services_started:
@@ -236,7 +242,10 @@ def worker(repo, home, record, directory, settings):
                 cleanup_code = 2
         save(directory / "receipt.json", {"case_id": record["case_id"], "stage": record["stage"],
              "result": "CLEANUP_FAILED" if cleanup_code else outcome, "test_result": outcome,
-             "cleanup_exit_code": cleanup_code, "reason": reason, "evidence": [directory.name]})
+             "cleanup_exit_code": cleanup_code, "reason": reason,
+             "cleanup_reason": "Case cleanup failed; inspect runtime/cleanup-results.jsonl and logs/cleanup.log"
+                if cleanup_code else None,
+             "test_evidence": test_details.get("evidence", []), "evidence": [directory.name]})
     return 0 if outcome == "PASS" and not cleanup_code else 1
 
 

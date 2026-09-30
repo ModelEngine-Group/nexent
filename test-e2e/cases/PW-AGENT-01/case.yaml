@@ -23,7 +23,7 @@ case:
     action: 打开/agents，从AgentSelectorHeader点击【新建】打开CreateAgentModal，仅填写展示名(display_name，用run_id)并确认创建Draft。
     expected: CreateAgentModal仅收集单一展示名创建Draft成功；基础Tab补填Agent名后通过validate。
   - order: 2
-    action: 确认新Agent被选中，NL2Agent不再显示不可用提示。
+    action: 确认新Agent被选中且配置表单可编辑，无未选择Agent提示；配置模型前允许显示模型未配置提示。
     expected: 基础/工具与技能/高级三Tab按预期分区：工具与技能在独立Tab，运行策略/发布属性在高级Tab。
   - order: 3
     action: 基础Tab→展示信息(Display Info)填写Agent名(name，用run_id派生合法标识符)与描述；角色与模型选择真实LLM并填核心Prompt。
@@ -63,7 +63,7 @@ case:
   actor: Nexent browser user
   journey:
   - 打开/agents，从AgentSelectorHeader点击【新建】打开CreateAgentModal，仅填写展示名(display_name，用run_id)并确认创建Draft。
-  - 确认新Agent被选中，NL2Agent不再显示不可用提示。
+  - 确认新Agent被选中且配置表单可编辑，无未选择Agent提示；配置模型前允许显示模型未配置提示。
   - 基础Tab→展示信息(Display Info)填写Agent名(name，用run_id派生合法标识符)与描述；角色与模型选择真实LLM并填核心Prompt。
   - 工具与技能Tab→按最小可运行配置设置工具与技能。
   - 高级Tab→按最小可运行配置设置运行策略、发布属性（协同代理/护栏默认可跳过）。

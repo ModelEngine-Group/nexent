@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: LOCAL-AGENT-JOURNEY-001
+  change_type: test-fix
+  title: Align draft Agent setup with editable fields and independent tabs
+  description: >-
+    The previous Windows evidence shows the newly selected Agent name in an input,
+    not a text node. Verify the name's input value during create and selection.
+    Model-not-configured is a legitimate warning before selecting the model; it
+    must not be confused with no Agent selected. Keep real model selection and
+    Debug completion mandatory. Execute description/model/prompt in Basic step 3,
+    Tools and Skills in step 4, and Advanced policies in step 5 as the Case states.
+  affected_features:
+    existing: [V5-PW-AGENT-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-AGENT-01]
+    retired: []

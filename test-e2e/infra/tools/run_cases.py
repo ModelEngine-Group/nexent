@@ -112,7 +112,7 @@ def command_for(record: dict, repo: Path, result_dir: Path, env: dict[str, str])
         node = shutil.which("node")
         if not node:
             raise ValueError("node is required for the case-local Node test")
-        return [[node, "--test", str(script)]], repo
+        return [[node, "--test", "--test-reporter=tap", str(script)]], repo
     if framework == "vitest":
         package = repo / "test-e2e/infra/automation/d1/frontend"
         binary = package / "node_modules/vitest/vitest.mjs"
@@ -179,14 +179,50 @@ def junit_outcome(path: Path) -> tuple[str, dict[str, int]]:
 
 def tap_outcome(path: Path) -> tuple[str, dict[str, int]]:
     summary = dict((key, int(value)) for key, value in re.findall(
-        r"(?m)^# (tests|pass|fail|skipped|todo) (\d+)\s*$", path.read_text(encoding="utf-8", errors="replace")))
+        r"(?m)^(?:#|ℹ) (tests|pass|fail|skipped|todo|cancelled) (\d+)\s*$",
+        path.read_text(encoding="utf-8", errors="replace")))
     if not summary.get("tests"):
         return "AUTOMATION_ERROR", summary
     if summary.get("fail"):
         return "FAIL", summary
-    if summary.get("skipped") or summary.get("todo"):
+    if summary.get("skipped") or summary.get("todo") or summary.get("cancelled"):
         return "BLOCKED", summary
     return ("PASS" if summary.get("pass") == summary["tests"] else "AUTOMATION_ERROR"), summary
+
+
+def result_reason(value: object, env: dict[str, str]) -> str:
+    """Keep actionable local diagnostics without copying configured credentials."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", str(value or ""))
+    for name, secret in sorted(env.items(), key=lambda item: len(item[1]), reverse=True):
+        if len(secret) >= 4 and re.search(r"PASSWORD|SECRET|TOKEN|API_?KEY", name, re.I):
+            text = text.replace(secret, "[REDACTED]")
+    return text[:4000]
+
+
+def playwright_outcome(result_dir: Path, case_id: str, env: dict[str, str]) -> dict:
+    """Read the audited terminal record, not just Playwright's process exit."""
+    try:
+        rows = [json.loads(line) for line in
+                (result_dir / "checkpoints/results.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+        if len(rows) != 1 or rows[0].get("case_id") != case_id or rows[0].get("stage") != "D4":
+            raise ValueError("missing, duplicate, or foreign D4 terminal record")
+        row = rows[0]
+        terminal = json.loads((result_dir / "d4" / case_id / "status.json").read_text(encoding="utf-8"))
+        allowed = {"PASS", "FAIL", "TIMEOUT", "AUTOMATION_ERROR", "BLOCKED",
+                   "BLOCKED_BY_DEPENDENCY", "SKIPPED", "SKIPPED_BY_SAFETY"}
+        if (row.get("result") not in allowed or terminal.get("case_id") != case_id or
+                terminal.get("status") != row["result"]):
+            raise ValueError("D4 terminal status and checkpoint disagree")
+        assertions = json.loads((result_dir / "d4" / case_id / "assertions.json").read_text(encoding="utf-8"))
+        cleanup_failed = (assertions.get("cleanup") or {}).get("status") == "FAIL"
+        return {"status": "BLOCKED" if row["result"].startswith("SKIPPED") else row["result"],
+                "journey_result": row["result"],
+                "reason": result_reason(row.get("failure_reason"), env) or None,
+                "evidence": row.get("evidence", []), "cleanup_failed": cleanup_failed}
+    except (OSError, ValueError, AttributeError, TypeError) as exc:
+        return {"status": "AUTOMATION_ERROR", "reason": f"Invalid D4 terminal evidence: {type(exc).__name__}",
+                "evidence": [], "cleanup_failed": False}
 
 
 def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result_dir: Path | None = None) -> tuple[str, str, Path]:
@@ -206,18 +242,29 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
     commands, cwd = command_for(record, repo, result_dir, run_env)
     framework = record["execution"]["implementations"][0]["framework"]
     exit_code = 0
+    step_results = []
     last_log = result_dir / "step-1.log"
     for number, command in enumerate(commands, 1):
         log = result_dir / f"step-{number}.log"
         last_log = log
         with log.open("w", encoding="utf-8") as output:
-            result = subprocess.run(command, cwd=cwd, env=run_env, stdout=output, stderr=subprocess.STDOUT,
-                                    check=False)
-        if result.returncode:
-            exit_code = result.returncode
-            break
+            try:
+                result = subprocess.run(command, cwd=cwd, env=run_env, stdout=output, stderr=subprocess.STDOUT,
+                                        check=False)
+                code = result.returncode
+            except OSError as exc:
+                output.write(f"Command could not start: {type(exc).__name__}\n")
+                code = 2
+        step_results.append({"step": number, "exit_code": code, "log": log.name})
+        if code:
+            exit_code = exit_code or code
+            # Failed journeys intentionally return nonzero. Audit their evidence
+            # as well; only a failed prepare prevents the browser/audit commands.
+            if not (framework == "playwright" and number == 2):
+                break
     status = "PASS" if exit_code == 0 else "EXECUTION_FAILED"
     summary = None
+    details = {"reason": None, "evidence": [item["log"] for item in step_results]}
     if framework in {"pytest", "vitest"}:
         observed, summary = junit_outcome(result_dir / "junit.xml")
         if observed != "PASS" or exit_code == 0:
@@ -226,16 +273,23 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
         observed, summary = tap_outcome(last_log)
         if observed != "PASS" or exit_code == 0:
             status = observed
-    elif framework == "playwright" and exit_code == 0:
-        status_path = result_dir / "d4" / case_id / "status.json"
-        try:
-            status = "PASS" if json.loads(status_path.read_text(encoding="utf-8")).get("status") == "PASS" else "EXECUTION_FAILED"
-        except (OSError, ValueError):
+    elif framework == "playwright":
+        if len(step_results) == 3 and step_results[-1]["exit_code"] == 0:
+            details.update(playwright_outcome(result_dir, case_id, run_env))
+            status = details.pop("status")
+        else:
             status = "AUTOMATION_ERROR"
+            details["reason"] = "D4 preparation or terminal evidence audit failed; inspect step logs"
+    if status == "PASS" and exit_code:
+        status = "AUTOMATION_ERROR"
+        details["reason"] = "Process exited nonzero despite a PASS result; inspect step logs"
+    if status != "PASS" and not details["reason"]:
+        details["reason"] = f"{framework} reported {status}; inspect local evidence"
     (result_dir / "status.json").write_text(json.dumps({
         "schema_version": 1, "case_id": case_id,
         "stage": record["stage"], "status": status,
         "exit_code": exit_code, "steps_completed": number,
+        "command_results": step_results, **details,
         **({"test_summary": summary} if summary is not None else {}),
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return case_id, status, result_dir

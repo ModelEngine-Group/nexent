@@ -47,15 +47,13 @@ journey("PW-AGENT-01", async (context) => {
         return `AgentSelectorHeader created run-scoped Draft id=${agentId}`;
       },
       async () => {
-        await expect(page.getByText(displayName, { exact: true }).first()).toBeVisible();
-        expect(await page.getByText(/请先创建或选择|不可用/).count()).toBe(0);
+        await expect(page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(displayName);
+        await expect(page.getByPlaceholder("请输入智能体变量名", { exact: true })).toBeEnabled();
+        expect(await page.getByText(/请先创建或选择/).count()).toBe(0);
         return "new Draft is selected and the configuration surface is enabled";
       },
       async () => {
         await agents.setDescription(description);
-        return "Basic > Display Info persisted the run-scoped description through autosave";
-      },
-      async () => {
         const roleModelSection = await agents.openSection("模型与提示词");
         const modelSelector = roleModelSection.getByRole("combobox").first();
         await modelSelector.click();
@@ -66,12 +64,18 @@ journey("PW-AGENT-01", async (context) => {
         await option.click();
         registerReadyAsset("models", "d4_basic_model_display_name", modelDisplay, "PW-AGENT-01");
         await agents.setPrompts({ duty: `只按要求回答，并在要求时输出标记 ${marker}` });
-        return `Role & Model selected real configured model ${modelDisplay} and persisted the core prompt`;
+        return `Basic persisted the description, real model ${modelDisplay} and core prompt`;
       },
       async () => {
-        for (const section of ["工具与技能", "运行策略", "发布属性"]) await agents.openSection(section);
-        expect(await page.getByText("工具与技能", { exact: true }).count()).toBeGreaterThan(0);
-        return "inspected Tools/Skills, Run Strategy and Publish Attributes and retained their valid minimal defaults";
+        const tab = page.getByRole("tab", { name: "工具与技能", exact: true });
+        await tab.click();
+        await expect(tab).toHaveAttribute("aria-selected", "true");
+        return "inspected the independent Tools & Skills tab and retained valid minimal defaults";
+      },
+      async () => {
+        await agents.openAdvanced();
+        for (const section of ["运行策略", "发布属性"]) await agents.openSection(section);
+        return "inspected Run Strategy and Publish Attributes under Advanced and retained valid minimal defaults";
       },
       async () => {
         await page.waitForLoadState("networkidle").catch(() => undefined);

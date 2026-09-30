@@ -5,12 +5,15 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
+import pytest
+
 from nexent.core.agents.core_agent import CoreAgent
 from nexent.core.agents.output_protocol import (
     ModelOutputProtocolError,
     ProtocolErrorReason,
 )
 
+pytestmark = [pytest.mark.case_id("CMSR-D1-004"), pytest.mark.stage("D1")]
 
 def _agent(*, finish_reason: str, output_tokens: int, reasoning_chars: int) -> CoreAgent:
     agent = object.__new__(CoreAgent)
