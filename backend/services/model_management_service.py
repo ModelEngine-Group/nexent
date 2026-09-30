@@ -1,6 +1,5 @@
 import logging
 import threading
-from datetime import timedelta
 from typing import List, Dict, Any, Optional, Tuple
 
 from fastapi import HTTPException
@@ -411,7 +410,12 @@ async def resolve_embedding_base_url(model_data: Dict[str, Any]) -> Tuple[Option
     return None, None
 
 
-async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
+async def create_model_for_tenant(
+    user_id: str,
+    tenant_id: str,
+    model_data: Dict[str, Any],
+    skip_default_backfill: bool = False,
+):
     """Create a single model record for the given tenant.
 
     Raises ValueError on display name conflict or invalid input.
@@ -530,6 +534,11 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
 
         # Auto-configure default-model slots that the tenant never set.
         # Only the models created by THIS call are eligible for empty slots.
+        # Batch imports pass skip_default_backfill on their per-row creates
+        # and finalize once after the whole batch (backfill_defaults), so the
+        # first row no longer permanently claims empty slots.
+        if skip_default_backfill:
+            return {"auto_configured_defaults": []}
         created_ids = _ids_for_created_models(
             [model_data["display_name"]], tenant_id, model_data.get("model_type"))
         auto_configured = _backfill_default_model_slots(
@@ -638,72 +647,29 @@ def _default_model_candidate_sort_key(record: Dict[str, Any]):
     return (-is_available, -int(context_tokens or 0), record.get("model_id") or 0)
 
 
-# How long after its creation an auto-configured slot occupant stays
-# "fresh": batch imports create their rows seconds apart, so a fresh
-# occupant means "this slot was auto-filled during the import that is still
-# in progress" and may still be swapped for a better freshly-added model.
-# Once the window passes, the occupant represents a settled earlier choice
-# and adding more models must not move it.
-_AUTO_SLOT_SWAP_WINDOW = timedelta(minutes=5)
-
-
-def _occupant_is_fresh(
-    candidates: List[Dict[str, Any]],
-    occupant_id: int,
-    new_model_ids: set,
-) -> bool:
-    """Whether an auto-configured occupant may still be swapped.
-
-    Compares the occupant's create_time against the newest model created in
-    the current call (both timestamps come from the DB, so no clock/timezone
-    skew). Missing timestamps disable the gate (permissive), matching the
-    pre-window behaviour for records/tables without reliable create_time.
-    """
-    newest_new_create = None
-    for m in candidates:
-        if m["model_id"] in new_model_ids and m.get("create_time"):
-            if newest_new_create is None or m["create_time"] > newest_new_create:
-                newest_new_create = m["create_time"]
-    if newest_new_create is None:
-        return True
-
-    occupant = next(
-        (m for m in candidates if m["model_id"] == occupant_id), None)
-    occupant_create = occupant.get("create_time") if occupant else None
-    if not occupant_create:
-        return True
-
-    return (newest_new_create - occupant_create) <= _AUTO_SLOT_SWAP_WINDOW
-
-
 def _resolve_existing_slot_config(tenant_id: str, config_key: str):
     """Classify a default-model slot's existing config row.
 
-    Returns (live_model_id, auto_configured, row):
-    - live_model_id set + auto_configured False: the configured default still
-      exists and the USER chose it (config row carries a user_id) -- backfill
-      must skip.
-    - live_model_id set + auto_configured True: the default exists but was
-      auto-configured by backfill (no user_id on the row) -- backfill may
-      re-evaluate and swap in a better candidate.
-    - live_model_id None + row set: the row's model has been deleted
-      (dangling default) -- backfill repairs that row in place.
-    - all empty: the slot was never configured -- backfill inserts a row.
+    Returns (live_model_id, stale_row):
+    - live_model_id set: the slot is occupied by a live model (user- or
+      system-configured) -- backfill must never touch it.
+    - stale_row set: a row exists but its model has been deleted (dangling
+      default) -- backfill repairs that row in place.
+    - both None: the slot is empty (never configured or cleared by the
+      user) -- backfill fills it from the current call's new models.
     """
     row = get_single_config_info(tenant_id, config_key)
     # Note: the DB helper returns {} (not None) when no row matches.
     if not row:
-        return None, False, None
+        return None, None
     raw_id = row.get("config_value")
     try:
         model_id = int(raw_id) if raw_id else None
     except (TypeError, ValueError):
         model_id = None
     if model_id is not None and get_model_by_model_id(model_id, tenant_id):
-        # Rows written by the UI save path carry the acting user's id;
-        # backfill-inserted rows leave user_id empty.
-        return model_id, not row.get("user_id"), row
-    return None, False, row
+        return model_id, None
+    return None, row
 
 
 def _ids_for_created_models(
@@ -741,20 +707,12 @@ def _backfill_default_model_slots(
     """Auto-configure default-model slots after models are created.
 
     Slot handling:
-    - A user-configured slot pointing at a live model is never touched.
-    - A slot that was auto-configured by a previous backfill is only
-      re-evaluated while the occupant is still "fresh" -- i.e. it was
-      created within _AUTO_SLOT_SWAP_WINDOW of the newest model in the
-      current call. This lets a batch import (whose rows are created one
-      HTTP call at a time) converge on the best freshly-added model instead
-      of permanently keeping whichever row happened to be created first,
-      while a default carried over from an earlier import session stays
-      frozen: adding more models later must not move it. The swap candidates
-      are the current occupant plus the models created in this call; older
-      models the user already passed over are never resurrected. The first
-      user save flips the row to a user-owned row (user_id stamped), locking
-      the choice.
-    - An empty slot (never configured, or deliberately cleared by the user)
+    - An OCCUPIED slot (any live model, whether the user picked it or an
+      earlier backfill did) is never touched: adding more models later must
+      not move an existing default. Batch imports therefore mark their
+      per-row creates with skip_default_backfill and finalize once after the
+      whole batch, so the first row no longer permanently claims the slot.
+    - An EMPTY slot (never configured, or deliberately cleared by the user)
       is filled ONLY from the models created in the current call
       (new_model_ids). Resurrecting an older model the user passed over
       (e.g. after clearing a default) would silently override that choice.
@@ -774,15 +732,16 @@ def _backfill_default_model_slots(
     try:
         for slot_name, model_type in _AUTO_CONFIGURABLE_MODEL_SLOTS.items():
             config_key = MODEL_CONFIG_MAPPING[slot_name]
-            live_model_id, auto_slot, row = _resolve_existing_slot_config(
+            live_model_id, row = _resolve_existing_slot_config(
                 tenant_id, config_key)
-            if live_model_id is not None and not auto_slot:
-                # A live, user-configured default: never touch it.
+            if live_model_id is not None:
+                # Occupied by a live model (user- or system-configured):
+                # never touch it.
                 continue
 
             candidates = get_model_records({"model_type": model_type}, tenant_id)
 
-            if live_model_id is None and row is None and new_model_ids is not None:
+            if row is None and new_model_ids is not None:
                 # Empty slot: only consider what this create call added.
                 candidates = [
                     m for m in candidates if m["model_id"] in new_model_ids
@@ -790,46 +749,7 @@ def _backfill_default_model_slots(
             if not candidates:
                 continue
 
-            if live_model_id is not None and auto_slot:
-                # Previously auto-configured slot. Candidates for a swap are
-                # the current occupant plus this call's new models (never all
-                # older models), and only while the occupant is fresh -- an
-                # occupant from an earlier import session is frozen.
-                if new_model_ids is not None:
-                    swap_pool = [
-                        m for m in candidates
-                        if m["model_id"] in new_model_ids
-                        or m["model_id"] == live_model_id
-                    ]
-                    if not _occupant_is_fresh(
-                        candidates, live_model_id, new_model_ids
-                    ):
-                        continue
-                else:
-                    swap_pool = candidates
-                selected = sorted(swap_pool, key=_default_model_candidate_sort_key)[0]
-                if selected["model_id"] == live_model_id:
-                    continue
-                success = update_config_by_tenant_config_id(
-                    row["tenant_config_id"], str(selected["model_id"])
-                )
-                if not success:
-                    logging.warning(
-                        "Auto-configure default model failed: swap returned "
-                        "False for key=%s tenant=%s", config_key, tenant_id)
-                    continue
-                logging.info(
-                    "Auto-configured default %s model swapped to '%s' (model_id=%s) for tenant %s",
-                    model_type, selected.get("display_name"), selected["model_id"], tenant_id)
-                auto_configured.append({
-                    "config_key": config_key,
-                    "model_id": selected["model_id"],
-                    "display_name": selected.get("display_name"),
-                    "model_type": model_type,
-                })
-                continue
-
-            if live_model_id is None and row is not None:
+            if row is not None:
                 # Dangling row (model deleted): repair it in place instead of
                 # appending another row to the key's history.
                 repair = sorted(candidates, key=_default_model_candidate_sort_key)[0]
@@ -851,7 +771,7 @@ def _backfill_default_model_slots(
                     "False for key=%s tenant=%s", config_key, tenant_id)
                 continue
 
-            picked = repair if (live_model_id is None and row is not None) else insert_pick
+            picked = repair if row is not None else insert_pick
             logging.info(
                 "Auto-configured default %s model to '%s' (model_id=%s) for tenant %s",
                 model_type, picked.get("display_name"), picked["model_id"], tenant_id)

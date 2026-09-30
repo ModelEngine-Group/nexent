@@ -2864,27 +2864,28 @@ def test_backfill_never_touches_configured_slots():
     assert all(cid != 100 for cid, _ in updated)
 
 
-def test_backfill_swaps_auto_configured_slot_to_larger_context():
-    """A slot previously auto-configured by backfill (no user_id on the row)
-    is re-evaluated on later creates: batch adds land one model at a time, so
-    the first-created model must not permanently occupy the slot when a
-    larger-context candidate arrives."""
+def test_backfill_never_touches_occupied_auto_slots():
+    """An occupied slot is never touched -- whether the user picked the model
+    or an earlier backfill did. Adding models later (even better ones) must
+    not move an existing default; batches finalize once with the whole
+    batch's models instead of swapping row by row."""
     svc = import_svc()
     rows = [
-        _model_row(1, "llm", "first-created", context=262144),
+        _model_row(1, "llm", "auto-picked", context=262144),
         _model_row(2, "llm", "larger-context", context=1048576),
     ]
     # Auto-configured row: user_id empty (backfill-written), pointing at the
-    # first-created model.
+    # smaller model. A better model exists (and was just created) -- the slot
+    # must stay frozen.
     result, inserted, updated = _run_backfill(
         svc, rows,
         {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": None}},
-        live_model_ids={1, 2})
+        live_model_ids={1, 2},
+        new_model_ids={2})
 
-    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
-    assert llm_entry["model_id"] == 2
-    assert (100, "2") in updated
+    assert result == []
     assert inserted == []
+    assert updated == []
 
 
 def test_backfill_keeps_auto_slot_when_occupant_still_best():
@@ -3026,49 +3027,62 @@ def test_backfill_legacy_callers_without_new_ids_keep_all_candidates():
     assert llm_entry["model_id"] == 1
 
 
-def test_backfill_swaps_fresh_occupant_within_batch_window():
-    """Mid-batch (occupant created seconds before the new models): the swap
-    still converges to the better freshly-added model."""
-    from datetime import datetime, timedelta
-
-    now = datetime(2026, 9, 30, 12, 0, 0)
+def test_backfill_batch_finalize_picks_best_of_batch():
+    """The batch finalize path passes the whole batch as new_model_ids: empty
+    slots get the best model of the batch in ONE decision (no per-row
+    claiming, no swaps)."""
     svc = import_svc()
     rows = [
-        _model_row(1, "llm", "first-created", context=262144,
-                   created=now - timedelta(seconds=30)),
-        _model_row(2, "llm", "larger-context", context=1048576, created=now),
+        _model_row(1, "llm", "first-created", context=262144),
+        _model_row(2, "llm", "larger-context", context=1048576),
     ]
-    result, inserted, updated = _run_backfill(
-        svc, rows,
-        {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": None}},
-        live_model_ids={1, 2},
-        new_model_ids={2})
+    result, inserted, _ = _run_backfill(
+        svc, rows, existing_config={}, new_model_ids={1, 2})
 
     llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
     assert llm_entry["model_id"] == 2
-    assert (100, "2") in updated
 
 
-def test_backfill_freezes_stale_auto_occupant():
-    """An auto-configured occupant from an earlier import session (older
-    than the swap window) must not be moved by newly added models."""
-    from datetime import datetime, timedelta
+def test_create_model_for_tenant_respects_skip_default_backfill():
+    """Rows flagged skip_default_backfill create without running the slot
+    backfill (the batch dialog finalizes once after its loop)."""
+    import asyncio
 
-    now = datetime(2026, 9, 30, 12, 0, 0)
+    svc = import_svc()
+    model_data = {
+        "display_name": "m1", "model_name": "m1", "model_type": "llm",
+        "api_key": "k", "base_url": "http://x", "connect_status": "available",
+        "model_repo": "",
+    }
+    backfill_result = []
+    with mock.patch.object(svc, "create_model_record", return_value=True), \
+            mock.patch.object(svc, "_backfill_default_model_slots", return_value=backfill_result) as mock_backfill:
+        result = asyncio.run(svc.create_model_for_tenant(
+            "u1", "t1", model_data, skip_default_backfill=True))
+    assert result == {"auto_configured_defaults": []}
+    mock_backfill.assert_not_called()
+
+
+def test_backfill_old_models_never_resurrect_for_empty_slot():
+    """Even on the legacy all-candidates path an empty slot is only filled
+    when the pool is provided; with new_model_ids the old giant the user
+    passed over never resurfaces (covered by the new-only tests). This test
+    pins the freeze semantics for occupied slots across sessions."""
     svc = import_svc()
     rows = [
-        _model_row(1, "llm", "settled-occupant", context=262144,
-                   created=now - timedelta(hours=1)),
-        _model_row(2, "llm", "new-better", context=1048576, created=now),
+        _model_row(1, "llm", "old-giant", context=2097152),
+        _model_row(2, "llm", "settled-occupant", context=262144),
+        _model_row(3, "llm", "new-model", context=32000),
     ]
+    # Occupied slot (auto row) pointing at model 2; an old giant and a new
+    # model exist. Nothing may move the slot.
     result, inserted, updated = _run_backfill(
         svc, rows,
-        {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": None}},
-        live_model_ids={1, 2},
-        new_model_ids={2})
+        {"LLM_ID": {"config_value": "2", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2, 3},
+        new_model_ids={3})
 
     assert result == []
-    assert inserted == []
     assert updated == []
 
 
