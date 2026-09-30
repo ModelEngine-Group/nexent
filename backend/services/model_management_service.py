@@ -636,35 +636,50 @@ def _default_model_candidate_sort_key(record: Dict[str, Any]):
 def _resolve_existing_slot_config(tenant_id: str, config_key: str):
     """Classify a default-model slot's existing config row.
 
-    Returns (live_model_id, stale_row):
-    - live_model_id set: the configured default still exists -- backfill must
-      skip (user's explicit choice).
-    - stale_row set: a row exists but its model has been deleted (dangling
-      default) -- backfill repairs that row in place.
-    - both None: the slot was never configured -- backfill inserts a row.
+    Returns (live_model_id, auto_configured, row):
+    - live_model_id set + auto_configured False: the configured default still
+      exists and the USER chose it (config row carries a user_id) -- backfill
+      must skip.
+    - live_model_id set + auto_configured True: the default exists but was
+      auto-configured by backfill (no user_id on the row) -- backfill may
+      re-evaluate and swap in a better candidate.
+    - live_model_id None + row set: the row's model has been deleted
+      (dangling default) -- backfill repairs that row in place.
+    - all empty: the slot was never configured -- backfill inserts a row.
     """
     row = get_single_config_info(tenant_id, config_key)
     # Note: the DB helper returns {} (not None) when no row matches.
     if not row:
-        return None, None
+        return None, False, None
     raw_id = row.get("config_value")
     try:
         model_id = int(raw_id) if raw_id else None
     except (TypeError, ValueError):
         model_id = None
     if model_id is not None and get_model_by_model_id(model_id, tenant_id):
-        return model_id, None
-    return None, row
+        # Rows written by the UI save path carry the acting user's id;
+        # backfill-inserted rows leave user_id empty.
+        return model_id, not row.get("user_id"), row
+    return None, False, row
 
 
 def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
     """Auto-configure default-model slots after models are created.
 
-    A slot is skipped only when its config row points at a still-existing
-    model; empty slots and dangling rows (model deleted) are (re)filled. The
-    candidate pool is the tenant's live models of the matching type, ranked by
-    availability then context size. Failures are logged and skipped so
-    backfill can never break the create flow.
+    Slot handling:
+    - A user-configured slot pointing at a live model is never touched.
+    - A slot that was auto-configured by a previous backfill is re-evaluated
+      on every create: batch adds create models one by one and each creation
+      used to permanently occupy the slot with whichever model happened to be
+      created first. Re-evaluating lets the ranking (available first, then
+      larger context window) converge on the best candidate once the whole
+      batch has landed. The first user save flips the row to a user-owned
+      row (user_id stamped), locking the choice.
+    - Dangling rows (model deleted) are repaired in place; never-configured
+      slots get a new row.
+
+    Failures are logged and skipped so backfill can never break the create
+    flow.
 
     Returns a list of {"config_key", "model_id", "display_name", "model_type"}
     entries describing what was auto-configured (empty when nothing changed).
@@ -673,9 +688,9 @@ def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str
     try:
         for slot_name, model_type in _AUTO_CONFIGURABLE_MODEL_SLOTS.items():
             config_key = MODEL_CONFIG_MAPPING[slot_name]
-            live_model_id, stale_row = _resolve_existing_slot_config(
+            live_model_id, auto_slot, row = _resolve_existing_slot_config(
                 tenant_id, config_key)
-            if live_model_id is not None:
+            if live_model_id is not None and not auto_slot:
                 # A live, user-configured default: never touch it.
                 continue
 
@@ -684,11 +699,38 @@ def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str
                 continue
 
             selected = sorted(candidates, key=_default_model_candidate_sort_key)[0]
-            if stale_row is not None:
+
+            if live_model_id is not None and auto_slot:
+                # Previously auto-configured slot: swap only when the current
+                # occupant is no longer the best candidate. The row keeps its
+                # empty user_id, so later creates can still improve it until
+                # the user makes an explicit choice.
+                if selected["model_id"] == live_model_id:
+                    continue
+                success = update_config_by_tenant_config_id(
+                    row["tenant_config_id"], str(selected["model_id"])
+                )
+                if not success:
+                    logging.warning(
+                        "Auto-configure default model failed: swap returned "
+                        "False for key=%s tenant=%s", config_key, tenant_id)
+                    continue
+                logging.info(
+                    "Auto-configured default %s model swapped to '%s' (model_id=%s) for tenant %s",
+                    model_type, selected.get("display_name"), selected["model_id"], tenant_id)
+                auto_configured.append({
+                    "config_key": config_key,
+                    "model_id": selected["model_id"],
+                    "display_name": selected.get("display_name"),
+                    "model_type": model_type,
+                })
+                continue
+
+            if live_model_id is None and row is not None:
                 # Dangling row (model deleted): repair it in place instead of
                 # appending another row to the key's history.
                 success = update_config_by_tenant_config_id(
-                    stale_row["tenant_config_id"], str(selected["model_id"])
+                    row["tenant_config_id"], str(selected["model_id"])
                 )
             else:
                 success = insert_config({

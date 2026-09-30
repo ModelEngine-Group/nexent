@@ -2842,16 +2842,61 @@ def test_backfill_prefers_available_models():
 
 def test_backfill_never_touches_configured_slots():
     svc = import_svc()
-    rows = [_model_row(1, "llm", "llm-one"), _model_row(2, "embedding", "emb-one")]
-    # LLM_ID row exists and points at a live model (id 1) -- must not be
-    # overwritten even though a "better" candidate exists.
+    rows = [_model_row(1, "llm", "llm-one", context=32000),
+            _model_row(2, "llm", "better-llm", context=1048576),
+            _model_row(3, "embedding", "emb-one")]
+    # LLM_ID row exists, points at a live model (id 1) and carries the acting
+    # user's id (UI save path) -- must not be overwritten even though model 2
+    # has a larger context window.
     result, inserted, updated = _run_backfill(
-        svc, rows, {"LLM_ID": {"config_value": "1", "tenant_config_id": 100}},
-        live_model_ids={1, 2})
+        svc, rows,
+        {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": "u1"}},
+        live_model_ids={1, 2, 3})
 
     assert {e["config_key"] for e in result} == {"EMBEDDING_ID"}
     assert all(d["config_key"] != "LLM_ID" for d in inserted)
     assert all(cid != 100 for cid, _ in updated)
+
+
+def test_backfill_swaps_auto_configured_slot_to_larger_context():
+    """A slot previously auto-configured by backfill (no user_id on the row)
+    is re-evaluated on later creates: batch adds land one model at a time, so
+    the first-created model must not permanently occupy the slot when a
+    larger-context candidate arrives."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "first-created", context=262144),
+        _model_row(2, "llm", "larger-context", context=1048576),
+    ]
+    # Auto-configured row: user_id empty (backfill-written), pointing at the
+    # first-created model.
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2})
+
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 2
+    assert (100, "2") in updated
+    assert inserted == []
+
+
+def test_backfill_keeps_auto_slot_when_occupant_still_best():
+    """An auto-configured slot whose occupant already ranks first is left
+    alone (no redundant update)."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "small-ctx", context=32000),
+        _model_row(2, "llm", "big-ctx", context=1048576),
+    ]
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "2", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2})
+
+    assert result == []
+    assert inserted == []
+    assert updated == []
 
 
 def test_backfill_handles_db_helper_empty_dict_for_missing_row():
