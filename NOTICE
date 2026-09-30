@@ -12,6 +12,3 @@ This software contains the following open-source components:
 
 2. SmolAgents - Apache License 2.0  
    Source: https://github.com/huggingface/smolagents
-
-3. Ray - Apache License 2.0
-   Source: https://github.com/ray-project/ray
