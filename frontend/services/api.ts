@@ -270,6 +270,7 @@ export const API_ENDPOINTS = {
     customModelCreate: `${API_BASE_URL}/model/create`,
     customModelCreateProvider: `${API_BASE_URL}/model/provider/create`,
     customModelBatchCreate: `${API_BASE_URL}/model/provider/batch_create`,
+    customModelBackfillDefaults: `${API_BASE_URL}/model/backfill_defaults`,
     getProviderSelectedModalList: `${API_BASE_URL}/model/provider/list`,
     customModelDelete: (displayName: string) =>
       `${API_BASE_URL}/model/delete?display_name=${encodeURIComponent(
