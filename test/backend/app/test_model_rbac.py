@@ -2,7 +2,8 @@
 
 Verifies that mutating /model/* endpoints reject the DEV role (which only
 holds model:read), read endpoints stay accessible to DEV, and the
-cross-tenant /manage/* endpoints are restricted to SU.
+/manage/* endpoints accept SU for any tenant plus ADMIN for its own tenant
+only.
 """
 
 import sys
@@ -185,9 +186,9 @@ async def test_admin_can_create_model(admin_client, mocker):
 
 
 @pytest.mark.asyncio
-async def test_admin_cannot_access_manage_endpoints(admin_client, mocker):
-    """ADMIN shares the SU model seeds, so manage/* must fall back to the
-    SU role whitelist."""
+async def test_admin_cannot_access_foreign_tenant_manage_endpoints(admin_client, mocker):
+    """ADMIN shares the SU model seeds, so cross-tenant manage/* calls must be
+    rejected by the role+tenant scope check rather than by permission strings."""
     mocker.patch(
         'backend.apps.model_management_app.list_models_for_admin',
         return_value={"models": [], "total": 0},
@@ -201,7 +202,85 @@ async def test_admin_cannot_access_manage_endpoints(admin_client, mocker):
 
 
 @pytest.mark.asyncio
+async def test_admin_cannot_mutate_foreign_tenant_models(admin_client, mocker):
+    """The own-tenant allowance must not extend to mutating endpoints either."""
+    mock_update = mocker.patch(
+        'backend.apps.model_management_app.update_single_model_for_tenant',
+        return_value=None,
+    )
+    response = admin_client.post(
+        "/model/manage/update",
+        json={
+            "tenant_id": "other_tenant",
+            "current_display_name": "m",
+            "model_name": "m2",
+        },
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    mock_update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_can_list_own_tenant_models(admin_client, mocker):
+    """Tenant admins manage their own tenant via /resource-manage, which always
+    passes the caller's own tenant_id. Regression: manage/list used to be
+    SU-only, so the Models tab rendered an empty table for ADMIN."""
+    mock_list = mocker.patch(
+        'backend.apps.model_management_app.list_models_for_admin',
+        return_value={"models": [], "total": 0},
+    )
+    response = admin_client.post(
+        "/model/manage/list",
+        json={"tenant_id": "rbac_tenant", "page": 1, "page_size": 10},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.OK
+    mock_list.assert_awaited_once()
+    # The own-tenant id must be the one forwarded to the service.
+    assert mock_list.await_args.args[0] == "rbac_tenant"
+
+
+@pytest.mark.asyncio
+async def test_admin_can_mutate_own_tenant_models(admin_client, mocker):
+    """Create/update/delete of the ADMIN's own tenant models stay available."""
+    mock_update = mocker.patch(
+        'backend.apps.model_management_app.update_single_model_for_tenant',
+        return_value=None,
+    )
+    response = admin_client.post(
+        "/model/manage/update",
+        json={
+            "tenant_id": "rbac_tenant",
+            "current_display_name": "m",
+            "model_name": "m2",
+        },
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.OK
+    mock_update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_dev_cannot_access_own_tenant_manage_endpoints(dev_client, mocker):
+    """DEV holds model:read and passes require(), so the scope check is the only
+    thing keeping it off the manage surface -- even for its own tenant."""
+    mock_list = mocker.patch(
+        'backend.apps.model_management_app.list_models_for_admin',
+        return_value={"models": [], "total": 0},
+    )
+    response = dev_client.post(
+        "/model/manage/list",
+        json={"tenant_id": "rbac_tenant", "page": 1, "page_size": 10},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    mock_list.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_su_can_access_manage_endpoints(su_client, mocker):
+    """SU may target any tenant, including one that is not its own."""
     mocker.patch(
         'backend.apps.model_management_app.list_models_for_admin',
         return_value={"models": [], "total": 0},

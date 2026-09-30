@@ -13,7 +13,7 @@ import {
   Pagination,
   Row,
   Spin,
-  Tag,
+  Tooltip,
 } from "antd";
 import { Bot, FileInput, Pencil, Search, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -33,6 +33,8 @@ import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
 import { AgentDetail } from "@/components/agent/agent-detail";
 import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
+import { getMineCardRepositoryStatusBadge } from "@/lib/agentRepositoryMine";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
 import AgentConfigActions from "./components/agent-config-actions";
 import AgentAvatar from "./components/agent-avatar";
@@ -92,6 +94,7 @@ export default function AgentsPage() {
     search,
     page,
     pageSize: itemsPerPage,
+    includeRepositoryInfo: true,
   });
   const cardHeight = `calc((100% - ${(rows - 1) * 20}px) / ${rows})`;
 
@@ -243,6 +246,13 @@ export default function AgentsPage() {
                   </Col>
                   {(agents as AgentCardItem[]).map((agent) => {
                     const date = formatAgentDate(agent);
+                    const repositoryBadge = getMineCardRepositoryStatusBadge(
+                      agent.repository_info ?? []
+                    );
+                    const unavailableReasonLabels = getUnavailableReasonLabels(
+                      agent.unavailable_reasons ?? [],
+                      t
+                    );
                     return (
                       <Col
                         key={agent.id}
@@ -257,13 +267,21 @@ export default function AgentsPage() {
                           className="h-full min-h-0"
                           title={getAgentTitle(agent)}
                           subtitle={
-                            agent.current_version_no
-                              ? t("agentRepository.mine.currentVersion", {
-                                  version:
-                                    agent.version_name ||
-                                    `V${agent.current_version_no}`,
-                                })
-                              : undefined
+                            agent.current_version_no ? (
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <span
+                                  className="size-1.5 shrink-0 rounded-full bg-primary"
+                                  aria-hidden
+                                />
+                                <span className="min-w-0 truncate">
+                                  {t("agentRepository.mine.currentVersion", {
+                                    version:
+                                      agent.version_name ||
+                                      `V${agent.current_version_no}`,
+                                  })}
+                                </span>
+                              </span>
+                            ) : undefined
                           }
                           icon={
                             <AgentAvatar
@@ -277,25 +295,72 @@ export default function AgentsPage() {
                             t("agentRepository.card.noDescription")
                           }
                           descriptionLines={2}
-                          actions={
-                            <div className="flex flex-col items-end gap-1.5">
-                              <AgentConfigActions
-                                agentId={Number(agent.id)}
-                                readOnly={agent.permission === "READ_ONLY"}
-                                variant="menu"
-                                onManageVersions={handleManageVersions}
-                              />
-                              <Tag
-                                color={
-                                  agent.current_version_no ? "green" : "orange"
-                                }
+                          fixedHeaderLayout
+                          statusRow={
+                            <div className="flex min-h-5 w-full min-w-0 items-center gap-2">
+                              <span
+                                className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                                  agent.current_version_no
+                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                                    : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                                }`}
                               >
                                 {agent.current_version_no
                                   ? t(
                                       "agentRepository.mine.lifecycle.published"
                                     )
                                   : t("agentRepository.mine.lifecycle.draft")}
-                              </Tag>
+                              </span>
+                              {repositoryBadge ? (
+                                <span
+                                  aria-label={`${t(repositoryBadge.labelKey)}${repositoryBadge.versionLabel ? ` · ${repositoryBadge.versionLabel}` : ""}`}
+                                  className={`ml-auto block min-w-0 truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                                    repositoryBadge.variant === "pending"
+                                      ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                                      : repositoryBadge.variant === "rejected"
+                                        ? "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                                        : "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"
+                                  }`}
+                                >
+                                  {t(repositoryBadge.labelKey)}
+                                  {repositoryBadge.versionLabel
+                                    ? ` · ${repositoryBadge.versionLabel}`
+                                    : null}
+                                </span>
+                              ) : null}
+                            </div>
+                          }
+                          actions={
+                            <div className="grid h-[60px] grid-rows-2">
+                              <div className="flex items-center justify-end">
+                                <AgentConfigActions
+                                  agentId={Number(agent.id)}
+                                  readOnly={agent.permission === "READ_ONLY"}
+                                  variant="menu"
+                                  onManageVersions={handleManageVersions}
+                                />
+                              </div>
+                              <div className="flex items-center justify-end">
+                                {agent.is_available === false ? (
+                                  <Tooltip
+                                    title={
+                                      unavailableReasonLabels.length > 0
+                                        ? unavailableReasonLabels.join(", ")
+                                        : t("agentSelector.agentUnavailable")
+                                    }
+                                  >
+                                    <span
+                                      className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                                      aria-label={
+                                        unavailableReasonLabels.join(", ") ||
+                                        t("agentSelector.agentUnavailable")
+                                      }
+                                    >
+                                      {t("mcpConfig.status.unavailable")}
+                                    </span>
+                                  </Tooltip>
+                                ) : null}
+                              </div>
                             </div>
                           }
                           meta={

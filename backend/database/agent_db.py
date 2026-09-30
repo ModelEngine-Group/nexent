@@ -548,6 +548,8 @@ def query_agent_list_candidates_by_tenant_id(
                 AgentInfo.version_no == 0,
                 AgentInfo.delete_flag != 'Y',
                 AgentInfo.enabled.is_(True),
+                or_(AgentInfo.agent_origin.is_(None), AgentInfo.agent_origin != "SYSTEM"),
+                or_(AgentInfo.system_key.is_(None), AgentInfo.system_key == ""),
             )
             .order_by(AgentInfo.create_time.desc(), AgentInfo.agent_id.desc())
             .all()

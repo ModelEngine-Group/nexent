@@ -449,7 +449,12 @@ async def test_create_provider_model_success(client, auth_header, user_credentia
     
     mock_get = mocker.patch(
         'backend.apps.model_management_app.create_provider_models_for_tenant',
-        return_value=[{"id": "A1"}, {"id": "a0"}, {"id": "b2"}, {"id": "c3"}]
+        return_value=[
+            {"id": "A1", "api_key": "provider-secret"},
+            {"id": "a0"},
+            {"id": "b2"},
+            {"id": "c3"},
+        ]
     )
     
     # Fix: Add required model_type field

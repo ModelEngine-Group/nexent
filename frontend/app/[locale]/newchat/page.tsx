@@ -160,7 +160,6 @@ const PersistentChatHome: FC = () => {
           setSelectedAgent={setSelectedAgent}
           isLoadingAgents={isLoadingAgents}
           agents={agents}
-          onAgentSelected={handleAgentSelected}
           onBack={handleBack}
           isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
         />
@@ -179,7 +178,6 @@ const HomeContent: FC<{
   setSelectedAgent: (agent: Agent | null) => void;
   isLoadingAgents: boolean;
   agents: Agent[];
-  onAgentSelected: (agent: Agent) => void;
   onBack: () => void;
   isDictationConfigured: boolean;
 }> = ({
@@ -188,7 +186,6 @@ const HomeContent: FC<{
   setSelectedAgent,
   isLoadingAgents,
   agents,
-  onAgentSelected,
   onBack,
   isDictationConfigured,
 }) => {
@@ -247,7 +244,9 @@ const HomeContent: FC<{
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
     new Map()
   );
-  const [, forceServerIdTick] = useState(0);
+  const [serverConversationIds, setServerConversationIds] = useState<
+    Map<string, string>
+  >(new Map());
 
   const handleServerConversationId = useCallback(
     (threadId: string, serverId: string, initialQuestion?: string) => {
@@ -257,10 +256,8 @@ const HomeContent: FC<{
       if (previous !== numericId) {
         map.set(threadId, numericId);
         cacheHistoricalChatMode(numericId, chatMode);
-        // Trigger a re-render so the `setRunConfig` effect below picks up the
-        // new id. We don't store the map in state because we never need to
-        // diff/render it directly — only react when an entry changes.
-        forceServerIdTick((tick) => tick + 1);
+        // Keep the sidebar and run configuration in sync with the server id.
+        setServerConversationIds(new Map(map));
       }
 
       if (initialQuestion && previous !== numericId) {
@@ -269,6 +266,7 @@ const HomeContent: FC<{
             setGeneratedTitles((titles) => {
               const next = new Map(titles);
               next.set(threadId, title);
+              next.set(numericId, title);
               return next;
             });
           })
@@ -726,8 +724,14 @@ const HomeContent: FC<{
 
   const handleThreadBack = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
-    await runtime.threads.switchToNewThread();
-    onBack();
+    try {
+      await runtime.threads.switchToNewThread();
+      await runtime.threads.reload();
+    } catch (error) {
+      log.error("[HomeContent] Failed to return to agent list:", error);
+    } finally {
+      onBack();
+    }
   }, [onBack, runtime]);
 
   const handlePrepareNewConversation = useCallback(() => {
@@ -737,22 +741,28 @@ const HomeContent: FC<{
   }, [onBack]);
 
   const handleNewConversation = useCallback(async () => {
-    handlePrepareNewConversation();
-    await runtime.threads.switchToNewThread();
-  }, [handlePrepareNewConversation, runtime]);
+    shouldRestoreAgentRef.current = false;
+    try {
+      await runtime.threads.switchToNewThread();
+      await runtime.threads.reload();
+    } catch (error) {
+      log.error("[HomeContent] Failed to start a new conversation:", error);
+    } finally {
+      onBack();
+    }
+  }, [onBack, runtime]);
 
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
-      await runtime.threads.switchToNewThread();
       const thread = runtime.threads.getItemById(
         runtime.threads.getState().mainThreadId
       );
       await thread.initialize();
       await thread.updateCustom({ agentId: agent.id });
-      onAgentSelected(agent);
+      setSelectedAgent(agent);
     },
-    [onAgentSelected, runtime]
+    [runtime, setSelectedAgent]
   );
 
   // Conditional rendering must happen after all hooks
@@ -770,6 +780,7 @@ const HomeContent: FC<{
         <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar
             generatedTitles={generatedTitles}
+            serverConversationIds={serverConversationIds}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
           />
