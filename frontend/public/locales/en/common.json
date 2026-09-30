@@ -4837,6 +4837,7 @@
   "agentEvaluation.pagination.total": "Total {{total}} items",
   "agentEvaluation.progressLabel": "Progress",
   "agentEvaluation.publish": "Publish",
+  "agentEvaluation.publishFailed": "Failed to publish evaluator",
   "agentEvaluation.published": "Published",
   "agentEvaluation.queryCountRequired": "Please select at least one runtime evaluator",
   "agentEvaluation.save": "Save",
