@@ -20,6 +20,24 @@ from test_asset_lib import implementation_hash  # noqa: E402
 
 
 class RunnerOutcomeTests(unittest.TestCase):
+    def test_vitest_runs_all_subscenarios_in_the_case_local_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            cli = repo / "test-e2e/infra/automation/d1/frontend/node_modules/vitest/vitest.mjs"
+            cli.parent.mkdir(parents=True)
+            cli.touch()
+            record = {"case_id": "UT-FE-TEST", "execution": {"implementations": [{
+                "framework": "vitest", "file": "test-e2e/cases/UT-FE-TEST/test.test.tsx",
+                "selector": "UT-FE-TEST",
+            }]}}
+            with patch.object(run_cases.shutil, "which", return_value="node"):
+                commands, _ = run_cases.command_for(record, repo, repo / "results", {})
+            self.assertIn(str(repo / record["execution"]["implementations"][0]["file"]), commands[0])
+            self.assertNotIn("--testNamePattern", commands[0])
+            self.assertIn("--reporter=default", commands[0])
+            self.assertIn("--reporter=junit", commands[0])
+            self.assertIn(f"--outputFile.junit={repo / 'results/junit.xml'}", commands[0])
+
     def playwright_run(self, root: Path, outcome: str, *, audit_code: int = 0,
                        browser_code: int = 1, duplicate: bool = False) -> tuple[dict, list[int]]:
         home = root / "test-home"

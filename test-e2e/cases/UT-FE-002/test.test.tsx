@@ -60,7 +60,7 @@ import { getLocalFileDownloadUrl, getLocalFilePreviewUrl } from "@/services/stor
 import { toApiError } from "@/services/api";
 import { formatNotificationMessage } from "@/lib/notificationMessage";
 import { buildRepositoryReviewDeepLink, parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
-import { parseSelection, serializeSelection } from "@/app/[locale]/agents/components/knowledge-base-search";
+import { parseSelection, serializeSelection } from "@/app/[locale]/agents/[agentId]/components/knowledge-base-search";
 import { transformMessagesToTaskMessages } from "@/app/[locale]/chat/streaming/messageTransformer";
 import { upsertHistorySummaryInMessages } from "@/app/[locale]/chat/streaming/chatStreamHandler";
 import { isNewAgentPaddingItem } from "@/types/agentRepository";
@@ -82,10 +82,10 @@ describe("D1 frontend functional components and state reducers", () => {
     if (!repoRoot) {
       throw new Error("NEXENT_REPO must point to the local Nexent checkout");
     }
-    const pageSource = readFileSync(join(repoRoot, "frontend/app/[locale]/agents/page.tsx"), "utf8");
+    const pageSource = readFileSync(join(repoRoot, "frontend/app/[locale]/agents/[agentId]/page.tsx"), "utf8");
     const versionSource = readFileSync(join(repoRoot, "frontend/app/[locale]/agents/agent-version.tsx"), "utf8");
     const selectorSource = readFileSync(
-      join(repoRoot, "frontend/app/[locale]/agents/components/advanced/collaborative-agent-selector-modal.tsx"),
+      join(repoRoot, "frontend/app/[locale]/agents/[agentId]/components/advanced/collaborative-agent-selector-modal.tsx"),
       "utf8",
     );
     expect(pageSource).toMatch(/onRefreshAgentInfo=\{refetchAgentInfo\}/);

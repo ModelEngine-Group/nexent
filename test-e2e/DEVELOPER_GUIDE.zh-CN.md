@@ -133,7 +133,7 @@ Change 文件位于 `changes/{requirements,bugs,refactors,test-fixes}/`，每个
 & $TestPython test-e2e/infra/tools/validate_test_assets.py --phase implementation
 ```
 
-生成器统一更新 registry、Feature 导航和 Excel。最后一条只读检查会发现生成视图过期。只修改受影响的源文件，但执行全局一致性检查。静态校验通过还需要实际运行。
+生成器统一更新本地 registry、Feature 导航和 Excel；registry 与 Excel 不入 Git。最后一条只读检查会发现已有生成视图过期，干净检出但尚未生成这两个文件时也可通过。只修改受影响的源文件，但执行全局一致性检查。静态校验通过还需要实际运行。
 
 先复测单条失败用例，再扩大到本次变更影响的范围：
 

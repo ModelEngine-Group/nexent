@@ -122,8 +122,9 @@ def command_for(record: dict, repo: Path, result_dir: Path, env: dict[str, str])
         if not node:
             raise ValueError("node is required for D1 frontend cases")
         return [[node, str(binary), "run", "--config", str(package / "vitest.config.ts"),
-                 str(script), "--testNamePattern", entry["selector"],
-                 "--reporter=junit", f"--outputFile={result_dir / 'junit.xml'}"]], package
+                 str(script),
+                 "--reporter=default", "--reporter=junit",
+                 f"--outputFile.junit={result_dir / 'junit.xml'}"]], package
     if framework == "playwright":
         package = repo / "test-e2e/infra/automation/d4"
         binary = package / "node_modules/playwright/cli.js"

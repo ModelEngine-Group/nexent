@@ -50,9 +50,9 @@ vi.mock('@/lib/logger', () => ({
   default: { error: vi.fn() },
 }));
 
-const mockMessage = { error: vi.fn() };
-vi.mock('antd', () => {
-  const React = require('react');
+const mockMessage = vi.hoisted(() => ({ error: vi.fn() }));
+vi.mock('antd', async () => {
+  const React = await import('react');
   return {
     App: {
       useApp: () => ({ message: mockMessage }),

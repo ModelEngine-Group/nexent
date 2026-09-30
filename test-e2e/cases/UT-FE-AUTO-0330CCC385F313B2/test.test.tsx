@@ -3,8 +3,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CiteMarker } from '@/app/[locale]/newchat/ui/cite-marker';
 
-vi.mock('@/components/ui/tooltip', () => {
-  const React = require('react');
+vi.mock('@/components/ui/tooltip', async () => {
+  const React = await import('react');
   const TooltipContext = React.createContext({ open: false, setOpen: (_v: any) => {} });
   const TooltipProvider = ({ children }: any) => {
     const [open, setOpen] = React.useState(false);
@@ -147,7 +147,9 @@ describe('CiteMarker', () => {
     render(<CiteMarker {...baseProps} loading />);
     const button = screen.getByRole('button');
     expect(button).toBeDisabled();
-    fireEvent.mouseOver(button);
+    // Disabled buttons suppress React mouse events; the Tooltip trigger
+    // uses pointer enter, which remains available for a loading preview.
+    fireEvent.pointerEnter(button);
     const content = await openTooltip();
     expect(within(content).getByText('Source details are loading')).toBeInTheDocument();
   });

@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
-import AgentSetupOrchestrator from "@/app/[locale]/agents/page";
+import AgentSetupOrchestrator from "@/app/[locale]/agents/[agentId]/page";
 
 const mocks = vi.hoisted(() => {
-  const storeState: { currentAgentId: number | null; isReadOnly: boolean } = {
+  const storeState = {
     currentAgentId: null,
     isReadOnly: false,
+    initialize: vi.fn(),
+    reset: vi.fn(),
   };
   return {
     useAgentVersionDetail: vi.fn(),
@@ -39,17 +41,16 @@ vi.mock("@/stores/agentStore", () => {
 });
 
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => ({
-    get: (key: string) => (key === "agent_id" ? mocks.agentIdParam : null),
-    toString: () => "",
-  }),
+  useParams: () => ({ agentId: mocks.agentIdParam, locale: 'en' }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
-vi.mock("react-i18next", () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-i18next')>()),
   useTranslation: () => ({
     t: (key: string, fallback?: unknown) =>
       typeof fallback === "string" ? fallback : key,
@@ -58,7 +59,11 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("antd", () => {
   const Box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
-  return { Button: Box, Spin: Box, Switch: Box, Tag: Box, Tour: Box };
+  return {
+    Button: Box, Spin: Box, Switch: Box, Tag: Box, Tour: Box,
+    App: { useApp: () => ({ message: { error: vi.fn() } }) },
+    Modal: ({ open, children }: any) => open ? <div>{children}</div> : null,
+  };
 });
 
 vi.mock("lucide-react", () => {
@@ -71,11 +76,17 @@ vi.mock("lucide-react", () => {
     RefreshCw: Icon,
     Sparkles: Icon,
     X: Icon,
+    ArrowLeft: Icon,
+    GitBranch: Icon,
   };
 });
 
 vi.mock("@/services/agentConfigService", () => ({
-  searchAgentInfo: vi.fn(),
+  searchAgentInfo: vi.fn().mockResolvedValue({ success: true, data: { id: '202' } }),
+}));
+
+vi.mock('@/components/providers/AuthorizationProvider', () => ({
+  useAuthorizationContext: () => ({ user: { tenantId: 'unit-tenant', role: 'ADMIN' } }),
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -86,7 +97,7 @@ vi.mock("@/app/[locale]/agents/agent-selector-header", () => ({
   default: () => <div data-testid="agent-selector-header" />,
 }));
 
-vi.mock("@/app/[locale]/agents/agent-config", () => ({
+vi.mock("@/app/[locale]/agents/[agentId]/agent-config", () => ({
   default: () => <div data-testid="agent-config" />,
 }));
 
@@ -94,7 +105,7 @@ vi.mock("@/app/[locale]/agents/agent-version", () => ({
   default: () => <div data-testid="agent-version" />,
 }));
 
-vi.mock("@/app/[locale]/agents/agent-debug", () => ({
+vi.mock("@/app/[locale]/agents/[agentId]/components/debug/agent-debug", () => ({
   default: () => <div data-testid="agent-debug" />,
 }));
 

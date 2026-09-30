@@ -10,6 +10,9 @@ change:
     must not be confused with no Agent selected. Keep real model selection and
     Debug completion mandatory. Execute description/model/prompt in Basic step 3,
     Tools and Skills in step 4, and Advanced policies in step 5 as the Case states.
+    Select the exact Agent resource card's Edit action instead of the removed
+    selector menu. Step 7 switches to a second run-owned Agent and back; both
+    owned Agents are registered for cleanup.
   affected_features:
     existing: [V5-PW-AGENT-01]
     added: []

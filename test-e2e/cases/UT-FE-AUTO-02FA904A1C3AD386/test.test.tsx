@@ -167,7 +167,9 @@ describe(' 线程模型选择器', () => {
     modelList.models = [mAvailable(1, 'm1')];
     const agent = baseAgent({ model_name: 'm1' });
     const { rerender } = renderThread(agent);
-    expect(composerProps.props.models.map((m: any) => m.id)).toEqual(['m1']);
+    // model_name resolves the resource; selection uses its canonical ID.
+    expect(composerProps.props.models.map((m: any) => m.id)).toEqual(['1']);
+    expect(composerProps.props.selectedModelId).toBe('1');
 
     modelList.models = [mUnavailable(1, 'm1')];
     rerender(<Thread agent={agent} chatMode='planning' onChatModeChange={noop} />);

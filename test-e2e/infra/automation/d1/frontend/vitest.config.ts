@@ -30,6 +30,9 @@ export default defineConfig({
     // otherwise hooks fail because two React copies are loaded.
     dedupe: ["react", "react-dom", "react-i18next"],
     alias: [
+      // Case files live outside this package; resolve their test-only imports
+      // from the isolated runner, not a developer's root node_modules tree.
+      { find: /^@testing-library\/(.*)$/, replacement: path.join(testNodeModules, "@testing-library/$1") },
       { find: /^react$/, replacement: path.join(testNodeModules, "react/index.js") },
       { find: /^react\/jsx-runtime$/, replacement: path.join(testNodeModules, "react/jsx-runtime.js") },
       { find: /^react\/jsx-dev-runtime$/, replacement: path.join(testNodeModules, "react/jsx-dev-runtime.js") },

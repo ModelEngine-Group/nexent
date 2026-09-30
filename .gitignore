@@ -91,6 +91,7 @@ test-e2e/**/.pytest_cache/
 test-e2e/**/runs/
 /test-e2e/config/
 /test-e2e/runs/
+/test-e2e/infra/generated/
 
 .pytest-tmp
 test/ext_components/aidp/mock_servers/_state/

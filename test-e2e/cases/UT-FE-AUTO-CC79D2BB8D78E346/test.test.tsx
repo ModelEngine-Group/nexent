@@ -3,7 +3,7 @@ import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import AgentConfig from '@/app/[locale]/agents/agent-config';
+import AgentConfig from '@/app/[locale]/agents/[agentId]/agent-config';
 
 const h = vi.hoisted(() => {
   const messageError = vi.fn();
@@ -84,24 +84,24 @@ vi.mock('@/components/ui/tabs', () => ({
   TabsTrigger: ({ children }: any) => <>{children}</>,
 }));
 
-vi.mock('@/app/[locale]/agents/components/agent-info', () => ({ default: () => null }));
-vi.mock('@/app/[locale]/agents/components/agent-prompt', () => ({ default: () => null }));
-vi.mock('@/app/[locale]/agents/components/agent-capability', () => ({
+vi.mock('@/app/[locale]/agents/[agentId]/components/agent-info', () => ({ default: () => null }));
+vi.mock('@/app/[locale]/agents/[agentId]/components/agent-prompt', () => ({ default: () => null }));
+vi.mock('@/app/[locale]/agents/[agentId]/components/agent-capability', () => ({
   AgentSkillCapability: () => null,
   AgentToolCapability: () => null,
 }));
-vi.mock('@/app/[locale]/agents/components/agent-run-policy', () => ({ default: () => null }));
-vi.mock('@/app/[locale]/agents/components/agent-guide', () => ({ default: () => null }));
-vi.mock('@/app/[locale]/agents/components/agent-deployment', () => ({ default: () => null }));
-vi.mock('@/app/[locale]/agents/components/collaborative-agent', () => ({
+vi.mock('@/app/[locale]/agents/[agentId]/components/agent-run-policy', () => ({ default: () => null }));
+vi.mock('@/app/[locale]/agents/[agentId]/components/agent-guide', () => ({ default: () => null }));
+vi.mock('@/app/[locale]/agents/[agentId]/components/agent-deployment', () => ({ default: () => null }));
+vi.mock('@/app/[locale]/agents/[agentId]/components/collaborative-agent', () => ({
   default: () => null,
   CollaborativeAgentActions: () => null,
 }));
-vi.mock('@/app/[locale]/agents/components/advanced/GuardrailConfigContent', () => ({
+vi.mock('@/app/[locale]/agents/[agentId]/components/advanced/GuardrailConfigContent', () => ({
   default: () => null,
   GuardrailConfigActions: () => null,
 }));
-vi.mock('@/app/[locale]/agents/components/knowledge-base-search', () => ({
+vi.mock('@/app/[locale]/agents/[agentId]/components/knowledge-base-search', () => ({
   default: () => null,
   KnowledgeBaseConfigActions: () => null,
 }));

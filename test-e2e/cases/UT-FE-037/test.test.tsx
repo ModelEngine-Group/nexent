@@ -1,81 +1,62 @@
-import React from "react";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fetchWithAuth, getAuthHeaders } from '@/lib/auth';
+import { ApiError } from '@/services/api';
+import { ErrorCode } from '@/const/errorCode';
 
-import {
-  buildCapacityPayload,
-  emptyCapacityForm,
-  validateCapacityForm,
-} from "@/app/[locale]/models/components/model/ModelCapacityFields";
-import {
-  advancedSettingsValueFromRecord,
-  buildInferenceParamsPayload,
-} from "@/app/[locale]/models/components/model/ModelAdvancedSettings";
-import { isValidMaxTokens, parseMaxTokens } from "@/app/[locale]/models/components/model/ModelMaxTokensInput";
-import {
-  canAnalyzeAutomationMessage,
-  createPreparingAutomationMessage,
-  resolveAutomationProposalMessage,
-} from "@/features/agentAutomation/chatAdapter";
-import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
-import { formValuesToProposalPatch } from "@/features/agentAutomation/scheduleForm";
-import { isValidAgentDescription, isValidAgentDisplayName, isValidAgentName } from "@/hooks/agent/useSaveGuard";
-import { canManageModels } from "@/lib/auth";
-import {
-  DEFAULT_MONITORING_DASHBOARD_ALLOWED_ROLES,
-  canViewMonitoringDashboard,
-} from "@/lib/monitoringAccess";
-import { isEmbeddingModelCompatible, isMultimodalConstraintMismatch } from "@/lib/knowledgeBaseCompatibility";
-import { detectProviderError, processProviderResponse } from "@/lib/providerError";
-import {
-  detectCsvDelimiter,
-  getPreviewAccessReasonFromStatus,
-  ignoreAbortError,
-  parseCsvLine,
-  updateChunkRangeState,
-} from "@/lib/filePreviewUtils";
-import {
-  getMineCardMenuActions,
-  isCancelableRepositoryStatus,
-  isTakeDownableRepositoryStatus,
-  pickLatestSharedVersionName,
-} from "@/lib/agentRepositoryMine";
-import {
-  extractMcpErrorMessage,
-  filterServiceCards,
-  findMissingRequiredField,
-  hasUnresolvedUrlTemplate,
-  isValidPort,
-  paginateItems,
-} from "@/lib/mcpTools";
-import { calculateConversationViewport } from "@/lib/conversationViewport";
-import { shouldContinueConversationPageLoading } from "@/lib/conversationLoadPolicy";
-import { extractMarkdownHeadings } from "@/components/common/markdownRenderer";
-import { extractSkillInfoFromContent, isSkillMdFile, normalizeSkillFiles } from "@/lib/skillFileUtils";
-import { getQuotaConflictTranslationKey, getQuotaExceededMessage, isQuotaExceededError } from "@/types/quota";
-import { validateAidpFiles, validateFileType } from "@/services/uploadService";
-import { getLocalFileDownloadUrl, getLocalFilePreviewUrl } from "@/services/storageService";
-import { toApiError } from "@/services/api";
-import { formatNotificationMessage } from "@/lib/notificationMessage";
-import { buildRepositoryReviewDeepLink, parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
-import { parseSelection, serializeSelection } from "@/app/[locale]/agents/components/knowledge-base-search";
-import { transformMessagesToTaskMessages } from "@/app/[locale]/chat/streaming/messageTransformer";
-import { upsertHistorySummaryInMessages } from "@/app/[locale]/chat/streaming/chatStreamHandler";
-import { isNewAgentPaddingItem } from "@/types/agentRepository";
-import { getToolParamOptions } from "@/const/agentConfig";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-
-
-const t = ((key: string) => key) as any;
-
-describe("D1 frontend functional components and state reducers", () => {
-  it("UT-FE-037 renders interactive UI state and prevents duplicate submit", () => {
-    const submit = vi.fn();
-    render(<Button disabled onClick={submit}>Submit request</Button>);
-    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
-    expect(submit).not.toHaveBeenCalled();
+const session = vi.hoisted(() => ({ hasCookies: true, valid: true, expired: vi.fn() }));
+vi.mock('@/lib/session', () => ({
+  hasAuthCookies: () => session.hasCookies, checkSessionValid: () => session.valid,
+  handleSessionExpired: session.expired,
+}));
+vi.mock('@/lib/authFlow', () => ({ authFlowState: { isExplicitLogoutInProgress: () => false } }));
+beforeEach(() => { session.valid = true; session.hasCookies = true; session.expired.mockClear(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+describe('UT-FE-037 current cookie authentication boundary', () => {
+  it('does not read browser JWT or inject Authorization and preserves caller headers/signal', async () => {
+    const read = vi.spyOn(Storage.prototype, 'getItem');
+    const request = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', request);
+    const abort = new AbortController();
+    await fetchWithAuth('/api/test-fixture', { method: 'POST', body: '{}', signal: abort.signal, headers: { 'X-Test': 'fixture' } });
+    expect(request).toHaveBeenCalledOnce();
+    expect(request.mock.calls[0][1]).toMatchObject({ signal: abort.signal, headers: { 'Content-Type': 'application/json', 'X-Test': 'fixture' } });
+    expect(request.mock.calls[0][1].headers).not.toHaveProperty('Authorization');
+    expect(getAuthHeaders()).not.toHaveProperty('Authorization');
+    expect(read).not.toHaveBeenCalled();
+  });
+  it('local expiry prevents request and signals forced login', async () => {
+    session.valid = false;
+    const request = vi.fn(); vi.stubGlobal('fetch', request);
+    await expect(fetchWithAuth('/api/test-fixture')).rejects.toBeInstanceOf(ApiError);
+    expect(request).not.toHaveBeenCalled(); expect(session.expired).toHaveBeenCalledOnce();
+  });
+  it.each([401, 499])('HTTP %s signals expiry without hidden refresh/retry', async status => {
+    const request = vi.fn().mockResolvedValue(new Response('{}', { status }));
+    vi.stubGlobal('fetch', request);
+    await expect(fetchWithAuth('/api/test-fixture')).rejects.toBeInstanceOf(ApiError);
+    expect(session.expired).toHaveBeenCalledOnce(); expect(request).toHaveBeenCalledOnce();
+  });
+  it('business TOKEN_EXPIRED preserves structured details', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: {
+      code: ErrorCode.TOKEN_EXPIRED, message: 'Expired fixture session', details: { recover: 'login' },
+    } }), { status: 400 })));
+    await expect(fetchWithAuth('/api/test-fixture')).rejects.toMatchObject({ code: ErrorCode.TOKEN_EXPIRED, details: { recover: 'login' } });
+    expect(session.expired).toHaveBeenCalledOnce();
+  });
+  it('cancellation remains AbortError and does not expire the session', async () => {
+    const request = vi.fn((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+      options.signal!.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true });
+    }));
+    vi.stubGlobal('fetch', request);
+    const abort = new AbortController();
+    const pending = fetchWithAuth('/api/test-fixture', { signal: abort.signal });
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    abort.abort(); await rejection;
+    expect(session.expired).not.toHaveBeenCalled(); expect(request).toHaveBeenCalledOnce();
+  });
+  it('FormData leaves the multipart boundary to the browser', async () => {
+    const request = vi.fn().mockResolvedValue(new Response('{}')); vi.stubGlobal('fetch', request);
+    await fetchWithAuth('/api/test-fixture', { method: 'POST', body: new FormData() });
+    expect(request.mock.calls[0][1].headers).not.toHaveProperty('Content-Type');
   });
 });

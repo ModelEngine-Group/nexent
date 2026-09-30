@@ -82,11 +82,20 @@ journey("PW-AGENT-01", async (context) => {
         return "all preceding autosave requests reached idle without a product 5xx";
       },
       async () => {
-        await page.reload({ waitUntil: "domcontentloaded" });
+        const otherName = `D4 Switch Agent ${token}`;
+        await agents.open();
+        const otherId = await agents.create(otherName, `d4_switch_agent_${token}`);
+        registerReadyAsset("agents", "d4_switch_id", String(otherId), "PW-AGENT-01", {
+          service: "config", identity: "tenant_a_admin", method: "DELETE", path: "/agent",
+          json: { agent_id: otherId }, allowed_statuses: [200, 404],
+        });
+        await expect(page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(otherName);
         await agents.select(displayName);
         await agents.openSection("展示信息");
         await expect(page.getByPlaceholder("请输入智能体描述")).toHaveValue(description);
-        return "reselected the Draft after a server reload and recovered Basic configuration";
+        const roleModelSection = await agents.openSection("模型与提示词");
+        await expect(roleModelSection.locator(".ant-select-selection-item").first()).toHaveText(modelDisplay);
+        return "switched to a second run-owned Agent and back, recovering persisted description and model";
       },
       async () => {
         await agents.openDebug();

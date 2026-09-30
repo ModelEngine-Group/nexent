@@ -1,79 +1,63 @@
-import React from "react";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { useLanguageSwitch } from '@/lib/language';
+import i18n, { loadLocaleMessages } from '@/app/[locale]/i18n';
 
-import {
-  buildCapacityPayload,
-  emptyCapacityForm,
-  validateCapacityForm,
-} from "@/app/[locale]/models/components/model/ModelCapacityFields";
-import {
-  advancedSettingsValueFromRecord,
-  buildInferenceParamsPayload,
-} from "@/app/[locale]/models/components/model/ModelAdvancedSettings";
-import { isValidMaxTokens, parseMaxTokens } from "@/app/[locale]/models/components/model/ModelMaxTokensInput";
-import {
-  canAnalyzeAutomationMessage,
-  createPreparingAutomationMessage,
-  resolveAutomationProposalMessage,
-} from "@/features/agentAutomation/chatAdapter";
-import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
-import { formValuesToProposalPatch } from "@/features/agentAutomation/scheduleForm";
-import { isValidAgentDescription, isValidAgentDisplayName, isValidAgentName } from "@/hooks/agent/useSaveGuard";
-import { canManageModels } from "@/lib/auth";
-import {
-  DEFAULT_MONITORING_DASHBOARD_ALLOWED_ROLES,
-  canViewMonitoringDashboard,
-} from "@/lib/monitoringAccess";
-import { isEmbeddingModelCompatible, isMultimodalConstraintMismatch } from "@/lib/knowledgeBaseCompatibility";
-import { detectProviderError, processProviderResponse } from "@/lib/providerError";
-import {
-  detectCsvDelimiter,
-  getPreviewAccessReasonFromStatus,
-  ignoreAbortError,
-  parseCsvLine,
-  updateChunkRangeState,
-} from "@/lib/filePreviewUtils";
-import {
-  getMineCardMenuActions,
-  isCancelableRepositoryStatus,
-  isTakeDownableRepositoryStatus,
-  pickLatestSharedVersionName,
-} from "@/lib/agentRepositoryMine";
-import {
-  extractMcpErrorMessage,
-  filterServiceCards,
-  findMissingRequiredField,
-  hasUnresolvedUrlTemplate,
-  isValidPort,
-  paginateItems,
-} from "@/lib/mcpTools";
-import { calculateConversationViewport } from "@/lib/conversationViewport";
-import { shouldContinueConversationPageLoading } from "@/lib/conversationLoadPolicy";
-import { extractMarkdownHeadings } from "@/components/common/markdownRenderer";
-import { extractSkillInfoFromContent, isSkillMdFile, normalizeSkillFiles } from "@/lib/skillFileUtils";
-import { getQuotaConflictTranslationKey, getQuotaExceededMessage, isQuotaExceededError } from "@/types/quota";
-import { validateAidpFiles, validateFileType } from "@/services/uploadService";
-import { getLocalFileDownloadUrl, getLocalFilePreviewUrl } from "@/services/storageService";
-import { toApiError } from "@/services/api";
-import { formatNotificationMessage } from "@/lib/notificationMessage";
-import { buildRepositoryReviewDeepLink, parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
-import { parseSelection, serializeSelection } from "@/app/[locale]/agents/components/knowledge-base-search";
-import { transformMessagesToTaskMessages } from "@/app/[locale]/chat/streaming/messageTransformer";
-import { upsertHistorySummaryInMessages } from "@/app/[locale]/chat/streaming/chatStreamHandler";
-import { isNewAgentPaddingItem } from "@/types/agentRepository";
-import { getToolParamOptions } from "@/const/agentConfig";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-
-
-const t = ((key: string) => key) as any;
-
-describe("D1 frontend functional components and state reducers", () => {
-  it("UT-FE-005 renders locale-neutral input values without changing route data", () => {
-    render(<Input aria-label="locale-input" defaultValue="中文 / English" />);
-    expect(screen.getByLabelText("locale-input")).toHaveValue("中文 / English");
+const fixture = vi.hoisted(() => ({ pathname: '/portal/zh/agents/7', language: 'zh' }));
+vi.mock('@/base-path.mjs', () => ({ BASE_PATH: '/portal' }));
+vi.mock('next/navigation', () => ({ usePathname: () => fixture.pathname }));
+vi.mock('react-i18next', async (original) => ({
+  ...await original<typeof import('react-i18next')>(),
+  useTranslation: () => ({ i18n: { language: fixture.language } }),
+}));
+function SwitchLanguage() {
+  const state = useLanguageSwitch();
+  return <button onClick={() => state.handleLanguageChange(state.getOppositeLanguage().lang)}>
+    {state.currentLanguage}:{state.getOppositeLanguage().label}
+  </button>;
+}
+beforeEach(() => { fixture.pathname = '/portal/zh/agents/7'; fixture.language = 'zh'; });
+afterEach(() => {
+  vi.unstubAllGlobals(); vi.restoreAllMocks();
+  document.cookie = 'NEXT_LOCALE=; path=/; max-age=0';
+});
+describe('UT-FE-005 locale behavior', () => {
+  it.each([
+    ['zh', '/portal/zh/agents/7', '/portal/en/agents/7'],
+    ['en', '/portal/en/newchat', '/portal/zh/newchat'],
+    ['zh', '/portal/agents/7', '/portal/en/agents/7'],
+    ['en', '/portal', '/portal/zh'],
+  ])('switches %s and preserves route %s', (language, pathname, expected) => {
+    fixture.language = language; fixture.pathname = pathname;
+    const navigation = { href: '' };
+    const originalWindow = window;
+    // Observe navigation without replacing the route computation.
+    vi.stubGlobal('window', new Proxy(originalWindow, {
+      get(target, key) { return key === 'location' ? navigation : Reflect.get(target, key, target); },
+    }));
+    render(<SwitchLanguage />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(navigation.href).toBe(expected);
+    expect(document.cookie).toContain('NEXT_LOCALE=' + (language === 'zh' ? 'en' : 'zh'));
+  });
+  it('loads unknown locale from English and preserves translation fallback', async () => {
+    const request = vi.fn(async (url: string) => ({ json: async () =>
+      url.endsWith('common.json') ? { 'test.fallback': 'English fallback' } : {} }));
+    vi.stubGlobal('fetch', request);
+    const loaded = await loadLocaleMessages('unsupported');
+    expect(request.mock.calls.map(([url]) => url)).toEqual([
+      '/portal/locales/en/common.json', '/portal/locales/zh/custom.json', '/portal/locales/en/custom.json',
+    ]);
+    i18n.addResourceBundle('en', 'common', loaded.resources.en.common, true, true);
+    await i18n.changeLanguage('zh');
+    expect(i18n.t('test.fallback')).toBe('English fallback');
+    expect(i18n.t('test.notDefined', { defaultValue: 'Safe default' })).toBe('Safe default');
+  });
+  it('locale load failure preserves already-loaded messages', async () => {
+    i18n.addResourceBundle('en', 'common', { 'test.fallback': 'English fallback' }, true, true);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline fixture')));
+    const result = await loadLocaleMessages('en');
+    expect(result.resources.en.common).toHaveProperty('test.fallback', 'English fallback');
   });
 });

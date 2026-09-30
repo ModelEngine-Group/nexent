@@ -55,10 +55,14 @@ export class AgentPage {
 
   async select(displayName: string): Promise<void> {
     await this.open();
-    await this.page.getByText("选择智能体", { exact: true }).click();
     const search = this.page.getByPlaceholder("按名称或描述搜索", { exact: true });
     await search.fill(displayName);
-    await this.page.getByRole("menuitem").filter({ has: this.page.getByText(displayName, { exact: true }) }).click();
+    // ResourceCard's primary click opens details, not the editor. Scope Edit to
+    // the exact run-owned Agent card so search matches cannot select another ID.
+    const card = this.page.getByRole("button", { name: displayName, exact: true }).locator("xpath=..");
+    await expect(card).toHaveCount(1);
+    await card.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(this.page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(displayName);
     await expect(this.page.getByText("模型与提示词", { exact: true }).first()).toBeVisible();
     await this.dismissCreationGuidance();
   }

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
 import { Form } from 'antd';
-import AgentPrompt from '@/app/[locale]/agents/components/agent-prompt';
+import AgentPrompt from '@/app/[locale]/agents/[agentId]/components/agent-prompt';
 import { reorderModelIds } from '@/lib/agent/modelPriority';
 
 type ModelFixture = {
@@ -30,6 +30,7 @@ const store = vi.hoisted(() => ({
     updateDraft: vi.fn(),
     flushDraft: vi.fn(),
     updateAgentConfig: vi.fn(),
+    reconcileUnavailableModels: vi.fn(),
   },
 }));
 
@@ -201,6 +202,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.clearAllMocks();
   modelList.availableLlmModels = [...MODELS];
   modelList.isSuccess = true;
@@ -213,10 +215,22 @@ beforeEach(() => {
   store.state.updateAgentConfig = vi.fn((patch: any) => {
     store.state.editedAgent = { ...store.state.editedAgent, ...patch };
   });
+  store.state.reconcileUnavailableModels = vi.fn((patch: any) => {
+    store.state.editedAgent = { ...store.state.editedAgent, ...patch };
+  });
   setAgent({ model_ids: [1, 2, 3] });
 });
 
-afterEach(() => cleanup());
+afterEach(async () => {
+  cleanup();
+  // Ant Design delay-state callbacks must settle while JSDOM still exists.
+  // Never ignore unhandled errors or turn a nonzero Vitest exit into PASS.
+  try {
+    await vi.runOnlyPendingTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 describe('AgentPrompt 多模型优先级（）', () => {
   it('UT-FE-AUTO-A2A0CB86E6D3E2F3 首次渲染回显 model_ids 顺序，首位为主模型，排序入口启用', () => {
@@ -316,7 +330,7 @@ describe('AgentPrompt 多模型优先级（）', () => {
     expect(store.state.editedAgent.model_ids).toEqual([1, 2]);
     expect(store.state.editedAgent.model).toEqual('Model A');
     expect(store.state.editedAgent.model_names).toEqual(['Model A', 'Model B']);
-    expect(store.state.updateAgentConfig).toHaveBeenCalledWith({
+    expect(store.state.reconcileUnavailableModels).toHaveBeenCalledWith({
       model_ids: [1, 2],
       model: 'Model A',
       model_names: ['Model A', 'Model B'],

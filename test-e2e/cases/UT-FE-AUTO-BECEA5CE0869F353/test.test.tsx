@@ -186,12 +186,12 @@ describe('KnowledgeBaseList tag filtering and assignment', () => {
   it('selecting a predicate switches the filter to primary, shows clear, and calls filterResourceIds', async () => {
     await renderList();
 
-    fireEvent.click(screen.getByLabelText('knowledgeBase.tagFilter.placeholder'));
+    fireEvent.click(screen.getByRole('button', { name: /knowledgeBase\.filter\.button/ }));
     fireEvent.click(await screen.findByRole('checkbox'));
 
-    await screen.findByRole('button', { name: 'knowledgeBase.tagFilter.clear' });
+    await screen.findByRole('button', { name: 'knowledgeBase.filter.clear' });
 
-    expect(screen.getByLabelText('knowledgeBase.tagFilter.placeholder').className).toContain('ant-btn-primary');
+    await waitFor(() => expect(screen.getByRole('button', { name: /knowledgeBase\.filter\.button/ }).className).toContain('ant-btn-primary'));
 
     await waitFor(() => {
       expect(tagManagementApi.filterResourceIds).toHaveBeenCalledWith(
@@ -210,7 +210,7 @@ describe('KnowledgeBaseList tag filtering and assignment', () => {
 
     await renderList();
 
-    fireEvent.click(screen.getByLabelText('knowledgeBase.tagFilter.placeholder'));
+    fireEvent.click(screen.getByRole('button', { name: /knowledgeBase\.filter\.button/ }));
     fireEvent.click(await screen.findByRole('checkbox'));
 
     await waitFor(() => {
@@ -219,7 +219,7 @@ describe('KnowledgeBaseList tag filtering and assignment', () => {
       expect(screen.getByText('Beta KB')).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'knowledgeBase.tagFilter.clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'knowledgeBase.filter.clear' }));
 
     await waitFor(() => {
       expect(screen.getByText('Alpha KB')).toBeTruthy();
@@ -227,7 +227,7 @@ describe('KnowledgeBaseList tag filtering and assignment', () => {
       expect(screen.getByText('Gamma KB')).toBeTruthy();
     });
 
-    expect(screen.getByLabelText('knowledgeBase.tagFilter.placeholder').className).toContain('ant-btn-default');
+    expect(screen.getByRole('button', { name: /knowledgeBase\.filter\.button/ }).className).toContain('ant-btn-default');
   });
 
   it('renders one ResourceTagChips per row with knowledge_base resource type and max 3', async () => {

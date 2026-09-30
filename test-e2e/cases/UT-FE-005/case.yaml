@@ -13,52 +13,34 @@ case:
   automation: automated
   objective: locale 切换、路由保留、关键文案 fallback｜核心流程
   preconditions:
-  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+  - 仓库 D1 前端组件运行器及隔离依赖可用。
+  - TEST_HOME 位于仓库外；测试不访问生产资源。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+    fixtures: &id001
+    - 内存 fixture 和受控服务响应；不依赖真实数据库 ID、模型或凭据。
   steps:
   - order: 1
-    action: 在组件测试环境加载“locale 切换、路由保留、关键文案 fallback｜核心流程”对应页面/组件，注入最小 props、store 和本地固定测试数据。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: 在带/不带 locale 和 BASE_PATH 的路由点击 zh/en 切换
+    expected: 目标 locale 正确，业务路径和 BASE_PATH 保留，NEXT_LOCALE Cookie 更新。
   - order: 2
-    action: 首次渲染后检查默认值、按钮启停状态、字段显隐、loading/empty/error 状态是否符合设计。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: 加载未知 locale，并请求缺失的翻译键
+    expected: 未知 locale 使用英文，缺失键回退英文或 defaultValue。
   - order: 3
-    action: 使用真实用户事件模拟 click / fill / select / checkbox / keyboard，而不是直接修改组件内部状态。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - order: 4
-    action: 对每个关键表单字段分别输入有效值与非法值，检查前端校验文案、按钮 disabled 状态和请求参数。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 5
-    action: 触发保存/删除/切换/刷新等动作，断言 service 调用次数、参数和组件状态迁移。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 6
-    action: 模拟接口 4xx/5xx/timeout，验证错误提示、重试入口和页面状态不会被错误提交。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 7
-    action: 对防抖/取消/卸载场景使用 fake timer 或 AbortSignal 检查旧请求不会覆盖新状态。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 8
-    action: 重新渲染或模拟刷新后的初始数据加载，确认回显与服务端数据映射一致。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 预先加载消息后模拟加载失败
+    expected: 已有翻译不被清空。
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  forbidden_side_effects: []
+  - 目标 locale 正确，业务路径和 BASE_PATH 保留，NEXT_LOCALE Cookie 更新。
+  - 未知 locale 使用英文，缺失键回退英文或 defaultValue。
+  - 已有翻译不被清空。
+  forbidden_side_effects:
+  - 不得访问真实用户、模型 Provider 或数据库，不得输出真实凭据。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 302
-  unit_boundary: i18n
-  inputs:
-  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  unit_boundary: useLanguageSwitch、loadLocaleMessages 与真实 i18n
+  inputs: *id001
   assertions:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 目标 locale 正确，业务路径和 BASE_PATH 保留，NEXT_LOCALE Cookie 更新。
+  - 未知 locale 使用英文，缺失键回退英文或 defaultValue。
+  - 已有翻译不被清空。

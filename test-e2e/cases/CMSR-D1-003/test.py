@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nexent.core.agents.core_agent import CoreAgent
+from nexent.core.agents import core_agent as agent_module
 from nexent.core.agents.output_protocol import ModelOutputProtocolError
 from nexent.core.utils.observer import MessageObserver
 
@@ -19,7 +20,7 @@ def _events(observer):
 
 
 def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
-    caplog.set_level(logging.INFO, logger="nexent.core.agents.core_agent")
+    caplog.set_level(logging.INFO, logger=agent_module.logger.name)
     observer = MessageObserver(lang="en")
     first_repair_chunk = threading.Event()
     release_repair = threading.Event()
@@ -148,5 +149,9 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
         for event in events
         if event["type"].startswith("model_output_") and event["content"]
     )
-    assert "model_output_protocol_repair_accepted" in caplog.text
-    assert "final_answer('ok')" not in caplog.text
+    lifecycle_logs = [
+        record.getMessage() for record in caplog.records
+        if "event=model_output_protocol_" in record.getMessage()
+    ]
+    assert any("event=model_output_protocol_repair_accepted" in text for text in lifecycle_logs)
+    assert all("final_answer('ok')" not in text for text in lifecycle_logs)

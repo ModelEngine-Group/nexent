@@ -37,18 +37,16 @@ def validate(root: Path, phase: str, regenerate: bool) -> list[ValidationIssue]:
     if regenerate:
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         registry_path.write_text(expected_registry, encoding="utf-8")
-    elif not registry_path.is_file() or registry_path.read_text(encoding="utf-8") != expected_registry:
-        issues.append(ValidationIssue(registry_path, "", "Generated execution registry is missing or stale"))
+    elif registry_path.is_file() and registry_path.read_text(encoding="utf-8") != expected_registry:
+        issues.append(ValidationIssue(registry_path, "", "Generated execution registry is stale"))
     excel_path = root / "test-e2e/infra/generated/Nexent_测试基线.xlsx"
     if regenerate:
         generate_excel.write_workbook(root, excel_path)
-    elif not excel_path.is_file():
-        issues.append(ValidationIssue(excel_path, "", "Generated Excel view is missing"))
     else:
         with tempfile.TemporaryDirectory() as temporary_directory:
             expected = Path(temporary_directory) / "expected.xlsx"
             generate_excel.write_workbook(root, expected)
-            if generate_excel.workbook_snapshot(expected) != generate_excel.workbook_snapshot(excel_path):
+            if excel_path.is_file() and generate_excel.workbook_snapshot(expected) != generate_excel.workbook_snapshot(excel_path):
                 issues.append(ValidationIssue(excel_path, "", "Generated Excel view is stale"))
     return issues
 

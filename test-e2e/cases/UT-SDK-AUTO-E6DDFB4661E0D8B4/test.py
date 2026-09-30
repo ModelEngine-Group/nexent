@@ -6,6 +6,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 import pytest
 
 from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
+from nexent.consts.mcp_errors import MCPConnectionTimeoutError
 
 
 class FakeFuture:
@@ -199,7 +200,7 @@ def _assert_startup_timeout():
     scope = FakeCancellationScope()
     collection = _make_collection(manager, scope, connect_timeout=0.02)
 
-    with pytest.raises(TimeoutError, match='MCP session startup timed out'):
+    with pytest.raises(MCPConnectionTimeoutError, match='MCP connection timed out'):
         collection.__enter__()
 
     assert len(scope.register_calls) == 1

@@ -21,7 +21,7 @@ test-e2e/
   infra/migration/                     source audit and migration receipts
 ```
 
-There is no manually maintained central manifest. `execution.yaml` is the binding for one Case. `registry.json`, Feature navigation pages, and the Excel view are generated. Do not edit them directly or treat Excel as the authoritative source.
+There is no manually maintained central manifest. `execution.yaml` is the binding for one Case. `registry.json`, Feature navigation pages, and the Excel view are generated. The registry and Excel view are local-only, ignored by Git, and optional in a fresh checkout. Do not edit them directly or treat Excel as the authoritative source.
 
 The migrated formal directories under `test/` have been removed from the checkout after a hash-verified recoverable archive. Legacy UT and its existing helpers remain under `test/`. Historical receipts and converters under `infra/migration` describe the old layout; do not run them as current authoring commands. `audit_layout_copy.py --source-root <archive-root>` can check an archive containing the old `test/` tree. Direct external-suite comparison uses `infra/tools/audit_external_suite.py`; it does not depend on the removed tree and does not certify live execution parity.
 
@@ -35,7 +35,7 @@ python test-e2e/infra/tools/validate_test_assets.py --phase implementation --gen
 python test-e2e/infra/tools/validate_test_assets.py --phase implementation
 ```
 
-The last command is read-only and fails on stale generated views. Design mode permits a newly designed automated Case without `execution.yaml`; implementation mode does not.
+The last command is read-only and fails on stale generated views if they exist; a fresh checkout without local registry or Excel files is valid. Use `--generate` when you need the local views. Design mode permits a newly designed automated Case without `execution.yaml`; implementation mode does not.
 
 ## Run a developer-selected Case
 

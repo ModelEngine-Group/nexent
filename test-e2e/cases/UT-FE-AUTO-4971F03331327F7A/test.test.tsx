@@ -21,7 +21,7 @@ function readAgentPromptSource(): string {
     throw new Error('NEXENT_REPO must point to the local Nexent checkout');
   }
   return readFileSync(
-    resolve(repo, 'frontend/app/[locale]/agents/components/agent-prompt.tsx'),
+    resolve(repo, 'frontend/app/[locale]/agents/[agentId]/components/agent-prompt.tsx'),
     'utf-8',
   );
 }

@@ -6,12 +6,12 @@ case:
   feature_id: F-069
   business_rule_ids:
   - F-069-RULE-01
-  title: 发布卡片字段校验与标签归一化（icon 必填非空≤32、tags 1..5 个各≤20去重去空、非法输入报错）｜核心流程
+  title: 发布卡片字段校验与标签归一化（icon_url 可选，提供时非空≤1024、tags 1..5 个各≤20去重去空、非法输入报错）｜核心流程
   type: BE-UT
   priority: P1
   status: active
   automation: automated
-  objective: 发布卡片字段校验与标签归一化（icon 必填非空≤32、tags 1..5 个各≤20去重去空、非法输入报错）｜核心流程
+  objective: 发布卡片字段校验与标签归一化（icon_url 可选，提供时非空≤1024、tags 1..5 个各≤20去重去空、非法输入报错）｜核心流程
   preconditions:
   - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
@@ -31,17 +31,17 @@ case:
     expected: 非法输入：tags 非 list 或含非字符串元素抛 ValueError；全空标签抛 ValueError。
   - order: 4
     action: 对单标签长度边界：20 字符标签通过，21 字符标签触发 ValueError（"Each tag must be at most 20 characters"）。
-    expected: _validate_card_fields：icon 必填非空字符串且 ≤32 字符，缺失/空/超长抛 ValueError；tags 缺失抛 ValueError。
+    expected: _validate_card_fields：icon_url 缺失或 None 使用默认图标；提供时为非空字符串且 ≤1024 字符，空/非字符串/超长抛 ValueError；tags 缺失抛 ValueError。
   - order: 5
     action: 对非法 tags 输入：传入非 list（如字符串、None）或含非字符串元素的 list 触发 ValueError（"tags must be a list of strings"）；全空/全空白标签触发 ValueError（"tags
       must contain at least one non-empty tag"）。
-    expected: 合法 icon+tags 通过校验，且 repository_data["tags"] 被归一化写回。
+    expected: 合法 icon_url+tags 通过校验，且 repository_data["tags"] 被归一化写回。
   - order: 6
-    action: '对 _validate_card_fields 传入合法数据 {"icon": "🤖", "tags": ["a", "b"]}，断言不抛异常且 repository_data["tags"] 被归一化写回。'
+    action: '对 _validate_card_fields 传入合法数据 {"icon_url": "https://example.test/icon.png", "tags": ["a", "b"]}，断言不抛异常且 repository_data["tags"] 被归一化写回。'
     expected: 失败路径返回明确 ValueError，不出现吞异常后返回伪成功，无半写入副作用。
   - order: 7
-    action: 对 icon 边界与异常：icon 缺失/None/空串/纯空白触发 ValueError（"icon is required and must be a non-empty string"）；32 字符通过，33 字符触发
-      ValueError（"icon must be at most 32 characters"）。
+    action: 对 icon_url 边界与异常：icon_url 缺失/None 通过；空串/纯空白/非字符串触发 ValueError（"icon_url must be a non-empty URL up to 1024 characters"）；1024 字符通过，1025 字符触发
+      ValueError（"icon_url must be a non-empty URL up to 1024 characters"）。
     expected: 日志、报告不出现明文 API Key/Token/Password/模型密钥。
   - order: 8
     action: 对 tags 缺失：repository_data 不含 tags 键触发 ValueError（"tags is required for marketplace listing submission"）。
@@ -53,12 +53,13 @@ case:
   - _normalize_listing_tags 对合法列表返回去空格、去重、去空后的标签，顺序保持首次出现。
   - 标签数量 1..5 通过，>5 抛 ValueError；单个标签 ≤20 字符通过，>20 抛 ValueError。
   - 非法输入：tags 非 list 或含非字符串元素抛 ValueError；全空标签抛 ValueError。
-  - _validate_card_fields：icon 必填非空字符串且 ≤32 字符，缺失/空/超长抛 ValueError；tags 缺失抛 ValueError。
-  - 合法 icon+tags 通过校验，且 repository_data["tags"] 被归一化写回。
+  - _validate_card_fields：icon_url 缺失或 None 使用默认图标；提供时为非空字符串且 ≤1024 字符，空/非字符串/超长抛 ValueError；tags 缺失抛 ValueError。
+  - 合法 icon_url+tags 通过校验，且 repository_data["tags"] 被归一化写回。
   - 失败路径返回明确 ValueError，不出现吞异常后返回伪成功，无半写入副作用。
   - 日志、报告不出现明文 API Key/Token/Password/模型密钥。
   forbidden_side_effects: []
   source:
+    notes: Contract updated from resource-card refactor 3a378d51d; optional icon_url replaces required emoji icon.
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 389
@@ -69,7 +70,7 @@ case:
   - _normalize_listing_tags 对合法列表返回去空格、去重、去空后的标签，顺序保持首次出现。
   - 标签数量 1..5 通过，>5 抛 ValueError；单个标签 ≤20 字符通过，>20 抛 ValueError。
   - 非法输入：tags 非 list 或含非字符串元素抛 ValueError；全空标签抛 ValueError。
-  - _validate_card_fields：icon 必填非空字符串且 ≤32 字符，缺失/空/超长抛 ValueError；tags 缺失抛 ValueError。
-  - 合法 icon+tags 通过校验，且 repository_data["tags"] 被归一化写回。
+  - _validate_card_fields：icon_url 缺失或 None 使用默认图标；提供时为非空字符串且 ≤1024 字符，空/非字符串/超长抛 ValueError；tags 缺失抛 ValueError。
+  - 合法 icon_url+tags 通过校验，且 repository_data["tags"] 被归一化写回。
   - 失败路径返回明确 ValueError，不出现吞异常后返回伪成功，无半写入副作用。
   - 日志、报告不出现明文 API Key/Token/Password/模型密钥。

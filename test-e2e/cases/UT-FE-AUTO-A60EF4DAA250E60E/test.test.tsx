@@ -3,8 +3,8 @@ import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { Form } from 'antd';
-import AgentPrompt from '@/app/[locale]/agents/components/agent-prompt';
-import DebugConfig from '@/app/[locale]/agents/components/agentInfo/DebugConfig';
+import AgentPrompt from '@/app/[locale]/agents/[agentId]/components/agent-prompt';
+import AgentDebugPanel from '@/app/[locale]/agents/[agentId]/components/debug/agent-debug';
 import { Thread } from '@/app/[locale]/newchat/assistant-ui/thread';
 
 const h = vi.hoisted(() => ({
@@ -48,8 +48,20 @@ vi.mock('@/hooks/model/useInferenceFieldSpecs', () => ({
 }));
 
 vi.mock('@/stores/agentStore', () => ({
-  useAgentStore: (selector: (s: any) => any) => selector(h.agentStore),
+  useAgentStore: (selector: (s: any) => any) => selector({
+    ...h.agentStore,
+    reconcileUnavailableModels: h.agentStore.updateAgentConfig,
+  }),
 }));
+
+// Keep the real Debug -> Chat -> Thread model derivation. Only replace
+// runtime/network adapters and the unrelated comparison panel.
+vi.mock('@/hooks/useConfig', () => ({ useConfig: () => ({ modelConfig: {} }) }));
+vi.mock('@/app/[locale]/newchat/adapter/attachment-adapter', () => ({ compositeAttachmentAdapter: {} }));
+vi.mock('@/app/[locale]/newchat/adapter/server-dictation-adapter', () => ({ ServerDictationAdapter: class {} }));
+vi.mock('@/app/[locale]/newchat/assistant-ui/agent-landing', () => ({ AgentLandingPage: () => null }));
+vi.mock('@/app/[locale]/agents/[agentId]/components/debug/compare-panel', () => ({ AgentDebugComparePanel: () => null }));
+vi.mock('@/components/ui/tooltip', () => ({ TooltipProvider: (p: any) => p.children }));
 
 vi.mock('@/stores/agentConfigStore', () => {
   const useAgentConfigStore: any = (selector: (s: any) => any) => selector(h.agentConfigStore);
@@ -168,6 +180,8 @@ vi.mock('@/components/ui/dialog', () => ({
 }));
 
 vi.mock('@assistant-ui/react', () => ({
+  AssistantRuntimeProvider: (p: any) => p.children,
+  useLocalRuntime: () => ({ thread: { composer: { setRunConfig: () => {} } } }),
   useAui: () => ({ composer: () => ({ setText: () => {} }) }),
   useAuiState: (selector: any) => selector(h.auiState),
   ThreadPrimitive: {
@@ -342,54 +356,36 @@ describe(' 模型可用性过滤与主模型回退', () => {
     expect(screen.queryByText('Model A')).toBeNull();
   });
 
-  it(' DebugConfig 过滤失效 model_ids 并回退 defaultModelId', async () => {
-    h.modelList.availableLlmModels = [model(1, 'Model A'), model(2, 'Model B')];
-    h.modelList.models = h.modelList.availableLlmModels;
-    h.agentConfigStore.editedAgent = { allow_chat_metadata: false, model: '' };
-    h.agentInfo.agentInfo = { model_ids: [1, 3] };
-
-    render(React.createElement(DebugConfig, { agentId: 1 }));
-
-    await waitFor(() => {
-      expect(h.chatModelSelectorProps).toBeTruthy();
-    });
-    expect(h.chatModelSelectorProps.modelIds).toEqual([1]);
-    expect(h.chatModelSelectorProps.modelNames).toEqual(['Model A']);
-    await waitFor(() => {
-      expect(h.chatModelSelectorProps.selectedModelId).toBe(1);
-    });
+  it('Debug Panel 通过真实 Chat/Thread 过滤不可用模型并回退首个可用 ID', async () => {
+    h.modelList.models = [model(1, 'Model A'), model(3, 'Model C', 'unavailable')];
+    h.agentStore.agentId = 1;
+    h.agentStore.editedAgent = buildEditedAgent({ model_ids: [1, 3], model_names: ['Model A', 'Model C'] });
+    render(<AgentDebugPanel />);
+    await waitFor(() => expect(h.composerProps).toBeTruthy());
+    expect(h.composerProps.models.map((m: any) => m.id)).toEqual(['1']);
+    expect(h.composerProps.selectedModelId).toBe('1');
   });
 
-  it(' DebugConfig 全部不可用时 selectedModelId 为 null 且不崩溃', async () => {
-    h.modelList.availableLlmModels = [model(1, 'Model A'), model(2, 'Model B')];
-    h.modelList.models = h.modelList.availableLlmModels;
-    h.agentConfigStore.editedAgent = { allow_chat_metadata: false, model: '' };
-    h.agentInfo.agentInfo = { model_ids: [3] };
-
-    render(React.createElement(DebugConfig, { agentId: 1 }));
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText('agent.debug.placeholder')).toBeTruthy();
-    });
-    expect(h.chatModelSelectorProps).toBeUndefined();
+  it('Debug Panel 全部不可用时模型列表为空且选中态 undefined', async () => {
+    h.modelList.models = [model(3, 'Model C', 'unavailable')];
+    h.agentStore.agentId = 1;
+    h.agentStore.editedAgent = buildEditedAgent({ model_ids: [3] });
+    render(<AgentDebugPanel />);
+    await waitFor(() => expect(h.composerProps).toBeTruthy());
+    expect(h.composerProps.models).toEqual([]);
+    expect(h.composerProps.selectedModelId).toBeUndefined();
   });
 
-  it(' DebugConfig 当前 selectedModelId 失效时回退到 defaultModelId', async () => {
-    h.modelList.availableLlmModels = [model(1, 'Model A'), model(2, 'Model B')];
-    h.modelList.models = h.modelList.availableLlmModels;
-    h.agentConfigStore.editedAgent = { allow_chat_metadata: false, model: '' };
-    h.agentInfo.agentInfo = { model_ids: [2, 3] };
-
-    const view = render(React.createElement(DebugConfig, { agentId: 1 }));
-    await waitFor(() => {
-      expect(h.chatModelSelectorProps?.selectedModelId).toBe(2);
-    });
-
-    h.agentInfo.agentInfo = { model_ids: [1] };
-    view.rerender(React.createElement(DebugConfig, { agentId: 1 }));
-    await waitFor(() => {
-      expect(h.chatModelSelectorProps?.selectedModelId).toBe(1);
-    });
+  it('Debug Panel 模型列表更新后不保留已失效的选中 ID', async () => {
+    h.modelList.models = [model(1, 'Model A'), model(2, 'Model B')];
+    h.agentStore.agentId = 1;
+    h.agentStore.editedAgent = buildEditedAgent({ model_ids: [2, 1], model_names: ['Model B', 'Model A'] });
+    const view = render(<AgentDebugPanel />);
+    await waitFor(() => expect(h.composerProps.selectedModelId).toBe('2'));
+    h.modelList.models = [model(1, 'Model A'), model(2, 'Model B', 'unavailable')];
+    view.rerender(<AgentDebugPanel />);
+    await waitFor(() => expect(h.composerProps.selectedModelId).toBe('1'));
+    expect(h.composerProps.models.map((m: any) => m.id)).toEqual(['1']);
   });
 
   it(' Thread useAgentModels 仅保留 connect_status=available 并回退首个可用模型', async () => {

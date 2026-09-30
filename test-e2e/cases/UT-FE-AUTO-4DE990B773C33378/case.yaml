@@ -28,7 +28,7 @@ case:
     action: 断言从 landing 选择 agent 时先将 shouldRestoreAgentRef 置为 true，允许后续恢复所选 agent。
     expected: 本地新线程在服务端尚无 conversation_id 时即可保存所选 agent，updateCustom 为 no-op，不要求后端会话 ID。
   - order: 3
-    action: '断言通过 runtime.threads.switchToNewThread() 切到新线程后，用 getItemById(mainThreadId) 取得新线程，先 initialize() 再 updateCustom({
+    action: '断言保持当前 landing 线程，用 getItemById(mainThreadId) 取得当前线程，先 initialize() 再 updateCustom({
       agentId: agent.id }) 写入 agentId。'
     expected: 返回列表时 shouldRestoreAgentRef=false 且 switchToNewThread() 清理旧线程状态，onBack() 返回 landing。
   - order: 4
@@ -52,6 +52,7 @@ case:
   - 测试过程无未处理异常，日志不输出明文 API Key/Token/Password。
   forbidden_side_effects: []
   source:
+    notes: Current landing-thread contract follows product change 0c9ff869c; static assertions are not end-to-end behavior proof.
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 430

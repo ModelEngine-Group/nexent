@@ -14,7 +14,7 @@ case:
   objective: 模型可用性过滤与主模型回退：agent 配置/Debug/线程选择器中失效 model_ids 被清除且无空模型引用
   preconditions:
   - 本地前端组件测试环境可运行（node:test / @testing-library 等），不要求外部模型服务在线。
-  - 测试可 mock useModelList/useAgentStore/useAgentConfigStore，注入固定的 availableLlmModels（含 connect_status）与 editedAgent/agentInfo/PublishAgent
+  - 测试可 mock useModelList/useAgentStore，注入固定的 availableLlmModels（含 connect_status）与 editedAgent/agentInfo/PublishAgent
     数据。
   - 固定测试数据：model_ids 同时包含已失效 id（不在 availableLlmModels 或 connect_status != available）与若干可用 id。
   - 所需本地资产/配置存在且校验通过（见本地资产/配置），测试代码不读取生产凭据。
@@ -34,16 +34,16 @@ case:
     expected: model/model_names 与可用模型的展示名一致。
   - order: 4
     action: 断言 useEffect 触发 updateAgent 时 model_ids 仅含可用 id，model 与 model_names 同步为可用模型的展示名，主模型回退到首个可用模型，不产生空 model 引用。
-    expected: 全部不可用时 selectedModelIds/debugModelIds/defaultModelId/useAgentModels 结果为 [] 或 null，组件不崩溃、不引用畸形模型。
+    expected: 全部不可用时 selectedModelIds/debugModelIds/defaultModelId/useAgentModels 模型列表为空且选中 ID 为 undefined，组件不崩溃、不引用畸形模型。
   - order: 5
     action: 当 editedAgent.model_ids 为空时，断言回退到 defaultLlmConfig.id 且仅在 defaultLlmConfig.id 可用时保留，否则为空数组。
     expected: 测试过程无未处理异常，日志不含 API Key/Token/Password/模型密钥。
   - order: 6
-    action: 渲染 DebugConfig，注入 agentInfo.model_ids 含已失效 id 与可用 id，断言 debugModelIds 仅保留 availableLlmModels 中存在的 id，debugModelNames
-      与可用模型展示名一致，defaultModelId 回退到首个可用 id。
+    action: 渲染 AgentDebugPanel → Chat → Thread，注入 editedAgent.model_ids 含已失效 id 与可用 id，断言 Composer.models 仅保留 connect_status=available 的 id，模型展示名
+      与可用模型展示名一致，selectedModelId 回退到首个可用模型的字符串 ID。
     expected: 测试过程无未处理异常，日志不含 API Key/Token/Password/模型密钥。
   - order: 7
-    action: 断言 selectedModelId 在当前值失效时回退到 defaultModelId，全部不可用时回退到 null 且不崩溃。
+    action: 断言 selectedModelId 在当前值失效时回退到 defaultModelId，全部不可用时回退到 undefined 且不崩溃。
     expected: 测试过程无未处理异常，日志不含 API Key/Token/Password/模型密钥。
   - order: 8
     action: 渲染 newchat Thread 的 useAgentModels，注入 availableModels 中含 connect_status != available 的模型，断言返回列表仅含 connect_status=available
@@ -56,10 +56,11 @@ case:
   - 已失效/不可用 model_ids 被 availableLlmModels 或 connect_status=available 过滤，不再出现在 model_ids/model/model_names 中。
   - 主模型、Debug 默认模型、线程默认模型均回退到首个可用模型，不产生空模型引用。
   - model/model_names 与可用模型的展示名一致。
-  - 全部不可用时 selectedModelIds/debugModelIds/defaultModelId/useAgentModels 结果为 [] 或 null，组件不崩溃、不引用畸形模型。
+  - 全部不可用时 selectedModelIds/debugModelIds/defaultModelId/useAgentModels 模型列表为空且选中 ID 为 undefined，组件不崩溃、不引用畸形模型。
   - 测试过程无未处理异常，日志不含 API Key/Token/Password/模型密钥。
   forbidden_side_effects: []
   source:
+    notes: DebugConfig was replaced by AgentDebugPanel in workbench refactor 106729394; verify real Debug-Chat-Thread model selection.
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 445
@@ -71,5 +72,5 @@ case:
   - 已失效/不可用 model_ids 被 availableLlmModels 或 connect_status=available 过滤，不再出现在 model_ids/model/model_names 中。
   - 主模型、Debug 默认模型、线程默认模型均回退到首个可用模型，不产生空模型引用。
   - model/model_names 与可用模型的展示名一致。
-  - 全部不可用时 selectedModelIds/debugModelIds/defaultModelId/useAgentModels 结果为 [] 或 null，组件不崩溃、不引用畸形模型。
+  - 全部不可用时 selectedModelIds/debugModelIds/defaultModelId/useAgentModels 模型列表为空且选中 ID 为 undefined，组件不崩溃、不引用畸形模型。
   - 测试过程无未处理异常，日志不含 API Key/Token/Password/模型密钥。

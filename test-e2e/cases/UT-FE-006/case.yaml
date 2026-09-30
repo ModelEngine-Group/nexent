@@ -13,52 +13,46 @@ case:
   automation: automated
   objective: stores/contexts 在 tab/refresh/login change 下的清理与恢复｜核心流程
   preconditions:
-  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+  - 仓库 D1 前端组件运行器及隔离依赖可用。
+  - TEST_HOME 位于仓库外；测试不访问生产资源。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+    fixtures: &id001
+    - 内存 fixture 和受控服务响应；不依赖真实数据库 ID、模型或凭据。
   steps:
   - order: 1
-    action: 在组件测试环境加载“stores/contexts 在 tab/refresh/login change 下的清理与恢复｜核心流程”对应页面/组件，注入最小 props、store 和本地固定测试数据。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: 保存 A、重新挂载读取，再初始化 B
+    expected: A 保存结果可读取；B 使用自己的快照，不继承 A 草稿。
   - order: 2
-    action: 首次渲染后检查默认值、按钮启停状态、字段显隐、loading/empty/error 状态是否符合设计。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: 延迟 A 的保存响应，在返回前切换 B
+    expected: 旧响应和错误 Agent 快照不能覆盖 B。
   - order: 3
-    action: 使用真实用户事件模拟 click / fill / select / checkbox / keyboard，而不是直接修改组件内部状态。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    action: 保存失败，再 reset 清理
+    expected: 草稿回滚，错误可见；未提交草稿不持久化，清理后无旧状态。
   - order: 4
-    action: 对每个关键表单字段分别输入有效值与非法值，检查前端校验文案、按钮 disabled 状态和请求参数。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 在只读 Agent 请求保存
+    expected: 不调用持久化 API。
   - order: 5
-    action: 触发保存/删除/切换/刷新等动作，断言 service 调用次数、参数和组件状态迁移。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 6
-    action: 模拟接口 4xx/5xx/timeout，验证错误提示、重试入口和页面状态不会被错误提交。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 7
-    action: 对防抖/取消/卸载场景使用 fake timer 或 AbortSignal 检查旧请求不会覆盖新状态。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 8
-    action: 重新渲染或模拟刷新后的初始数据加载，确认回显与服务端数据映射一致。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 切换 Nl2 session 后发送旧 Agent completion
+    expected: 旧 completion 被忽略，sessionGeneration 更新，reset 清空 session。
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  forbidden_side_effects: []
+  - A 保存结果可读取；B 使用自己的快照，不继承 A 草稿。
+  - 旧响应和错误 Agent 快照不能覆盖 B。
+  - 草稿回滚，错误可见；未提交草稿不持久化，清理后无旧状态。
+  - 不调用持久化 API。
+  - 旧 completion 被忽略，sessionGeneration 更新，reset 清空 session。
+  forbidden_side_effects:
+  - 不得访问真实用户、模型 Provider 或数据库，不得输出真实凭据。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 303
-  unit_boundary: 会话状态
-  inputs:
-  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+    notes: D1 store/context boundary only; component remount does not establish full browser refresh or login-change integration
+      acceptance.
+  unit_boundary: 真实 useAgentStore 和 Nl2AgentFlowProvider，service 为受控边界
+  inputs: *id001
   assertions:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - A 保存结果可读取；B 使用自己的快照，不继承 A 草稿。
+  - 旧响应和错误 Agent 快照不能覆盖 B。
+  - 草稿回滚，错误可见；未提交草稿不持久化，清理后无旧状态。
+  - 不调用持久化 API。
+  - 旧 completion 被忽略，sessionGeneration 更新，reset 清空 session。

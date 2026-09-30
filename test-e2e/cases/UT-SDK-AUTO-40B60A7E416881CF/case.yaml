@@ -9,7 +9,7 @@ case:
   title: 受管线程状态变更 OpenTelemetry span 属性（lane/execution/counts）与 OTel 不可用/导出失败静默降级｜核心流程
   type: SDK-UT
   priority: P1
-  status: active
+  status: retired
   automation: automated
   objective: 受管线程状态变更 OpenTelemetry span 属性（lane/execution/counts）与 OTel 不可用/导出失败静默降级｜核心流程
   preconditions:
@@ -58,6 +58,9 @@ case:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 462
+    notes: 'Retired against b8f8f6f29 (#3984): concrete OpenTelemetryThreadTelemetry and automatic snapshot spans intentionally
+      removed. Historical requirements/script retained; this is not PASS. Scheduling/metrics and optional injected telemetry
+      remain.'
   unit_boundary: 并发管理
   inputs:
   - 无（纯逻辑 SDK 单元测试，OTel 依赖以 mock 注入，不读取本地配置、模型或凭据）

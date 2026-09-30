@@ -16,17 +16,17 @@ case:
   - 本地前端组件测试环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 组件测试加载 Agent 配置页 AgentSetupContent（frontend/app/[locale]/agents/page.tsx），注入 agentStore、useAgentInfo/useAgentVersionList/useAgentVersionDetail
+  - 组件测试加载 Agent 配置页 AgentSetupContent（frontend/app/[locale]/agents/[agentId]/page.tsx），注入 agentStore、useAgentInfo/useAgentVersionList/useAgentVersionDetail
     等 hook 与本地固定测试数据。
   test_data:
     legacy_asset_declaration: 无本地资产依赖；组件测试注入本地固定测试数据（当前 Agent A、目标 Agent B 及各自版本列表），不访问真实模型/Agent 服务。
   steps:
   - order: 1
-    action: 在组件测试环境加载 Agent 配置页 AgentSetupContent（frontend/app/[locale]/agents/page.tsx），注入 agentStore、useAgentInfo/useAgentVersionList/useAgentVersionDetail
-      等 hook 与本地固定测试数据，令当前 Agent A 已选中（currentAgentId=A 且 URL agent_id=A），useAgentVersionList(A) 返回 total>0。
+    action: 在组件测试环境加载 Agent 配置页 AgentSetupContent（frontend/app/[locale]/agents/[agentId]/page.tsx），注入 agentStore、useAgentInfo/useAgentVersionList/useAgentVersionDetail
+      等 hook 与本地固定测试数据，令当前 Agent A 已选中（currentAgentId=A 且 路由参数 agentId=A），useAgentVersionList(A) 返回 total>0。
     expected: 切换期间（isRequestedAgentLoading=true）shouldFetchVersionDetail=false，useAgentVersionDetail 不请求旧 Agent A 的版本详情，界面不闪现旧版本详情。
   - order: 2
-    action: 通过 AgentSelectorHeader 的下拉选择 Agent B（handleSelectAgent 将 URL 的 agent_id 替换为 B），此时 requestedAgentId=B 且 != currentAgentId=A，isRequestedAgentLoading
+    action: 切换动态路由至 Agent B（路由参数 agentId=B），此时 requestedAgentId=B 且 != currentAgentId=A，isRequestedAgentLoading
       置为 true。
     expected: 切换完成后（isRequestedAgentLoading=false 且 total>0）shouldFetchVersionDetail=true，版本详情按新 Agent B 的当前版本号（agentInfo.current_version_no）加载。
   - order: 3

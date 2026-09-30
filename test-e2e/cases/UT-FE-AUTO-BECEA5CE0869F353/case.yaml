@@ -32,7 +32,7 @@ case:
     action: 首次渲染断言默认状态：无标签谓词时筛选按钮为 default 类型、无清空入口、matchedTagIds 为 null、列表全量渲染。
     expected: filterResourceIds 以 resource_type=knowledge_base 和当前 KB id 列表为参数调用，其 matched_resource_ids 驱动列表过滤，谓词清空后恢复全量。
   - order: 3
-    action: 点击标签筛选按钮打开 Popover，在 TagFilterControls 中选择谓词条件，断言 setTagPredicates 更新 tagPredicates 状态、按钮切换为 primary 类型并出现清空按钮。
+    action: 点击组合筛选按钮打开 Popover，在 TagFilterControls 中选择谓词条件，断言 setTagPredicates 更新 tagPredicates 状态、按钮切换为 primary 类型并出现清空按钮。
     expected: 行内以 knowledge_base 资源类型渲染 ResourceTagChips，正确展示资源关联标签。
   - order: 4
     action: 断言 tagManagementApi.filterResourceIds 以 resource_type="knowledge_base"、当前 KB id 字符串数组、当前 tagPredicates 为参数被调用。

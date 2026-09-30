@@ -12,6 +12,8 @@ change:
     explicitly selects TAP so a successful CMSR-D1-002 is not an automation error.
     CMSR-D1-003 declares protocol repair enabled and supplies the current
     prepare_step memory_messages field in its controlled context fixture.
+    Capture the actual model_call logger and assert content-free protocol lifecycle
+    events separately from ordinary model-output logs.
   affected_features:
     existing: [CMSR-005]
     added: []

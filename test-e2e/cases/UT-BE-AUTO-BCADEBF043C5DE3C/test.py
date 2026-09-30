@@ -30,6 +30,9 @@ class _FakeQuery:
     def all(self):
         return [obj for obj in self._store if isinstance(obj, self._model)]
 
+    def count(self):
+        return len(self.all())
+
     def first(self):
         return next((obj for obj in self._store if isinstance(obj, self._model)), None)
 

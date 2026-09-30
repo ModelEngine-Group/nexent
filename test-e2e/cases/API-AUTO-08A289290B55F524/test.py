@@ -1,127 +1,105 @@
-"""D2 contract test: Agent icon upload/read service layer.
-
-Covers content-type whitelist (gif/jpeg/png/webp), the 2 MB upper bound,
-EDIT permission enforcement, invalid/missing icon errors, and icon_url
-write-back, against upload_agent_icon_impl / get_agent_icon_impl.
-"""
-
+"""D2 Agent icon contract at the real service/storage boundary."""
 import io
+from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
 import pytest
 
-from management.services.agent import service as agent_service
 from consts.exceptions import ForbiddenError
+from database import attachment_db, client as database_client
+from management.services.agent import service as agent_service
 
-
-_TWO_MB_PLUS_ONE = 2 * 1024 * 1024 + 1
-
-PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
-JPEG_BYTES = (
-    b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-)
-GIF_BYTES = b"GIF89a" + b"\x00" * 16
-WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 16
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+GIF = b"GIF89a" + b"\x00" * 16
+WEBP = b"RIFF" + b"\x00" * 4 + b"WEBP" + b"\x00" * 16
 
 
 @pytest.mark.asyncio
 @pytest.mark.stage("D2")
 @pytest.mark.case_id("API-AUTO-08A289290B55F524")
 async def test_agent_icon_upload_read_contract(monkeypatch):
-    agent_id = 900001
-    tenant_id = "tenant-d2-icon"
-    user_id = "user-d2-editor"
-    icon_url = f"/api/agent/{agent_id}/icon"
-
+    # These identifiers belong only to the controlled in-memory collaborators.
+    agent_id, tenant_id, user_id = 17, "fixture-tenant", "fixture-editor"
     state = {"permission": "EDIT", "tenant_id": tenant_id, "icon_url": None}
-    stored_content = {"value": None}
-    icon_writes = []
+    writes, uploads, urls = [], [], []
 
-    async def fake_get_agent_info(agent_id_arg, tenant_id_arg, version_no=0, user_id=None):
+    async def read_agent(*args, **kwargs):
         return dict(state)
 
-    def fake_update_agent_icon(*, agent_id, tenant_id, icon_url, user_id):
-        icon_writes.append(
-            {
-                "agent_id": agent_id,
-                "tenant_id": tenant_id,
-                "icon_url": icon_url,
-                "user_id": user_id,
-            }
-        )
+    def write_icon(**values):
+        writes.append(values)
+        state["icon_url"] = values["icon_url"]
 
-    def fake_get_file_stream(object_name):
-        if stored_content["value"] is None:
-            return None
-        return io.BytesIO(stored_content["value"])
+    class Storage:
+        content = None
+        fail = False
 
-    class _FakeMinio:
-        def __init__(self):
-            self.uploaded = []
+        def upload_fileobj(self, stream, object_name):
+            assert object_name == f"agent-icons/{tenant_id}/{agent_id}/icon"
+            if self.fail:
+                return False, "controlled upload failure"
+            self.content = stream.read()
+            uploads.append(self.content)
+            return True, ""
 
-        def upload_fileobj(self, file_obj, object_name):
-            data = file_obj.read()
-            self.uploaded.append(data)
-            stored_content["value"] = data
-            return (True, "")
+    storage = Storage()
+    monkeypatch.setattr(agent_service, "get_agent_info_impl", read_agent)
+    monkeypatch.setattr(agent_service, "is_system_agent", lambda *args: False)
+    monkeypatch.setattr(agent_service, "update_agent_icon", write_icon)
+    # Keep real upload/read/validation functions, replacing only object storage.
+    monkeypatch.setattr(database_client, "minio_client", storage)
+    monkeypatch.setattr(attachment_db, "get_file_stream",
+                        lambda name: io.BytesIO(storage.content) if storage.content is not None else None)
 
-    fake_minio = _FakeMinio()
-
-    monkeypatch.setattr(agent_service, "get_agent_info_impl", fake_get_agent_info)
-    monkeypatch.setattr(agent_service, "update_agent_icon", fake_update_agent_icon)
-    monkeypatch.setattr(agent_service, "get_file_stream", fake_get_file_stream)
-    monkeypatch.setattr(agent_service, "minio_client", fake_minio)
-
-    result = await agent_service.upload_agent_icon_impl(agent_id, PNG_BYTES, tenant_id, user_id)
-    assert result == {"icon_url": icon_url, "content_type": "image/png"}
-    assert len(icon_writes) == 1
-
-    for content, expected_type in (
-        (JPEG_BYTES, "image/jpeg"),
-        (GIF_BYTES, "image/gif"),
-        (WEBP_BYTES, "image/webp"),
-    ):
+    for content, mime in [(PNG, "image/png"), (JPEG, "image/jpeg"), (GIF, "image/gif"), (WEBP, "image/webp")]:
         result = await agent_service.upload_agent_icon_impl(agent_id, content, tenant_id, user_id)
-        assert result["content_type"] == expected_type
-        assert result["icon_url"] == icon_url
+        assert result["content_type"] == mime
+        parsed = urlsplit(result["icon_url"])
+        assert parsed.path == f"/api/agent/{agent_id}/icon"
+        version = parse_qs(parsed.query)["v"]
+        assert len(version) == 1 and UUID(hex=version[0]).hex == version[0]
+        urls.append(result["icon_url"])
+        assert state["icon_url"] == result["icon_url"]
+        assert writes[-1] == {"agent_id": agent_id, "tenant_id": tenant_id,
+                              "icon_url": result["icon_url"], "user_id": user_id}
+        assert await agent_service.get_agent_icon_impl(agent_id, tenant_id, user_id) == (content, mime)
+    assert len(set(urls)) == 4
 
-    writes_before = len(icon_writes)
-    uploads_before = len(fake_minio.uploaded)
-
-    with pytest.raises(ValueError, match="Agent icon file is empty"):
-        await agent_service.upload_agent_icon_impl(agent_id, b"", tenant_id, user_id)
-    assert len(icon_writes) == writes_before
-    assert len(fake_minio.uploaded) == uploads_before
-
-    with pytest.raises(ValueError, match="Agent icon must not exceed 2 MB"):
-        await agent_service.upload_agent_icon_impl(agent_id, b"\x00" * _TWO_MB_PLUS_ONE, tenant_id, user_id)
-    assert len(icon_writes) == writes_before
-    assert len(fake_minio.uploaded) == uploads_before
-
-    with pytest.raises(ValueError, match="Agent icon must be a PNG, JPEG, GIF, or WebP image"):
-        await agent_service.upload_agent_icon_impl(agent_id, b"plain text, not an image", tenant_id, user_id)
-    assert len(icon_writes) == writes_before
-    assert len(fake_minio.uploaded) == uploads_before
+    before = len(writes), len(uploads), state["icon_url"]
+    for content, message in [
+        (b"", "Icon file is empty"),
+        (b"\x00" * (2 * 1024 * 1024 + 1), "Icon must not exceed 2 MB"),
+        (b"not an image", "Icon must be a PNG, JPEG, GIF, or WebP image"),
+    ]:
+        with pytest.raises(ValueError) as error:
+            await agent_service.upload_agent_icon_impl(agent_id, content, tenant_id, user_id)
+        assert str(error.value) == message
+        assert (len(writes), len(uploads), state["icon_url"]) == before
 
     state["permission"] = "READ_ONLY"
-    with pytest.raises(ForbiddenError, match="You do not have permission to edit this agent"):
-        await agent_service.upload_agent_icon_impl(agent_id, PNG_BYTES, tenant_id, user_id)
-    assert len(icon_writes) == writes_before
-    assert len(fake_minio.uploaded) == uploads_before
-
+    with pytest.raises(ForbiddenError):
+        await agent_service.upload_agent_icon_impl(agent_id, PNG, tenant_id, user_id)
+    assert (len(writes), len(uploads), state["icon_url"]) == before
     state["permission"] = "EDIT"
-    state["icon_url"] = icon_url
-    await agent_service.upload_agent_icon_impl(agent_id, PNG_BYTES, tenant_id, user_id)
+    monkeypatch.setattr(agent_service, "is_system_agent", lambda *args: True)
+    with pytest.raises(ForbiddenError, match="System Agent"):
+        await agent_service.upload_agent_icon_impl(agent_id, PNG, tenant_id, user_id)
+    assert (len(writes), len(uploads), state["icon_url"]) == before
+    monkeypatch.setattr(agent_service, "is_system_agent", lambda *args: False)
 
-    content, content_type = await agent_service.get_agent_icon_impl(agent_id, tenant_id, user_id)
-    assert content == PNG_BYTES
-    assert content_type == "image/png"
+    storage.fail = True
+    with pytest.raises(ValueError, match="Failed to upload icon"):
+        await agent_service.upload_agent_icon_impl(agent_id, PNG, tenant_id, user_id)
+    assert (len(writes), len(uploads), state["icon_url"]) == before
 
     state["icon_url"] = None
     with pytest.raises(FileNotFoundError, match="Agent icon not found"):
         await agent_service.get_agent_icon_impl(agent_id, tenant_id, user_id)
-
-    last_write = icon_writes[-1]
-    assert last_write["icon_url"] == icon_url
-    assert last_write["agent_id"] == agent_id
-    assert last_write["tenant_id"] == tenant_id
-    assert last_write["user_id"] == user_id
+    state["icon_url"] = urls[-1]
+    storage.content = None
+    with pytest.raises(FileNotFoundError, match="Icon not found"):
+        await agent_service.get_agent_icon_impl(agent_id, tenant_id, user_id)
+    storage.content = b"invalid stored image"
+    with pytest.raises(FileNotFoundError, match="Icon is invalid"):
+        await agent_service.get_agent_icon_impl(agent_id, tenant_id, user_id)

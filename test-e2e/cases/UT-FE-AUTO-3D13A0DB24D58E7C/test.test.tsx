@@ -2,9 +2,10 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Form } from 'antd';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import AgentInfo from '@/app/[locale]/agents/components/agent-info';
+import AgentInfo from '@/app/[locale]/agents/[agentId]/components/agent-info';
 
 const hoisted = vi.hoisted(() => ({
   isReadOnly: false,
@@ -192,6 +193,7 @@ function setupEditableAgent() {
 }
 
 function renderAgentInfo() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Harness() {
     const [form] = Form.useForm();
     return (
@@ -200,7 +202,7 @@ function renderAgentInfo() {
       </Form>
     );
   }
-  return render(<Harness />);
+  return render(<QueryClientProvider client={queryClient}><Harness /></QueryClientProvider>);
 }
 
 function editButton() {

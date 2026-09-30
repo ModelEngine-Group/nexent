@@ -126,6 +126,9 @@ def test_gateway_context_and_final_context_contract() -> None:
     # fields without mutating the caller's object.
     qwen = object.__new__(OpenAIModel)
     qwen.model_id = "qwen3.7-plus"
+    qwen.reasoning_capability = None
+    qwen.model_factory = "openai"
+    qwen.api_base_url = "http://model"
     source = {"enable_thinking": False, "provider_option": {"nested": True}}
     translated = qwen._translate_thinking_flag(source)
     assert translated == {

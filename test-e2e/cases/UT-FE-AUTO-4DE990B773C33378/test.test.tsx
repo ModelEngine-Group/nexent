@@ -45,21 +45,24 @@ test('UT-FE-AUTO-4DE990B773C33378 landing agent selection restores agent and bin
   const src = readSource(REL_SOURCES.page);
   const start = src.indexOf('handleAgentSelectedFromLanding');
   assert.ok(start !== -1, 'handleAgentSelectedFromLanding should exist in page.tsx');
-  const end = src.indexOf('onAgentSelected(agent);', start);
-  assert.ok(end !== -1, 'onAgentSelected(agent) should follow handleAgentSelectedFromLanding');
-  const block = src.slice(start, end + 'onAgentSelected(agent);'.length);
+  const end = src.indexOf('setSelectedAgent(agent);', start);
+  assert.ok(end !== -1, 'selected agent should be committed after thread metadata');
+  const block = src.slice(start, end + 'setSelectedAgent(agent);'.length);
   assertOrdered(
     block,
     [
       'shouldRestoreAgentRef.current = true',
-      'runtime.threads.switchToNewThread()',
       'runtime.threads.getItemById(',
       'mainThreadId',
       'thread.initialize()',
       'thread.updateCustom({ agentId: agent.id })',
+      'setSelectedAgent(agent)',
     ],
     'handleAgentSelectedFromLanding',
   );
+  // Product change 0c9ff869c intentionally preserves the current landing
+  // thread. Starting another thread here would discard its metadata.
+  assert.ok(!block.includes('switchToNewThread()'));
 });
 
 test('handleThreadBack clears restore flag then switches thread and returns to landing', () => {
