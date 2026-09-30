@@ -55,6 +55,9 @@ UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
 
 # Upload Configuration
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+# Knowledge-base uploads have an independently configurable hard ceiling.
+MAX_KNOWLEDGE_FILE_SIZE_MB = _positive_int_env("MAX_KNOWLEDGE_FILE_SIZE_MB", 100)
+MAX_KNOWLEDGE_FILE_SIZE_BYTES = MAX_KNOWLEDGE_FILE_SIZE_MB * 1024 * 1024
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
@@ -109,7 +112,18 @@ AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 
 # Container-internal official skills ZIP directory
-OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
+OFFICIAL_SKILLS_ZIP_PATH = os.getenv(
+    "OFFICIAL_SKILLS_ZIP_PATH", "/mnt/nexent/official-skills-zip"
+)
+
+# Container-internal official agents bundle directory (one JSON per agent)
+OFFICIAL_AGENTS_PATH = os.getenv(
+    "OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents"
+)
+
+OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "")
+SYSTEM_TENANT_ID = "system"
+SYSTEM_USER_ID = "system"
 
 
 # Preview Configuration
@@ -217,6 +231,18 @@ MAX_USERS_PER_TENANT = _positive_int_env("MAX_USERS_PER_TENANT", 10_000)
 MAX_GROUPS_PER_TENANT = _positive_int_env("MAX_GROUPS_PER_TENANT", 1_000)
 MAX_SUPER_ADMIN_COUNT = _positive_int_env("MAX_SUPER_ADMIN_COUNT", 1)
 MAX_ADMINS_PER_TENANT = _positive_int_env("MAX_ADMINS_PER_TENANT", 1_000)
+MAX_KNOWLEDGE_BASES_PER_TENANT = _positive_int_env(
+    "MAX_KNOWLEDGE_BASES_PER_TENANT", 10_000
+)
+MAX_KNOWLEDGE_BASES_PER_USER = _positive_int_env(
+    "MAX_KNOWLEDGE_BASES_PER_USER", 10
+)
+MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER = _positive_int_env(
+    "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER", 1_000
+)
+MAX_CONVERSATION_TURNS = _positive_int_env("MAX_CONVERSATION_TURNS", 100)
+MAX_CONVERSATIONS_PER_USER = _positive_int_env("MAX_CONVERSATIONS_PER_USER", 1_000)
+MAX_AGENTS_PER_TENANT = _positive_int_env("MAX_AGENTS_PER_TENANT", 1_000)
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -262,6 +288,7 @@ IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
+ENABLE_AGENT_WORKBENCH = os.getenv("ENABLE_AGENT_WORKBENCH", "false").lower() in ("true", "1", "yes", "on")
 AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
 AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
 AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
@@ -317,6 +344,11 @@ RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS = float(
 RUNTIME_MCP_TOOL_TIMEOUT_SECONDS = float(
     os.getenv("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS", "60")
 )
+RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS = int(
+    os.getenv("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS", "120")
+)
+if RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS must be greater than zero")
 RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS = float(
     os.getenv("RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS", "5")
 )
@@ -859,6 +891,12 @@ MODEL_CATALOG_JSON_PATH = os.getenv(
     os.path.join(os.path.dirname(__file__), "..", "configs", "model_catalog.json")
 )
 """Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
+
+MODELS_DEV_CATALOG_JSON_PATH = os.getenv(
+    "MODELS_DEV_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "models_dev_catalog.json")
+)
+"""models.dev capability catalog downloaded during the backend image build."""
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

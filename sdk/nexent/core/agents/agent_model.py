@@ -26,6 +26,22 @@ class ModelConfig(BaseModel):
     url: str = Field(description="Model endpoint URL")
     temperature: Optional[float] = Field(description="Temperature", default=0.1)
     top_p: Optional[float] = Field(description="Top P", default=0.95)
+    enable_thinking: bool = Field(
+        description="Whether provider thinking is enabled",
+        default=False,
+    )
+    reasoning_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(
+        description="Canonical per-request reasoning effort, when supported",
+        default=None,
+    )
+    reasoning_budget_tokens: Optional[int] = Field(
+        description="Canonical numeric reasoning budget, when supported",
+        default=None,
+    )
+    reasoning_capability: Optional[Dict[str, Any]] = Field(
+        description="Resolved model reasoning capability metadata",
+        default=None,
+    )
     ssl_verify: Optional[bool] = Field(description="Whether to verify SSL certificates", default=True)
     model_factory: Optional[str] = Field(
         description="Model provider identifier (e.g., openai, modelengine)", default=None
@@ -246,7 +262,22 @@ class AgentVerificationConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    runtime_ref: Optional[str] = None
+    origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
+    agent_id: Optional[Union[int, str]] = Field(
+        description="Stable persisted Agent identity used for runtime events",
+        default=None,
+    )
+    version_no: Optional[int] = Field(
+        description="Resolved immutable Agent version used by this run",
+        default=None,
+    )
+    invocation_name: Optional[str] = Field(
+        description="Stable, unique callable name within the resolved Agent tree",
+        default=None,
+    )
     name: str = Field(description="Agent name")
+    display_name: Optional[str] = Field(description="User-facing Agent name", default=None)
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
@@ -260,6 +291,10 @@ class AgentConfig(BaseModel):
     output_protocol: Literal["code_action", "final_envelope"] = Field(
         description="Closed model-output protocol used by the Agent runtime",
         default="code_action",
+    )
+    enable_protocol_repair_retry: bool = Field(
+        description="Whether the Agent uses strict output validation and silent protocol repair",
+        default=False,
     )
     provide_run_summary: Optional[bool] = Field(
         description="Whether to provide run summary to upper-level Agent", default=False
@@ -395,6 +430,13 @@ class AgentRunInfo(BaseModel):
     )
     conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
     user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
+    user_context: Optional[Dict[str, Any]] = Field(
+        description="Caller user context (tenant/user/groups) passed through to tools for "
+        "tool-side authorization. Hidden from the model; values come only from the "
+        "authenticated session, never from model output.",
+        default=None,
+        exclude=True,
+    )
     runtime_metadata: Dict[str, Any] = Field(
         description="Immutable application-resolved runtime metadata snapshot",
         default_factory=dict,

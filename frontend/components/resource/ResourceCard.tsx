@@ -29,6 +29,9 @@ export interface ResourceCardProps {
   onClick?: () => void;
   onDoubleClick?: () => void;
   selected?: boolean;
+  disabled?: boolean;
+  selectionRole?: "option";
+  describedBy?: string;
   className?: string;
   containerRef?: Ref<HTMLDivElement>;
 }
@@ -50,6 +53,9 @@ export default function ResourceCard({
   onClick,
   onDoubleClick,
   selected,
+  disabled = false,
+  selectionRole,
+  describedBy,
   className,
   containerRef,
 }: ResourceCardProps) {
@@ -67,6 +73,7 @@ export default function ResourceCard({
         "p-5 shadow-sm hover:border-blue-300 hover:shadow-md dark:bg-slate-900",
         selected && "border-blue-400 ring-1 ring-blue-200 dark:ring-blue-900",
         !selected && "border-slate-200 dark:border-slate-700",
+        disabled && "cursor-not-allowed opacity-50",
         className
       )}
       onDoubleClick={onDoubleClick}
@@ -79,9 +86,13 @@ export default function ResourceCard({
             <button
               type="button"
               aria-labelledby={titleId}
-              aria-pressed={selected}
+              role={selectionRole}
+              aria-pressed={selectionRole ? undefined : selected}
+              aria-selected={selectionRole ? selected : undefined}
+              aria-describedby={describedBy}
+              disabled={disabled}
               onClick={onClick}
-              className="absolute inset-0 z-0 size-full cursor-pointer rounded-[inherit] border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset"
+              className="absolute inset-0 z-0 size-full cursor-pointer rounded-[inherit] border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset disabled:cursor-not-allowed"
             />
           ) : null}
           <div

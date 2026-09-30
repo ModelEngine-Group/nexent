@@ -27,6 +27,7 @@ import {
 } from "@ant-design/icons";
 import quotaService from "@/services/quotaService";
 import { ASSET_OWNER_TENANT_ID } from "@/const/auth";
+import { QUOTA_USAGE_CHANGED_EVENT } from "@/lib/quotaEvents";
 import {
   getQuotaConflictTranslationKey,
   type PlatformQuotaOverview,
@@ -56,7 +57,9 @@ function toQuotaInput(bytes: number): { value: number; unit: QuotaUnit } {
   if (bytes >= GB && bytes % GB === 0) {
     return { value: bytes / GB, unit: "GB" };
   }
-  return { value: Math.floor(bytes / MB), unit: "MB" };
+  // A nonzero finite quota must never collapse to 0: clamp the MB view to at
+  // least 1 MB so sub-MB remainders (or stale 0 inputs) stay representable.
+  return { value: Math.max(1, Math.floor(bytes / MB)), unit: "MB" };
 }
 
 function getProgressColor(usagePct: number | null | undefined): string {
@@ -118,6 +121,15 @@ export function PlatformQuotaPanel({
 
   useEffect(() => {
     fetchData();
+  }, [fetchData]);
+
+  // Refresh when any quota-affecting change happens elsewhere
+  // (tenant allocation modals, KB uploads, capacity updates, polling).
+  useEffect(() => {
+    window.addEventListener(QUOTA_USAGE_CHANGED_EVENT, fetchData);
+    return () => {
+      window.removeEventListener(QUOTA_USAGE_CHANGED_EVENT, fetchData);
+    };
   }, [fetchData]);
 
   // Inline edit for tenant hard quota
@@ -451,7 +463,11 @@ export function PlatformQuotaPanel({
       }}
     >
       {/* Platform Capacity Header */}
-      <Card size="small" style={{ marginBottom: 16 }}>
+      <Card
+        size="small"
+        style={{ marginBottom: 16 }}
+        loading={loading && data == null}
+      >
         <Row gutter={[32, 20]} align="middle">
           <Col xs={24} lg={15}>
             <Text strong style={{ fontSize: 16 }}>

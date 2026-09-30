@@ -25,7 +25,6 @@ from nexent.core.concurrency import (
     ThreadCapacityExceeded,
     ThreadManager,
 )
-from nexent.core.concurrency import telemetry as telemetry_module
 
 
 class RecordingTelemetry:
@@ -47,7 +46,7 @@ class RecordingTelemetry:
         )
 
 
-def _manager(telemetry):
+def _manager(telemetry=None):
     manager = ThreadManager(
         service_name="test-runtime",
         lane_policies={
@@ -123,6 +122,69 @@ def test_ut_sdk_tlm_041_default_telemetry_has_no_phoenix_side_effects():
     assert "thread.manager.snapshot" not in source
     assert "nexent.thread_manager" not in source
     assert "opentelemetry" not in source
+@pytest.fixture(scope="module")
+def snapshot_tracing():
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    provider = TracerProvider()
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(trace, "_TRACER_PROVIDER", provider)
+        try:
+            yield provider.get_tracer(__name__), exporter
+        finally:
+            provider.shutdown()
+
+
+@pytest.mark.parametrize("dedicated", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_ut_sdk_trace_008_default_manager_does_not_export_snapshot_spans(
+    snapshot_tracing, dedicated, fail,
+):
+    tracer, exporter = snapshot_tracing
+    exporter.clear()
+    manager = _manager()
+
+    def work(*_args):
+        with tracer.start_as_current_span("tool.work"):
+            if fail:
+                raise ValueError("task failed")
+            return "done"
+
+    try:
+        with tracer.start_as_current_span("agent.run") as parent:
+            if dedicated:
+                execution = manager.register_service(
+                    ManagedThreadSpec(task_name="work", owner="test"), work,
+                )
+                manager.start_service(execution.execution_id)
+            else:
+                execution = manager.submit(
+                    "agent-run", ManagedTaskSpec(task_name="work", owner="test"), work,
+                )
+            if fail:
+                with pytest.raises(ValueError, match="task failed"):
+                    execution.future.result(timeout=2)
+            else:
+                assert execution.future.result(timeout=2) == "done"
+        asyncio.run(manager.shutdown(timeout=2))
+
+        spans = exporter.get_finished_spans()
+        assert sorted(span.name for span in spans) == ["agent.run", "tool.work"]
+        child = next(span for span in spans if span.name == "tool.work")
+        assert child.parent.span_id == parent.get_span_context().span_id
+        assert child.context.trace_id == parent.get_span_context().trace_id
+        metrics, = manager.metrics_snapshot()
+        assert metrics.completed_count == 1
+        assert metrics.failed_count == int(fail)
+    finally:
+        asyncio.run(manager.shutdown(timeout=2))
 
 
 def test_tc_tlm_021_snapshot_lists_task_composition_without_telemetry_side_effects():

@@ -615,6 +615,7 @@ class ModelCapacitySuggestionRequest(BaseModel):
 
 class ModelCapacitySuggestionResponse(BaseModel):
     suggestions: Optional[CapacitySuggestionFields] = None
+    reasoning_capability: Optional["ReasoningCapability"] = None
     match_kind: Literal["catalog_exact", "catalog_fuzzy", "provider_discovery", "litellm_lookup", "none"]
     match_confidence: Optional[Literal["high", "medium", "low"]] = None
     match_explanation: str
@@ -815,6 +816,18 @@ class ConversationKnowledgeScopeRequest(BaseModel):
     """Persisted business policy for conversation-scoped knowledge retrieval."""
 
     schema_version: Literal[1] = 1
+    retrieval_config: Optional[Dict[str, Any]] = None
+
+    @field_validator("retrieval_config")
+    @classmethod
+    def validate_retrieval_config(cls, values):
+        if values is None:
+            return None
+        reserved = {"index_names", "kds_list", "display_names", "server_url", "api_key", "tenant_id",
+                    "observer", "kds_name_to_id_map", "allowed_kds_set", "allowed_index_names"}
+        if len(values) > 30 or reserved.intersection(values):
+            raise ValueError("Retrieval parameters cannot contain connection settings or resource ranges")
+        return values
     local: LocalKnowledgeScopeRequest = Field(default_factory=LocalKnowledgeScopeRequest)
     aidp: AidpKnowledgeScopeRequest = Field(default_factory=AidpKnowledgeScopeRequest)
 
@@ -823,6 +836,100 @@ class ConversationKnowledgeScopeUpdateRequest(BaseModel):
     """Replace a conversation scope, or clear it with null to restore defaults."""
 
     scope: Optional[ConversationKnowledgeScopeRequest] = None
+    expected_workbench_config_version: Optional[int] = Field(default=None, ge=0)
+
+
+WorkbenchMode = Literal[
+    "generic_chat",
+    "single_agent_chat",
+    "multi_agent_chat",
+    "skill_create",
+    "agent_create",
+]
+
+
+class RuntimeAgentMount(BaseModel):
+    """Stable reference to one Agent version selected by the Workbench."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: int = Field(gt=0)
+    version_no: Optional[int] = Field(default=None, gt=0)
+
+
+class RuntimeSkillMount(BaseModel):
+    """Complete root-Agent Skill selection for a Workbench conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_id: int = Field(gt=0)
+    config_values: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkbenchGenerationConfig(BaseModel):
+    """Provider-neutral generation settings persisted with the conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deep_thinking: bool = False
+    thinking_effort: Literal["low", "medium", "high"] = "low"
+    temperature: Optional[float] = Field(default=None, ge=0, le=2)
+    top_p: Optional[float] = Field(default=None, gt=0, le=1)
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
+
+
+class WorkbenchSessionConfig(BaseModel):
+    """Canonical, persisted Workbench declaration; resolved artifacts are excluded."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[3] = 3
+    mode: WorkbenchMode
+    model_id: Optional[int] = Field(default=None, gt=0)
+    generation_config: WorkbenchGenerationConfig = Field(
+        default_factory=WorkbenchGenerationConfig
+    )
+    agent_mounts: List[RuntimeAgentMount] = Field(default_factory=list, max_length=8)
+    skill_mounts: List[RuntimeSkillMount] = Field(default_factory=list, max_length=20)
+    knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
+
+    @model_validator(mode="after")
+    def validate_mode_resources(self):
+        agent_count = len(self.agent_mounts)
+        if self.mode == "generic_chat" and agent_count != 0:
+            raise ValueError("generic_chat does not accept Agent mounts")
+        if self.mode == "single_agent_chat" and agent_count != 1:
+            raise ValueError("single_agent_chat requires exactly one Agent mount")
+        if self.mode == "multi_agent_chat" and agent_count < 2:
+            raise ValueError("multi_agent_chat requires at least two Agent mounts")
+        if self.mode in {"skill_create", "agent_create"}:
+            if agent_count or self.skill_mounts or self.knowledge_scope is not None:
+                raise ValueError("creation modes do not accept Agent, Skill, or knowledge resources")
+        skill_ids = [mount.skill_id for mount in self.skill_mounts]
+        if len(skill_ids) != len(set(skill_ids)):
+            raise ValueError("skill_mounts contains duplicate skill_id values")
+        agent_keys = [(mount.agent_id, mount.version_no) for mount in self.agent_mounts]
+        if len(agent_keys) != len(set(agent_keys)):
+            raise ValueError("agent_mounts contains duplicate Agent references")
+        return self
+
+
+class WorkbenchConfigUpdateRequest(BaseModel):
+    """Optimistic-lock replacement request for an existing conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    config: WorkbenchSessionConfig
+    expected_version: int = Field(ge=0)
+
+
+class WorkbenchCapabilityPreviewRequest(BaseModel):
+    """Request defaults and capabilities for one candidate published Agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: int = Field(gt=0)
+    version_no: Optional[int] = Field(default=None, gt=0)
 
 
 def reject_legacy_agent_fields(value):
@@ -840,11 +947,30 @@ class AgentRequest(BaseModel):
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
     model_id: Optional[int] = None
+    generation_config: Optional[WorkbenchGenerationConfig] = None
+    reasoning_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(
+        default=None,
+        description=(
+            "Optional per-run reasoning effort. None inherits the selected model "
+            "or Agent default."
+        ),
+    )
+    reasoning_budget_tokens: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Optional per-run reasoning token budget. None inherits the selected "
+            "model or Agent default."
+        ),
+    )
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
     knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
+    entrypoint: Optional[Literal["workbench"]] = None
+    workbench: Optional[WorkbenchSessionConfig] = None
+    expected_workbench_config_version: Optional[int] = Field(default=None, ge=0)
     context_policy: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional request-scoped context policy override",
@@ -869,6 +995,14 @@ class AgentRequest(BaseModel):
     def validate_context_policy(cls, value):
         return _validated_context_policy(value)
 
+    @model_validator(mode="after")
+    def validate_workbench_entrypoint(self):
+        if self.entrypoint == "workbench" and self.workbench is None and self.conversation_id is None:
+            raise ValueError("workbench entrypoint requires a Workbench configuration")
+        if self.workbench is not None and self.entrypoint != "workbench":
+            raise ValueError("Workbench configuration requires entrypoint='workbench'")
+        return self
+
     enable_plan: Optional[bool] = Field(
         default=False,
         description="Whether to enable the planning phase before execution"
@@ -880,19 +1014,30 @@ class AgentRequest(BaseModel):
 
 
 class NL2AgentRunRequest(BaseModel):
-    """Request payload for one ephemeral NL2Agent turn."""
+    """Request payload for an NL2Agent turn, optionally persisted by Workbench."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: int = Field(gt=0)
+    conversation_id: Optional[int] = Field(default=None, gt=0)
+    retry_user_message_id: Optional[int] = Field(default=None, gt=0)
+    retry_message_index: Optional[int] = Field(default=None, ge=0)
+    persist_history: bool = False
+    workbench_config: Optional[Dict[str, Any]] = None
 
 
 class NL2SkillRunRequest(BaseModel):
-    """Request payload for one ephemeral NL2Skill conversation turn."""
+    """Request payload for an NL2Skill turn, optionally persisted by Workbench."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
+    minio_files: Optional[List[Dict[str, Any]]] = None
+    conversation_id: Optional[int] = Field(default=None, gt=0)
+    retry_user_message_id: Optional[int] = Field(default=None, gt=0)
+    retry_message_index: Optional[int] = Field(default=None, ge=0)
+    persist_history: bool = False
+    workbench_config: Optional[Dict[str, Any]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     language: Optional[Literal["zh", "en"]] = None
     model_id: Optional[int] = Field(
@@ -1179,6 +1324,7 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    enable_protocol_repair_retry: Optional[bool] = None
     is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
@@ -1281,6 +1427,7 @@ class ExportAndImportAgentInfo(BaseModel):
     is_main_agent: bool = True
     provide_run_summary: bool
     allow_chat_metadata: bool = False
+    enable_protocol_repair_retry: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
@@ -1326,6 +1473,157 @@ class AgentRepositorySnapshot(ExportAndImportDataFormat):
     skills: Optional[List["SkillZipEntry"]] = None
 
 
+# ---------------------------------------------------------------------------
+# Official agent bundles (platform-provided, mirroring official skills)
+# ---------------------------------------------------------------------------
+
+
+class KnowledgeBaseSeedDoc(BaseModel):
+    """A seed document in an official agent bundle's knowledge base.
+
+    Text seeds carry ``content``; binary seeds (docx/pdf/...) carry ``file_path``
+    pointing at the real file on disk (set by the loader for directory layouts,
+    so the install pipeline can upload it like a normal KB document). At least
+    one of the two is set.
+    """
+    file_name: str
+    content: Optional[str] = None
+    file_path: Optional[str] = None
+
+
+class KnowledgeBaseSeed(BaseModel):
+    """Knowledge base declaration inside an official agent bundle.
+
+    ``logical_index_name`` is the bundle-local reference that agent tools point
+    to; it is remapped to the tenant's real generated index name on install.
+    """
+    logical_index_name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    documents: List[KnowledgeBaseSeedDoc] = []
+
+
+class OfficialAgentBundle(AgentRepositorySnapshot):
+    """Official agent bundle: marketplace snapshot plus official card fields.
+
+    Reuses AgentRepositorySnapshot (agent_info / mcp_info / skills) and adds
+    official card metadata plus optional knowledge base seed documents.
+    An empty ``knowledge_bases`` list means the agent has no KB dependency.
+
+    Card fields are optional: when omitted they are derived from the root agent
+    (name / display_name) or sensible defaults (icon, version_label), so a bare
+    export can be used directly as a bundle without manual card editing.
+    """
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    tags: List[str] = []
+    version_label: Optional[str] = None
+    knowledge_bases: List[KnowledgeBaseSeed] = []
+
+    @model_validator(mode="after")
+    def _derive_card_fields(self) -> "OfficialAgentBundle":
+        root_agent = self.agent_info.get(str(self.agent_id))
+        root_name = getattr(root_agent, "name", None) if root_agent else None
+        root_display_name = (
+            getattr(root_agent, "display_name", None) if root_agent else None
+        )
+        if not self.name:
+            self.name = root_name or "agent"
+        if not self.display_name:
+            self.display_name = root_display_name or self.name
+        if not self.icon:
+            self.icon = "🤖"
+        if not self.version_label:
+            self.version_label = "V1"
+        return self
+
+
+OfficialAgentStatus = Literal[
+    "installed", "needs_model", "installable"
+]
+
+
+class OfficialAgentAgentInfo(BaseModel):
+    """An agent inside an official bundle (root or sub-agent) for conflict pre-check."""
+    name: str
+    display_name: Optional[str] = None
+
+
+class OfficialAgentMcpPreview(BaseModel):
+    """MCP server declaration inside an official bundle, with per-tenant install state."""
+    mcp_server_name: str
+    mcp_url: str
+    installed: bool = False
+
+
+class OfficialAgentListItem(BaseModel):
+    """Single item in the GET /repository/agent/official response."""
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    tags: List[str] = []
+    version_label: Optional[str] = None
+    status: OfficialAgentStatus
+    has_knowledge: bool
+    mcp_count: int
+    skill_count: int
+    kb_count: int
+    missing_models: List[str] = []
+    agents: List[OfficialAgentAgentInfo] = []
+    mcps: List[OfficialAgentMcpPreview] = []
+
+
+OfficialAgentInstallStatus = Literal[
+    "installed", "needs_model", "already_installed", "not_found", "failed"
+]
+
+OfficialAgentInstallStepStatus = Literal["ok", "failed"]
+
+
+class OfficialAgentInstallStep(BaseModel):
+    """One step of an official agent install (mcp / tools / knowledge_base / agent).
+
+    ``status`` is "ok" when the step completed, "failed" when it raised (the
+    install aborts and the failed step's message explains why).
+    """
+    name: str
+    status: OfficialAgentInstallStepStatus
+    message: Optional[str] = None
+
+
+class OfficialAgentInstallRequest(BaseModel):
+    """Request body for installing official agents.
+
+    ``renames`` maps an existing agent name inside a bundle to a new name
+    (used to resolve name conflicts before import). ``model_ids`` maps a bundle
+    key to a tenant LLM model_id applied to the bundle's root agent on install.
+    """
+    agent_names: List[str] = Field(
+        ..., min_length=1, description="Official agent bundle names to install"
+    )
+    renames: Optional[Dict[str, str]] = None
+    model_ids: Optional[Dict[str, int]] = None
+    embedding_model_ids: Optional[Dict[str, int]] = None
+
+
+class OfficialAgentInstallItem(BaseModel):
+    """Per-agent result of an official agent install request."""
+    name: str
+    status: OfficialAgentInstallStatus
+    message: Optional[str] = None
+    steps: Optional[List[OfficialAgentInstallStep]] = None
+    missing_models: List[str] = []
+    agent_id: Optional[int] = None
+
+
+class OfficialAgentInstallResponse(BaseModel):
+    """Response payload for POST /repository/agent/official/install."""
+    results: List[OfficialAgentInstallItem]
+
+
 RepositoryImportRequirementType = Literal[
     "model", "knowledge_base", "mcp", "skill", "tool"
 ]
@@ -1340,6 +1638,8 @@ class RepositoryImportRequirementItem(BaseModel):
     available: bool
     reason_code: Optional[str] = None
     suggested_new_name: Optional[str] = None
+    resolution_required: bool = False
+    existing_index_name: Optional[str] = None
 
 
 class RepositoryImportPrecheckResponse(BaseModel):
@@ -1355,7 +1655,7 @@ class RepositoryImportPrecheckResponse(BaseModel):
 
 class AgentRepositoryListingCreateRequest(BaseModel):
     """Request body for creating a marketplace listing from an agent version."""
-    icon: Optional[str] = Field(None, description="Marketplace card icon (emoji or URL)")
+    icon_url: Optional[str] = Field(None, description="Repository icon URL")
     downloads: int = Field(0, ge=0, description="Initial download/copy count for card display")
     tags: Optional[List[str]] = Field(None, description="Marketplace tags")
     tool_count: Optional[int] = Field(
@@ -1370,11 +1670,12 @@ class AgentRepositoryListingDetailResponse(BaseModel):
     """Detailed marketplace listing payload for repository detail view."""
     agent_repository_id: int
     agent_id: Optional[int] = None
+    version_no: Optional[int] = None
     name: str
     display_name: Optional[str] = None
     description: Optional[str] = None
     author: Optional[str] = None
-    icon: Optional[str] = None
+    icon_url: Optional[str] = None
     status: str
     version_label: Optional[str] = None
     downloads: int = 0
@@ -1435,6 +1736,12 @@ class SkillResolution(BaseModel):
     skill_name: str
     action: Literal["rename", "use_existing"]
     new_name: Optional[str] = None
+
+
+class KnowledgeBaseResolution(BaseModel):
+    """User-selected resolution for an existing official knowledge base."""
+    knowledge_name: str
+    action: Literal["reuse", "create_new"]
 
 
 class SkillConflictCheckRequest(BaseModel):
@@ -2263,6 +2570,74 @@ class DeleteMcpServiceRequest(BaseModel):
 # =============================================================================
 
 
+class ReasoningControl(BaseModel):
+    """One reasoning control exposed by the provider catalog."""
+
+    type: Literal["toggle", "effort", "budget_tokens"]
+    values: List[str] = Field(default_factory=list)
+    min: Optional[int] = Field(default=None, ge=0)
+    max: Optional[int] = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_control(self) -> "ReasoningControl":
+        if self.type == "effort" and not self.values:
+            raise ValueError("Effort reasoning control must declare values")
+        if self.type == "budget_tokens":
+            if self.min is None or self.max is None or self.min > self.max:
+                raise ValueError("Budget-token reasoning control must declare a valid min/max range")
+        return self
+
+
+class ReasoningCapability(BaseModel):
+    """Explicit reasoning control capability declared by the model catalog."""
+
+    status: Literal["supported", "unsupported", "unknown"] = "unknown"
+    control: Literal["toggle", "effort", "budget_tokens"] = "effort"
+    levels: List[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(default_factory=list)
+    default: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = None
+    wire_format: Literal["reasoning_effort", "thinking_toggle", "thinking_budget"] = "reasoning_effort"
+    effort_budgets: Dict[str, int] = Field(default_factory=dict)
+    controls: List[ReasoningControl] = Field(default_factory=list)
+    provider_id: Optional[str] = None
+    budget_wire_format: Optional[Literal["thinking_object", "thinking_budget"]] = None
+    toggle_wire_format: Optional[Literal["thinking_object", "enable_thinking", "chat_template"]] = None
+    matched_api: Optional[str] = None
+    matched_model_id: Optional[str] = None
+    source: Literal["catalog", "models_dev", "operator", "unknown"] = "unknown"
+
+    @model_validator(mode="after")
+    def validate_levels(self) -> "ReasoningCapability":
+        if self.status == "supported" and self.control == "effort" and not self.levels:
+            raise ValueError("Effort reasoning capability must declare at least one level")
+        if self.default is not None and self.default != "auto" and self.default not in self.levels:
+            raise ValueError("Reasoning default must be included in reasoning levels")
+        if any(level not in self.levels for level in self.effort_budgets):
+            raise ValueError("Reasoning budget keys must be included in reasoning levels")
+        if any(value < 1024 for value in self.effort_budgets.values()):
+            raise ValueError("Reasoning budgets must be at least 1024 tokens")
+        if self.status == "supported" and self.wire_format == "thinking_budget":
+            missing_budgets = {
+                level for level in self.levels if level != "none" and level not in self.effort_budgets
+            }
+            if missing_budgets:
+                raise ValueError(
+                    "Thinking-budget reasoning capability must declare a budget for every enabled level"
+                )
+        if self.status != "supported":
+            self.levels = []
+            self.default = None
+            self.effort_budgets = {}
+            self.controls = []
+        return self
+
+
+# Canonical values accepted by the model-level reasoning default.  The
+# provider catalog still decides which values are valid for a specific model.
+REASONING_EFFORT_VALUES = frozenset(
+    {"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
+)
+
+
 class ModelCatalogProfile(BaseModel):
     """从预置模型目录中读取的单个模型的完整配置描述。
 
@@ -2285,6 +2660,10 @@ class ModelCatalogProfile(BaseModel):
     timeout_seconds: Optional[int] = Field(None, gt=0, description="Per-request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, gt=0, description="Maximum concurrent requests for this model")
     capability_profile_version: Optional[str] = Field(None, description="Approved provider/model capability profile version")
+    reasoning_capability: Optional[ReasoningCapability] = Field(
+        None,
+        description="Explicit reasoning control capability for this model",
+    )
     requires_appid: bool = Field(False, description="Whether the model requires model_appid auth (STT/TTS)")
     requires_access_token: bool = Field(False, description="Whether the model requires access_token auth (STT/TTS)")
     forced_temperature: Optional[float] = Field(
@@ -2415,7 +2794,13 @@ def get_extra_param_keys_for_type(model_type: str) -> List[str]:
     for the given model type (i.e., fields without a dedicated DB column).
     """
     specs = FIXED_INFERENCE_FIELDS_BY_TYPE.get(model_type, [])
-    return [s.key for s in specs if s.key not in _FIELDS_WITH_DEDICATED_COLUMN]
+    keys = [s.key for s in specs if s.key not in _FIELDS_WITH_DEDICATED_COLUMN]
+    if model_type in {"llm", "chat"}:
+        # Stored in the existing JSONB column so this feature remains
+        # backwards-compatible with installations that have no migration.
+        keys.append("reasoning_effort")
+        keys.append("reasoning_budget_tokens")
+    return keys
 
 
 _INVALID_CUSTOM_VALUE = object()
@@ -2485,6 +2870,45 @@ def _clean_custom_params(value: Any, logger) -> Optional[Dict[str, Any]]:
     return clean_custom or None
 
 
+def _validate_reasoning_extra_param(key: str, value: Any, logger) -> bool:
+    if key == "enable_thinking":
+        if isinstance(value, bool):
+            return True
+        logger.warning(
+            "Dropped invalid enable_thinking value %r; expected a boolean",
+            value,
+        )
+        return False
+    if key == "reasoning_effort" and value not in REASONING_EFFORT_VALUES:
+        logger.warning(
+            "Dropped invalid reasoning_effort value %r; expected one of %s",
+            value,
+            sorted(REASONING_EFFORT_VALUES),
+        )
+        return False
+    if key == "reasoning_budget_tokens":
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return True
+        logger.warning(
+            "Dropped invalid reasoning_budget_tokens value %r; expected a positive integer",
+            value,
+        )
+        return False
+    return True
+
+
+def _prepare_custom_extra_param(
+    value: Any, logger
+) -> tuple[Optional[Dict[str, Any]], bool]:
+    if not isinstance(value, dict):
+        logger.warning(
+            "__custom__ must be a dict, got %s; dropping",
+            type(value).__name__,
+        )
+        return None, False
+    return _clean_custom_params(value, logger), True
+
+
 def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Filter extra_params to only keep keys allowed for the given model type.
 
@@ -2506,21 +2930,17 @@ def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]])
     dropped = []
     for key, value in extra_params.items():
         if key == "__custom__":
-            if not isinstance(value, dict):
-                logger.warning(
-                    "__custom__ must be a dict, got %s; dropping",
-                    type(value).__name__,
-                )
+            clean_custom, accepted = _prepare_custom_extra_param(value, logger)
+            if not accepted:
                 dropped.append(key)
                 continue
-            clean_custom = _clean_custom_params(value, logger)
             if clean_custom is not None:
                 filtered["__custom__"] = clean_custom
             continue
-        if key in allowed:
-            filtered[key] = value
-        else:
+        if key not in allowed or not _validate_reasoning_extra_param(key, value, logger):
             dropped.append(key)
+            continue
+        filtered[key] = value
     if dropped:
         logger.warning(
             "Dropped extra_params keys not in fixed field set for model_type=%s: %s",

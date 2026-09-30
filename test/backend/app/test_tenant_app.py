@@ -1,5 +1,7 @@
 import types
 import importlib.machinery
+import importlib.util
+import logging
 import pytest
 import sys
 import os
@@ -69,6 +71,17 @@ sys.modules["services"] = services_module
 sys.modules["services.tenant_service"] = tenant_service_module
 sys.modules["utils"] = utils_module
 sys.modules["utils.auth_utils"] = auth_utils_module
+
+# The `services` stub above is not a package, so the audit submodule is loaded from
+# its file: without it collection fails, and the audit assertions further down would
+# observe a mock instead of real audit lines.
+_audit_spec = importlib.util.spec_from_file_location(
+    "services.audit_service",
+    os.path.join(os.path.dirname(__file__), "../../../backend/services/audit_service.py"),
+)
+_audit_service = importlib.util.module_from_spec(_audit_spec)
+_audit_spec.loader.exec_module(_audit_service)
+sys.modules["services.audit_service"] = _audit_service
 
 from apps.tenant_app import router
 
@@ -612,3 +625,50 @@ class TestTenantEndpointMappings:
             tenant_service_module.delete_tenant.side_effect = exception
             response = client.delete("/tenants/tenant-1")
             assert response.status_code == status_code
+
+    def test_create_success_records_audit_entry(self, caplog):
+        """Test successful tenant creation records a security audit entry"""
+        tenant_service_module.create_tenant.return_value = {"tenant_id": "new-tenant"}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.post("/tenants", json={"tenant_name": "New tenant"})
+
+        assert response.status_code == 201
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tenant_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=user-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"tenant_id":"new-tenant","tenant_name":"New tenant"}' in messages[0]
+
+    def test_update_success_records_audit_entry(self, caplog):
+        """Test successful tenant update records a security audit entry"""
+        tenant_service_module.update_tenant_info.return_value = {"tenant_name": "Updated"}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.put("/tenants/tenant-1", json={"tenant_name": "Updated"})
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tenant_update" in messages[0]
+        assert "user_id=user-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"tenant_id":"tenant-1","tenant_name":"Updated"}' in messages[0]
+
+    def test_delete_success_records_audit_entry(self, caplog):
+        """Test successful tenant deletion records a security audit entry"""
+        tenant_service_module.delete_tenant.return_value = True
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.delete("/tenants/tenant-1")
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tenant_delete" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=user-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"tenant_id":"tenant-1"}' in messages[0]

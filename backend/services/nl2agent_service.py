@@ -29,10 +29,12 @@ from agents.create_agent_info import (
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
 from consts.const import (
+    TOKEN,
     ENABLE_AIDP_KNOWLEDGE,
     LOCAL_MCP_SERVER,
     MODEL_CONFIG_MAPPING,
 )
+from utils.mcp_url_utils import get_tenant_local_mcp_server
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import (
     query_all_agent_info_by_tenant_id,
@@ -100,6 +102,7 @@ AGENT_DRAFT_FIELD_ORDER = (
     "greeting_message",
     "example_questions",
 )
+_WORKBENCH_DRAFT_NAME = re.compile(r"Workbench Draft [a-z0-9]+-[a-z0-9]{6}\Z")
 
 
 class _Nl2AgentBoundaryObserver(MessageObserver):
@@ -179,6 +182,13 @@ def _update_agent_draft_from_fields(
 
     patch = fields.model_dump(mode="python", exclude_unset=True)
     generated_name = patch.get("name")
+    if "display_name" in patch and not (
+        generated_name is not None
+        and not str(draft.get("name") or "").strip()
+        and not str(draft.get("description") or "").strip()
+        and _WORKBENCH_DRAFT_NAME.fullmatch(str(draft.get("display_name") or ""))
+    ):
+        raise Nl2AgentDraftSaveError("agent_display_name_immutable")
     if generated_name is not None:
         if str(draft.get("name") or "").strip():
             raise Nl2AgentDraftSaveError("agent_name_already_set")
@@ -1384,7 +1394,7 @@ async def build_nl2agent_run_info(
     agent_config.capacity_snapshot = capacity_snapshot
     agent_config.context_budget_snapshot = context_budget_snapshot
     mcp_config: dict[str, Any] = {
-        "url": urljoin(LOCAL_MCP_SERVER, "sse"),
+        "url": get_tenant_local_mcp_server(tenant_id),
         "transport": "sse",
         "httpx_client_factory": create_httpx_client,
         "bypass_proxy": True,
@@ -1393,6 +1403,8 @@ async def build_nl2agent_run_info(
     if authorization:
         mcp_headers["Authorization"] = authorization
     mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(request.agent_id)
+    mcp_headers["X-Tenant-ID"] = str(tenant_id)
+    mcp_headers["X-Nexent-Internal-Token"] = TOKEN
     if mcp_headers:
         mcp_config["headers"] = mcp_headers
 

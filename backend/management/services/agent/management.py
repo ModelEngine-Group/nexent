@@ -12,10 +12,12 @@ from fastapi import Header
 from fastapi.responses import JSONResponse
 
 from agents.create_agent_info import create_tool_config_list
+from utils.agent_transfer_utils import portable_tool_params, validate_import_tool_params
 from services.agent_version_service import publish_version_impl
 from consts.const import TOOL_TYPE_MAPPING, \
     MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from consts.exceptions import (
+    ForbiddenError,
     SkillDuplicateError,
 )
 from consts.model import (
@@ -40,7 +42,10 @@ from database.agent_db import (
     delete_agent_relationship,
     delete_related_agent,
     insert_related_agent,
+    is_system_agent,
     query_all_agent_info_by_tenant_id,
+    query_agent_info_by_ids,
+    query_agent_list_candidates_by_tenant_id,
     query_sub_agent_relations,
     query_sub_agents_id_list,
     resolve_sub_agent_version_no,
@@ -62,10 +67,11 @@ from database.tool_db import (
 )
 from database import skill_db
 from management.services.skill.service import SkillService
-from database.agent_version_db import query_version_list
+from database.agent_version_db import batch_search_version_names, query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.a2a_agent_db import get_server_agent_ids
+from database.tag_management_db import TagManagementDB
 from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_ID,
     SYSTEM_PROMPT_TEMPLATE_NAME,
@@ -231,6 +237,9 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         tenant_id: Tenant ID
         user_id: User ID performing the deletion
     """
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent is managed by the platform")
+
     try:
         try:
             agent = search_agent_info_by_agent_id(agent_id, tenant_id)
@@ -261,6 +270,9 @@ async def _export_agent_dict_core(
     version_no: int = 0,
 ) -> dict:
     """Build ExportAndImportDataFormat dict for an agent tree at the given version."""
+    if is_system_agent(root_agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent cannot be exported")
+
     export_agent_dict = {}
     search_list: deque = deque([(root_agent_id, version_no)])
     visited: set = set()
@@ -478,6 +490,9 @@ async def export_agent_by_agent_id(
 
     # Check if any tool is KnowledgeBaseSearchTool and set its metadata to empty dict
     for tool in tool_list:
+        if tool.class_name == "AidpSearchTool":
+            tool.params = portable_tool_params(tool.class_name, tool.params)
+            tool.metadata = {}
         if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool", "DataMateSearchTool"]:
             tool.metadata = {}
         if tool.class_name == "IndependentAidpSearchTool":
@@ -515,6 +530,7 @@ async def export_agent_by_agent_id(
                                           is_main_agent=agent_info.get("is_main_agent", True),
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
+                                          enable_protocol_repair_retry=agent_info.get("enable_protocol_repair_retry") is True,
                                           verification_config=agent_info.get("verification_config"),
                                           context_policy=agent_info.get("context_policy"),
                                           model_params_override=agent_info.get("model_params_override"),
@@ -618,23 +634,14 @@ async def import_agent_by_agent_id(
         db_tool_info: dict | None = db_all_tool_info_dict.get(
             f"{tool.class_name}&{tool.source}", None)
 
-        if db_tool_info is None:
-            raise ValueError(
-                f"Cannot find tool {tool.class_name} in {tool.source}.")
-
-        db_tool_info_params = db_tool_info["params"]
-        db_tool_info_params_name_set = set(
-            [param_info["name"] for param_info in db_tool_info_params])
-
-        for tool_param_name in tool.params:
-            if tool_param_name not in db_tool_info_params_name_set:
-                raise ValueError(
-                    f"Parameter {tool_param_name} in tool {tool.class_name} from {tool.source} cannot be found.")
+        portable_params = validate_import_tool_params(
+            tool.class_name, tool.source, tool.params, db_tool_info,
+        )
 
         tool_list.append(ToolInstanceInfoRequest(tool_id=db_tool_info['tool_id'],
                                                  agent_id=-1,
                                                  enabled=True,
-                                                 params=tool.params))
+                                                 params=portable_params))
     # check the validity of the agent parameters
     if import_agent_info.max_steps <= 0:
         raise ValueError(
@@ -692,6 +699,7 @@ async def import_agent_by_agent_id(
                                          "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "allow_chat_metadata": import_agent_info.allow_chat_metadata,
+                                         "enable_protocol_repair_retry": getattr(import_agent_info, "enable_protocol_repair_retry", False),
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
                                          "model_params_override": getattr(import_agent_info, "model_params_override", None),
@@ -755,7 +763,9 @@ async def clear_agent_new_mark_impl(agent_id: int, tenant_id: str, user_id: str)
     return rowcount
 
 
-async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
+async def list_all_agent_info_impl(
+    tenant_id: str, user_id: str, agent_ids: Optional[list[int]] = None
+) -> list[dict]:
     """
     list all agent info
 
@@ -786,7 +796,11 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 )
                 user_group_ids = set()
 
-        agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
+        agent_list = (
+            query_agent_info_by_ids(tenant_id, agent_ids)
+            if agent_ids is not None
+            else query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
+        )
 
         # Get all agent IDs that are registered as A2A Server agents
         a2a_server_agent_ids = get_server_agent_ids(tenant_id)
@@ -795,6 +809,8 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
         enriched_agents: list[dict] = []
 
         for agent in agent_list:
+            if agent.get("agent_origin") == "SYSTEM" or agent.get("system_key"):
+                continue
             if not agent["enabled"]:
                 continue
 
@@ -837,6 +853,22 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
         # mark later ones as unavailable due to duplication.
         apply_duplicate_name_availability_rules(enriched_agents)
 
+        agent_tag_values: Dict[str, List[str]] = {}
+        agent_ids = [
+            str(entry["raw_agent"]["agent_id"])
+            for entry in enriched_agents
+            if entry["raw_agent"].get("agent_id") is not None
+        ]
+        if agent_ids:
+            try:
+                agent_tag_values = (
+                    TagManagementDB.list_resource_assignment_display_values_by_ids(
+                        tenant_id, "agent", agent_ids
+                    )
+                )
+            except Exception as error:
+                logger.warning("Failed to load agent tags: %s", error)
+
         simple_agent_list: list[dict] = []
         for entry in enriched_agents:
             agent = entry["raw_agent"]
@@ -860,7 +892,11 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "name": agent["name"] if agent["name"] else agent["display_name"],
                 "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
                 "description": agent["description"],
+                "icon_url": agent.get("icon_url"),
                 "author": agent.get("author"),
+                "created_by": agent.get("created_by"),
+                "create_time": agent.get("create_time"),
+                "tags": agent_tag_values.get(str(agent["agent_id"]), []),
                 "model_ids": model_ids,
                 "model_names": model_names,
                 "model_name": first_model_name,
@@ -873,12 +909,235 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "current_version_no": agent.get("current_version_no"),
                 "is_a2a_server": agent["agent_id"] in a2a_server_agent_ids,
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
+                "model_params_override": agent.get("model_params_override"),
+                "enable_protocol_repair_retry": agent.get("enable_protocol_repair_retry") is True,
             })
 
         return simple_agent_list
     except Exception as e:
         logger.error(f"Failed to query all agent info: {str(e)}")
         raise ValueError(f"Failed to query all agent info: {str(e)}")
+
+
+async def list_agent_page_impl(
+    tenant_id: str,
+    user_id: str,
+    permission: Optional[str] = None,
+    tag: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    additional_tenant_id: Optional[str] = None,
+    created_by: Optional[str] = None,
+    created_by_not: Optional[str] = None,
+    tag_predicates: Optional[list] = None,
+    search_tag_predicates: Optional[list] = None,
+) -> Dict[str, Any]:
+    """List visible agents with server-side filters and pagination."""
+    if created_by and created_by_not:
+        raise ValueError("created_by and created_by_not cannot be used together")
+
+    user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+    user_role = str(user_tenant_record.get("user_role") or "").upper()
+    can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+    user_group_ids: set[int] = set()
+    if not can_edit_all:
+        try:
+            user_group_ids = set(query_group_ids_by_user(user_id) or [])
+        except Exception as error:
+            logger.warning("Failed to query user group ids for filtering: %s", error)
+
+    agents: list[dict] = []
+    duplicate_reasons: dict[tuple[str, int], list[str]] = {}
+    tenant_ids = [tenant_id]
+    if additional_tenant_id:
+        tenant_ids.append(additional_tenant_id)
+    for scope_tenant_id in tenant_ids:
+        candidates = query_agent_list_candidates_by_tenant_id(
+            scope_tenant_id, include_description=bool(search and search.strip())
+        )
+        visible: list[dict] = []
+        for candidate in candidates:
+            if candidate.get("enabled") is False:
+                continue
+            if not can_edit_all:
+                agent_group_ids = set(convert_string_to_list(candidate.get("group_ids")))
+                is_creator = str(candidate.get("created_by")) == str(user_id)
+                if not is_creator and (
+                    not user_group_ids.intersection(agent_group_ids)
+                    or candidate.get("ingroup_permission") == PERMISSION_PRIVATE
+                ):
+                    continue
+            candidate.setdefault("tenant_id", scope_tenant_id)
+            if "permission" not in candidate:
+                candidate["permission"] = resolve_agent_list_permission(
+                    user_role=user_role,
+                    agent=candidate,
+                    user_id=user_id,
+                    can_edit_all=can_edit_all,
+                )
+            visible.append(candidate)
+
+        duplicate_entries = [
+            {"raw_agent": candidate, "unavailable_reasons": []}
+            for candidate in visible
+        ]
+        apply_duplicate_name_availability_rules(duplicate_entries)
+        for entry in duplicate_entries:
+            reasons = entry["unavailable_reasons"]
+            if reasons:
+                duplicate_reasons[(scope_tenant_id, int(entry["raw_agent"]["agent_id"]))] = reasons
+
+        if tag and tag.strip():
+            missing_tags = [candidate for candidate in visible if "tags" not in candidate]
+            try:
+                values = (
+                    TagManagementDB.list_resource_assignment_display_values_by_ids(
+                        scope_tenant_id,
+                        "agent",
+                        [str(candidate["agent_id"]) for candidate in missing_tags],
+                    )
+                    if missing_tags else {}
+                )
+            except Exception as error:
+                logger.warning("Failed to load agent tags: %s", error)
+                values = {}
+            for candidate in missing_tags:
+                candidate.setdefault("tags", values.get(str(candidate["agent_id"]), []))
+        agents.extend(visible)
+
+    agent_ids = [str(agent["agent_id"]) for agent in agents if agent.get("agent_id") is not None]
+    if tag_predicates:
+        matched_ids = set(TagManagementDB.filter_authorized_resource_ids(
+            tenant_id, "agent", agent_ids, tag_predicates
+        ))
+        agents = [agent for agent in agents if str(agent.get("agent_id")) in matched_ids]
+        agent_ids = [str(agent["agent_id"]) for agent in agents if agent.get("agent_id") is not None]
+
+    search_tag_ids = set()
+    if search_tag_predicates:
+        search_tag_ids = set(TagManagementDB.filter_authorized_resource_ids(
+            tenant_id, "agent", agent_ids, search_tag_predicates
+        ))
+
+    creator_count = sum(
+        str(agent.get("created_by")) == str(user_id) for agent in agents
+    )
+    creator_counts = {
+        "all": len(agents),
+        "created": creator_count,
+        "others": len(agents) - creator_count,
+    }
+
+    if created_by:
+        agents = [agent for agent in agents if str(agent.get("created_by")) == created_by]
+    if created_by_not:
+        agents = [agent for agent in agents if str(agent.get("created_by")) != created_by_not]
+
+    if permission:
+        normalized_permission = permission.strip().upper()
+        if normalized_permission not in {"EDIT", "READ_ONLY"}:
+            raise ValueError("permission must be EDIT or READ_ONLY")
+        agents = [
+            agent
+            for agent in agents
+            if agent.get("permission") == normalized_permission
+        ]
+
+    if tag and tag.strip():
+        normalized_tag = tag.strip().casefold()
+        agents = [
+            agent
+            for agent in agents
+            if any(
+                str(agent_tag).casefold() == normalized_tag
+                for agent_tag in agent.get("tags", [])
+            )
+        ]
+
+    if search and search.strip():
+        normalized_search = search.strip().casefold()
+        agents = [
+            agent
+            for agent in agents
+            if str(agent.get("agent_id")) in search_tag_ids or any(
+                normalized_search in str(agent.get(field) or "").casefold()
+                for field in ("name", "display_name", "description")
+            )
+        ]
+
+    total = len(agents)
+    offset = (page - 1) * page_size
+    paged_candidates = agents[offset:offset + page_size]
+    enriched_by_key: dict[tuple[str, int], dict] = {}
+    for scope_tenant_id in tenant_ids:
+        page_ids = [
+            int(agent["agent_id"])
+            for agent in paged_candidates
+            if agent["tenant_id"] == scope_tenant_id
+        ]
+        if not page_ids:
+            continue
+        enriched = await list_all_agent_info_impl(
+            tenant_id=scope_tenant_id, user_id=user_id, agent_ids=page_ids
+        )
+        enriched_by_key.update(
+            {
+                (scope_tenant_id, int(agent["agent_id"])): agent
+                for agent in enriched
+                if int(agent["agent_id"]) in page_ids
+            }
+        )
+
+    paged_scoped_agents: list[tuple[str, dict]] = []
+    for candidate in paged_candidates:
+        key = (candidate["tenant_id"], int(candidate["agent_id"]))
+        enriched = enriched_by_key.get(key)
+        if enriched is None:
+            continue
+        agent = dict(enriched)
+        reasons = list(
+            dict.fromkeys(
+                [*agent.get("unavailable_reasons", []), *duplicate_reasons.get(key, [])]
+            )
+        )
+        agent["unavailable_reasons"] = reasons
+        agent["is_available"] = not reasons
+        paged_scoped_agents.append((candidate["tenant_id"], agent))
+
+    for scope_tenant_id in tenant_ids:
+        versioned_agents = [
+            agent for scope, agent in paged_scoped_agents
+            if scope == scope_tenant_id
+            and (agent.get("current_version_no") or 0) > 0
+        ]
+        if not versioned_agents:
+            continue
+        version_rows = batch_search_version_names(
+            [int(agent["agent_id"]) for agent in versioned_agents],
+            scope_tenant_id,
+            [int(agent["current_version_no"]) for agent in versioned_agents],
+        )
+        version_by_key = {
+            (row["agent_id"], row["version_no"]): row for row in version_rows
+        }
+        for agent in versioned_agents:
+            version = version_by_key.get(
+                (int(agent["agent_id"]), int(agent["current_version_no"])), {}
+            )
+            agent["version_label"] = version.get("version_name")
+            agent["version_create_time"] = version.get("create_time")
+    paged_agents = [agent for _, agent in paged_scoped_agents]
+    return {
+        "items": paged_agents,
+        "creator_counts": creator_counts,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": (total + page_size - 1) // page_size if total else 0,
+        },
+    }
 
 
 
@@ -1090,6 +1349,8 @@ async def export_agent_with_skills_impl(
       - ExportAndImportDataFormat as a plain dict when the agent has no skills
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent cannot be exported")
 
     skill_zip_entries = collect_skill_zip_entries(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
@@ -1144,6 +1405,18 @@ async def import_agent_with_skills_impl(
     skill names are resolved to tenant-local skill IDs before creating instances.
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
+
+    # Validate every agent before creating any dependency skills.
+    catalog = {
+        (tool["class_name"], tool["source"]): tool
+        for tool in query_all_tools(tenant_id=tenant_id)
+    }
+    for agent in agent_info.agent_info.values():
+        for tool in agent.tools:
+            validate_import_tool_params(
+                tool.class_name, tool.source, tool.params,
+                catalog.get((tool.class_name, tool.source)),
+            )
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}

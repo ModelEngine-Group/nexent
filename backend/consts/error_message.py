@@ -76,6 +76,7 @@ class ErrorMessage:
         ErrorCode.KNOWLEDGE_STORAGE_COMMIT_FAILED: "File upload failed because the storage service is unavailable.",
         ErrorCode.KNOWLEDGE_TASK_SUBMIT_FAILED: "The file was uploaded, but the ingestion service is unavailable.",
         ErrorCode.KNOWLEDGE_DELETE_BLOCKED: "Knowledge base deletion is blocked while files are being processed.",
+        ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED: "Knowledge resource limit exceeded.",
 
         # ==================== 07 MCPTools / MCP 工具 ====================
         ErrorCode.MCP_TOOL_NOT_FOUND: "Tool not found.",
@@ -176,7 +177,7 @@ class ErrorMessage:
         ErrorCode.AGENT_EVALUATION_QUERY_COUNT_RANGE: "Query count must be between 1 and 50.",
         ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND: "Agent not found.",
         ErrorCode.AGENT_EVALUATION_JUDGE_MODEL_REQUIRED: "Judge model ID is required.",
-        ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE: "Only the creator can delete this evaluation run.",
+        ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE: "Only the creator or a tenant administrator can delete this evaluation run.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FAILED: "Failed to generate test queries.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT: "AI returned invalid format for test queries.",
         ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_EMPTY: "AI generated no valid test queries.",

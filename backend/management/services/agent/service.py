@@ -1,9 +1,8 @@
 import asyncio
-import imghdr
-import io
 import logging
 from collections import deque
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import Header
 from nexent.core.concurrency import run_blocking
@@ -17,6 +16,7 @@ from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     AppException,
     ForbiddenError,
+    TenantResourceLimitError,
 )
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
@@ -37,6 +37,7 @@ from management.services.agent.read import (
 from database.agent_db import (
     batch_search_agent_display_names,
     create_agent,
+    is_system_agent,
     query_all_agent_info_by_tenant_id,
     query_sub_agent_relations,
     query_sub_agents_id_list,
@@ -58,10 +59,12 @@ from database.tool_db import (
     search_tools_for_sub_agent,
 )
 from database import skill_db
-from database.attachment_db import (
-    get_file_stream,
+from management.services.agent.icon_storage import (
+    ICON_MAX_BYTES,
+    read_icon_image,
+    upload_icon_image,
+    validate_icon_image,
 )
-from database.client import minio_client
 from management.services.skill.service import SkillService
 from database.agent_version_db import (
     query_current_version_no,
@@ -83,19 +86,16 @@ from services.conversation_management_service import (
 )
 from utils.auth_utils import get_current_user_info
 from utils.config_utils import tenant_config_manager
+from services.agent_reasoning_service import (
+    snapshot_agent_reasoning_config as build_reasoning_snapshot,
+)
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
 # Import monitoring utilities
 
 logger = logging.getLogger(__name__)
-AGENT_ICON_MAX_BYTES = 2 * 1024 * 1024
-AGENT_ICON_CONTENT_TYPES = {
-    "gif": "image/gif",
-    "jpeg": "image/jpeg",
-    "png": "image/png",
-    "webp": "image/webp",
-}
+AGENT_ICON_MAX_BYTES = ICON_MAX_BYTES
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 
@@ -116,6 +116,7 @@ from management.services.agent.management import (
     load_default_agents_json_file,
     clear_agent_new_mark_impl,
     list_all_agent_info_impl,
+    list_agent_page_impl,
     insert_related_agent_impl,
     get_agent_id_by_name,
     get_agent_by_name_impl,
@@ -165,6 +166,7 @@ __all__ = (
     "load_default_agents_json_file",
     "clear_agent_new_mark_impl",
     "list_all_agent_info_impl",
+    "list_agent_page_impl",
     "insert_related_agent_impl",
     "get_agent_id_by_name",
     "get_agent_by_name_impl",
@@ -200,11 +202,6 @@ def _agent_icon_object_name(agent_id: int, tenant_id: str) -> str:
     return f"agent-icons/{tenant_id}/{agent_id}/icon"
 
 
-def _detect_agent_icon_content_type(content: bytes) -> str | None:
-    image_type = imghdr.what(None, content)
-    return AGENT_ICON_CONTENT_TYPES.get(image_type)
-
-
 async def upload_agent_icon_impl(
     agent_id: int,
     content: bytes,
@@ -212,26 +209,18 @@ async def upload_agent_icon_impl(
     user_id: str,
 ) -> dict:
     """Validate, store, and attach a user-supplied image to an editable agent."""
-    if not content:
-        raise ValueError("Agent icon file is empty")
-    if len(content) > AGENT_ICON_MAX_BYTES:
-        raise ValueError("Agent icon must not exceed 2 MB")
-
-    content_type = _detect_agent_icon_content_type(content)
-    if content_type is None:
-        raise ValueError("Agent icon must be a PNG, JPEG, GIF, or WebP image")
-
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent is managed by the platform")
+    validate_icon_image(content)
     agent = await get_agent_info_impl(agent_id, tenant_id, user_id=user_id)
     if agent.get("permission") != "EDIT":
         raise ForbiddenError("You do not have permission to edit this agent")
 
     owner_tenant_id = agent.get("tenant_id") or tenant_id
     object_name = _agent_icon_object_name(agent_id, owner_tenant_id)
-    success, error = minio_client.upload_fileobj(io.BytesIO(content), object_name)
-    if not success:
-        raise ValueError(f"Failed to upload agent icon: {error}")
+    content_type = upload_icon_image(content, object_name)
 
-    icon_url = f"/api/agent/{agent_id}/icon"
+    icon_url = f"/api/agent/{agent_id}/icon?v={uuid4().hex}"
     update_agent_icon(
         agent_id=agent_id,
         tenant_id=owner_tenant_id,
@@ -250,15 +239,7 @@ async def get_agent_icon_impl(
         raise FileNotFoundError("Agent icon not found")
 
     owner_tenant_id = agent.get("tenant_id") or tenant_id
-    stream = get_file_stream(_agent_icon_object_name(agent_id, owner_tenant_id))
-    if stream is None:
-        raise FileNotFoundError("Agent icon not found")
-
-    content = stream.read()
-    content_type = _detect_agent_icon_content_type(content)
-    if content_type is None:
-        raise FileNotFoundError("Agent icon is invalid")
-    return content, content_type
+    return read_icon_image(_agent_icon_object_name(agent_id, owner_tenant_id))
 
 
 async def check_agent_name_conflict_batch_impl(
@@ -392,10 +373,17 @@ async def get_agent_info_impl(
 ):
     try:
         agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+        if (
+            agent_info.get("agent_origin") == "SYSTEM"
+            or agent_info.get("system_key") is not None
+        ):
+            raise ForbiddenError("Agent is not accessible")
         # Keep the request-scoped tenant_id unless the record explicitly provides one.
         record_tenant_id = agent_info.get("tenant_id")
         if record_tenant_id:
             tenant_id = record_tenant_id
+    except ForbiddenError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")
@@ -665,6 +653,12 @@ async def update_agent_info_impl(
 ):
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
+    if (
+        request.agent_id is not None
+        and is_system_agent(request.agent_id, tenant_id) is True
+    ):
+        raise ForbiddenError("System Agent is managed by the platform")
+
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(
             ErrorCode.COMMON_PARAMETER_INVALID,
@@ -679,8 +673,45 @@ async def update_agent_info_impl(
         user_id=user_id,
     )
 
+    existing_agent = None
+    if request.agent_id is not None:
+        existing_agent = search_agent_info_by_agent_id(
+            agent_id=request.agent_id,
+            tenant_id=tenant_id,
+            version_no=getattr(request, "version_no", 0),
+        )
+    request_fields = getattr(request, "model_fields_set", set())
+    model_ids = (
+        request.model_ids
+        if "model_ids" in request_fields and request.model_ids is not None
+        else (existing_agent or {}).get("model_ids")
+    )
+    requested_overrides = (
+        request.model_params_override
+        if "model_params_override" in request_fields
+        else None
+    )
+    model_params_override = build_reasoning_snapshot(
+        model_ids=model_ids,
+        requested_overrides=requested_overrides,
+        existing_overrides=(existing_agent or {}).get("model_params_override"),
+        tenant_id=tenant_id,
+    )
+
     # If agent_id is None, create a new agent; otherwise, update existing
     agent_id: Optional[int] = request.agent_id
+    if agent_id is not None and isinstance(getattr(request, "enable_protocol_repair_retry", None), bool):
+        agent_record = search_agent_info_by_agent_id(agent_id, tenant_id)
+        user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+        user_role = str(user_tenant_record.get("user_role") or "").upper()
+        permission = resolve_agent_list_permission(
+            user_role=user_role,
+            agent=agent_record,
+            user_id=user_id,
+            can_edit_all=user_role in CAN_EDIT_ALL_USER_ROLES,
+        )
+        if permission != "EDIT":
+            raise ForbiddenError("You do not have permission to edit this agent")
     try:
         if agent_id is None:
             # Create agent - automatically set group_ids to current user's groups
@@ -706,10 +737,13 @@ async def update_agent_info_impl(
                     "allow_chat_metadata": request.allow_chat_metadata
                     if request.allow_chat_metadata is not None
                     else False,
+                    "enable_protocol_repair_retry": request.enable_protocol_repair_retry
+                    if request.enable_protocol_repair_retry is not None
+                    else False,
                     "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                     "verification_config": request.verification_config,
                     "context_policy": request.context_policy,
-                    "model_params_override": request.model_params_override,
+                    "model_params_override": model_params_override,
                     "duty_prompt": request.duty_prompt,
                     "constraint_prompt": request.constraint_prompt,
                     "few_shots_prompt": request.few_shots_prompt,
@@ -730,7 +764,10 @@ async def update_agent_info_impl(
             # Update agent
             request.prompt_template_id = prompt_template_id
             request.prompt_template_name = prompt_template_name
+            request.model_params_override = model_params_override
             update_agent(agent_id, request, user_id)
+    except TenantResourceLimitError:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")

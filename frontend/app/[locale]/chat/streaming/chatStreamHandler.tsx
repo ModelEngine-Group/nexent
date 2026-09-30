@@ -5,6 +5,7 @@ import { ChatMessageType, AgentStep } from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
+import { stripStreamedFinalAnswerEcho } from "@/lib/streamFinalAnswer";
 
 // Streaming message types for recovery
 export interface StreamingUnit {
@@ -321,6 +322,28 @@ const processThinkingCodeUnit = (
   state.lastContentType = unit.unit_type;
 };
 
+const removeFinalAnswerEchoFromStep = (
+  step: AgentStep | null,
+  answer: string
+): void => {
+  if (!step || !answer) return;
+  for (let index = step.contents.length - 1; index >= 0; index -= 1) {
+    const block = step.contents[index];
+    if (
+      block.type !== chatConfig.messageTypes.MODEL_OUTPUT &&
+      block.type !== chatConfig.messageTypes.MODEL_OUTPUT_THINKING &&
+      block.type !== chatConfig.messageTypes.MODEL_OUTPUT_CODE
+    ) {
+      continue;
+    }
+    const remaining = stripStreamedFinalAnswerEcho(block.content, answer);
+    if (remaining === null) return;
+    if (remaining.trim()) step.contents[index] = { ...block, content: remaining };
+    else step.contents.splice(index, 1);
+    return;
+  }
+};
+
 // Check if unit type should be skipped during reconstruction
 const isSkippedUnitType = (unitType: string): boolean => {
   const skippedTypes = [
@@ -387,9 +410,15 @@ export function reconstructFromStreamingMessage(
         processThinkingCodeUnit(unit, state);
         break;
 
-      case "final_answer":
-        state.finalAnswer = unwrapFinalAnswer(unit.unit_content);
+      case "final_answer": {
+        const answer = unwrapFinalAnswer(unit.unit_content);
+        removeFinalAnswerEchoFromStep(
+          state.currentStep ?? state.steps[state.steps.length - 1] ?? null,
+          answer
+        );
+        state.finalAnswer = answer;
         break;
+      }
 
       default: {
         if (isSkippedUnitType(unit.unit_type)) {
@@ -1041,13 +1070,13 @@ export const handleStreamResponse = async (
                   }
                   break;
 
-                case chatConfig.messageTypes.FINAL_ANSWER:
+                case chatConfig.messageTypes.FINAL_ANSWER: {
                   // Accumulate final answer content and process user break tag
-                  finalAnswer += processUserBreakTag(
-                    unwrapFinalAnswer(messageContent),
-                    t
-                  );
+                  const answer = unwrapFinalAnswer(messageContent);
+                  removeFinalAnswerEchoFromStep(currentStep, answer);
+                  finalAnswer += processUserBreakTag(answer, t);
                   break;
+                }
 
                 case chatConfig.messageTypes.PARSE:
                   // Code display message, skip

@@ -1,14 +1,40 @@
 import logging
 from typing import List, Optional
-from sqlalchemy import or_, update
+from sqlalchemy import or_, text, update
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
 from database.agent_version_db import query_current_version_no
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
+from consts.exceptions import TenantResourceLimitError
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
+
+
+def _enforce_tenant_agent_limit(session, tenant_id: str) -> None:
+    """Serialize standard-Agent creation and enforce the tenant quota."""
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"tenant-agent-limit:{tenant_id}"},
+    )
+    agent_count = session.query(AgentInfo.agent_id).filter(
+        AgentInfo.tenant_id == tenant_id,
+        AgentInfo.version_no == 0,
+        AgentInfo.delete_flag == "N",
+        or_(
+            AgentInfo.agent_origin == "USER",
+            AgentInfo.agent_origin.is_(None),
+        ),
+    ).count()
+    if agent_count >= MAX_AGENTS_PER_TENANT:
+        raise TenantResourceLimitError(
+            f"Tenant agent limit reached: maximum {MAX_AGENTS_PER_TENANT} agents per tenant",
+            resource="agents",
+            scope="tenant",
+            limit=MAX_AGENTS_PER_TENANT,
+            current_count=agent_count,
+        )
 
 
 def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
@@ -59,6 +85,49 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
         if not agent:
             raise ValueError("agent not found")
         return agent.agent_id
+
+
+def find_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: int = 0):
+    """Return an Agent ID by name, or ``None`` when no Agent exists.
+
+    This non-raising variant is intended for idempotent provisioning flows
+    where a missing Agent is an expected branch, not an error condition.
+    """
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.name == agent_name,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == version_no,
+            AgentInfo.delete_flag != 'Y').first()
+        return agent.agent_id if agent else None
+
+
+def search_system_agent(
+    tenant_id: str,
+    system_key: str,
+    version_no: int = 0,
+) -> Optional[dict]:
+    """Return one active platform-owned Agent for the tenant and key."""
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.system_key == system_key,
+            AgentInfo.agent_origin == "SYSTEM",
+            AgentInfo.version_no == version_no,
+            AgentInfo.delete_flag != "Y",
+        ).first()
+        return as_dict(agent) if agent else None
+
+
+def is_system_agent(agent_id: int, tenant_id: str) -> bool:
+    """Return whether an Agent identity is owned and protected by the platform."""
+    with get_db_session() as session:
+        return session.query(AgentInfo.agent_id).filter(
+            AgentInfo.agent_id == agent_id,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.agent_origin == "SYSTEM",
+            AgentInfo.delete_flag != "Y",
+        ).first() is not None
 
 
 def search_blank_sub_agent_by_main_agent_id(tenant_id: str, version_no: int = 0):
@@ -203,6 +272,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     info_with_metadata.setdefault("context_policy", None)
     info_with_metadata.setdefault("model_params_override", None)
     info_with_metadata.setdefault("is_a2a", False)
+    info_with_metadata.setdefault("enable_protocol_repair_retry", False)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -211,6 +281,10 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "is_new": True,  # Mark new agents as new
     })
     with get_db_session() as session:
+        # System Agents are provisioned separately and are excluded by the
+        # quota query above; ordinary Agent creation is serialized per tenant.
+        if info_with_metadata.get("agent_origin", "USER") != "SYSTEM":
+            _enforce_tenant_agent_limit(session, tenant_id)
         new_agent = AgentInfo(**filter_property(info_with_metadata, AgentInfo))
         new_agent.delete_flag = 'N'
         session.add(new_agent)
@@ -221,6 +295,9 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "agent_id": new_agent.agent_id,
             "tenant_id": new_agent.tenant_id,
             "name": new_agent.name,
+            "system_key": getattr(new_agent, "system_key", None),
+            "agent_origin": getattr(new_agent, "agent_origin", "USER"),
+            "system_revision": getattr(new_agent, "system_revision", None),
             "display_name": new_agent.display_name,
             "description": new_agent.description,
             "author": new_agent.author,
@@ -233,6 +310,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "is_main_agent": new_agent.is_main_agent,
             "provide_run_summary": new_agent.provide_run_summary,
             "allow_chat_metadata": bool(new_agent.allow_chat_metadata),
+            "enable_protocol_repair_retry": new_agent.enable_protocol_repair_retry,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,
             "business_logic_model_name": new_agent.business_logic_model_name,
@@ -257,7 +335,35 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         return result
 
 
-def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
+def update_system_agent_revision(
+    *,
+    agent_id: int,
+    tenant_id: str,
+    system_revision: str,
+    user_id: str,
+) -> None:
+    """Record the applied release revision on the protected system draft."""
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.agent_id == agent_id,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == 0,
+            AgentInfo.agent_origin == "SYSTEM",
+            AgentInfo.delete_flag != "Y",
+        ).first()
+        if not agent:
+            raise ValueError("System Agent draft not found")
+        agent.system_revision = system_revision
+        agent.updated_by = user_id
+
+
+def update_agent(
+    agent_id,
+    agent_info,
+    user_id,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Update an existing agent in the database.
     Default version_no=0 updates the draft version.
@@ -280,6 +386,8 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
         ).first()
         if not agent:
             raise ValueError("ag_tenant_agent_t Agent not found")
+        if getattr(agent, "agent_origin", "USER") == "SYSTEM" and not allow_system:
+            raise ValueError("System Agent is managed by the platform")
 
         agent_data = dict(agent_info.__dict__)
         fields_set = getattr(agent_info, "model_fields_set", None)
@@ -306,6 +414,24 @@ def update_agent_icon(agent_id: int, tenant_id: str, icon_url: str, user_id: str
                 AgentInfo.delete_flag == "N",
             )
             .values(icon_url=icon_url, updated_by=user_id)
+        )
+        if result.rowcount == 0:
+            raise ValueError("ag_tenant_agent_t Agent not found")
+
+
+def update_agent_display_name(
+    agent_id: int, tenant_id: str, display_name: str, user_id: str
+) -> None:
+    """Update the display name on every active version of an agent."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.delete_flag == "N",
+            )
+            .values(display_name=display_name, updated_by=user_id)
         )
         if result.rowcount == 0:
             raise ValueError("ag_tenant_agent_t Agent not found")
@@ -398,6 +524,55 @@ def query_all_agent_info_by_tenant_id(tenant_id: str, version_no: int = 0):
         return [as_dict(agent) for agent in agents]
 
 
+def query_agent_list_candidates_by_tenant_id(
+    tenant_id: str, *, include_description: bool = False
+) -> list[dict]:
+    """Load only fields needed to filter and page visible draft agents."""
+    columns = [
+        AgentInfo.agent_id,
+        AgentInfo.tenant_id,
+        AgentInfo.name,
+        AgentInfo.display_name,
+        AgentInfo.created_by,
+        AgentInfo.create_time,
+        AgentInfo.group_ids,
+        AgentInfo.ingroup_permission,
+    ]
+    if include_description:
+        columns.append(AgentInfo.description)
+    with get_db_session() as session:
+        rows = (
+            session.query(*columns)
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != 'Y',
+                AgentInfo.enabled.is_(True),
+            )
+            .order_by(AgentInfo.create_time.desc(), AgentInfo.agent_id.desc())
+            .all()
+        )
+        return [dict(row._mapping) for row in rows]
+
+
+def query_agent_info_by_ids(tenant_id: str, agent_ids: list[int]) -> list[dict]:
+    """Load complete draft records for one already-authorized agent page."""
+    if not agent_ids:
+        return []
+    with get_db_session() as session:
+        agents = (
+            session.query(AgentInfo)
+            .filter(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != 'Y',
+                AgentInfo.agent_id.in_(agent_ids),
+            )
+            .all()
+        )
+        return [as_dict(agent) for agent in agents]
+
+
 def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> dict:
     """
     Batch query agent display names by agent IDs.
@@ -423,7 +598,25 @@ def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> di
         return {a.agent_id: (a.display_name or a.name) for a in agents}
 
 
-def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0, selected_agent_version_no: Optional[int] = None) -> bool:
+def _ensure_system_relation_mutation_allowed(
+    parent_agent_id: int,
+    tenant_id: str,
+    allow_system: bool,
+) -> None:
+    """Reject ordinary relation writes targeting a platform Agent."""
+    if not allow_system and is_system_agent(parent_agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
+
+
+def insert_related_agent(
+    parent_agent_id: int,
+    child_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    selected_agent_version_no: Optional[int] = None,
+    allow_system: bool = False,
+) -> bool:
     """
     Insert a related agent.
     Default version_no=0 creates the draft version.
@@ -436,6 +629,9 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         version_no: Parent agent version number. Default 0 = draft/editing state
         selected_agent_version_no: Pinned version of child agent. None = runtime fallback to child current_version_no
     """
+    _ensure_system_relation_mutation_allowed(
+        parent_agent_id, tenant_id, allow_system
+    )
     try:
         relation_info = {
             "parent_agent_id": parent_agent_id,
@@ -457,7 +653,14 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         return False
 
 
-def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0) -> bool:
+def delete_related_agent(
+    parent_agent_id: int,
+    child_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+) -> bool:
     """
     Delete a related agent.
     Default version_no=0 deletes the draft version.
@@ -469,6 +672,9 @@ def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         user_id: User ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    _ensure_system_relation_mutation_allowed(
+        parent_agent_id, tenant_id, allow_system
+    )
     try:
         with get_db_session() as session:
             session.query(AgentRelation).filter(
@@ -537,6 +743,7 @@ def update_related_agents(
     user_id: str,
     related_agents: Optional[List[dict]] = None,
     version_no: int = 0,
+    allow_system: bool = False,
 ):
     """
     Update related agents for a parent agent by replacing all existing relations.
@@ -552,6 +759,9 @@ def update_related_agents(
         related_agents: List of dicts with 'agent_id' and optional 'version_no' keys
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    _ensure_system_relation_mutation_allowed(
+        parent_agent_id, tenant_id, allow_system
+    )
     new_related_ids, version_map = _parse_related_agents(related_agents)
 
     with get_db_session() as session:
@@ -586,7 +796,13 @@ def update_related_agents(
         _update_existing_relations(current_relations, ids_to_update, version_map, user_id)
 
 
-def delete_agent_relationship(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):
+def delete_agent_relationship(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Delete all relationships for an agent.
     Default version_no=0 deletes the draft version.
@@ -597,6 +813,7 @@ def delete_agent_relationship(agent_id: int, tenant_id: str, user_id: str, versi
         user_id: User ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    _ensure_system_relation_mutation_allowed(agent_id, tenant_id, allow_system)
     with get_db_session() as session:
         session.query(AgentRelation).filter(
             AgentRelation.parent_agent_id == agent_id,

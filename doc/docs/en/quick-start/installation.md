@@ -539,6 +539,74 @@ NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
 
 > **Important**: The URL must include the `/api` suffix because the Northbound service uses FastAPI's `root_path="/api"` configuration.
 
+## 🤖 Official Agent Deployment
+
+After Nexent is deployed, you can install official agents from the official agent resources included in the deployment package. Official agent deployment is decoupled from the Nexent platform deployment and does not run automatically when the platform starts.
+
+### Prerequisites
+
+Before deployment, make sure that:
+
+1. Nexent has been deployed with Docker or Kubernetes;
+2. The `nexent-config` service is running and database initialization is complete;
+3. The deployment package contains `deploy/official-agents`;
+4. Docker deployments use Git Bash or WSL to run the script; Kubernetes deployments use a terminal with access to the target cluster.
+
+No additional environment variables are required, and users do not need to run Git commands, `docker cp`, or the synchronization API manually.
+
+### Interactive Deployment
+
+Run the following command from the Nexent repository root:
+
+```bash
+bash deploy/deploy-official-agents.sh
+```
+
+The script scans the actual first-level directories under `deploy/official-agents` and presents them as the available profiles. You can enter one profile, multiple profiles such as `2,3`, or `all` to install every profile. The script validates the directories and `agent.json` files. Invalid selections stop before any copy or synchronization operation.
+
+For Docker deployments, the selected profiles are copied to `/mnt/nexent/official-agents/` in the `nexent-config` container and then synchronized to the official agent repository.
+
+For Kubernetes deployments, run:
+
+```bash
+bash deploy/deploy-official-agents.sh --kubernetes
+```
+
+To specify a namespace:
+
+```bash
+bash deploy/deploy-official-agents.sh \
+  --kubernetes \
+  --namespace custom-namespace
+```
+
+### Using Official Agents After Deployment
+
+After deployment, users can find the templates in the **Agent Repository** under the official agent list. When copying an official agent, follow the dialog to select models and choose whether to reuse or create the required knowledge bases, Skills, and MCP configurations.
+
+The deployment stage only publishes templates. It does not create knowledge bases for every tenant. When an official agent includes a knowledge base, the target tenant must have an available embedding model when the agent is copied for the first time.
+
+### Verification
+
+For Docker deployments, inspect the copied resources with:
+
+```bash
+docker exec nexent-config find /mnt/nexent/official-agents -name agent.json -print
+```
+
+Then sign in to Nexent, open the **Agent Repository**, switch to the official agent list, and confirm that the selected profiles are available.
+
+### Delete an Official Agent
+
+Deleting an official template requires Super Administrator privileges:
+
+1. Open **Resource Management**;
+2. Open the **Agents** page;
+3. Click **Manage Official Agents**;
+4. Select the template and confirm deletion.
+
+This removes the official repository listing, the source Agent in the system tenant, and the corresponding server-side Bundle files. Agent copies already created in regular tenants are not deleted.
+
 ## 💡 Need Help
 
 - Browse the [FAQ](./faq) for common install issues

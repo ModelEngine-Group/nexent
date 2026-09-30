@@ -1,5 +1,6 @@
 import pytest
 from jinja2 import Environment, meta
+from nexent.core.prompts import load_prompt
 from utils.prompt_template_utils import (
     get_prompt_generate_template_keys,
     get_nl2skill_prompt_template,
@@ -17,6 +18,15 @@ class TestPromptTemplateUtils:
         assert "duty_system_prompt" in template_keys
         template_keys.clear()
         assert get_prompt_generate_template_keys()
+
+    @pytest.mark.parametrize(
+        ("language", "expected"),
+        [("en", "general-purpose workbench assistant"), ("zh", "通用智能工作台助手")],
+    )
+    def test_get_workbench_main_prompt(self, language, expected):
+        template = load_prompt(language, "agent/workbench_main")
+
+        assert expected in template["system_prompt"]
 
     @pytest.mark.parametrize("template_content", [None, [], "invalid"])
     def test_normalize_prompt_generate_template_content_rejects_non_mappings(

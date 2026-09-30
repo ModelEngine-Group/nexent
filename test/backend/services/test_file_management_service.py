@@ -8,6 +8,7 @@ import importlib
 import os
 import sys
 import types
+from contextlib import contextmanager
 from types import SimpleNamespace
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock, Mock
@@ -168,6 +169,49 @@ def reset_knowledge_storage_stub():
 
 class TestUploadFilesImpl:
     """Test cases for upload_files_impl function"""
+
+    @pytest.mark.asyncio
+    async def test_knowledge_file_size_validation_handles_fallback_and_oversize(self, monkeypatch):
+        """Knowledge uploads measure fallback streams and reject files over the configured limit."""
+        from backend.services.file_management_service import (
+            _get_upload_size,
+            _validate_knowledge_file_sizes,
+        )
+
+        file_object = MagicMock()
+        file_object.tell.return_value = 0
+        file_object.seek.side_effect = [OSError("seek failed"), OSError("restore failed")]
+        fallback_upload = MagicMock(size=None, file=file_object)
+        fallback_upload.seek = AsyncMock()
+        fallback_upload.read = AsyncMock(return_value=b"abc")
+
+        assert await _get_upload_size(fallback_upload) == 3
+
+        monkeypatch.setattr(file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 2)
+        oversized_upload = MagicMock(size=3, filename="large.pdf")
+        with pytest.raises(AppException) as exc_info:
+            await _validate_knowledge_file_sizes([None, oversized_upload])
+
+        assert exc_info.value.error_code == ErrorCode.FILE_TOO_LARGE
+        assert exc_info.value.details["limit_bytes"] == 2
+
+    @pytest.mark.asyncio
+    async def test_local_knowledge_upload_validates_size_before_writing(self, monkeypatch):
+        """Local knowledge-base uploads reject oversized files before save_upload_file."""
+        monkeypatch.setattr(file_management_service, "MAX_KNOWLEDGE_FILE_SIZE_BYTES", 1)
+        oversized_upload = MagicMock(size=2, filename="large.pdf")
+        save_upload = AsyncMock(return_value=True)
+
+        with patch.object(file_management_service, "save_upload_file", save_upload):
+            with pytest.raises(AppException) as exc_info:
+                await upload_files_impl(
+                    destination="local",
+                    file=[oversized_upload],
+                    folder="knowledge_base",
+                )
+
+        assert exc_info.value.error_code == ErrorCode.FILE_TOO_LARGE
+        save_upload.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_local_success(self):
@@ -412,24 +456,14 @@ class TestUploadFilesImpl:
             assert uploaded_names == ["DOC_1.PDF", "doc_2.pdf"]
 
     @pytest.mark.asyncio
-    async def test_upload_files_impl_syncs_effective_name_to_successful_lifecycle_record(self):
-        """Conflict renaming updates only successful lifecycle rows in a partial batch."""
-        files = [
-            MagicMock(filename="a.txt", size=3),
-            MagicMock(filename="b.txt", size=4),
-        ]
-        context = SimpleNamespace(
-            tenant_id="tenant-1",
-            knowledge_id=7,
-            index_name="kb-1",
-            bucket_name="bucket-1",
-            ingroup_permission="SHARED",
-        )
-        records = [
-            {"file_id": "fid-a", "object_name": "folder/a.txt", "original_filename": "a.txt", "status": "UPLOADING"},
-            {"file_id": "fid-b", "object_name": "folder/b.txt", "original_filename": "b.txt", "status": "UPLOADING"},
-        ]
-        transitions = []
+    @contextmanager
+    def _minio_kb_upload_patches(self, *, records, minio_results, list_files_payload, transitions, context):
+        """Shared mock harness for knowledge-base uploads through upload_files_impl."""
+        quota_service = MagicMock()
+        quota_service.check_hard_limit.return_value = {"quota_status": "ok"}
+        quota_service.check_hard_limit_post_write.return_value = {"quota_status": "ok"}
+        quota_module = types.ModuleType("services.quota_service")
+        quota_module.QuotaService = MagicMock(return_value=quota_service)
 
         def transition(file_id, **kwargs):
             transitions.append((file_id, kwargs))
@@ -438,38 +472,43 @@ class TestUploadFilesImpl:
             current["status"] = kwargs.get("status", current.get("status"))
             return dict(current)
 
-        quota_service = MagicMock()
-        quota_service.check_hard_limit.return_value = {"quota_status": "ok"}
-        quota_service.check_hard_limit_post_write.return_value = {"quota_status": "ok"}
-        quota_module = types.ModuleType("services.quota_service")
-        quota_module.QuotaService = MagicMock(return_value=quota_service)
-
         with patch.object(knowledge_storage_stub, "resolve_storage_context", return_value=context), \
                 patch("backend.services.file_management_service.create_file_records", return_value=records), \
                 patch("backend.services.file_management_service.transition_file_record", side_effect=transition), \
-                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=[
-                    {
-                        "success": True,
-                        "file_id": "fid-a",
-                        "file_name": "a.txt",
-                        "object_name": "folder/a.txt",
-                        "file_size": 3,
-                    },
-                    {
-                        "success": False,
-                        "file_id": "fid-b",
-                        "file_name": "b.txt",
-                        "error": "read failed",
-                    },
-                ])), \
+                patch("backend.services.file_management_service.upload_to_minio", AsyncMock(return_value=minio_results)), \
                 patch("backend.services.file_management_service.get_vector_db_core", MagicMock()), \
-                patch("backend.services.file_management_service.ElasticSearchService.list_files", AsyncMock(
-                    return_value={"files": [{"file": "a.txt"}]}
-                )), \
+                patch("backend.services.file_management_service.ElasticSearchService.list_files", AsyncMock(return_value=list_files_payload)), \
                 patch.dict(sys.modules, {"services.quota_service": quota_module}):
+            yield
+
+    async def test_upload_files_impl_syncs_effective_name_to_successful_lifecycle_record(self):
+        """Conflict renaming updates only successful lifecycle rows in a partial batch."""
+        records = [
+            {"file_id": "fid-a", "object_name": "folder/a.txt", "original_filename": "a.txt", "status": "UPLOADING"},
+            {"file_id": "fid-b", "object_name": "folder/b.txt", "original_filename": "b.txt", "status": "UPLOADING"},
+        ]
+        transitions = []
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+
+        with self._minio_kb_upload_patches(
+            records=records,
+            minio_results=[
+                {"success": True, "file_id": "fid-a", "file_name": "a.txt", "object_name": "folder/a.txt", "file_size": 3},
+                {"success": False, "file_id": "fid-b", "file_name": "b.txt", "error": "read failed"},
+            ],
+            list_files_payload={"files": [{"file": "a.txt"}]},
+            transitions=transitions,
+            context=context,
+        ):
             result = await upload_files_impl(
                 destination="minio",
-                file=files,
+                file=[MagicMock(filename="a.txt", size=3), MagicMock(filename="b.txt", size=4)],
                 folder="folder",
                 index_name="kb-1",
                 user_id="user-1",
@@ -486,6 +525,47 @@ class TestUploadFilesImpl:
             file_id == "fid-b" and "original_filename" in kwargs
             for file_id, kwargs in transitions
         )
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_conflict_scan_ignores_own_batch_rows(self):
+        """The conflict scan must not treat the current batch's lifecycle rows as existing documents.
+
+        list_files merges durable lifecycle rows into the file list, so right after
+        create_file_records the upload's own row is visible there. Without the
+        batch exclusion every first upload of a name renamed itself to <name>_1.
+        """
+        records = [
+            {"file_id": "fid-a", "object_name": "folder/a.txt", "original_filename": "a.txt", "status": "UPLOADING"},
+        ]
+        transitions = []
+        context = SimpleNamespace(
+            tenant_id="tenant-1",
+            knowledge_id=7,
+            index_name="kb-1",
+            bucket_name="bucket-1",
+            ingroup_permission="SHARED",
+        )
+
+        with self._minio_kb_upload_patches(
+            records=records,
+            minio_results=[
+                {"success": True, "file_id": "fid-a", "file_name": "a.txt", "object_name": "folder/a.txt", "file_size": 3},
+            ],
+            list_files_payload={"files": [{"file": "a.txt", "file_id": "fid-a"}]},
+            transitions=transitions,
+            context=context,
+        ):
+            result = await upload_files_impl(
+                destination="minio",
+                file=[MagicMock(filename="a.txt", size=3)],
+                folder="folder",
+                index_name="kb-1",
+                user_id="user-1",
+            )
+
+        assert result[2] == ["a.txt"]
+        assert records[0]["original_filename"] == "a.txt"
+        assert not any("original_filename" in kwargs for _, kwargs in transitions)
 
     @pytest.mark.asyncio
     async def test_upload_files_impl_minio_conflict_resolution_es_exception(self):

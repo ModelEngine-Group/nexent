@@ -122,6 +122,9 @@ oauth_service_mock.get_oauth_config = MagicMock(
 )
 sys.modules["services"] = MagicMock()
 sys.modules["services.oauth_service"] = oauth_service_mock
+# apps.oauth_app imports services.audit_service; the blanket `services` MagicMock
+# above is not a package, so the audit submodule must be pre-registered.
+sys.modules["services.audit_service"] = MagicMock()
 
 nexent_mock = MagicMock()
 sys.modules["nexent"] = nexent_mock

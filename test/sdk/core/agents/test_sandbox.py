@@ -1218,13 +1218,15 @@ class TestHostToolBridge:
         executor.send_tools({"host_add": HostTool(), "remote_tool": remote_tool})
 
         assert executor.sent_tools == {"remote_tool": remote_tool}
-        assert "def host_add(*args, **kwargs):" in executor.proxy_code
-
-        namespace = {}
-        exec(executor.proxy_code, namespace)
-        assert namespace["host_add"](4, right=5) == 9
-
-        executor.cleanup()
+        try:
+            namespace = {}
+            exec(executor.proxy_code, namespace)
+            bridge = executor._nexent_tool_bridge
+            with bridge.execution_context() as execution_id:
+                exec(bridge.execution_proxy_code(execution_id), namespace)  # noqa: S102 - Trusted bridge bootstrap.
+                assert namespace["host_add"](4, right=5) == 9
+        finally:
+            executor.cleanup()
         assert executor.cleaned_up is True
 
     def test_containerized_bridge_uses_runtime_service_name(self, monkeypatch):
@@ -1252,8 +1254,10 @@ class TestHostToolBridge:
                 namespace,
             )
 
-            with pytest.raises(RuntimeError, match="Unknown local tool: missing_tool"):
-                namespace["missing_tool"]()
+            with bridge.execution_context() as execution_id:
+                missing = namespace["_nexent_make_host_tool"]("missing_tool", execution_id)
+                with pytest.raises(RuntimeError, match="Unknown local tool: missing_tool"):
+                    missing()
         finally:
             bridge.close()
 
@@ -1277,7 +1281,9 @@ class TestHostToolBridge:
                 namespace,
             )
 
-            result = namespace["generate_chart"]()
+            with bridge.execution_context() as execution_id:
+                exec(bridge.execution_proxy_code(execution_id), namespace)  # noqa: S102 - Trusted bridge bootstrap.
+                result = namespace["generate_chart"]()
             output_path = tmp_path / "chart.png"
             result.save(output_path)
 
@@ -1303,7 +1309,9 @@ class TestHostToolBridge:
                 namespace,
             )
 
-            assert namespace["binary_tool"]() == {"items": [b"chart-bytes"]}
+            with bridge.execution_context() as execution_id:
+                exec(bridge.execution_proxy_code(execution_id), namespace)  # noqa: S102 - Trusted bridge bootstrap.
+                assert namespace["binary_tool"]() == {"items": [b"chart-bytes"]}
         finally:
             bridge.close()
 
@@ -1329,12 +1337,14 @@ class TestHostToolBridge:
                 namespace,
             )
 
-            result = namespace["parallel_executor"](
-                tasks=[
-                    (namespace["host_add"], {"left": 1, "right": 2}),
-                    (namespace["host_add"], {"left": 4, "right": 5}),
-                ]
-            )
+            with bridge.execution_context() as execution_id:
+                exec(bridge.execution_proxy_code(execution_id), namespace)  # noqa: S102 - Trusted bridge bootstrap.
+                result = namespace["parallel_executor"](
+                    tasks=[
+                        (namespace["host_add"], {"left": 1, "right": 2}),
+                        (namespace["host_add"], {"left": 4, "right": 5}),
+                    ]
+                )
 
             assert result == [3, 9]
         finally:
@@ -2203,7 +2213,7 @@ class TestToolBridge:
             code = bridge.proxy_code({"my_tool": object()})
             namespace = {}
             exec(code, namespace)
-            assert "def my_tool(" in code
+            assert callable(namespace["my_tool"])
             assert "_NEXENT_TOOL_BRIDGE_URL" in code
             assert "_NEXENT_TOOL_BRIDGE_TIMEOUT = None" in code
             assert "timeout=120" not in code

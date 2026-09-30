@@ -34,12 +34,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
+import { resolveAgentDeepLinkAction } from "@/lib/agentUsageGuide";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
 import { conversationService } from "@/services/conversationService";
 import { useTranslation } from "react-i18next";
+import { useConversationRouteGuard } from "@/features/workbench/hooks/useConversationRouteGuard";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -51,10 +53,7 @@ import type {
 function useLocalChatRuntime(
   dictationAdapter: ServerDictationAdapter
 ): AssistantRuntime {
-  const attachmentAdapter = useMemo(
-    () => createNewChatAttachmentAdapter(),
-    []
-  );
+  const attachmentAdapter = useMemo(() => createNewChatAttachmentAdapter(), []);
 
   return useLocalRuntime(remoteChatModelAdapter, {
     adapters: {
@@ -77,10 +76,15 @@ export default function Home() {
 }
 
 const PersistentChatHome: FC = () => {
+  useConversationRouteGuard("agent_chat");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
+  const [deepLinkedAgentId, setDeepLinkedAgentId] = useState<number | null>(
+    null
+  );
+  const consumedDeepLinkRef = useRef(false);
   const { modelConfig } = useConfig();
   const dictationAdapter = useMemo(
     () => new ServerDictationAdapter(() => modelConfig?.stt),
@@ -92,6 +96,12 @@ const PersistentChatHome: FC = () => {
     const threadId =
       searchParams.get("thread_id") ?? searchParams.get("conversation_id");
     setRequestedThreadId(threadId || undefined);
+    const agentId = searchParams.get("agent_id");
+    setDeepLinkedAgentId(
+      agentId && Number.isInteger(Number(agentId)) && Number(agentId) > 0
+        ? Number(agentId)
+        : null
+    );
   }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
@@ -104,10 +114,37 @@ const PersistentChatHome: FC = () => {
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
 
-  const handleAgentSelected = useCallback((agent: Agent) => {
-    setSelectedAgent(agent);
-    log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
-  }, []);
+  const switchToNewAgentThread = useCallback(async () => {
+    await runtime.threads.switchToNewThread();
+  }, [runtime]);
+
+  const handleAgentSelected = useCallback(
+    (agent: Agent) => {
+      setSelectedAgent(agent);
+      log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
+      void switchToNewAgentThread().catch((error) => {
+        log.error("[Home] Failed to switch to a new agent thread:", error);
+      });
+    },
+    [switchToNewAgentThread]
+  );
+
+  useEffect(() => {
+    const action = resolveAgentDeepLinkAction({
+      agentId: deepLinkedAgentId,
+      agents,
+      consumed: consumedDeepLinkRef.current,
+      isLoading: isLoadingAgents,
+      getAgentId: (agent) => Number((agent as { agent_id?: number }).agent_id),
+    });
+    if (action.action === "wait") return;
+    if (deepLinkedAgentId != null) {
+      consumedDeepLinkRef.current = true;
+    }
+    if (action.action === "select") {
+      handleAgentSelected(action.agent);
+    }
+  }, [agents, deepLinkedAgentId, handleAgentSelected, isLoadingAgents]);
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
@@ -715,7 +752,7 @@ const HomeContent: FC<{
       await thread.updateCustom({ agentId: agent.id });
       onAgentSelected(agent);
     },
-    [runtime, onAgentSelected]
+    [onAgentSelected, runtime]
   );
 
   // Conditional rendering must happen after all hooks

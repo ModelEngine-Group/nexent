@@ -179,6 +179,40 @@ def test_filter_extra_params_passes_through_custom_object():
     }
 
 
+def test_filter_extra_params_accepts_reasoning_effort_for_llm_only():
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_effort": "high"}
+    ) == {"reasoning_effort": "high"}
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_effort": "unsupported"}
+    ) is None
+    assert model_consts.filter_extra_params(
+        "embedding", {"reasoning_effort": "high"}
+    ) is None
+
+
+def test_filter_extra_params_validates_reasoning_switch():
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": True, "reasoning_effort": "medium"}
+    ) == {"enable_thinking": True, "reasoning_effort": "medium"}
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": False, "reasoning_effort": "high"}
+    ) == {"enable_thinking": False, "reasoning_effort": "high"}
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": "true"}
+    ) is None
+
+
+def test_filter_extra_params_validates_reasoning_budget_tokens():
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_budget_tokens": 4096}
+    ) == {"reasoning_budget_tokens": 4096}
+    for value in (True, 0, -1, "4096"):
+        assert model_consts.filter_extra_params(
+            "llm", {"reasoning_budget_tokens": value}
+        ) is None
+
+
 def test_filter_extra_params_passes_through_custom_for_all_types():
     """__custom__ is type-agnostic: it survives for embedding/rerank/vlm too."""
     for model_type in ("embedding", "rerank", "vlm", "stt", "tts"):
@@ -1093,10 +1127,12 @@ def test_nl2_agent_skill_requests():
 
     nl2_skill = model_consts.NL2SkillRunRequest(
         query="Build an automation",
-        language="en"
+        language="en",
+        minio_files=[{"name": "requirements.pdf", "object_name": "files/1"}],
     )
     assert "complexity" not in nl2_skill.model_dump()
     assert nl2_skill.language == "en"
+    assert nl2_skill.minio_files[0]["name"] == "requirements.pdf"
 
 
 def test_export_import_requests():
@@ -1137,6 +1173,45 @@ def test_agent_repository_snapshot():
         ]
     )
     assert len(snapshot.skills) == 1
+
+
+def test_official_agent_bundle_derives_card_fields_from_root_agent():
+    root_agent = model_consts.ExportAndImportAgentInfo(
+        agent_id=1,
+        tenant_id="official",
+        name="medical_assistant",
+        display_name="Medical Assistant",
+        description="Medical assistant",
+        max_steps=5,
+        provide_run_summary=False,
+        enabled=True,
+        tools=[],
+        managed_agents=[],
+    )
+
+    bundle = model_consts.OfficialAgentBundle(
+        agent_id=1,
+        agent_info={"1": root_agent},
+        mcp_info=[],
+    )
+
+    assert bundle.name == "medical_assistant"
+    assert bundle.display_name == "Medical Assistant"
+    assert bundle.icon == "🤖"
+    assert bundle.version_label == "V1"
+
+
+def test_official_agent_bundle_uses_defaults_without_root_agent():
+    bundle = model_consts.OfficialAgentBundle(
+        agent_id=1,
+        agent_info={},
+        mcp_info=[],
+    )
+
+    assert bundle.name == "agent"
+    assert bundle.display_name == "agent"
+    assert bundle.icon == "🤖"
+    assert bundle.version_label == "V1"
 
 
 def test_repository_import_requests():
@@ -1371,15 +1446,17 @@ def test_manage_tenant_model_list_response():
 
 
 def test_agent_repository_listing_requests():
-    """Test AgentRepositoryListingCreateRequest"""
+    """Test the repository icon URL in the listing creation request."""
+    icon_url = "/api/repository/agent/1/versions/1/icon/image-id"
     req = model_consts.AgentRepositoryListingCreateRequest(
-        icon="🚀",
+        icon_url=icon_url,
         downloads=100,
         tags=["ai", "automation"],
         tool_count=10,
         content="This is a great agent"
     )
-    assert req.icon == "🚀"
+    assert req.icon_url == icon_url
+    assert req.model_dump(exclude_unset=True)["icon_url"] == icon_url
     assert req.downloads == 100
 
 
@@ -1427,3 +1504,57 @@ def test_delete_mcp_service_request():
         mcp_id=42
     )
     assert req.mcp_id == 42
+
+
+def test_reasoning_capability_normalizes_unsupported_profiles():
+    capability = model_consts.ReasoningCapability(
+        status="unsupported",
+        levels=["low"],
+        default="low",
+        effort_budgets={"low": 2048},
+    )
+
+    assert capability.levels == []
+    assert capability.default is None
+    assert capability.effort_budgets == {}
+
+
+def test_reasoning_capability_accepts_toggle_without_effort_levels():
+    capability = model_consts.ReasoningCapability(
+        status="supported",
+        control="toggle",
+        wire_format="thinking_toggle",
+    )
+
+    assert capability.levels == []
+
+
+def test_reasoning_control_validates_effort_and_budget_shapes():
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="effort")
+
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="budget_tokens", min=1024)
+
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="budget_tokens", min=4096, max=1024)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"status": "supported", "control": "effort"},
+        {"status": "supported", "levels": ["low"], "default": "high"},
+        {"status": "supported", "levels": ["low"], "effort_budgets": {"high": 2048}},
+        {"status": "supported", "levels": ["low"], "effort_budgets": {"low": 512}},
+        {
+            "status": "supported",
+            "levels": ["none", "high"],
+            "wire_format": "thinking_budget",
+            "effort_budgets": {},
+        },
+    ],
+)
+def test_reasoning_capability_rejects_invalid_profiles(payload):
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningCapability(**payload)

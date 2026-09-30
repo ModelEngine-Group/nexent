@@ -66,7 +66,8 @@ export const ModelOverrideModal = ({
     modelId: number,
     next: ModelAdvancedSettingsValue
   ) => {
-    const entry = buildModelOverrideEntry(next);
+    const model = models.find((item) => item.id === modelId);
+    const entry = buildModelOverrideEntry(next, model?.reasoningCapability);
     onChange({
       ...value,
       [String(modelId)]: entry,
@@ -108,16 +109,18 @@ export const ModelOverrideModal = ({
         // __custom__) so the user can see the currently effective values.
         // Once an override exists, it takes precedence.
         const formRecord = hasOverride
-          ? entry
+          ? { ...entry, reasoning_capability: model.reasoningCapability }
           : {
               temperature: model.temperature,
               top_p: model.topP,
               extra_params: model.extraParams,
+              reasoning_capability: model.reasoningCapability,
             };
         const formValue = advancedSettingsValueFromRecord(
           formRecord,
           specs,
-          modelType
+          modelType,
+          model.reasoningCapability
         );
         return { model, modelType, formValue, hasOverride };
       }),
@@ -196,9 +199,10 @@ export const ModelOverrideModal = ({
                 modelType={modelType}
                 specs={specs}
                 value={formValue}
-                onChange={(next) => handleFieldChange(model.id, next)}
+            onChange={(next) => handleFieldChange(model.id, next)}
                 mode="override"
                 disabled={disabled}
+                reasoningCapability={model.reasoningCapability}
               />
             </div>
           ))}

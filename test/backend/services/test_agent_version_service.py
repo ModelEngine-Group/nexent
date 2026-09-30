@@ -183,6 +183,96 @@ from backend.services.agent_version_service import (
 )
 
 
+def test_publish_rejects_platform_managed_system_agent(monkeypatch):
+    monkeypatch.setattr(agent_version_service_module, "is_system_agent", lambda *_: True)
+
+    with pytest.raises(ValueError, match="managed by the platform"):
+        publish_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="user1",
+        )
+
+
+def test_publish_allows_internal_system_agent_sync(monkeypatch):
+    monkeypatch.setattr(agent_version_service_module, "is_system_agent", lambda *_: True)
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_agent_draft",
+        lambda *_: (None, [], []),
+    )
+
+    with pytest.raises(ValueError, match="Agent draft not found"):
+        publish_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="system",
+            allow_system=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("operation", "downstream_name"),
+    [
+        (
+            lambda: get_version_list_impl(agent_id=1, tenant_id="tenant1"),
+            "query_version_list",
+        ),
+        (
+            lambda: get_version_impl(
+                agent_id=1,
+                tenant_id="tenant1",
+                version_no=2,
+            ),
+            "search_version_by_version_no",
+        ),
+        (
+            lambda: get_version_detail_impl(
+                agent_id=1,
+                tenant_id="tenant1",
+                version_no=2,
+            ),
+            "search_version_by_version_no",
+        ),
+        (
+            lambda: get_current_version_impl(agent_id=1, tenant_id="tenant1"),
+            "query_current_version_no",
+        ),
+        (
+            lambda: compare_versions_impl(
+                agent_id=1,
+                tenant_id="tenant1",
+                version_no_a=1,
+                version_no_b=2,
+            ),
+            "_get_version_detail_or_draft",
+        ),
+        (
+            lambda: _get_version_detail_or_draft(
+                agent_id=1,
+                tenant_id="tenant1",
+                version_no=0,
+            ),
+            "query_agent_draft",
+        ),
+    ],
+)
+def test_version_reads_hide_system_agent_before_snapshot_access(
+    monkeypatch,
+    operation,
+    downstream_name,
+):
+    """UT-BE-SAL-010: direct version reads must not disclose system Agents."""
+    monkeypatch.setattr(agent_version_service_module, "is_system_agent", lambda *_: True)
+    downstream = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, downstream_name, downstream)
+
+    with pytest.raises(ValueError, match="Agent not found"):
+        operation()
+
+    downstream.assert_not_called()
+
+
 @pytest.fixture
 def mock_agent_draft():
     """Mock agent draft data"""
@@ -265,6 +355,7 @@ def mock_skills_draft():
 
 def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test successfully publishing a version"""
+    mock_agent_draft["enable_protocol_repair_retry"] = False
     # Mock query_agent_draft
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
@@ -315,6 +406,7 @@ def test_publish_version_impl_success(monkeypatch, mock_agent_draft, mock_tools_
     # Verify updated_by is set to user_id on all snapshot types
     agent_snapshot = mock_insert_agent.call_args[0][0]
     assert agent_snapshot["updated_by"] == "user1"
+    assert agent_snapshot["enable_protocol_repair_retry"] is False
 
     tool_snapshot_0 = mock_insert_tool.call_args_list[0][0][0]
     tool_snapshot_1 = mock_insert_tool.call_args_list[1][0][0]
@@ -725,7 +817,7 @@ def test_rollback_version_impl_success(monkeypatch):
 
     # Assign the mock to a variable
     mock_query_snapshot = MagicMock(return_value=(
-        {"agent_id": 1, "name": "Test Agent"},
+        {"agent_id": 1, "name": "Test Agent", "enable_protocol_repair_retry": False},
         [],
         [],
     ))
@@ -776,6 +868,7 @@ def test_rollback_version_impl_success(monkeypatch):
     mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
     mock_query_draft.assert_called_once_with(1, "tenant1")  # Verify it was called
     mock_restore.assert_called_once()
+    assert mock_restore.call_args.kwargs["target_agent_snapshot"]["enable_protocol_repair_retry"] is False
     
 
 def test_rollback_version_impl_version_not_found(monkeypatch):

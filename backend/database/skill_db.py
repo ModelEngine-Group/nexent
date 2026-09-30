@@ -35,7 +35,13 @@ def _params_value_for_db(raw: Any) -> Any:
     return json.loads(json.dumps(strip_params_comments_for_db(raw), default=str))
 
 
-def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: str, version_no: int = 0):
+def create_or_update_skill_by_skill_info(
+    skill_info,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Create or update a SkillInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -49,9 +55,16 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
     Returns:
         Created or updated SkillInstance object
     """
+    from .agent_db import is_system_agent
+
     skill_info_dict = skill_info.__dict__ if hasattr(
         skill_info, '__dict__') else skill_info
     skill_info_dict = skill_info_dict.copy()
+    if (
+        not allow_system
+        and is_system_agent(skill_info_dict.get("agent_id"), tenant_id) is True
+    ):
+        raise ValueError("System Agent is managed by the platform")
     skill_info_dict.setdefault("tenant_id", tenant_id)
     skill_info_dict.setdefault("user_id", user_id)
     skill_info_dict.setdefault("version_no", version_no)
@@ -166,8 +179,18 @@ def search_skills_for_agent(agent_id: int, tenant_id: str, version_no: int = 0):
         return [as_dict(skill_instance) for skill_instance in skill_instances]
 
 
-def delete_skills_by_agent_id(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):
+def delete_skills_by_agent_id(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """Delete all skill instances for an agent."""
+    from .agent_db import is_system_agent
+
+    if not allow_system and is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
     with get_db_session() as session:
         session.query(SkillInstance).filter(
             SkillInstance.agent_id == agent_id,
@@ -289,7 +312,7 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "name": skill.skill_name,
         "tenant_id": skill.tenant_id,
         "description": skill.skill_description,
-        "tags": skill.skill_tags or [],
+        "tags": _normalize_skill_tags(skill.skill_tags),
         "content": skill.skill_content or "",
         "config_schemas": skill.config_schemas,
         "config_values": skill.config_values,
@@ -301,6 +324,17 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "updated_by": skill.updated_by,
         "update_time": skill.update_time.isoformat() if skill.update_time else None,
     }
+
+
+def _normalize_skill_tags(tags: Any) -> List[str]:
+    """Return skill tags as a string list, tolerating malformed persisted values."""
+    if isinstance(tags, list):
+        return [
+            tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()
+        ]
+    if isinstance(tags, str) and tags.strip():
+        return [tags.strip()]
+    return []
 
 
 def list_skills(tenant_id: str) -> List[Dict[str, Any]]:

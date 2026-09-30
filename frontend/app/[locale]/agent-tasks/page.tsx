@@ -747,8 +747,8 @@ export default function AgentTasksPage() {
       ),
     },
     {
-      title: t("agentAutomation.page.nextFireAt"),
-      dataIndex: "next_fire_at",
+      title: t("agentAutomation.page.lastFireAt"),
+      dataIndex: "last_fire_at",
       width: 220,
       render: (value) => formatDateTime(value),
     },

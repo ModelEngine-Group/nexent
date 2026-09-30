@@ -126,7 +126,7 @@ class TestAnalyzeImageToolEdgeCases:
     """Test edge cases and additional scenarios for AnalyzeImageTool."""
 
     def test_forward_impl_vlm_model_none(self, observer_en, mock_storage_client):
-        """Test that exception is raised when VLM model is None."""
+        """UT-BE-WMA-021: missing VLM returns a clear English Tool error."""
         tool = AnalyzeImageTool(
             observer=observer_en,
             vlm_model=None,

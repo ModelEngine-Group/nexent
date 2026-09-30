@@ -1,13 +1,13 @@
 "use client";
 
 import { Button } from "antd";
-import { Bot, Check, Eye, X } from "lucide-react";
+import { Check, Eye, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
+import { RepositoryAgentIcon } from "./RepositoryAgentIcon";
 
-const GRID_COLS =
-  "grid-cols-[minmax(0,2fr)_120px_160px_minmax(0,1.5fr)_280px]";
+const GRID_COLS = "grid-cols-[minmax(0,2fr)_120px_160px_minmax(0,1.5fr)_280px]";
 
 interface ReviewAgentListProps {
   listings: AgentRepositoryListingItem[];
@@ -18,10 +18,7 @@ interface ReviewAgentListProps {
   onReject: (listing: AgentRepositoryListingItem) => void;
 }
 
-function getListingTitle(
-  listing: AgentRepositoryListingItem,
-  t: TFunction
-) {
+function getListingTitle(listing: AgentRepositoryListingItem, t: TFunction) {
   return (
     listing.display_name?.trim() ||
     listing.name?.trim() ||
@@ -76,8 +73,7 @@ export function ReviewAgentList({
             const isUpdating =
               updatingRepositoryId === listing.agent_repository_id;
             const versionLabel =
-              listing.version_label?.trim() ||
-              t("repository.review.noVersion");
+              listing.version_label?.trim() || t("repository.review.noVersion");
             const submitter = getSubmitterDisplay(
               listing.submitted_by,
               currentUserEmail,
@@ -92,11 +88,12 @@ export function ReviewAgentList({
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-lg text-primary">
-                    {listing.icon?.trim() ? (
-                      <span aria-hidden>{listing.icon.trim()}</span>
-                    ) : (
-                      <Bot className="size-5" aria-hidden />
-                    )}
+                    <RepositoryAgentIcon
+                      agentId={listing.agent_id}
+                      iconUrl={listing.icon_url}
+                      size={40}
+                      iconSize={20}
+                    />
                   </div>
                   <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
                     {title}
