@@ -14,7 +14,7 @@ Do not invent script paths, selectors, hashes, or results during design.
 
 ## Bug
 
-Use a lightweight bug record under `test-e2e/changes/bugs/`. Identify observed versus expected behavior, owning Feature IDs, the stage where the defect escaped, why the existing formal baseline missed it, and whether an existing Case can be reused or strengthened. Update the Feature only when the product contract is missing or changes.
+Follow [bugfix.md](bugfix.md). With a usable SPEC, follow and confirm its Feature/rule/Case associations. Without one, use `nexent-spec-coding`'s lightweight design.md, defining the coherent capability and the same D1-D5 matrix without requiring a proposal/task set. Record a bug Change under `test-e2e/changes/bugs/`, with impact evidence and selected Cases. Reuse or strengthen existing coverage first; zero additions is valid. Record no gap or an unavailable baseline accurately rather than claiming coverage is absent. Update Feature/Case contracts only when changed or missing; historical coverage gaps are separate work.
 
 ## Change record paths
 

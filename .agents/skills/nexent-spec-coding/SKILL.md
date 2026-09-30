@@ -19,12 +19,19 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 | Work | Required reference |
 | --- | --- |
 | Choose the SPEC maintenance mode | [spec-maintenance-guide.md](references/spec-maintenance-guide.md) |
+| Fix a bug with or without an existing SPEC | [spec-maintenance-guide.md](references/spec-maintenance-guide.md), [bugfix-design-template.md](references/bugfix-design-template.md), and `nexent-test-assets`'s bugfix reference |
 | Create or revise `proposal.md` | [proposal-template.md](references/proposal-template.md) |
 | Create or revise `design.md`; design formal D1-D5 cases | [design-template.md](references/design-template.md) and [test-design-guide.md](references/test-design-guide.md) |
 | Create or revise `task.md` | [task-template.md](references/task-template.md) |
 | Plan, execute, or close verification | [verification-guide.md](references/verification-guide.md) |
 
 Use `nexent-test-assets` for the concrete Feature, Case, execution binding, schema, and Excel formats. `proposal.md` owns the current-change acceptance criteria, `design.md` owns design rationale and test strategy, and `task.md` owns the change-level traceability and evidence record.
+
+## Bugfix route
+
+For a bug, search the existing SPEC and formal assets before selecting the document scope. With a usable SPEC, follow its Feature/business-rule/Case links and check actual callers and scripts to determine affected behavior; update only relevant sections. Without a usable SPEC, create a lightweight `design.md` using the bugfix template. Define the complete coherent capability that owns the bug, its final expected behavior and existing Feature/Case coverage. Keep the current fix and verification scope explicit. A missing SPEC does not require creating `proposal.md` or `task.md`, reconstructing unrelated capabilities, or completing historical test coverage.
+
+Distinguish missing requirement documentation, a test baseline unavailable in this checkout, and a verified coverage gap. Reuse or strengthen existing Cases before adding any. Zero new Cases is valid when existing coverage reproduces the defect. Add stages only for a concrete proof boundary; D1-D5 is a classification, not a per-bug quota. Use the lightweight design's Acceptance Traceability for evidence when there is no `task.md`.
 
 ## Gated workflow
 
@@ -34,11 +41,11 @@ Search existing SPECs and choose the maintenance mode. Inspect the relevant code
 
 ### 2. Define behavior and formal D1-D5 cases
 
-Create or update `proposal.md`, `design.md`, and `task.md`. Update the product feature catalog and define observable acceptance criteria. Design every applicable D1-D5 case before product implementation. Each case must have a stable Case ID, owning Feature ID, priority, precise preconditions, steps, expected results, forbidden side effects, and the stage-specific fields required by the repository schemas.
+For requirements, create or update `proposal.md`, `design.md`, and `task.md`. For bugs, use the Bugfix route above. Preserve correct existing Feature and Case contracts; update them only for affected behavior or a confirmed gap. Define observable acceptance criteria and select the necessary proving stages before product implementation. Each new or modified case must have a stable Case ID, owning Feature ID, priority, precise preconditions, steps, expected results, forbidden side effects, and the stage-specific fields required by the repository schemas.
 
 Create a requirement change record under `test-e2e/changes/requirements/` or a lightweight bug record under `test-e2e/changes/bugs/`. Put lasting Feature and Case contracts in `test-e2e/features/` and `test-e2e/cases/`, not only in the change record. Run the design-phase validator and regenerate the Excel view. Do not invent final script paths, selectors, implementation hashes, or passing results during design.
 
-The design gate fails when an in-scope behavior lacks an applicable case or justified exclusion, a case lacks executable assertions, stage boundaries are violated, affected Feature/Case declarations are stale, or schema and traceability validation fail. Resolve material behavior conflicts before implementation. No separate manual test-case approval is required by this workflow.
+The design gate applies to current-change acceptance and justified regression behavior, not every historical path in the functional inventory. It fails when required proof is missing, assertions are not executable, stage boundaries are violated, affected Feature/Case declarations are stale, or schema and traceability validation fail. Resolve material behavior conflicts before implementation. No separate manual test-case approval is required by this workflow.
 
 ### 3. Implement the product behavior
 
@@ -56,7 +63,7 @@ Legacy UT maintenance remains separate and uses `nexent-python-tests` only when 
 
 Run the affected formal D1-D5 cases selected from the change record. Use fixed Playwright scripts for D4. Keep Mock and Real Smoke results distinct when both profiles apply. Missing, unimplemented, skipped, or expected-failure required cases do not pass. Keep product, test, environment, and external-provider failures distinguishable.
 
-Record sanitized commands, results, evidence paths, and unresolved blockers in `task.md`. Do not claim API, browser, model, Agent, security, reliability, performance, or deployment acceptance from a lower layer.
+Record sanitized commands, results, evidence paths, and unresolved blockers in `task.md`, or the lightweight bugfix `design.md` when that is the selected document mode. Run only the affected selection, broadening when caller/risk evidence warrants it. Do not claim API, browser, model, Agent, security, reliability, performance, or deployment acceptance from a lower layer.
 
 ### 6. Close out
 

@@ -4,12 +4,14 @@
 
 Create or update `task.md` according to [SPEC maintenance guidance](spec-maintenance-guide.md). The dependency order is formal test design, product implementation, fixed test implementation and case-local binding, local verification, then source/view closeout. Use numbered groups and checkboxes. Do not merge Legacy UT obligations into formal D1-D5 coverage.
 
+This template applies to full requirement/change sets and existing task documents. A bug without a usable SPEC keeps the same Acceptance Traceability columns in its lightweight design.md and does not require a separate task.md. Reuse correct existing contracts/scripts without artificial edits. A coverage inventory is broader than the current-fix verification selection.
+
 # Tasks — <Feature Name>
 
 ## 1. Formal Test Asset Design
 
-- [ ] 1.1 Update affected feature contracts and business rules. [AC-001]
-- [ ] 1.2 Add or modify required D1-D5 structured cases with explicit assertions and exclusions. [AC-001]
+- [ ] 1.1 Confirm affected feature contracts and business rules; update only changed or missing contracts. [AC-001]
+- [ ] 1.2 Reuse, strengthen or add structured cases at necessary proving stages, with explicit assertions and impact reasons. Zero additions is valid. [AC-001]
 - [ ] 1.3 Run the design-phase unified validator and regenerate Excel before product implementation. [AC-001]
 
 ## 2. Product Implementation
@@ -18,14 +20,14 @@ Create or update `task.md` according to [SPEC maintenance guidance](spec-mainten
 
 ## 3. Fixed Test Implementation
 
-- [ ] 3.1 Implement affected D1-D5 scripts after stable interfaces exist; bind case IDs in test metadata. [AC-001]
+- [ ] 3.1 Implement new/strengthened D1-D5 scripts after stable interfaces exist; reuse correct existing scripts for regression. [AC-001]
 - [ ] 3.2 Add or update `execution.yaml` for only affected Case directories; regenerate derived hashes. [AC-001]
 - [ ] 3.3 For a bug fix, retain a focused regression reproduction; an earlier reproduction script is allowed when it helps prove the defect. [AC-001]
 
 ## 4. Verification
 
 - [ ] 4.1 Run the smallest affected case selection and record exact results. [AC-001]
-- [ ] 4.2 Run all applicable affected D1-D5 groups and required mock/real-smoke profiles. [AC-001]
+- [ ] 4.2 Run selected regression Cases and required profiles; broaden only for evidenced caller or risk boundaries. [AC-001]
 - [ ] 4.3 Regenerate the Excel view and run the unified test-asset validator. [AC-001]
 
 ## 5. Acceptance Traceability

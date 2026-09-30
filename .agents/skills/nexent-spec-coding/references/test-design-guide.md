@@ -4,7 +4,7 @@ Use this guide while writing or revising `design.md`. Formal Nexent acceptance a
 
 ## Required design content
 
-For every in-scope requirement or bug contract:
+For current-change requirements or bug acceptance, and justified regressions:
 
 - assign or preserve a stable feature ID and observable business rules;
 - select every required proving stage from D1 through D5;
@@ -13,6 +13,8 @@ For every in-scope requirement or bug contract:
 - record exclusions with a concrete reason rather than silently omitting a normally applicable stage.
 
 Write formal assets through `nexent-test-assets`. Structured YAML/JSON files are the source of truth. Excel is a deterministic generated view and must not be edited as the source.
+
+For bugfixes, follow the SPEC's existing Feature/rule/Case associations and check actual code impact. Without a usable SPEC, use the lightweight bugfix design's identical matrix. Search and read existing Cases before authoring. Distinguish reuse, strengthen, add, regression-only and unaffected coverage. Missing documentation or a baseline not present in this checkout is not evidence that all stages lack tests. Documentation may cover the full coherent capability while current-fix acceptance remains limited to the defect and justified regressions.
 
 ## Choose the proving stage
 
@@ -26,6 +28,8 @@ Write formal assets through `nexent-test-assets`. Structured YAML/JSON files are
 
 Use the lowest stage that proves a behavior, then add higher stages only when their boundary adds necessary evidence. Mixed features commonly need several stages. D1 success never establishes D2-D5 results.
 
+No per-stage or per-bug count is required. Existing Cases may be sufficient with zero additions. Use parameterized variants when they prove the same contract; create distinct Case IDs for independent behavior or necessary independent proof. Every added layer needs a specific boundary/risk reason. Do not treat unrelated historical gaps in the functional inventory as this fix's tasks.
+
 ## Case quality rules
 
 - One case proves one concrete behavior or coherent journey outcome.
@@ -38,11 +42,11 @@ Use the lowest stage that proves a behavior, then add higher stages only when th
 
 ## Lifecycle
 
-1. During requirement or bug design, update the feature inventory and formal D1-D5 case contracts.
+1. During design, confirm the Feature/Case associations and modify only changed or missing contracts.
 2. Run `python test-e2e/infra/tools/validate_test_assets.py --phase design --generate` before product implementation begins.
 3. Implement product behavior.
-4. Implement fixed scripts and case-local `execution.yaml` after interfaces stabilize. Bind every automated Case ID to its own primary script.
-5. Run affected cases locally, then the applicable broader stage groups.
+4. Implement new/strengthened scripts and update affected `execution.yaml` bindings after interfaces stabilize. Reuse correct existing scripts unchanged.
+5. Run the selected Cases locally; broaden only when impact analysis warrants additional proof.
 6. Run `python test-e2e/infra/tools/validate_test_assets.py --phase implementation --generate` before closeout.
 
 Legacy implementation-oriented tests remain separate. They may continue to run during transition, but they are not formal D1-D5 assets and cannot satisfy formal Case or execution-binding coverage.

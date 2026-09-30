@@ -17,6 +17,7 @@ Paths are relative to the repository root. Authoritative assets live under `test
 - A Case's primary script lives beside its `case.yaml`; shared framework helpers live under `test-e2e/infra/automation/`. Do not make a shared helper the primary Case binding.
 - Design cases before product implementation. Implement fixed scripts and case-local `execution.yaml` after product implementation, except an intentional bug reproduction may be written earlier.
 - Update only affected Case directories, then validate the complete derived registry.
+- In bugfix mode, reuse existing coverage before adding Cases; zero additions is valid. A missing SPEC or unavailable test baseline does not trigger whole-feature test generation. Follow [bugfix.md](references/bugfix.md) for impact selection.
 - Do not edit the generated Excel workbook directly.
 - Do not encode secrets, personal absolute paths, or environment-specific runtime IDs in formal cases or scripts.
 - Business tests must not depend on a specific SQL file path. Test migration behavior only at the D5 deployment boundary.

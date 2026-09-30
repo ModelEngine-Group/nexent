@@ -111,6 +111,12 @@ uv pip check --python $TestPython
 
 用例验收标准正确时，纯脚本修复不必改 `case.yaml`；文件名、选择器和准备声明没变时，也不必改 `execution.yaml`。保留原 Case ID。新增用例使用新 ID，历史契约需要退出时标记 `retired`。
 
+Bugfix 有相关 SPEC 时，沿用其中 Feature、业务规则和 Case 的关联，并结合实际调用路径确认影响。没有可用 SPEC 时，在文档仓库创建轻量 `design.md`，按 [Bugfix design 模板](../.agents/skills/nexent-spec-coding/references/bugfix-design-template.md) 描述完整、内聚的功能边界与最终预期，保留与新需求相同的 `D1-D5 Test Design` 矩阵。它列出功能范围内的已知覆盖，Notes 标注复用、补强、新增、仅回归或不受影响；本次修复与验证范围单独写明。无需强制补齐 proposal/task 或整模块需求文档。
+
+优先复用能复现的用例，缺一个边界时补强原用例，只有缺少必要证明才新增。允许新增 0 条，也不要求每层一条。区分“没有 SPEC”“当前分支没有迁入基线”和“已确认覆盖缺口”：找不到基线时记录未知及检索范围，不自动补全整个功能。矩阵中的 N/A 表示不适用，GAP 表示已知缺口，UNKNOWN 表示覆盖不可确认；这些标注不是 Case ID，也不代表通过。
+
+Bug Change 的 `affected_cases.existing` 放入只需复用或回归的已有用例，`modified` 放入实际修改的 Case 或脚本，`added` 放入新用例。不受影响的 Case 可以保留在 design 的功能覆盖矩阵中，不列入本次执行选择。已有用例能准确检出时 `coverage_gap.type` 可为 `no_gap`；基线不可见时可为 `unknown_baseline`。关联原因和 design 路径记录在 `notes`，不必新增独立 manifest。
+
 Change 文件位于 `changes/{requirements,bugs,refactors,test-fixes}/`，每个文件一条记录。它记录关联关系，正式 Feature 和 Case 仍保留在各自目录。测试修复记录也要列出受影响 Case，方便通过 `--change` 选择验证范围。具体字段按现有 Schema 校验，不要仅创建一篇自由格式说明代替记录。
 
 固定脚本必须验证正式用例的前置条件、操作和预期；不能用常量断言、吞掉异常、随意 skip/xfail 或删除失败断言来获得通过。脚本使用现有资产 helper，并登记测试创建的资源，供清理过程追踪。创建本身属于被测行为时，应在测试步骤内创建并断言，不能靠前置准备绕过。

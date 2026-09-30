@@ -12,4 +12,4 @@ Use the Case structure in `test-e2e/cases/<Case-ID>/case.yaml`. The validator ch
 
 Priority expresses business and regression risk and does not select the stage. Each case proves one coherent behavior. Steps and expected results must be executable without guessing. Include forbidden side effects when failure could mutate state, leak data, invoke downstream services, or contaminate another tenant or session.
 
-A2A requires applicable cases at D1-D5, including discovery, registration or publishing, binding, invocation, and failure recovery journeys. OAuth and CAS journeys remain policy-skipped.
+A2A coverage can include discovery, registration or publishing, binding, invocation, and failure recovery at their necessary proving stages. A bug affecting one A2A behavior does not require generating Cases for all capabilities or all five stages. OAuth and CAS journeys remain policy-skipped.

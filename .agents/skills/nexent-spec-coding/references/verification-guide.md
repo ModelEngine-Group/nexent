@@ -2,12 +2,12 @@
 
 ## Required records
 
-Before implementation, record affected feature IDs, business rules, acceptance criteria and required D1-D5 case contracts. During execution, record exact commands, environment profile, version, observed results and evidence paths. Keep results in `task.md` traceability and formal run artifacts; do not write execution state back into the case contract.
+Before implementation, record affected feature IDs, business rules, acceptance criteria and selected Case IDs. During execution, record exact commands, environment profile, version, observed results and evidence paths. Keep results in `task.md` traceability or the lightweight bugfix design's identical table, plus formal run artifacts; do not write execution state back into the case contract.
 
 ## Verification rules
 
 - Run schema and traceability validation before product implementation.
-- After product implementation, add or update fixed scripts and case-local `execution.yaml` bindings for affected automated cases.
+- After product implementation, update scripts/bindings only when their contract, assertions or execution setup needs changes; existing regression Cases may run unchanged.
 - A case passes only when all expected results and forbidden-side-effect assertions pass.
 - Missing, unimplemented, skipped or expected-failure required cases remain incomplete. Required P0/P1 cases cannot be accepted that way.
 - Keep product, environment, provider, asset and test-implementation failures distinguishable.
@@ -25,6 +25,8 @@ Before implementation, record affected feature IDs, business rules, acceptance c
 | D5 | Risk-specific security, reliability, performance or deployment check |
 
 Use all applicable stages for mixed changes. Mocks provide deterministic primary coverage. Optional real-smoke profiles prove selected real-provider integrations and remain separately identified.
+
+For bugs, current-fix ACs and evidence-backed regression impact determine applicability. A full functional coverage matrix does not require all listed Cases or all five stages to execute. Global asset validation checks consistency without authorizing generation of historical coverage. Missing/unavailable baseline coverage is a limitation, not an N/A proof surface or an automatic test-generation task.
 
 ## Evidence and status
 

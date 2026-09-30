@@ -40,7 +40,7 @@
       "additionalProperties": false,
       "required": ["type", "description"],
       "properties": {
-        "type": {"enum": ["missing_case", "missing_boundary", "missing_assertion", "manifest_omission", "incorrect_skip", "non_blocking_result", "missing_contract"]},
+        "type": {"enum": ["no_gap", "unknown_baseline", "missing_case", "missing_boundary", "missing_assertion", "binding_omission", "manifest_omission", "incorrect_skip", "non_blocking_result", "missing_contract"]},
         "description": {"$ref": "#/$defs/nonEmpty"}
       }
     },
