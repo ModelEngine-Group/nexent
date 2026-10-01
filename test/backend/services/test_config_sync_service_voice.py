@@ -197,8 +197,11 @@ class TestBuildModelConfigSTT:
         result = build_model_config(model_config)
 
         assert result["modelFactory"] == "volc"
-        assert result["modelAppid"] == "stt_appid"
-        assert result["accessToken"] == "stt_token"
+        # Voice credentials are sanitized before reaching HTTP clients:
+        # model_appid / access_token must never be echoed back.
+        assert result["modelAppid"] == ""
+        assert result["accessToken"] == ""
+        assert result["apiConfig"]["apiKey"] == ""
 
     def test_build_model_config_stt_empty_fields(self, service_mocks):
         """Test build_model_config with STT model and empty voice fields."""

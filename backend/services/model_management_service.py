@@ -999,6 +999,16 @@ async def update_single_model_for_tenant(
             else:
                 model_data["ssl_verify"] = True
 
+        # Keep-existing semantics for voice-model credentials. List endpoints
+        # sanitize model_appid / access_token before returning records, so an
+        # edit dialog that the operator did not touch submits empty strings
+        # for these fields. Drop them instead of overwriting the stored
+        # values -- mirroring the api_key "empty means keep" contract that
+        # the frontend already relies on.
+        for credential_field in ("model_appid", "access_token"):
+            if credential_field in model_data and not model_data[credential_field]:
+                model_data.pop(credential_field)
+
         # Carry model_type from the existing record so the legacy-alias
         # coercion can distinguish LLM/VLM updates from embedding updates
         # even when the caller payload omits model_type. We don't store the
