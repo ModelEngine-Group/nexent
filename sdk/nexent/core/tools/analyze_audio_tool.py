@@ -1,7 +1,7 @@
 """
 Analyze Audio Tool
 
-Analyze audio using the configured video understanding model.
+Analyze audio using the configured audio understanding model.
 Supports audio from S3, HTTP, and HTTPS URLs.
 """
 
@@ -25,18 +25,18 @@ logger = logging.getLogger("analyze_audio_tool")
 
 
 class AnalyzeAudioTool(Tool):
-    """Tool for understanding and analyzing audio using the video understanding model."""
+    """Tool for understanding and analyzing audio using the audio understanding model."""
 
     name = "analyze_audio"
     skip_forward_signature_validation = True
     description = (
-        "This tool uses the configured video understanding model to understand audio based on your query and then returns an audio analysis result.\n"
+        "This tool uses the configured audio understanding model to understand audio based on your query and then returns an audio analysis result.\n"
         "It is used to understand and analyze one audio file, with sources supporting S3 URLs (s3://bucket/key or /bucket/key), "
         "HTTP, and HTTPS URLs.\n"
         "Use this tool when you want to retrieve information contained in audio and provide the audio URL and your query."
     )
     description_zh = (
-        "使用视频理解模型，根据你的问题理解音频，并返回音频分析结果。"
+        "使用音频理解模型，根据你的问题理解音频，并返回音频分析结果。"
         "可用于理解和分析一个音频文件，支持 S3 URL（s3://bucket/key 或 /bucket/key）、HTTP 和 HTTPS URL。"
     )
 
@@ -55,9 +55,9 @@ class AnalyzeAudioTool(Tool):
 
     init_param_descriptions = {
         "observer": {"description": "Message observer"},
-        "vlm_model": {"description": "The video understanding model to use"},
+        "vlm_model": {"description": "The audio understanding model to use"},
         "selected_model_id": {
-            "description": "Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used."
+            "description": "Optional Nexent audio understanding model ID to use for audio analysis. If omitted, the default audio understanding model is used."
         },
         "storage_client": {"description": "Storage client for downloading files"},
         "validate_url_access": {
@@ -75,11 +75,11 @@ class AnalyzeAudioTool(Tool):
                 default=None,
                 exclude=True),
             vlm_model: Any = Field(
-                description="The video understanding model to use",
+                description="The audio understanding model to use",
                 default=None,
                 exclude=True),
             selected_model_id: int = Field(
-                description="Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used.",
+                description="Optional Nexent audio understanding model ID to use for audio analysis. If omitted, the default audio understanding model is used.",
                 default=None),
             storage_client: MinIOStorageClient = Field(
                 description="Storage client for downloading files from S3 URLs, HTTP URLs, and HTTPS URLs.",
@@ -178,8 +178,8 @@ Raises:
                         )
                     )
                 except Exception as e:
-                    error_msg_zh = f"音频{index}分析失败: {str(e)}。请检查视频理解模型配置是否正确。"
-                    error_msg_en = f"Failed to analyze audio {index}: {str(e)}. Please check if the video understanding model is configured correctly."
+                    error_msg_zh = f"音频{index}分析失败: {str(e)}。请检查音频理解模型配置是否正确。"
+                    error_msg_en = f"Failed to analyze audio {index}: {str(e)}. Please check if the audio understanding model is configured correctly."
                     error_msg = error_msg_zh if self._is_chinese else error_msg_en
                     raise Exception(error_msg)
 
