@@ -1,0 +1,11 @@
+# Combine with compose.ext-knowledge.yaml.
+# The product network must already exist; no product container is recreated.
+version: "3.7"
+services:
+  ext-knowledge:
+    networks:
+      - product
+networks:
+  product:
+    external: true
+    name: ${NEXENT_PRODUCT_NETWORK:-nexent_network}

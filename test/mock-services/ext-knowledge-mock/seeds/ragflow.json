@@ -1,0 +1,85 @@
+{
+  "datasets": [
+    {
+      "id": "ragflow-ds-main",
+      "name": "Main Corpus",
+      "description": "Primary RAGFlow corpus for retrieval tests.",
+      "doc_num": 25,
+      "chunk_num": 3100,
+      "create_time": "2024-05-01 10:00:00",
+      "update_time": "2024-06-20 15:30:00"
+    },
+    {
+      "id": "ragflow-ds-empty",
+      "name": "Empty Corpus",
+      "description": "Dataset with no documents.",
+      "doc_num": 0,
+      "chunk_num": 0,
+      "create_time": "2024-05-02 11:00:00",
+      "update_time": "2024-05-02 11:00:00"
+    },
+    {
+      "id": "ragflow-ds-legal",
+      "name": "合规语料库",
+      "description": "法规与合规文档。",
+      "doc_num": 8,
+      "chunk_num": 640,
+      "create_time": "2024-05-10 09:00:00",
+      "update_time": "2024-06-01 16:00:00"
+    },
+    {
+      "id": "ragflow-ds-faq",
+      "name": "Knowledge Base FAQ",
+      "description": "FAQ chunks for the knowledge base module.",
+      "doc_num": 3,
+      "chunk_num": 87,
+      "create_time": "2024-05-15 14:20:00",
+      "update_time": "2024-06-10 08:45:00"
+    },
+    {
+      "id": "ragflow-ds-legacy",
+      "name": "Legacy Import",
+      "description": "One-shot legacy import.",
+      "doc_num": 1,
+      "chunk_num": 12,
+      "create_time": "2024-04-01 08:00:00",
+      "update_time": "2024-04-01 08:00:00"
+    }
+  ],
+  "chunks_by_dataset": {
+    "ragflow-ds-main": [
+      {
+        "content_with_weight": "RAGFlow chunks are retrieved with a similarity score and optional highlight support.",
+        "content_ltks": "ragflow chunk retriev similar score highlight support",
+        "docnm_kwd": "ragflow-overview.md",
+        "important_kwd": ["ragflow", "retrieval"],
+        "doc_id": "rag-doc-001",
+        "similarity": 0.9,
+        "term_similarity": 0.6,
+        "vector_similarity": 0.8
+      },
+      {
+        "content_with_weight": "语料库支持按数据集过滤检索，并可设置相似度阈值。",
+        "content_ltks": "语料库 支持 数据集 过滤 检索 相似度 阈值",
+        "docnm_kwd": "corpus-guide.md",
+        "important_kwd": ["数据集"],
+        "doc_id": "rag-doc-002",
+        "similarity": 0.84,
+        "term_similarity": 0.55,
+        "vector_similarity": 0.77
+      }
+    ],
+    "ragflow-ds-faq": [
+      {
+        "content_with_weight": "FAQ: the RAGFlow connector lists datasets via /api/v1/datasets with a Bearer key.",
+        "content_ltks": "faq ragflow connector list dataset api bearer key",
+        "docnm_kwd": "connector-faq.md",
+        "important_kwd": ["ragflow", "faq"],
+        "doc_id": "rag-doc-101",
+        "similarity": 0.86,
+        "term_similarity": 0.62,
+        "vector_similarity": 0.79
+      }
+    ]
+  }
+}
