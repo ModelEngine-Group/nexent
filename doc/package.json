@@ -8,6 +8,6 @@
     "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
-    "mermaid": "^11.17.2"
+    "mermaid": "^12.0.0"
   }
 }
