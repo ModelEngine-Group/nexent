@@ -183,7 +183,7 @@ const ROUTE_PATHS = ROUTE_CONFIG.map((route) => route.path);
  * Displays main navigation items for the application based on user's accessible routes
  */
 export function SideNavigation({ collapsed }: SideNavigationProps) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
@@ -228,7 +228,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       if (pendingNavigationPath && isAuthenticated) {
         // Small delay to ensure authentication state is fully updated
         setTimeout(() => {
-          router.push(pendingNavigationPath);
+          router.push(localized(pendingNavigationPath));
           setPendingNavigationPath(null);
         }, 200);
       }
@@ -295,6 +295,13 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
    * Create a menu item from route configuration
    * Pre-check authentication before navigation to avoid unnecessary route changes
    */
+  // Menu paths are stored without the locale prefix. The production proxy
+  // covers that, but prefixing here keeps every entry working in dev too.
+  const localized = (path: string) => {
+    const locale = i18n.language?.split("-")[0] === "en" ? "en" : "zh";
+    return /^\/(zh|en)(\/|$)/.test(path) ? path : `/${locale}${path}`;
+  };
+
   const createMenuItem = (
     route: RouteConfig
   ): NonNullable<MenuProps["items"]>[number] => {
@@ -313,7 +320,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
           return; // Prevent navigation
         }
 
-        router.push(navigationPath);
+        router.push(localized(navigationPath));
       },
     };
   };
@@ -338,7 +345,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
                 openAuthPromptModal(child.path);
                 return;
               }
-              router.push(child.path);
+              router.push(localized(child.path));
             },
           })),
         };

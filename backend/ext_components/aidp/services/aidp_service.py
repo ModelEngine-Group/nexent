@@ -2,6 +2,7 @@
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
 """
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -856,6 +857,9 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
 _AIDP_CREATE_DEFAULTS: Dict[str, Any] = {
     "chunk_token_num": 1024,
     "chunk_overlap_num": 128,
+    # chunk_mode: 0 smart splitting, 1 legal clauses. Distinct from
+    # ``smartsplit``, which stays in place for existing callers.
+    "chunk_mode": 0,
     "embedding_model": "default",
     # AIDP expects the VLM model identifier exactly as registered in its system.
     "vlm_model": "Qwen3-VL-8B-Instruct",
@@ -865,7 +869,103 @@ _AIDP_CREATE_DEFAULTS: Dict[str, Any] = {
     "smartsplit": 1,
     # caption_enable: int 0/1, not string or bool.
     "caption_enable": 0,
+    # Graph extraction stays off unless the caller enables it; its
+    # configuration is only serialized in that case.
+    "is_exist_graph": False,
 }
+
+
+# Bounds from the AIDP create contract. They guard the new creation page and
+# any other caller: values outside them would be rejected upstream anyway, and
+# an invalid overlap would otherwise be forwarded as-is.
+_CHUNK_TOKEN_MIN = 256
+_CHUNK_TOKEN_MAX = 4096
+_GRAPH_DOMAINS = {"medical", "finance", "general"}
+_GRAPH_PROMPT_LANGUAGES = {"chinese", "english"}
+_GRAPH_PROMPT_MAX_BYTES = 2048
+
+
+def _validate_chunking(result: Dict[str, Any]) -> None:
+    """Reject a chunk overlap that exceeds half of an explicit chunk size.
+
+    Only the ratio is validated here, and only for a positive chunk size: the
+    absolute token bounds belong to the creation page, and an existing caller
+    that already sends a valid pair (1024 / 128) is unaffected.
+    """
+    chunk_tokens = result.get("chunk_token_num")
+    chunk_overlap = result.get("chunk_overlap_num")
+    if not isinstance(chunk_tokens, int) or isinstance(chunk_tokens, bool):
+        return
+    if chunk_tokens <= 0:
+        # A non-positive chunk size is the upstream contract's business; the
+        # overlap ratio cannot be evaluated against it.
+        return
+    if isinstance(chunk_overlap, int) and not isinstance(chunk_overlap, bool):
+        if chunk_overlap < 0 or chunk_overlap > chunk_tokens * 0.5:
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "chunk_overlap_num must not exceed half of chunk_token_num",
+            )
+
+
+def _serialize_graph_config(config: Dict[str, Any]) -> str:
+    """Validate a structured graph configuration and serialize it for AIDP.
+
+    Only documented keys are forwarded — unknown input is dropped rather than
+    passed through — and out-of-range values are rejected instead of being
+    silently clamped. The result is the JSON string AIDP expects in
+    ``graph_config``; the frontend never builds that string itself.
+    """
+    domain = config.get("domain") or "general"
+    if domain not in _GRAPH_DOMAINS:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Unsupported graph domain: {domain}",
+        )
+
+    prompt_language = config.get("prompt_language") or "chinese"
+    if prompt_language not in _GRAPH_PROMPT_LANGUAGES:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Unsupported graph prompt language: {prompt_language}",
+        )
+
+    prompt_text = config.get("prompt_text") or ""
+    if not isinstance(prompt_text, str):
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Graph prompt text must be a string",
+        )
+    if len(prompt_text.encode("utf-8")) > _GRAPH_PROMPT_MAX_BYTES:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Graph prompt exceeds {_GRAPH_PROMPT_MAX_BYTES} UTF-8 bytes",
+        )
+
+    def _bounded_int(key: str, default: int, minimum: int, maximum: int) -> int:
+        value = config.get(key, default)
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or not minimum <= value <= maximum
+        ):
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                f"Graph parameter {key} must be an integer between {minimum} and {maximum}",
+            )
+        return value
+
+    payload = {
+        "domain": domain,
+        "retrieve_default_topk": _bounded_int("retrieve_default_topk", 5, 1, 100),
+        "retrieve_subgraph_hop": _bounded_int("retrieve_subgraph_hop", 2, 1, 3),
+        "no_think_mode": bool(config.get("no_think_mode", True)),
+        "prompt_language": prompt_language,
+        "prompt_text": prompt_text,
+        "synonym_merge_enable": bool(config.get("synonym_merge_enable", False)),
+        "disambiguation_enable": bool(config.get("disambiguation_enable", False)),
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -910,6 +1010,19 @@ def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
     caption = result.get("caption_enable")
     if caption in (0, "0", False):
         result["vlm_model"] = ""
+
+    # A disabled graph submits neither its configuration nor a hidden model
+    # selection; an enabled one is validated and serialized into the string
+    # payload AIDP expects.
+    if not result.get("is_exist_graph"):
+        result.pop("graph_config", None)
+        result.pop("llm_model_name", None)
+    else:
+        graph_config = result.get("graph_config")
+        if isinstance(graph_config, dict):
+            result["graph_config"] = _serialize_graph_config(graph_config)
+
+    _validate_chunking(result)
     return result
 
 

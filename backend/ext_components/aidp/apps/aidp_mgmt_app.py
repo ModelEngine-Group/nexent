@@ -173,6 +173,25 @@ class CreateKbRequest(BaseModel):
     similarity: Optional[float] = Field(None, description="Similarity score threshold")
     smartsplit: Optional[int] = Field(None, ge=0, le=1, description="Smart chunking mode, int 0 or 1")
     caption_enable: Optional[int] = Field(None, ge=0, le=1, description="Caption generation toggle, int 0 or 1")
+    chunk_mode: Optional[int] = Field(
+        None, ge=0, le=1, description="Chunking mode: 0 smart splitting, 1 legal clauses"
+    )
+    is_exist_graph: Optional[bool] = Field(
+        None, description="Whether knowledge graph extraction is enabled for this KB"
+    )
+    graph_config: Optional[dict] = Field(
+        None,
+        description=(
+            "Structured graph configuration. The service validates it and serializes it into the "
+            "AIDP graph_config string; it is omitted entirely when the graph is disabled."
+        ),
+    )
+    llm_model_name: Optional[str] = Field(
+        None, description="Graph extraction model taken from the llm category"
+    )
+    sensitive_intercept_enalbe: Optional[int] = Field(
+        None, ge=0, le=1, description="Safety guard: 1 enabled, 0 disabled"
+    )
     # Nexent-side permission payload. Never forwarded to AIDP.
     ingroup_permission: Optional[str] = Field(
         "READ_ONLY",
@@ -196,6 +215,12 @@ class SetPermissionRequest(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, description="Changed KB name; omit when unchanged")
     description: Optional[str] = Field(None, description="Changed description; omit when unchanged")
+    sensitive_intercept_enalbe: Optional[int] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Changed safety guard value; an explicit 0 disables it and must not be dropped",
+    )
     ingroup_permission: str = Field(..., description="EDIT / READ_ONLY / PRIVATE")
     group_ids: Optional[List[int]] = Field(
         None,
@@ -911,6 +936,18 @@ async def list_knowledge_bases(
             "group_ids": row.get("group_ids"),
             "created_by": row.get("owner_user_id"),
             "resource_status": resource_status,
+            # --- Optional display metadata (AIDP knowledge base pages) ---
+            # These stay absent when the upstream response does not carry
+            # them, so the UI renders an unknown value instead of a fabricated
+            # one. ``user_name`` is only ever a display name AIDP reported —
+            # the Nexent user id is never presented as a name.
+            "is_private": detail.get("is_private", row.get("is_private")),
+            "current_cap": detail.get("current_cap", row.get("current_cap")),
+            "user_name": detail.get("user_name", row.get("user_name")),
+            # A document count is only a real statistic when the detail
+            # payload supplied it; the catalog fallback is a compatibility
+            # default, not a confirmed count.
+            "document_count_reliable": bool(detail),
         })
 
     total_ms = (time.perf_counter() - started_at) * 1000
@@ -1420,7 +1457,12 @@ async def set_permission(
                 detail=str(exc),
             )
 
-    metadata = body.model_dump(include={"name", "description"}, exclude_none=True)
+    # An explicit safety guard value of 0 must survive this whitelist: dropping
+    # it would silently leave the remote setting enabled.
+    metadata = body.model_dump(
+        include={"name", "description", "sensitive_intercept_enalbe"},
+        exclude_none=True,
+    )
     if "name" in metadata:
         metadata["name"] = metadata["name"].strip()
         if not metadata["name"]:

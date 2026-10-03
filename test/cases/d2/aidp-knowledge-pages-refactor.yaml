@@ -1,0 +1,176 @@
+schema_version: '1.0'
+stage: D2
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKPR-D2-001
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-002, AKPR-RULE-006]
+    title: Knowledge base list keeps its contract and adds optional display fields
+    type: CONTRACT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the paginated AIDP list proxy keeps its existing request and response contract while exposing the optional display metadata.
+    preconditions:
+      - An authenticated request reaches the AIDP management proxy with a controllable upstream fixture.
+    test_data: {profile: mock, page: 1, page_size: 10, keyword: alpha}
+    steps:
+      - order: 1
+        action: Request the first page with a keyword.
+        expected: The proxy forwards page, page_size and keyword and applies the existing permission intersection.
+      - order: 2
+        action: Inspect the response payload.
+        expected: Existing fields keep their names and types and the optional display fields appear only when the upstream returns them.
+      - order: 3
+        action: Request a later page.
+        expected: Ordering and totals remain consistent with the unfiltered permission-scoped set.
+    expected_results:
+      - Existing request parameters and response fields are unchanged.
+      - Optional display metadata is additive.
+      - Pagination order and totals stay stable.
+    forbidden_side_effects:
+      - No column filter parameter is introduced.
+      - No fabricated default replaces a missing metadata value.
+      - No ES knowledge base endpoint is touched.
+    contract:
+      protocol: HTTP
+      method: GET
+      endpoint: /aidp-mgmt/knowledge-bases
+      request_expectations:
+        - page, page_size and keyword behave as before.
+        - The permission-scoped access set is resolved before pagination.
+        - No new required parameter is added.
+      response_expectations:
+        - Existing fields keep their current names and types.
+        - Optional display fields are additive and omit a value the upstream did not return.
+        - Page totals equal the permission-scoped count.
+  - case_id: AKPR-D2-002
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-010, AKPR-RULE-011, AKPR-RULE-012, AKPR-RULE-013]
+    title: Creation request carries the new configuration and keeps legacy field names
+    type: API-IT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the create proxy forwards chunking, retrieval, graph, model and safety fields while preserving legacy field names and existing defaults.
+    preconditions:
+      - An authenticated create request reaches the AIDP management proxy with a recorded upstream payload.
+    test_data: {profile: mock, chunk_mode: [0, 1], graph_enabled: [true, false], multimodal: [true, false]}
+    steps:
+      - order: 1
+        action: Submit the minimal creation payload.
+        expected: Existing defaults still apply and the legacy field names remain unchanged.
+      - order: 2
+        action: Submit a payload with chunking, retrieval and graph configuration.
+        expected: The chunk mode, chunk token fields, similarity, knowledge base Top K and a serialized graph configuration reach the upstream payload.
+      - order: 3
+        action: Submit with the graph and multimodal capabilities disabled.
+        expected: The graph configuration and the hidden model fields are absent from the upstream payload.
+    expected_results:
+      - New configuration fields reach the upstream request.
+      - Legacy field names and defaults are preserved.
+      - Disabled capabilities submit no hidden configuration.
+    forbidden_side_effects:
+      - No ES knowledge base request shape change.
+      - No invented graph JSON keys.
+      - No model value submitted for a disabled capability.
+    contract:
+      protocol: HTTP
+      method: POST
+      endpoint: /aidp-mgmt/knowledge-bases
+      request_expectations:
+        - Chunk mode, chunk token and overlap values follow the documented types and bounds.
+        - Graph configuration is serialized as the documented string payload.
+        - Legacy field names remain in place for existing callers.
+      response_expectations:
+        - The created knowledge base identifier is returned as before.
+        - Permission and group handling keeps its existing behavior.
+        - A failed upstream create surfaces a stable error without partial local state.
+  - case_id: AKPR-D2-003
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-014]
+    title: Update request forwards an explicit disabled safety guard and reports partial failure
+    type: CONTRACT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the safety guard survives the update whitelist, an explicit zero is forwarded and permission success stays distinguishable from metadata failure.
+    preconditions:
+      - An authenticated update reaches the AIDP management proxy for a base the caller may edit.
+    test_data: {profile: mock, guard: ['enabled to disabled', unchanged, 'disabled to enabled'], metadata_failure: true}
+    steps:
+      - order: 1
+        action: Disable the safety guard and save.
+        expected: The upstream metadata payload contains the field as integer 0.
+      - order: 2
+        action: Save again without changing the guard.
+        expected: The field is not resent when nothing changed.
+      - order: 3
+        action: Make the upstream metadata update fail after the permission write.
+        expected: The response distinguishes saved permissions from a failed metadata update and the readback keeps the previous guard value.
+    expected_results:
+      - An explicit 0 is forwarded and an unchanged value is omitted.
+      - Permission and metadata outcomes are separately reported.
+      - A metadata failure is never presented as a saved guard value.
+    forbidden_side_effects:
+      - No silent drop of the disabled value by the field whitelist.
+      - No boolean encoding.
+      - No claimed success on upstream failure.
+    contract:
+      protocol: HTTP
+      method: PATCH
+      endpoint: /aidp-mgmt/knowledge-bases/{kds_id}/permission
+      request_expectations:
+        - Only explicitly changed metadata fields are sent.
+        - The safety guard is forwarded as an integer when it changed.
+        - Permission and group fields keep their existing rules.
+      response_expectations:
+        - Permission save status and metadata update status are reported separately.
+        - A failed metadata update yields a non-success result with the unchanged readback value.
+        - Cache invalidation follows a successful metadata update.
+  - case_id: AKPR-D2-004
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-012]
+    title: Model queries select a single category per control
+    type: CONTRACT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the model query proxy passes one category per request and returns only models applicable to the knowledge base application.
+    preconditions:
+      - A controllable upstream model fixture serves distinct payloads per category.
+    test_data: {profile: mock, categories: [llm, vlm, embedding]}
+    steps:
+      - order: 1
+        action: Query the graph model list.
+        expected: The request carries the llm category and the response exposes only llm models.
+      - order: 2
+        action: Query the multimodal model list.
+        expected: The request carries the vlm category and the response exposes only vlm models.
+      - order: 3
+        action: Query an unsupported or failing category.
+        expected: A stable error or an empty result is returned without falling back to another category.
+    expected_results:
+      - One category is requested per control.
+      - Responses are not reused across categories.
+      - Failures do not silently substitute another category.
+    forbidden_side_effects:
+      - No shared cache entry across categories.
+      - No fabricated model identifier on failure.
+      - No change to existing non-AIDP model endpoints.
+    contract:
+      protocol: HTTP
+      method: GET
+      endpoint: /aidp-mgmt/models
+      request_expectations:
+        - The service parameter carries exactly one requested category.
+        - The application parameter keeps the knowledge base scope.
+        - No credential is returned to the browser.
+      response_expectations:
+        - Only models of the requested category are returned.
+        - An unavailable category yields a stable error or an empty list.
+        - Results are filtered to the knowledge base application scope.

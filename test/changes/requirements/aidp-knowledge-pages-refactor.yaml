@@ -1,0 +1,41 @@
+schema_version: '1.0'
+changes:
+  - change_id: AKPR-REQ-001
+    change_type: requirement
+    requirement_id: AKPR-001
+    title: AIDP knowledge base list and creation page refactor
+    description: Split the AIDP knowledge base overview and its file management into separate views with a card or table overview, an independent name search, a collapsible three-step guide, a column visibility setting and a full-page file view that restores list state. Creation moves to a dedicated two-step page carrying permission, safety guard, graph, chunking, model and retrieval configuration, and the previously hidden document download and delete entries become available again under the documented permission gates.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [AKPR-001], modified: [], retired: []}
+    affected_cases:
+      existing: []
+      added:
+        - AKPR-D1-001
+        - AKPR-D1-002
+        - AKPR-D1-003
+        - AKPR-D1-004
+        - AKPR-D1-005
+        - AKPR-D1-006
+        - AKPR-D1-007
+        - AKPR-D1-008
+        - AKPR-D1-009
+        - AKPR-D1-010
+        - AKPR-D1-011
+        - AKPR-D1-012
+        - AKPR-D2-001
+        - AKPR-D2-002
+        - AKPR-D2-003
+        - AKPR-D2-004
+        - AKPR-D3-001
+        - AKPR-D3-002
+        - AKPR-D4-001
+        - AKPR-D4-002
+        - AKPR-D4-003
+        - AKPR-D4-004
+        - AKPR-D5-001
+        - AKPR-D5-002
+        - AKPR-D5-003
+        - AKPR-D5-004
+      modified: []
+      retired: []
+    notes: The AIDP-only scope is preserved; the ES knowledge base path keeps its current components and endpoints. D3, D4 and D5 cases remain blocked until a disposable deployment and the upstream safety guard contract are available.

@@ -30,6 +30,16 @@ export interface AidpKbDetail {
   group_ids?: number[];
   resource_status?:
     "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  /** AIDP personal/enterprise flag in its raw response form. */
+  is_private?: boolean | number | string | null;
+  /** Personal knowledge base capacity in GB as reported by AIDP. */
+  current_cap?: number | null;
+  /** Creator display name from AIDP when the response provides one. */
+  user_name?: string | null;
+  /** False when the reported document count is not a confirmed statistic. */
+  document_count_reliable?: boolean;
+  /** Safety guard: 1 enabled, 0 disabled, null or absent unknown. */
+  sensitive_intercept_enalbe?: number | null;
 }
 
 export interface AidpDocumentItem {
@@ -177,6 +187,30 @@ export interface AidpModelListResponse {
   total_count: number;
 }
 
+/**
+ * Structured knowledge graph configuration. The backend validates these
+ * fields and serializes them into the documented AIDP `graph_config` string,
+ * so the frontend never hand-builds the JSON payload.
+ */
+export interface AidpGraphConfig {
+  /** Extraction domain. */
+  domain?: "medical" | "finance" | "general";
+  /** Graph candidate Top K, independent from the knowledge base Top K. */
+  retrieve_default_topk?: number;
+  /** Sub-graph expansion hop count. */
+  retrieve_subgraph_hop?: number;
+  /** Inverse of the "enable model thinking" switch. */
+  no_think_mode?: boolean;
+  /** Extraction prompt language. */
+  prompt_language?: "chinese" | "english";
+  /** Editable extraction prompt, limited to 2048 UTF-8 bytes. */
+  prompt_text?: string;
+  /** Whether synonym merging is enabled. */
+  synonym_merge_enable?: boolean;
+  /** Whether semantic disambiguation is enabled. */
+  disambiguation_enable?: boolean;
+}
+
 export interface AidpCreateKbPayload {
   name: string;
   description?: string;
@@ -193,6 +227,25 @@ export interface AidpCreateKbPayload {
   smartsplit?: number;
   caption_enable?: number;
   /**
+   * Chunking mode: 0 = smart splitting, 1 = legal clauses. Distinct from
+   * ``smartsplit``, which stays in place for existing callers.
+   */
+  chunk_mode?: number;
+  /** Whether knowledge graph extraction is enabled for this knowledge base. */
+  is_exist_graph?: boolean;
+  /**
+   * Graph configuration as a structured object. The backend validates it and
+   * serializes it into the documented AIDP `graph_config` string.
+   */
+  graph_config?: AidpGraphConfig;
+  /** Knowledge graph extraction model taken from the llm category. */
+  llm_model_name?: string;
+  /**
+   * Safety guard: 1 enabled, 0 disabled. An explicit 0 must always be
+   * forwarded; the field is omitted only when the user never set it.
+   */
+  sensitive_intercept_enalbe?: number;
+  /**
    * Nexent-side in-group permission. ``PRIVATE`` forces an empty
    * ``group_ids``; ``READ_ONLY`` / ``EDIT`` require a non-empty group list.
    * Never forwarded to AIDP — the backend writes it to
@@ -207,9 +260,14 @@ export interface AidpCreateKbPayload {
 export interface AidpSetPermissionPayload {
   ingroup_permission: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
-  /** Only include metadata fields when their values have changed. */
+  /**
+   * Only include metadata fields when their values have changed. A safety
+   * guard that the user disabled is forwarded as an explicit 0 and must not
+   * be dropped by the backend whitelist.
+   */
   name?: string;
   description?: string;
+  sensitive_intercept_enalbe?: number;
 }
 
 export interface AidpSaveSettingsResult {

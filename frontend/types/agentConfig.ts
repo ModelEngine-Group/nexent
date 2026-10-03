@@ -292,6 +292,27 @@ export interface AidpKnowledgeBaseItem {
   embedding_model?: string;
   /** Whether this AIDP knowledge base supports multimodal content. */
   is_multimodal?: boolean;
+  /**
+   * AIDP personal/enterprise flag. AIDP returns it as boolean, 0/1 or a
+   * string, so it stays unnormalized here and is read through the AIDP
+   * display helpers rather than compared directly.
+   */
+  is_private?: boolean | number | string | null;
+  /** Personal knowledge base capacity in GB as reported by AIDP. */
+  current_cap?: number | null;
+  /** Creator display name from AIDP; absent when the response omits it. */
+  user_name?: string | null;
+  /**
+   * False when the backend could not confirm a real document count, so the
+   * overview must not present the value as a trustworthy statistic.
+   */
+  document_count_reliable?: boolean;
+  /**
+   * Safety guard state: 1 enabled, 0 disabled, null or absent means the
+   * response did not report it (never treat that as a confirmed disabled
+   * state).
+   */
+  sensitive_intercept_enalbe?: number | null;
 }
 
 export interface AidpKnowledgeBaseListResponse {

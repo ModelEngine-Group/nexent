@@ -1,0 +1,202 @@
+schema_version: '1.0'
+stage: D4
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKPR-D4-001
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-001, AKPR-RULE-002, AKPR-RULE-003, AKPR-RULE-004, AKPR-RULE-005]
+    title: Overview journey keeps the guide, search, view and column state across the file view
+    type: E2E
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify the complete overview journey in a browser against a deployed instance. This case stays blocked until a disposable Nexent deployment with the AIDP flag enabled and reachable AIDP data is available.
+    preconditions:
+      - A deployed Nexent instance runs this worktree with the AIDP flag enabled.
+      - The test tenant can see more than one knowledge base.
+      - A writable knowledge base with at least one document exists.
+    test_data: {profile: real_smoke, keyword: alpha, page_size: 10}
+    steps:
+      - order: 1
+        action: Open the knowledge base page and inspect the guide.
+        expected: The explanation and the three steps are visible, collapse and reopen work, and cards are the default view.
+      - order: 2
+        action: Search a name, move to a later page, switch to the table and hide one column.
+        expected: The table shows the filtered result set on the same page and the hidden column disappears.
+      - order: 3
+        action: Open a knowledge base from the table.
+        expected: The full-page file view shows only that base files.
+      - order: 4
+        action: Return to the overview.
+        expected: The keyword, page, table view and hidden column state are restored.
+    expected_results:
+      - The guide, card default, search, view switch and column setting all work in the browser.
+      - The file view is scoped to the selected base.
+      - Returning restores the earlier overview state.
+    forbidden_side_effects:
+      - No modification request from view or column changes.
+      - No state reset after returning.
+      - No ES knowledge base page rendered while the AIDP flag is enabled.
+    actor: Authenticated test tenant user
+    journey:
+      - Open the knowledge base overview.
+      - Expand and collapse the guide.
+      - Search, page and switch views while hiding a column.
+      - Open a knowledge base and return to the overview.
+    final_business_result:
+      - A user can browse, filter and configure the knowledge base overview and reach one base file view without losing context.
+    failure_evidence:
+      - Retain browser screenshot, network log and console trace on failure.
+    execution:
+      profiles:
+        - name: real_smoke
+          required_services: [knowledge-provider]
+  - case_id: AKPR-D4-002
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-009]
+    title: File view journey uploads, polls, downloads and deletes under permission control
+    type: E2E
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify the restored file operations in a browser against a deployed instance. This case stays blocked until a disposable Nexent deployment with reachable AIDP upload and document services is available.
+    preconditions:
+      - A deployed Nexent instance runs this worktree with the AIDP flag enabled.
+      - The test user owns an editable knowledge base and can read another one.
+      - A small local document is prepared for upload.
+    test_data: {profile: real_smoke, documents: 2, one_failing_upload: true}
+    steps:
+      - order: 1
+        action: Open the writable knowledge base and upload a document.
+        expected: The document appears and its processing status reaches a terminal state through polling.
+      - order: 2
+        action: Download the processed document.
+        expected: The browser receives the original file with its name.
+      - order: 3
+        action: Delete the document and confirm the dialog.
+        expected: The document disappears from the list and the deletion reports its own result.
+      - order: 4
+        action: Open the read-only knowledge base and attempt the same operations.
+        expected: Upload and delete are unavailable while browsing and download remain permitted.
+    expected_results:
+      - Upload reaches a terminal processing state.
+      - The downloaded file matches the uploaded original.
+      - Deletion removes the document after confirmation.
+      - Permission gates match the documented read and edit rules.
+    forbidden_side_effects:
+      - No upload or delete entry for a read-only base.
+      - No polling continues after leaving the file view.
+      - No document of another base rendered in the current view.
+    actor: Authenticated test tenant user
+    journey:
+      - Open a writable knowledge base file view.
+      - Upload and wait for processing to finish.
+      - Download the document.
+      - Delete the document with confirmation.
+      - Check the same controls on a read-only base.
+    final_business_result:
+      - A user with edit permission can add, retrieve and remove documents while a read-only user can only browse and download them.
+    failure_evidence:
+      - Retain browser screenshot, network log, downloaded file metadata and console trace on failure.
+    execution:
+      profiles:
+        - name: real_smoke
+          required_services: [knowledge-provider]
+  - case_id: AKPR-D4-003
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-010, AKPR-RULE-011, AKPR-RULE-012, AKPR-RULE-013, AKPR-RULE-014]
+    title: Creation page journey configures two steps and reports creation and upload results separately
+    type: E2E
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify the dedicated two-step creation page in a browser including conditional graph and multimodal sections and the separate creation and upload outcomes. This case stays blocked until a disposable Nexent deployment with reachable AIDP services is available.
+    preconditions:
+      - A deployed Nexent instance runs this worktree with the AIDP flag enabled.
+      - The test user belongs to a valid group for a shared permission.
+      - A local document and an intentionally rejected document are prepared.
+    test_data: {profile: real_smoke, chunk_mode: 1, graph_enabled: true, multimodal: true}
+    steps:
+      - order: 1
+        action: Open the creation page, fill the first step and toggle the graph and multimodal sections.
+        expected: The conditional sections appear with their own model selections and permission fields stay in the first step.
+      - order: 2
+        action: Press next and then return to the first step.
+        expected: No knowledge base exists yet and the form values and selected files are preserved.
+      - order: 3
+        action: Submit with one accepted and one rejected file.
+        expected: The knowledge base is created once, the accepted file processes and the rejected file is reported as a separate failure.
+      - order: 4
+        action: Retry only the failed file.
+        expected: No second knowledge base is created and the retry targets the failed file only.
+    expected_results:
+      - The two-step flow holds its state and creates nothing early.
+      - Conditional graph and multimodal configuration is submitted with the chosen models.
+      - Creation and upload outcomes are reported separately and retrying never duplicates the base.
+    forbidden_side_effects:
+      - No knowledge base created before final submission or twice after a retry.
+      - No hidden graph or multimodal configuration submitted when disabled.
+      - No upload attempted before a successful creation.
+    actor: Authenticated test tenant user
+    journey:
+      - Open the dedicated creation page.
+      - Configure the first step including permissions and capabilities.
+      - Advance to the upload step and back.
+      - Submit with a partially failing file set.
+      - Retry the failed file.
+    final_business_result:
+      - A user can create one properly configured knowledge base and see which files were accepted and which failed without creating duplicates.
+    failure_evidence:
+      - Retain browser screenshot, network log of create and upload requests, and console trace on failure.
+    execution:
+      profiles:
+        - name: real_smoke
+          required_services: [knowledge-provider]
+  - case_id: AKPR-D4-004
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-008]
+    title: ES deployment still renders the original knowledge base page
+    type: E2E
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify that with the AIDP flag disabled the original ES knowledge base page renders unchanged. This case stays blocked until a disposable deployment or a flag configuration switch is available for browser verification.
+    preconditions:
+      - A deployed Nexent instance can run with the AIDP flag disabled.
+      - The same instance serves the ES knowledge base data.
+    test_data: {profile: real_smoke, aidp_flag: false}
+    steps:
+      - order: 1
+        action: Open the knowledge base page with the AIDP flag disabled.
+        expected: The original ES knowledge base page renders without the AIDP guide, card overview or AIDP file view.
+      - order: 2
+        action: Exercise the original list, creation and document interactions.
+        expected: Existing ES behavior is unchanged.
+      - order: 3
+        action: Inspect the requests issued by the page.
+        expected: No AIDP management endpoint is called.
+    expected_results:
+      - The ES page is untouched.
+      - No AIDP component renders in the ES path.
+      - No AIDP request is issued.
+    forbidden_side_effects:
+      - No AIDP request from the ES page.
+      - No visual or behavioral change to the ES list and document flows.
+      - No new ES write request.
+    actor: Authenticated test tenant user
+    journey:
+      - Switch the deployment flag off.
+      - Open the knowledge base page.
+      - Exercise the original list and document interactions.
+    final_business_result:
+      - An ES deployment keeps its original knowledge base experience with no AIDP leakage.
+    failure_evidence:
+      - Retain browser screenshot, network log and console trace on failure.
+    execution:
+      profiles:
+        - name: real_smoke
+          required_services: []
