@@ -9,6 +9,7 @@ container's own POSTGRES_* environment and no password is copied into logs.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import os
 import subprocess
 from functools import lru_cache
@@ -77,6 +78,14 @@ def postgres_target() -> PostgresTarget:
     password = os.environ.get("NEXENT_TEST_PG_PASSWORD") or values.get("POSTGRES_PASSWORD")
     address = _run(["docker", "inspect", container, "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"])
     host = os.environ.get("NEXENT_TEST_PG_HOST") or address.stdout.strip()
+    published_port = None
+    if os.name == "nt" and not os.environ.get("NEXENT_TEST_PG_HOST"):
+        ports = _run(["docker", "inspect", container, "--format", "{{json .NetworkSettings.Ports}}"])
+        if ports.returncode == 0:
+            bindings = (json.loads(ports.stdout) or {}).get("5432/tcp") or []
+            if bindings:
+                host = "127.0.0.1"
+                published_port = int(bindings[0]["HostPort"])
     if not user or not database or not password or not host:
         raise AssetDependencyError(
             "services", "postgres", dependency_case_id="D0-POSTGRES",
@@ -85,7 +94,7 @@ def postgres_target() -> PostgresTarget:
     # On Docker Desktop hosts (Windows/macOS) the container-internal IP is not
     # reachable from the host; tests must connect through the published port.
     port_env = os.environ.get("NEXENT_TEST_PG_PORT", "").strip()
-    port = int(port_env) if port_env.isdigit() else 5432
+    port = int(port_env) if port_env.isdigit() else (published_port or 5432)
     return PostgresTarget(container=container, user=user, database=database, password=password, host=host, port=port)
 
 

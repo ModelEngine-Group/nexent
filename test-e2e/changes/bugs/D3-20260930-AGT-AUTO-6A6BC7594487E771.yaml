@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: D3-20260930-AGT-AUTO-6A6BC7594487E771
+  change_type: bugfix
+  bug_id: D3-20260930-AGT-AUTO-6A6BC7594487E771
+  title: Local draft update does not save requested duty prompt
+  description: Open product-quality issue reproduced by the existing D3 Case; no product
+    fix is included in this triage.
+  observed_behavior: The update_fields flow emits no saved duty_prompt field for an
+    explicit one-field request.
+  expected_behavior: Save only duty_prompt and report the saved field without entering
+    full generation.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: The existing formal D3 Case detects this failure.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-045
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGT-AUTO-6A6BC7594487E771
+    added: []
+    modified: []
+    retired: []

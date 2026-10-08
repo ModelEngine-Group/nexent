@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: D3-20260930-API-AUTO-8CFB0598A62F2E58
+  change_type: bugfix
+  bug_id: D3-20260930-API-AUTO-8CFB0598A62F2E58
+  title: Market API remains unavailable through the configured proxy
+  description: Open product-quality issue reproduced by the existing D3 Case; no product
+    fix is included in this triage.
+  observed_behavior: GET /api/market/agents through the Web proxy returns HTTP 404
+    while the frontend still calls this route.
+  expected_behavior: Expose the documented market route through the configured backend
+    or align the public route contract.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: The existing formal D3 Case detects this failure.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-184
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - API-AUTO-8CFB0598A62F2E58
+    added: []
+    modified: []
+    retired: []

@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: D3-20260930-API-063
+  change_type: bugfix
+  bug_id: D3-20260930-API-063
+  title: Unknown Skill binding returns server error
+  description: Open product-quality issue reproduced by the existing D3 Case; no product
+    fix is included in this triage.
+  observed_behavior: Updating an Agent with a nonexistent Skill ID returns HTTP 500.
+  expected_behavior: Reject the invalid Skill reference with a clear 4xx response
+    and no partial binding.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: The existing formal D3 Case detects this failure.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-051
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - API-063
+    added: []
+    modified: []
+    retired: []

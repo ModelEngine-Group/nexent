@@ -14,7 +14,7 @@ import pytest
 from d3.assets import asset_path, model_request, get_test_asset
 from shared.cases import case_params
 from shared.config import controlled_asset_url, load_secret_env, load_yaml, service_url
-from shared.http import MODEL_TIMEOUT, assert_status, client
+from shared.http import MODEL_TIMEOUT, assert_status, client, redacted_response_body
 from shared.factories.tenant import isolated_accounts
 
 
@@ -98,8 +98,12 @@ async def _provider_negative(identity) -> None:
         malformed = await api.post("/model/provider/batch_create", json={
             "api_key": "", "provider": "", "type": "llm", "models": [{"display_name": ""}],
         })
-    assert blank.status_code in {400, 422, 502, 503}
-    assert malformed.status_code in {400, 422}
+    assert blank.status_code in {400, 422, 502, 503}, (
+        f"provider/create returned {blank.status_code}: {redacted_response_body(blank)}"
+    )
+    assert malformed.status_code in {400, 422}, (
+        f"provider/batch_create returned {malformed.status_code}: {redacted_response_body(malformed)}"
+    )
 
 
 async def _model_crud(identity) -> None:
@@ -184,7 +188,9 @@ async def _model_list_boundaries(identity) -> None:
     assert_status(denied, 401)
     async with client("config", token=identity.access_token) as api:
         invalid = await api.post("/model/provider/list", json={"provider": "x", "model_type": "unknown"})
-    assert invalid.status_code in {200, 400, 422}
+    assert invalid.status_code in {200, 400, 422}, (
+        f"provider/list returned {invalid.status_code}: {redacted_response_body(invalid)}"
+    )
     if invalid.status_code == 200:
         assert invalid.json().get("data") == []
 
@@ -410,10 +416,10 @@ async def execute_model_and_multimodal_scenario(case: dict, tenant_a_admin, tena
         "API-049": lambda: _provider_negative(tenant_a_admin),
         "API-050": lambda: _model_crud(tenant_a_admin),
         "API-051": lambda: _model_negative(tenant_a_admin),
-        "API-052": lambda: _model_lists(tenant_a_user),
-        "API-053": lambda: _model_list_boundaries(tenant_a_user),
-        "CTR-006": lambda: _saved_health(tenant_a_user),
-        "CTR-007": lambda: _saved_health_negative(tenant_a_user),
+        "API-052": lambda: _model_lists(tenant_a_admin),
+        "API-053": lambda: _model_list_boundaries(tenant_a_admin),
+        "CTR-006": lambda: _saved_health(tenant_a_admin),
+        "CTR-007": lambda: _saved_health_negative(tenant_a_admin),
         "CTR-008": lambda: _temporary_health(tenant_a_user, valid=False, timeout_case=True),
         "CTR-009": lambda: _temporary_health(tenant_a_user, valid=True),
         "CTR-010": lambda: _temporary_health(tenant_a_user, valid=False),

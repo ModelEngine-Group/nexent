@@ -15,7 +15,7 @@ from shared.mock_network import mock_bind_host, mock_callback_url
 
 CASE_ID = 'CTR-AUTO-9ACCCB74F6E72CCC'
 
-_AIDP_PLUGIN_NAME = 'aidp_mem_plugin'
+_AIDP_PLUGIN_NAME = 'AIDP_Memorybank'
 _MEM0_PLUGIN_NAME = 'mem0'
 
 

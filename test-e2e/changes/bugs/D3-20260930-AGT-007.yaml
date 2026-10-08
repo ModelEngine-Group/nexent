@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: D3-20260930-AGT-007
+  change_type: bugfix
+  bug_id: D3-20260930-AGT-007
+  title: Empty prompt task description is accepted
+  description: Open product-quality issue reproduced by the existing D3 Case; no product
+    fix is included in this triage.
+  observed_behavior: POST /prompt/generate returns HTTP 200 for an empty task_description.
+  expected_behavior: Reject the empty task with a documented 4xx response.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: The existing formal D3 Case detects this failure.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-046
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGT-007
+    added: []
+    modified: []
+    retired: []

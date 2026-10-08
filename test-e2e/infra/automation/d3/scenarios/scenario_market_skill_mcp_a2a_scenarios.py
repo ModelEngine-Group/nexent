@@ -183,7 +183,15 @@ async def _mcp_agent(identity, mode: str) -> None:
     if mode == "core":
         assert "mcp-d3-42" in text and ("tool" in text or "observation" in text)
     elif mode == "outage":
-        assert "error" in text or "unavailable" in text or "timeout" in text
+        event_kinds = [
+            (event.get("event"),
+             event.get("data", {}).get("type") if isinstance(event.get("data"), dict) else None,
+             event.get("data", {}).get("tool_name") if isinstance(event.get("data"), dict) else None)
+            for event in events
+        ]
+        assert "error" in text or "unavailable" in text or "timeout" in text, (
+            f"disabled MCP service produced no failure event; event kinds={event_kinds}"
+        )
     else:
         # Current runtime contract ignores unknown nested tool mappings and
         # continues with the known MCP schema; it does not reject them as 4xx.

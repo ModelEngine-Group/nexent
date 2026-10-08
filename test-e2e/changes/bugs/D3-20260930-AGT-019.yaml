@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: D3-20260930-AGT-019
+  change_type: bugfix
+  bug_id: D3-20260930-AGT-019
+  title: Stopping an absent run reports an active stop
+  description: Open product-quality issue reproduced by the existing D3 Case; no product
+    fix is included in this triage.
+  observed_behavior: An absent run returns success without already_stopped and installs
+    a cancellation signal.
+  expected_behavior: Return idempotent already_stopped=true without treating the absent
+    run as active.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: The existing formal D3 Case detects this failure.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-057
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGT-019
+    added: []
+    modified: []
+    retired: []

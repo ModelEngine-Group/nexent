@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: D3-20260930-API-AUTO-357B84F01BA6D321
+  change_type: bugfix
+  bug_id: D3-20260930-API-AUTO-357B84F01BA6D321
+  title: Projection write failure raises NoneType exception
+  description: Open product-quality issue reproduced by the existing D3 Case; no product
+    fix is included in this triage.
+  observed_behavior: Injected document tag projection write failure reaches current.get
+    when current is None and raises AttributeError.
+  expected_behavior: Persist a failed projection state with retry metadata and preserve
+    canonical assignments.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: The existing formal D3 Case detects this failure.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-177
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - API-AUTO-357B84F01BA6D321
+    added: []
+    modified: []
+    retired: []

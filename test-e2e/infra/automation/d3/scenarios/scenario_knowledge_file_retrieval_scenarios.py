@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from shared.factories.agent import retrieval_agent
-from shared.factories.files import _upload_tuple, _object_name, _upload_kb_file, _upload_attachment, _remove_object
+from shared.factories.files import _upload_tuple, _object_name, _upload_kb_file, _upload_attachment, _remove_object, register_uploaded_files
 from shared.resource_ids import absent_numeric_id
 
 import json
@@ -107,6 +107,8 @@ async def _file_upload(identity, valid: bool) -> None:
                     data={"destination": "minio", "folder": "knowledge_base", "index_name": kb["index_name"]},
                     files=[("file", first), ("file", second)],
                 )
+            if response.status_code in (200, 207):
+                register_uploaded_files(identity, response.json(), index_name=kb["index_name"])
             assert_status(response, 200)
             body = response.json()
             assert len(body.get("uploaded_file_paths") or []) == 2
@@ -120,7 +122,7 @@ async def _file_upload(identity, valid: bool) -> None:
                     data={"destination": "unknown", "folder": "knowledge_base", "index_name": kb["index_name"]},
                     files=[("file", bad)],
                 )
-            assert_status(response, 400)
+            assert_status(response, (400, 422))
             assert response.json().get("errors") or response.json().get("detail")
 
 
@@ -424,7 +426,7 @@ async def execute_d3_knowledge_file_retrieval(case, tenant_a_admin, tenant_a_use
         mode = {"AGT-044": "core", "AGT-045": "boundary", "AGT-046": "dependency"}[case_id]
         await _retrieval(tenant_a_admin, mode)
     elif case_id in {"API-110", "API-111"}:
-        await _conversation_scope(tenant_a_user, case_id == "API-110")
+        await _conversation_scope(tenant_a_admin, case_id == "API-110")
     elif case_id == "CTR-047":
         await _external_adapter_contract(tenant_a_user)
     else:

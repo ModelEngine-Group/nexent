@@ -15,7 +15,7 @@ from d3.assets import model_id as configured_model_id, model_request
 from shared.cases import case_params
 from shared.asset_registry import register_asset, register_asset_failure, resolve_asset, mark_asset_state
 from shared.factories.ownership import register_owned_http
-from shared.http import MODEL_TIMEOUT, assert_status, client
+from shared.http import MODEL_TIMEOUT, assert_status, client, redacted_response_body
 from shared.http import config_save_payload
 from shared.factories.tenant import isolated_accounts
 from shared.sse import assert_terminal_event, read_sse
@@ -140,7 +140,9 @@ async def _agent_discovery_negative(identity, other) -> None:
             isolated = await api.post("/agent/search_info", json={"agent_id": agent_id, "version_no": 0})
         async with client("config", token=identity.access_token) as api:
             missing = await api.get("/agent/by-name/not-present")
-        assert isolated.status_code in {403, 404}
+        assert isolated.status_code in {403, 404}, (
+            f"cross-tenant agent lookup returned {isolated.status_code}: {redacted_response_body(isolated)}"
+        )
         assert_status(missing, 404)
 
 
@@ -163,13 +165,32 @@ async def _agent_crud(identity) -> None:
 
 async def _agent_crud_negative(identity) -> None:
     async with _draft_agent(identity) as (agent_id, payload):
-        async with client("config", token=identity.access_token) as api:
-            duplicate = await api.post("/agent/update", json={**payload, "agent_id": None})
-            invalid = await api.post("/agent/update", json={"agent_id": agent_id, "max_steps": 0})
-            missing = await api.request("DELETE", "/agent", json={"agent_id": absent_numeric_id(__name__)})
-        assert duplicate.status_code in {400, 409}
-        assert_status(invalid, 422)
-        assert_status(missing, 404)
+        duplicate_id = None
+        try:
+            async with client("config", token=identity.access_token) as api:
+                duplicate = await api.post("/agent/update", json={**payload, "agent_id": None})
+                if duplicate.status_code == 200:
+                    duplicate_id = int(duplicate.json().get("agent_id") or 0)
+                    if duplicate_id and duplicate_id != agent_id:
+                        register_asset(
+                            "owned_agents", str(duplicate_id), duplicate_id, owner_case_id="API-058",
+                            cleanup={"service": "config", "identity": identity.id, "method": "DELETE",
+                                     "path": "/agent", "json": {"agent_id": duplicate_id},
+                                     "allowed_statuses": [200, 404]},
+                        )
+                invalid = await api.post("/agent/update", json={"agent_id": agent_id, "max_steps": 0})
+                missing = await api.request("DELETE", "/agent", json={"agent_id": absent_numeric_id(__name__)})
+            assert duplicate.status_code in {400, 409}, (
+                f"duplicate agent creation returned {duplicate.status_code}: {redacted_response_body(duplicate)}"
+            )
+            assert_status(invalid, 422)
+            assert_status(missing, 404)
+        finally:
+            if duplicate_id and duplicate_id != agent_id:
+                async with client("config", token=identity.access_token) as api:
+                    cleanup = await api.request("DELETE", "/agent", json={"agent_id": duplicate_id})
+                assert_status(cleanup, (200, 404))
+                mark_asset_state("owned_agents", str(duplicate_id), "DELETED")
 
 
 async def _regenerate_name(identity, model_admin, *, force_failure: bool) -> None:
@@ -265,7 +286,9 @@ async def _prompt_generate(identity, mode: str) -> None:
         async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
             async with api.stream("POST", "/prompt/generate", json=payload) as response:
                 if mode == "boundary":
-                    assert response.status_code in {400, 404, 422}
+                    assert response.status_code in {400, 404, 422}, (
+                        f"empty task_description returned HTTP {response.status_code}"
+                    )
                     return
                 assert_status(response, 200)
                 events = await read_sse(response)
@@ -472,6 +495,10 @@ async def _tool_binding(identity, valid: bool) -> None:
 
 
 async def _skill_binding(identity, valid: bool) -> None:
+    if valid:
+        from shared.factories.skill import prepare_skill
+
+        await prepare_skill(identity, role="configurable", cleanup_identity=identity.id, owner="API-062")
     async with _draft_agent(
         identity,
         retain_for_batch=valid,
@@ -485,13 +512,13 @@ async def _skill_binding(identity, valid: bool) -> None:
             if valid:
                 registered = resolve_asset(
                     "skills", "configurable_id", required=False,
-                    consumer_case_id="API-062", dependency_case_id="API-077",
+                    consumer_case_id="API-062", dependency_case_id="API-062",
                 )
                 if registered is None:
                     from shared.asset_registry import AssetDependencyError
                     raise AssetDependencyError(
-                        "skills", "configurable_id", "API-062", "API-077",
-                        detail="D2 did not create a reusable Skill",
+                        "skills", "configurable_id", "API-062", "API-062",
+                        detail="case-owned Skill preparation did not register its identity",
                     )
                 selected = int(registered)
                 assert any(int(item.get("skill_id") or item.get("id")) == selected for item in items), (
@@ -515,7 +542,9 @@ async def _relationship(identity, valid: bool) -> None:
             related = [parent_id, absent_numeric_id(__name__)]
             async with client("config", token=identity.access_token) as api:
                 updated = await api.post("/agent/update", json={**parent, "related_agent_ids": related})
-            assert updated.status_code in {400, 404, 409}
+            assert updated.status_code in {400, 404, 409}, (
+                f"invalid related_agent_ids returned {updated.status_code}: {redacted_response_body(updated)}"
+            )
         return
 
     async with _draft_agent(
@@ -569,29 +598,29 @@ async def _export_import(identity) -> None:
 async def execute_agent_configuration_scenario(case: dict, tenant_a_admin, tenant_a_user, tenant_b_user) -> None:
     case_id = case["id"]
     handlers = {
-        "API-055": lambda: _agent_discovery(tenant_a_user),
-        "API-056": lambda: _agent_discovery_negative(tenant_a_user, tenant_b_user),
-        "API-057": lambda: _agent_crud(tenant_a_user),
-        "API-058": lambda: _agent_crud_negative(tenant_a_user),
+        "API-055": lambda: _agent_discovery(tenant_a_admin),
+        "API-056": lambda: _agent_discovery_negative(tenant_a_admin, tenant_b_user),
+        "API-057": lambda: _agent_crud(tenant_a_admin),
+        "API-058": lambda: _agent_crud_negative(tenant_a_admin),
         "AGT-001": lambda: _regenerate_name_isolated(force_failure=False),
         "AGT-002": lambda: _regenerate_name_isolated(force_failure=True),
-        "AGT-003": lambda: _nl2agent(tenant_a_user, "core"),
-        "AGT-004": lambda: _nl2agent(tenant_a_user, "boundary"),
-        "AGT-005": lambda: _nl2agent(tenant_a_user, "failure"),
-        "AGT-006": lambda: _prompt_generate(tenant_a_user, "core"),
-        "AGT-007": lambda: _prompt_generate(tenant_a_user, "boundary"),
-        "AGT-008": lambda: _prompt_generate(tenant_a_user, "failure"),
-        "AGT-009": lambda: _prompt_section(tenant_a_user, True),
-        "AGT-010": lambda: _prompt_section(tenant_a_user, False),
-        "AGT-011": lambda: _prompt_badcase(tenant_a_user, False, False),
-        "AGT-012": lambda: _prompt_badcase(tenant_a_user, True, True),
+        "AGT-003": lambda: _nl2agent(tenant_a_admin, "core"),
+        "AGT-004": lambda: _nl2agent(tenant_a_admin, "boundary"),
+        "AGT-005": lambda: _nl2agent(tenant_a_admin, "failure"),
+        "AGT-006": lambda: _prompt_generate(tenant_a_admin, "core"),
+        "AGT-007": lambda: _prompt_generate(tenant_a_admin, "boundary"),
+        "AGT-008": lambda: _prompt_generate(tenant_a_admin, "failure"),
+        "AGT-009": lambda: _prompt_section(tenant_a_admin, True),
+        "AGT-010": lambda: _prompt_section(tenant_a_admin, False),
+        "AGT-011": lambda: _prompt_badcase(tenant_a_admin, False, False),
+        "AGT-012": lambda: _prompt_badcase(tenant_a_admin, True, True),
         "API-059": lambda: _template_crud(tenant_a_user),
-        "API-060": lambda: _tool_binding(tenant_a_user, True),
-        "API-061": lambda: _tool_binding(tenant_a_user, False),
-        "API-062": lambda: _skill_binding(tenant_a_user, True),
-        "API-063": lambda: _skill_binding(tenant_a_user, False),
-        "API-064": lambda: _relationship(tenant_a_user, True),
-        "API-065": lambda: _relationship(tenant_a_user, False),
-        "API-066": lambda: _export_import(tenant_a_user),
+        "API-060": lambda: _tool_binding(tenant_a_admin, True),
+        "API-061": lambda: _tool_binding(tenant_a_admin, False),
+        "API-062": lambda: _skill_binding(tenant_a_admin, True),
+        "API-063": lambda: _skill_binding(tenant_a_admin, False),
+        "API-064": lambda: _relationship(tenant_a_admin, True),
+        "API-065": lambda: _relationship(tenant_a_admin, False),
+        "API-066": lambda: _export_import(tenant_a_admin),
     }
     await handlers[case_id]()

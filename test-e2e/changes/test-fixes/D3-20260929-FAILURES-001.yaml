@@ -1,0 +1,70 @@
+schema_version: '1.0'
+change:
+  change_id: D3-20260929-FAILURES-001
+  change_type: test-fix
+  title: Correct D3 cleanup, actor permissions, plugin name, and local targets
+  description: >-
+    API-101 uploaded two files without registering them for owned knowledge-base
+    cleanup, leaving the KB delete blocked by the product's processing guard.
+    API-102 expected only HTTP 400 for an invalid destination although request
+    validation returns HTTP 422. The memory wire Case passed the plugin directory
+    name instead of the registered plugin name AIDP_Memorybank. These corrections
+    preserve the functional assertions and resource ownership checks. API-049
+    and API-053 now include redacted response details when a status assertion
+    fails, so subsequent triage can distinguish permission from validation.
+    On Windows the PostgreSQL helper now uses the container's published host
+    port instead of its unreachable Docker-internal address. The same host-side
+    targeting correction applies to Redis-backed deletion fence tests.
+    Model and Agent configuration scenarios use a same-tenant ADMIN actor for
+    privileged setup and model health operations. USER remains the denied or
+    cross-tenant actor where the negative boundary requires it.
+    API-062 now creates its own Skill instead of relying on another Case's
+    runtime asset. API-058 registers and removes any duplicate Agent created
+    by the product while preserving the failing duplicate-name assertion.
+  affected_features:
+    existing:
+    - F-099
+    - F-178
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - API-101
+    - API-102
+    - API-049
+    - API-053
+    - CTR-AUTO-9ACCCB74F6E72CCC
+    - API-AUTO-2B3A078E3CD1B151
+    - API-AUTO-357B84F01BA6D321
+    - AGT-003
+    - AGT-004
+    - AGT-005
+    - AGT-006
+    - AGT-007
+    - AGT-008
+    - AGT-009
+    - AGT-010
+    - AGT-011
+    - AGT-012
+    - API-052
+    - API-055
+    - API-056
+    - API-057
+    - API-058
+    - API-060
+    - API-061
+    - API-062
+    - API-063
+    - API-064
+    - API-065
+    - API-066
+    - API-110
+    - CTR-006
+    - CTR-007
+    - CTR-028
+    - CTR-029
+    - CTR-030
+    retired: []
