@@ -635,8 +635,10 @@ async def test_create_model_for_tenant_success_llm():
 
         await svc.create_model_for_tenant(user_id, tenant_id, model_data)
 
-        mock_get_by_display.assert_called_once_with(
-            "huggingface/llama", tenant_id)
+        # Called twice: once for the display-name conflict check and once by
+        # _ids_for_created_models to resolve the new model's id for backfill.
+        mock_get_by_display.assert_any_call("huggingface/llama", tenant_id)
+        assert mock_get_by_display.call_count == 2
         # create_model_record called once for non-multimodal
         assert mock_create.call_count == 1
 
@@ -2768,17 +2770,20 @@ async def test_usm_embedding_localhost_replaced_before_url_resolution():
 # ============================================================================
 
 
-def _model_row(model_id, model_type, display_name, connect_status="available", context=None):
-    return {
+def _model_row(model_id, model_type, display_name, connect_status="available", context=None, created=None):
+    row = {
         "model_id": model_id,
         "model_type": model_type,
         "display_name": display_name,
         "connect_status": connect_status,
         "context_window_tokens": context,
     }
+    if created is not None:
+        row["create_time"] = created
+    return row
 
 
-def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, updated=None):
+def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, updated=None, new_model_ids=None):
     inserted = []
     updated = updated if updated is not None else []
     live_ids = live_model_ids if live_model_ids is not None else {
@@ -2808,7 +2813,8 @@ def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, upda
             mock.patch.object(svc, "insert_config", side_effect=fake_insert_config), \
             mock.patch.object(svc, "update_config_by_tenant_config_id", side_effect=fake_update_config), \
             mock.patch.object(svc, "get_model_by_model_id", side_effect=fake_get_model_by_model_id):
-        result = svc._backfill_default_model_slots("u1", "t1")
+        result = svc._backfill_default_model_slots(
+            "u1", "t1", new_model_ids=new_model_ids)
     return result, inserted, updated
 
 
@@ -2842,16 +2848,62 @@ def test_backfill_prefers_available_models():
 
 def test_backfill_never_touches_configured_slots():
     svc = import_svc()
-    rows = [_model_row(1, "llm", "llm-one"), _model_row(2, "embedding", "emb-one")]
-    # LLM_ID row exists and points at a live model (id 1) -- must not be
-    # overwritten even though a "better" candidate exists.
+    rows = [_model_row(1, "llm", "llm-one", context=32000),
+            _model_row(2, "llm", "better-llm", context=1048576),
+            _model_row(3, "embedding", "emb-one")]
+    # LLM_ID row exists, points at a live model (id 1) and carries the acting
+    # user's id (UI save path) -- must not be overwritten even though model 2
+    # has a larger context window.
     result, inserted, updated = _run_backfill(
-        svc, rows, {"LLM_ID": {"config_value": "1", "tenant_config_id": 100}},
-        live_model_ids={1, 2})
+        svc, rows,
+        {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": "u1"}},
+        live_model_ids={1, 2, 3})
 
     assert {e["config_key"] for e in result} == {"EMBEDDING_ID"}
     assert all(d["config_key"] != "LLM_ID" for d in inserted)
     assert all(cid != 100 for cid, _ in updated)
+
+
+def test_backfill_never_touches_occupied_auto_slots():
+    """An occupied slot is never touched -- whether the user picked the model
+    or an earlier backfill did. Adding models later (even better ones) must
+    not move an existing default; batches finalize once with the whole
+    batch's models instead of swapping row by row."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "auto-picked", context=262144),
+        _model_row(2, "llm", "larger-context", context=1048576),
+    ]
+    # Auto-configured row: user_id empty (backfill-written), pointing at the
+    # smaller model. A better model exists (and was just created) -- the slot
+    # must stay frozen.
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "1", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2},
+        new_model_ids={2})
+
+    assert result == []
+    assert inserted == []
+    assert updated == []
+
+
+def test_backfill_keeps_auto_slot_when_occupant_still_best():
+    """An auto-configured slot whose occupant already ranks first is left
+    alone (no redundant update)."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "small-ctx", context=32000),
+        _model_row(2, "llm", "big-ctx", context=1048576),
+    ]
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "2", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2})
+
+    assert result == []
+    assert inserted == []
+    assert updated == []
 
 
 def test_backfill_handles_db_helper_empty_dict_for_missing_row():
@@ -2925,3 +2977,137 @@ def test_create_model_for_tenant_returns_backfill_result():
         result = __import__("asyncio").run(
             svc.create_model_for_tenant("u1", "t1", model_data))
     assert result == {"auto_configured_defaults": backfill_result}
+
+
+def test_backfill_empty_slot_only_considers_new_models():
+    """An empty slot (never configured or deliberately cleared) is filled
+    only from the models created in the current call -- an older, larger
+    model the user passed over must not be resurrected."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-giant", context=1048576),
+        _model_row(2, "llm", "new-small", context=32000),
+    ]
+    result, inserted, _ = _run_backfill(
+        svc, rows, existing_config={}, new_model_ids={2})
+
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 2
+
+
+def test_backfill_empty_slot_stays_empty_without_new_candidates():
+    """When the current create added no model of the slot's type, an empty
+    slot stays empty instead of falling back to pre-existing models."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-llm", context=1048576),
+        _model_row(2, "embedding", "new-emb"),
+    ]
+    # Only an embedding model was created; the empty LLM slot must not be
+    # filled from the old LLM.
+    result, inserted, _ = _run_backfill(
+        svc, rows, existing_config={}, new_model_ids={2})
+
+    assert all(e["config_key"] != "LLM_ID" for e in result)
+    assert all(d["config_key"] != "LLM_ID" for d in inserted)
+    assert any(e["config_key"] == "EMBEDDING_ID" for e in result)
+
+
+def test_backfill_legacy_callers_without_new_ids_keep_all_candidates():
+    """Callers that omit new_model_ids (legacy path) keep the old
+    best-of-all behaviour for empty slots."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-giant", context=1048576),
+        _model_row(2, "llm", "new-small", context=32000),
+    ]
+    result, _, _ = _run_backfill(svc, rows, existing_config={})
+
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 1
+
+
+def test_backfill_batch_finalize_picks_best_of_batch():
+    """The batch finalize path passes the whole batch as new_model_ids: empty
+    slots get the best model of the batch in ONE decision (no per-row
+    claiming, no swaps)."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "first-created", context=262144),
+        _model_row(2, "llm", "larger-context", context=1048576),
+    ]
+    result, inserted, _ = _run_backfill(
+        svc, rows, existing_config={}, new_model_ids={1, 2})
+
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 2
+
+
+def test_create_model_for_tenant_respects_skip_default_backfill():
+    """Rows flagged skip_default_backfill create without running the slot
+    backfill (the batch dialog finalizes once after its loop)."""
+    import asyncio
+
+    svc = import_svc()
+    model_data = {
+        "display_name": "m1", "model_name": "m1", "model_type": "llm",
+        "api_key": "k", "base_url": "http://x", "connect_status": "available",
+        "model_repo": "",
+    }
+    backfill_result = []
+    with mock.patch.object(svc, "create_model_record", return_value=True), \
+            mock.patch.object(svc, "_backfill_default_model_slots", return_value=backfill_result) as mock_backfill:
+        result = asyncio.run(svc.create_model_for_tenant(
+            "u1", "t1", model_data, skip_default_backfill=True))
+    assert result == {"auto_configured_defaults": []}
+    mock_backfill.assert_not_called()
+
+
+def test_backfill_old_models_never_resurrect_for_empty_slot():
+    """Even on the legacy all-candidates path an empty slot is only filled
+    when the pool is provided; with new_model_ids the old giant the user
+    passed over never resurfaces (covered by the new-only tests). This test
+    pins the freeze semantics for occupied slots across sessions."""
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-giant", context=2097152),
+        _model_row(2, "llm", "settled-occupant", context=262144),
+        _model_row(3, "llm", "new-model", context=32000),
+    ]
+    # Occupied slot (auto row) pointing at model 2; an old giant and a new
+    # model exist. Nothing may move the slot.
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "2", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2, 3},
+        new_model_ids={3})
+
+    assert result == []
+    assert updated == []
+
+
+def test_backfill_swap_pool_never_resurrects_old_models():
+    """Even with a fresh occupant, the swap only considers the occupant and
+    the newly created models -- an older, larger model the user passed over
+    must not resurface through the swap path."""
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 9, 30, 12, 0, 0)
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "old-giant", context=2097152,
+                   created=now - timedelta(days=30)),
+        _model_row(2, "llm", "fresh-occupant", context=262144,
+                   created=now - timedelta(seconds=30)),
+        _model_row(3, "llm", "new-model", context=32000, created=now),
+    ]
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        {"LLM_ID": {"config_value": "2", "tenant_config_id": 100, "user_id": None}},
+        live_model_ids={1, 2, 3},
+        new_model_ids={3})
+
+    # The old giant (1M) is not in the swap pool, and the new model (32K)
+    # does not beat the fresh occupant (256K): nothing changes.
+    assert result == []
+    assert updated == []

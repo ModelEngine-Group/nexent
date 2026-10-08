@@ -1,5 +1,6 @@
 // Agent Configuration Types
 import type { Dispatch, SetStateAction } from "react";
+import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
 
 import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
@@ -169,10 +170,7 @@ export interface Agent {
    * Shape: { "<model_id>": { temperature?: number|null, top_p?: number|null, extra_params?: Record<string, unknown>|null } }
    * NULL/undefined means inherit the model's default values.
    */
-  model_params_override?: Record<
-    string,
-    ModelParamsOverrideEntry
-  > | null;
+  model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   allow_chat_metadata?: boolean;
@@ -215,6 +213,7 @@ export interface Agent {
   greeting_message?: string;
   example_questions?: string[];
   icon_url?: string;
+  repository_info?: MyAgentRepositoryInfoItem[];
 }
 
 export interface Tool {

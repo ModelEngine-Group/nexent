@@ -4,6 +4,7 @@ tools:
   intro: '以下工具可供当前任务使用：'
   input_label: 接受输入
   output_label: 返回输出类型
+  mcp_call_guidance: 'MCP 工具请直接调用 Python 函数名 `{{ name }}`，不要把 `[MCP]` 写入代码。'
   file_url_guide_manager: |-
     ### 文件链接使用指南
     当处理用户上传的文件时，请根据工具类型选择正确的 URL：

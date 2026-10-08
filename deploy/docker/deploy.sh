@@ -1232,6 +1232,31 @@ deploy_core_services() {
   fi
 }
 
+deploy_https_nginx() {
+  # Start the Nginx HTTPS reverse proxy when HTTPS is enabled.
+  if [ "$DEPLOYMENT_HTTPS_MODE" = "disabled" ] || [ -z "$DEPLOYMENT_HTTPS_MODE" ]; then
+    # Stop and remove the HTTPS profile service when HTTPS is disabled so a
+    # previously enabled deployment does not keep the proxy running.
+    if ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" ps -q nexent-nginx 2>/dev/null | grep -q .; then
+      echo "Stopping Nginx HTTPS reverse proxy (HTTPS disabled)..."
+      if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" rm -sf nexent-nginx 2>/dev/null; then
+        docker rm -f nexent-nginx 2>/dev/null || true
+      fi
+    fi
+    export NEXENT_WEB_PORT="${NEXENT_WEB_PORT:-3000}"
+    return 0
+  fi
+
+  deployment_https_prepare || return 1
+
+  echo "🔒 Starting Nginx HTTPS reverse proxy (nexent-nginx)..."
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then
+    echo "   ❌ ERROR Failed to start nexent-nginx"
+    return 1
+  fi
+  echo "   ✅ Nginx HTTPS reverse proxy started"
+}
+
 stop_unselected_data_process_service() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && return 0
 
@@ -1973,6 +1998,17 @@ main_deploy() {
     return 0
   fi
 
+  # Configure HTTPS state before core services start so nexent-web is created
+  # with the right port mapping on the first run (avoids a recreate cycle).
+  deploy_https_nginx || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ HTTPS 反向代理部署失败"
+    else
+      echo "HTTPS reverse proxy deployment failed"
+    fi
+    exit 1
+  }
+
   # Start core services
   deploy_core_services || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -1982,6 +2018,7 @@ main_deploy() {
     fi
     exit 1
   }
+
 
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "   ✅ 核心服务启动成功"
@@ -2015,10 +2052,10 @@ main_deploy() {
 
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "🎉  部署完成！"
-    echo "🌐  现在可以访问应用：http://localhost:3000"
+    echo "🌐  现在可以访问应用：http://localhost:${NEXENT_WEB_PORT:-3000}"
   else
     echo "🎉  Deployment completed successfully!"
-    echo "🌐  You can now access the application at http://localhost:3000"
+    echo "🌐  You can now access the application at http://localhost:${NEXENT_WEB_PORT:-3000}"
   fi
 }
 

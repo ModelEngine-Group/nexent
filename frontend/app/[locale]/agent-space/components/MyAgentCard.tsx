@@ -1,9 +1,7 @@
 "use client";
 
-import { Button, Dropdown, Spin, Tooltip } from "antd";
+import { Button, Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
-import { useState } from "react";
-import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import {
   ClipboardCheck,
   Clock,
@@ -21,7 +19,7 @@ import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import {
   formatMineDate,
   getMineCardMenuActions,
-  toMineRepositoryInfo,
+  getMineCardRepositoryStatusBadge,
   type MineCardMenuAction,
 } from "@/lib/agentRepositoryMine";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
@@ -69,16 +67,6 @@ export function MyAgentCard({
   isDeleting = false,
 }: MyAgentCardProps) {
   const { t } = useTranslation("common");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const {
-    data: listingData,
-    isLoading: isListingLoading,
-    isError: isListingError,
-    refetch,
-  } = useAgentRepositoryListings(
-    { agent_id: agent.agent_id, page: 1, page_size: 100 },
-    menuOpen || guideMenuOpen === true
-  );
 
   const title = agent.name?.trim() || t("agentRepository.card.untitled");
   const description =
@@ -88,8 +76,6 @@ export function MyAgentCard({
     agent.unavailable_reasons ?? [],
     t
   );
-  const repositoryInfo = toMineRepositoryInfo(listingData?.items ?? []);
-  const agentWithRepository = { ...agent, repository_info: repositoryInfo };
   const { canOpen: published } = getAgentUsageGuideAccess({
     currentVersionNo: agent.current_version_no,
     permission: agent.permission,
@@ -99,9 +85,10 @@ export function MyAgentCard({
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
   const canEvaluate = canView;
-  const menuActions = listingData
-    ? getMineCardMenuActions(agentWithRepository)
-    : [];
+  const menuActions = getMineCardMenuActions(agent);
+  const repositoryBadge = getMineCardRepositoryStatusBadge(
+    agent.repository_info
+  );
 
   const menuItems: MenuProps["items"] = menuActions.map((action) => {
     const icon =
@@ -122,28 +109,12 @@ export function MyAgentCard({
           return;
         }
         onViewReview(
-          agentWithRepository,
+          agent,
           action === "reviewUpdate" ? "reviewUpdate" : "review"
         );
       },
     };
   });
-
-  if (isListingLoading) {
-    menuItems.unshift({
-      key: "loading",
-      label: <Spin size="small" />,
-      disabled: true,
-    });
-  } else if (isListingError) {
-    menuItems.unshift({
-      key: "retry",
-      label: t("repository.common.retry"),
-      onClick: () => {
-        void refetch();
-      },
-    });
-  }
 
   if (canEvaluate) {
     menuItems.push({
@@ -189,14 +160,16 @@ export function MyAgentCard({
       onClick={onView}
       subtitle={
         versionLabel != null ? (
-          <span className="inline-flex items-center gap-1.5 truncate">
+          <span className="flex min-w-0 items-center gap-1.5">
             <span
               className="size-1.5 shrink-0 rounded-full bg-primary"
               aria-hidden
             />
-            {t("agentRepository.mine.currentVersion", {
-              version: versionLabel,
-            })}
+            <span className="min-w-0 truncate">
+              {t("agentRepository.mine.currentVersion", {
+                version: versionLabel,
+              })}
+            </span>
           </span>
         ) : undefined
       }
@@ -217,59 +190,87 @@ export function MyAgentCard({
           </>
         ) : undefined
       }
-      headerActions={
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          {menuItems.length > 0 ? (
-            <Dropdown
-              menu={{ items: menuItems }}
-              open={guideMenuOpen}
-              onOpenChange={onGuideMenuOpenChange ?? setMenuOpen}
-              trigger={["click"]}
-            >
-              <Button
-                type="text"
-                size="small"
-                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-                icon={<MoreHorizontal className="size-4" aria-hidden />}
-                aria-label={t("agentRepository.mine.menu.more")}
-                aria-haspopup="menu"
-              />
-            </Dropdown>
-          ) : null}
-          <div className="flex items-center gap-1.5">
-            {agent.is_available === false ? (
-              <Tooltip
-                title={
-                  unavailableReasonLabels.length > 0
-                    ? unavailableReasonLabels.join(", ")
-                    : t("agentSelector.agentUnavailable")
-                }
+      statusRow={
+        <div className="flex w-full min-w-0 items-center gap-2">
+          <span
+            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+              published
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+            }`}
+          >
+            {published
+              ? t("agentRepository.mine.lifecycle.published")
+              : t("agentRepository.mine.lifecycle.draft")}
+          </span>
+          <div className="flex min-w-0 flex-1 justify-end">
+            {repositoryBadge ? (
+              <span
+                aria-label={`${t(repositoryBadge.labelKey)}${repositoryBadge.versionLabel ? ` · ${repositoryBadge.versionLabel}` : ""}`}
+                className={`block w-fit max-w-full truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                  repositoryBadge.variant === "pending"
+                    ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                    : repositoryBadge.variant === "rejected"
+                      ? "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                      : "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"
+                }`}
               >
-                <span
-                  className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
-                  aria-label={
-                    unavailableReasonLabels.join(", ") ||
-                    t("agentSelector.agentUnavailable")
-                  }
-                >
-                  {t("mcpConfig.status.unavailable")}
-                </span>
-              </Tooltip>
+                {t(repositoryBadge.labelKey)}
+                {repositoryBadge.versionLabel
+                  ? ` · ${repositoryBadge.versionLabel}`
+                  : null}
+              </span>
             ) : null}
-            <span
-              className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-                published
-                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                  : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
-              }`}
-            >
-              {published
-                ? t("agentRepository.mine.lifecycle.published")
-                : t("agentRepository.mine.lifecycle.draft")}
-            </span>
           </div>
         </div>
       }
+      headerActions={
+        menuItems.length > 0 || agent.is_available === false ? (
+          <div className="grid h-[60px] grid-rows-2">
+            <div className="flex items-center justify-end">
+              {menuItems.length > 0 ? (
+                <Dropdown
+                  menu={{ items: menuItems }}
+                  open={guideMenuOpen}
+                  onOpenChange={onGuideMenuOpenChange}
+                  trigger={["click"]}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                    icon={<MoreHorizontal className="size-4" aria-hidden />}
+                    aria-label={t("agentRepository.mine.menu.more")}
+                    aria-haspopup="menu"
+                  />
+                </Dropdown>
+              ) : null}
+            </div>
+            {agent.is_available === false ? (
+              <div className="flex items-center justify-end">
+                <Tooltip
+                  title={
+                    unavailableReasonLabels.length > 0
+                      ? unavailableReasonLabels.join(", ")
+                      : t("agentSelector.agentUnavailable")
+                  }
+                >
+                  <span
+                    className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                    aria-label={
+                      unavailableReasonLabels.join(", ") ||
+                      t("agentSelector.agentUnavailable")
+                    }
+                  >
+                    {t("mcpConfig.status.unavailable")}
+                  </span>
+                </Tooltip>
+              </div>
+            ) : null}
+          </div>
+        ) : undefined
+      }
+      fixedHeaderLayout
       footerLayout="inline"
       meta={
         footerDate ? (

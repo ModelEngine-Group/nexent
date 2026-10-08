@@ -402,6 +402,10 @@ export const modelService = {
     temperature?: number;
     topP?: number;
     extraParams?: Record<string, unknown>;
+    // Batch-import flow control: rows marked here leave default-model slots
+    // untouched; the batch finalize call (backfillDefaults) runs the
+    // auto-configuration once for the whole batch.
+    skipDefaultBackfill?: boolean;
   }): Promise<any> => {
     try {
       const requestBody: any = {
@@ -421,6 +425,10 @@ export const modelService = {
         ...buildCapacityRequestBody(model),
         ...buildInferenceParamsRequestBody(model),
       };
+
+      if (model.skipDefaultBackfill) {
+        requestBody.skip_default_backfill = true;
+      }
 
       // Add STT specific fields
       if (model.modelFactory) {
@@ -454,6 +462,33 @@ export const modelService = {
     } catch (error) {
       if (error instanceof ModelError) throw error;
       throw new ModelError("添加自定义模型失败", 500);
+    }
+  },
+
+  // Finalize default-model auto-configuration after a batch import: empty
+  // slots get the best model among the given display names; occupied slots
+  // (user- or system-configured) are never touched.
+  backfillDefaults: async (displayNames: string[]): Promise<any> => {
+    try {
+      const response = await authedFetch(
+        API_ENDPOINTS.model.customModelBackfillDefaults,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ display_names: displayNames }),
+        }
+      );
+      const result = await response.json();
+      if (response.status !== 200) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to backfill defaults",
+          response.status
+        );
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      throw new ModelError("Failed to backfill defaults", 500);
     }
   },
 

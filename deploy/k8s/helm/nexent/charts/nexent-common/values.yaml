@@ -71,6 +71,11 @@ config:
   skillsPath: "/mnt/nexent-data/skills"
   memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
   logDir: "/mnt/nexent-data/logs"
+  skill:
+    maxSkillsPerTenant: "1000"
+    maxUploadSizeMb: "10"
+  evaluationSet:
+    maxFileSizeMb: "20"
   modelEngine:
     enabled: "false"
   voiceService:

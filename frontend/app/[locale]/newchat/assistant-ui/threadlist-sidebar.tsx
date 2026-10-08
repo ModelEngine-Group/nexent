@@ -24,18 +24,28 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
+type RenameSuccessHandler = (
+  threadId: string,
+  remoteId: string | undefined,
+  title: string
+) => void;
+
 interface ThreadListSidebarProps extends SidebarProps {
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
+  serverConversationIds?: ReadonlyMap<string, string>;
   onPrepareNewConversation?: () => void;
   onNewConversation?: () => void | Promise<void>;
+  onRenameSuccess?: RenameSuccessHandler;
   showLegacySwitch?: boolean;
 }
 
 export function ThreadListSidebar({
   generatedTitles,
+  serverConversationIds,
   onPrepareNewConversation,
   onNewConversation,
+  onRenameSuccess,
   showLegacySwitch = true,
   ...props
 }: ThreadListSidebarProps) {
@@ -104,7 +114,10 @@ export function ThreadListSidebar({
         className="h-full w-64 min-w-64 max-w-64 p-2"
         style={{ backgroundColor: "#F2F8FF" }}
       >
-        <BatchSelectionProvider onNewConversation={onNewConversation}>
+        <BatchSelectionProvider
+          onNewConversation={onNewConversation}
+          serverConversationIds={serverConversationIds}
+        >
           <Sidebar
             {...props}
             collapsible="none"
@@ -114,18 +127,33 @@ export function ThreadListSidebar({
           >
             <SidebarHeader>
               <div className="flex items-center gap-2 px-1">
-                <ThreadListPrimitive.New
-                  className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
-                  onClick={onPrepareNewConversation}
-                >
-                  <PlusIcon className="size-4 shrink-0" />
-                  {t("chat.sidebar.newConversation")}
-                </ThreadListPrimitive.New>
+                {onNewConversation ? (
+                  <button
+                    type="button"
+                    className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
+                    onClick={onNewConversation}
+                  >
+                    <PlusIcon className="size-4 shrink-0" />
+                    {t("chat.sidebar.newConversation")}
+                  </button>
+                ) : (
+                  <ThreadListPrimitive.New
+                    className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
+                    onClick={onPrepareNewConversation}
+                  >
+                    <PlusIcon className="size-4 shrink-0" />
+                    {t("chat.sidebar.newConversation")}
+                  </ThreadListPrimitive.New>
+                )}
                 <SidebarTrigger className="size-8 shrink-0" />
               </div>
             </SidebarHeader>
             <SidebarContent className="focus:outline-none">
-              <ThreadList generatedTitles={generatedTitles} />
+              <ThreadList
+                generatedTitles={generatedTitles}
+                serverConversationIds={serverConversationIds}
+                onRenameSuccess={onRenameSuccess}
+              />
             </SidebarContent>
             <SidebarFooter>
               <BatchSidebarFooter

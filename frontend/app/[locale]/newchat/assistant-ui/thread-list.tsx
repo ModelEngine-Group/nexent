@@ -30,7 +30,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -39,6 +41,7 @@ import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import type { FC } from "react";
 import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
+import { getVisibleThreadIds } from "./visible-thread-ids";
 
 // Conversation status indicator component
 const ConversationStatusIndicator: FC<{
@@ -89,7 +92,8 @@ const useBatchSelection = (): BatchSelectionValue | null =>
 export const BatchSelectionProvider: FC<{
   children: ReactNode;
   onNewConversation?: () => void | Promise<void>;
-}> = ({ children, onNewConversation }) => {
+  serverConversationIds?: ReadonlyMap<string, string>;
+}> = ({ children, onNewConversation, serverConversationIds }) => {
   const { t } = useTranslation();
   const aui = useAui();
   const { confirm } = useConfirmModal();
@@ -109,8 +113,13 @@ export const BatchSelectionProvider: FC<{
   }, []);
 
   const selectAllVisible = useCallback(() => {
-    setSelectedIds(() => new Set(threadIds));
-  }, [threadIds]);
+    setSelectedIds(
+      () =>
+        new Set(
+          getVisibleThreadIds(threadIds, threadItems, serverConversationIds)
+        )
+    );
+  }, [threadIds, threadItems, serverConversationIds]);
 
   const clear = useCallback(() => setSelectedIds(new Set()), []);
 
@@ -132,9 +141,10 @@ export const BatchSelectionProvider: FC<{
     );
     const conversationIds: number[] = [];
     for (const id of selectedIds) {
-      const remoteId = itemsById.get(id)?.remoteId;
-      const num = Number(remoteId);
-      if (remoteId && Number.isInteger(num) && num > 0) {
+      const conversationId =
+        serverConversationIds?.get(id) || itemsById.get(id)?.remoteId;
+      const num = Number(conversationId);
+      if (conversationId && Number.isInteger(num) && num > 0) {
         conversationIds.push(num);
       }
     }
@@ -144,7 +154,8 @@ export const BatchSelectionProvider: FC<{
     // If so, the main panel must switch to a fresh thread after reload,
     // otherwise it would keep pointing at a now-deleted conversation.
     const activeRemoteId = mainThreadId
-      ? itemsById.get(mainThreadId)?.remoteId
+      ? serverConversationIds?.get(mainThreadId) ||
+        itemsById.get(mainThreadId)?.remoteId
       : undefined;
     const activeConversationId = Number(activeRemoteId);
     const activeDeleted =
@@ -184,6 +195,7 @@ export const BatchSelectionProvider: FC<{
     selectedIds,
     threadItems,
     mainThreadId,
+    serverConversationIds,
     confirm,
     t,
     aui,
@@ -293,41 +305,72 @@ export const BatchSidebarFooter: FC<{ onSwitchToLegacy?: () => void }> = ({
   );
 };
 
+type RenameSuccessHandler = (
+  threadId: string,
+  remoteId: string | undefined,
+  title: string
+) => void;
+
 interface ThreadListProps {
   generatedTitles?: ReadonlyMap<string, string>;
+  serverConversationIds?: ReadonlyMap<string, string>;
+  onRenameSuccess?: RenameSuccessHandler;
 }
 
 export const ThreadList: FC<ThreadListProps> = ({
   generatedTitles,
+  serverConversationIds,
+  onRenameSuccess,
 }) => {
   const { t } = useTranslation();
-  const completedConversations = useMemo(() => new Set<string>(), []);
+  const [completedConversations, setCompletedConversations] = useState(
+    () => new Set<string>()
+  );
+  const isThreadRunning = useAuiState((s) => s.thread.isRunning);
+  const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
+  const runningThreadId = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (isThreadRunning) {
+      runningThreadId.current = mainThreadId;
+      return;
+    }
+
+    if (runningThreadId.current) {
+      const completedThreadId = runningThreadId.current;
+      setCompletedConversations((previous) => {
+        const next = new Set(previous);
+        next.add(completedThreadId);
+        return next;
+      });
+      runningThreadId.current = undefined;
+    }
+  }, [isThreadRunning, mainThreadId]);
   const isLoading = useAuiState((s) => s.threads.isLoading);
   const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  const threadIds = useAuiState((s) => s.threads.threadIds);
+  const threadItems = useAuiState((s) => s.threads.threadItems);
+  const visibleThreadIds = getVisibleThreadIds(
+    threadIds,
+    threadItems,
+    serverConversationIds
+  );
 
   return (
     <div className="flex flex-col p-2">
       <AuiIf condition={(s) => s.threads.isLoading}>
         <ThreadListSkeleton />
       </AuiIf>
-      <AuiIf
-        condition={(s) =>
-          !s.threads.isLoading && s.threads.threadIds.length === 0
-        }
-      >
-        <ThreadListEmpty />
-      </AuiIf>
-      <AuiIf
-        condition={(s) =>
-          !s.threads.isLoading && s.threads.threadIds.length > 0
-        }
-      >
+      {!isLoading && visibleThreadIds.length === 0 && <ThreadListEmpty />}
+      {!isLoading && visibleThreadIds.length > 0 && (
         <ThreadListItems
           completedConversations={completedConversations}
           generatedTitles={generatedTitles}
+          onRenameSuccess={onRenameSuccess}
+          visibleThreadIds={visibleThreadIds}
         />
-      </AuiIf>
+      )}
       <ThreadListPrimitive.LoadMore
         disabled={!hasMore || isLoading || isLoadingMore}
         className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -363,38 +406,33 @@ const ThreadListEmpty: FC = () => {
 interface ThreadListItemsProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onRenameSuccess?: RenameSuccessHandler;
+  visibleThreadIds: string[];
 }
 
 const ThreadListItems: FC<ThreadListItemsProps> = ({
   completedConversations,
   generatedTitles,
+  onRenameSuccess,
+  visibleThreadIds,
 }) => {
   const { t } = useTranslation();
 
-  const groups = useThreadListGroups();
+  const groups = useThreadListGroups(visibleThreadIds);
 
   const GroupedThreadListItem = useMemo<FC>(
-    () => () => (
-      <ThreadListItem
-        completedConversations={completedConversations}
-        generatedTitles={generatedTitles}
-      />
-    ),
-    [completedConversations, generatedTitles]
-  );
-
-  if (!groups) {
-    return (
-      <ThreadListPrimitive.Items>
-        {() => (
+    () =>
+      function GroupedThreadListItem() {
+        return (
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            onRenameSuccess={onRenameSuccess}
           />
-        )}
-      </ThreadListPrimitive.Items>
-    );
-  }
+        );
+      },
+    [completedConversations, generatedTitles, onRenameSuccess]
+  );
 
   // Render each thread by index so we can interleave group labels between
   // recency buckets without giving up the runtime's per-item context.
@@ -402,12 +440,14 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     <div className="flex flex-col">
       {groups.map((group) => (
         <Fragment key={group.label}>
-          <div
-            data-slot="aui_thread-list-group-label"
-            className="px-3 pt-3 pb-1 text-xs font-medium text-[#4379EE]"
-          >
-            {t(group.label)}
-          </div>
+          {group.label && (
+            <div
+              data-slot="aui_thread-list-group-label"
+              className="px-3 pt-3 pb-1 text-xs font-medium text-[#4379EE]"
+            >
+              {t(group.label)}
+            </div>
+          )}
           {group.entries.map(({ id, index }) => (
             <ThreadListPrimitive.ItemByIndex
               key={id}
@@ -443,13 +483,12 @@ const dateGroupLabel = (
   return "chat.threadList.older";
 };
 
-// Build ordered recency groups for the current thread list. Returns null when
-// no thread has a usable timestamp so the caller can render a flat list.
-const useThreadListGroups = (): ThreadListGroup[] | null => {
+// Build ordered recency groups for the visible thread list.
+const useThreadListGroups = (visibleThreadIds: string[]): ThreadListGroup[] => {
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
 
-  return useMemo<ThreadListGroup[] | null>(() => {
+  return useMemo<ThreadListGroup[]>(() => {
     const itemsById = new Map(
       (
         threadItems as ReadonlyArray<{
@@ -462,8 +501,6 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
       const raw = itemsById.get(id)?.custom?.lastMessageAt;
       return raw ? new Date(raw) : undefined;
     });
-    if (!dates.some(Boolean)) return null;
-
     const now = new Date();
     const startOfToday = new Date(
       now.getFullYear(),
@@ -475,7 +512,17 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
       dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const indices = threadIds
       .map((_, index) => index)
+      .filter((index) => visibleThreadIds.includes(threadIds[index]))
       .sort((a, b) => time(b) - time(a));
+
+    if (!indices.some((index) => dates[index])) {
+      return [
+        {
+          label: "",
+          entries: indices.map((index) => ({ id: threadIds[index], index })),
+        },
+      ];
+    }
 
     const result: ThreadListGroup[] = [];
     for (const index of indices) {
@@ -489,7 +536,7 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
       }
     }
     return result;
-  }, [threadIds, threadItems]);
+  }, [threadIds, threadItems, visibleThreadIds]);
 };
 
 const ThreadListSkeleton: FC = () => {
@@ -518,17 +565,20 @@ const ThreadListSkeleton: FC = () => {
 interface ThreadListItemProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onRenameSuccess?: RenameSuccessHandler;
 }
 
 const ThreadListItem: FC<ThreadListItemProps> = ({
   completedConversations,
   generatedTitles,
+  onRenameSuccess,
 }) => {
   return (
     <ThreadListItemPrimitive.Root className="group/item flex h-9 items-center rounded-lg hover:bg-muted data-[active=true]:bg-muted">
       <ThreadListItemContent
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        onRenameSuccess={onRenameSuccess}
       />
     </ThreadListItemPrimitive.Root>
   );
@@ -537,11 +587,13 @@ const ThreadListItem: FC<ThreadListItemProps> = ({
 interface ThreadListItemContentProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onRenameSuccess?: RenameSuccessHandler;
 }
 
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   completedConversations,
   generatedTitles,
+  onRenameSuccess,
 }) => {
   const aui = useAui();
   const { t } = useTranslation();
@@ -554,13 +606,17 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const threadListItem = aui.threadListItem;
   const thread = threadListItem.getState();
   const title =
-    generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
+    generatedTitles?.get(thread.id) ??
+    (thread.remoteId ? generatedTitles?.get(thread.remoteId) : undefined) ??
+    thread.title ??
+    t("chat.thread.newChat");
 
   const handleRename = useCallback(
     async (newTitle: string) => {
       setPendingThreadOperationId(thread.id);
       try {
         await threadListItem.rename(newTitle);
+        onRenameSuccess?.(thread.id, thread.remoteId, newTitle);
         log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
         setIsEditing(false);
       } catch (error) {
@@ -570,7 +626,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
         setPendingThreadOperationId(undefined);
       }
     },
-    [thread.id, threadListItem, t]
+    [thread.id, thread.remoteId, threadListItem, onRenameSuccess, t]
   );
 
   const handleRenameClick = useCallback(() => {
@@ -633,9 +689,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           />
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="min-w-0 flex-1 truncate text-left">
-                {title}
-              </span>
+              <span className="min-w-0 flex-1 truncate text-left">{title}</span>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-80 break-words">
               {title}
@@ -685,11 +739,26 @@ const ConversationStatusIndicatorWrapper: FC<{
   completedConversations: Set<string>;
 }> = ({ completedConversations }) => {
   const aui = useAui();
-  const status = aui.threadListItem().getState().status as string;
-  const isRunning = status === "running" || status === "streaming";
+  const threadId = aui.threadListItem().getState().id;
 
   return (
-    <ConversationStatusIndicator isStreaming={isRunning} isCompleted={false} />
+    <>
+      <AuiIf
+        condition={(s) =>
+          s.thread.isRunning && s.threads.mainThreadId === threadId
+        }
+      >
+        <ConversationStatusIndicator isStreaming isCompleted={false} />
+      </AuiIf>
+      <AuiIf
+        condition={(s) =>
+          completedConversations.has(threadId) &&
+          !(s.thread.isRunning && s.threads.mainThreadId === threadId)
+        }
+      >
+        <ConversationStatusIndicator isStreaming={false} isCompleted />
+      </AuiIf>
+    </>
   );
 };
 

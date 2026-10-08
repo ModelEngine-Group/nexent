@@ -484,6 +484,11 @@ render_k8s_runtime_config_values() {
     printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
     printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
     printf '    logDir: %s\n' "$(yaml_quote "$(env_or_default LOG_DIR "/mnt/nexent-data/logs")")"
+    echo "    skill:"
+    printf '      maxSkillsPerTenant: %s\n' "$(yaml_quote "$(env_or_default MAX_SKILLS_PER_TENANT "1000")")"
+    printf '      maxUploadSizeMb: %s\n' "$(yaml_quote "$(env_or_default MAX_SKILL_UPLOAD_SIZE_MB "10")")"
+    echo "    evaluationSet:"
+    printf '      maxFileSizeMb: %s\n' "$(yaml_quote "$(env_or_default MAX_EVALUATION_SET_FILE_SIZE_MB "20")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
     echo "    voiceService:"
@@ -751,6 +756,7 @@ update_values_yaml() {
 
   deployment_apply_image_source
   deployment_prepare_monitoring_env k8s || exit 1
+  deployment_https_prepare || exit 1
   deployment_render_helm_values "$GENERATED_VALUES"
   deployment_render_helm_values "$INFRASTRUCTURE_GENERATED_VALUES"
   render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"

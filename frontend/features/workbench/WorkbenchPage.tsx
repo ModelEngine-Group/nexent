@@ -195,7 +195,9 @@ const HomeContent: FC = () => {
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
     new Map()
   );
-  const [, forceServerIdTick] = useState(0);
+  const [serverConversationIds, setServerConversationIds] = useState<
+    Map<string, string>
+  >(new Map());
 
   const handleServerConversationId = useCallback(
     (threadId: string, serverId: string, initialQuestion?: string) => {
@@ -205,10 +207,8 @@ const HomeContent: FC = () => {
       if (previous !== numericId) {
         map.set(threadId, numericId);
         cacheHistoricalChatMode(numericId, chatMode);
-        // Trigger a re-render so the `setRunConfig` effect below picks up the
-        // new id. We don't store the map in state because we never need to
-        // diff/render it directly — only react when an entry changes.
-        forceServerIdTick((tick) => tick + 1);
+        // Keep the sidebar and run configuration in sync with the server id.
+        setServerConversationIds(new Map(map));
         if (workbenchState.configVersion === 0) {
           dispatchWorkbench({ type: "set-version", version: 1 });
         }
@@ -251,6 +251,18 @@ const HomeContent: FC = () => {
       }
     },
     [chatMode, dispatchWorkbench, workbenchState.configVersion]
+  );
+
+  const handleConversationRenamed = useCallback(
+    (threadId: string, remoteId: string | undefined, title: string) => {
+      setGeneratedTitles((titles) => {
+        const next = new Map(titles);
+        next.set(threadId, title);
+        if (remoteId) next.set(remoteId, title);
+        return next;
+      });
+    },
+    []
   );
 
   const handleGenerationStopped = useCallback((conversationId: number) => {
@@ -1167,6 +1179,8 @@ const HomeContent: FC = () => {
           <ThreadListSidebar
             showLegacySwitch={false}
             generatedTitles={generatedTitles}
+            serverConversationIds={serverConversationIds}
+            onRenameSuccess={handleConversationRenamed}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
           />

@@ -43,8 +43,15 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(effectivePath === "/workbench");
 
   useEffect(() => {
-    if (effectivePath !== "/workbench") return;
-    const frame = requestAnimationFrame(() => setCollapsed(true));
+    if (
+      effectivePath !== "/workbench" &&
+      !effectivePath.startsWith("/agents/") &&
+      effectivePath !== "/skill-space"
+    )
+      return;
+    const frame = requestAnimationFrame(() =>
+      setCollapsed(effectivePath === "/workbench")
+    );
     return () => cancelAnimationFrame(frame);
   }, [effectivePath]);
 

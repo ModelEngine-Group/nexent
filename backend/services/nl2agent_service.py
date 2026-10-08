@@ -32,6 +32,7 @@ from consts.const import (
     TOKEN,
     ENABLE_AIDP_KNOWLEDGE,
     LOCAL_MCP_SERVER,
+    MCP_REQUEST_TIMEOUT_SECONDS,
     MODEL_CONFIG_MAPPING,
 )
 from utils.mcp_url_utils import get_tenant_local_mcp_server
@@ -1418,6 +1419,7 @@ async def build_nl2agent_run_info(
         ),
         agent_config=agent_config,
         mcp_host=[mcp_config],
+        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         history=_convert_history(request.history),
         stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,

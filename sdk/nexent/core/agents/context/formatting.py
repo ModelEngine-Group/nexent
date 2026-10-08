@@ -7,7 +7,7 @@ rendering is an SDK responsibility. Callers provide authorized data only.
 import json
 from typing import Any, Dict, List
 
-from nexent.core.prompts import load_prompt
+from nexent.core.prompts import load_prompt, render_prompt_text
 
 
 def _localize_schema_descriptions(value: Any, language: str) -> Any:
@@ -84,9 +84,11 @@ def _format_tools_description(
             output_type = tool.get("output_type", "")
             source = tool.get("source", "local")
         inputs = _localize_schema_descriptions(inputs, language)
-        prefix = "[MCP] " if source == "mcp" else ""
+        source_marker = " [MCP]" if source == "mcp" else ""
+        lines.append(f"- {name}{source_marker}: {desc}")
+        if source == "mcp":
+            lines.append("   " + render_prompt_text(labels["mcp_call_guidance"], {"name": name}))
         lines.extend([
-            f"- {prefix}{name}: {desc}",
             f"   {labels['input_label']}: {inputs}",
             f"   {labels['output_label']}: {output_type}",
         ])

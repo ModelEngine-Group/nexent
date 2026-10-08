@@ -7,7 +7,7 @@ import {
   McpSource,
   McpTransportType,
 } from "@/const/mcpTools";
-import { API_ENDPOINTS } from "@/services/api";
+import { API_ENDPOINTS, ApiError } from "@/services/api";
 import type {
   AddMcpServicePayload,
   HealthcheckMcpServicePayload,
@@ -294,8 +294,10 @@ export const addContainerMcpToolServiceStream = async (
         } else if (message.status === "success") {
           return message.data || {};
         } else if (message.status === "error") {
-          throw new Error(
-            message.detail || "Failed to add container MCP service"
+          throw new ApiError(
+            message.code || "request_failed",
+            message.message || message.detail || "Failed to add container MCP service",
+            message.details,
           );
         }
       }

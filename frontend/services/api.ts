@@ -186,6 +186,7 @@ export const API_ENDPOINTS = {
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
+    config: `${API_BASE_URL}/evaluation-sets/config`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
@@ -269,6 +270,7 @@ export const API_ENDPOINTS = {
     customModelCreate: `${API_BASE_URL}/model/create`,
     customModelCreateProvider: `${API_BASE_URL}/model/provider/create`,
     customModelBatchCreate: `${API_BASE_URL}/model/provider/batch_create`,
+    customModelBackfillDefaults: `${API_BASE_URL}/model/backfill_defaults`,
     getProviderSelectedModalList: `${API_BASE_URL}/model/provider/list`,
     customModelDelete: (displayName: string) =>
       `${API_BASE_URL}/model/delete?display_name=${encodeURIComponent(
@@ -935,9 +937,11 @@ export const fetchWithErrorHandling = async (
             throw error;
           }
         }
+        // Preserve structured FILE_TOO_LARGE responses so upload callers can
+        // display the configured limit from details.limit_mb.
         throw new ApiError(
-          ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit.",
+          errorCode,
+          errorMessage || "File size exceeds limit.",
           errorDetails
         );
       }

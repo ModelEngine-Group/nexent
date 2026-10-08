@@ -4,6 +4,7 @@ tools:
   intro: 'The following tools are available for this task:'
   input_label: Accepts input
   output_label: Returns output type
+  mcp_call_guidance: 'Call the MCP tool directly as the Python function `{{ name }}`; do not include `[MCP]` in code.'
   file_url_guide_manager: |-
     ### File URL Usage Guide
     When processing user-uploaded files, choose the correct URL based on tool type:
