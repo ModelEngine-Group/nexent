@@ -1,59 +1,50 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
-import { useRouter, usePathname } from "next/navigation";
-import { Menu, ConfigProvider } from "antd";
+import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
-  Bot,
-  Globe,
-  Settings,
+  Bell,
   BookOpen,
-  Database,
-  Code,
-  Home,
-  Puzzle,
+  Bot,
   Building2,
-  Zap,
   CalendarClock,
+  Code,
+  Database,
+  Globe,
+  Home,
   LineChart,
+  Puzzle,
+  Settings,
+  Zap,
 } from "lucide-react";
-import type { MenuProps } from "antd";
+
+import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { SIDER_CONFIG } from "@/const/layoutConstants";
+import { NotificationBell } from "@/components/navigation/NotificationBell";
 import { AUTH_EVENTS } from "@/const/auth";
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+} from "@/hooks/useNotifications";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents } from "@/lib/authEvents";
+import { publicAsset } from "@/lib/publicAsset";
 
-interface SideNavigationProps {
-  collapsed?: boolean;
-}
-
-/**
- * Route configuration interface for menu items
- */
 interface RouteConfig {
   path: string;
-  Icon: React.ComponentType<{ className?: string }>;
+  Icon: ComponentType<{ className?: string }>;
   labelKey: string;
   order: number;
   parentKey?: string | null;
   navigationPath?: string;
+  isSection?: boolean;
 }
 
-/**
- * Processed route with children for nested menus
- */
-interface ProcessedRoute extends RouteConfig {
-  children: RouteConfig[];
-}
-
-/**
- * Static route configuration mapping
- * All available routes with their metadata
- */
 const ROUTE_CONFIG: RouteConfig[] = [
   {
     path: "/",
@@ -84,13 +75,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 2,
     parentKey: null,
   },
-  // Agent Development submenu
   {
     path: "/agent-dev",
     Icon: Code,
     labelKey: "sidebar.agentDev",
     order: 3,
     parentKey: null,
+    isSection: true,
   },
   {
     path: "/models",
@@ -127,13 +118,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 8,
     parentKey: "/agent-dev",
   },
-  // Resource Space submenu
   {
     path: "/resource-space",
     Icon: Globe,
     labelKey: "sidebar.resourceSpace",
     order: 9,
     parentKey: null,
+    isSection: true,
   },
   {
     path: "/agent-space",
@@ -156,7 +147,6 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 12,
     parentKey: "/resource-space",
   },
-  // Management menus
   {
     path: "/resource-manage",
     Icon: Building2,
@@ -173,16 +163,30 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
 ];
 
-/**
- * Extract all available route paths from ROUTE_CONFIG
- */
-const ROUTE_PATHS = ROUTE_CONFIG.map((route) => route.path);
+const RAIL_ITEM_CLASS =
+  "flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-[4px] border-0 bg-transparent p-2 text-[#191919]";
+const MENU_ITEM_CLASS = `${RAIL_ITEM_CLASS} !h-auto min-h-12 !px-0 !py-1`;
+const RAIL_ICON_CLASS = "h-5 w-5 shrink-0";
+const RAIL_LABEL_CLASS =
+  "w-11 max-w-11 break-words text-center text-[12px] leading-[20px] ![letter-spacing:0px] text-[#191919]";
+const SELECTED_ITEM_CLASS = "!bg-[rgba(25,25,25,0.05)] !rounded-[12px]";
 
-/**
- * Side navigation component with collapsible menu
- * Displays main navigation items for the application based on user's accessible routes
- */
-export function SideNavigation({ collapsed }: SideNavigationProps) {
+function isRouteAccessible(
+  route: RouteConfig,
+  accessibleRoutes: string[],
+  enableAgentWorkbench: boolean
+) {
+  if (route.path === "/workbench" && !enableAgentWorkbench) {
+    return false;
+  }
+
+  return (
+    accessibleRoutes.includes(route.path) ||
+    (route.path === "/workbench" && accessibleRoutes.includes("/chat"))
+  );
+}
+
+export function SideNavigation() {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
@@ -190,40 +194,33 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const [selectedKey, setSelectedKey] = useState("/");
-  const [openKeys, setOpenKeys] = useState<string[]>([]);
   const [pendingNavigationPath, setPendingNavigationPath] = useState<
     string | null
   >(null);
-  const isCollapsed = typeof collapsed === "boolean" ? collapsed : false;
 
-  // Find parent key for a given path
-  const findParentKey = (path: string): string | null => {
-    const route = ROUTE_CONFIG.find((r) => r.path === path);
-    return route?.parentKey || null;
-  };
+  const {
+    unreadCount,
+    items,
+    isLoading: isNotificationsLoading,
+  } = useNotifications(!isSpeedMode && isAuthenticated);
+  const markNotificationReadMutation = useMarkNotificationRead();
+  const markAllNotificationsReadMutation = useMarkAllNotificationsRead();
 
-  // Update selected key and expand parent menu when pathname changes
-  useEffect(() => {
+  const selectedKey = useMemo(() => {
     const currentPath = getEffectiveRoutePath(pathname);
-    const matchedKey =
-      currentPath === "/newchat"
-        ? "/chat"
-        : ROUTE_PATHS.includes(currentPath)
-          ? currentPath
-          : null;
-    setSelectedKey(matchedKey || "");
+    const matchedRoute = [...ROUTE_CONFIG]
+      .sort((a, b) => b.path.length - a.path.length)
+      .find(
+        (route) =>
+          currentPath === route.path || currentPath.startsWith(`${route.path}/`)
+      );
 
-    // Auto-expand parent menu when visiting child page
-    const parentKey = findParentKey(currentPath);
-    setOpenKeys(parentKey ? [parentKey] : []);
+    return matchedRoute?.isSection ? "" : matchedRoute?.path || "";
   }, [pathname]);
 
-  // Listen for login success event and navigate to pending path
   useEffect(() => {
     const handleLoginSuccess = () => {
       if (pendingNavigationPath && isAuthenticated) {
-        // Small delay to ensure authentication state is fully updated
         setTimeout(() => {
           router.push(pendingNavigationPath);
           setPendingNavigationPath(null);
@@ -231,146 +228,113 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       }
     };
 
-    const cleanup = authEvents.on(
-      AUTH_EVENTS.LOGIN_SUCCESS,
-      handleLoginSuccess
-    );
-    return cleanup;
-  }, [pendingNavigationPath, isAuthenticated, router]);
+    return authEvents.on(AUTH_EVENTS.LOGIN_SUCCESS, handleLoginSuccess);
+  }, [isAuthenticated, pendingNavigationPath, router]);
 
-  // Listen for back-to-home event and reset selected key
-  useEffect(() => {
-    const handleBackToHome = () => {
-      setSelectedKey("/");
-    };
-
-    const cleanup = authEvents.on(AUTH_EVENTS.BACK_TO_HOME, handleBackToHome);
-    return cleanup;
-  }, []);
-
-  // Filter and sort routes based on accessibleRoutes from authorization context
-  // Build nested menu structure with parent-child relationships
-  const accessibleMenuItems = useMemo((): ProcessedRoute[] => {
+  const accessibleMenuItems = useMemo(() => {
     if (!accessibleRoutes || accessibleRoutes.length === 0) {
       return [];
     }
 
-    const filtered = ROUTE_CONFIG.filter((route) => {
-      if (route.path === "/workbench" && !enableAgentWorkbench) return false;
-      return (
-        accessibleRoutes.includes(route.path) ||
-        (route.path === "/workbench" && accessibleRoutes.includes("/chat"))
-      );
-    });
-
-    // Separate root items and children
-    const rootItems = filtered
-      .filter((route) => !route.parentKey || route.parentKey === null)
-      .sort((a, b) => a.order - b.order);
-
-    const childrenByParent = new Map<string, RouteConfig[]>();
-    filtered
-      .filter((route) => route.parentKey && route.parentKey !== null)
-      .sort((a, b) => a.order - b.order)
-      .forEach((route) => {
-        const parent = route.parentKey!;
-        if (!childrenByParent.has(parent)) {
-          childrenByParent.set(parent, []);
-        }
-        childrenByParent.get(parent)!.push(route);
-      });
-
-    // Build nested structure
-    return rootItems.map((root) => ({
-      ...root,
-      children: childrenByParent.get(root.path) || [],
-    }));
-  }, [accessibleRoutes, enableAgentWorkbench]);
-
-  /**
-   * Create a menu item from route configuration
-   * Pre-check authentication before navigation to avoid unnecessary route changes
-   */
-  const createMenuItem = (
-    route: RouteConfig
-  ): NonNullable<MenuProps["items"]>[number] => {
-    return {
-      key: route.path,
-      icon: <route.Icon className="w-4 h-4" />,
-      label: t(route.labelKey),
-      onClick: () => {
-        const navigationPath = route.navigationPath || route.path;
-        setSelectedKey(route.path);
-
-        // Pre-check authentication - show auth prompt if user is not authenticated
-        if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
-          setPendingNavigationPath(navigationPath);
-          openAuthPromptModal(navigationPath);
-          return; // Prevent navigation
-        }
-
-        router.push(navigationPath);
-      },
-    };
-  };
-
-  // Build menu items from accessible routes with nested submenus
-  const buildMenuItems = (): MenuProps["items"] => {
-    return accessibleMenuItems.map((item) => {
-      // If this item has children, create a submenu
-      if (item.children && item.children.length > 0) {
-        return {
-          key: item.path,
-          icon: <item.Icon className="w-4 h-4" />,
-          label: t(item.labelKey),
-          children: item.children.map((child) => ({
-            key: child.path,
-            icon: <child.Icon className="w-4 h-4" />,
-            label: t(child.labelKey),
-            onClick: () => {
-              setSelectedKey(child.path);
-              if (!isAuthenticated && !isSpeedMode && child.path !== "/") {
-                setPendingNavigationPath(child.path);
-                openAuthPromptModal(child.path);
-                return;
-              }
-              router.push(child.path);
-            },
-          })),
-        };
+    return ROUTE_CONFIG.filter((route) => {
+      if (route.isSection) {
+        return ROUTE_CONFIG.some(
+          (child) =>
+            child.parentKey === route.path &&
+            isRouteAccessible(child, accessibleRoutes, enableAgentWorkbench)
+        );
       }
 
-      // Regular menu item
-      return createMenuItem(item);
-    });
+      return isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench);
+    }).sort((a, b) => a.order - b.order);
+  }, [accessibleRoutes, enableAgentWorkbench]);
+
+  const handleRouteClick = (route: RouteConfig) => {
+    if (route.isSection) {
+      return;
+    }
+
+    const navigationPath = route.navigationPath || route.path;
+
+    if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
+      setPendingNavigationPath(navigationPath);
+      openAuthPromptModal(navigationPath);
+      return;
+    }
+
+    router.push(navigationPath);
   };
 
-  const menuItems: MenuProps["items"] = buildMenuItems();
+  const notificationAction =
+    isAuthenticated && !isSpeedMode ? (
+      <NotificationBell
+        rail
+        unreadCount={unreadCount}
+        items={items}
+        isLoading={isNotificationsLoading}
+        isMarkingAllRead={markAllNotificationsReadMutation.isPending}
+        onMarkRead={async (receiverId) => {
+          await markNotificationReadMutation.mutateAsync(receiverId);
+        }}
+        onMarkAllRead={async () => {
+          await markAllNotificationsReadMutation.mutateAsync();
+        }}
+      />
+    ) : (
+      <button
+        type="button"
+        aria-label={t("notifications.bell.label")}
+        className={RAIL_ITEM_CLASS}
+        onClick={() => {
+          if (!isAuthenticated && !isSpeedMode) {
+            openAuthPromptModal("/");
+          }
+        }}
+      >
+        <Bell className={RAIL_ICON_CLASS} />
+      </button>
+    );
 
   return (
-    <ConfigProvider>
-      <div className="relative">
-        <div
-          className="flex-shrink-0"
-          style={{
-            width: isCollapsed
-              ? SIDER_CONFIG.COLLAPSED_WIDTH
-              : SIDER_CONFIG.EXPANDED_WIDTH,
-          }}
-        >
-          <div className="py-2 h-full">
-            <Menu
-              mode="inline"
-              inlineCollapsed={isCollapsed}
-              selectedKeys={[selectedKey]}
-              openKeys={openKeys}
-              onOpenChange={setOpenKeys}
-              items={menuItems}
-              className="bg-transparent border-r-0 h-full"
-            />
-          </div>
+    <div className="flex h-full w-full flex-col items-center bg-[#f0f0f0] p-2">
+      <Link
+        href="/"
+        aria-label={t("sidebar.homePage")}
+        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[4px] p-2"
+      >
+        <img
+          src={publicAsset("/modelengine-logo.png")}
+          alt="logo"
+          className="h-8 w-8 object-contain"
+        />
+      </Link>
+
+      <nav className="min-h-0 w-12 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-col items-center gap-[12px]">
+          {accessibleMenuItems.map((route) => {
+            const Icon = route.Icon;
+            const isSelected = selectedKey === route.path;
+
+            return (
+              <button
+                key={route.path}
+                type="button"
+                aria-current={isSelected ? "page" : undefined}
+                className={`${MENU_ITEM_CLASS} ${isSelected ? SELECTED_ITEM_CLASS : ""}`}
+                onClick={() => handleRouteClick(route)}
+              >
+                <Icon className={RAIL_ICON_CLASS} />
+                <span className={RAIL_LABEL_CLASS}>{t(route.labelKey)}</span>
+              </button>
+            );
+          })}
         </div>
+      </nav>
+
+      <div className="flex h-24 w-12 shrink-0 flex-col items-center">
+        {notificationAction}
+        <AvatarDropdown rail />
       </div>
-    </ConfigProvider>
+    </div>
   );
 }

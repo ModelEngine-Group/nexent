@@ -1,98 +1,62 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import { type CSSProperties, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { Layout, Button, Spin } from "antd";
+import { Layout, Spin } from "antd";
 import { TopNavbar } from "@/components/navigation/TopNavbar";
 import { SideNavigation } from "@/components/navigation/SideNavigation";
 import { FooterLayout } from "@/components/navigation/FooterLayout";
-import {
-  HEADER_CONFIG,
-  FOOTER_CONFIG,
-  SIDER_CONFIG,
-} from "@/const/layoutConstants";
+import { FOOTER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
 import { AuthDialogs } from "@/components/auth/AuthDialogs";
-import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { QuotaWarningMonitor } from "@/components/quota/QuotaWarningMonitor";
 import { MemoryEmbeddingMonitor } from "@/components/memory/MemoryEmbeddingMonitor";
 
-const { Header, Sider, Content, Footer } = Layout;
+const { Sider, Content, Footer } = Layout;
 
 export function ClientLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { isAuthenticated } = useAuthenticationContext();
   const { isAuthorized } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
 
-  // Check if current route is setup page
   const isSetupPage = pathname?.includes("/setup");
-
   const isChatPage = pathname?.includes("/chat");
 
-  // Home page does not require authorization
   const effectivePath = getEffectiveRoutePath(pathname);
   const isHomePage = effectivePath === "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
   const isSharePage = effectivePath.startsWith("/share/");
+  const isAgentConfigPage =
+    effectivePath === "/agents" || effectivePath.startsWith("/agents/");
 
-  // Sidebar collapse state
-  const [collapsed, setCollapsed] = useState(effectivePath === "/workbench");
-
-  useEffect(() => {
-    if (effectivePath !== "/workbench") return;
-    const frame = requestAnimationFrame(() => setCollapsed(true));
-    return () => cancelAnimationFrame(frame);
-  }, [effectivePath]);
-
-  // Layout style calculations
-  const headerReservedHeight = parseInt(HEADER_CONFIG.RESERVED_HEIGHT);
   const footerReservedHeight = parseInt(FOOTER_CONFIG.RESERVED_HEIGHT);
 
-  const layoutStyle: React.CSSProperties = {
+  const layoutStyle: CSSProperties = {
     height: "100vh",
     width: "100vw",
     overflow: "hidden",
     backgroundColor: "#fff",
   };
 
-  const siderStyle: React.CSSProperties = {
+  const siderStyle: CSSProperties = {
     textAlign: "start",
     display: "flex",
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "flex-start",
     position: "fixed",
-    top: headerReservedHeight,
-    bottom: isSetupPage ? 0 : footerReservedHeight,
+    top: 0,
+    bottom: 0,
     left: 0,
-    backgroundColor: "#fff",
-    overflow: "visible",
+    width: SIDER_CONFIG.WIDTH,
+    backgroundColor: "#f0f0f0",
+    overflow: "hidden",
     zIndex: 30,
   };
 
-  const siderInnerStyle: React.CSSProperties = {
-    height: "100%",
-    overflowY: "auto",
-    overflowX: "hidden",
-    WebkitOverflowScrolling: "touch",
-    display: "flex",
-    flexDirection: "column",
-  };
-
-  const headerStyle: React.CSSProperties = {
-    textAlign: "center",
-    height: headerReservedHeight,
-    backgroundColor: "#fff",
-    lineHeight: "64px",
-    paddingInline: 0,
-    flexShrink: 0,
-  };
-
-  const footerStyle: React.CSSProperties = {
+  const footerStyle: CSSProperties = {
     textAlign: "center",
     height: footerReservedHeight,
     lineHeight: footerReservedHeight,
@@ -101,14 +65,12 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     backgroundColor: "#fff",
   };
 
-  const contentStyle: React.CSSProperties = {
-    height: "100%",
+  const contentStyle: CSSProperties = {
+    flex: 1,
+    minHeight: 0,
     overflowY: "auto",
     overflowX: "hidden",
     position: "relative",
-    marginLeft: collapsed
-      ? `${SIDER_CONFIG.COLLAPSED_WIDTH}px`
-      : `${SIDER_CONFIG.EXPANDED_WIDTH}px`,
     backgroundColor: "#fff",
   };
 
@@ -133,72 +95,43 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     <Layout style={layoutStyle}>
       <QuotaWarningMonitor enabled={!isSetupPage} />
       <MemoryEmbeddingMonitor />
-      <Header style={headerStyle}>
-        <TopNavbar isChatPage={isChatPage} />
-      </Header>
 
-      <Layout>
-        <Sider
-          style={siderStyle}
-          width={SIDER_CONFIG.EXPANDED_WIDTH}
-          collapsed={collapsed}
-          onCollapse={setCollapsed}
-          trigger={null}
-          breakpoint="lg"
-          collapsedWidth={SIDER_CONFIG.COLLAPSED_WIDTH}
-          className="dark:bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
-        >
-          <div style={siderInnerStyle}>
-            <SideNavigation collapsed={collapsed} />
-          </div>
-          <Button
-            type="primary"
-            shape="circle"
-            size="small"
-            onClick={() => setCollapsed(!collapsed)}
-            style={{
-              position: "absolute",
-              top: "50%",
-              transform: "translateY(-50%)",
-              right: "-12px",
-              transition: "right 0.2s ease, left 0.2s ease",
-              zIndex: 40,
-            }}
-            icon={
-              collapsed ? (
-                <ChevronRight className="w-3 h-3" />
-              ) : (
-                <ChevronLeft className="w-3 h-3" />
-              )
-            }
-          />
-        </Sider>
+      <Sider
+        style={siderStyle}
+        width={SIDER_CONFIG.WIDTH}
+        collapsedWidth={SIDER_CONFIG.WIDTH}
+        trigger={null}
+        className="!bg-[#f0f0f0] border-r border-[#c9c9c9]"
+      >
+        <SideNavigation />
+      </Sider>
 
-        {/* Don't render children until authorization is complete (except home page) */}
+      <Layout
+        style={{
+          minHeight: "100vh",
+          marginLeft: `${SIDER_CONFIG.WIDTH}px`,
+        }}
+      >
+        {!isAgentConfigPage && <TopNavbar isChatPage={isChatPage} />}
+
         <Content style={contentStyle}>
           {isHomePage || isOAuthCompletePage || isSharePage || isAuthorized ? (
             children
           ) : (
-            <div className="flex items-center justify-center h-full w-full">
+            <div className="flex h-full w-full items-center justify-center">
               <Spin />
             </div>
           )}
         </Content>
+
+        {!isSetupPage && !isAgentConfigPage && (
+          <Footer style={footerStyle}>
+            <FooterLayout />
+          </Footer>
+        )}
       </Layout>
 
-      {/* Conditionally render footer */}
-      {!isSetupPage && (
-        <Footer style={footerStyle}>
-          <FooterLayout />
-        </Footer>
-      )}
-
-      {/* Global authentication dialogs */}
-      {!isSpeedMode && (
-        <>
-          <AuthDialogs />
-        </>
-      )}
+      {!isSpeedMode && <AuthDialogs />}
     </Layout>
   );
 }

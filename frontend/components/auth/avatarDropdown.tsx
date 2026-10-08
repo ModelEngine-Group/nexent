@@ -19,8 +19,12 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 import { USER_ROLES } from "@/const/auth";
 
-export function AvatarDropdown() {
-  const { user, isAuthzReady } = useAuthorizationContext();
+interface AvatarDropdownProps {
+  rail?: boolean;
+}
+
+export function AvatarDropdown({ rail = false }: AvatarDropdownProps) {
+  const { user } = useAuthorizationContext();
   const { isLoading, logout, openLoginModal, openRegisterModal } =
     useAuthenticationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -48,7 +52,13 @@ export function AvatarDropdown() {
 
   // Show loading while authentication is in progress
   if (isLoading) {
-    return <Spin size="small" />;
+    return rail ? (
+      <div className="flex h-12 w-12 items-center justify-center p-2">
+        <Spin size="small" />
+      </div>
+    ) : (
+      <Spin size="small" />
+    );
   }
   if (!user) {
     const items: ItemType[] = [
@@ -104,7 +114,14 @@ export function AvatarDropdown() {
           )}
           getPopupContainer={() => document.body}
         >
-          <Button type="text" icon={<UserRound size={18} />} shape="circle" />
+          <Button
+            type="text"
+            icon={<UserRound size={rail ? 20 : 18} />}
+            shape={rail ? undefined : "circle"}
+            className={
+              rail ? "h-12 w-12 rounded-[4px] p-2 text-[#191919]" : undefined
+            }
+          />
         </Dropdown>
       </ConfigProvider>
     );
@@ -173,12 +190,25 @@ export function AvatarDropdown() {
           <div style={{ minWidth: "180px" }}>{menu}</div>
         )}
       >
-        <Avatar
-          src={user.avatarUrl}
-          className="cursor-pointer"
-          size="default"
-          icon={<UserRound size={18} />}
-        />
+        {rail ? (
+          <button
+            type="button"
+            className="flex h-12 w-12 items-center justify-center rounded-[4px] border-0 bg-transparent p-2 text-[#191919]"
+          >
+            <Avatar
+              src={user.avatarUrl}
+              size={20}
+              icon={<UserRound size={20} />}
+            />
+          </button>
+        ) : (
+          <Avatar
+            src={user.avatarUrl}
+            className="cursor-pointer"
+            size="default"
+            icon={<UserRound size={18} />}
+          />
+        )}
       </Dropdown>
     </ConfigProvider>
   );

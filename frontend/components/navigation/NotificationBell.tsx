@@ -18,6 +18,7 @@ interface NotificationBellProps {
   unreadCount: number;
   items: NotificationItem[];
   isLoading: boolean;
+  rail?: boolean;
   onMarkRead?: (receiverId: number) => Promise<void>;
   onMarkAllRead?: () => Promise<void>;
   isMarkingAllRead?: boolean;
@@ -27,6 +28,7 @@ export function NotificationBell({
   unreadCount,
   items,
   isLoading,
+  rail = false,
   onMarkRead,
   onMarkAllRead,
   isMarkingAllRead = false,
@@ -138,42 +140,70 @@ export function NotificationBell({
     </div>
   );
 
+  const notificationControl = rail ? (
+    <Button
+      type="text"
+      aria-label={t("notifications.bell.label")}
+      className="!h-12 !w-12 !min-w-12 rounded-[4px] p-2 text-[#191919]"
+    >
+      <Badge
+        count={unreadCount}
+        size="small"
+        color="#ff4d4f"
+        overflowCount={99}
+        offset={[0, 0]}
+        styles={{
+          root: {
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            height: 20,
+            width: 20,
+            lineHeight: 1,
+          },
+        }}
+      >
+        <Bell className="h-5 w-5" />
+      </Badge>
+    </Button>
+  ) : (
+    <Badge
+      count={unreadCount}
+      size="small"
+      color="#ff4d4f"
+      overflowCount={99}
+      offset={[-2, 2]}
+      styles={{
+        root: {
+          display: "inline-flex",
+          alignItems: "center",
+          height: 32,
+          lineHeight: 1,
+          verticalAlign: "middle",
+        },
+      }}
+    >
+      <Button
+        type="text"
+        size="small"
+        aria-label={t("notifications.bell.label")}
+        className="h-8 w-8 p-0 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+        icon={<Bell className="h-4 w-4" />}
+      />
+    </Badge>
+  );
+
   return (
     <ConfigProvider getPopupContainer={() => document.body}>
       <Dropdown
         trigger={["click"]}
-        placement="bottomRight"
+        placement={rail ? "rightTop" : "bottomRight"}
         open={dropdownOpen}
         onOpenChange={setDropdownOpen}
         getPopupContainer={() => document.body}
         popupRender={() => panel}
       >
-        <Tooltip title={tooltipTitle}>
-          <Badge
-            count={unreadCount}
-            size="small"
-            color="#ff4d4f"
-            overflowCount={99}
-            offset={[-2, 2]}
-            styles={{
-              root: {
-                display: "inline-flex",
-                alignItems: "center",
-                height: 32, // match Button h-8
-                lineHeight: 1,
-                verticalAlign: "middle",
-              },
-            }}
-          >
-            <Button
-              type="text"
-              size="small"
-              aria-label={t("notifications.bell.label")}
-              className="h-8 w-8 p-0 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
-              icon={<Bell className="h-4 w-4" />}
-            />
-          </Badge>
-        </Tooltip>
+        <Tooltip title={tooltipTitle}>{notificationControl}</Tooltip>
       </Dropdown>
     </ConfigProvider>
   );
