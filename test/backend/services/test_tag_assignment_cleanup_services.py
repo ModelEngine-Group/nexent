@@ -10,6 +10,7 @@ from services.tag_resource_adapters import _encode_document_resource_id
 @pytest.mark.asyncio
 async def test_agent_delete_cleans_up_only_a_proven_tenant_owned_agent(monkeypatch):
     calls = []
+    monkeypatch.setattr(agent_service, "is_system_agent", lambda *_args: False)
     monkeypatch.setattr(
         agent_service,
         "search_agent_info_by_agent_id",
@@ -40,6 +41,7 @@ async def test_agent_delete_cleans_up_only_a_proven_tenant_owned_agent(monkeypat
 
 @pytest.mark.asyncio
 async def test_agent_delete_does_not_clean_assignments_for_another_tenant(monkeypatch):
+    monkeypatch.setattr(agent_service, "is_system_agent", lambda *_args: False)
     monkeypatch.setattr(
         agent_service,
         "search_agent_info_by_agent_id",
@@ -65,6 +67,10 @@ def test_skill_delete_cleans_up_the_tenant_scoped_stable_skill_id(monkeypatch):
     service = object.__new__(SkillService)
     service.tenant_id = "tenant-a"
     monkeypatch.setattr(SkillService, "_local_skills_dir", lambda *args: "/tmp/skills")
+    monkeypatch.setattr(
+        "management.services.skill.service._resolve_local_skill_path",
+        lambda *_args: "/tmp/skills/summarize",
+    )
     monkeypatch.setattr("management.services.skill.service.os.path.exists", lambda path: False)
     monkeypatch.setattr(
         "management.services.skill.service.skill_db.get_skill_by_name",
@@ -88,6 +94,10 @@ def test_skill_delete_without_a_same_tenant_record_does_not_clean_up(monkeypatch
     service = object.__new__(SkillService)
     service.tenant_id = "tenant-a"
     monkeypatch.setattr(SkillService, "_local_skills_dir", lambda *args: "/tmp/skills")
+    monkeypatch.setattr(
+        "management.services.skill.service._resolve_local_skill_path",
+        lambda *_args: "/tmp/skills/summarize",
+    )
     monkeypatch.setattr("management.services.skill.service.os.path.exists", lambda path: False)
     monkeypatch.setattr("management.services.skill.service.skill_db.get_skill_by_name", lambda *args: None)
     monkeypatch.setattr(

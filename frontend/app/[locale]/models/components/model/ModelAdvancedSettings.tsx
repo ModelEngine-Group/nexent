@@ -84,6 +84,10 @@ export interface ModelAdvancedSettingsProps {
   inheritedDefaults?: Record<string, unknown>;
   /** Capability metadata for the model-level default reasoning selector. */
   reasoningCapability?: ReasoningCapability;
+  /** Render the model-level display-name field in default-mode settings. */
+  showDisplayName?: boolean;
+  /** Fallback shown until the user explicitly edits the display-name field. */
+  displayNameFallback?: string;
 }
 
 /** Keys that have dedicated DB columns or are stored as top-level fields (not in extra_params). */
@@ -162,7 +166,7 @@ const REMOVED_ADVANCED_PARAM_KEYS = new Set<string>([
   "speed",
 ]);
 
-const resolveReasoningDefault = (
+export const resolveReasoningDefault = (
   currentEffort: ReasoningEffort | undefined,
   capability: ReasoningCapability | undefined,
   levels: readonly ReasoningEffort[]
@@ -177,6 +181,118 @@ const resolveReasoningDefault = (
   }
   return levels[0];
 };
+
+/** One declared reasoning control from the catalog (toggle / effort / budget). */
+export type ReasoningControlSpec =
+  | { type: "toggle" }
+  | { type: "effort"; values: string[] }
+  | { type: "budget_tokens"; min: number; max: number };
+
+export interface ReasoningControlResolution {
+  effortControl?: ReasoningControlSpec;
+  budgetControl?: ReasoningControlSpec;
+  budgetPreferred: boolean;
+  /** Budget wins over effort when a model declares both. */
+  effectiveEffortControl?: ReasoningControlSpec;
+  reasoningLevels: ReasoningEffort[];
+  /** Whether any control was declared — gates the thinking UI (#4009). */
+  hasDeclaredControls: boolean;
+}
+
+/**
+ * Resolve which reasoning controls (effort levels / token budget) a model
+ * exposes from its catalog capability. Shared by ModelAdvancedSettings and
+ * the v0 ModelAdvancedConfig so the two dialogs render identical controls.
+ */
+export function resolveReasoningControls(
+  capability: ReasoningCapability | undefined
+): ReasoningControlResolution {
+  const declared: ReasoningControlSpec[] = [];
+  if (capability?.status === "supported") {
+    if (capability.controls?.length) {
+      declared.push(...capability.controls);
+    } else if (capability.levels.length > 0) {
+      declared.push({ type: "effort", values: capability.levels });
+    } else if (capability.control === "toggle") {
+      declared.push({ type: "toggle" });
+    }
+  }
+  const effortControl = declared.find((control) => control.type === "effort");
+  const budgetControl = declared.find(
+    (control) => control.type === "budget_tokens"
+  );
+  const budgetPreferred = budgetControl?.type === "budget_tokens";
+  const effectiveEffortControl = budgetPreferred ? undefined : effortControl;
+  const configuredReasoningLevels =
+    effectiveEffortControl?.type === "effort"
+      ? (effectiveEffortControl.values as ReasoningEffort[])
+      : capability?.levels || [];
+  const reasoningLevels = [
+    "auto",
+    ...configuredReasoningLevels.filter((level) => level !== "auto"),
+  ] as ReasoningEffort[];
+  return {
+    effortControl,
+    budgetControl,
+    budgetPreferred,
+    effectiveEffortControl,
+    reasoningLevels,
+    hasDeclaredControls: declared.length > 0,
+  };
+}
+
+/** Clamp a stored budget value into the control's declared range. */
+export function clampReasoningBudget(
+  budgetControl: ReasoningControlSpec | undefined,
+  raw: unknown
+): number | undefined {
+  if (budgetControl?.type !== "budget_tokens") return undefined;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  return Math.min(budgetControl.max, Math.max(budgetControl.min, raw));
+}
+
+/**
+ * Shared reasoning-form state effects (develop #4009 semantics), used by
+ * ModelAdvancedSettings and the v0 ModelAdvancedConfig:
+ *  - strips legacy reasoning values when the capability is not supported,
+ *    so an unchanged save cannot re-submit them
+ *  - materializes enable_thinking=true for visible controls, because the
+ *    payload builder drops reasoning params when it is not strictly true.
+ * Returns whether the thinking UI should render.
+ */
+export function useReasoningFormEffects(
+  modelType: string,
+  reasoningCapability: ReasoningCapability | undefined,
+  value: ModelAdvancedSettingsValue,
+  onChange: (next: ModelAdvancedSettingsValue) => void
+): boolean {
+  const { hasDeclaredControls } = resolveReasoningControls(reasoningCapability);
+  const reasoningControlVisible = modelType === "llm" && hasDeclaredControls;
+
+  useEffect(() => {
+    if (
+      modelType === "llm" &&
+      !reasoningControlVisible &&
+      (value.enable_thinking !== undefined ||
+        value.reasoning_effort !== undefined ||
+        value.reasoning_budget_tokens !== undefined)
+    ) {
+      const next = { ...value };
+      delete next.enable_thinking;
+      delete next.reasoning_effort;
+      delete next.reasoning_budget_tokens;
+      onChange(next);
+    }
+  }, [modelType, onChange, reasoningControlVisible, value]);
+
+  useEffect(() => {
+    if (reasoningControlVisible && value.enable_thinking === undefined) {
+      onChange({ ...value, enable_thinking: true });
+    }
+  }, [onChange, reasoningControlVisible, value]);
+
+  return reasoningControlVisible;
+}
 
 const shouldSkipInferenceParam = (
   key: string,
@@ -213,8 +329,10 @@ const assignInferenceParam = (
 
 const applyReasoningValues = (
   value: ModelAdvancedSettingsValue,
-  extra: Record<string, unknown>
+  extra: Record<string, unknown>,
+  capability?: ReasoningCapability
 ): void => {
+  if (capability?.status !== "supported") return;
   if (typeof extra.enable_thinking === "boolean") {
     value.enable_thinking = extra.enable_thinking;
   }
@@ -293,7 +411,7 @@ const parseCustomValue = (raw: string): unknown => {
  * in the text control. Strings that look like another JSON type are quoted
  * to avoid changing their type when the form is opened and saved again.
  */
-const formatCustomValueForEditing = (raw: unknown): string => {
+export const formatCustomValueForEditing = (raw: unknown): string => {
   if (typeof raw === "string") {
     const trimmed = raw.trim();
     if (trimmed !== "") {
@@ -403,7 +521,8 @@ export const diffCustomParamsForSave = (
 };
 
 export const buildInferenceParamsPayload = (
-  value: ModelAdvancedSettingsValue
+  value: ModelAdvancedSettingsValue,
+  reasoningCapability?: ReasoningCapability
 ): {
   temperature?: number;
   top_p?: number;
@@ -413,8 +532,17 @@ export const buildInferenceParamsPayload = (
   const result: Record<string, unknown> = {};
   const extraParams: Record<string, unknown> = {};
   const thinkingEnabled = value.enable_thinking === true;
+  const reasoningSupported = reasoningCapability?.status === "supported";
 
   for (const [key, raw] of Object.entries(value)) {
+    if (
+      (key === "enable_thinking" ||
+        key === "reasoning_effort" ||
+        key === "reasoning_budget_tokens") &&
+      !reasoningSupported
+    ) {
+      continue;
+    }
     if (shouldSkipInferenceParam(key, raw, thinkingEnabled)) continue;
     assignInferenceParam(key, raw, result, extraParams);
   }
@@ -445,14 +573,15 @@ export const buildInferenceParamsPayload = (
  * overridable per-agent/per-KB).
  */
 export const buildModelOverrideEntry = (
-  value: ModelAdvancedSettingsValue
+  value: ModelAdvancedSettingsValue,
+  reasoningCapability?: ReasoningCapability
 ): {
   temperature?: number | null;
   top_p?: number | null;
   extra_params?: Record<string, unknown> | null;
   [key: string]: unknown;
 } => {
-  const payload = buildInferenceParamsPayload(value);
+  const payload = buildInferenceParamsPayload(value, reasoningCapability);
   const entry: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(payload)) {
     // display_name is a model-level property, not overridable per-agent/per-KB.
@@ -474,12 +603,14 @@ export const advancedSettingsValueFromRecord = (
         temperature?: number | null;
         top_p?: number | null;
         extra_params?: Record<string, unknown> | null;
+        reasoning_capability?: ReasoningCapability;
         [key: string]: unknown;
       }
     | null
     | undefined,
   specs: InferenceFieldSpecsByType,
-  modelType: string
+  modelType: string,
+  reasoningCapability?: ReasoningCapability
 ): ModelAdvancedSettingsValue => {
   const value: ModelAdvancedSettingsValue = {};
   if (!record) return value;
@@ -499,7 +630,11 @@ export const advancedSettingsValueFromRecord = (
 
   // The model-level reasoning default is catalog-driven rather than part of
   // the generic field-spec payload, but it still lives in extra_params.
-  applyReasoningValues(value, extra);
+  applyReasoningValues(
+    value,
+    extra,
+    reasoningCapability ?? record.reasoning_capability
+  );
 
   // Pass through user-defined custom params (extra_params.__custom__).
   // Backend stores a dict of JSON-compatible values; the editor works on a
@@ -816,6 +951,8 @@ export const ModelAdvancedSettings = ({
   disabled = false,
   inheritedDefaults,
   reasoningCapability,
+  showDisplayName = false,
+  displayNameFallback = "",
 }: ModelAdvancedSettingsProps) => {
   const { t } = useTranslation();
   // STT/TTS auth fields (AppID, Access Token) only apply to Volcano Engine.
@@ -841,15 +978,6 @@ export const ModelAdvancedSettings = ({
     }
   }, [isVoiceType, mode, value, onChange]);
 
-  // LLMs expose the thinking switch regardless of whether the catalog has
-  // declared a provider-specific reasoning control. Keep the default enabled
-  // so an empty legacy/new form is saved with the same visible state.
-  useEffect(() => {
-    if (modelType === "llm" && value.enable_thinking === undefined) {
-      onChange({ ...value, enable_thinking: true });
-    }
-  }, [modelType, value, onChange]);
-
   // Filter out:
   //  - capacity fields in default mode: rendered by the dedicated
   //    `ModelCapacityFields` panel, so showing them here would duplicate the
@@ -857,17 +985,43 @@ export const ModelAdvancedSettings = ({
   //    capacity panel, so capacity fields ARE shown here.
   //  - display_name in override mode: it's a model-level property, not an
   //    inference parameter that can be overridden per-agent/per-KB.
+  const shouldRenderDisplayName = showDisplayName && mode === "default";
   const specList = getVisibleAdvancedSpecs(
     specs,
     modelType,
     mode,
     isVoiceType,
     isVolcengineVoice
-  );
+  ).filter((spec) => !shouldRenderDisplayName || spec.key !== "display_name");
 
   const handleFieldChange = (key: string, next: unknown) => {
     onChange({ ...value, [key]: next });
   };
+
+  const displayNameField = shouldRenderDisplayName ? (
+    <div>
+      <label className="block mb-1 text-sm font-medium text-gray-700">
+        {t("model.dialog.label.displayName", { defaultValue: "显示名称" })}
+      </label>
+      <Input
+        className="w-full"
+        value={
+          value.display_name === undefined
+            ? displayNameFallback
+            : value.display_name === null
+              ? ""
+              : String(value.display_name)
+        }
+        disabled={disabled}
+        placeholder={t("model.dialog.placeholder.displayName", {
+          defaultValue: "请输入模型的显示名称",
+        })}
+        onChange={(event) =>
+          handleFieldChange("display_name", event.target.value)
+        }
+      />
+    </div>
+  ) : null;
 
   // ---------- Custom key/value params ----------
   // value.__custom__ holds the editing-state entries array ([string, string][]),
@@ -882,50 +1036,32 @@ export const ModelAdvancedSettings = ({
     ([k], i) => k !== "" && customEntries.findIndex(([k2]) => k2 === k) !== i
   );
 
-  const declaredReasoningControls =
-    reasoningCapability?.status === "supported"
-      ? reasoningCapability.controls?.length
-        ? reasoningCapability.controls
-        : reasoningCapability.levels.length > 0
-          ? [{ type: "effort" as const, values: reasoningCapability.levels }]
-          : reasoningCapability.control === "toggle"
-            ? [{ type: "toggle" as const }]
-            : []
-      : [];
-  const effortControl = declaredReasoningControls.find(
-    (control) => control.type === "effort"
+  const {
+    budgetControl,
+    budgetPreferred,
+    effectiveEffortControl,
+    reasoningLevels,
+  } = resolveReasoningControls(reasoningCapability);
+  // develop #4009: capability-gated visibility plus the shared strip/seed
+  // effects live in useReasoningFormEffects.
+  const reasoningControlVisible = useReasoningFormEffects(
+    modelType,
+    reasoningCapability,
+    value,
+    onChange
   );
-  const budgetControl = declaredReasoningControls.find(
-    (control) => control.type === "budget_tokens"
-  );
-  const budgetPreferred = budgetControl?.type === "budget_tokens";
-  const effectiveEffortControl = budgetPreferred ? undefined : effortControl;
-  const reasoningControlVisible = modelType === "llm";
   const thinkingEnabled =
     modelType === "llm" && value.enable_thinking !== false;
-  const configuredReasoningLevels =
-    effectiveEffortControl?.type === "effort"
-      ? (effectiveEffortControl.values as ReasoningEffort[])
-      : reasoningCapability?.levels || [];
-  const reasoningLevels = [
-    "auto",
-    ...configuredReasoningLevels.filter((level) => level !== "auto"),
-  ] as ReasoningEffort[];
   const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
   const reasoningDefault = resolveReasoningDefault(
     reasoningEffort,
     reasoningCapability,
     reasoningLevels
   );
-  const reasoningBudget =
-    budgetControl?.type === "budget_tokens"
-      ? typeof value.reasoning_budget_tokens === "number"
-        ? Math.min(
-            budgetControl.max,
-            Math.max(budgetControl.min, value.reasoning_budget_tokens)
-          )
-        : undefined
-      : undefined;
+  const reasoningBudget = clampReasoningBudget(
+    budgetControl,
+    value.reasoning_budget_tokens
+  );
 
   useEffect(() => {
     if (budgetPreferred && value.reasoning_effort !== undefined) {
@@ -1036,7 +1172,11 @@ export const ModelAdvancedSettings = ({
     commitCustomEntries(next);
   };
 
-  if (specList.length === 0 && !reasoningControlVisible) {
+  if (
+    specList.length === 0 &&
+    !reasoningControlVisible &&
+    !shouldRenderDisplayName
+  ) {
     return (
       <div className="space-y-3">
         <Empty
@@ -1069,6 +1209,7 @@ export const ModelAdvancedSettings = ({
         </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {displayNameField}
         {specList.map((spec) => {
           const fieldValue = value[spec.key];
           const rangeHint =

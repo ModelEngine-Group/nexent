@@ -27,14 +27,18 @@ import { useTranslation } from "react-i18next";
 interface ThreadListSidebarProps extends SidebarProps {
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
+  serverConversationIds?: ReadonlyMap<string, string>;
   onPrepareNewConversation?: () => void;
   onNewConversation?: () => void | Promise<void>;
+  showLegacySwitch?: boolean;
 }
 
 export function ThreadListSidebar({
   generatedTitles,
+  serverConversationIds,
   onPrepareNewConversation,
   onNewConversation,
+  showLegacySwitch = true,
   ...props
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
@@ -77,18 +81,20 @@ export function ThreadListSidebar({
             </div>
           </SidebarHeader>
           <SidebarContent />
-          <SidebarFooter>
-            <TooltipIconButton
-              tooltip={t("chat.sidebar.switchToLegacy")}
-              side="right"
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              onClick={() => router.push("/chat")}
-            >
-              <Repeat2Icon className="size-4" />
-            </TooltipIconButton>
-          </SidebarFooter>
+          {showLegacySwitch && (
+            <SidebarFooter>
+              <TooltipIconButton
+                tooltip={t("chat.sidebar.switchToLegacy")}
+                side="right"
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                onClick={() => router.push("/chat")}
+              >
+                <Repeat2Icon className="size-4" />
+              </TooltipIconButton>
+            </SidebarFooter>
+          )}
         </Sidebar>
       </div>
     );
@@ -100,7 +106,10 @@ export function ThreadListSidebar({
         className="h-full w-64 min-w-64 max-w-64 p-2"
         style={{ backgroundColor: "#F2F8FF" }}
       >
-        <BatchSelectionProvider onNewConversation={onNewConversation}>
+        <BatchSelectionProvider
+          onNewConversation={onNewConversation}
+          serverConversationIds={serverConversationIds}
+        >
           <Sidebar
             {...props}
             collapsible="none"
@@ -110,22 +119,38 @@ export function ThreadListSidebar({
           >
             <SidebarHeader>
               <div className="flex items-center gap-2 px-1">
-                <ThreadListPrimitive.New
-                  className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
-                  onClick={onPrepareNewConversation}
-                >
-                  <PlusIcon className="size-4 shrink-0" />
-                  {t("chat.sidebar.newConversation")}
-                </ThreadListPrimitive.New>
+                {onNewConversation ? (
+                  <button
+                    type="button"
+                    className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
+                    onClick={onNewConversation}
+                  >
+                    <PlusIcon className="size-4 shrink-0" />
+                    {t("chat.sidebar.newConversation")}
+                  </button>
+                ) : (
+                  <ThreadListPrimitive.New
+                    className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
+                    onClick={onPrepareNewConversation}
+                  >
+                    <PlusIcon className="size-4 shrink-0" />
+                    {t("chat.sidebar.newConversation")}
+                  </ThreadListPrimitive.New>
+                )}
                 <SidebarTrigger className="size-8 shrink-0" />
               </div>
             </SidebarHeader>
             <SidebarContent className="focus:outline-none">
-              <ThreadList generatedTitles={generatedTitles} />
+              <ThreadList
+                generatedTitles={generatedTitles}
+                serverConversationIds={serverConversationIds}
+              />
             </SidebarContent>
             <SidebarFooter>
               <BatchSidebarFooter
-                onSwitchToLegacy={() => router.push("/chat")}
+                onSwitchToLegacy={
+                  showLegacySwitch ? () => router.push("/chat") : undefined
+                }
               />
             </SidebarFooter>
           </Sidebar>

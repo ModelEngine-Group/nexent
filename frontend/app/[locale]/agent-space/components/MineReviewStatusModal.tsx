@@ -53,8 +53,7 @@ export function MineReviewStatusModal({
         icon: Clock,
         label: t("repository.listingStatus.pendingLabel"),
         description: t("repository.listingStatus.pendingDescription"),
-        tone:
-          "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200",
+        tone: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200",
         iconClass: "text-amber-600 dark:text-amber-300",
       }
     : isRejected
@@ -62,16 +61,14 @@ export function MineReviewStatusModal({
           icon: XCircle,
           label: t("repository.listingStatus.rejectedLabel"),
           description: t("repository.listingStatus.rejectedDescription"),
-          tone:
-            "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200",
+          tone: "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200",
           iconClass: "text-red-600 dark:text-red-300",
         }
       : {
           icon: CheckCircle2,
           label: t("repository.listingStatus.listedLabel"),
           description: t("repository.listingStatus.listedDescription"),
-          tone:
-            "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
+          tone: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
           iconClass: "text-emerald-600 dark:text-emerald-300",
         };
 
@@ -192,7 +189,7 @@ export function MineReviewStatusModal({
       <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
         <div className="flex justify-between gap-4">
           <span>{t("agentRepository.mine.reviewModal.version")}</span>
-          <span className="font-medium text-slate-700 dark:text-slate-200">
+          <span className="min-w-0 truncate font-medium text-slate-700 dark:text-slate-200">
             {versionLabel}
           </span>
         </div>

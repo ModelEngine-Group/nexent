@@ -173,6 +173,7 @@ export const ModelEditDialogV2 = ({
             temperature: model.temperature,
             top_p: model.topP,
             extra_params: model.extraParams,
+            reasoning_capability: model.reasoningCapability,
           },
           filteredSpecs,
           model.type
@@ -412,7 +413,7 @@ export const ModelEditDialogV2 = ({
       // in the connectivity probe for LLM so the probe reflects the
       // configured runtime behavior.
       const inferencePayload = supportsInferenceParams
-        ? buildInferenceParamsPayload(advanced)
+        ? buildInferenceParamsPayload(advanced, reasoningCapability)
         : {};
       // Probe budget per model type: embedding carries its dimension, rerank
       // has no token budget, everything else uses the capacity-panel budget.
@@ -503,7 +504,7 @@ export const ModelEditDialogV2 = ({
   const buildSharedUpdateFields = () => {
     const volc = form.modelFactory === "volcengine";
     const inferencePayload = supportsInferenceParams
-      ? buildInferenceParamsPayload(advanced)
+      ? buildInferenceParamsPayload(advanced, reasoningCapability)
       : {};
     const inferenceUpdate = {
       temperature: inferencePayload.temperature as number | undefined,

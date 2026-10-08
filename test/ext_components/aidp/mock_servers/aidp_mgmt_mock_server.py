@@ -24,6 +24,10 @@ Document status simulation (drives the "processing status" UI):
     non-terminal ``UPLOADING`` / ``EXTRACTING`` stages.
   * ``GET .../KnowledgeFiles`` keeps returning COMPLETED documents only (mirrors
     real AIDP), while ``POST .../KnowledgeFiles/History`` returns every status.
+  * ``POST .../KnowledgeFiles/History`` is paginated (body ``page``, ten entries
+    per page) and lists files that are still being processed first, so a burst of
+    simultaneous uploads spills onto the next page and the caller has to walk the
+    pages. Tune the page size with ``POST /_mock/history-page-size?size=N``.
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 (next to this file). On restart the mock loads the file, so KBs created by
@@ -89,6 +93,10 @@ _CHANNEL_ROOT = "/aidp/knowledge"
 # Seconds an uploaded document stays PROCESSING before turning COMPLETED.
 # Overridable at runtime through POST /_mock/processing-seconds.
 _PROCESSING_SECONDS = 8.0
+
+# Entries one history page returns. Real AIDP pages the channel directory, so the
+# backend has to walk the pages; keep this small to exercise that locally.
+_HISTORY_PAGE_SIZE = 10
 
 # Directory for persisted runtime state. Lives next to this file so the mock
 # is self-contained (no absolute paths) and stays out of version control via
@@ -343,6 +351,7 @@ class DocHistoryBody(BaseModel):
 
     fs_id: Optional[str] = None
     dir_path: Optional[str] = None
+    page: int = 1
 
 
 class DocStatusBody(BaseModel):
@@ -487,6 +496,21 @@ def set_processing_seconds(
     _PROCESSING_SECONDS = seconds
     logger.info("MOCK CONFIG  processing seconds = %s", seconds)
     return JSONResponse(content={"processing_seconds": _PROCESSING_SECONDS})
+
+
+@app.post("/_mock/history-page-size")
+def set_history_page_size(
+    size: int = Query(10, ge=1, le=1000, description="Entries returned per history page"),
+) -> JSONResponse:
+    """Tune how many entries one history page returns.
+
+    Set it to 1 to make every file land on its own page, which is how the
+    multi-page walk is exercised locally.
+    """
+    global _HISTORY_PAGE_SIZE
+    _HISTORY_PAGE_SIZE = size
+    logger.info("MOCK CONFIG  history page size = %s", size)
+    return JSONResponse(content={"history_page_size": _HISTORY_PAGE_SIZE})
 
 
 @app.post("/_mock/doc-status")
@@ -965,11 +989,30 @@ def knowledge_file_history(
         }
         for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
     ]
-    logger.info(
-        "FILE HISTORY  kds_id=%s fs_id=%s dir_path=%s returned=%d",
-        kds_id, body.fs_id, body.dir_path, len(items),
+    # Real AIDP lists files that are still being processed first and pages the
+    # directory, which is what lets more simultaneous uploads than fit in one
+    # page spill onto the next. Mirrored here, so a caller that reads only the
+    # first page is caught locally instead of in production. The sort is stable,
+    # so documents keep their insertion order inside each group.
+    items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
+    page = body.page if isinstance(body.page, int) and body.page > 0 else 1
+    start = (page - 1) * _HISTORY_PAGE_SIZE
+    end = start + _HISTORY_PAGE_SIZE
+    page_items = items[start:end]
+    next_link = (
+        f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles/History?page={page + 1}"
+        if end < len(items)
+        else None
     )
-    return JSONResponse(content={"value": items})
+    logger.info(
+        "FILE HISTORY  kds_id=%s fs_id=%s dir_path=%s page=%d returned=%d total=%d",
+        kds_id, body.fs_id, body.dir_path, page, len(page_items), len(items),
+    )
+    return JSONResponse(content={
+        "value": page_items,
+        "total_count": len(items),
+        "next_link": next_link,
+    })
 
 
 # =============================================================================

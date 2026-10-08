@@ -3,29 +3,127 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
-from starlette.responses import JSONResponse
+from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
+from starlette.responses import JSONResponse, Response
 
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
 from consts.model import (
     AgentRepositoryListingCreateRequest,
+    KnowledgeBaseResolution,
     SkillResolution,
     TagAssignmentFilter,
 )
 from services.agent_repository_service import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
+    delete_official_agent_impl,
     get_agent_repository_listing_detail_impl,
+    get_agent_repository_icon_impl,
     import_agent_from_repository_impl,
     list_agent_repository_listings_impl,
     list_agent_repository_tag_stats_impl,
     list_my_editable_agents_impl,
+    list_official_agent_management_impl,
     update_agent_repository_status_impl,
+    upload_agent_repository_icon_impl,
 )
-from utils.auth_utils import get_current_user_id
+from services.official_agent_sync_service import sync_official_agents
+from utils.auth_utils import get_current_user_context, get_current_user_id
+from utils.agent_transfer_utils import AgentToolImportError
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
+
+
+@agent_repository_router.post("/{agent_id}/versions/{version_no}/icon")
+async def upload_agent_repository_icon_api(
+    agent_id: int,
+    version_no: int,
+    file: UploadFile = File(...),
+    authorization: str = Header(None),
+):
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = await upload_agent_repository_icon_impl(
+            agent_id, version_no, tenant_id, user_id, await file.read()
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+
+
+@agent_repository_router.get("/{agent_id}/versions/{version_no}/icon/{image_id}")
+async def get_agent_repository_icon_api(
+    agent_id: int,
+    version_no: int,
+    image_id: str,
+    authorization: str = Header(None),
+):
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        content, content_type = get_agent_repository_icon_impl(
+            agent_id, version_no, image_id, tenant_id
+        )
+        return Response(content=content, media_type=content_type)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+
+
+def _require_super_admin(user_role: str) -> None:
+    if user_role.upper() != "SU":
+        raise UnauthorizedError("Super admin role is required")
+
+
+@agent_repository_router.get("/official/management")
+async def list_official_agent_management_api(
+    authorization: str = Header(None)
+):
+    try:
+        _, _, user_role = get_current_user_context(authorization)
+        _require_super_admin(user_role)
+        return JSONResponse(content={"items": list_official_agent_management_impl()})
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
+
+
+@agent_repository_router.delete("/official/management/{agent_repository_id}")
+async def delete_official_agent_api(
+    agent_repository_id: int, authorization: str = Header(None)
+):
+    try:
+        user_id, _, user_role = get_current_user_context(authorization)
+        _require_super_admin(user_role)
+        return JSONResponse(content=delete_official_agent_impl(agent_repository_id, user_id))
+    except UnauthorizedError as error:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
+    except ValueError as error:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(error))
+
+
+@agent_repository_router.post("/internal/official/sync")
+async def sync_official_agents_api(
+    request: Request,
+    profiles: Optional[str] = Query(None),
+):
+    """Synchronize mounted official bundles from a container-local request."""
+    client_host = request.client.host if request.client else None
+    if client_host not in {"127.0.0.1", "::1"}:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Official agent synchronization is only available locally",
+        )
+    try:
+        kwargs = {}
+        if profiles is not None:
+            kwargs["profiles"] = profiles
+        result = await sync_official_agents(**kwargs)
+        return JSONResponse(content={"synchronized": len(result), "items": result})
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(error))
 
 
 def _parse_tag_predicates(raw: str | None) -> list[TagAssignmentFilter]:
@@ -257,7 +355,7 @@ async def create_agent_repository_listing_api(
     """Create or update a marketplace repository listing from an agent version snapshot."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        card_fields = payload.model_dump(exclude_none=True) if payload else None
+        card_fields = payload.model_dump(exclude_unset=True) if payload else None
         result = await create_agent_repository_listing_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
@@ -310,19 +408,42 @@ async def check_repository_import_precheck_api(
 @agent_repository_router.post("/{agent_repository_id}/import")
 async def import_agent_from_repository_api(
     agent_repository_id: int,
-    skill_resolutions: Optional[list[SkillResolution]] = Body(default=None),
+    payload: Optional[object] = Body(default=None),
     authorization: Optional[str] = Header(None),
 ):
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        await import_agent_from_repository_impl(
+        user_id, tenant_id = get_current_user_id(authorization)
+        skill_resolutions = None
+        model_ids = None
+        embedding_model_ids = None
+        knowledge_base_resolutions = None
+        if isinstance(payload, list):
+            skill_resolutions = [SkillResolution.model_validate(item) for item in payload]
+        elif isinstance(payload, dict):
+            skill_resolutions = [
+                SkillResolution.model_validate(item)
+                for item in (payload.get("skill_resolutions") or [])
+            ] or None
+            model_ids = payload.get("model_ids")
+            embedding_model_ids = payload.get("embedding_model_ids")
+            knowledge_base_resolutions = [
+                KnowledgeBaseResolution.model_validate(item)
+                for item in (payload.get("knowledge_base_resolutions") or [])
+            ] or None
+
+        result = await import_agent_from_repository_impl(
             agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             authorization=authorization,
             skill_resolutions=skill_resolutions,
+            model_ids=model_ids,
+            embedding_model_ids=embedding_model_ids,
+            knowledge_base_resolutions=knowledge_base_resolutions,
+            user_id=user_id,
+            return_root_id=True,
         )
-        return JSONResponse(status_code=HTTPStatus.OK, content={})
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(
             f"Unauthorized agent repository import attempt "
@@ -341,6 +462,9 @@ async def import_agent_from_repository_api(
                 "duplicate_skills": exc.duplicate_names,
             },
         )
+    except AgentToolImportError as e:
+        logger.warning("Agent repository tool validation failed (id=%s): %s", agent_repository_id, e)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logger.warning(
             f"Agent repository listing not found for import "

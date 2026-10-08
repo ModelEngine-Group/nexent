@@ -7,6 +7,10 @@ from ...monitor.monitoring import (
     OPENINFERENCE_INPUT_VALUE,
 )
 from ..utils.token_estimation import estimate_tokens_text
+from ..utils.model_output_diagnostics import (
+    bounded_rejected_output_preview,
+    rejected_output_preview_enabled,
+)
 from ..concurrency import RunCancellationScope, run_blocking
 import logging
 import threading
@@ -17,6 +21,7 @@ import json
 import httpx
 import uuid
 from typing import List, Optional, Dict, Any
+from urllib.parse import urlsplit
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
@@ -96,7 +101,10 @@ _REASONING_ERROR_MARKERS = (
 
 def _has_reasoning_parameters(completion_kwargs: Dict[str, Any]) -> bool:
     """Return whether the request contains a reasoning-related wire field."""
-    if "reasoning_effort" in completion_kwargs:
+    if any(
+        key in completion_kwargs
+        for key in ("reasoning_effort", "thinking_budget", "reasoning_budget_tokens")
+    ):
         return True
     extra_body = completion_kwargs.get("extra_body")
     return isinstance(extra_body, dict) and any(
@@ -242,6 +250,7 @@ class OpenAIModel(OpenAIServerModel):
         self.reasoning_effort = reasoning_effort
         self.reasoning_budget_tokens = reasoning_budget_tokens
         self.reasoning_capability = reasoning_capability or None
+        self.api_base_url = kwargs.get("api_base")
         self.stop_event = (
             cancellation_scope.stop_event if cancellation_scope else threading.Event()
         )
@@ -259,6 +268,9 @@ class OpenAIModel(OpenAIServerModel):
         self.last_prompt_cache_usage = None
         self.last_cached_input_token_count = 0
         self.last_response_diagnostics = None
+        self.last_attempt_id = None
+        self.last_attempt_number = None
+        self.last_reasoning_preview = None
         self.context_budget_snapshot = context_budget_snapshot
         self.capacity_snapshot = capacity_snapshot
         if max_output_tokens is None and max_tokens is not None:
@@ -340,7 +352,7 @@ class OpenAIModel(OpenAIServerModel):
                  _model_attempts_used: int = 0,
                  _defer_attempt_commit: bool = False,
                  _suppress_attempt_stream: bool = False,
-
+                 _retry_empty_response: bool = True,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
@@ -386,13 +398,16 @@ class OpenAIModel(OpenAIServerModel):
                     _model_attempts_used=_model_attempts_used,
                     _defer_attempt_commit=_defer_attempt_commit,
                     _suppress_attempt_stream=_suppress_attempt_stream,
-
+                    _retry_empty_response=_retry_empty_response,
                     **kwargs,
                 )
 
         token_tracker = _token_tracker or self._monitoring.create_token_tracker(
             self.model_id)
         self.last_response_diagnostics = None
+        self.last_attempt_id = None
+        self.last_attempt_number = None
+        self.last_reasoning_preview = None
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.
@@ -527,6 +542,8 @@ class OpenAIModel(OpenAIServerModel):
                         "reason": "stop_event_set"})
                 raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
             attempt_id = uuid.uuid4().hex
+            self.last_attempt_id = attempt_id
+            self.last_attempt_number = attempt
             begin_attempt = getattr(self.observer, "begin_model_attempt", None)
             if callable(begin_attempt) and not _suppress_attempt_stream:
 
@@ -589,6 +606,8 @@ class OpenAIModel(OpenAIServerModel):
                 content_chunk_count = 0
                 reasoning_chunk_count = 0
                 reasoning_char_count = 0
+                reasoning_preview = ""
+                preview_enabled = rejected_output_preview_enabled()
                 empty_choices_chunk_count = 0
                 nonstandard_chunk_count = 0
 
@@ -631,6 +650,8 @@ class OpenAIModel(OpenAIServerModel):
                         if reasoning_content is not None:
                             reasoning_chunk_count += 1
                             reasoning_char_count += len(str(reasoning_content))
+                            if preview_enabled and len(reasoning_preview) < 256:
+                                reasoning_preview += str(reasoning_content)[: 256 - len(reasoning_preview)]
                             if not _suppress_attempt_stream:
                                 self.observer.add_model_reasoning_content(
                                     reasoning_content)
@@ -739,8 +760,21 @@ class OpenAIModel(OpenAIServerModel):
                         "nonstandard_chunk_count": nonstandard_chunk_count,
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
+                        "requested_output_tokens": (
+                            self._coerce_context_budget_snapshot(
+                                trusted_budget_snapshot
+                            ).requested_output_tokens
+                            if trusted_budget_snapshot is not None
+                            else dispatch_kwargs.get("max_tokens")
+                        ),
+                        "reasoning_only_budget_exhausted": (
+                            finish_reason == "length"
+                            and reasoning_char_count > 0
+                            and not model_output.strip()
+                        ),
                     }
                     self.last_response_diagnostics = response_diagnostics
+                    self.last_reasoning_preview = reasoning_preview if preview_enabled else None
                     self._monitoring.set_span_attributes(
                         **{f"llm.response.{key}": value for key, value in response_diagnostics.items()}
                     )
@@ -757,22 +791,37 @@ class OpenAIModel(OpenAIServerModel):
                     if not model_output.strip():
                         logger.warning(
                             "event=empty_model_response model_id=%s provider=%s "
+                            "attempt_id=%s attempt=%s requested_output_tokens=%s "
                             "finish_reason=%s chunk_count=%d content_chunk_count=%d "
-                            "reasoning_chunk_count=%d reasoning_char_count=%d "
+                            "content_char_count=%d reasoning_chunk_count=%d reasoning_char_count=%d "
                             "empty_choices_chunk_count=%d nonstandard_chunk_count=%d "
-                            "input_tokens=%d output_tokens=%d",
+                            "input_tokens=%d output_tokens=%d "
+                            "reasoning_only_budget_exhausted=%s",
                             self.model_id,
                             self.model_factory or "unknown",
+                            attempt_id,
+                            attempt,
+                            response_diagnostics["requested_output_tokens"],
                             finish_reason,
                             len(chunk_list),
                             content_chunk_count,
+                            len(model_output),
                             reasoning_chunk_count,
                             reasoning_char_count,
                             empty_choices_chunk_count,
                             nonstandard_chunk_count,
                             input_tokens,
                             output_tokens,
+                            response_diagnostics["reasoning_only_budget_exhausted"],
                         )
+                        if preview_enabled:
+                            logger.warning(
+                                "event=rejected_model_output_preview attempt_id=%s "
+                                "content_preview=%s reasoning_preview=%s",
+                                attempt_id,
+                                bounded_rejected_output_preview(model_output),
+                                bounded_rejected_output_preview(reasoning_preview),
+                            )
                         self._monitoring.add_span_event("empty_model_response", response_diagnostics)
                         raise EmptyModelResponseError(
                             "Model stream completed without user-visible content "
@@ -832,9 +881,13 @@ class OpenAIModel(OpenAIServerModel):
                     "attempt": attempt,
                     "reason": "empty_response",
                 })
-                # Empty ``stop`` responses share the normal model attempt
-                # budget. Deterministic truncation (``length``) fails fast.
-                if self.last_finish_reason not in (None, "stop") or attempt >= self.retry_config.max_attempts:
+                # Empty completed responses use the model attempt budget only
+                # when this caller enables empty-response retry.
+                if (
+                    not _retry_empty_response
+                    or self.last_finish_reason not in (None, "stop")
+                    or attempt >= self.retry_config.max_attempts
+                ):
                     raise ModelInvocationTerminalError(
                         ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED,
                         attempt,
@@ -929,7 +982,7 @@ class OpenAIModel(OpenAIServerModel):
                         _model_attempts_used=attempt,
                         _defer_attempt_commit=_defer_attempt_commit,
                         _suppress_attempt_stream=_suppress_attempt_stream,
-
+                        _retry_empty_response=_retry_empty_response,
                         **kwargs,
                     )
                 is_timeout = _is_timeout_error(e)
@@ -1083,24 +1136,114 @@ class OpenAIModel(OpenAIServerModel):
             )
             return self.client.chat.completions.create(**retry_kwargs)
 
+    def _reasoning_wire_profile(self) -> Optional[Dict[str, Optional[str]]]:
+        """Return only an explicitly known provider wire mapping.
+
+        models.dev declares that a model has reasoning controls, but it does
+        not define a universal request field for every OpenAI-compatible
+        provider. Confirmed providers use their own adapter. For an unknown
+        provider, an enum effort falls back to OpenAI's public
+        ``reasoning_effort`` field. Numeric budgets still require an explicit
+        provider adapter; an explicitly supplied thinking toggle retains the
+        legacy top-level passthrough for generic compatible gateways.
+        """
+        capability = self.reasoning_capability or {}
+        provider_id = str(
+            capability.get("provider_id") or self.model_factory or ""
+        ).lower()
+        api_url = str(
+            capability.get("matched_api") or self.api_base_url or ""
+        ).lower()
+        try:
+            api_hostname = (
+                urlsplit(api_url if "://" in api_url else f"//{api_url}").hostname
+                or ""
+            ).rstrip(".")
+        except ValueError:
+            api_hostname = ""
+        if api_hostname == "aliyuncs.com" or api_hostname.endswith(".aliyuncs.com"):
+            provider_id = "dashscope"
+        elif api_hostname == "api.deepseek.com":
+            provider_id = "deepseek"
+
+        if capability.get("source") == "models_dev":
+            if provider_id in {"alibaba", "alibaba-cn", "dashscope"}:
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": "thinking_budget",
+                    "toggle": "enable_thinking",
+                }
+            if provider_id == "deepseek":
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": "thinking_object",
+                }
+            if provider_id in {"openai", "google"}:
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": None,
+                }
+            if capability.get("wire_format") == "reasoning_effort":
+                return {
+                    "effort": "reasoning_effort",
+                    "budget": None,
+                    "toggle": None,
+                }
+            return {
+                "effort": "reasoning_effort",
+                "budget": None,
+                "toggle": None,
+            }
+
+        effort = capability.get("wire_format") or "reasoning_effort"
+        if effort not in {"reasoning_effort", "thinking_toggle", "thinking_budget"}:
+            # OpenAI-compatible endpoints have one public effort field. Use
+            # it as the conservative fallback for an unconfirmed provider;
+            # provider-specific budget/toggle fields are never inferred.
+            effort = "reasoning_effort"
+        budget = capability.get("budget_wire_format")
+        if budget is None and effort == "thinking_budget":
+            # Existing operator/catalog profiles explicitly using the
+            # thinking-budget wire format use the nested thinking object.
+            budget = "thinking_object"
+        toggle = capability.get("toggle_wire_format")
+        if toggle is None and provider_id == "deepseek":
+            toggle = "thinking_object"
+        if toggle is None and provider_id in {"alibaba", "alibaba-cn", "dashscope"}:
+            toggle = "enable_thinking"
+        return {"effort": effort, "budget": budget, "toggle": toggle}
+
     def _translate_thinking_flag(
         self, extra_body: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Translate the enable_thinking flag to the provider's wire format.
 
-        Qwen-family models (vLLM/SGLang deployments and DashScope alike) only
-        read it from ``chat_template_kwargs.enable_thinking``; a top-level
-        flag is silently ignored there. Other providers (DashScope
-        non-Qwen, DeepSeek, SiliconFlow DeepSeek-V3.x) read the top-level
-        ``enable_thinking``. An explicit False must therefore be wrapped for
-        Qwen and kept top-level for everyone else; an absent flag is passed
-        through untouched (model default applies).
+        Qwen-family self-hosted deployments read the flag from
+        ``chat_template_kwargs.enable_thinking``. DashScope's OpenAI-compatible
+        endpoint accepts the top-level ``enable_thinking`` extra field. Known
+        providers use their adapter; unknown compatible gateways retain an
+        explicitly supplied top-level flag for backward compatibility.
         """
         if "enable_thinking" not in extra_body:
             return extra_body
         translated = dict(extra_body)
         thinking = translated.pop("enable_thinking")
-        if "qwen" in (self.model_id or "").lower():
+        wire_profile = self._reasoning_wire_profile()
+        toggle_format = wire_profile.get("toggle") if wire_profile else None
+        if toggle_format == "thinking_object":
+            translated["thinking"] = {
+                "type": "enabled" if thinking else "disabled"
+            }
+        elif toggle_format == "enable_thinking":
+            translated["enable_thinking"] = thinking
+        elif toggle_format == "chat_template" or (
+            toggle_format is None
+            and wire_profile is not None
+            and (self.reasoning_capability or {}).get("source") != "models_dev"
+            and "qwen" in (self.model_id or "").lower()
+        ):
             chat_kwargs = translated.get("chat_template_kwargs")
             if isinstance(chat_kwargs, dict):
                 translated["chat_template_kwargs"] = {
@@ -1108,8 +1251,19 @@ class OpenAIModel(OpenAIServerModel):
                 }
             else:
                 translated["chat_template_kwargs"] = {"enable_thinking": thinking}
-        else:
-            translated["enable_thinking"] = thinking
+        elif toggle_format is None:
+            capability = self.reasoning_capability or {}
+            provider_id = str(
+                capability.get("provider_id") or self.model_factory or ""
+            ).lower()
+            if capability.get("status") != "unsupported" and not (
+                capability.get("source") == "models_dev"
+                and provider_id in {"openai", "google"}
+            ):
+                # Preserve the pre-merge behavior for generic OpenAI-compatible
+                # gateways. This only forwards a toggle explicitly supplied by
+                # the caller; it does not enable the flag for every request.
+                translated["enable_thinking"] = thinking
         return translated
 
     def _apply_reasoning_control(self, completion_kwargs: Dict[str, Any]) -> None:
@@ -1127,25 +1281,62 @@ class OpenAIModel(OpenAIServerModel):
             return
 
         capability = self.reasoning_capability or {}
-        wire_format = capability.get("wire_format", "reasoning_effort")
-        if wire_format not in {"reasoning_effort", "thinking_toggle", "thinking_budget"}:
-            wire_format = "reasoning_effort"
+        if capability.get("status") == "unsupported":
+            return
+        wire_profile = self._reasoning_wire_profile()
+        if wire_profile is None:
+            logger.warning(
+                "event=reasoning_wire_adapter_missing model_id=%s provider=%s",
+                self.model_id,
+                capability.get("provider_id") or self.model_factory or "unknown",
+            )
+            return
+        wire_format = wire_profile.get("effort")
 
         controls = capability.get("controls")
         budget_control_declared = any(
             isinstance(control, dict) and control.get("type") == "budget_tokens"
             for control in controls or []
         )
+        budget_wire_format = wire_profile.get("budget")
 
-        if wire_format == "reasoning_effort":
-            if self.reasoning_budget_tokens is not None:
-                completion_kwargs["reasoning_budget_tokens"] = self.reasoning_budget_tokens
-            elif budget_control_declared:
-                # Budget and effort are alternative controls. A catalog entry
-                # with both uses the budget control; auto means no parameter.
+        # Numeric budget and enum effort are alternative controls. If both are
+        # present in a historical/configured value, numeric budget wins.
+        has_budget = (
+            budget_control_declared
+            and isinstance(self.reasoning_budget_tokens, int)
+            and not isinstance(self.reasoning_budget_tokens, bool)
+            and self.reasoning_budget_tokens > 0
+        )
+        if has_budget:
+            completion_kwargs.pop("reasoning_effort", None)
+            if budget_wire_format == "thinking_budget":
+                extra_body = dict(completion_kwargs.get("extra_body") or {})
+                extra_body["thinking_budget"] = self.reasoning_budget_tokens
+                completion_kwargs["extra_body"] = self._translate_thinking_flag(extra_body)
                 return
-            elif self.reasoning_effort is not None and self.reasoning_effort != "auto":
+            if budget_wire_format is None:
+                logger.warning(
+                    "event=reasoning_budget_adapter_missing model_id=%s provider=%s",
+                    self.model_id,
+                    capability.get("provider_id") or self.model_factory or "unknown",
+                )
+                return
+        elif budget_control_declared:
+            # Auto means no provider reasoning parameter.
+            return
+
+        if wire_format == "reasoning_effort" and not has_budget:
+            if self.reasoning_effort is not None and self.reasoning_effort != "auto":
                 completion_kwargs["reasoning_effort"] = self.reasoning_effort
+            return
+
+        if wire_format is None:
+            logger.warning(
+                "event=reasoning_effort_adapter_missing model_id=%s provider=%s",
+                self.model_id,
+                capability.get("provider_id") or self.model_factory or "unknown",
+            )
             return
 
         if budget_control_declared and self.reasoning_budget_tokens is None:
@@ -1317,5 +1508,5 @@ class OpenAIModel(OpenAIServerModel):
             # If no exception is raised, the connection is successful
             return True
         except Exception as e:
-            logging.error(f"Connection test failed: {str(e)}")
+            logger.error(f"Connection test failed: {str(e)}")
             return False

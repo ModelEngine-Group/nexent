@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -103,9 +103,10 @@ const translateError = (
   if (!errorMessage) return errorMessage;
   const lower = errorMessage.toLowerCase();
 
-  const nameMatch = /Name\s+(?:['"]([^'"]+)['"]|([^\s,]+))\s+is already in use/i.exec(
-    errorMessage
-  );
+  const nameMatch =
+    /Name\s+(?:['"]([^'"]+)['"]|([^\s,]+))\s+is already in use/i.exec(
+      errorMessage
+    );
   if (nameMatch) {
     return t("model.dialog.error.nameAlreadyInUse", {
       name: nameMatch[1] || nameMatch[2],
@@ -169,22 +170,72 @@ const buildEmbeddingChunkFields = (
   chunkingBatchSize: Number.parseInt(chunkingBatchSize ?? "", 10) || 10,
 });
 
-const generateRandomSuffix = (length: number = 5): string => {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const values = new Uint32Array(length);
-  crypto.getRandomValues(values);
-  let result = "";
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(values[i] % chars.length);
-  }
-  return result;
+const defaultDisplayName = (modelName: string): string => {
+  return modelName?.trim() || "custom-model";
 };
 
-const defaultDisplayName = (modelName: string): string => {
-  // A nameless model must not degrade to a bare random suffix ("tvj17") --
-  // the random string carries no meaning and looks like garbage in titles.
-  const base = modelName?.trim() || "custom-model";
-  return `${base}${generateRandomSuffix(5)}`;
+const normalizeDisplayName = (value: unknown): string =>
+  typeof value === "string" ? value.trim() : "";
+
+const SHARED_DISPLAY_NAME_MODEL_TYPES = new Set<ModelType>([
+  MODEL_TYPES.VLM,
+  MODEL_TYPES.VLM2,
+  MODEL_TYPES.VLM3,
+  MODEL_TYPES.VLM4,
+]);
+
+type DisplayNameCandidate = {
+  displayName: string;
+  type: ModelType;
+};
+
+type ExistingDisplayNameModel = {
+  displayName: string;
+  type?: ModelType;
+};
+
+const hasDisplayNameConflict = (
+  candidate: DisplayNameCandidate,
+  existing: ExistingDisplayNameModel[]
+): boolean => {
+  const matchingModels = existing.filter(
+    (model) => model.displayName === candidate.displayName
+  );
+  if (matchingModels.length === 0) return false;
+
+  // Keep the backend's intentional exception: independent multimodal slots
+  // may share a display name, but the same slot or any other model type may
+  // not.
+  if (!SHARED_DISPLAY_NAME_MODEL_TYPES.has(candidate.type)) return true;
+  return matchingModels.some(
+    (model) =>
+      model.type === candidate.type ||
+      !SHARED_DISPLAY_NAME_MODEL_TYPES.has(model.type as ModelType)
+  );
+};
+
+const collectDuplicateDisplayNames = (
+  candidates: DisplayNameCandidate[],
+  existing: ExistingDisplayNameModel[]
+): string[] => {
+  const duplicates: string[] = [];
+  const acceptedCandidates: DisplayNameCandidate[] = [];
+
+  for (const candidate of candidates) {
+    const displayName = normalizeDisplayName(candidate.displayName);
+    if (!displayName) continue;
+    const normalizedCandidate = { ...candidate, displayName };
+    if (
+      hasDisplayNameConflict(normalizedCandidate, existing) ||
+      hasDisplayNameConflict(normalizedCandidate, acceptedCandidates)
+    ) {
+      if (!duplicates.includes(displayName)) duplicates.push(displayName);
+      continue;
+    }
+    acceptedCandidates.push(normalizedCandidate);
+  }
+
+  return duplicates;
 };
 
 // =============================================================================
@@ -242,7 +293,9 @@ const buildBatchRowParams = (opts: {
 }): Record<string, any> => {
   const { row, state, baseUrl, apiKey, providerKey } = opts;
   const resolvedModelType = resolveBatchModelType(state);
-  const capacityPayload: Record<string, any> = supportsCapacityFields(state.modelType)
+  const capacityPayload: Record<string, any> = supportsCapacityFields(
+    state.modelType
+  )
     ? buildCapacityPayload(state.capacity)
     : {};
 
@@ -251,13 +304,18 @@ const buildBatchRowParams = (opts: {
     type: resolvedModelType,
     url: baseUrl,
     apiKey,
-    maxTokens: row.max_tokens || (isEmbeddingType(resolvedModelType) ? 0 : 4096),
-    displayName: (state.advanced.display_name as string) || defaultDisplayName(row.model_name),
-    modelFactory: providerKey === "__custom__" ? "OpenAI-API-Compatible" : providerKey,
+    maxTokens:
+      row.max_tokens || (isEmbeddingType(resolvedModelType) ? 0 : 4096),
+    displayName:
+      normalizeDisplayName(state.advanced.display_name) ||
+      defaultDisplayName(row.model_name),
+    modelFactory:
+      providerKey === "__custom__" ? "OpenAI-API-Compatible" : providerKey,
     // Batch submit requires every enabled row to have passed the probe
     // (hasUnchecked gate in handleBatchSubmit), so the verified result is
     // carried into the created record instead of resetting to not_detected.
-    connectStatus: state.connectivityStatus === "available" ? "available" : undefined,
+    connectStatus:
+      state.connectivityStatus === "available" ? "available" : undefined,
     contextWindowTokens: capacityPayload.contextWindowTokens,
     maxInputTokens: capacityPayload.maxInputTokens,
     maxOutputTokens: capacityPayload.maxOutputTokens,
@@ -267,7 +325,7 @@ const buildBatchRowParams = (opts: {
     // v2.6.0 inference params (temperature / top_p / extra_params incl. __custom__)
     // buildInferenceParamsPayload returns snake_case keys; buildInferenceParamsRequestBody
     // in modelService accepts both snake_case and camelCase.
-    ...buildInferenceParamsPayload(state.advanced),
+    ...buildInferenceParamsPayload(state.advanced, state.reasoningCapability),
   };
 
   // Embedding-specific fields (aligned with original ModelAddDialog):
@@ -276,15 +334,21 @@ const buildBatchRowParams = (opts: {
   if (isEmbeddingType(resolvedModelType)) {
     singleParams.expectedChunkSize = state.chunkSizeRange[0];
     singleParams.maximumChunkSize = state.chunkSizeRange[1];
-    singleParams.chunkingBatchSize = state.advanced.chunk_batch as number | undefined;
+    singleParams.chunkingBatchSize = state.advanced.chunk_batch as
+      number | undefined;
     singleParams.maxTokens = 1024;
   }
 
   // STT/TTS-specific fields (aligned with original ModelAddDialog)
-  if (state.modelType === MODEL_TYPES.STT || state.modelType === MODEL_TYPES.TTS) {
-    singleParams.modelFactory = (state.advanced.model_factory as string) || singleParams.modelFactory;
+  if (
+    state.modelType === MODEL_TYPES.STT ||
+    state.modelType === MODEL_TYPES.TTS
+  ) {
+    singleParams.modelFactory =
+      (state.advanced.model_factory as string) || singleParams.modelFactory;
     singleParams.modelAppid = state.advanced.model_appid as string | undefined;
-    singleParams.accessToken = state.advanced.access_token as string | undefined;
+    singleParams.accessToken = state.advanced.access_token as
+      string | undefined;
   }
 
   return singleParams;
@@ -295,7 +359,12 @@ const makeInitialRowState = (
   catalogProfile?: any,
   discoveredReasoningCapability?: ReasoningCapability
 ): BatchRowState => {
-  const advanced = advancedSettingsValueFromRecord(catalogProfile, {}, modelType);
+  const advanced = advancedSettingsValueFromRecord(
+    catalogProfile,
+    {},
+    modelType,
+    catalogProfile?.reasoning_capability ?? discoveredReasoningCapability
+  );
   // STT/TTS default provider to DashScope (阿里灵积) when not provided by the
   // catalog, matching the original ModelAddDialog (sttProvider/ttsProvider:
   // "dashscope"). Ensures the STT服务商 dropdown is pre-selected when a voice
@@ -314,8 +383,7 @@ const makeInitialRowState = (
       contextWindowTokens: catalogProfile?.context_window_tokens,
       maxInputTokens: catalogProfile?.max_input_tokens,
       maxOutputTokens: catalogProfile?.max_output_tokens,
-      defaultOutputReserveTokens:
-        catalogProfile?.default_output_reserve_tokens,
+      defaultOutputReserveTokens: catalogProfile?.default_output_reserve_tokens,
       tokenizerFamily: catalogProfile?.tokenizer_family,
     }),
     connectivityStatus: null,
@@ -326,7 +394,9 @@ const makeInitialRowState = (
     // Provider discovery is authoritative when available. The static profile
     // remains a fallback for older endpoints and catalog-only rows.
     reasoningCapability:
-      discoveredReasoningCapability ?? catalogProfile?.reasoning_capability ?? undefined,
+      discoveredReasoningCapability ??
+      catalogProfile?.reasoning_capability ??
+      undefined,
   };
 };
 
@@ -343,13 +413,14 @@ export const ModelAddDialogV2 = ({
   onConnectivityChange,
 }: ModelAddDialogV2Props) => {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { modelConfig, updateModelConfig, saveConfig } = useConfig();
 
   // ---------- shared state ----------
   const [activeTab, setActiveTab] = useState<"batch" | "custom">("batch");
   const [loading, setLoading] = useState(false);
-  const [inferenceSpecs, setInferenceSpecs] = useState<InferenceFieldSpecsByType>({});
+  const [inferenceSpecs, setInferenceSpecs] =
+    useState<InferenceFieldSpecsByType>({});
 
   // ---------- Tab A (batch) state ----------
   const [catalog, setCatalog] = useState<ModelCatalogFullPayload | null>(null);
@@ -361,7 +432,9 @@ export const ModelAddDialogV2 = ({
   // Client-side filter for the fetched model table (model name substring).
   const [modelSearchTerm, setModelSearchTerm] = useState("");
   const [rowStates, setRowStates] = useState<Record<string, BatchRowState>>({});
-  const [settingsModalRowId, setSettingsModalRowId] = useState<string | null>(null);
+  const [settingsModalRowId, setSettingsModalRowId] = useState<string | null>(
+    null
+  );
 
   // ---------- Tab B (custom) state ----------
   const [customForm, setCustomForm] = useState({
@@ -373,18 +446,19 @@ export const ModelAddDialogV2 = ({
     maxTokens: "4096",
     // Embedding-specific
     isMultimodal: false,
-    chunkSizeRange: [DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE] as [number, number],
+    chunkSizeRange: [
+      DEFAULT_EXPECTED_CHUNK_SIZE,
+      DEFAULT_MAXIMUM_CHUNK_SIZE,
+    ] as [number, number],
     chunkingBatchSize: "10",
   });
   const [customCapacity, setCustomCapacity] =
     useState<ModelCapacityFormState>(emptyCapacityForm);
-  const [customAdvanced, setCustomAdvanced] = useState<ModelAdvancedSettingsValue>({});
-  const [customReasoningCapability, setCustomReasoningCapability] =
-    useState<ReasoningCapability | undefined>(undefined);
-  // Suffix generated once per custom-access form lifecycle; reused while
-  // the operator types the model name so display_name stays stable instead
-  // of regenerating a new suffix on every keystroke. Regenerated on reset.
-  const customNameSuffixRef = useRef(generateRandomSuffix(5));
+  const [customAdvanced, setCustomAdvanced] =
+    useState<ModelAdvancedSettingsValue>({});
+  const [customReasoningCapability, setCustomReasoningCapability] = useState<
+    ReasoningCapability | undefined
+  >(undefined);
   const [customAdvancedOpen, setCustomAdvancedOpen] = useState(false);
   const [customConnectivity, setCustomConnectivity] = useState<{
     status: ConnectivityStatusType;
@@ -445,6 +519,7 @@ export const ModelAddDialogV2 = ({
         model_factory: model.modelFactory,
         model_appid: model.modelAppid,
         access_token: model.accessToken,
+        reasoning_capability: model.reasoningCapability,
       },
       inferenceSpecs,
       model.type
@@ -462,9 +537,7 @@ export const ModelAddDialogV2 = ({
     // the "已配置" tag right away (the debounce lookup will also re-check and
     // fill any EMPTY field from catalog/LiteLLM when the name settles).
     const prefilled = capacityFormFromModel(model);
-    setCapacityAutoFilled(
-      Object.values(prefilled).some((v) => v !== "")
-    );
+    setCapacityAutoFilled(Object.values(prefilled).some((v) => v !== ""));
   }, [isOpen, model, inferenceSpecs]);
 
   const findCatalogProfile = useCallback(
@@ -525,7 +598,11 @@ export const ModelAddDialogV2 = ({
             ? { maxOutputTokens: String(s.maxOutputTokens) }
             : {}),
           ...(s.defaultOutputReserveTokens && !prev.defaultOutputReserveTokens
-            ? { defaultOutputReserveTokens: String(s.defaultOutputReserveTokens) }
+            ? {
+                defaultOutputReserveTokens: String(
+                  s.defaultOutputReserveTokens
+                ),
+              }
             : {}),
           ...(s.tokenizerFamily && !prev.tokenizerFamily
             ? { tokenizerFamily: s.tokenizerFamily }
@@ -543,16 +620,43 @@ export const ModelAddDialogV2 = ({
   }, [isOpen, customForm.name, customForm.url, customForm.type]);
 
   // ---------- derived: model type options (aligned with original ModelAddDialog) ----------
-  const modelTypeOptions = useMemo(() => [
-    { value: MODEL_TYPES.LLM, label: t("model.type.llm", { defaultValue: "LLM" }) },
-    { value: MODEL_TYPES.EMBEDDING, label: t("model.type.embedding", { defaultValue: "Embedding" }) },
-    { value: MODEL_TYPES.VLM, label: t("model.type.imageUnderstanding", { defaultValue: "VLM" }) },
-    { value: MODEL_TYPES.VLM2, label: t("model.type.imageGeneration", { defaultValue: "VLM2" }) },
-    { value: MODEL_TYPES.VLM3, label: t("model.type.videoUnderstanding", { defaultValue: "VLM3" }) },
-    { value: MODEL_TYPES.RERANK, label: t("model.type.rerank", { defaultValue: "Rerank" }) },
-    { value: MODEL_TYPES.STT, label: t("model.type.stt", { defaultValue: "STT" }) },
-    { value: MODEL_TYPES.TTS, label: t("model.type.tts", { defaultValue: "TTS" }) },
-  ], [t]);
+  const modelTypeOptions = useMemo(
+    () => [
+      {
+        value: MODEL_TYPES.LLM,
+        label: t("model.type.llm", { defaultValue: "LLM" }),
+      },
+      {
+        value: MODEL_TYPES.EMBEDDING,
+        label: t("model.type.embedding", { defaultValue: "Embedding" }),
+      },
+      {
+        value: MODEL_TYPES.VLM,
+        label: t("model.type.imageUnderstanding", { defaultValue: "VLM" }),
+      },
+      {
+        value: MODEL_TYPES.VLM2,
+        label: t("model.type.imageGeneration", { defaultValue: "VLM2" }),
+      },
+      {
+        value: MODEL_TYPES.VLM3,
+        label: t("model.type.videoUnderstanding", { defaultValue: "VLM3" }),
+      },
+      {
+        value: MODEL_TYPES.RERANK,
+        label: t("model.type.rerank", { defaultValue: "Rerank" }),
+      },
+      {
+        value: MODEL_TYPES.STT,
+        label: t("model.type.stt", { defaultValue: "STT" }),
+      },
+      {
+        value: MODEL_TYPES.TTS,
+        label: t("model.type.tts", { defaultValue: "TTS" }),
+      },
+    ],
+    [t]
+  );
 
   // ---------- derived: provider options ----------
   const providerOptions = useMemo(() => {
@@ -566,7 +670,13 @@ export const ModelAddDialogV2 = ({
         })) || [];
     return [
       ...preset,
-      { value: "__custom__", label: t("model.dialog.v2.customProvider", { defaultValue: "自定义 provider (OpenAI 兼容)" }), info: null },
+      {
+        value: "__custom__",
+        label: t("model.dialog.v2.customProvider", {
+          defaultValue: "自定义 provider (OpenAI 兼容)",
+        }),
+        info: null,
+      },
     ];
   }, [catalog, t]);
 
@@ -595,54 +705,71 @@ export const ModelAddDialogV2 = ({
   // For each fetched model, capacity is queried via suggest_capacity (see
   // applyRows) — model_catalog.json is no longer the capacity source.
 
-  const applyRows = useCallback(async (rows: any[]) => {
-    setFetchedModels(rows);
-    const initStates: Record<string, BatchRowState> = {};
-    await Promise.all(
-      rows.map(async (row) => {
-        const catalogProfile = findCatalogProfile(row.model_name);
-        const initialState = makeInitialRowState(
-          row.model_type,
-          catalogProfile,
-          row.reasoning_capability
-        );
-        // Default display_name to model name + 5-char random suffix
-        initialState.advanced.display_name = defaultDisplayName(row.model_name);
-        // Unified capacity source: query capability_profiles.py / bundled
-        // LiteLLM JSON via suggest_capacity. Pure local lookups, no HTTP
-        // probes, so batching one call per fetched model is cheap.
-        try {
-          const suggestion = await modelService.suggestCapacity({
-            modelName: row.model_name,
-            baseUrl,
-            providerHint: providerKey,
-            modelType: row.model_type,
-          });
-          const s = suggestion?.suggestions;
-          if (s) {
-            if (s.contextWindowTokens)
-              initialState.capacity.contextWindowTokens = String(s.contextWindowTokens);
-            if (s.maxInputTokens)
-              initialState.capacity.maxInputTokens = String(s.maxInputTokens);
-            if (s.maxOutputTokens)
-              initialState.capacity.maxOutputTokens = String(s.maxOutputTokens);
-            if (s.defaultOutputReserveTokens)
-              initialState.capacity.defaultOutputReserveTokens = String(s.defaultOutputReserveTokens);
-            if (s.tokenizerFamily)
-              initialState.capacity.tokenizerFamily = s.tokenizerFamily;
+  const applyRows = useCallback(
+    async (rows: any[]) => {
+      setFetchedModels(rows);
+      const initStates: Record<string, BatchRowState> = {};
+      await Promise.all(
+        rows.map(async (row) => {
+          const catalogProfile = findCatalogProfile(row.model_name);
+          const initialState = makeInitialRowState(
+            row.model_type,
+            catalogProfile,
+            row.reasoning_capability
+          );
+          // Display names default to the provider's model name. Keep the
+          // value in row state so the advanced-settings input is populated
+          // before submit, while still allowing the user to override it.
+          if (!normalizeDisplayName(initialState.advanced.display_name)) {
+            initialState.advanced.display_name = row.model_name;
           }
-        } catch {
-          // catalog miss + LLM disabled → leave empty; connectivity will fill
-        }
-        initStates[row.id] = initialState;
-      })
-    );
-    setRowStates(initStates);
-  }, [baseUrl, providerKey, findCatalogProfile]);
+          // Unified capacity source: query capability_profiles.py / bundled
+          // LiteLLM JSON via suggest_capacity. Pure local lookups, no HTTP
+          // probes, so batching one call per fetched model is cheap.
+          try {
+            const suggestion = await modelService.suggestCapacity({
+              modelName: row.model_name,
+              baseUrl,
+              providerHint: providerKey,
+              modelType: row.model_type,
+            });
+            const s = suggestion?.suggestions;
+            if (s) {
+              if (s.contextWindowTokens)
+                initialState.capacity.contextWindowTokens = String(
+                  s.contextWindowTokens
+                );
+              if (s.maxInputTokens)
+                initialState.capacity.maxInputTokens = String(s.maxInputTokens);
+              if (s.maxOutputTokens)
+                initialState.capacity.maxOutputTokens = String(
+                  s.maxOutputTokens
+                );
+              if (s.defaultOutputReserveTokens)
+                initialState.capacity.defaultOutputReserveTokens = String(
+                  s.defaultOutputReserveTokens
+                );
+              if (s.tokenizerFamily)
+                initialState.capacity.tokenizerFamily = s.tokenizerFamily;
+            }
+          } catch {
+            // catalog miss + LLM disabled → leave empty; connectivity will fill
+          }
+          initStates[row.id] = initialState;
+        })
+      );
+      setRowStates(initStates);
+    },
+    [baseUrl, providerKey, findCatalogProfile]
+  );
 
   const handleFetchModels = useCallback(async () => {
     if (!apiKey.trim()) {
-      message.warning(t("model.dialog.v2.warn.apiKeyRequired", { defaultValue: "请先输入 API Key" }));
+      message.warning(
+        t("model.dialog.v2.warn.apiKeyRequired", {
+          defaultValue: "请先输入 API Key",
+        })
+      );
       return;
     }
     setFetchingModels(true);
@@ -698,7 +825,10 @@ export const ModelAddDialogV2 = ({
         [rowId]: { ...prev[rowId], checking: true },
       }));
       try {
-        const inferencePayload = buildInferenceParamsPayload(state.advanced);
+        const inferencePayload = buildInferenceParamsPayload(
+          state.advanced,
+          state.reasoningCapability
+        );
         const capacityPayload = supportsCapacityFields(state.modelType)
           ? buildCapacityPayload(state.capacity)
           : {};
@@ -713,7 +843,8 @@ export const ModelAddDialogV2 = ({
           ? {
               expectedChunkSize: state.chunkSizeRange[0],
               maximumChunkSize: state.chunkSizeRange[1],
-              chunkingBatchSize: state.advanced.chunk_batch as number | undefined,
+              chunkingBatchSize: state.advanced.chunk_batch as
+                number | undefined,
               embeddingDim: 1024,
             }
           : {};
@@ -730,24 +861,46 @@ export const ModelAddDialogV2 = ({
           const next: BatchRowState = {
             ...prev[rowId],
             checking: false,
-            connectivityStatus: response.connectivity ? "available" : "unavailable",
+            connectivityStatus: response.connectivity
+              ? "available"
+              : "unavailable",
             connectivityMessage: response.error || "",
           };
           // Connectivity runs the full suggest_capacity flow (catalog + LLM
           // fallback), unlike the catalog-only fetch-time prefill. Fill only
           // verified non-empty fields so we don't wipe gear-popup edits.
-          if (response.connectivity && response.capacitySuggestion?.suggestions) {
+          if (
+            response.connectivity &&
+            response.capacitySuggestion?.suggestions
+          ) {
             const s = response.capacitySuggestion.suggestions;
             if (s.contextWindowTokens)
-              next.capacity = { ...next.capacity, contextWindowTokens: String(s.contextWindowTokens) };
+              next.capacity = {
+                ...next.capacity,
+                contextWindowTokens: String(s.contextWindowTokens),
+              };
             if (s.maxInputTokens)
-              next.capacity = { ...next.capacity, maxInputTokens: String(s.maxInputTokens) };
+              next.capacity = {
+                ...next.capacity,
+                maxInputTokens: String(s.maxInputTokens),
+              };
             if (s.maxOutputTokens)
-              next.capacity = { ...next.capacity, maxOutputTokens: String(s.maxOutputTokens) };
+              next.capacity = {
+                ...next.capacity,
+                maxOutputTokens: String(s.maxOutputTokens),
+              };
             if (s.defaultOutputReserveTokens)
-              next.capacity = { ...next.capacity, defaultOutputReserveTokens: String(s.defaultOutputReserveTokens) };
+              next.capacity = {
+                ...next.capacity,
+                defaultOutputReserveTokens: String(
+                  s.defaultOutputReserveTokens
+                ),
+              };
             if (s.tokenizerFamily)
-              next.capacity = { ...next.capacity, tokenizerFamily: s.tokenizerFamily };
+              next.capacity = {
+                ...next.capacity,
+                tokenizerFamily: s.tokenizerFamily,
+              };
           }
           return { ...prev, [rowId]: next };
         });
@@ -771,13 +924,63 @@ export const ModelAddDialogV2 = ({
   // Shared guard for the batch actions: the enabled rows, or null when none
   // are selected (the caller then shows the no-selection warning).
   const getEnabledRows = useCallback((): any[] | null => {
-    const enabledRows = fetchedModels.filter((row) => rowStates[row.id]?.enabled);
+    const enabledRows = fetchedModels.filter(
+      (row) => rowStates[row.id]?.enabled
+    );
     if (enabledRows.length === 0) {
-      message.warning(t("model.dialog.v2.warn.noSelection", { defaultValue: "请至少启用一个模型" }));
+      message.warning(
+        t("model.dialog.v2.warn.noSelection", {
+          defaultValue: "请至少启用一个模型",
+        })
+      );
       return null;
     }
     return enabledRows;
   }, [fetchedModels, rowStates, message, t]);
+
+  const validateDisplayNameCandidates = useCallback(
+    async (candidates: DisplayNameCandidate[]): Promise<boolean> => {
+      let existingModels: ExistingDisplayNameModel[];
+      try {
+        existingModels =
+          await modelService.getExistingModelsForDuplicateCheck(tenantId);
+      } catch (error) {
+        log.error(
+          "Failed to validate model display names before create",
+          error
+        );
+        modal.error({
+          title: t("model.dialog.error.displayNameCheckFailedTitle", {
+            defaultValue: "无法校验模型显示名称",
+          }),
+          content: t("model.dialog.error.displayNameCheckFailed", {
+            defaultValue: "无法检查显示名称是否重复，请稍后重试。",
+          }),
+        });
+        return false;
+      }
+
+      const duplicateNames = collectDuplicateDisplayNames(
+        candidates,
+        existingModels
+      );
+      if (duplicateNames.length > 0) {
+        modal.error({
+          title: t("model.dialog.error.duplicateDisplayNamesTitle", {
+            defaultValue: "显示名称已存在",
+          }),
+          content: t("model.dialog.error.duplicateDisplayNames", {
+            defaultValue: "以下显示名称已存在：{{names}}",
+            names: duplicateNames.join("、"),
+          }),
+        });
+        return false;
+      }
+
+      return true;
+    },
+    [modal, t, tenantId]
+  );
 
   const handleBatchConnectivity = useCallback(async () => {
     const enabledRows = getEnabledRows();
@@ -803,6 +1006,32 @@ export const ModelAddDialogV2 = ({
     if (!enabledRows) {
       return;
     }
+    const candidates = enabledRows.map((row) => {
+      const state = rowStates[row.id];
+      return {
+        row,
+        state,
+        params: buildBatchRowParams({
+          row,
+          state,
+          baseUrl,
+          apiKey,
+          providerKey,
+        }),
+      };
+    });
+    setLoading(true);
+    const canCreate = await validateDisplayNameCandidates(
+      candidates.map(({ params, state }) => ({
+        displayName: params.displayName,
+        type: resolveBatchModelType(state),
+      }))
+    );
+    if (!canCreate) {
+      setLoading(false);
+      return;
+    }
+
     // Require all enabled models to have passed connectivity testing before submit.
     const hasUnchecked = enabledRows.some(
       (row) => rowStates[row.id]?.connectivityStatus !== "available"
@@ -813,25 +1042,20 @@ export const ModelAddDialogV2 = ({
           defaultValue: "请先完成所有启用模型的连通性测试",
         })
       );
+      setLoading(false);
       return;
     }
-    setLoading(true);
+
     try {
       let createdCount = 0;
       let autoConfiguredDefaults: any[] = [];
-      for (const row of enabledRows) {
-        const state = rowStates[row.id];
-        const singleParams = buildBatchRowParams({
-          row,
-          state,
-          baseUrl,
-          apiKey,
-          providerKey,
-        });
-
+      for (const { row, params: singleParams } of candidates) {
         try {
           const createResult = tenantId
-            ? await modelService.createManageTenantModel({ tenantId, ...singleParams } as any)
+            ? await modelService.createManageTenantModel({
+                tenantId,
+                ...singleParams,
+              } as any)
             : await modelService.addCustomModel(singleParams as any);
           if (createResult?.auto_configured_defaults?.length) {
             autoConfiguredDefaults = createResult.auto_configured_defaults;
@@ -848,19 +1072,19 @@ export const ModelAddDialogV2 = ({
           );
         }
       }
-      message.success(t("model.dialog.v2.batchSuccess", { defaultValue: "批量入库成功" }));
+      message.success(
+        t("model.dialog.v2.batchSuccess", { defaultValue: "批量入库成功" })
+      );
       notifyAutoConfiguredDefaults(autoConfiguredDefaults, t, message);
       resetBatchState();
       onClose();
       // Use resolved model type for the success callback (embedding + isMultimodal → multi_embedding)
-      const firstRow = enabledRows[0];
-      const firstState = firstRow ? rowStates[firstRow.id] : null;
+      const firstCandidate = candidates[0];
       await onSuccess(
-        firstRow && firstState
+        firstCandidate
           ? {
-              name: (firstState.advanced.display_name as string) ||
-                defaultDisplayName(firstRow.model_name),
-              type: resolveBatchModelType(firstState),
+              name: firstCandidate.params.displayName,
+              type: resolveBatchModelType(firstCandidate.state),
             }
           : undefined
       );
@@ -874,7 +1098,19 @@ export const ModelAddDialogV2 = ({
     } finally {
       setLoading(false);
     }
-  }, [getEnabledRows, rowStates, apiKey, baseUrl, providerKey, tenantId, message, t, onClose, onSuccess]);
+  }, [
+    getEnabledRows,
+    rowStates,
+    apiKey,
+    baseUrl,
+    providerKey,
+    tenantId,
+    message,
+    t,
+    onClose,
+    onSuccess,
+    validateDisplayNameCandidates,
+  ]);
 
   const resetBatchState = useCallback(() => {
     setFetchedModels([]);
@@ -887,15 +1123,27 @@ export const ModelAddDialogV2 = ({
   // ---------- Tab B: connectivity + submit ----------
   const validateCustomForm = useCallback((): boolean => {
     if (!customForm.name.trim()) {
-      message.warning(t("model.dialog.v2.warn.modelNameRequired", { defaultValue: "请填写模型名称" }));
+      message.warning(
+        t("model.dialog.v2.warn.modelNameRequired", {
+          defaultValue: "请填写模型名称",
+        })
+      );
       return false;
     }
     if (!customForm.url.trim()) {
-      message.warning(t("model.dialog.v2.warn.urlRequired", { defaultValue: "请填写 Base URL" }));
+      message.warning(
+        t("model.dialog.v2.warn.urlRequired", {
+          defaultValue: "请填写 Base URL",
+        })
+      );
       return false;
     }
     if (!model && !isVoiceType(customForm.type) && !customForm.apiKey.trim()) {
-      message.warning(t("model.dialog.v2.warn.apiKeyRequired", { defaultValue: "请填写 API Key" }));
+      message.warning(
+        t("model.dialog.v2.warn.apiKeyRequired", {
+          defaultValue: "请填写 API Key",
+        })
+      );
       return false;
     }
     return true;
@@ -905,7 +1153,10 @@ export const ModelAddDialogV2 = ({
   // connectivity probe and the submit paths resolve the same fields from the
   // custom form + advanced settings + capacity form.
   const buildCustomRequestContext = useCallback(() => {
-    const inferencePayload = buildInferenceParamsPayload(customAdvanced);
+    const inferencePayload = buildInferenceParamsPayload(
+      customAdvanced,
+      effectiveCustomReasoningCapability
+    );
     const capacityPayload = supportsCapacityFields(customForm.type)
       ? buildCapacityPayload(customCapacity)
       : {};
@@ -991,7 +1242,15 @@ export const ModelAddDialogV2 = ({
     } finally {
       setVerifyingCustom(false);
     }
-  }, [customForm, model, onConnectivityChange, message, t, validateCustomForm, buildCustomRequestContext]);
+  }, [
+    customForm,
+    model,
+    onConnectivityChange,
+    message,
+    t,
+    validateCustomForm,
+    buildCustomRequestContext,
+  ]);
 
   // Custom-tab edit path: update the existing model row (manage or single API).
   const submitCustomEditPath = useCallback(
@@ -1000,13 +1259,17 @@ export const ModelAddDialogV2 = ({
       displayNameValue: string,
       isVoice: boolean
     ) => {
-      const { capacityPayload, resolvedModelType, isEmbedding, inferencePayload } = ctx;
+      const {
+        capacityPayload,
+        resolvedModelType,
+        isEmbedding,
+        inferencePayload,
+      } = ctx;
       const inferenceUpdate = {
         temperature: inferencePayload.temperature as number | undefined,
         topP: inferencePayload.top_p as number | undefined,
         extraParams: inferencePayload.extra_params as
-          | Record<string, unknown>
-          | undefined,
+          Record<string, unknown> | undefined,
       };
       // Look up the existing row by its original display name, then send the
       // edited fields. Mirrors ModelEditDialogV2's update payload shape,
@@ -1062,12 +1325,18 @@ export const ModelAddDialogV2 = ({
       displayNameValue: string,
       maxTokensValue: number
     ) => {
-      const { capacityPayload, resolvedModelType, isEmbedding, inferencePayload } = ctx;
+      const {
+        capacityPayload,
+        resolvedModelType,
+        isEmbedding,
+        inferencePayload,
+      } = ctx;
       const modelParams: any = {
         name: customForm.name,
         type: resolvedModelType,
         url: customForm.url,
-        apiKey: customForm.apiKey.trim() === "" ? "sk-no-api-key" : customForm.apiKey,
+        apiKey:
+          customForm.apiKey.trim() === "" ? "sk-no-api-key" : customForm.apiKey,
         maxTokens: maxTokensValue,
         displayName: displayNameValue,
         ...capacityPayload,
@@ -1085,7 +1354,10 @@ export const ModelAddDialogV2 = ({
       };
 
       if (tenantId) {
-        const createResult = await modelService.createManageTenantModel({ tenantId, ...modelParams });
+        const createResult = await modelService.createManageTenantModel({
+          tenantId,
+          ...modelParams,
+        });
         return {
           resolvedModelType,
           autoConfiguredDefaults: createResult?.auto_configured_defaults ?? [],
@@ -1103,7 +1375,10 @@ export const ModelAddDialogV2 = ({
 
   // Persist the custom-tab model into the local config (best-effort).
   const persistCustomLocalConfig = useCallback(
-    async (ctx: ReturnType<typeof buildCustomRequestContext>, displayNameValue: string) => {
+    async (
+      ctx: ReturnType<typeof buildCustomRequestContext>,
+      displayNameValue: string
+    ) => {
       const configKey: keyof ModelConfig =
         ctx.resolvedModelType === MODEL_TYPES.MULTI_EMBEDDING
           ? "multiEmbedding"
@@ -1117,8 +1392,7 @@ export const ModelAddDialogV2 = ({
       const currentSlotDisplayName = modelConfig?.[configKey]?.displayName;
       const slotIsFree = !currentSlotDisplayName;
       const submitsCurrentSlotModel =
-        !!model &&
-        currentSlotDisplayName === (model.displayName || model.name);
+        !!model && currentSlotDisplayName === (model.displayName || model.name);
       if (!slotIsFree && !submitsCurrentSlotModel) {
         return;
       }
@@ -1146,29 +1420,49 @@ export const ModelAddDialogV2 = ({
 
   const handleCustomSubmit = useCallback(async () => {
     if (!validateCustomForm()) return;
-    if (supportsCapacityFields(customForm.type) && validateCapacityForm(customCapacity, [])) {
+    if (
+      supportsCapacityFields(customForm.type) &&
+      validateCapacityForm(customCapacity, [])
+    ) {
       message.error(t("model.dialog.capacity.error.positiveInteger"));
       return;
     }
+    const ctx = buildCustomRequestContext();
+    const displayNameValue =
+      normalizeDisplayName(customAdvanced.display_name) ||
+      defaultDisplayName(customForm.name);
     setLoading(true);
+    if (
+      !model &&
+      !(await validateDisplayNameCandidates([
+        { displayName: displayNameValue, type: ctx.resolvedModelType },
+      ]))
+    ) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      const ctx = buildCustomRequestContext();
       const { resolvedModelType, isEmbedding } = ctx;
       const maxTokensValue = isEmbedding
         ? 0
         : Number.parseInt(customForm.maxTokens, 10) || 0;
-
-      const displayNameValue =
-        (customAdvanced.display_name as string) || defaultDisplayName(customForm.name);
       const isVoice = isVoiceType(resolvedModelType);
 
-      let createResult: { resolvedModelType: ModelType; autoConfiguredDefaults: any[] } | null = null;
+      let createResult: {
+        resolvedModelType: ModelType;
+        autoConfiguredDefaults: any[];
+      } | null = null;
       if (model) {
         // ---------- edit (update) path ----------
         await submitCustomEditPath(ctx, displayNameValue, isVoice);
       } else {
         // ---------- add (create) path ----------
-        createResult = await submitCustomCreatePath(ctx, displayNameValue, maxTokensValue);
+        createResult = await submitCustomCreatePath(
+          ctx,
+          displayNameValue,
+          maxTokensValue
+        );
       }
 
       await persistCustomLocalConfig(ctx, displayNameValue);
@@ -1178,11 +1472,15 @@ export const ModelAddDialogV2 = ({
           ? t("model.dialog.editSuccess", { defaultValue: "模型更新成功" })
           : t("model.dialog.v2.customSuccess", { defaultValue: "模型添加成功" })
       );
-      notifyAutoConfiguredDefaults(createResult?.autoConfiguredDefaults, t, message);
+      notifyAutoConfiguredDefaults(
+        createResult?.autoConfiguredDefaults,
+        t,
+        message
+      );
       resetCustomForm();
       onClose();
       await onSuccess({
-        name: (customAdvanced.display_name as string) || defaultDisplayName(customForm.name),
+        name: displayNameValue,
         type: resolvedModelType,
       });
     } catch (error: any) {
@@ -1199,7 +1497,23 @@ export const ModelAddDialogV2 = ({
     } finally {
       setLoading(false);
     }
-  }, [customForm, customAdvanced, customCapacity, tenantId, model, message, t, onClose, onSuccess, validateCustomForm, buildCustomRequestContext, submitCustomEditPath, submitCustomCreatePath, persistCustomLocalConfig]);
+  }, [
+    customForm,
+    customAdvanced,
+    customCapacity,
+    tenantId,
+    model,
+    message,
+    t,
+    onClose,
+    onSuccess,
+    validateCustomForm,
+    buildCustomRequestContext,
+    submitCustomEditPath,
+    submitCustomCreatePath,
+    persistCustomLocalConfig,
+    validateDisplayNameCandidates,
+  ]);
 
   const resetCustomForm = useCallback(() => {
     setCustomForm({
@@ -1218,8 +1532,6 @@ export const ModelAddDialogV2 = ({
     setCustomReasoningCapability(undefined);
     setCustomConnectivity({ status: null, message: "" });
     setCapacityAutoFilled(false);
-    // Regenerate suffix so the next custom-access form gets a fresh one
-    customNameSuffixRef.current = generateRandomSuffix(5);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -1227,7 +1539,6 @@ export const ModelAddDialogV2 = ({
     resetCustomForm();
     setActiveTab("batch");
     onClose();
-    console.log(providerOptions);
   }, [onClose, resetBatchState, resetCustomForm]);
 
   // ---------- Tab A: table columns ----------
@@ -1302,7 +1613,9 @@ export const ModelAddDialogV2 = ({
         ),
       },
       {
-        title: t("model.dialog.v2.col.connectivity", { defaultValue: "连通性" }),
+        title: t("model.dialog.v2.col.connectivity", {
+          defaultValue: "连通性",
+        }),
         key: "connectivity",
         width: 180,
         render: (_: any, row: any) => {
@@ -1312,7 +1625,8 @@ export const ModelAddDialogV2 = ({
           const statusText = state.connectivityStatus
             ? t(`model.connectivity.${state.connectivityStatus}`, {
                 defaultValue:
-                  ROW_CONNECTIVITY_FALLBACK_LABELS[state.connectivityStatus] ?? "",
+                  ROW_CONNECTIVITY_FALLBACK_LABELS[state.connectivityStatus] ??
+                  "",
               })
             : "";
           return (
@@ -1361,13 +1675,17 @@ export const ModelAddDialogV2 = ({
         items={[
           {
             key: "batch",
-            label: t("model.dialog.v2.tab.batchImport", { defaultValue: "从服务商导入" }),
+            label: t("model.dialog.v2.tab.batchImport", {
+              defaultValue: "从服务商导入",
+            }),
             children: (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 gap-3">
                   <div>
                     <label className="block mb-1 text-sm font-medium text-gray-700">
-                      {t("model.dialog.v2.provider", { defaultValue: "服务商" })}
+                      {t("model.dialog.v2.provider", {
+                        defaultValue: "服务商",
+                      })}
                     </label>
                     <Select
                       className="w-full"
@@ -1395,7 +1713,9 @@ export const ModelAddDialogV2 = ({
                   </div>
                   <div>
                     <label className="block mb-1 text-sm font-medium text-gray-700">
-                      {t("model.dialog.v2.baseUrl", { defaultValue: "Base URL" })}
+                      {t("model.dialog.v2.baseUrl", {
+                        defaultValue: "Base URL",
+                      })}
                     </label>
                     <Input
                       value={baseUrl}
@@ -1411,24 +1731,37 @@ export const ModelAddDialogV2 = ({
                 <Space>
                   <Button
                     type="primary"
-                    icon={fetchingModels ? <LoaderCircle size={14} className="animate-spin" /> : null}
+                    icon={
+                      fetchingModels ? (
+                        <LoaderCircle size={14} className="animate-spin" />
+                      ) : null
+                    }
                     onClick={handleFetchModels}
                     loading={fetchingModels}
                   >
-                    {t("model.dialog.v2.btn.fetch", { defaultValue: "获取模型列表 (全部类型)" })}
+                    {t("model.dialog.v2.btn.fetch", {
+                      defaultValue: "获取模型列表 (全部类型)",
+                    })}
                   </Button>
                   {fetchedModels.length > 0 && (
                     <Button
-                      icon={batchChecking ? <LoaderCircle size={14} className="animate-spin" /> : null}
+                      icon={
+                        batchChecking ? (
+                          <LoaderCircle size={14} className="animate-spin" />
+                        ) : null
+                      }
                       onClick={handleBatchConnectivity}
                       loading={batchChecking}
                       disabled={
-                        Object.values(rowStates).filter((s) => s?.enabled).length === 0
+                        Object.values(rowStates).filter((s) => s?.enabled)
+                          .length === 0
                       }
                     >
                       {t("model.dialog.v2.btn.batchConnectivity", {
                         defaultValue: "批量测试连通性",
-                        count: Object.values(rowStates).filter((s) => s?.enabled).length,
+                        count: Object.values(rowStates).filter(
+                          (s) => s?.enabled
+                        ).length,
                       })}
                     </Button>
                   )}
@@ -1473,15 +1806,18 @@ export const ModelAddDialogV2 = ({
                     loading={loading}
                     onClick={handleBatchSubmit}
                     disabled={
-                      Object.values(rowStates).filter((s) => s?.enabled).length === 0 ||
+                      Object.values(rowStates).filter((s) => s?.enabled)
+                        .length === 0 ||
                       Object.values(rowStates).some(
-                        (s) => s?.enabled && s?.connectivityStatus !== "available"
+                        (s) =>
+                          s?.enabled && s?.connectivityStatus !== "available"
                       )
                     }
                   >
                     {t("model.dialog.v2.btn.batchSubmit", {
                       defaultValue: "批量入库",
-                      count: Object.values(rowStates).filter((s) => s.enabled).length,
+                      count: Object.values(rowStates).filter((s) => s.enabled)
+                        .length,
                     })}
                   </Button>
                 </div>
@@ -1490,7 +1826,9 @@ export const ModelAddDialogV2 = ({
           },
           {
             key: "custom",
-            label: t("model.dialog.v2.tab.custom", { defaultValue: "自定义接入" }),
+            label: t("model.dialog.v2.tab.custom", {
+              defaultValue: "自定义接入",
+            }),
             children: (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 gap-3">
@@ -1502,15 +1840,18 @@ export const ModelAddDialogV2 = ({
                       className="w-full"
                       value={customForm.type}
                       onChange={(v) => {
-                        setCustomForm((prev) => ({ ...prev, type: v as ModelType }));
+                        setCustomForm((prev) => ({
+                          ...prev,
+                          type: v as ModelType,
+                        }));
                         // STT defaults its provider to DashScope (阿里灵积) when
                         // empty, matching the original ModelAddDialog
                         // (sttProvider: "dashscope").
                         setCustomAdvanced(
-                          v === MODEL_TYPES.STT ? { model_factory: "dashscope" } : {}
+                          v === MODEL_TYPES.STT
+                            ? { model_factory: "dashscope" }
+                            : {}
                         );
-                        // Regenerate suffix on type switch for a fresh lifecycle
-                        customNameSuffixRef.current = generateRandomSuffix(5);
                       }}
                       options={modelTypeOptions}
                     />
@@ -1528,16 +1869,6 @@ export const ModelAddDialogV2 = ({
                         // Name changed — the previous capacity lookup result no
                         // longer applies; the debounce effect will re-query.
                         setCapacityAutoFilled(false);
-                        // Auto-populate display_name in advanced settings to
-                        // align with batch-access behavior (defaultDisplayName).
-                        // Uses the stable suffix from customNameSuffixRef so
-                        // the random part doesn't change on every keystroke.
-                        setCustomAdvanced((prev) => ({
-                          ...prev,
-                          display_name: name
-                            ? `${name}${customNameSuffixRef.current}`
-                            : "",
-                        }));
                       }}
                     />
                   </div>
@@ -1548,7 +1879,12 @@ export const ModelAddDialogV2 = ({
                     </label>
                     <Input
                       value={customForm.url}
-                      onChange={(e) => setCustomForm((prev) => ({ ...prev, url: e.target.value }))}
+                      onChange={(e) =>
+                        setCustomForm((prev) => ({
+                          ...prev,
+                          url: e.target.value,
+                        }))
+                      }
                       placeholder="https://..."
                     />
                   </div>
@@ -1562,7 +1898,10 @@ export const ModelAddDialogV2 = ({
                       <Input.Password
                         value={customForm.apiKey}
                         onChange={(e) =>
-                          setCustomForm((prev) => ({ ...prev, apiKey: e.target.value }))
+                          setCustomForm((prev) => ({
+                            ...prev,
+                            apiKey: e.target.value,
+                          }))
                         }
                         placeholder={
                           model
@@ -1584,6 +1923,8 @@ export const ModelAddDialogV2 = ({
                     value={customAdvanced}
                     onChange={setCustomAdvanced}
                     mode="default"
+                    showDisplayName
+                    displayNameFallback={customForm.name}
                   />
                 ) : (
                   <div className="flex items-center gap-2">
@@ -1616,7 +1957,9 @@ export const ModelAddDialogV2 = ({
                         return v != null && v !== "";
                       })) && (
                       <Tag color="blue">
-                        {t("model.advanced.configured", { defaultValue: "已配置" })}
+                        {t("model.advanced.configured", {
+                          defaultValue: "已配置",
+                        })}
                       </Tag>
                     )}
                   </div>
@@ -1628,10 +1971,16 @@ export const ModelAddDialogV2 = ({
                     loading={verifyingCustom}
                     onClick={handleCustomConnectivity}
                   >
-                    {t("model.dialog.v2.btn.checkConnectivity", { defaultValue: "校验连通性" })}
+                    {t("model.dialog.v2.btn.checkConnectivity", {
+                      defaultValue: "校验连通性",
+                    })}
                   </Button>
                   {customConnectivity.status && (
-                    <Tag color={getConnectivityMeta(customConnectivity.status).color}>
+                    <Tag
+                      color={
+                        getConnectivityMeta(customConnectivity.status).color
+                      }
+                    >
                       {t(`model.connectivity.${customConnectivity.status}`, {
                         defaultValue:
                           CUSTOM_CONNECTIVITY_FALLBACK_LABELS[
@@ -1642,7 +1991,11 @@ export const ModelAddDialogV2 = ({
                   )}
                 </Space>
                 {customConnectivity.message && (
-                  <Alert type="error" showIcon title={customConnectivity.message} />
+                  <Alert
+                    type="error"
+                    showIcon
+                    title={customConnectivity.message}
+                  />
                 )}
 
                 <div className="flex justify-end gap-2 pt-2 border-t">
@@ -1673,7 +2026,11 @@ export const ModelAddDialogV2 = ({
             : ""
         }
         width={640}
-        footer={<Button onClick={() => setSettingsModalRowId(null)}>{t("common.close", { defaultValue: "关闭" })}</Button>}
+        footer={
+          <Button onClick={() => setSettingsModalRowId(null)}>
+            {t("common.close", { defaultValue: "关闭" })}
+          </Button>
+        }
       >
         {settingsRow && settingsState && (
           <div className="space-y-4">
@@ -1685,7 +2042,10 @@ export const ModelAddDialogV2 = ({
                     ...prev,
                     [settingsRow.id]: {
                       ...prev[settingsRow.id],
-                      capacity: { ...prev[settingsRow.id].capacity, [field]: val },
+                      capacity: {
+                        ...prev[settingsRow.id].capacity,
+                        [field]: val,
+                      },
                     },
                   }))
                 }
@@ -1699,7 +2059,9 @@ export const ModelAddDialogV2 = ({
                 <div>
                   <div className="flex justify-between items-center">
                     <label className="block text-sm font-medium text-gray-700">
-                      {t("model.dialog.label.multimodal", { defaultValue: "多模态" })}
+                      {t("model.dialog.label.multimodal", {
+                        defaultValue: "多模态",
+                      })}
                     </label>
                     <Switch
                       checked={settingsState.isMultimodal}
@@ -1716,15 +2078,22 @@ export const ModelAddDialogV2 = ({
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
                     {settingsState.isMultimodal
-                      ? t("model.dialog.hint.multimodalEnabled", { defaultValue: "已启用多模态，将使用 multi_embedding 类型" })
-                      : t("model.dialog.hint.multimodalDisabled", { defaultValue: "未启用多模态" })}
+                      ? t("model.dialog.hint.multimodalEnabled", {
+                          defaultValue:
+                            "已启用多模态，将使用 multi_embedding 类型",
+                        })
+                      : t("model.dialog.hint.multimodalDisabled", {
+                          defaultValue: "未启用多模态",
+                        })}
                   </div>
                 </div>
 
                 {/* Chunk Size Slider */}
                 <div>
                   <label className="block mb-1 text-sm font-medium text-gray-700">
-                    {t("modelConfig.slider.chunkingSize", { defaultValue: "文档切片大小" })}
+                    {t("modelConfig.slider.chunkingSize", {
+                      defaultValue: "文档切片大小",
+                    })}
                   </label>
                   <ModelChunkSizeSlider
                     value={settingsState.chunkSizeRange}
@@ -1743,7 +2112,9 @@ export const ModelAddDialogV2 = ({
                 {/* Concurrent Request Count (chunk_batch) */}
                 <div>
                   <label className="block mb-1 text-sm font-medium text-gray-700">
-                    {t("modelConfig.input.chunkingBatchSize", { defaultValue: "单次请求切片量" })}
+                    {t("modelConfig.input.chunkingBatchSize", {
+                      defaultValue: "单次请求切片量",
+                    })}
                   </label>
                   <Input
                     type="number"
@@ -1767,25 +2138,28 @@ export const ModelAddDialogV2 = ({
                 </div>
               </div>
             )}
-            {inferenceSpecs[settingsState.modelType]?.length > 0 && (
-              <ModelAdvancedSettings
-                modelType={settingsState.modelType}
-                specs={inferenceSpecs}
-                value={settingsState.advanced}
-                onChange={(next) =>
-                  setRowStates((prev) => ({
-                    ...prev,
-                    [settingsRow.id]: { ...prev[settingsRow.id], advanced: next },
-                  }))
-                }
-                mode="default"
-                reasoningCapability={
-                  settingsState.modelType === MODEL_TYPES.LLM
-                    ? settingsState.reasoningCapability
-                    : undefined
-                }
-              />
-            )}
+            <ModelAdvancedSettings
+              modelType={settingsState.modelType}
+              specs={inferenceSpecs}
+              value={settingsState.advanced}
+              onChange={(next) =>
+                setRowStates((prev) => ({
+                  ...prev,
+                  [settingsRow.id]: {
+                    ...prev[settingsRow.id],
+                    advanced: next,
+                  },
+                }))
+              }
+              mode="default"
+              showDisplayName
+              displayNameFallback={settingsRow.model_name}
+              reasoningCapability={
+                settingsState.modelType === MODEL_TYPES.LLM
+                  ? settingsState.reasoningCapability
+                  : undefined
+              }
+            />
           </div>
         )}
       </Modal>
@@ -1797,9 +2171,6 @@ export const ModelAddDialogV2 = ({
         onOk={() => setCustomAdvancedOpen(false)}
         title={`${t("model.advanced.title", { defaultValue: "高级设置" })} - ${
           (customAdvanced.display_name as string) ||
-          // Empty model name falls back to the type label, NOT a generated
-          // "custom-modelXXXXX" placeholder -- a synthetic name in the title
-          // reads like garbage (that suffix only makes sense at save time).
           (customForm.name ? defaultDisplayName(customForm.name) : "") ||
           customForm.type
         }`}
@@ -1829,31 +2200,46 @@ export const ModelAddDialogV2 = ({
               <div>
                 <div className="flex justify-between items-center">
                   <label className="block text-sm font-medium text-gray-700">
-                    {t("model.dialog.label.multimodal", { defaultValue: "多模态" })}
+                    {t("model.dialog.label.multimodal", {
+                      defaultValue: "多模态",
+                    })}
                   </label>
                   <Switch
                     checked={customForm.isMultimodal}
                     onChange={(checked) =>
-                      setCustomForm((prev) => ({ ...prev, isMultimodal: checked }))
+                      setCustomForm((prev) => ({
+                        ...prev,
+                        isMultimodal: checked,
+                      }))
                     }
                   />
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
                   {customForm.isMultimodal
-                    ? t("model.dialog.hint.multimodalEnabled", { defaultValue: "已启用多模态，将使用 multi_embedding 类型" })
-                    : t("model.dialog.hint.multimodalDisabled", { defaultValue: "未启用多模态" })}
+                    ? t("model.dialog.hint.multimodalEnabled", {
+                        defaultValue:
+                          "已启用多模态，将使用 multi_embedding 类型",
+                      })
+                    : t("model.dialog.hint.multimodalDisabled", {
+                        defaultValue: "未启用多模态",
+                      })}
                 </div>
               </div>
 
               {/* Chunk Size Slider */}
               <div>
                 <label className="block mb-1 text-sm font-medium text-gray-700">
-                  {t("modelConfig.slider.chunkingSize", { defaultValue: "文档切片大小" })}
+                  {t("modelConfig.slider.chunkingSize", {
+                    defaultValue: "文档切片大小",
+                  })}
                 </label>
                 <ModelChunkSizeSlider
                   value={customForm.chunkSizeRange}
                   onChange={(value) =>
-                    setCustomForm((prev) => ({ ...prev, chunkSizeRange: value }))
+                    setCustomForm((prev) => ({
+                      ...prev,
+                      chunkSizeRange: value,
+                    }))
                   }
                 />
               </div>
@@ -1861,7 +2247,9 @@ export const ModelAddDialogV2 = ({
               {/* Concurrent Request Count (chunk_batch) */}
               <div>
                 <label className="block mb-1 text-sm font-medium text-gray-700">
-                  {t("modelConfig.input.chunkingBatchSize", { defaultValue: "单次请求切片量" })}
+                  {t("modelConfig.input.chunkingBatchSize", {
+                    defaultValue: "单次请求切片量",
+                  })}
                 </label>
                 <Input
                   type="number"
@@ -1869,7 +2257,10 @@ export const ModelAddDialogV2 = ({
                   placeholder="10"
                   value={customForm.chunkingBatchSize}
                   onChange={(e) =>
-                    setCustomForm((prev) => ({ ...prev, chunkingBatchSize: e.target.value }))
+                    setCustomForm((prev) => ({
+                      ...prev,
+                      chunkingBatchSize: e.target.value,
+                    }))
                   }
                 />
               </div>
@@ -1883,6 +2274,8 @@ export const ModelAddDialogV2 = ({
             value={customAdvanced}
             onChange={setCustomAdvanced}
             mode="default"
+            showDisplayName
+            displayNameFallback={customForm.name}
             reasoningCapability={
               customForm.type === MODEL_TYPES.LLM
                 ? effectiveCustomReasoningCapability

@@ -3,14 +3,16 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Modal, Form, Input, Button } from "antd";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 
 const { TextArea } = Input;
 
 import { publishVersion, updateVersion } from "@/services/agentVersionService";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import A2AServerSettingsPanel from "../components/a2a/A2AServerSettingsPanel";
-import { a2aClientService } from "@/services/a2aService";
+import {
+  buildDefaultAgentVersionName,
+  getAgentPublishCompletion,
+} from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
 
 export interface AgentVersionPubulishModalProps {
@@ -19,6 +21,7 @@ export interface AgentVersionPubulishModalProps {
   agentId?: number | null;
   versionNo?: number | null;
   isEdit?: boolean;
+  defaultVersionName?: string;
   initialValues?: {
     version_name?: string;
     release_note?: string;
@@ -33,6 +36,7 @@ export default function AgentVersionPubulishModal({
   agentId,
   versionNo,
   isEdit = false,
+  defaultVersionName,
   initialValues,
   onPublished,
   onUpdated,
@@ -46,16 +50,6 @@ export default function AgentVersionPubulishModal({
 
   const [isLoading, setIsLoading] = useState(false);
   const [publishForm] = Form.useForm();
-  const [showA2ASettings, setShowA2ASettings] = useState(false);
-  const [a2aAgentInfo, setA2aAgentInfo] = useState<{
-    endpoint_id: string;
-    agent_id: number;
-  } | null>(null);
-  const { data: a2aSettingsData } = useQuery({
-    queryKey: ["a2aServerSettings", a2aAgentInfo?.agent_id],
-    queryFn: () => a2aClientService.getServerSettings(a2aAgentInfo!.agent_id),
-    enabled: showA2ASettings && !!a2aAgentInfo,
-  });
 
   // Reset form when modal opens or initialValues changes
   useEffect(() => {
@@ -63,10 +57,13 @@ export default function AgentVersionPubulishModal({
       if (isEdit && initialValues) {
         publishForm.setFieldsValue(initialValues);
       } else if (!isEdit) {
-        publishForm.resetFields();
+        publishForm.setFieldsValue({
+          version_name:
+            defaultVersionName || buildDefaultAgentVersionName(undefined),
+        });
       }
     }
-  }, [open, isEdit, initialValues, publishForm]);
+  }, [open, isEdit, initialValues, defaultVersionName, publishForm]);
 
   // Custom validator for duplicate version name
   const validateVersionName = {
@@ -83,14 +80,19 @@ export default function AgentVersionPubulishModal({
       );
 
       if (duplicate) {
-        return Promise.reject(new Error(t("agent.version.versionNameDuplicate")));
+        return Promise.reject(
+          new Error(t("agent.version.versionNameDuplicate"))
+        );
       }
 
       return Promise.resolve();
     },
   };
 
-  const handleSubmit = async (values: { version_name?: string; release_note?: string }) => {
+  const handleSubmit = async (values: {
+    version_name?: string;
+    release_note?: string;
+  }) => {
     if (isEdit) {
       await handleUpdate(values);
     } else {
@@ -98,7 +100,10 @@ export default function AgentVersionPubulishModal({
     }
   };
 
-  const handlePublish = async (values: { version_name?: string; release_note?: string }) => {
+  const handlePublish = async (values: {
+    version_name?: string;
+    release_note?: string;
+  }) => {
     if (!agentId) {
       message.error(t("agent.error.agentNotFound"));
       return;
@@ -112,26 +117,14 @@ export default function AgentVersionPubulishModal({
     try {
       setIsLoading(true);
       const result = await publishVersion(agentId, values);
-      if (result.success) {
+      if (getAgentPublishCompletion(result) === "complete") {
         message.success(t("agent.version.publishSuccess"));
-        if (result.data?.a2a_agent) {
-          setA2aAgentInfo({
-            endpoint_id: result.data.a2a_agent.endpoint_id,
-            agent_id: result.data.a2a_agent.agent_id,
-          });
-          onClose();
-          publishForm.resetFields();
-          onPublished?.();
-          queryClient.invalidateQueries({ queryKey: ["agents"] });
-          queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
-          setShowA2ASettings(true);
-        } else {
-          onClose();
-          publishForm.resetFields();
-          onPublished?.();
-          queryClient.invalidateQueries({ queryKey: ["agents"] });
-          queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
-        }
+        onClose();
+        publishForm.resetFields();
+        onPublished?.();
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
+        queryClient.invalidateQueries({ queryKey: ["myEditableAgents"] });
       } else {
         message.error(result.message || t("agent.version.publishFailed"));
       }
@@ -143,7 +136,10 @@ export default function AgentVersionPubulishModal({
     }
   };
 
-  const handleUpdate = async (values: { version_name?: string; release_note?: string }) => {
+  const handleUpdate = async (values: {
+    version_name?: string;
+    release_note?: string;
+  }) => {
     if (!agentId || !versionNo) {
       message.error(t("agent.error.agentNotFound"));
       return;
@@ -185,25 +181,21 @@ export default function AgentVersionPubulishModal({
         footer={null}
         destroyOnHidden
       >
-        <Form
-          form={publishForm}
-          layout="vertical"
-          onFinish={handleSubmit}
-        >
+        <Form form={publishForm} layout="vertical" onFinish={handleSubmit}>
           <Form.Item
             label={t("agent.version.versionName")}
             name="version_name"
             rules={[
-              { required: true, message: t("agent.version.versionNameRequired") },
+              {
+                required: true,
+                message: t("agent.version.versionNameRequired"),
+              },
               validateVersionName,
             ]}
           >
             <Input placeholder={t("agent.version.versionNamePlaceholder")} />
           </Form.Item>
-          <Form.Item
-            label={t("agent.version.releaseNote")}
-            name="release_note"
-          >
+          <Form.Item label={t("agent.version.releaseNote")} name="release_note">
             <TextArea
               rows={4}
               placeholder={t("agent.version.releaseNotePlaceholder")}
@@ -225,23 +217,6 @@ export default function AgentVersionPubulishModal({
             </div>
           </Form.Item>
         </Form>
-      </Modal>
-
-      <Modal
-        centered
-        width={640}
-        title={t("a2a.server.previewTitle")}
-        open={showA2ASettings}
-        onCancel={() => setShowA2ASettings(false)}
-        footer={null}
-        destroyOnHidden
-      >
-        {showA2ASettings && a2aSettingsData?.data && (
-          <A2AServerSettingsPanel
-            endpointId={a2aSettingsData.data.endpoint_id}
-            supportedInterfaces={a2aSettingsData.data.supported_interfaces}
-          />
-        )}
       </Modal>
     </>
   );

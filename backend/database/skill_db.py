@@ -9,6 +9,9 @@ from sqlalchemy import or_, update as sa_update
 
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
+from consts.const import MAX_SKILLS_PER_TENANT
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 from utils.skill_params_utils import strip_params_comments_for_db
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 
@@ -35,7 +38,37 @@ def _params_value_for_db(raw: Any) -> Any:
     return json.loads(json.dumps(strip_params_comments_for_db(raw), default=str))
 
 
-def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: str, version_no: int = 0):
+def _raise_if_skill_limit_reached(session, tenant_id: str, additional_count: int = 1) -> None:
+    """Reject tenant-owned Skill creation when the hard quota would be exceeded."""
+    if tenant_id is None or additional_count <= 0:
+        return
+
+    current_count = session.query(SkillInfo).filter(
+        SkillInfo.tenant_id == tenant_id,
+        SkillInfo.delete_flag != "Y",
+    ).count()
+    # Lightweight test doubles may not implement count(); production SQLAlchemy
+    # sessions always return an integer.
+    if isinstance(current_count, int) and current_count + additional_count > MAX_SKILLS_PER_TENANT:
+        raise AppException(
+            ErrorCode.TENANT_RESOURCE_EXCEEDED,
+            f"Tenant skill limit reached: maximum {MAX_SKILLS_PER_TENANT} skills per tenant",
+            details={
+                "resource": "skills",
+                "scope": "tenant",
+                "limit": MAX_SKILLS_PER_TENANT,
+                "current_count": current_count,
+            },
+        )
+
+
+def create_or_update_skill_by_skill_info(
+    skill_info,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Create or update a SkillInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -49,9 +82,16 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
     Returns:
         Created or updated SkillInstance object
     """
+    from .agent_db import is_system_agent
+
     skill_info_dict = skill_info.__dict__ if hasattr(
         skill_info, '__dict__') else skill_info
     skill_info_dict = skill_info_dict.copy()
+    if (
+        not allow_system
+        and is_system_agent(skill_info_dict.get("agent_id"), tenant_id) is True
+    ):
+        raise ValueError("System Agent is managed by the platform")
     skill_info_dict.setdefault("tenant_id", tenant_id)
     skill_info_dict.setdefault("user_id", user_id)
     skill_info_dict.setdefault("version_no", version_no)
@@ -166,8 +206,18 @@ def search_skills_for_agent(agent_id: int, tenant_id: str, version_no: int = 0):
         return [as_dict(skill_instance) for skill_instance in skill_instances]
 
 
-def delete_skills_by_agent_id(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):
+def delete_skills_by_agent_id(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """Delete all skill instances for an agent."""
+    from .agent_db import is_system_agent
+
+    if not allow_system and is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
     with get_db_session() as session:
         session.query(SkillInstance).filter(
             SkillInstance.agent_id == agent_id,
@@ -289,7 +339,7 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "name": skill.skill_name,
         "tenant_id": skill.tenant_id,
         "description": skill.skill_description,
-        "tags": skill.skill_tags or [],
+        "tags": _normalize_skill_tags(skill.skill_tags),
         "content": skill.skill_content or "",
         "config_schemas": skill.config_schemas,
         "config_values": skill.config_values,
@@ -301,6 +351,17 @@ def _to_dict(skill: SkillInfo) -> Dict[str, Any]:
         "updated_by": skill.updated_by,
         "update_time": skill.update_time.isoformat() if skill.update_time else None,
     }
+
+
+def _normalize_skill_tags(tags: Any) -> List[str]:
+    """Return skill tags as a string list, tolerating malformed persisted values."""
+    if isinstance(tags, list):
+        return [
+            tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()
+        ]
+    if isinstance(tags, str) and tags.strip():
+        return [tags.strip()]
+    return []
 
 
 def list_skills(tenant_id: str) -> List[Dict[str, Any]]:
@@ -437,6 +498,8 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
         tenant_id: Tenant ID for the skill
     """
     with get_db_session() as session:
+        _raise_if_skill_limit_reached(session, tenant_id)
+
         skill = SkillInfo(
             skill_name=skill_data["name"],
             tenant_id=tenant_id,
@@ -769,6 +832,14 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
             SkillInfo.delete_flag != 'Y'
         ).all()
         existing_dict = {s.skill_name: s for s in existing_skills}
+
+        new_skill_names = {
+            skill_data.get("name")
+            for skill_data in skills
+            if skill_data.get("name") and skill_data.get("name") not in existing_dict
+        }
+        new_skill_count = len(new_skill_names)
+        _raise_if_skill_limit_reached(session, tenant_id, new_skill_count)
 
         for skill_data in skills:
             skill_name = skill_data.get("name")

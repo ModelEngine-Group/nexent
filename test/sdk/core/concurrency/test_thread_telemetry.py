@@ -25,7 +25,6 @@ from nexent.core.concurrency import (
     ThreadCapacityExceeded,
     ThreadManager,
 )
-from nexent.core.concurrency import telemetry as telemetry_module
 
 
 class RecordingTelemetry:
@@ -47,40 +46,7 @@ class RecordingTelemetry:
         )
 
 
-class RecordingSpan:
-    def __init__(self):
-        self.attributes = {}
-        self.events = []
-        self.statuses = []
-        self.ended = 0
-
-    def set_attributes(self, attributes):
-        self.attributes.update(attributes)
-
-    def add_event(self, name, attributes=None):
-        self.events.append((name, attributes or {}))
-
-    def set_status(self, status):
-        self.statuses.append(status)
-
-    def end(self):
-        self.ended += 1
-
-
-class RecordingTracer:
-    def __init__(self):
-        self.calls = []
-        self.spans = []
-
-    def start_span(self, name, *, kind, attributes):
-        span = RecordingSpan()
-        self.calls.append((name, kind, attributes))
-        self.spans.append(span)
-        span.attributes.update(attributes)
-        return span
-
-
-def _manager(telemetry):
+def _manager(telemetry=None):
     manager = ThreadManager(
         service_name="test-runtime",
         lane_policies={
@@ -129,61 +95,69 @@ def test_tc_tlm_017_emits_current_statistics_for_each_state_change():
     asyncio.run(manager.shutdown(timeout=1))
 
 
-def test_tc_tlm_017_otel_snapshot_span_is_immediate_and_uses_current_counts(
-    monkeypatch,
+@pytest.fixture(scope="module")
+def snapshot_tracing():
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    provider = TracerProvider()
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(trace, "_TRACER_PROVIDER", provider)
+        try:
+            yield provider.get_tracer(__name__), exporter
+        finally:
+            provider.shutdown()
+
+
+@pytest.mark.parametrize("dedicated", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_ut_sdk_trace_008_default_manager_does_not_export_snapshot_spans(
+    snapshot_tracing, dedicated, fail,
 ):
-    tracer = RecordingTracer()
-    monkeypatch.setattr(telemetry_module, "OTEL_AVAILABLE", True)
-    monkeypatch.setattr(telemetry_module.trace, "get_tracer", lambda _name: tracer)
-    telemetry = telemetry_module.OpenTelemetryThreadTelemetry()
-    execution = types.SimpleNamespace(
-        execution_id="execution-1",
-        lane="agent-run",
-        state=types.SimpleNamespace(value="queued"),
-        spec=types.SimpleNamespace(
-            task_name="agent-run",
-            owner="sdk-agent",
-            run_id="run-1",
-            attempt_id="attempt-1",
-        ),
-        created_at_monotonic=10.0,
-        started_at_monotonic=11.0,
-        finished_at_monotonic=13.0,
-    )
+    tracer, exporter = snapshot_tracing
+    exporter.clear()
+    manager = _manager()
 
-    telemetry.record_snapshot(
-        "runtime",
-        "thread.started",
-        execution,
-        (3, 0, 3, 0),
-        dedicated=False,
-    )
-    execution.state = types.SimpleNamespace(value="succeeded")
-    telemetry.record_snapshot(
-        "runtime",
-        "thread.finished",
-        execution,
-        (0, 0, 0, 0),
-        dedicated=False,
-        result="succeeded",
-    )
+    def work(*_args):
+        with tracer.start_as_current_span("tool.work"):
+            if fail:
+                raise ValueError("task failed")
+            return "done"
 
-    name, kind, initial_attributes = tracer.calls[0]
-    assert name == "thread.manager.snapshot"
-    assert kind is telemetry_module.SpanKind.INTERNAL
-    assert initial_attributes["openinference.span.kind"] == "CHAIN"
-    assert initial_attributes["nexent.span.kind"] == "thread"
-    assert initial_attributes["thread.event"] == "thread.started"
-    assert initial_attributes["thread.execution.id"] == "execution-1"
-    assert initial_attributes["thread.counts.managed_active"] == 3
-    assert initial_attributes["thread.counts.queued"] == 0
-    assert initial_attributes["thread.counts.running"] == 3
-    assert not any(key.endswith(".start") for key in initial_attributes)
-    assert not any(key.endswith(".end") for key in initial_attributes)
-    assert len(tracer.spans) == 2
-    assert all(span.ended == 1 for span in tracer.spans)
-    assert tracer.calls[1][2]["thread.counts.managed_active"] == 0
-    assert tracer.calls[1][2]["thread.result"] == "succeeded"
+    try:
+        with tracer.start_as_current_span("agent.run") as parent:
+            if dedicated:
+                execution = manager.register_service(
+                    ManagedThreadSpec(task_name="work", owner="test"), work,
+                )
+                manager.start_service(execution.execution_id)
+            else:
+                execution = manager.submit(
+                    "agent-run", ManagedTaskSpec(task_name="work", owner="test"), work,
+                )
+            if fail:
+                with pytest.raises(ValueError, match="task failed"):
+                    execution.future.result(timeout=2)
+            else:
+                assert execution.future.result(timeout=2) == "done"
+        asyncio.run(manager.shutdown(timeout=2))
+
+        spans = exporter.get_finished_spans()
+        assert sorted(span.name for span in spans) == ["agent.run", "tool.work"]
+        child = next(span for span in spans if span.name == "tool.work")
+        assert child.parent.span_id == parent.get_span_context().span_id
+        assert child.context.trace_id == parent.get_span_context().trace_id
+        metrics, = manager.metrics_snapshot()
+        assert metrics.completed_count == 1
+        assert metrics.failed_count == int(fail)
+    finally:
+        asyncio.run(manager.shutdown(timeout=2))
 
 
 def test_tc_tlm_021_snapshot_lists_task_composition_without_telemetry_side_effects():

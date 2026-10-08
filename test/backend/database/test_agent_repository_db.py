@@ -58,7 +58,7 @@ class _AgentRepositoryModel:
     submitted_by = MagicMock(name="submitted_by")
     tags = MagicMock(name="tags")
     tool_count = MagicMock(name="tool_count")
-    icon = MagicMock(name="icon")
+    icon_url = MagicMock(name="icon_url")
     downloads = MagicMock(name="downloads")
     version_name = MagicMock(name="version_name")
     agent_info_json = MagicMock(name="agent_info_json")
@@ -146,7 +146,7 @@ class MockAgentRepository:
             "tags": ["tag1"],
             "tool_count": 2,
             "version_name": "v1",
-            "icon": "icon",
+            "icon_url": "icon_url",
             "downloads": 0,
             "status": STATUS_NOT_SHARED,
             "delete_flag": "N",
@@ -172,7 +172,7 @@ class MockSummaryRow:
             "tags": ["tag1"],
             "tool_count": 2,
             "version_name": "v1",
-            "icon": "icon",
+            "icon_url": "icon_url",
             "downloads": 0,
             "content": None,
         }
@@ -520,7 +520,7 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
         "tags",
         "tool_count",
         "version_name",
-        "icon",
+        "icon_url",
         "downloads",
         "content",
     }
@@ -749,6 +749,23 @@ def test_list_agent_repository_by_agent_ids_success(monkeypatch, mock_session):
     assert result[0]["version_name"] == "v1"
     assert result[0]["create_time"] == row.create_time
     assert result[0]["content"] is None
+
+
+def test_list_agent_repository_by_agent_ids_filters_publisher_user(monkeypatch, mock_session):
+    session, query = mock_session
+    inner_query = MagicMock()
+    inner_query.filter.return_value = inner_query
+    inner_query.order_by.return_value.all.return_value = []
+    query.filter.return_value = inner_query
+    _patch_session(monkeypatch, session)
+
+    list_agent_repository_by_agent_ids(
+        [10], statuses=["pending_review"],
+        publisher_tenant_id="tenant-1", publisher_user_id="alice",
+    )
+
+    assert inner_query.filter.call_count == 1
+    _AgentRepositoryModel.publisher_user_id.__eq__.assert_called_with("alice")
 
 
 def test_update_agent_repository_status_by_id_persists_content(monkeypatch, mock_session):

@@ -1323,11 +1323,16 @@ def test_call_with_reasoning_content_only(openai_model_instance):
             "Final response")
 
 
+@pytest.mark.parametrize("content_preview_enabled", [False, True])
 def test_call_rejects_reasoning_only_response_and_records_diagnostics(
-    openai_model_instance, caplog
+    openai_model_instance, caplog, monkeypatch, content_preview_enabled
 ):
     """A reasoning stream that exhausts its budget must not become an empty success."""
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    if content_preview_enabled:
+        monkeypatch.setenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", "1")
+    else:
+        monkeypatch.delenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", raising=False)
 
     reasoning_chunk = MagicMock()
     reasoning_chunk.choices = [MagicMock()]
@@ -1366,7 +1371,14 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
     assert diagnostics["reasoning_chunk_count"] == 1
     assert diagnostics["reasoning_char_count"] == len("Internal reasoning")
     assert diagnostics["output_tokens"] == 20
+    assert diagnostics["reasoning_only_budget_exhausted"] is True
     assert "event=empty_model_response" in caplog.text
+    assert f"attempt_id={openai_model_instance.last_attempt_id}" in caplog.text
+    assert "output_tokens=20" in caplog.text
+    if content_preview_enabled:
+        assert 'reasoning_preview="Internal reasoning"' in caplog.text
+    else:
+        assert "Internal reasoning" not in caplog.text
 
 
 def test_call_with_reasoning_content_and_content_together(openai_model_instance):
@@ -2635,6 +2647,32 @@ def test_reasoning_only_stop_response_recovers_on_retry(openai_model_instance):
     assert openai_model_instance.last_retry_count == 1
 
 
+def test_oc_033_empty_response_retry_can_be_disabled_for_one_call(openai_model_instance):
+    """A disabled CodeAgent call rolls back its first empty generation and stops."""
+    calls = {"n": 0}
+
+    def fake_create(stream=True, **kwargs):
+        calls["n"] += 1
+        chunk = _make_content_chunk(None)
+        chunk.choices[0].finish_reason = "stop"
+        return [chunk]
+
+    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.client.chat.completions.create.side_effect = fake_create
+
+    with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
+        openai_model_instance.__call__(
+            [{"role": "user", "content": "hello"}],
+            _retry_empty_response=False,
+        )
+
+    assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
+    assert exc_info.value.attempts == 1
+    assert calls["n"] == 1
+    openai_model_instance.observer.rollback_model_attempt.assert_called_once()
+    openai_model_instance.observer.commit_model_attempt.assert_not_called()
+
+
 def test_reasoning_only_retry_is_interrupted_by_stop_event(openai_model_instance):
     def fake_create(stream=True, **kwargs):
         chunk = _make_content_chunk(None)
@@ -2882,12 +2920,37 @@ def test_translate_thinking_wraps_qwen_in_chat_template_kwargs(openai_model_inst
 
 
 def test_translate_thinking_keeps_top_level_for_non_qwen(openai_model_instance):
-    """DeepSeek/DashScope-style providers read the top-level flag."""
+    """Generic OpenAI-compatible gateways retain an explicit caller toggle."""
     openai_model_instance.model_id = "deepseek-ai/DeepSeek-V3"
     result = openai_model_instance._translate_thinking_flag(
         {"enable_thinking": False}
     )
     assert result == {"enable_thinking": False}
+
+
+def test_generic_gateway_keeps_explicit_thinking_toggle(openai_model_instance):
+    openai_model_instance.model_id = "deepseek-v4-flash"
+    openai_model_instance.model_factory = "OpenAI-API-Compatible"
+    openai_model_instance.reasoning_capability = None
+    openai_model_instance.api_base_url = (
+        "https://example.apigateway-cn-beijing.volceapi.com/v1"
+    )
+
+    assert openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": False, "custom": 1}
+    ) == {"enable_thinking": False, "custom": 1}
+
+
+def test_known_openai_provider_does_not_receive_unknown_toggle(openai_model_instance):
+    openai_model_instance.model_id = "gpt-4o"
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "openai",
+    }
+
+    assert openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": False}
+    ) == {}
 
 
 def test_translate_thinking_merges_existing_chat_template_kwargs(openai_model_instance):
@@ -2912,6 +2975,7 @@ def test_reasoning_effort_uses_top_level_wire_field(openai_model_instance):
     openai_model_instance.reasoning_effort = "max"
     openai_model_instance.reasoning_capability = {
         "wire_format": "reasoning_effort",
+        "budget_wire_format": "thinking_budget",
     }
     completion_kwargs = {}
 
@@ -2925,6 +2989,7 @@ def test_budget_control_takes_precedence_over_effort(openai_model_instance):
     openai_model_instance.reasoning_budget_tokens = 4096
     openai_model_instance.reasoning_capability = {
         "wire_format": "reasoning_effort",
+        "budget_wire_format": "thinking_budget",
         "controls": [
             {"type": "effort", "values": ["low", "high"]},
             {"type": "budget_tokens", "min": 0, "max": 32768},
@@ -2934,7 +2999,9 @@ def test_budget_control_takes_precedence_over_effort(openai_model_instance):
 
     openai_model_instance._apply_reasoning_control(completion_kwargs)
 
-    assert completion_kwargs == {"reasoning_budget_tokens": 4096}
+    assert completion_kwargs == {
+        "extra_body": {"thinking_budget": 4096},
+    }
 
 
 def test_budget_control_auto_omits_legacy_effort(openai_model_instance):
@@ -2951,6 +3018,59 @@ def test_budget_control_auto_omits_legacy_effort(openai_model_instance):
     openai_model_instance._apply_reasoning_control(completion_kwargs)
 
     assert completion_kwargs == {}
+
+
+def test_models_dev_dashscope_budget_uses_confirmed_thinking_budget_field(openai_model_instance):
+    openai_model_instance.model_id = "qwen3.8-max"
+    openai_model_instance.model_factory = "openai-api-compatible"
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_budget_tokens = 8192
+    openai_model_instance.reasoning_capability = {
+        "status": "supported",
+        "source": "models_dev",
+        "provider_id": "alibaba-cn",
+        "controls": [
+            {"type": "effort", "values": ["low", "medium", "xhigh"]},
+            {"type": "budget_tokens", "min": 0, "max": 262144},
+        ],
+    }
+
+    completion_kwargs = {}
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {"extra_body": {"thinking_budget": 8192}}
+
+
+def test_models_dev_unknown_provider_does_not_guess_budget_wire_field(openai_model_instance):
+    openai_model_instance.reasoning_budget_tokens = 4096
+    openai_model_instance.reasoning_capability = {
+        "status": "supported",
+        "source": "models_dev",
+        "provider_id": "siliconflow",
+        "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+    }
+
+    completion_kwargs = {}
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {}
+
+
+def test_models_dev_deepseek_toggle_uses_thinking_object(openai_model_instance):
+    openai_model_instance.model_id = "deepseek-v4-pro"
+    openai_model_instance.reasoning_capability = {
+        "status": "supported",
+        "source": "models_dev",
+        "provider_id": "deepseek",
+        "controls": [
+            {"type": "toggle"},
+            {"type": "effort", "values": ["low", "high", "max"]},
+        ],
+    }
+
+    assert openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": True}
+    ) == {"thinking": {"type": "enabled"}}
 
 
 def test_effort_control_with_declared_values_sends_selected_effort(openai_model_instance):
@@ -3085,7 +3205,7 @@ def test_dispatch_raises_safe_reasoning_configuration_error(openai_model_instanc
         openai_model_instance._dispatch_chat_completion(reasoning_effort="high")
 
 
-def test_unknown_reasoning_wire_format_falls_back_to_top_level(openai_model_instance):
+def test_unknown_reasoning_wire_format_falls_back_to_openai_effort(openai_model_instance):
     openai_model_instance.reasoning_effort = "medium"
     openai_model_instance.reasoning_capability = {"wire_format": "provider-specific"}
     completion_kwargs = {}
@@ -3093,6 +3213,21 @@ def test_unknown_reasoning_wire_format_falls_back_to_top_level(openai_model_inst
     openai_model_instance._apply_reasoning_control(completion_kwargs)
 
     assert completion_kwargs == {"reasoning_effort": "medium"}
+
+
+def test_models_dev_unknown_provider_uses_openai_effort_for_enum_control(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "unknown-provider",
+        "wire_format": "reasoning_effort",
+        "controls": [{"type": "effort", "values": ["low", "medium", "high"]}],
+    }
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {"reasoning_effort": "high"}
 
 
 def test_check_connectivity_translates_extra_body_before_reasoning_control(openai_model_instance):
@@ -3115,3 +3250,137 @@ def test_check_connectivity_translates_extra_body_before_reasoning_control(opena
         "chat_template_kwargs": {"enable_thinking": False},
         "thinking": {"type": "disabled"},
     }
+
+
+def test_reasoning_wire_profile_infers_known_providers_from_api_url(openai_model_instance):
+    openai_model_instance.api_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "openai",
+    }
+    dashscope_profile = openai_model_instance._reasoning_wire_profile()
+
+    openai_model_instance.api_base_url = "https://api.deepseek.com/v1"
+    deepseek_profile = openai_model_instance._reasoning_wire_profile()
+
+    assert dashscope_profile == {
+        "effort": "reasoning_effort",
+        "budget": "thinking_budget",
+        "toggle": "enable_thinking",
+    }
+    assert deepseek_profile == {
+        "effort": "reasoning_effort",
+        "budget": None,
+        "toggle": "thinking_object",
+    }
+
+
+def test_reasoning_wire_profile_does_not_match_provider_names_in_untrusted_urls(
+    openai_model_instance,
+):
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "openai",
+    }
+
+    openai_model_instance.api_base_url = "https://dashscope.aliyuncs.com.evil.test/v1"
+    assert openai_model_instance._reasoning_wire_profile() == {
+        "effort": "reasoning_effort",
+        "budget": None,
+        "toggle": None,
+    }
+
+    openai_model_instance.api_base_url = "https://proxy.example.test/api.deepseek.com/v1"
+    assert openai_model_instance._reasoning_wire_profile() == {
+        "effort": "reasoning_effort",
+        "budget": None,
+        "toggle": None,
+    }
+
+
+def test_reasoning_wire_profile_supports_catalog_and_provider_fallbacks(openai_model_instance):
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "openai",
+    }
+    assert openai_model_instance._reasoning_wire_profile()["effort"] == "reasoning_effort"
+
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "other-provider",
+    }
+    assert openai_model_instance._reasoning_wire_profile() == {
+        "effort": "reasoning_effort",
+        "budget": None,
+        "toggle": None,
+    }
+
+    openai_model_instance.reasoning_capability = {"wire_format": "thinking_budget"}
+    assert openai_model_instance._reasoning_wire_profile()["budget"] == "thinking_object"
+
+    openai_model_instance.reasoning_capability = {
+        "provider_id": "deepseek",
+        "wire_format": "reasoning_effort",
+    }
+    assert openai_model_instance._reasoning_wire_profile()["toggle"] == "thinking_object"
+
+    openai_model_instance.reasoning_capability = {
+        "provider_id": "dashscope",
+        "wire_format": "reasoning_effort",
+    }
+    assert openai_model_instance._reasoning_wire_profile()["toggle"] == "enable_thinking"
+
+
+def test_dashscope_reasoning_toggle_keeps_top_level_flag(openai_model_instance):
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev",
+        "provider_id": "dashscope",
+    }
+
+    assert openai_model_instance._translate_thinking_flag({"enable_thinking": False}) == {
+        "enable_thinking": False
+    }
+
+
+def test_reasoning_control_skips_unsupported_capability(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {"status": "unsupported"}
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {}
+
+
+def test_reasoning_control_handles_missing_wire_adapters(openai_model_instance):
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {"status": "supported"}
+    with patch.object(openai_model_instance, "_reasoning_wire_profile", return_value=None):
+        completion_kwargs = {}
+        openai_model_instance._apply_reasoning_control(completion_kwargs)
+    assert completion_kwargs == {}
+
+    openai_model_instance.reasoning_budget_tokens = 4096
+    openai_model_instance.reasoning_capability = {
+        "status": "supported",
+        "wire_format": "reasoning_effort",
+        "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+    }
+    completion_kwargs = {}
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+    assert completion_kwargs == {}
+
+    openai_model_instance.reasoning_budget_tokens = None
+    openai_model_instance.reasoning_effort = "high"
+    openai_model_instance.reasoning_capability = {
+        "status": "supported",
+        "controls": [{"type": "effort", "values": ["high"]}],
+    }
+    with patch.object(
+        openai_model_instance,
+        "_reasoning_wire_profile",
+        return_value={"effort": None, "budget": None, "toggle": None},
+    ):
+        completion_kwargs = {}
+        openai_model_instance._apply_reasoning_control(completion_kwargs)
+    assert completion_kwargs == {}

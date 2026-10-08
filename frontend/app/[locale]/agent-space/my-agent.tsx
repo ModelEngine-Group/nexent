@@ -10,24 +10,38 @@ import CreateAgentModal, {
   type CreatedAgentResult,
 } from "@/components/agent/CreateAgentModal";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useToolList } from "@/hooks/agent/useToolList";
+import { useSkillList } from "@/hooks/agent/useSkillList";
+import type { Agent } from "@/types/agentConfig";
+import type { AgentListFilters } from "@/services/agentConfigService";
 import { deleteAgent } from "@/services/agentConfigService";
 import {
   AGENTS_LIST_QUERY_KEY,
   invalidateAgentRepositoryCaches,
   useCreateAgentRepositoryListing,
   useMyEditableAgents,
+  useAgentRepositoryListings,
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
+import { parseAgentUsageGuideParams } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
+import {
+  getAgentUsageGuideOpenAction,
+  parseAgentUsageGuideTargetParams,
+  resolveAgentUsageGuideTarget,
+} from "@/lib/agentUsageGuide";
 import {
   isCancelableRepositoryStatus,
   isTakeDownableRepositoryStatus,
   findRepositoryInfoById,
   pickReviewDisplayRepositoryInfo,
   resolveReviewModalMode,
+  toMineRepositoryInfo,
 } from "@/lib/agentRepositoryMine";
 import {
   isNewAgentPaddingItem,
@@ -38,14 +52,16 @@ import {
 } from "@/types/agentRepository";
 import { MineApplyListingModal } from "./components/MineApplyListingModal";
 import { MineReviewStatusModal } from "./components/MineReviewStatusModal";
+import { AgentUsageGuideModal } from "./components/AgentUsageGuideModal";
 import { CreateNewAgentCard } from "./components/CreateNewAgentCard";
 import { MyAgentCard } from "./components/MyAgentCard";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
-import { mapAgentVersionDetail } from "@/lib/agentRepositoryDetail";
-import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
+import { mapMyAgentDetail } from "@/lib/myAgentDetail";
+import { AgentDetail } from "@/components/agent/agent-detail";
+import { MyAgentIcon } from "./components/MyAgentIcon";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -56,10 +72,17 @@ const CARD_GAP = 20;
 const MIN_CARD_HEIGHT = 240;
 const PAGINATION_HEIGHT = 60;
 
-export function MyAgent({ active }: { active: boolean }) {
+export function MyAgent({
+  active,
+  onTotalChange,
+}: {
+  active: boolean;
+  onTotalChange?: (total: number) => void;
+}) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
+  const { user } = useAuthorizationContext();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
@@ -83,7 +106,7 @@ export function MyAgent({ active }: { active: boolean }) {
   const rows = getRowCount(
     Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
   );
-  const pageSize = columns * rows;
+  const gridSlots = columns * rows;
   const measureGridHeight = useCallback(() => {
     if (!active || !gridRegionRef.current) return;
 
@@ -129,31 +152,53 @@ export function MyAgent({ active }: { active: boolean }) {
     () => getTagSearchPredicates(tagDefinitions, searchQuery, t),
     [tagDefinitions, searchQuery, t]
   );
+  const createCardInGrid = gridSlots > 1;
+  const pageSize = Math.max(1, gridSlots - (createCardInGrid ? 1 : 0));
   const listParams = useMemo(
-    () => ({
+    (): AgentListFilters => ({
+      tenantId: user?.tenantId ?? null,
+      enabled: active,
+      includeRepositoryInfo: true,
+      page,
+      pageSize,
+      search: searchQuery.trim() || undefined,
+      tagPredicates,
+      searchTagPredicates,
+      createdBy: ownership === "created" ? user?.id : undefined,
+      createdByNot: ownership === "others" ? user?.id : undefined,
+    }),
+    [
+      active,
+      user?.tenantId,
+      user?.id,
       ownership,
       page,
-      page_size: pageSize,
-      ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
-      ...(tagPredicates.length > 0 ? { tag_predicates: tagPredicates } : {}),
-      ...(searchTagPredicates.length > 0
-        ? { search_tag_predicates: searchTagPredicates }
-        : {}),
-      ...(ownership === "all" &&
-      !searchQuery.trim() &&
-      tagPredicates.length === 0
-        ? { new_agent_padding: true }
-        : {}),
-    }),
-    [ownership, page, pageSize, searchQuery, tagPredicates, searchTagPredicates]
+      pageSize,
+      searchQuery,
+      tagPredicates,
+      searchTagPredicates,
+    ]
   );
-  const { data, isLoading, isError, isFetching, refetch } = useMyEditableAgents(
-    listParams,
-    active
+  const {
+    agents: listedAgents,
+    creatorCounts,
+    pagination,
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+  } = useAgentList(listParams);
+  const agents: MyEditableAgentItem[] = useMemo(
+    () => listedAgents.map(toMyAgentItem),
+    [listedAgents]
   );
-  const agents = useMemo(() => data?.items ?? [], [data?.items]);
-  const counts = data?.counts ?? { all: 0, created: 0, others: 0 };
-  const total = data?.pagination?.total ?? 0;
+  const counts = creatorCounts ?? { all: 0, created: 0, others: 0 };
+  const total = pagination?.total ?? 0;
+  useEffect(() => {
+    if (active && creatorCounts && tagPredicates.length === 0) {
+      onTotalChange?.(creatorCounts.all);
+    }
+  }, [active, creatorCounts, onTotalChange, tagPredicates.length]);
   const gridHeight =
     availableGridHeight === null
       ? undefined
@@ -162,16 +207,24 @@ export function MyAgent({ active }: { active: boolean }) {
     () => parseReviewDeepLinkParams(searchParams),
     [searchParams]
   );
+  const usageGuideDeepLink = useMemo(
+    () => parseAgentUsageGuideParams(searchParams),
+    [searchParams]
+  );
+  const usageGuideTarget = useMemo(
+    () => parseAgentUsageGuideTargetParams(searchParams),
+    [searchParams]
+  );
   const { data: deepLinkMineData, isLoading: deepLinkFallbackLoading } =
     useMyEditableAgents(
       {
         ownership: "all",
-        agent_id: reviewDeepLink?.agentId,
+        agent_id: reviewDeepLink?.agentId ?? usageGuideTarget?.agentId,
         page: 1,
         page_size: 1,
         new_agent_padding: false,
       },
-      active && reviewDeepLink != null
+      active && (reviewDeepLink != null || usageGuideTarget != null)
     );
   const deepLinkFallbackAgent = useMemo(() => {
     const item = deepLinkMineData?.items?.[0];
@@ -180,6 +233,12 @@ export function MyAgent({ active }: { active: boolean }) {
   const onReviewDeepLinkConsumed = useCallback(() => {
     router.replace(`/${locale}/agent-space?tab=mine`);
   }, [locale, router]);
+  const onUsageGuideDeepLinkConsumed = useCallback(() => {
+    if (!usageGuideTarget) return;
+    router.replace(
+      `/${locale}/agent-space?tab=mine&agent_id=${usageGuideTarget.agentId}`
+    );
+  }, [locale, router, usageGuideTarget]);
   const onOwnershipChange = (value: MineOwnershipFilter) => {
     setOwnership(value);
     setPage(1);
@@ -205,6 +264,7 @@ export function MyAgent({ active }: { active: boolean }) {
   const [detailTarget, setDetailTarget] = useState<{
     agentId: number;
     versionNo: number;
+    agent: MyEditableAgentItem;
   } | null>(null);
   const {
     data: versionDetail,
@@ -217,19 +277,54 @@ export function MyAgent({ active }: { active: boolean }) {
     detailTarget?.versionNo ?? null,
     active && detailTarget != null
   );
-  const detail = useMemo(
-    () =>
-      versionDetail
-        ? mapAgentVersionDetail(versionDetail)
-        : detailTarget
-          ? undefined
-          : null,
-    [detailTarget, versionDetail]
+  const { tools: availableTools } = useToolList({
+    enabled: active && detailTarget != null,
+  });
+  const { skills: availableSkills } = useSkillList({
+    enabled: active && detailTarget != null,
+  });
+  const {
+    data: detailListings,
+    isLoading: isDetailListingsLoading,
+    isError: isDetailListingsError,
+    isFetching: isDetailListingsFetching,
+    refetch: refetchDetailListings,
+  } = useAgentRepositoryListings(
+    detailTarget
+      ? { agent_id: detailTarget.agentId, page: 1, page_size: 100 }
+      : undefined,
+    active && detailTarget != null
   );
+  const detail = useMemo(() => {
+    if (!detailTarget) return null;
+    if (!versionDetail) return undefined;
+    const repositoryInfo = pickReviewDisplayRepositoryInfo(
+      toMineRepositoryInfo(detailListings?.items ?? [])
+    );
+    return {
+      ...mapMyAgentDetail(versionDetail, detailTarget.agent, {
+        tools: availableTools,
+        skills: availableSkills,
+      }),
+      status: repositoryInfo?.status,
+    };
+  }, [
+    availableSkills,
+    availableTools,
+    detailTarget,
+    detailListings,
+    versionDetail,
+  ]);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
+  const [usageGuideAgent, setUsageGuideAgent] =
+    useState<MyEditableAgentItem | null>(null);
+  const [guidedMenuAgentId, setGuidedMenuAgentId] = useState<number | null>(
+    null
+  );
   const consumedDeepLinkRef = useRef<number | null>(null);
+  const consumedUsageGuideRef = useRef<number | null>(null);
 
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
@@ -238,6 +333,50 @@ export function MyAgent({ active }: { active: boolean }) {
   });
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  const usageGuideTargetState = useMemo(
+    () =>
+      usageGuideTarget
+        ? resolveAgentUsageGuideTarget({
+            agentId: usageGuideTarget.agentId,
+            agents,
+            fallbackAgent: deepLinkFallbackAgent,
+            isListLoading: isLoading,
+            isFallbackLoading: deepLinkFallbackLoading,
+            isActive: active,
+            getAgentId: (agent) =>
+              isNewAgentPaddingItem(agent) ? null : agent.agent_id,
+          })
+        : null,
+    [
+      agents,
+      deepLinkFallbackAgent,
+      deepLinkFallbackLoading,
+      isLoading,
+      usageGuideTarget,
+    ]
+  );
+  const displayedAgents = useMemo(() => {
+    if (usageGuideTargetState?.state !== "found") {
+      return agents;
+    }
+    const targetAgent = usageGuideTargetState.agent;
+    if (
+      isNewAgentPaddingItem(targetAgent) ||
+      agents.some(
+        (agent) =>
+          !isNewAgentPaddingItem(agent) &&
+          agent.agent_id === targetAgent.agent_id
+      )
+    ) {
+      return agents;
+    }
+    return [targetAgent, ...agents];
+  }, [agents, usageGuideTargetState]);
+  const highlightedAgentId =
+    usageGuideTargetState?.state === "found" &&
+    !isNewAgentPaddingItem(usageGuideTargetState.agent)
+      ? usageGuideTargetState.agent.agent_id
+      : null;
 
   const handleCreateAgent = () => {
     setCreateAgentModalVisible(true);
@@ -249,7 +388,7 @@ export function MyAgent({ active }: { active: boolean }) {
       invalidateAgentRepositoryCaches(queryClient),
       queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
     ]);
-    router.push(`/${locale}/agents?agent_id=${agentId}`);
+    router.push(`/${locale}/agents/${agentId}`);
   };
 
   const handleEdit = (
@@ -259,9 +398,7 @@ export function MyAgent({ active }: { active: boolean }) {
     if (permission === "READ_ONLY") {
       return;
     }
-    router.push(
-      `/${locale}/agents?agent_id=${agentId}&from=agent-space&tab=mine`
-    );
+    router.push(`/${locale}/agents/${agentId}?from=agent-space&tab=mine`);
   };
 
   const handleDeleteAgent = (agent: MyEditableAgentItem) => {
@@ -393,10 +530,9 @@ export function MyAgent({ active }: { active: boolean }) {
     }
 
     const agentFromList = agents.find(
-      (item): item is MyEditableAgentItem =>
-        !isNewAgentPaddingItem(item) && item.agent_id === reviewDeepLink.agentId
+      (item) => item.agent_id === reviewDeepLink.agentId
     );
-    const agent = agentFromList ?? deepLinkFallbackAgent;
+    const agent = deepLinkFallbackAgent ?? agentFromList;
 
     if (!agent) {
       if (listStillLoading || fallbackStillLoading) {
@@ -438,6 +574,47 @@ export function MyAgent({ active }: { active: boolean }) {
     reviewDeepLink,
     t,
   ]);
+
+  useEffect(() => {
+    if (!usageGuideDeepLink) {
+      consumedUsageGuideRef.current = null;
+      return;
+    }
+
+    if (!usageGuideTargetState) {
+      return;
+    }
+    const openAction = getAgentUsageGuideOpenAction({
+      agentId: usageGuideDeepLink.agentId,
+      consumedAgentId: consumedUsageGuideRef.current,
+      target: usageGuideTargetState,
+    });
+    if (openAction.action === "ignore" || openAction.action === "wait") {
+      return;
+    }
+    if (openAction.action === "missing") {
+      message.error(t("notifications.usageGuide.agentNotFound"));
+      consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
+      onUsageGuideDeepLinkConsumed?.();
+      return;
+    }
+
+    if (isNewAgentPaddingItem(openAction.agent)) {
+      return;
+    }
+    setGuidedMenuAgentId(openAction.agent.agent_id);
+    consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
+    onUsageGuideDeepLinkConsumed?.();
+  }, [
+    onUsageGuideDeepLinkConsumed,
+    t,
+    usageGuideDeepLink,
+    usageGuideTargetState,
+  ]);
+
+  const closeUsageGuide = () => {
+    setUsageGuideAgent(null);
+  };
 
   const handleSetNotShared = async () => {
     if (!reviewModalInfo) {
@@ -484,7 +661,8 @@ export function MyAgent({ active }: { active: boolean }) {
     ownership !== "all" ||
     normalizedQuery.length > 0 ||
     tagPredicates.length > 0;
-  const showFilteredEmpty = !isLoading && !isError && agents.length === 0;
+  const showFilteredEmpty =
+    !isLoading && !isError && agents.length === 0 && hasActiveFilter;
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -518,20 +696,17 @@ export function MyAgent({ active }: { active: boolean }) {
             }`}
           >
             {t(ownershipLabelKey[filter])}
-            <span
-              className={`rounded px-1.5 text-xs ${
-                ownership === filter
-                  ? "bg-white/20"
-                  : "bg-white/70 text-slate-500 dark:bg-slate-900/50 dark:text-slate-400"
-              }`}
-            >
-              {counts[filter]}
-            </span>
+            <span className="text-xs opacity-80">{counts[filter]}</span>
           </button>
         ))}
       </div>
 
       <div ref={gridRegionRef} className="min-h-0">
+        {!createCardInGrid ? (
+          <div className="mb-5">
+            <CreateNewAgentCard onClick={handleCreateAgent} />
+          </div>
+        ) : null}
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <Spin size="large" />
@@ -549,60 +724,77 @@ export function MyAgent({ active }: { active: boolean }) {
               {t("repository.common.retry")}
             </Button>
           </div>
-        ) : showFilteredEmpty ? (
-          <Empty
-            className="py-16"
-            description={
-              hasActiveFilter
-                ? t("agentRepository.mine.emptyFiltered")
-                : t("agentRepository.mine.empty")
-            }
-          />
         ) : (
           <>
             <ResourceCardGrid
-              items={agents}
+              items={displayedAgents}
               columns={columns}
               rows={rows}
-              gridHeight={gridHeight}
+              gridHeight={showFilteredEmpty ? undefined : gridHeight}
               page={page}
               total={total}
               onPageChange={setPage}
               paginateItems={false}
               showToolbar={false}
-              renderItem={(agent) =>
-                isNewAgentPaddingItem(agent) ? (
-                  <CreateNewAgentCard
-                    key="new-agent-padding"
-                    onClick={handleCreateAgent}
+              emptyState={
+                showFilteredEmpty ? (
+                  <Empty
+                    description={t("agentRepository.mine.emptyFiltered")}
                   />
-                ) : (
-                  <MyAgentCard
-                    key={agent.agent_id}
-                    agent={agent}
-                    onEdit={() => handleEdit(agent.agent_id, agent.permission)}
-                    onView={() =>
-                      setDetailTarget({
-                        agentId: agent.agent_id,
-                        versionNo: agent.current_version_no ?? 0,
-                      })
-                    }
-                    onApplyListing={() => handleApplyListing(agent)}
-                    onViewReview={(mode) => handleViewReview(agent, mode)}
-                    onDelete={() => handleDeleteAgent(agent)}
-                    onEvaluate={() => handleEvaluate(agent)}
-                    isApplying={
-                      applyingAgentId === agent.agent_id &&
-                      createListingMutation.isPending
-                    }
-                    isDeleting={
-                      deleteAgentMutation.isPending &&
-                      deleteAgentMutation.variables === agent.agent_id
-                    }
-                  />
-                )
+                ) : undefined
               }
+              showCreateCard={createCardInGrid}
+              createCard={
+                createCardInGrid ? (
+                  <CreateNewAgentCard onClick={handleCreateAgent} />
+                ) : undefined
+              }
+              renderItem={(agent) => (
+                <MyAgentCard
+                  key={agent.agent_id}
+                  agent={agent}
+                  onEdit={() => handleEdit(agent.agent_id, agent.permission)}
+                  onView={() =>
+                    setDetailTarget({
+                      agentId: agent.agent_id,
+                      versionNo: agent.current_version_no ?? 0,
+                      agent,
+                    })
+                  }
+                  onApplyListing={() => handleApplyListing(agent)}
+                  onViewReview={handleViewReview}
+                  onDelete={() => handleDeleteAgent(agent)}
+                  onEvaluate={() => handleEvaluate(agent)}
+                  onUsageGuide={() => {
+                    setGuidedMenuAgentId(null);
+                    setUsageGuideAgent(agent);
+                  }}
+                  highlighted={highlightedAgentId === agent.agent_id}
+                  guideMenuOpen={
+                    guidedMenuAgentId === agent.agent_id ? true : undefined
+                  }
+                  onGuideMenuOpenChange={(open) => {
+                    if (!open && guidedMenuAgentId === agent.agent_id) {
+                      setGuidedMenuAgentId(null);
+                    }
+                  }}
+                  isApplying={
+                    applyingAgentId === agent.agent_id &&
+                    createListingMutation.isPending
+                  }
+                  isDeleting={
+                    deleteAgentMutation.isPending &&
+                    deleteAgentMutation.variables === agent.agent_id
+                  }
+                />
+              )}
             />
+            {showFilteredEmpty && createCardInGrid ? (
+              <Empty
+                className="py-16"
+                description={t("agentRepository.mine.emptyFiltered")}
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -625,22 +817,70 @@ export function MyAgent({ active }: { active: boolean }) {
         onSetNotShared={handleSetNotShared}
       />
 
+      <AgentUsageGuideModal
+        agent={usageGuideAgent}
+        locale={locale}
+        open={usageGuideAgent !== null}
+        onClose={closeUsageGuide}
+      />
+
       <CreateAgentModal
         open={active && createAgentModalVisible}
         onCancel={() => setCreateAgentModalVisible(false)}
         onCreated={handleAgentCreated}
       />
-      <AgentRepositoryDetailModal
+      <AgentDetail
         open={active && detailTarget != null}
         onClose={() => setDetailTarget(null)}
+        onEdit={
+          detailTarget?.agent.permission === "READ_ONLY"
+            ? undefined
+            : detailTarget
+              ? () =>
+                  handleEdit(
+                    detailTarget.agentId,
+                    detailTarget.agent.permission
+                  )
+              : undefined
+        }
         detail={detail}
-        isLoading={isDetailLoading}
-        isError={isDetailError}
-        isFetching={isDetailFetching}
-        onRetry={() => refetchDetail()}
+        agentIcon={
+          detailTarget ? (
+            <MyAgentIcon agent={detailTarget.agent} size={48} iconSize={24} />
+          ) : undefined
+        }
+        published={(detailTarget?.versionNo ?? 0) > 0}
+        status={detail?.status}
+        isLoading={isDetailLoading || isDetailListingsLoading}
+        isError={isDetailError || isDetailListingsError}
+        isFetching={isDetailFetching || isDetailListingsFetching}
+        onRetry={() => {
+          void refetchDetail();
+          void refetchDetailListings();
+        }}
       />
     </div>
   );
+}
+
+function toMyAgentItem(agent: Agent): MyEditableAgentItem {
+  const currentVersionNo = agent.current_version_no ?? 0;
+  return {
+    agent_id: Number(agent.id),
+    icon_url: agent.icon_url,
+    is_available: agent.is_available,
+    unavailable_reasons: agent.unavailable_reasons,
+    name: agent.display_name || agent.name,
+    description: agent.description,
+    current_version_no: currentVersionNo,
+    version_label:
+      agent.version_label ??
+      (currentVersionNo > 0 ? `V${currentVersionNo}` : null),
+    version_create_time: agent.version_create_time ?? null,
+    permission: agent.permission,
+    tags: agent.tags,
+    repository_info: agent.repository_info ?? [],
+  };
 }
 
 function getRowCount(availableHeight: number) {

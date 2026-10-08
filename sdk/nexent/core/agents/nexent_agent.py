@@ -31,6 +31,7 @@ from .core_agent import CoreAgent, convert_code_format
 from .sandbox_workspace import SandboxWorkspace, probe_workspace
 from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
+from ...consts.mcp_errors import is_mcp_timeout_error
 from .output_protocol import ModelOutputProtocolExhaustedError
 from .tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,
@@ -64,6 +65,7 @@ def get_local_python_authorized_imports() -> List[str]:
 logger = logging.getLogger(__name__)
 
 _WORKSPACE_UPLOAD_EXCLUDED_DIRS = {
+    ".skill_snapshot",
     ".cache",
     ".npm",
     ".parcel-cache",
@@ -575,6 +577,8 @@ class NexentAgent:
                 observer=self.observer,
                 authorized_skill_names=params.get("authorized_skill_names"),
             )
+            if params.get("isolated_skills_root"):
+                kwargs["isolated_skills_root"] = True
             if params.get("workspace_path"):
                 kwargs["workspace_path"] = params["workspace_path"]
                 kwargs["on_complete"] = lambda _result: self._push_file_workspace_to_sandbox()
@@ -582,12 +586,17 @@ class NexentAgent:
         elif class_name == "ReadSkillMdTool":
             from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
             metadata = tool_config.metadata or {}
-            return ReadSkillMdTool(
+            kwargs = dict(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
+            if params.get("authorized_skill_names") is not None:
+                kwargs["authorized_skill_names"] = params["authorized_skill_names"]
+            if params.get("isolated_skills_root"):
+                kwargs["isolated_skills_root"] = True
+            return ReadSkillMdTool(**kwargs)
         elif class_name == "WriteSkillFileTool":
             from nexent.core.tools.write_skill_file_tool import WriteSkillFileTool
             metadata = tool_config.metadata or {}
@@ -600,13 +609,16 @@ class NexentAgent:
         elif class_name == "ReadSkillConfigTool":
             from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
             metadata = tool_config.metadata or {}
-            return ReadSkillConfigTool(
+            kwargs = dict(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 config_overrides=params.get("config_overrides"),
             )
+            if params.get("authorized_skill_names") is not None:
+                kwargs["authorized_skill_names"] = params["authorized_skill_names"]
+            return ReadSkillConfigTool(**kwargs)
         elif class_name == "DownloadFromS3Tool":
             from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool
             metadata = tool_config.metadata or {}
@@ -707,7 +719,8 @@ class NexentAgent:
             or getattr(sub_agent_config, "_sub_agent_id", None)
         )
         agent_name = (
-            getattr(sub_agent_config, "name", None)
+            getattr(sub_agent_config, "display_name", None)
+            or getattr(sub_agent_config, "name", None)
             or getattr(inner_agent, "name", None)
             or "subagent"
         )
@@ -716,6 +729,15 @@ class NexentAgent:
             observer=self.observer,
             agent_id=resolved_id,
             agent_name=str(agent_name),
+            runtime_identity={
+                key: getattr(sub_agent_config, key, None)
+                for key in ("runtime_ref", "version_no", "display_name", "origin")
+            },
+            invocation_name=(
+                getattr(sub_agent_config, "invocation_name", None)
+                or getattr(inner_agent, "name", None)
+                or str(agent_name)
+            ),
         )
 
     def _check_sandbox_cancelled(self) -> None:
@@ -926,9 +948,32 @@ class NexentAgent:
                 if self.sandbox_config.level != SandboxLevel.LOCAL:
                     try:
                         warm_start = time.time()
-                        self._check_sandbox_cancelled()
-                        python_executor("[0, None]")
-                        self._check_sandbox_cancelled()
+
+                        current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
+                        warmup_metadata = replace(
+                            current_metadata,
+                            agent_id=(
+                                getattr(agent_config, "_sub_agent_id", None)
+                                if _managed_context else current_metadata.agent_id
+                            ),
+                            agent_name=agent_config.name,
+                            agent_display_name=agent_config.display_name,
+                            model_name=agent_config.model_name,
+                        )
+                        with get_monitoring_manager().trace_agent_step(
+                            "agent.sandbox.warmup",
+                            warmup_metadata,
+                            step_type="sandbox_warmup",
+                            **{
+                                "sandbox.level": self.sandbox_config.level.value,
+                                "sandbox.scope": self.sandbox_config.scope.value,
+                                "sandbox.backend": getattr(python_executor, "_nexent_backend", "unknown"),
+                            },
+                        ):
+                            self._check_sandbox_cancelled()
+                            python_executor("[0, None]")
+                            self._check_sandbox_cancelled()
+
                         warm_dur = time.time() - warm_start
                         backend = getattr(python_executor, "_nexent_backend", "unknown")
                         if backend == "local":
@@ -977,7 +1022,8 @@ class NexentAgent:
                 observer=self.observer,
                 tools=tool_list,
                 model=model,
-                name=agent_config.name,
+                name=agent_config.invocation_name or agent_config.name,
+                display_name=agent_config.display_name,
                 description=agent_config.description,
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
@@ -993,6 +1039,7 @@ class NexentAgent:
                 executor=python_executor,
                 verification_config=getattr(agent_config, "verification_config", None),
                 output_protocol=getattr(agent_config, "output_protocol", "code_action"),
+                enable_protocol_repair_retry=agent_config.enable_protocol_repair_retry,
                 enable_clarification=enable_clarification,
                 workspace_path=self.workspace_path,
             )
@@ -1117,7 +1164,8 @@ class NexentAgent:
         current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
         metadata = replace(
             current_metadata,
-            agent_name=current_metadata.agent_name or self.agent.agent_name,
+            agent_name=current_metadata.agent_name or getattr(self.agent, "name", None) or self.agent.agent_name,
+            agent_display_name=current_metadata.agent_display_name or getattr(self.agent, "display_name", None),
             query=current_metadata.query if current_metadata.query is not None else query,
         )
         observer = self.agent.observer
@@ -1291,6 +1339,8 @@ class NexentAgent:
                     )
                     raise
                 except Exception as e:
+                    if is_mcp_timeout_error(e):
+                        raise
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
                     raise ValueError(f"Error in interaction: {str(e)}")

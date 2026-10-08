@@ -46,13 +46,22 @@ def client(mocker):
 
         services_vdb_mod.get_vector_db_core = _get_vector_db_core
         _sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
-    
+
     # Import after mocking (only backend path is required by app imports)
     from backend.apps.model_managment_app import router
-    
+    from permissions.depends import authenticate
+    from permissions.models import CurrentUser
+
+    # Grant all model permissions so existing business-logic tests pass
+    # without touching the RBAC database; RBAC behavior is covered by
+    # test_model_rbac.py.
+    mocker.patch('permissions.depends.has_permission', return_value=True)
+
     # Create test client
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[authenticate] = lambda: CurrentUser(
+        user_id="test_user", tenant_id="test_tenant", role="SU")
     return TestClient(app)
 
 
@@ -847,13 +856,90 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
 async def test_verify_model_config_exception(client, auth_header, sample_model_data, mocker):
     """Test model config verification with exception."""
     mocker.patch(
-        'backend.apps.model_managment_app.verify_model_config_connectivity', 
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
         side_effect=Exception("err")
     )
-    
+
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_probe_falls_back_to_stored_key_for_stored_url(client, auth_header, user_credentials, mocker):
+    """Empty-key probe of an existing model borrows the stored key when the
+    probe targets the stored endpoint (edit dialog, URL untouched)."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+    stored = {
+        "api_key": "stored-secret-key",
+        "base_url": "https://api.example.com/v1/",  # trailing slash on purpose
+    }
+    mocker.patch(
+        'backend.apps.model_managment_app.get_model_by_model_id',
+        return_value=stored,
+    )
+    mock_verify = mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": False, "model_name": "m"},
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck",
+        headers=auth_header,
+        json={
+            "model_name": "m",
+            "model_type": "llm",
+            "base_url": "https://api.example.com/v1",  # no trailing slash
+            "api_key": "sk-no-api-key",
+            "probe_model_id": 7,
+        },
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    probed_config = mock_verify.call_args.args[0]
+    assert probed_config["api_key"] == "stored-secret-key"
+
+
+@pytest.mark.asyncio
+async def test_probe_does_not_borrow_stored_key_for_foreign_url(client, auth_header, user_credentials, mocker):
+    """A probe pointing at a different base_url must NOT receive the stored
+    key — otherwise any tenant member could exfiltrate stored keys by
+    directing the probe at their own server."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+    stored = {
+        "api_key": "stored-secret-key",
+        "base_url": "https://api.example.com/v1/",
+    }
+    mocker.patch(
+        'backend.apps.model_managment_app.get_model_by_model_id',
+        return_value=stored,
+    )
+    mock_verify = mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": False, "model_name": "m"},
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck",
+        headers=auth_header,
+        json={
+            "model_name": "m",
+            "model_type": "llm",
+            "base_url": "https://attacker.example/collect",
+            "api_key": "sk-no-api-key",
+            "probe_model_id": 7,
+        },
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    probed_config = mock_verify.call_args.args[0]
+    assert probed_config["api_key"] == "sk-no-api-key"
 
 
 # Tests for /model/update endpoint
@@ -1924,14 +2010,27 @@ MODEL_TOKEN_EXPIRED_ENDPOINTS = [
 
 @pytest.mark.parametrize("method,url,kwargs", MODEL_TOKEN_EXPIRED_ENDPOINTS)
 def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker, method, url, kwargs):
-    """Expired token maps to 401 on every authenticated model endpoint."""
-    from consts.exceptions import TokenExpiredError
+    """Expired token maps to 401 on every authenticated model endpoint.
 
-    mocker.patch(
-        "backend.apps.model_managment_app.get_current_user_id",
-        side_effect=TokenExpiredError("expired"),
-    )
-    response = getattr(client, method)(url, headers=auth_header, **kwargs)
+    In production the global TokenExpiredError handler (app_factory) maps the
+    exception raised inside ``authenticate`` to 401; the bare test app has no
+    such handler, so emulate the same mapping here.
+    """
+    from fastapi import HTTPException as FastAPIHTTPException
+    from permissions.depends import authenticate
+
+    def _expired_user():
+        raise FastAPIHTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED, detail="expired")
+
+    client.app.dependency_overrides[authenticate] = _expired_user
+    try:
+        response = getattr(client, method)(url, headers=auth_header, **kwargs)
+    finally:
+        # Restore the default override for other tests using this client.
+        from permissions.models import CurrentUser
+        client.app.dependency_overrides[authenticate] = lambda: CurrentUser(
+            user_id="test_user", tenant_id="test_tenant", role="SU")
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]

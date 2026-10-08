@@ -55,6 +55,8 @@ export const API_ENDPOINTS = {
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     knowledgeScope: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
+    workbenchConfig: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench-config`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     batchDelete: `${API_BASE_URL}/conversation/batch-delete`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
@@ -85,6 +87,7 @@ export const API_ENDPOINTS = {
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    listPage: `${API_BASE_URL}/agent/list/page`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
     stop: (runId: string | number) =>
@@ -100,11 +103,14 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     knowledgeCapabilities: (agentId: number) =>
       `${API_BASE_URL}/agent/${agentId}/knowledge-capabilities`,
+    workbenchBootstrap: `${API_BASE_URL}/agent/workbench/bootstrap`,
+    workbenchPreview: `${API_BASE_URL}/agent/workbench/capabilities/preview`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
     generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
-    icon: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/icon`,
+    icon: (agentId: number, revision?: string | null) =>
+      `${API_BASE_URL}/agent/${agentId}/icon${revision ? `?v=${encodeURIComponent(revision)}` : ""}`,
     versions: {
       version: (agentId: number, versionNo: number) =>
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
@@ -180,6 +186,7 @@ export const API_ENDPOINTS = {
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
+    config: `${API_BASE_URL}/evaluation-sets/config`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
@@ -263,6 +270,7 @@ export const API_ENDPOINTS = {
     customModelCreate: `${API_BASE_URL}/model/create`,
     customModelCreateProvider: `${API_BASE_URL}/model/provider/create`,
     customModelBatchCreate: `${API_BASE_URL}/model/provider/batch_create`,
+    customModelBackfillDefaults: `${API_BASE_URL}/model/backfill_defaults`,
     getProviderSelectedModalList: `${API_BASE_URL}/model/provider/list`,
     customModelDelete: (displayName: string) =>
       `${API_BASE_URL}/model/delete?display_name=${encodeURIComponent(
@@ -619,6 +627,11 @@ export const API_ENDPOINTS = {
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    official: `${API_BASE_URL}/repository/agent/official`,
+    officialInstall: `${API_BASE_URL}/repository/agent/official/install`,
+    officialManagement: `${API_BASE_URL}/repository/agent/official/management`,
+    officialManagementItem: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/official/management/${agentRepositoryId}`,
     tagStats: `${API_BASE_URL}/repository/agent/tags`,
     importPrecheck: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
@@ -628,6 +641,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
+    icon: (agentId: number, versionNo: number) =>
+      `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}/icon`,
   },
   skillRepository: {
     listings: (params?: SkillRepositoryListingListParams) => {
@@ -913,7 +928,8 @@ export const fetchWithErrorHandling = async (
           if (errorData?.error === "TenantStorageFull") {
             throw new ApiError(
               413,
-              errorData.message || "Tenant storage limit reached"
+              errorData.message || "Tenant storage limit reached",
+              errorData
             );
           }
         } catch (error) {
@@ -921,9 +937,12 @@ export const fetchWithErrorHandling = async (
             throw error;
           }
         }
+        // Preserve structured FILE_TOO_LARGE responses so upload callers can
+        // display the configured limit from details.limit_mb.
         throw new ApiError(
-          ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit."
+          errorCode,
+          errorMessage || "File size exceeds limit.",
+          errorDetails
         );
       }
 

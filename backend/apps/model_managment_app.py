@@ -7,9 +7,12 @@ layer contract:
 - Map domain/service exceptions to HTTP where necessary; avoid leaking internals.
 - Return structured responses consistent with existing patterns for backward compatibility.
 
-Authorization: The bearer token is retrieved via the `authorization` header and
-parsed with `utils.auth_utils.get_current_user_id`, then propagated as `user_id`
-and `tenant_id` to services/database helpers.
+Authorization: Mutating endpoints require RBAC permissions (model:create /
+model:update / model:delete) via ``permissions.depends.require``; read endpoints
+require ``model:read``. Cross-tenant ``/manage/*`` endpoints additionally
+require the SU role, or the ADMIN role when the targeted tenant is the
+caller's own. Identity is resolved from the bearer token into a
+``CurrentUser`` and propagated as ``user_id`` / ``tenant_id`` to services.
 """
 
 import asyncio
@@ -18,6 +21,7 @@ import re
 
 from consts.model import (
     BatchCreateModelsRequest,
+    BackfillDefaultsRequest,
     CapacitySuggestionFields,
     ModelRequest,
     ModelProbeRequest,
@@ -37,7 +41,7 @@ from consts.model import (
 )
 from consts.const import CAPACITY_SUGGESTION_ENABLED
 
-from fastapi import APIRouter, Header, Query, HTTPException
+from fastapi import APIRouter, Depends, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
@@ -62,11 +66,26 @@ from services.model_management_service import (
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
     get_model_reasoning_capability,
+    _ids_for_created_models,
+    _backfill_default_model_slots,
 )
+from permissions.depends import authenticate, require
+from permissions.models import CurrentUser
 from utils.auth_utils import get_current_user_id
 from consts.exceptions import TokenExpiredError
 from nexent.core.concurrency import run_blocking
 from database.model_management_db import get_model_by_model_id
+
+# Permission strings normalized by backend RBAC cache (lower-case type:subtype).
+MODEL_CREATE_PERMISSION = "model:create"
+MODEL_READ_PERMISSION = "model:read"
+MODEL_UPDATE_PERMISSION = "model:update"
+MODEL_DELETE_PERMISSION = "model:delete"
+# Roles allowed on the cross-tenant /manage/* endpoints. ADMIN shares the same
+# MODEL permission seeds as SU, so permission strings cannot separate the two
+# and the role itself must be checked. ADMIN is scoped to its own tenant by
+# ``_require_manage_scope``; SU may target any tenant.
+_MANAGE_ALLOWED_ROLES = ("SU", "ADMIN")
 
 # Model Catalog loader (with graceful fallback)
 try:
@@ -132,6 +151,28 @@ def _sanitize_model_credentials(payload: Any) -> Any:
 def _log_safe(value: Any) -> str:
     """Strip control characters so user input cannot forge log entries."""
     return _LOG_UNSAFE_CHARS.sub("", str(value))
+
+
+def _require_manage_scope(current_user: CurrentUser, target_tenant_id: str) -> None:
+    """Authorize a /manage/* call against the tenant it targets.
+
+    SU may manage any tenant. ADMIN may manage only the tenant its token
+    belongs to -- the tenant-resource page always passes the caller's own
+    tenant_id, so restricting ADMIN outright would break tenant admins
+    managing their own models while blocking no cross-tenant access. Any
+    other role, or an ADMIN naming a foreign tenant, is rejected.
+    """
+    role = current_user.normalized_role
+    if role not in _MANAGE_ALLOWED_ROLES:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="This operation requires SU or tenant ADMIN role",
+        )
+    if role != "SU" and target_tenant_id != current_user.tenant_id:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Tenant admins may only manage models of their own tenant",
+        )
 
 
 def _catalog_unavailable_response(status_code: HTTPStatus, **extra: Any) -> JSONResponse:
@@ -209,7 +250,10 @@ def _capacity_suggestion_for_model_request(request: ModelRequest):
 
 
 @router.post("/create")
-async def create_model(request: ModelRequest, authorization: Optional[str] = Header(None)):
+async def create_model(
+    request: ModelRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
     """Create a single model record for the current tenant.
 
     Responsibilities (App layer):
@@ -220,15 +264,19 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
 
     Args:
         request: Model configuration payload.
-        authorization: Bearer token header used to derive `user_id` and `tenant_id`.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         model_data = request.model_dump()
         accept_signal = pop_capacity_accept_signal(model_data)
+        # Batch-import flow control flag: popped here so it never reaches
+        # the service/DB layer (same contract as the accept-signal fields).
+        skip_backfill = bool(model_data.pop("skip_default_backfill", None))
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
-        create_result = await create_model_for_tenant(user_id, tenant_id, model_data)
+        create_result = await create_model_for_tenant(
+            user_id, tenant_id, model_data,
+            skip_default_backfill=skip_backfill)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
@@ -250,10 +298,43 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.post("/backfill_defaults")
+async def backfill_default_model_slots(
+    request: BackfillDefaultsRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
+    """Finalize default-model auto-configuration after a batch import.
+
+    The batch dialog creates its rows one HTTP call at a time with
+    skip_default_backfill set; this endpoint runs the auto-configuration
+    ONCE with the whole batch's models as candidates, so empty slots get
+    the best model of the batch instead of whichever row happened to be
+    created first. Occupied slots (user- or system-configured) are never
+    touched.
+    """
+    try:
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
+        created_ids = _ids_for_created_models(
+            request.display_names, tenant_id)
+        auto_configured = _backfill_default_model_slots(
+            user_id, tenant_id, new_model_ids=created_ids)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": auto_configured,
+            "message": "Default model backfill completed"
+        })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to backfill default model slots: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @router.post("/suggest-capacity")
 async def suggest_model_capacity(
     request: ModelCapacitySuggestionRequest,
-    authorization: Optional[str] = Header(None),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
 ):
     """Return a non-mutating capacity suggestion for a model add/edit form.
 
@@ -264,7 +345,6 @@ async def suggest_model_capacity(
     `result.data` unconditionally.
     """
     try:
-        get_current_user_id(authorization)
         result = _suggest_capacity_for_request(request)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully suggested model capacity",
@@ -284,14 +364,16 @@ async def suggest_model_capacity(
 
 
 @router.get("/capacity-coverage")
-async def get_model_capacity_coverage(authorization: Optional[str] = Header(None)):
+async def get_model_capacity_coverage(
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
     """Return bare-capacity LLM/VLM coverage for the current tenant.
 
     Wrapped in the shared `{message, data}` envelope; see
     `suggest_model_capacity` for the same rationale.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         result = get_capacity_coverage(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model capacity coverage",
@@ -308,7 +390,10 @@ async def get_model_capacity_coverage(authorization: Optional[str] = Header(None
 
 
 @router.post("/provider/create")
-async def create_provider_model(request: ProviderModelRequest, authorization: Optional[str] = Header(None)):
+async def create_provider_model(
+    request: ProviderModelRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
     """Create or refresh provider models for the current tenant in memory only.
 
     This endpoint fetches models from the specified provider and merges existing
@@ -317,11 +402,10 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
 
     Args:
         request: Provider and model type information.
-        authorization: Bearer token header used to derive identity context.
     """
     try:
         provider_model_config = request.model_dump()
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         model_list = await create_provider_models_for_tenant(tenant_id, provider_model_config)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Provider model created successfully",
@@ -337,7 +421,10 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
 
 
 @router.post("/provider/batch_create")
-async def batch_create_models(request: BatchCreateModelsRequest, authorization: Optional[str] = Header(None)):
+async def batch_create_models(
+    request: BatchCreateModelsRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
     """Synchronize provider models for a tenant by creating/updating/deleting records.
 
     The request includes the authoritative list of models for a provider/type.
@@ -346,11 +433,10 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
 
     Args:
         request: Batch payload with provider, type, models, and optional API key.
-        authorization: Bearer token header used to derive identity context.
 
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         batch_model_config = request.model_dump()
         # Strip W11 accept-signal fields off every model entry before the
         # batch reaches the service/DB layer. Same audit-only contract as
@@ -372,6 +458,7 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
+        # Malformed batch entries are client errors, not server faults.
         logging.error(f"Failed to batch create models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                             detail=str(e))
@@ -382,16 +469,18 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
 
 
 @router.post("/provider/list")
-async def get_provider_list(request: ProviderModelRequest, authorization: Optional[str] = Header(None)):
+async def get_provider_list(
+    request: ProviderModelRequest,
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
     """List persisted models for a provider and type for the current tenant.
 
     Args:
         request: Provider and model type to filter.
-        authorization: Bearer token header used to derive identity context.
 
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         model_list = await list_provider_models_for_tenant(
             tenant_id, request.provider, request.model_type
         )
@@ -412,7 +501,7 @@ async def get_provider_list(request: ProviderModelRequest, authorization: Option
 async def update_single_model(
     request: dict,
     display_name: str = Query(..., description="Current display name of the model to update"),
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Update a single model by its current `display_name`.
 
@@ -422,14 +511,13 @@ async def update_single_model(
     Args:
         request: Arbitrary model fields to update (may include new display_name).
         display_name: Current display name of the model (query parameter for lookup).
-        authorization: Bearer token header used to derive identity context.
 
     Raises:
         HTTPException: 404 if model not found, 409 if new `display_name` conflicts,
                        500 for unexpected errors.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         accept_signal = pop_capacity_accept_signal(request)
         await update_single_model_for_tenant(user_id, tenant_id, display_name, request)
         if accept_signal is not None:
@@ -457,15 +545,17 @@ async def update_single_model(
 
 
 @router.post("/batch_update")
-async def batch_update_models(request: List[dict], authorization: Optional[str] = Header(None)):
+async def batch_update_models(
+    request: List[dict],
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
+):
     """Batch update multiple models for the current tenant.
 
     Args:
         request: List of partial model payloads with `model_id` fields.
-        authorization: Bearer token header used to derive identity context.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         await batch_update_models_for_tenant(user_id, tenant_id, request)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch update models successfully"
@@ -480,7 +570,10 @@ async def batch_update_models(request: List[dict], authorization: Optional[str] 
 
 
 @router.post("/delete")
-async def delete_model(display_name: str = Query(..., embed=True), authorization: Optional[str] = Header(None)):
+async def delete_model(
+    display_name: str = Query(..., embed=True),
+    current_user: CurrentUser = Depends(require(MODEL_DELETE_PERMISSION)),
+):
     """Soft delete model(s) by `display_name` for the current tenant.
 
     Behavior:
@@ -489,10 +582,9 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
 
     Args:
         display_name: Display name of the model to delete (unique key).
-        authorization: Bearer token header used to derive identity context.
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
         logger.info(
             f"Start to delete model, user_id: {user_id}, tenant_id: {tenant_id}")
         model_name = await delete_model_for_tenant(user_id, tenant_id, display_name)
@@ -514,7 +606,9 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
 
 
 @router.get("/list")
-async def get_model_list(authorization: Optional[str] = Header(None)):
+async def get_model_list(
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
     """Get detailed information for all models for the current tenant.
 
     Returns each model enriched with repo-qualified `model_name` and a normalized
@@ -522,9 +616,9 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
     """
 
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         logger.debug(
-            f"Start to list models, user_id: {user_id}, tenant_id: {tenant_id}")
+            f"Start to list models, user_id: {current_user.user_id}, tenant_id: {tenant_id}")
         model_list = await list_models_for_tenant(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model list",
@@ -540,10 +634,12 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
 
 
 @router.get("/llm_list")
-async def get_llm_model_list(authorization: Optional[str] = Header(None)):
+async def get_llm_model_list(
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
     """Get list of LLM models for the current tenant."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         llm_list = await list_llm_models_for_tenant(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved LLM list",
@@ -562,16 +658,15 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
 async def check_model_health(
         display_name: Annotated[str, Query(..., description="Display name to check")],
         model_type: Annotated[str, Query(..., description="...")],
-        authorization: Optional[str] = Header(None)
+        current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Check and update model connectivity, returning the latest status.
 
     Args:
         display_name: Display name of the model to check.
-        authorization: Bearer token header used to derive identity context.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        tenant_id = current_user.tenant_id
         result = await check_model_connectivity(display_name, tenant_id, model_type)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully checked model connectivity",
@@ -594,25 +689,44 @@ async def check_model_health(
                             detail=str(e))
 
 
+def _normalize_probe_base_url(url: Optional[str]) -> str:
+    """Normalize a base_url for the probe key-fallback match.
+
+    Only trailing slashes are stripped: the match must stay an exact-string
+    comparison — prefix or fuzzy matching would re-open the exfiltration
+    path the fallback guards against.
+    """
+    return (url or "").rstrip("/")
+
+
 @router.post("/temporary_healthcheck")
 async def check_temporary_model_health(
-    request: ModelProbeRequest, authorization: Optional[str] = Header(None)
+    request: ModelProbeRequest,
+    current_user: CurrentUser = Depends(authenticate),
 ):
     """Verify connectivity for the provided model configuration without persisting it.
 
+    Authentication only: any tenant user may verify a candidate model config.
+
     Args:
         request: Model configuration to verify.
-        authorization: Bearer token header used to enforce authentication.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
         # Edit-dialog probes arrive without the api_key (the backend never
         # returns the persisted key to the client, and the dialog leaves the
         # field empty to "keep existing"). Fall back to the stored key so
-        # verifying does not require retyping it.
+        # verifying does not require retyping it — but ONLY when the probe
+        # targets the stored endpoint itself: substituting the key while the
+        # caller controls base_url would let any tenant member exfiltrate a
+        # stored key by pointing the probe at their own server.
         if request.probe_model_id is not None and request.api_key in (None, "", "sk-no-api-key"):
-            stored_model = get_model_by_model_id(request.probe_model_id, tenant_id=tenant_id)
-            if stored_model and stored_model.get("api_key"):
+            stored_model = get_model_by_model_id(request.probe_model_id, tenant_id=current_user.tenant_id)
+            if (
+                stored_model
+                and stored_model.get("api_key")
+                and _normalize_probe_base_url(request.base_url)
+                == _normalize_probe_base_url(stored_model.get("base_url"))
+            ):
                 request.api_key = stored_model["api_key"]
         result = await verify_model_config_connectivity(request.model_dump())
         if result.get("connectivity") is True:
@@ -647,7 +761,7 @@ async def check_temporary_model_health(
 @router.post("/manage/healthcheck")
 async def manage_check_model_health(
     request: ManageTenantModelHealthcheckRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Check and update model connectivity for a specified tenant (admin/manage operation).
 
@@ -655,15 +769,14 @@ async def manage_check_model_health(
 
     Args:
         request: Query request with target tenant_id and model display_name.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Connectivity check result with updated status.
     """
+    _require_manage_scope(current_user, request.tenant_id)
     try:
-        user_id, _ = get_current_user_id(authorization)
         logger.debug(
-            f"Start to check model connectivity for tenant, user_id: {user_id}, "
+            f"Start to check model connectivity for tenant, user_id: {current_user.user_id}, "
             f"target_tenant_id: {request.tenant_id}, display_name: {request.display_name}")
 
         result = await check_model_connectivity(
@@ -692,7 +805,7 @@ async def manage_check_model_health(
 @router.post("/manage/create")
 async def manage_create_model(
     request: ManageTenantModelCreateRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Create a model in a specified tenant (admin/manage operation).
 
@@ -700,13 +813,13 @@ async def manage_create_model(
 
     Args:
         request: Model configuration with target tenant_id.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Success message on successful creation.
     """
+    _require_manage_scope(current_user, request.tenant_id)
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id = current_user.user_id
         logger.debug(
             f"Start to create model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}")
 
@@ -743,7 +856,7 @@ async def manage_create_model(
 @router.post("/manage/update")
 async def manage_update_model(
     request: ManageTenantModelUpdateRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Update a model in a specified tenant (admin/manage operation).
 
@@ -751,13 +864,13 @@ async def manage_update_model(
 
     Args:
         request: Update payload with target tenant_id and current display_name.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Success message on successful update.
     """
+    _require_manage_scope(current_user, request.tenant_id)
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id = current_user.user_id
         logger.debug(
             f"Start to update model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
             f"current_display_name: {request.current_display_name}")
@@ -795,7 +908,7 @@ async def manage_update_model(
 @router.post("/manage/delete")
 async def manage_delete_model(
     request: ManageTenantModelDeleteRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_DELETE_PERMISSION)),
 ):
     """Delete a model from a specified tenant (admin/manage operation).
 
@@ -803,13 +916,13 @@ async def manage_delete_model(
 
     Args:
         request: Delete request with target tenant_id and display_name.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Success message with deleted model name.
     """
+    _require_manage_scope(current_user, request.tenant_id)
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id = current_user.user_id
         logger.debug(
             f"Start to delete model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
             f"display_name: {request.display_name}")
@@ -839,7 +952,7 @@ async def manage_delete_model(
 @router.post("/manage/batch_create")
 async def manage_batch_create_models(
     request: ManageBatchCreateModelsRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Batch create/update models in a specified tenant (admin/manage operation).
 
@@ -848,13 +961,13 @@ async def manage_batch_create_models(
 
     Args:
         request: Batch payload with target tenant_id, provider, type, api_key, and models list.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Success message on completion.
     """
+    _require_manage_scope(current_user, request.tenant_id)
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id = current_user.user_id
         logger.debug(
             f"Start to batch create models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
             f"provider: {request.provider}, type: {request.type}, models count: {len(request.models)}")
@@ -892,7 +1005,7 @@ async def manage_batch_create_models(
 @router.post("/manage/list", response_model=ManageTenantModelListResponse)
 async def manage_list_models(
     request: ManageTenantModelListRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
 ):
     """List models for a specified tenant (admin/manage operation).
 
@@ -900,15 +1013,14 @@ async def manage_list_models(
 
     Args:
         request: Query request with target tenant_id and pagination params.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         Paginated model list for the specified tenant.
     """
+    _require_manage_scope(current_user, request.tenant_id)
     try:
-        user_id, _ = get_current_user_id(authorization)
         logger.debug(
-            f"Start to list models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"Start to list models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
             f"page: {request.page}, page_size: {request.page_size}")
 
         result = await list_models_for_admin(
@@ -933,7 +1045,7 @@ async def manage_list_models(
 @router.post("/manage/provider/list")
 async def manage_list_provider_models(
     request: ManageProviderModelListRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
 ):
     """List provider models for a specified tenant (admin/manage operation).
 
@@ -942,15 +1054,14 @@ async def manage_list_provider_models(
 
     Args:
         request: Query request with target tenant_id, provider, model_type.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         List of available provider models for the specified tenant.
     """
+    _require_manage_scope(current_user, request.tenant_id)
     try:
-        user_id, _ = get_current_user_id(authorization)
         logger.debug(
-            f"Start to list provider models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"Start to list provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
             f"provider: {request.provider}, model_type: {request.model_type}")
 
         model_list = await list_provider_models_for_tenant(
@@ -972,7 +1083,7 @@ async def manage_list_provider_models(
 @router.post("/manage/provider/create")
 async def manage_create_provider_models(
     request: ManageProviderModelCreateRequest,
-    authorization: Optional[str] = Header(None)
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Create/fetch provider models for a specified tenant (admin/manage operation).
 
@@ -981,15 +1092,14 @@ async def manage_create_provider_models(
 
     Args:
         request: Query request with target tenant_id, provider, model_type, and optional api_key/base_url.
-        authorization: Bearer token header used to derive `user_id`.
 
     Returns:
         List of available provider models for the specified tenant.
     """
+    _require_manage_scope(current_user, request.tenant_id)
     try:
-        user_id, _ = get_current_user_id(authorization)
         logger.debug(
-            f"Start to create provider models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"Start to create provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
             f"provider: {request.provider}, model_type: {request.model_type}")
 
         # Build provider request dict for the service function

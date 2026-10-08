@@ -261,7 +261,22 @@ class AgentVerificationConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    runtime_ref: Optional[str] = None
+    origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
+    agent_id: Optional[Union[int, str]] = Field(
+        description="Stable persisted Agent identity used for runtime events",
+        default=None,
+    )
+    version_no: Optional[int] = Field(
+        description="Resolved immutable Agent version used by this run",
+        default=None,
+    )
+    invocation_name: Optional[str] = Field(
+        description="Stable, unique callable name within the resolved Agent tree",
+        default=None,
+    )
     name: str = Field(description="Agent name")
+    display_name: Optional[str] = Field(description="User-facing Agent name", default=None)
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
@@ -275,6 +290,10 @@ class AgentConfig(BaseModel):
     output_protocol: Literal["code_action", "final_answer_envelope"] = Field(
         description="Closed model-output protocol used by the Agent runtime",
         default="code_action",
+    )
+    enable_protocol_repair_retry: bool = Field(
+        description="Whether the Agent uses strict output validation and silent protocol repair",
+        default=False,
     )
     provide_run_summary: Optional[bool] = Field(
         description="Whether to provide run summary to upper-level Agent", default=False
@@ -371,6 +390,13 @@ class AgentRunInfo(BaseModel):
         "Transport can be 'sse' or 'streamable-http'. If string, transport is auto-detected based on URL ending: "
         "URLs ending with '/sse' use 'sse' transport, URLs ending with '/mcp' use 'streamable-http' transport. "
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",
+        default=None,
+    )
+    mcp_request_timeout_seconds: Optional[float] = Field(
+        description=(
+            "Maximum seconds allowed to establish an MCP connection and complete "
+            "the initialization handshake. It does not limit tool execution."
+        ),
         default=None,
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
