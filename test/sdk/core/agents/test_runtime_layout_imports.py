@@ -81,3 +81,14 @@ assert modality.LLMRequest is LLMRequest
 request = LLMRequest(messages=[{'role': 'user', 'content': 'hello'}], kwargs={'temperature': 0})
 assert pickle.loads(pickle.dumps(request)) == request
 """)
+
+
+def test_nexent_agent_uses_public_entry_and_canonical_helper():
+    """The assembled Agent imports implementation helpers from their owner."""
+    run_isolated("""
+from nexent.core.agents import CoreAgent
+from nexent.core.agents import nexent_agent
+from nexent.core.agents.execution.code.legacy_agent import convert_code_format
+assert nexent_agent.CoreAgent is CoreAgent
+assert nexent_agent.convert_code_format is convert_code_format
+""")
