@@ -3,7 +3,10 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Steps } from "antd";
+import { Button } from "antd";
+import { DownOutlined, UpOutlined } from "@ant-design/icons";
+import { BookOpen, FolderPlus, Link2, Upload, Workflow } from "lucide-react";
+import styles from "./AidpKnowledgeVisuals.module.css";
 
 /**
  * Collapsible guide shown above the AIDP knowledge base overview.
@@ -19,14 +22,14 @@ const AidpKnowledgeGuide: React.FC = () => {
 
   return (
     <section className="w-full shrink-0">
-      <div className="flex min-h-9 items-center justify-between gap-4">
-        <h1 className="text-lg font-semibold text-gray-800">
-          {t("aidpKnowledge.overviewTitle")}
-        </h1>
+      <div className={styles.guideHeader}>
+        <h1>{t("aidpKnowledge.overviewTitle")}</h1>
         <Button
           type="link"
           size="small"
-          className="px-0"
+          className={styles.guideToggle}
+          icon={expanded ? <UpOutlined /> : <DownOutlined />}
+          iconPlacement="end"
           onClick={() => setExpanded((previous) => !previous)}
           aria-expanded={expanded}
         >
@@ -37,20 +40,56 @@ const AidpKnowledgeGuide: React.FC = () => {
       </div>
 
       {expanded && (
-        <div className="pb-5 pt-2">
-          <p className="text-sm leading-6 text-gray-600">
-            {t("aidpKnowledge.guideIntro")}
-          </p>
-          <Steps
-            responsive
-            size="small"
-            className="mt-6"
-            items={[
-              { title: t("aidpKnowledge.guideStepCreate") },
-              { title: t("aidpKnowledge.guideStepUpload") },
-              { title: t("aidpKnowledge.guideStepAgent") },
-            ]}
-          />
+        <div className={styles.guideBody}>
+          <div>
+            <h2 className={styles.guideHeading}>
+              <BookOpen size={16} aria-hidden="true" />
+              {t("aidpKnowledge.guideWhatIs")}
+            </h2>
+            <p className={styles.guideIntro}>{t("aidpKnowledge.guideIntro")}</p>
+          </div>
+          <div className={styles.guideFlow}>
+            <h2 className={styles.guideHeading}>
+              <Workflow size={16} aria-hidden="true" />
+              {t("aidpKnowledge.guideFlowTitle")}
+            </h2>
+            <div
+              className={styles.guideSteps}
+              aria-label={t("aidpKnowledge.guideTitle")}
+            >
+              {[
+                {
+                  title: t("aidpKnowledge.guideStepCreate"),
+                  description: t("aidpKnowledge.guideStepCreateDescription"),
+                  icon: FolderPlus,
+                },
+                {
+                  title: t("aidpKnowledge.guideStepUpload"),
+                  description: t("aidpKnowledge.guideStepUploadDescription"),
+                  icon: Upload,
+                },
+                {
+                  title: t("aidpKnowledge.guideStepAgent"),
+                  description: t("aidpKnowledge.guideStepAgentDescription"),
+                  icon: Link2,
+                },
+              ].map((step, index) => (
+                <article key={step.title} className={styles.guideStep}>
+                  <h3>
+                    {t("aidpKnowledge.guideStepLabel", {
+                      step: index + 1,
+                      title: step.title,
+                    })}
+                  </h3>
+                  <p>{step.description}</p>
+                  <step.icon
+                    className={styles.stepDecoration}
+                    aria-hidden="true"
+                  />
+                </article>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </section>

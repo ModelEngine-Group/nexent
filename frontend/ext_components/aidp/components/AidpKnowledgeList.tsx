@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import {
   Button,
   Checkbox,
+  ConfigProvider,
   Dropdown,
   Input,
   type MenuProps,
@@ -18,15 +19,17 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
+  ClockCircleOutlined,
+  DatabaseOutlined,
   EllipsisOutlined,
   FileAddOutlined,
-  PlusOutlined,
+  FileTextOutlined,
   ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
   TableOutlined,
 } from "@ant-design/icons";
-import { BookOpen, SquarePen, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import {
@@ -42,6 +45,15 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { Can } from "@/components/permission/Can";
 import AidpKnowledgeGuide from "./AidpKnowledgeGuide";
 import AidpPagination from "./AidpPagination";
+import { aidpKnowledgeVisualTheme } from "./aidpKnowledgeVisualTheme";
+import styles from "./AidpKnowledgeVisuals.module.css";
+
+/** Keep the compact card date in the UCD year-month-day format. */
+function formatCardDate(value: unknown): string {
+  if (formatAidpDateTime(value) === AIDP_UNKNOWN_VALUE)
+    return AIDP_UNKNOWN_VALUE;
+  return new Date(value as string).toLocaleDateString("sv-SE");
+}
 
 /** Overview presentation modes. Cards are the default. */
 export type AidpKbViewMode = "cards" | "table";
@@ -104,7 +116,6 @@ interface AidpKnowledgeListProps {
   onRefresh: () => void;
   onCreateNew: () => void;
   onImport: (kb: AidpKnowledgeBaseItem) => void;
-  onEdit: (kb: AidpKnowledgeBaseItem) => void;
   onDelete: (kb: AidpKnowledgeBaseItem) => void;
   onRetry: () => void;
 }
@@ -187,7 +198,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   onRefresh,
   onCreateNew,
   onImport,
-  onEdit,
   onDelete,
   onRetry,
 }) => {
@@ -292,11 +302,8 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         label: t("aidpKnowledge.importFile"),
       },
       {
-        key: "edit",
-        icon: <SquarePen className="h-3.5 w-3.5" />,
-        label: t("common.edit"),
+        type: "divider" as const,
       },
-      { type: "divider" as const },
       {
         key: "delete",
         danger: true,
@@ -307,7 +314,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     onClick: ({ key, domEvent }) => {
       domEvent.stopPropagation();
       if (key === "import") onImport(kb);
-      if (key === "edit") onEdit(kb);
       if (key === "delete") onDelete(kb);
     },
   });
@@ -318,6 +324,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         <Button
           type="text"
           size="small"
+          className={styles.cardMore}
           aria-label={t("aidpKnowledge.moreOperations")}
           icon={<EllipsisOutlined />}
           onClick={(event) => event.stopPropagation()}
@@ -326,7 +333,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     ) : null;
 
   const renderCards = () => (
-    <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 2xl:grid-cols-4">
+    <div className={styles.cardGrid}>
       {displayedKbs.map((kb) => (
         <article
           key={kb.kds_id}
@@ -334,67 +341,71 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
           tabIndex={0}
           onClick={() => onSelect(kb)}
           onKeyDown={(event) => {
+            if (event.target !== event.currentTarget) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               onSelect(kb);
             }
           }}
-          className="group flex min-h-[172px] cursor-pointer flex-col rounded-lg border border-gray-200 bg-white p-4 transition hover:border-blue-300 hover:shadow-sm"
+          className={styles.card}
         >
-          <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
-              <BookOpen size={20} strokeWidth={1.8} />
-            </span>
-            <div className="min-w-0 flex-1 pt-0.5">
-              <h3
-                className="truncate text-sm font-semibold text-gray-800"
-                title={kb.kds_name}
-              >
+          <div className={styles.cardContent}>
+            <div className={styles.cardHeader}>
+              <span className={styles.cardIcon} aria-hidden="true">
+                <DatabaseOutlined />
+              </span>
+              <h3 className={styles.cardTitle} title={kb.kds_name}>
                 {kb.kds_name}
               </h3>
-              <p
-                className="mt-1 line-clamp-2 min-h-9 text-xs leading-[18px] text-gray-500"
-                title={kb.description || undefined}
-              >
-                {kb.description?.trim() || t("aidpKnowledge.noDescription")}
-              </p>
+              {renderMoreMenu(kb)}
             </div>
-            <div className="-mr-2 -mt-2 shrink-0">{renderMoreMenu(kb)}</div>
+
+            <p
+              className={styles.cardDescription}
+              title={kb.description || undefined}
+            >
+              {kb.description?.trim() || t("aidpKnowledge.noDescription")}
+            </p>
           </div>
 
-          <div className="mt-auto pt-4">
-            <div className="flex min-w-0 items-center gap-1.5 text-xs text-gray-500">
-              <span className="shrink-0">{t("aidpKnowledge.cardUpdated")}</span>
-              <span
-                className="truncate"
-                title={formatAidpDateTime(kb.updated_at)}
-              >
-                {formatAidpDateTime(kb.updated_at)}
+          <div className={styles.cardMetadata}>
+            <span
+              className={styles.cardDate}
+              title={`${t("aidpKnowledge.cardUpdated")} ${formatAidpDateTime(kb.updated_at)}`}
+            >
+              <ClockCircleOutlined aria-hidden="true" />
+              <span className={styles.metadataValue}>
+                {t("aidpKnowledge.cardUpdated")} {formatCardDate(kb.updated_at)}
               </span>
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-3 border-t border-gray-100 pt-2 text-xs text-gray-500">
-              <span
-                className="truncate"
-                title={t("aidpKnowledge.cardDocuments", {
-                  count: formatAidpDocumentCount(
-                    kb.document_count,
-                    kb.document_count_reliable
-                  ),
-                })}
-              >
-                {t("aidpKnowledge.cardDocuments", {
-                  count: formatAidpDocumentCount(
-                    kb.document_count,
-                    kb.document_count_reliable
-                  ),
-                })}
+            </span>
+            <span
+              className={styles.cardStatistic}
+              title={t("aidpKnowledge.cardDocuments", {
+                count: formatAidpDocumentCount(
+                  kb.document_count,
+                  kb.document_count_reliable
+                ),
+              })}
+            >
+              <FileTextOutlined aria-hidden="true" />
+              <span className={styles.metadataValue}>
+                {formatAidpDocumentCount(
+                  kb.document_count,
+                  kb.document_count_reliable
+                )}
               </span>
-              <span className="shrink-0">
-                {t("aidpKnowledge.cardCapacity", {
-                  value: formatAidpCapacity(kb.current_cap),
-                })}
+            </span>
+            <span
+              className={styles.cardStatistic}
+              title={t("aidpKnowledge.cardCapacity", {
+                value: formatAidpCapacity(kb.current_cap),
+              })}
+            >
+              <DatabaseOutlined aria-hidden="true" />
+              <span className={styles.metadataValue}>
+                {formatAidpCapacity(kb.current_cap)}
               </span>
-            </div>
+            </span>
           </div>
         </article>
       ))}
@@ -426,7 +437,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         ({
           width: columnWidths[key] ?? baseWidths[key],
           onResize: (width: number) => handleResize(key, width),
-        }) as any,
+        }) as ResizableTitleProps,
     });
     const allColumns: Record<
       AidpKbColumnKey,
@@ -440,7 +451,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         render: (_value, kb) => (
           <button
             type="button"
-            className="max-w-full truncate text-left font-medium text-blue-600 hover:text-blue-700"
+            className={`${styles.tableName} max-w-full truncate text-left font-medium`}
             title={kb.kds_name}
             onClick={(event) => {
               event.stopPropagation();
@@ -509,17 +520,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
               </Button>
               <Button
                 type="link"
-                size="small"
-                className="px-1"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onEdit(kb);
-                }}
-              >
-                {t("common.edit")}
-              </Button>
-              <Button
-                type="link"
                 danger
                 size="small"
                 className="px-1"
@@ -552,7 +552,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         dataSource={displayedKbs}
         pagination={false}
         components={{
-          header: { cell: ResizableTitle as React.ComponentType<any> },
+          header: { cell: ResizableTitle },
         }}
         scroll={{ x: totalWidth }}
         onRow={(kb) => ({
@@ -624,84 +624,90 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col gap-3">
-      <AidpKnowledgeGuide />
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
-          <div className="flex min-w-56 flex-1 items-center gap-2">
-            <Input
-              allowClear
-              className="max-w-sm"
-              placeholder={t("aidpKnowledge.searchPlaceholder")}
-              prefix={<SearchOutlined className="text-gray-400" />}
-              value={keyword}
-              onChange={(event) => onKeywordChange(event.target.value)}
-              size="middle"
-            />
-            <Tooltip title={t("aidpKnowledge.refresh")}>
-              <Button
-                aria-label={t("aidpKnowledge.refresh")}
-                icon={<ReloadOutlined spin={isLoading} />}
-                onClick={onRefresh}
+    <ConfigProvider theme={aidpKnowledgeVisualTheme}>
+      <div
+        className={`${styles.overview} flex h-full min-h-0 w-full flex-col gap-3`}
+      >
+        <AidpKnowledgeGuide />
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+          <div className={styles.toolbar}>
+            <div className={styles.searchGroup}>
+              <Input
+                allowClear
+                className={styles.searchInput}
+                placeholder={t("aidpKnowledge.searchPlaceholder")}
+                prefix={<SearchOutlined />}
+                value={keyword}
+                onChange={(event) => onKeywordChange(event.target.value)}
+                size="middle"
               />
-            </Tooltip>
-          </div>
-          <div className="ml-auto flex items-center justify-end gap-2">
-            <Button
-              type="primary"
-              onClick={onCreateNew}
-              icon={<PlusOutlined />}
-            >
-              {t("aidpKnowledge.createKb")}
-            </Button>
-            <Segmented
-              value={viewMode}
-              onChange={(value) => onViewModeChange(value as AidpKbViewMode)}
-              options={[
-                {
-                  value: "cards",
-                  title: t("aidpKnowledge.viewCards"),
-                  label: <AppstoreOutlined />,
-                },
-                {
-                  value: "table",
-                  title: t("aidpKnowledge.viewTable"),
-                  label: <TableOutlined />,
-                },
-              ]}
-            />
-            {viewMode === "table" && (
-              <Popover
-                trigger="click"
-                placement="bottomRight"
-                content={columnSettingContent}
+              <Tooltip title={t("aidpKnowledge.refresh")}>
+                <Button
+                  type="text"
+                  aria-label={t("aidpKnowledge.refresh")}
+                  icon={<ReloadOutlined spin={isLoading} />}
+                  onClick={onRefresh}
+                />
+              </Tooltip>
+            </div>
+            <div className="ml-auto flex items-center justify-end gap-2">
+              <Button
+                type="primary"
+                className={styles.createButton}
+                onClick={onCreateNew}
               >
-                <Tooltip title={t("aidpKnowledge.columnSettings")}>
-                  <Button
-                    aria-label={t("aidpKnowledge.columnSettings")}
-                    icon={<SettingOutlined />}
-                  />
-                </Tooltip>
-              </Popover>
-            )}
+                {t("aidpKnowledge.createKb")}
+              </Button>
+              <Segmented
+                className={styles.viewSwitch}
+                value={viewMode}
+                onChange={(value) => onViewModeChange(value as AidpKbViewMode)}
+                options={[
+                  {
+                    value: "table",
+                    title: t("aidpKnowledge.viewTable"),
+                    label: <TableOutlined />,
+                  },
+                  {
+                    value: "cards",
+                    title: t("aidpKnowledge.viewCards"),
+                    label: <AppstoreOutlined />,
+                  },
+                ]}
+              />
+              {viewMode === "table" && (
+                <Popover
+                  trigger="click"
+                  placement="bottomRight"
+                  content={columnSettingContent}
+                >
+                  <Tooltip title={t("aidpKnowledge.columnSettings")}>
+                    <Button
+                      aria-label={t("aidpKnowledge.columnSettings")}
+                      icon={<SettingOutlined />}
+                    />
+                  </Tooltip>
+                </Popover>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto">{renderBody()}</div>
-        {kbs.length > 0 && (
-          <div className="flex shrink-0 justify-end border-t border-gray-200 px-4 py-3">
-            <AidpPagination
-              currentPage={currentPage}
-              pageSize={pageSize}
-              total={total}
-              totalReliable={totalReliable}
-              hasMore={hasMore}
-              onPageChange={onPageChange}
-              onPageSizeChange={onPageSizeChange}
-            />
-          </div>
-        )}
-      </section>
-    </div>
+          <div className="min-h-0 flex-1 overflow-auto">{renderBody()}</div>
+          {kbs.length > 0 && (
+            <div className="flex shrink-0 pt-3">
+              <AidpPagination
+                currentPage={currentPage}
+                pageSize={pageSize}
+                total={total}
+                totalReliable={totalReliable}
+                hasMore={hasMore}
+                onPageChange={onPageChange}
+                onPageSizeChange={onPageSizeChange}
+              />
+            </div>
+          )}
+        </section>
+      </div>
+    </ConfigProvider>
   );
 };
 
