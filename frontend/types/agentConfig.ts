@@ -1,5 +1,6 @@
 // Agent Configuration Types
 import type { Dispatch, SetStateAction } from "react";
+import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
 
 import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
@@ -212,6 +213,7 @@ export interface Agent {
   greeting_message?: string;
   example_questions?: string[];
   icon_url?: string;
+  repository_info?: MyAgentRepositoryInfoItem[];
 }
 
 export interface Tool {

@@ -26,6 +26,7 @@ export async function invalidateAgentRepositoryCaches(
     [AGENT_REPOSITORY_LISTINGS_QUERY_KEY],
     [MY_EDITABLE_AGENTS_QUERY_KEY],
     [AGENT_REPOSITORY_DETAIL_QUERY_KEY],
+    [AGENTS_LIST_QUERY_KEY],
   ] as const;
 
   await Promise.all(
