@@ -24,7 +24,7 @@ cases:
     stage: D2
     status: implemented
     contract_hash: sha256:9e5d436508638774329620f8bea1420eab531ad470095c935fac5fccc69e894c
-    implementation_hash: sha256:570d7db5b7480c6b3a3a3adcc953158f7c496e44a79e90ad1ca3a4df676d573f
+    implementation_hash: sha256:f8f1bc3e7a01d6ffd739d9fbe695e28533e4c410847a09b6405a7dbd4c2e948a
     implementation:
       - framework: pytest
         file: test/automation/d2/test_model_attempt_sse.py
@@ -58,7 +58,7 @@ cases:
     stage: D1
     status: implemented
     contract_hash: sha256:7ef8664f2224d068d7deafecf80f09353d734bc10b35a1147b3cc58d1ae6eacd
-    implementation_hash: sha256:1dee7e7ce90f70c40d02907f11be7b55665495fdcaa3dfdec3ab478953c5c38c
+    implementation_hash: sha256:1e23ba2952b874e8029345d74ff832663be433870e57e403ccac4370e9237916
     implementation:
       - framework: pytest
         file: test/automation/d1/test_semantic_repair_stream.py

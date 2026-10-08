@@ -287,7 +287,7 @@ agents_mod.output_protocol = output_protocol_module
 assert output_protocol_spec and output_protocol_spec.loader
 output_protocol_spec.loader.exec_module(output_protocol_module)
 
-CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "core_agent.py"
+CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "execution" / "code" / "legacy_agent.py"
 CORE_AGENT_NAME = "sdk.nexent.core.agents.core_agent"
 sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core")]
 
@@ -308,6 +308,7 @@ mcp_errors_spec.loader.exec_module(mcp_errors_module)
 sys.modules["sdk.nexent.core.utils"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core" / "utils")]
 spec = importlib.util.spec_from_file_location(CORE_AGENT_NAME, CORE_AGENT_PATH)
 core_agent_module = importlib.util.module_from_spec(spec)
+core_agent_module.__package__ = "sdk.nexent.core.agents.execution.code"
 sys.modules[CORE_AGENT_NAME] = core_agent_module
 agents_mod.core_agent = core_agent_module
 assert spec and spec.loader

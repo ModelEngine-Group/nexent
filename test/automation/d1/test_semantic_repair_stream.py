@@ -18,7 +18,7 @@ def _events(observer):
 
 
 def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
-    caplog.set_level(logging.INFO, logger="nexent.core.agents.core_agent")
+    caplog.set_level(logging.INFO, logger="model_call.core_agent")
     observer = MessageObserver(lang="en")
     first_repair_chunk = threading.Event()
     release_repair = threading.Event()
@@ -63,7 +63,7 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
     agent.model = ControlledModel()
     agent.context_runtime = MagicMock()
     agent.context_runtime.prepare_step.return_value = SimpleNamespace(
-        messages=[], evidence=None
+        messages=[], memory_messages=None, evidence=None
     )
     agent.context_runtime.token_counts.return_value = {}
     agent._history_step_count = 0
@@ -75,6 +75,7 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
     agent._protocol_repair_messages = []
     agent._consecutive_protocol_errors = 0
     agent.output_protocol = "code_action"
+    agent.enable_protocol_repair_retry = True
     agent.verification_controller = None
     agent.stop_event = threading.Event()
     agent.enable_planning = False
@@ -146,5 +147,10 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
         for event in events
         if event["type"].startswith("model_output_") and event["content"]
     )
-    assert "model_output_protocol_repair_accepted" in caplog.text
-    assert "final_answer('ok')" not in caplog.text
+    lifecycle_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("event=model_output_")
+    ]
+    assert any("model_output_protocol_repair_accepted" in message for message in lifecycle_messages)
+    assert all("final_answer('ok')" not in message for message in lifecycle_messages)

@@ -22,7 +22,7 @@ import pytest
 def _load_tool_user_context_module():
     module_path = os.path.normpath(os.path.join(
         os.path.dirname(__file__), "..", "..", "..", "..",
-        "sdk", "nexent", "core", "agents", "tool_user_context.py",
+        "sdk", "nexent", "core", "agents", "resources", "tool_user_context.py",
     ))
     spec = importlib.util.spec_from_file_location("tool_user_context", module_path)
     module = importlib.util.module_from_spec(spec)

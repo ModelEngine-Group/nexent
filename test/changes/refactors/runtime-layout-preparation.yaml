@@ -1,0 +1,11 @@
+schema_version: '1.0'
+changes:
+  - change_id: RLP-REFACTOR-001
+    change_type: refactor
+    title: Prepare existing runtime and LLM adapter directories
+    description: Relocate existing implementations with identical legacy imports, class identity and behavior; no NativeAgent implementation or request logic changes.
+    feature_contract_changed: false
+    affected_features: {existing: [CMSR-005], added: [], modified: [], retired: []}
+    affected_cases: {existing: [CMSR-D1-003, CMSR-D1-004, CMSR-D2-001], added: [], modified: [], retired: []}
+    no_case_change_reason: Existing case contracts remain unchanged; the semantic-repair fixture now supplies memory_messages and explicitly enables the repair policy required by its existing contract; new import-identity checks are Legacy UT for internal layout compatibility, not new product behavior. API and UI contracts are unchanged. Deployment/import smoke is recorded in the scoped SPEC evidence.
+    notes: Scope and regression ACs are defined in nexent-doc/docs/Developing/runtime-model-capability-execution/PR4053-DIRECTORY-PREP.md. Native runtime, composition facade and new model service contracts remain future work.

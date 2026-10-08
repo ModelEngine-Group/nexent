@@ -248,7 +248,7 @@ def _load_core_agent_module():
     # __file__ is C:\Project\nexent\test\sdk\core\agents\test_core_agent.py
     # We need to go up 5 levels to get to C:\Project\nexent
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-    core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "core_agent.py")
+    core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "execution", "code", "legacy_agent.py")
 
     # Create full package hierarchy
     sys.modules["sdk"] = ModuleType("sdk")
@@ -306,7 +306,7 @@ def _load_core_agent_module():
     # Load the module
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.core_agent", core_agent_path)
     module = importlib.util.module_from_spec(spec)
-    module.__package__ = "sdk.nexent.core.agents"
+    module.__package__ = "sdk.nexent.core.agents.execution.code"
     sys.modules["sdk.nexent.core.agents.core_agent"] = module
 
     # Override some functions with mock implementations
@@ -1855,7 +1855,7 @@ class TestRunStreamRealExecution:
     @pytest.fixture(autouse=True)
     def _stub_sandbox_context(self, monkeypatch):
         """Keep executor tests independent of the sandbox's external imports."""
-        sandbox_module = ModuleType(f"{core_agent_module.__package__}.sandbox")
+        sandbox_module = ModuleType("sdk.nexent.core.agents.sandbox")
         sandbox_module._execute_with_tool_context = lambda executor, code: executor(code)
         monkeypatch.setitem(sys.modules, sandbox_module.__name__, sandbox_module)
 
@@ -2048,13 +2048,13 @@ class TestRunStreamRealExecution:
             # Find the core_agent.py file
             test_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(test_dir))))
-            core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "core_agent.py")
+            core_agent_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "execution", "code", "legacy_agent.py")
             _register_sdk_consts_package(project_root)
 
             # Load the module
             spec = importlib.util.spec_from_file_location("core_agent_test", core_agent_path)
             module = importlib.util.module_from_spec(spec)
-            module.__package__ = "sdk.nexent.core.agents"
+            module.__package__ = "sdk.nexent.core.agents.execution.code"
 
             sys.modules["sdk.nexent.core.agents.core_agent"] = module
 

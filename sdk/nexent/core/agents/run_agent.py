@@ -32,7 +32,7 @@ from ..concurrency.helpers import (
 from ..concurrency.cancellation import RunTerminated
 from ..model_errors import ModelInvocationTerminalError
 from .agent_model import AgentRunInfo
-from .managed_mcp import ManagedMCPToolCollection
+from .resources.managed_mcp import ManagedMCPToolCollection
 from ...consts.mcp_errors import (
     is_mcp_connection_timeout_error,
     is_mcp_timeout_error,
