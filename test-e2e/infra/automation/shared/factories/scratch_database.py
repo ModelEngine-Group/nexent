@@ -60,7 +60,7 @@ def isolated_schema_database():
     target=postgres.postgres_target()
     dump=postgres._run(['docker','exec',target.container,'pg_dump','--schema-only',
                        '--no-owner','--no-privileges','-U',target.user,'-d',target.database])
-    if dump.returncode:
+    if dump.returncode or not dump.stdout or not dump.stdout.strip():
         raise RuntimeError('Cannot export deployment schema for isolated migration test')
     name=scratch_name()
     create_scratch(name)

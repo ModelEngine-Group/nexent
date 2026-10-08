@@ -33,10 +33,14 @@ def configured_product_storage():
             endpoint = os.environ.get('NEXENT_TEST_MINIO_ENDPOINT')
             if not endpoint:
                 storage = _inspect(os.getenv('NEXENT_TEST_MINIO_CONTAINER', 'nexent-minio'))
-                addresses = {v.get('IPAddress') for v in storage['NetworkSettings']['Networks'].values() if v.get('IPAddress')}
-                if len(addresses) != 1:
-                    raise AssetDependencyError('storage','minio',detail='Set NEXENT_TEST_MINIO_ENDPOINT for ambiguous network')
-                endpoint = 'http://' + addresses.pop() + ':9000'
+                bindings = (storage['NetworkSettings'].get('Ports') or {}).get('9000/tcp') or []
+                if os.name == 'nt' and bindings:
+                    endpoint = 'http://127.0.0.1:' + str(int(bindings[0]['HostPort']))
+                else:
+                    addresses = {v.get('IPAddress') for v in storage['NetworkSettings']['Networks'].values() if v.get('IPAddress')}
+                    if len(addresses) != 1:
+                        raise AssetDependencyError('storage','minio',detail='Set NEXENT_TEST_MINIO_ENDPOINT for ambiguous network')
+                    endpoint = 'http://' + addresses.pop() + ':9000'
             values['MINIO_ENDPOINT'] = endpoint
     if not all(values[key] for key in required):
         raise AssetDependencyError('storage','minio',detail='Required storage configuration is incomplete')

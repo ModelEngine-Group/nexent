@@ -33,7 +33,8 @@ async def _delete_set(identity, set_id: int) -> None:
     mark_asset_state('owned_evaluation_sets',str(set_id),'DELETED')
 
 
-async def prepare_completed_run(identity, *, owner='LOCAL-EVALUATION-PREP') -> int:
+async def prepare_completed_run(identity, *, owner='LOCAL-EVALUATION-PREP', case_count=1,
+                                section='evaluation', key='completed_run_id') -> int:
     """Create an isolated completed run, not execute AGT-059 as a prerequisite.
 
     Register cleanup immediately after each creation. Consumer assertions and
@@ -44,22 +45,29 @@ async def prepare_completed_run(identity, *, owner='LOCAL-EVALUATION-PREP') -> i
     from d3.assets import model_id
     from shared.asset_registry import register_asset, mark_asset_state
 
+    if not isinstance(case_count, int) or not 1 <= case_count <= 200:
+        raise ValueError('Isolated evaluation preparation supports 1..200 cases')
+
     def cleanup(path):
         return {'service': 'config', 'identity': identity.id, 'method': 'DELETE',
                 'path': path, 'allowed_statuses': [200, 404]}
 
+    role = 'evaluation_seed' if section == 'evaluation' else key + '_agent'
+    set_key = 'completed_set_id' if section == 'evaluation' else key + '_set_id'
     async with _draft_agent(identity, name_prefix='local-eval', retain_for_batch=True,
-                            owner_case_id=owner, registry_role='evaluation_seed',
+                            owner_case_id=owner, registry_role=role,
                             cleanup_identity=identity.id) as (agent_id, _):
         set_id = await _create_set(identity, name_prefix='local-evaluation')
-        register_asset('evaluation', 'completed_set_id', set_id, owner_case_id=owner,
+        register_asset(section, set_key, set_id, owner_case_id=owner,
                        cleanup=cleanup(f'/evaluation-sets/{set_id}'))
         async with client('config', token=identity.access_token) as api:
-            seeded = await api.post(f'/evaluation-sets/{set_id}/cases', json={
-                'inputs': {'query': 'Only reply LOCAL_EVAL_OK'},
-                'label': {'answer': 'LOCAL_EVAL_OK'},
-            })
-            assert_status(seeded, 200)
+            for index in range(case_count):
+                marker = 'LOCAL_EVAL_OK' if case_count == 1 else f'LOCAL_EVAL_OK_{index}'
+                seeded = await api.post(f'/evaluation-sets/{set_id}/cases', json={
+                    'inputs': {'query': f'Only reply {marker}'},
+                    'label': {'answer': marker},
+                })
+                assert_status(seeded, 200)
             created = await api.post('/agent-evaluations', json={
                 'agent_id': agent_id, 'judge_model_id': await model_id('llm', identity),
                 'evaluation_set_id': set_id, 'agent_version_no': 0,
@@ -68,7 +76,7 @@ async def prepare_completed_run(identity, *, owner='LOCAL-EVALUATION-PREP') -> i
             await register_partial_runs(identity, agent_id, set_id, owner=owner)
         assert_status(created, 200)
         run_id = int((_data(created) or {})['agent_evaluation_id'])
-        register_asset('evaluation', 'completed_run_id', run_id, owner_case_id=owner,
+        register_asset(section, key, run_id, owner_case_id=owner,
                        state='CREATING', cleanup=cleanup(f'/agent-evaluations/{run_id}'))
         async def read():
             async with client('config', token=identity.access_token) as api:
@@ -79,12 +87,12 @@ async def prepare_completed_run(identity, *, owner='LOCAL-EVALUATION-PREP') -> i
         try:
             await wait_ready(read, ready={'COMPLETED', 'SUCCEEDED', 'SUCCESS'},
                              failed={'FAILED', 'CANCELED', 'CANCELLED'},
-                             section='evaluation', key='completed_run_id')
+                             section=section, key=key)
         except Exception:
-            mark_asset_state('evaluation', 'completed_run_id', 'FAILED',
+            mark_asset_state(section, key, 'FAILED',
                              detail='isolated evaluation did not become ready')
             raise
-        register_asset('evaluation', 'completed_run_id', run_id, owner_case_id=owner,
+        register_asset(section, key, run_id, owner_case_id=owner,
                        cleanup=cleanup(f'/agent-evaluations/{run_id}'))
         return run_id
 

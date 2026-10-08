@@ -13,7 +13,7 @@ import pytest
 
 from d3.assets import temporary_conversation, temporary_knowledge_base, get_test_asset
 from shared.factories.files import _upload_kb_file
-from d5.assets import destructive_deployment_enabled, require_command, run_command
+from d5.assets import bash_path, destructive_deployment_enabled, require_command, run_command, run_posix_contract
 from d5.scenarios.scenario_security_reliability_deployment import (
     _docker_deployment,
     _kubernetes_deployment,
@@ -312,13 +312,12 @@ async def _migration_upgrade_compatibility(identity) -> None:
 
 async def _backup_upgrade_rollback_contracts() -> None:
     """DEP-06: deterministic Docker/Kubernetes backup and rollback assets."""
-    bash = require_command("bash")
     for contract in (
         repo_root() / "deploy" / "tests" / "test_docker_backup.sh",
         repo_root() / "deploy" / "tests" / "test_k8s_backup.sh",
     ):
         assert contract.is_file(), f"missing backup contract: {contract}"
-        code, output = await run_command(bash, str(contract), timeout=1200)
+        code, output = await run_posix_contract(contract, timeout=1200)
         assert code == 0, f"backup contract failed: {contract.name}\n{output}"
 
 

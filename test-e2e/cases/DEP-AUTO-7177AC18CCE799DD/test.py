@@ -5,6 +5,7 @@ import tempfile
 
 import pytest
 
+from d5.assets import bash_path, require_command
 from shared.config import repo_root
 
 CASE_ID = "DEP-AUTO-7177AC18CCE799DD"
@@ -118,9 +119,11 @@ def test_dep_auto_7177ac18cce799dd():
     assert docker_deploy.is_file(), "missing deploy script: " + str(docker_deploy)
     with tempfile.TemporaryDirectory() as tmp:
         proc = subprocess.run(
-            ["bash", "-c", _BASH, "nexent-sandbox-test", str(common), str(docker_deploy), tmp],
+            [require_command("bash"), "-c", _BASH, "nexent-sandbox-test",
+             bash_path(common), bash_path(docker_deploy), bash_path(tmp)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
     assert proc.returncode == 0, (
         "deployment sandbox-mode contract failed (rc="

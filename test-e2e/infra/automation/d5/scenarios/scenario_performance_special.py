@@ -113,22 +113,64 @@ async def _scheduler_load(identity) -> None:
 
 
 async def _evaluation_200(identity) -> None:
-    run_id = int(get_test_asset("performance", "evaluation_200_run_id"))
-    with Stopwatch() as timer:
-        async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-            pages = await asyncio.gather(*[
-                api.get(f"/agent-evaluations/{run_id}/cases", params={"limit": 50, "offset": offset})
-                for offset in (0, 50, 100, 150)
-            ])
-            stats = await api.get(f"/agent-evaluations/{run_id}/stats")
-            report = await api.get(f"/agent-evaluations/{run_id}/report")
-    assert timer.elapsed_ms <= threshold_ms("evaluation_report_ms", 60_000)
-    for response in pages:
-        assert_status(response, 200)
-    assert_status(stats, 200)
-    assert_status(report, 200)
-    assert sum(len((response.json().get("data") or {}).get("items") or []) for response in pages) >= 200
-    assert report.content.startswith(b"%PDF")
+    from shared.factories.evaluation import prepare_completed_run
+    from shared.asset_registry import runtime_dir
+
+    # Verify the model-backed evaluation path before launching 200 calls.
+    probe_id = await prepare_completed_run(
+        identity, owner="PERF-06", section="performance", key="evaluation_probe_run_id",
+    )
+    async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
+        probe = await api.get(f"/agent-evaluations/{probe_id}/cases")
+    assert_status(probe, 200)
+    probe_rows = (probe.json().get("data") or {}).get("items", [])
+    (runtime_dir(required=True) / "perf-06-evaluation-probe.json").write_text(
+        json.dumps({"run_id": probe_id, "cases": probe_rows}, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+    assert len(probe_rows) == 1
+    assert probe_rows[0].get("status") == "COMPLETED", (
+        "Evaluation smoke failed before the 200-case workload: "
+        + str(probe_rows[0].get("error_message") or probe_rows[0].get("status"))
+    )
+    # Own exactly 200 cases instead of depending on a stale external run ID.
+    run_id = await prepare_completed_run(
+        identity, owner="PERF-06", case_count=200,
+        section="performance", key="evaluation_200_run_id",
+    )
+    samples = []
+    # The first request warms caches; measure three independent batches.
+    for attempt in range(4):
+        with Stopwatch() as timer:
+            async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
+                pages = await asyncio.gather(*[
+                    api.get(f"/agent-evaluations/{run_id}/cases", params={"limit": 50, "offset": offset})
+                    for offset in (0, 50, 100, 150)
+                ])
+                stats = await api.get(f"/agent-evaluations/{run_id}/stats")
+                report = await api.get(f"/agent-evaluations/{run_id}/report")
+        for response in pages:
+            assert_status(response, 200)
+        assert_status(stats, 200)
+        assert_status(report, 200)
+        rows = [row for response in pages for row in (response.json().get("data") or {}).get("items", [])]
+        assert len(rows) == 200
+        assert len({row["agent_evaluation_case_id"] for row in rows}) == 200
+        summary = stats.json().get("data") or {}
+        assert summary.get("total") == 200
+        assert summary.get("pass_count", 0) + summary.get("fail_count", 0) == 200
+        assert report.content.startswith(b"%PDF")
+        if attempt:
+            samples.append(timer.elapsed_ms)
+    measurements = {
+        "run_id": run_id, "case_count": 200, "warmup_batches": 1,
+        "samples_ms": samples, "max_ms": max(samples),
+        "threshold_ms": threshold_ms("evaluation_report_ms", 60_000),
+        "scope": "Four concurrent pagination reads, statistics and PDF export; three measured batches",
+    }
+    (runtime_dir(required=True) / "perf-06-measurements.json").write_text(
+        json.dumps(measurements, indent=2), encoding="utf-8",
+    )
+    assert max(samples) <= measurements["threshold_ms"]
 
 
 async def _memory_budget(identity) -> None:

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from d5.assets import bash_path, require_command
 from shared.config import repo_root
 
 CASE_ID = 'DEP-AUTO-00C24E57476D8253'
@@ -55,7 +56,7 @@ def _write_oci_archive(path: Path) -> None:
 
 
 def _write_executable(path: Path, content: str) -> None:
-    path.write_text(content, encoding='utf-8')
+    path.write_text(content, encoding='utf-8', newline='\n')
     path.chmod(0o755)
 
 
@@ -66,7 +67,7 @@ def _loader_sandbox(tmp_path: Path) -> dict:
     bin_dir.mkdir(parents=True)
 
     load_script = repo_root() / 'deploy' / 'offline' / 'load-images.sh'
-    (pkg / 'load-images.sh').write_bytes(load_script.read_bytes())
+    (pkg / 'load-images.sh').write_text(load_script.read_text(encoding='utf-8'), encoding='utf-8', newline='\n')
     _write_oci_archive(pkg / 'images' / 'nexent.tar')
 
     _write_executable(
@@ -110,15 +111,21 @@ fi
     # Keep the command lookup hermetic.  Otherwise deleting the fake ctr still
     # discovers the host's real /usr/bin/ctr and the fallback branch is never
     # exercised.
-    (bin_dir / 'dirname').symlink_to('/usr/bin/dirname')
+    _write_executable(bin_dir / 'dirname', '#!/bin/bash\nexec /usr/bin/dirname "$@"\n')
     env = dict(os.environ)
-    env['PATH'] = str(bin_dir)
-    env['IMAGE_LOADER_LOG'] = str(log)
+    env['PATH'] = bash_path(bin_dir)
+    env['NEXENT_LOADER_PATH'] = bash_path(bin_dir)
+    env['IMAGE_LOADER_LOG'] = bash_path(log)
     return {'script': pkg / 'load-images.sh', 'env': env, 'log': log, 'bin': bin_dir}
 
 
 def _run_load(script: Path, env: dict, target: str) -> subprocess.CompletedProcess:
-    return subprocess.run(['/bin/bash', str(script), target], env=env, capture_output=True, text=True)
+    # Git Bash prepends host utilities during startup; reset PATH afterwards
+    # so every loader branch uses the sandbox's fake id/ctr/docker commands.
+    return subprocess.run([require_command('bash'), '-c',
+                           'export PATH="$NEXENT_LOADER_PATH"; source "$1" "$2"',
+                           'loader-contract', bash_path(script), target], env=env,
+                          capture_output=True, text=True, encoding='utf-8')
 
 
 def _extract_bash_function(text: str, name: str) -> str:
@@ -162,9 +169,9 @@ def _run_build_bundle(tmp_path: Path, with_assets: bool):
 
     harness = f'''#!/usr/bin/env bash
 set +e
-PROJECT_ROOT="{fake_repo}"
+PROJECT_ROOT="{bash_path(fake_repo)}"
 DEPLOY_ROOT="$PROJECT_ROOT/deploy"
-OUTPUT_DIR="{out}"
+OUTPUT_DIR="{bash_path(out)}"
 VERSION="latest"
 TARGET="k8s"
 create_offline_deploy_entrypoint() {{ return 0; }}
@@ -175,8 +182,9 @@ rc=$?
 echo "BUILD_RC=$rc" >&2
 '''
     harness_path = tmp_path / 'harness.sh'
-    harness_path.write_text(harness, encoding='utf-8')
-    result = subprocess.run(['bash', str(harness_path)], capture_output=True, text=True)
+    harness_path.write_text(harness, encoding='utf-8', newline='\n')
+    result = subprocess.run([require_command('bash'), bash_path(harness_path)],
+                            capture_output=True, text=True, encoding='utf-8')
     return result, out
 
 

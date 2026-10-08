@@ -48,6 +48,7 @@ def _run(command: list[str], *, input_text: str | None = None) -> subprocess.Com
             command,
             input=input_text,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             timeout=120,
             check=False,

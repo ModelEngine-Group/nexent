@@ -34,8 +34,9 @@ def _healthz_ready(client: httpx.Client) -> httpx.Response:
         except httpx.HTTPError:
             last_status = -1
         if time.monotonic() >= deadline:
-            raise AssertionError(
-                f'cas-mock /healthz did not become healthy within {HEALTH_RETRY_SECONDS}s; last_status={last_status}'
+            raise AssetDependencyError(
+                'services', 'cas_mock', dependency_case_id='D0-CAS-MOCK',
+                detail=f'cas-mock /healthz did not become healthy within {HEALTH_RETRY_SECONDS}s; last_status={last_status}',
             )
         time.sleep(HEALTH_RETRY_INTERVAL)
 
