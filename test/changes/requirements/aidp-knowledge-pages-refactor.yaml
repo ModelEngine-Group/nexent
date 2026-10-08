@@ -52,3 +52,16 @@ changes:
       modified: [AKPR-D2-003, AKPR-D3-001, AKPR-D4-003, AKPR-D5-001, AKPR-D5-003]
       retired: [AKPR-D1-012]
     notes: The API request and response models, AIDP-facing UI and mock no longer expose sensitive_intercept_enalbe. The ES knowledge-base path and unrelated agent safety controls are outside this change.
+  - change_id: AKPR-REQ-003
+    change_type: requirement
+    requirement_id: AKPR-001
+    title: Create AIDP knowledge bases directly from the configuration page
+    description: Remove the creation step indicator and optional import stage. Keep all knowledge-base configuration on one full-page form; submitting it creates the knowledge base and opens its detail page, where users can upload files. The create and detail page titles and detail information section headings use 18px text.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [AKPR-001], retired: []}
+    affected_cases:
+      existing: []
+      added: []
+      modified: [AKPR-D1-014, AKPR-D4-005]
+      retired: []
+    notes: The create API payload and permission/configuration fields remain unchanged; file upload remains available from the detail page. No ES page behavior changes.

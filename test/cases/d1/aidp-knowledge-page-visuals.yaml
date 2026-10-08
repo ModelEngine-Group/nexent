@@ -41,36 +41,47 @@ cases:
   - case_id: AKPR-D1-014
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
-    business_rule_ids: [AKPR-RULE-010, AKPR-RULE-016]
-    title: Creation page keeps switches beside labels and aligns paired controls
+    business_rule_ids: [AKPR-RULE-010, AKPR-RULE-016, AKPR-RULE-017]
+    title: Creation page uses 18px titles and submits directly from its single form
     type: FE-COMP
     priority: P0
     status: active
     automation: automated
-    objective: Verify the AIDP create page is full-width, section controls have the designed visual grouping, and paired controls share a baseline.
+    objective: Verify the AIDP create page uses the approved title sizes and single-page submit flow while keeping section controls aligned.
     preconditions:
-      - Render the first creation step at desktop width with safety, graph and VLM controls visible.
+      - Render the AIDP creation page at desktop width with a valid mock create response.
     test_data: {profile: mock, viewport_width: 1382, chunk_modes: [0, 1]}
     steps:
       - order: 1
         action: Render the page header and form.
-        expected: The creation form uses the available content width and the breadcrumb reads knowledge base / create knowledge base.
+        expected: The creation form uses the available content width; breadcrumb labels are 18px and no step indicator or optional upload stage is rendered.
       - order: 2
-        action: Inspect safety, graph and VLM toggle groups.
+        action: Inspect graph and VLM toggle groups.
         expected: Each switch sits beside its corresponding label and help icon.
       - order: 3
-        action: Inspect fields that share a row.
+        action: Inspect section headings and fields that share a row.
         expected: Both controls use the same label structure and their input or slider starts differ by no more than one pixel.
+      - order: 4
+        action: Fill required fields and submit the create form.
+        expected: One create request is sent, no upload request is sent, and success navigates to the created knowledge base detail page.
+      - order: 5
+        action: Render the detail information tab for a seeded knowledge base.
+        expected: The detail breadcrumb and configuration, graph and permission section headings use 18px text.
     expected_results:
       - No fixed narrow modal-sized content column constrains the create page.
+      - The create breadcrumb title and form section headings use 18px text.
+      - The form creates the knowledge base directly without an intermediate step or upload stage.
       - Switches are adjacent to their own labels rather than the far edge of the row.
       - Paired model, chunking and retrieval controls align consistently.
     forbidden_side_effects:
       - No global Ant Design or ES knowledge-base style override is introduced.
       - No change to values submitted for chunk_mode 0 or 1.
-    unit_boundary: AIDP create form section layout and toggle grouping
-    inputs: [desktop viewport, graph toggle, VLM toggle, paired model controls]
+    unit_boundary: AIDP create form title, direct-submit flow, section layout and toggle grouping
+    inputs: [desktop viewport, graph toggle, VLM toggle, paired model controls, valid create response]
     assertions:
       - The creation header and form fill the available page content width.
+      - The current create breadcrumb and section heading computed font sizes are 18px.
+      - The current detail breadcrumb and detail information section heading computed font sizes are 18px.
+      - No stepper or optional-upload control is rendered; one submit calls create once and does not call upload.
       - Switches are grouped within 12 pixels of their labels.
       - Paired controls use consistent label and field alignment.

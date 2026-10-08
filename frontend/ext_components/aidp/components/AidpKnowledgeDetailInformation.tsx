@@ -73,7 +73,7 @@ const AidpKnowledgeDetailInformation = ({
   return (
     <div className="@container w-full shrink-0 divide-y divide-gray-200 pb-4">
       <section className="pb-6 pt-1">
-        <h2 className="mb-5 text-sm font-semibold text-gray-800">
+        <h2 className="mb-5 text-lg font-semibold leading-7 text-gray-800">
           {t("aidpKnowledge.detailBasicInformation")}
         </h2>
         <dl className={FIELD_GRID}>
@@ -93,7 +93,7 @@ const AidpKnowledgeDetailInformation = ({
       </section>
 
       <section className="pb-6 pt-6">
-        <h2 className="mb-5 text-sm font-semibold text-gray-800">
+        <h2 className="mb-5 text-lg font-semibold leading-7 text-gray-800">
           {t("aidpKnowledge.detailConfiguration")}
         </h2>
         <dl className={FIELD_GRID}>
@@ -132,7 +132,7 @@ const AidpKnowledgeDetailInformation = ({
       </section>
 
       <section className="py-6">
-        <h2 className="mb-5 text-sm font-semibold text-gray-800">
+        <h2 className="mb-5 text-lg font-semibold leading-7 text-gray-800">
           {t("aidpKnowledge.detailGraph")}
         </h2>
         {detail.is_exist_graph !== true ? (
@@ -190,7 +190,7 @@ const AidpKnowledgeDetailInformation = ({
 
       <section className="py-6">
         <div className="mb-5 flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-gray-800">
+          <h2 className="text-lg font-semibold leading-7 text-gray-800">
             {t("aidpKnowledge.detailPermissions")}
           </h2>
           {canEdit && (

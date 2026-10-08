@@ -14,3 +14,17 @@ changes:
     feature_contract_changed: true
     affected_features: {existing: [], added: [], modified: [AKPR-001], retired: []}
     affected_cases: {existing: [], added: [AKPR-D1-013, AKPR-D1-014, AKPR-D4-005], modified: [], retired: []}
+  - change_id: AKPR-BUG-002
+    change_type: bugfix
+    bug_id: AKPR-BUG-002
+    title: AIDP create and detail page headings use inconsistent font sizes
+    description: Apply the approved 18px typography to the current create/detail breadcrumb titles and detail information section headings.
+    observed_behavior: The create and detail breadcrumb labels inherit Ant Design's 14px default, and detail information section headings are 14px, while equivalent page and section titles are specified at 18px.
+    expected_behavior: The breadcrumb labels on the create and detail pages use 18px text with the current page title visually emphasized; detail information section headings use 18px text. The knowledge-base list title remains 18px.
+    escaped_stage: D4
+    coverage_gap:
+      type: missing_assertion
+      description: Existing visual cases checked form layout but did not assert computed font sizes for create/detail page titles or detail information section headings.
+    feature_contract_changed: false
+    affected_features: {existing: [], added: [], modified: [], retired: []}
+    affected_cases: {existing: [], added: [], modified: [AKPR-D1-014, AKPR-D4-005], retired: []}

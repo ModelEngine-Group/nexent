@@ -2,12 +2,12 @@ schema_version: '1.0'
 module:
   id: AIDP-KNOWLEDGE
   name: AIDP knowledge base
-  description: AIDP knowledge base overview, file view and two-step creation page inside the Nexent frontend, including the AIDP-only branch selected by the deployment flag.
+  description: AIDP knowledge base overview, file view and single-page creation form inside the Nexent frontend, including the AIDP-only branch selected by the deployment flag.
 features:
   - feature_id: AKPR-001
     name: AIDP knowledge base list and creation page refactor
     status: active
-    description: AIDP knowledge bases are listed in a card or table overview with an independent name search, a collapsible three-step guide and a full-page file view per knowledge base; creation moves to a dedicated two-step page that carries permission, chunking, retrieval, graph and model configuration. The ES knowledge base path stays untouched.
+    description: AIDP knowledge bases are listed in a card or table overview with an independent name search, a collapsible three-step guide and a full-page file view per knowledge base; creation uses one dedicated full-page form for permissions, chunking, retrieval, graph and model configuration, submits directly, and leaves file upload to the detail page. The ES knowledge base path stays untouched.
     business_rules:
       - rule_id: AKPR-RULE-001
         description: The overview renders a knowledge base guide with the fixed steps "create knowledge base, upload files, configure the knowledge base in an agent"; the guide collapses and reopens without losing the rest of the page state.
@@ -28,7 +28,7 @@ features:
       - rule_id: AKPR-RULE-009
         description: File upload, processing-status polling, download and deletion inside the AIDP file view keep their permission gates, expose partial-failure feedback, and clean up their polling state when the view is left.
       - rule_id: AKPR-RULE-010
-        description: Creation uses a dedicated two-step page; the first step owns name, description, permission and user groups, the next step only validates and caches local form state, and the knowledge base is created once at final submission before any file upload.
+        description: Creation uses one dedicated full-page form for name, description, permission, user groups and configuration; the create action submits the knowledge base directly without a step indicator or optional upload stage, and file upload remains available from the detail page.
       - rule_id: AKPR-RULE-011
         description: Chunking submits chunk_mode 0 for smart splitting and 1 for legal clauses, converts the overlap percentage to floor(tokens * percent / 100) integer tokens bounded by 50 percent of the chunk size, and keeps the existing default chunking values.
       - rule_id: AKPR-RULE-012
@@ -38,7 +38,9 @@ features:
       - rule_id: AKPR-RULE-015
         description: The overview guide uses a rounded pale-blue gradient introduction area, a configuration-flow heading and three 156px-high step cards separated by 16px gaps; the knowledge-base cards keep a fixed Nexent icon, a full-width two-line description, and update time, document count and capacity on one aligned footer row, with stable card and right-aligned pagination geometry. Fonts and icons retain Nexent conventions.
       - rule_id: AKPR-RULE-016
-        description: The full-page creation form follows the designed section order and spacing; graph and VLM switches sit beside their labels, same-row fields align, and the chunking and retrieval controls retain slider layout and consistent value widths.
+        description: The full-page creation form follows the designed section order and spacing; page and section titles use 18px text; graph and VLM switches sit beside their labels, same-row fields align, and the chunking and retrieval controls retain slider layout and consistent value widths.
+      - rule_id: AKPR-RULE-017
+        description: The current breadcrumb title on the create and detail pages and the detail information section headings use 18px text while ancestor breadcrumb links remain visually secondary.
     required_test_stages: [D1, D2, D3, D4, D5]
     source:
       requirement_ids: [AKPR-001]

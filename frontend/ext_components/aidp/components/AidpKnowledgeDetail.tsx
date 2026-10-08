@@ -665,13 +665,19 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
               <button
                 type="button"
                 onClick={onBack}
-                className="text-gray-500 hover:text-blue-600"
+                className="!text-lg !leading-7 text-gray-500 hover:text-blue-600"
               >
                 {t("aidpKnowledge.breadcrumbKnowledgeBase")}
               </button>
             ),
           },
-          { title: t("aidpKnowledge.detailBreadcrumb") },
+          {
+            title: (
+              <span className="!text-lg !font-semibold !leading-7 text-gray-800">
+                {t("aidpKnowledge.detailBreadcrumb")}
+              </span>
+            ),
+          },
         ]}
       />
 

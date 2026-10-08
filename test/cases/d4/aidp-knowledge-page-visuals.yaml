@@ -5,13 +5,13 @@ cases:
   - case_id: AKPR-D4-005
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
-    business_rule_ids: [AKPR-RULE-015, AKPR-RULE-016]
+    business_rule_ids: [AKPR-RULE-010, AKPR-RULE-015, AKPR-RULE-016, AKPR-RULE-017]
     title: Overview and creation pages match their approved desktop layout
     type: E2E
     priority: P0
     status: blocked
     automation: automated
-    objective: Verify the rendered guide, knowledge cards, pagination, inline switches and paired create-form controls against the AIDP design at desktop and narrow widths.
+    objective: Verify the rendered guide, knowledge cards, pagination, inline switches, title typography and direct create flow against the AIDP design at desktop and narrow widths.
     preconditions:
       - The AIDP-enabled instance is reachable with the authenticated test account.
       - The instance has multiple knowledge bases with realistic metadata and an empty creation form.
@@ -25,16 +25,24 @@ cases:
         action: Switch to table view and inspect the toolbar and column controls.
         expected: The create and view buttons align at the right, table column control follows them, and no edit operation appears in the overview. The table header and data rows are 40px high with 14px/22px body text and pale #F3F3F3 separators. Permission tags stay on one line and row actions use compact inline links. Resize the description column by 100px and verify every other column keeps its measured width; horizontal scrolling moves the middle columns while name and actions stay fixed. Hide and restore the creator column without hiding the required name or actions columns.
       - order: 3
-        action: Open creation and inspect the page header, switches and paired fields at both viewport sizes.
-        expected: The page uses the available width, switches sit beside their labels, and paired inputs or sliders align without page-level horizontal overflow.
+        action: Open creation and inspect the page title, section titles, switches and paired fields at both viewport sizes.
+        expected: Breadcrumb labels and form section headings use 18px text, there is no step indicator or optional import stage, the page uses the available width, switches sit beside their labels, and paired inputs or sliders align without page-level horizontal overflow.
+      - order: 4
+        action: Fill the required configuration and submit the create form.
+        expected: The knowledge base is created directly with one create request, the browser opens its detail page, and no upload request is issued from creation.
+      - order: 5
+        action: Open the detail page's information tab.
+        expected: The detail breadcrumb and configuration, graph and permission section headings render at 18px.
     expected_results:
       - The running AIDP pages match the accepted layout and preserve Nexent visual conventions.
+      - The create and detail current page titles and detail information section headings use 18px text.
+      - The create flow has no stepper or optional upload stage; file upload remains in the knowledge base detail page.
       - The expanded guide uses the pale-blue gradient introduction panel with 24px padding, a configuration-flow heading and three 156px-high step cards; the step content stays create, upload and configure an agent, and collapse or reopen preserves the overview state.
       - The narrow viewport remains usable without overlapping labels or page-level horizontal scrolling.
       - Collapsing the guide preserves the keyword and page; changing page size resets to page one; the last partial page keeps the same content-panel height; a valid page jump navigates without a mutating request.
-      - No write request is issued while visually inspecting the pages.
+      - No write request is issued while inspecting pages before the explicit create submit.
     forbidden_side_effects:
-      - No knowledge base is created, edited or deleted during this journey.
+      - No knowledge base is created before the explicit submit, edited, or deleted; the submit issues exactly one create request and no upload request.
       - No global style or ES page behavior is changed.
     actor: Authenticated AIDP tenant user
     journey:
@@ -42,7 +50,7 @@ cases:
       - Inspect the table toolbar and pagination.
       - Inspect the full-page creation layout at desktop and narrow widths.
     final_business_result:
-      - Users see the intended list and creation composition before beginning a knowledge-base operation.
+      - Users can inspect the intended list and create composition, then create a knowledge base directly and continue to its detail page.
     failure_evidence:
       - Save screenshots, computed layout measurements and browser console errors for both viewport sizes.
     execution:

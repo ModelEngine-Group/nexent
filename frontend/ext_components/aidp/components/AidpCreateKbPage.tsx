@@ -11,8 +11,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 
-import { Button, Breadcrumb, Form, Space, Steps, Upload, message } from "antd";
-import { InboxOutlined } from "@ant-design/icons";
+import { Button, Breadcrumb, Form, Space, message } from "antd";
 
 import type {
   AidpGraphConfig,
@@ -20,12 +19,6 @@ import type {
 } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import { USER_ROLES } from "@/const/auth";
-import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
-import { collectUploadedFileIds } from "@/lib/aidpDocumentStatus";
-import {
-  partitionAidpFiles,
-  validateAidpFiles,
-} from "@/services/uploadService";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -33,8 +26,6 @@ import log from "@/lib/logger";
 
 import AidpCreateKbSections from "./AidpCreateKbSections";
 import styles from "./AidpCreateKbSections.module.css";
-
-const { Dragger } = Upload;
 
 /**
  * Default AIDP knowledge base configuration.
@@ -77,34 +68,20 @@ const DEFAULT_GRAPH_PROMPT = `你作为专业知识图谱抽取引擎，仅执�
 /**
  * Dedicated AIDP knowledge base creation page.
  *
- * Two steps: the first collects every creation parameter (permissions included)
- * and only validates locally — no resource exists until the final submit. The
- * second step optionally uploads files after the knowledge base was created.
- * Upload failures never recreate the knowledge base; only the failed files can
- * be retried.
+ * Collects all creation parameters in one page and creates the knowledge base
+ * directly. Files are uploaded from the knowledge base detail page.
  */
 const AidpCreateKbPage: React.FC = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const router = useRouter();
   const params = useParams();
   const locale = (params?.locale as string) || "zh";
   const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
 
   const [form] = Form.useForm();
-  const [current, setCurrent] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [fileList, setFileList] = useState<File[]>([]);
-  const fileListRef = useRef<File[]>([]);
-  const pendingFilesRef = useRef<File[]>([]);
-  const rafIdRef = useRef<number | null>(null);
   /** Guards against a second create while one submission is in flight. */
   const submittingRef = useRef(false);
-  /** Knowledge base created by the current submission, if any. */
-  const createdKbIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    fileListRef.current = fileList;
-  }, [fileList]);
 
   // The entry only serves AIDP; an ES deployment has no creation entry here,
   // so a direct visit goes back to the knowledge base page.
@@ -205,34 +182,16 @@ const AidpCreateKbPage: React.FC = () => {
     });
   }, [form, isUser]);
 
-  const steps = [
-    { title: t("aidpKnowledge.createStepInfo") },
-    { title: t("aidpKnowledge.createStepUpload") },
-  ];
-
   const goBackToList = () => router.push(`/${locale}/knowledges`);
-
-  /** Validate the first step; nothing is created here. */
-  const handleNext = async () => {
-    try {
-      await form.validateFields();
-      setCurrent(1);
-    } catch {
-      // Validation errors are rendered next to the fields.
-    }
-  };
-
-  const handleBack = () => setCurrent(0);
 
   /** Jump to the created knowledge base file view. */
   const openCreatedKb = (kbId: string) => {
     router.push(`/${locale}/knowledges?kb=${encodeURIComponent(kbId)}`);
   };
 
-  const handleSubmit = async (skipUpload: boolean) => {
+  const handleSubmit = async () => {
     if (submittingRef.current) return;
     submittingRef.current = true;
-    let createdId: string | null = createdKbIdRef.current;
     setLoading(true);
     try {
       const values = await form.validateFields();
@@ -246,227 +205,76 @@ const AidpCreateKbPage: React.FC = () => {
             ? values.group_ids
             : [];
 
-      // Defense in depth: re-validate every selected file in case the drop
-      // handler was bypassed.
-      if (createdId === null && !skipUpload && fileList.length > 0) {
-        const validation = validateAidpFiles(fileList);
-        if (validation.valid.length !== fileList.length) {
-          partitionAidpFiles(fileList, t, message);
-          return;
-        }
-      }
+      const chunkTokens =
+        values.chunk_token_num ?? AIDP_CREATE_DEFAULTS.chunk_token_num;
+      const overlapPercent =
+        values.chunk_overlap_percent ??
+        AIDP_CREATE_DEFAULTS.chunk_overlap_percent;
+      const overlapTokens = Math.floor(
+        (chunkTokens * Number(overlapPercent)) / 100
+      );
 
-      if (createdId === null) {
-        const chunkTokens =
-          values.chunk_token_num ?? AIDP_CREATE_DEFAULTS.chunk_token_num;
-        const overlapPercent =
-          values.chunk_overlap_percent ??
-          AIDP_CREATE_DEFAULTS.chunk_overlap_percent;
-        const overlapTokens = Math.floor(
-          (chunkTokens * Number(overlapPercent)) / 100
-        );
+      const graphConfig: AidpGraphConfig | undefined = values.is_exist_graph
+        ? {
+            domain: values.graph_domain || AIDP_CREATE_DEFAULTS.graph_domain,
+            retrieve_default_topk:
+              values.graph_topk ?? AIDP_CREATE_DEFAULTS.graph_topk,
+            retrieve_subgraph_hop:
+              values.graph_hop ?? AIDP_CREATE_DEFAULTS.graph_hop,
+            // The UI switch is the inverse of the submitted thinking mode.
+            no_think_mode: !values.graph_thinking,
+            prompt_language:
+              values.graph_prompt_language ||
+              AIDP_CREATE_DEFAULTS.graph_prompt_language,
+            prompt_text: values.graph_prompt_text || DEFAULT_GRAPH_PROMPT,
+            synonym_merge_enable: !!values.graph_synonym_merge,
+            disambiguation_enable: !!values.graph_disambiguation,
+            llm_model_name: values.llm_model_name,
+          }
+        : undefined;
 
-        const graphConfig: AidpGraphConfig | undefined = values.is_exist_graph
-          ? {
-              domain: values.graph_domain || AIDP_CREATE_DEFAULTS.graph_domain,
-              retrieve_default_topk:
-                values.graph_topk ?? AIDP_CREATE_DEFAULTS.graph_topk,
-              retrieve_subgraph_hop:
-                values.graph_hop ?? AIDP_CREATE_DEFAULTS.graph_hop,
-              // The UI switch is the inverse of the submitted thinking mode.
-              no_think_mode: !values.graph_thinking,
-              prompt_language:
-                values.graph_prompt_language ||
-                AIDP_CREATE_DEFAULTS.graph_prompt_language,
-              prompt_text: values.graph_prompt_text || DEFAULT_GRAPH_PROMPT,
-              synonym_merge_enable: !!values.graph_synonym_merge,
-              disambiguation_enable: !!values.graph_disambiguation,
-              llm_model_name: values.llm_model_name,
-            }
-          : undefined;
+      const created = await aidpKnowledgeService.createKb({
+        name: values.name.trim(),
+        description: values.description?.trim() || "",
+        chunk_token_num: chunkTokens,
+        chunk_overlap_num: overlapTokens,
+        chunk_mode: values.chunk_mode ?? AIDP_CREATE_DEFAULTS.chunk_mode,
+        embedding_model:
+          values.embedding_model || AIDP_CREATE_DEFAULTS.embedding_model,
+        topk: values.topk ?? AIDP_CREATE_DEFAULTS.topk,
+        similarity: values.similarity ?? AIDP_CREATE_DEFAULTS.similarity,
+        smartsplit: AIDP_CREATE_DEFAULTS.smartsplit,
+        is_personal: AIDP_CREATE_DEFAULTS.is_personal,
+        caption_enable: values.caption_enable ? 1 : 0,
+        vlm_model: values.caption_enable ? values.vlm_model || "" : "",
+        is_exist_graph: !!values.is_exist_graph,
+        graph_config: graphConfig,
+        ingroup_permission: permission,
+        group_ids: groupIds,
+      });
 
-        const created = await aidpKnowledgeService.createKb({
-          name: values.name.trim(),
-          description: values.description?.trim() || "",
-          chunk_token_num: chunkTokens,
-          chunk_overlap_num: overlapTokens,
-          chunk_mode: values.chunk_mode ?? AIDP_CREATE_DEFAULTS.chunk_mode,
-          embedding_model:
-            values.embedding_model || AIDP_CREATE_DEFAULTS.embedding_model,
-          topk: values.topk ?? AIDP_CREATE_DEFAULTS.topk,
-          similarity: values.similarity ?? AIDP_CREATE_DEFAULTS.similarity,
-          smartsplit: AIDP_CREATE_DEFAULTS.smartsplit,
-          is_personal: AIDP_CREATE_DEFAULTS.is_personal,
-          caption_enable: values.caption_enable ? 1 : 0,
-          vlm_model: values.caption_enable ? values.vlm_model || "" : "",
-          is_exist_graph: !!values.is_exist_graph,
-          graph_config: graphConfig,
-          ingroup_permission: permission,
-          group_ids: groupIds,
-        });
-        createdId = String(created.kds_id || "");
-        createdKbIdRef.current = createdId;
-      }
-
-      // Upload only after a successful create; a failure here never creates
-      // another knowledge base.
-      if (createdId && !skipUpload && fileList.length > 0) {
-        const result = await aidpKnowledgeService.uploadDocs(
-          createdId,
-          fileList
-        );
-        const failureDetails = result.failed_list.map((item) => {
-          const reason = i18n.language.startsWith("zh")
-            ? item.reason_zh || item.reason_en
-            : item.reason_en || item.reason_zh;
-          return `${item.file_name}: ${reason || t("aidpKnowledge.uploadFailed")}`;
-        });
-        const failureLines = failureDetails.map((detail, index) => (
-          <div key={`${index}-${detail}`}>{detail}</div>
-        ));
-
-        if (result.summary.failed > 0 && result.summary.success === 0) {
-          message.warning(
-            <div className="text-left">
-              <div>{t("aidpKnowledge.createKbSuccess")}</div>
-              {failureLines.length > 0 ? (
-                failureLines
-              ) : (
-                <div>{t("aidpKnowledge.uploadFailed")}</div>
-              )}
-            </div>
-          );
-        } else if (result.summary.failed > 0) {
-          message.info(
-            <div className="text-left">
-              <div>{t("aidpKnowledge.createKbSuccess")}</div>
-              <div>
-                {t("aidpKnowledge.uploadPartial", {
-                  success: result.summary.success,
-                  failed: result.summary.failed,
-                })}
-              </div>
-              {failureLines}
-            </div>
-          );
-        } else {
-          message.success(
-            `${t("aidpKnowledge.createKbSuccess")} | ${t(
-              "aidpKnowledge.uploadSuccess",
-              { count: result.summary.success }
-            )}`
-          );
-        }
-        void collectUploadedFileIds(result.success_list);
-      } else {
-        message.success(t("aidpKnowledge.createKbSuccess"));
-      }
-
+      message.success(t("aidpKnowledge.createKbSuccess"));
+      const createdId = String(created.kds_id || "");
       if (createdId) openCreatedKb(createdId);
     } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "errorFields" in error
+      ) {
+        return;
+      }
       log.error("Failed to submit AIDP knowledge base creation:", error);
       const reason =
         error instanceof Error && error.message.trim()
           ? error.message
-          : createdId
-            ? t("aidpKnowledge.uploadFailed")
-            : t("aidpKnowledge.createKbFailed");
-      message.error(
-        createdId ? `${t("aidpKnowledge.createKbSuccess")} | ${reason}` : reason
-      );
-      // The knowledge base exists even though a later step failed: take the
-      // user to it instead of leaving a form that would create a duplicate.
-      if (createdId) openCreatedKb(createdId);
+          : t("aidpKnowledge.createKbFailed");
+      message.error(reason);
     } finally {
       setLoading(false);
       submittingRef.current = false;
     }
   };
-
-  const renderStep0 = () => (
-    <AidpCreateKbSections
-      form={form}
-      t={t}
-      canConfigureGroupPermissions={canConfigureGroupPermissions}
-      groupOptions={groupOptions}
-      ingroupPermission={ingroupPermission}
-      llmModelOptions={llmModelOptions}
-      llmModelsLoading={llmModelsLoading}
-      vlmModelOptions={vlmModelOptions}
-      vlmModelsLoading={vlmModelsLoading}
-      embeddingModelOptions={embeddingModelOptions}
-      embeddingModelsLoading={embeddingModelsLoading}
-    />
-  );
-  const renderStep1 = () => (
-    <div className="mt-4">
-      <Dragger
-        accept={AIDP_ACCEPT_STRING}
-        multiple
-        fileList={fileList.map((f, i) => ({
-          uid: `${i}-${f.name}`,
-          name: f.name,
-          size: f.size,
-          status: "done" as const,
-          originFileObj: f as unknown as File & {
-            uid: string;
-            lastModifiedDate: Date;
-          },
-        }))}
-        beforeUpload={(_file) => {
-          // Antd fires beforeUpload once per file in a batch; queue them and
-          // flush validation plus state once per frame.
-          pendingFilesRef.current.push(_file);
-          if (rafIdRef.current === null) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              const batch = pendingFilesRef.current;
-              pendingFilesRef.current = [];
-              rafIdRef.current = null;
-
-              const currentFiles = fileListRef.current;
-              const existing = new Set(currentFiles.map((file) => file.name));
-              const uniqueBatch = batch.filter(
-                (file) => !existing.has(file.name)
-              );
-              const { valid } = partitionAidpFiles(
-                uniqueBatch,
-                t,
-                message,
-                currentFiles.length
-              );
-              if (valid.length > 0) {
-                setFileList([...currentFiles, ...valid]);
-              }
-            });
-          }
-          return false;
-        }}
-        onRemove={(file) => {
-          setFileList((prev) =>
-            prev.filter((f) => f.name !== (file as { name?: string }).name)
-          );
-        }}
-      >
-        <p className="ant-upload-drag-icon">
-          <InboxOutlined />
-        </p>
-        <p className="ant-upload-text">{t("aidpKnowledge.uploadHint")}</p>
-        <div className="ant-upload-hint mt-2 w-full min-w-0 max-w-full space-y-1 overflow-hidden px-4 whitespace-normal">
-          <div>{t("aidpKnowledge.uploadHintCount")}</div>
-          <div>{t("aidpKnowledge.uploadHintSize")}</div>
-          <div className="w-full min-w-0 break-all leading-5 whitespace-normal">
-            {t("aidpKnowledge.uploadHintFormats")}
-          </div>
-        </div>
-      </Dragger>
-
-      {fileList.length === 0 && (
-        <div className="mt-3 text-gray-400 text-xs text-center">
-          {t("aidpKnowledge.createNoFiles")}
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col">
@@ -479,63 +287,52 @@ const AidpCreateKbPage: React.FC = () => {
                   type="button"
                   disabled={loading}
                   onClick={goBackToList}
-                  className="text-gray-500 hover:text-blue-500 disabled:cursor-not-allowed"
+                  className="!text-lg !leading-7 text-gray-500 hover:text-blue-500 disabled:cursor-not-allowed"
                 >
                   {t("aidpKnowledge.breadcrumbKnowledgeBase")}
                 </button>
               ),
             },
-            { title: t("aidpKnowledge.createPageTitle") },
+            {
+              title: (
+                <span className="!text-lg !font-semibold !leading-7 text-gray-800">
+                  {t("aidpKnowledge.createPageTitle")}
+                </span>
+              ),
+            },
           ]}
         />
-        <div className="mt-4">
-          <Steps current={current} items={steps} size="small" />
-        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
-        {/* Keep the first step mounted so form fields survive step changes. */}
-        <div className={current === 0 ? "w-full" : "hidden"}>
-          {renderStep0()}
-        </div>
-        {current === 1 && renderStep1()}
+        <AidpCreateKbSections
+          form={form}
+          t={t}
+          canConfigureGroupPermissions={canConfigureGroupPermissions}
+          groupOptions={groupOptions}
+          ingroupPermission={ingroupPermission}
+          llmModelOptions={llmModelOptions}
+          llmModelsLoading={llmModelsLoading}
+          vlmModelOptions={vlmModelOptions}
+          vlmModelsLoading={vlmModelsLoading}
+          embeddingModelOptions={embeddingModelOptions}
+          embeddingModelsLoading={embeddingModelsLoading}
+        />
       </div>
 
       <footer className={styles.createFooter}>
-        <div>
-          {current === 1 && (
-            <Button onClick={handleBack} disabled={loading}>
-              {t("aidpKnowledge.createBack")}
-            </Button>
-          )}
-        </div>
+        <div />
         <Space size={10} wrap>
           <Button onClick={goBackToList} disabled={loading}>
             {t("common.cancel")}
           </Button>
-          {current === 0 && (
-            <Button type="primary" onClick={handleNext}>
-              {t("aidpKnowledge.createNext")}
-            </Button>
-          )}
-          {current === 1 && (
-            <Button
-              type={fileList.length === 0 ? "primary" : "default"}
-              loading={loading}
-              onClick={() => void handleSubmit(true)}
-            >
-              {t("aidpKnowledge.createSkipUpload")}
-            </Button>
-          )}
-          {current === 1 && fileList.length > 0 && (
-            <Button
-              type="primary"
-              loading={loading}
-              onClick={() => void handleSubmit(false)}
-            >
-              {t("aidpKnowledge.createSubmit")}
-            </Button>
-          )}
+          <Button
+            type="primary"
+            loading={loading}
+            onClick={() => void handleSubmit()}
+          >
+            {t("aidpKnowledge.createSubmit")}
+          </Button>
         </Space>
       </footer>
       {loading && (
