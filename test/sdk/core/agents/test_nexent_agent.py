@@ -129,6 +129,9 @@ class _MockProcessType:
 class _MockAgentRunMetadata:
     agent_name: str | None = None
     query: str | None = None
+    agent_display_name: str | None = None
+    agent_id: int | None = None
+    model_name: str | None = None
 
 
 MessageObserver = _MockMessageObserver
@@ -370,6 +373,7 @@ with patch.dict("sys.modules", module_mocks):
         _build_tool_input, _wrap_tool_with_monitoring, _tool_name,
         SAFE_PYTHON_INTERPRETER_IMPORTS, get_local_python_authorized_imports,
     )
+    from sdk.nexent.consts.mcp_errors import MCPToolTimeoutError
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory, ExternalA2AAgentConfig
 
     # Clean up after import
@@ -2098,6 +2102,21 @@ def test_cmsr_004_terminal_model_error_emits_one_safe_error(
     )
 
 
+def test_agent_run_with_observer_rethrows_mcp_timeout(nexent_agent_instance, mock_core_agent):
+    """MCP timeouts bypass the generic Agent error event and retry wrapper."""
+    nexent_agent_instance.agent = mock_core_agent
+    timeout_error = MCPToolTimeoutError(
+        "MCP tool request timed out after 10 seconds"
+    )
+    mock_core_agent.run.side_effect = timeout_error
+
+    with pytest.raises(MCPToolTimeoutError) as exc_info:
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    assert exc_info.value is timeout_error
+    mock_core_agent.observer.add_message.assert_not_called()
+
+
 def test_agent_run_with_observer_invalid_agent_type(nexent_agent_instance):
     """Test agent_run_with_observer raises TypeError when agent is not a CoreAgent."""
     nexent_agent_instance.agent = "not_core_agent"
@@ -3811,8 +3830,10 @@ class TestCreateSingleAgent:
         assert wrapped_agent._agent_id == "managed-1"
         assert wrapped_agent._agent_name == "Research agent"
 
+    @pytest.mark.parametrize("enable_protocol_repair_retry", [False, True])
     def test_create_single_agent_passes_context_item_override(
-        self, nexent_agent_instance, mock_model_config, mock_core_agent
+        self, nexent_agent_instance, mock_model_config, mock_core_agent,
+        enable_protocol_repair_retry,
     ):
         """Test create_single_agent converts the supplied context input sequence into runtime state."""
         nexent_agent_instance.model_config_list = [mock_model_config]
@@ -3824,6 +3845,7 @@ class TestCreateSingleAgent:
             max_steps=5,
             model_name="test_model",
             output_protocol="final_answer_envelope",
+            enable_protocol_repair_retry=enable_protocol_repair_retry,
         )
 
         with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
@@ -3836,6 +3858,7 @@ class TestCreateSingleAgent:
         assert result is mock_core_agent
         assert context_runtime.items == [context_item]
         assert mock_core_agent_fn.call_args.kwargs["output_protocol"] == "final_answer_envelope"
+        assert mock_core_agent_fn.call_args.kwargs["enable_protocol_repair_retry"] is enable_protocol_repair_retry
 
     def test_create_single_agent_with_prompt_templates(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent correctly passes prompt_templates."""
@@ -5094,6 +5117,46 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             call_args.args[1] == ProcessType.WARNING
             for call_args in nexent_agent_instance.observer.add_message.call_args_list
         )
+
+    @pytest.mark.parametrize("with_output", [False, True])
+    def test_finalize_workspace_excludes_runtime_skill_snapshots(
+        self, nexent_agent_instance, tmp_path, with_output
+    ):
+        workspace = tmp_path / "run"
+        snapshot = workspace / ".skill_snapshot" / "tenant" / "analyze-image"
+        snapshot.mkdir(parents=True)
+        for name in ("SKILL.md", "examples.md"):
+            (snapshot / name).write_text("Internal skill dependency", encoding="utf-8")
+        output = workspace / "outputs" / "SKILL.md"
+        if with_output:
+            output.parent.mkdir()
+            output.write_text("User-requested skill artifact", encoding="utf-8")
+        upload_tool = MagicMock()
+        upload_tool.uploaded_paths = set()
+        nexent_agent_instance._workspace_uploads = []
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.agent = MagicMock(tools={"upload_to_s3": upload_tool})
+
+        def record_upload(file_path, target_filename):
+            nexent_agent_instance._record_workspace_upload({"name": target_filename})
+
+        upload_tool.forward.side_effect = record_upload
+        nexent_agent_instance.observer.add_message.reset_mock()
+        with patch.object(nexent_agent_instance, "_pull_file_workspace_from_sandbox"):
+            nexent_agent_instance._finalize_file_workspace()
+
+        artifacts = [
+            call.args[2] for call in nexent_agent_instance.observer.add_message.call_args_list
+            if call.args[1] == ProcessType.FILE_ARTIFACT
+        ]
+        if with_output:
+            upload_tool.forward.assert_called_once_with(str(output), "outputs/SKILL.md")
+            assert artifacts == [{"artifacts": [{"name": "outputs/SKILL.md"}]}]
+        else:
+            upload_tool.forward.assert_not_called()
+            assert artifacts == []
+        assert (snapshot / "SKILL.md").is_file()
+        assert (snapshot / "examples.md").is_file()
 
     def test_cleanup_rejects_mismatched_run_directory(self, nexent_agent_instance, tmp_path):
         workspace = tmp_path / "user" / "actual-run"

@@ -211,6 +211,7 @@ class QuotaExceededError(Exception): pass
 class UnauthorizedError(Exception): pass
 exceptions_stub.AppException = AppException
 exceptions_stub.NotFoundException = NotFoundException
+exceptions_stub.AppException = AppException
 exceptions_stub.OfficeConversionException = OfficeConversionException
 exceptions_stub.UnsupportedFileTypeException = UnsupportedFileTypeException
 exceptions_stub.FileTooLargeException = FileTooLargeException

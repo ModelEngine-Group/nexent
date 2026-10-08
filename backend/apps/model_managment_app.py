@@ -10,7 +10,8 @@ layer contract:
 Authorization: Mutating endpoints require RBAC permissions (model:create /
 model:update / model:delete) via ``permissions.depends.require``; read endpoints
 require ``model:read``. Cross-tenant ``/manage/*`` endpoints additionally
-require the SU role. Identity is resolved from the bearer token into a
+require the SU role, or the ADMIN role when the targeted tenant is the
+caller's own. Identity is resolved from the bearer token into a
 ``CurrentUser`` and propagated as ``user_id`` / ``tenant_id`` to services.
 """
 
@@ -20,6 +21,7 @@ import re
 
 from consts.model import (
     BatchCreateModelsRequest,
+    BackfillDefaultsRequest,
     CapacitySuggestionFields,
     ModelRequest,
     ModelProbeRequest,
@@ -64,6 +66,8 @@ from services.model_management_service import (
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
     get_model_reasoning_capability,
+    _ids_for_created_models,
+    _backfill_default_model_slots,
 )
 from permissions.depends import authenticate, require
 from permissions.models import CurrentUser
@@ -77,9 +81,11 @@ MODEL_CREATE_PERMISSION = "model:create"
 MODEL_READ_PERMISSION = "model:read"
 MODEL_UPDATE_PERMISSION = "model:update"
 MODEL_DELETE_PERMISSION = "model:delete"
-# Cross-tenant manage endpoints are SU-only; ADMIN shares the same MODEL seeds
-# so permission strings cannot separate them.
-_MANAGE_ALLOWED_ROLES = ("SU",)
+# Roles allowed on the cross-tenant /manage/* endpoints. ADMIN shares the same
+# MODEL permission seeds as SU, so permission strings cannot separate the two
+# and the role itself must be checked. ADMIN is scoped to its own tenant by
+# ``_require_manage_scope``; SU may target any tenant.
+_MANAGE_ALLOWED_ROLES = ("SU", "ADMIN")
 
 # Model Catalog loader (with graceful fallback)
 try:
@@ -147,12 +153,25 @@ def _log_safe(value: Any) -> str:
     return _LOG_UNSAFE_CHARS.sub("", str(value))
 
 
-def _require_manage_role(current_user: CurrentUser) -> None:
-    """Restrict cross-tenant manage endpoints to super admins."""
-    if current_user.normalized_role not in _MANAGE_ALLOWED_ROLES:
+def _require_manage_scope(current_user: CurrentUser, target_tenant_id: str) -> None:
+    """Authorize a /manage/* call against the tenant it targets.
+
+    SU may manage any tenant. ADMIN may manage only the tenant its token
+    belongs to -- the tenant-resource page always passes the caller's own
+    tenant_id, so restricting ADMIN outright would break tenant admins
+    managing their own models while blocking no cross-tenant access. Any
+    other role, or an ADMIN naming a foreign tenant, is rejected.
+    """
+    role = current_user.normalized_role
+    if role not in _MANAGE_ALLOWED_ROLES:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
-            detail="This operation requires SU role",
+            detail="This operation requires SU or tenant ADMIN role",
+        )
+    if role != "SU" and target_tenant_id != current_user.tenant_id:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Tenant admins may only manage models of their own tenant",
         )
 
 
@@ -250,9 +269,14 @@ async def create_model(
         user_id, tenant_id = current_user.user_id, current_user.tenant_id
         model_data = request.model_dump()
         accept_signal = pop_capacity_accept_signal(model_data)
+        # Batch-import flow control flag: popped here so it never reaches
+        # the service/DB layer (same contract as the accept-signal fields).
+        skip_backfill = bool(model_data.pop("skip_default_backfill", None))
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
-        create_result = await create_model_for_tenant(user_id, tenant_id, model_data)
+        create_result = await create_model_for_tenant(
+            user_id, tenant_id, model_data,
+            skip_default_backfill=skip_backfill)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
@@ -270,6 +294,39 @@ async def create_model(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/backfill_defaults")
+async def backfill_default_model_slots(
+    request: BackfillDefaultsRequest,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
+    """Finalize default-model auto-configuration after a batch import.
+
+    The batch dialog creates its rows one HTTP call at a time with
+    skip_default_backfill set; this endpoint runs the auto-configuration
+    ONCE with the whole batch's models as candidates, so empty slots get
+    the best model of the batch instead of whichever row happened to be
+    created first. Occupied slots (user- or system-configured) are never
+    touched.
+    """
+    try:
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
+        created_ids = _ids_for_created_models(
+            request.display_names, tenant_id)
+        auto_configured = _backfill_default_model_slots(
+            user_id, tenant_id, new_model_ids=created_ids)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": auto_configured,
+            "message": "Default model backfill completed"
+        })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to backfill default model slots: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -632,6 +689,16 @@ async def check_model_health(
                             detail=str(e))
 
 
+def _normalize_probe_base_url(url: Optional[str]) -> str:
+    """Normalize a base_url for the probe key-fallback match.
+
+    Only trailing slashes are stripped: the match must stay an exact-string
+    comparison — prefix or fuzzy matching would re-open the exfiltration
+    path the fallback guards against.
+    """
+    return (url or "").rstrip("/")
+
+
 @router.post("/temporary_healthcheck")
 async def check_temporary_model_health(
     request: ModelProbeRequest,
@@ -648,10 +715,18 @@ async def check_temporary_model_health(
         # Edit-dialog probes arrive without the api_key (the backend never
         # returns the persisted key to the client, and the dialog leaves the
         # field empty to "keep existing"). Fall back to the stored key so
-        # verifying does not require retyping it.
+        # verifying does not require retyping it — but ONLY when the probe
+        # targets the stored endpoint itself: substituting the key while the
+        # caller controls base_url would let any tenant member exfiltrate a
+        # stored key by pointing the probe at their own server.
         if request.probe_model_id is not None and request.api_key in (None, "", "sk-no-api-key"):
             stored_model = get_model_by_model_id(request.probe_model_id, tenant_id=current_user.tenant_id)
-            if stored_model and stored_model.get("api_key"):
+            if (
+                stored_model
+                and stored_model.get("api_key")
+                and _normalize_probe_base_url(request.base_url)
+                == _normalize_probe_base_url(stored_model.get("base_url"))
+            ):
                 request.api_key = stored_model["api_key"]
         result = await verify_model_config_connectivity(request.model_dump())
         if result.get("connectivity") is True:
@@ -698,7 +773,7 @@ async def manage_check_model_health(
     Returns:
         Connectivity check result with updated status.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to check model connectivity for tenant, user_id: {current_user.user_id}, "
@@ -742,7 +817,7 @@ async def manage_create_model(
     Returns:
         Success message on successful creation.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -793,7 +868,7 @@ async def manage_update_model(
     Returns:
         Success message on successful update.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -845,7 +920,7 @@ async def manage_delete_model(
     Returns:
         Success message with deleted model name.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -890,7 +965,7 @@ async def manage_batch_create_models(
     Returns:
         Success message on completion.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -942,7 +1017,7 @@ async def manage_list_models(
     Returns:
         Paginated model list for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to list models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
@@ -983,7 +1058,7 @@ async def manage_list_provider_models(
     Returns:
         List of available provider models for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to list provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
@@ -1021,7 +1096,7 @@ async def manage_create_provider_models(
     Returns:
         List of available provider models for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to create provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "

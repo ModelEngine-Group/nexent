@@ -1,16 +1,18 @@
 import {
   API_ENDPOINTS,
+  ApiError,
   fetchWithErrorHandling,
   toApiError,
-  type ApiError,
 } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { getAuthHeaders } from "@/lib/auth";
+import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
+import type { Agent } from "@/types/agentConfig";
 import yaml from "js-yaml";
 import type { SkillFileNode } from "@/types/skill";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
 /**
  * Normalize tags field into a string array.
@@ -153,6 +155,94 @@ export const fetchTools = async () => {
  * @param tenantId optional tenant ID for filtering
  * @returns list of agents with basic info (id, name, description, is_available)
  */
+type AgentListApiItem = {
+  agent_id: number | string;
+  name: string;
+  display_name?: string;
+  description: string;
+  author?: string;
+  created_by?: string | null;
+  create_time?: string;
+  tags?: unknown;
+  model_ids?: number[];
+  model_id?: number;
+  model_names?: string[];
+  model_name?: string;
+  is_available?: boolean;
+  unavailable_reasons?: string[];
+  group_ids?: number[];
+  is_new?: boolean;
+  permission?: "EDIT" | "READ_ONLY";
+  is_published?: boolean;
+  current_version_no?: number;
+  version_label?: string | null;
+  version_create_time?: string | null;
+  is_a2a_server?: boolean;
+  allow_chat_metadata?: boolean;
+  enable_protocol_repair_retry?: boolean;
+  model_params_override?: Agent["model_params_override"];
+  icon_url?: string;
+  repository_info?: Agent["repository_info"];
+};
+
+const formatAgentListItem = (agent: AgentListApiItem): Agent =>
+  ({
+    id: String(agent.agent_id),
+    name: agent.name,
+    display_name: agent.display_name || agent.name,
+    description: agent.description,
+    author: agent.author,
+    created_by: agent.created_by,
+    create_time: agent.create_time,
+    tags: normalizeTags(agent.tags),
+    model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
+    model_names:
+      agent.model_names || (agent.model_name ? [agent.model_name] : []),
+    is_available: agent.is_available,
+    unavailable_reasons: agent.unavailable_reasons || [],
+    group_ids: agent.group_ids || [],
+    is_new: agent.is_new || false,
+    permission: agent.permission,
+    is_published: agent.is_published,
+    current_version_no: agent.current_version_no,
+    version_label: agent.version_label,
+    version_create_time: agent.version_create_time,
+    is_a2a_server: agent.is_a2a_server || false,
+    allow_chat_metadata: agent.allow_chat_metadata ?? false,
+    enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
+    model_params_override: agent.model_params_override ?? null,
+    icon_url: agent.icon_url,
+    repository_info: agent.repository_info,
+  }) as unknown as Agent;
+
+export type AgentListFilters = {
+  tenantId?: string | null;
+  enabled?: boolean;
+  includeRepositoryInfo?: boolean;
+  permission?: "EDIT" | "READ_ONLY";
+  tag?: string;
+  tagPredicates?: TagResourcePredicate[];
+  searchTagPredicates?: TagResourcePredicate[];
+  createdBy?: string;
+  createdByNot?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+export type AgentListPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+export type PagedAgentList = {
+  agents: Agent[];
+  pagination: AgentListPagination;
+  creatorCounts?: { all: number; created: number; others: number };
+};
+
 export const fetchAgentList = async (tenantId?: string) => {
   try {
     const trimmedTenantId = tenantId?.trim();
@@ -168,27 +258,7 @@ export const fetchAgentList = async (tenantId?: string) => {
     const data = await response.json();
 
     // convert backend data to frontend format (basic info only)
-    const formattedAgents = data.map((agent: any) => ({
-      id: String(agent.agent_id),
-      name: agent.name,
-      display_name: agent.display_name || agent.name,
-      description: agent.description,
-      author: agent.author,
-      model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
-      model_names:
-        agent.model_names || (agent.model_name ? [agent.model_name] : []),
-      is_available: agent.is_available,
-      unavailable_reasons: agent.unavailable_reasons || [],
-      group_ids: agent.group_ids || [],
-      is_new: agent.is_new || false,
-      permission: agent.permission,
-      is_published: agent.is_published,
-      current_version_no: agent.current_version_no,
-      is_a2a_server: agent.is_a2a_server || false,
-      allow_chat_metadata: agent.allow_chat_metadata ?? false,
-      model_params_override: agent.model_params_override ?? null,
-      icon_url: agent.icon_url,
-    }));
+    const formattedAgents = data.map(formatAgentListItem);
 
     return {
       success: true,
@@ -200,6 +270,72 @@ export const fetchAgentList = async (tenantId?: string) => {
     return {
       success: false,
       data: [],
+      message: "agentConfig.agents.listFetchFailed",
+    };
+  }
+};
+
+export const fetchPagedAgentList = async (
+  filters: AgentListFilters
+): Promise<{ success: boolean; data: PagedAgentList; message: string }> => {
+  try {
+    const queryParams = new URLSearchParams();
+    const tenantId = filters.tenantId?.trim();
+    if (tenantId) queryParams.set("tenant_id", tenantId);
+    if (filters.permission) queryParams.set("permission", filters.permission);
+    if (filters.createdBy) queryParams.set("created_by", filters.createdBy);
+    if (filters.createdByNot)
+      queryParams.set("created_by_not", filters.createdByNot);
+    if (filters.tagPredicates?.length)
+      queryParams.set("tag_predicates", JSON.stringify(filters.tagPredicates));
+    if (filters.searchTagPredicates?.length)
+      queryParams.set(
+        "search_tag_predicates",
+        JSON.stringify(filters.searchTagPredicates)
+      );
+    if (filters.tag?.trim()) queryParams.set("tag", filters.tag.trim());
+    if (filters.search?.trim())
+      queryParams.set("search", filters.search.trim());
+    if (filters.includeRepositoryInfo)
+      queryParams.set("include_repository_info", "true");
+    queryParams.set("page", String(filters.page ?? 1));
+    queryParams.set("page_size", String(filters.pageSize ?? 20));
+
+    const response = await fetch(
+      `${API_ENDPOINTS.agent.listPage}?${queryParams.toString()}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return {
+      success: true,
+      data: {
+        agents: (data.items || []).map(formatAgentListItem),
+        creatorCounts: data.creator_counts,
+        pagination: {
+          page: data.pagination.page,
+          pageSize: data.pagination.page_size,
+          total: data.pagination.total,
+          totalPages: data.pagination.total_pages,
+        },
+      },
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to fetch paged agent list:", error);
+    return {
+      success: false,
+      data: {
+        agents: [],
+        pagination: {
+          page: filters.page ?? 1,
+          pageSize: filters.pageSize ?? 20,
+          total: 0,
+          totalPages: 0,
+        },
+      },
       message: "agentConfig.agents.listFetchFailed",
     };
   }
@@ -244,6 +380,7 @@ export const fetchPublishedAgentList = async () => {
       example_questions: agent.example_questions || [],
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
       model_params_override: agent.model_params_override ?? null,
+      enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
       icon_url: agent.icon_url,
     }));
 
@@ -437,6 +574,7 @@ export interface UpdateAgentInfoPayload {
   is_main_agent?: boolean;
   provide_run_summary?: boolean;
   allow_chat_metadata?: boolean;
+  enable_protocol_repair_retry?: boolean;
   enable_context_manager?: boolean;
   is_a2a?: boolean;
   verification_config?: Record<string, any>;
@@ -464,28 +602,30 @@ export interface UpdateAgentInfoPayload {
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.update, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.agent.update, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
     });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
     return {
       success: true,
       data: data,
       message: "Agent updated successfully",
+      error: undefined,
     };
   } catch (error) {
     log.error("Failed to update Agent:", error);
+    const apiError = toApiError(
+      error,
+      "Failed to update Agent, please try again later"
+    );
     return {
       success: false,
       data: null,
-      message: "Failed to update Agent, please try again later",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -689,17 +829,29 @@ export const importAgent = async (
       const errorData = await response.json().catch(() => ({}));
       const errMsg = errorData?.message ?? errorData?.detail;
       if (typeof errMsg === "object" && errMsg !== null) {
+        const apiError = new ApiError(
+          errorData?.code ?? response.status,
+          typeof errorData?.message === "string"
+            ? errorData.message
+            : errMsg?.type === "skill_duplicate"
+              ? "Skill name conflict detected"
+              : "Failed to import Agent, please try again later",
+          errorData?.details
+        );
         return {
           success: false,
           data: { detail: errMsg },
-          message:
-            errMsg?.type === "skill_duplicate"
-              ? "Skill name conflict detected"
-              : (errorData?.message ??
-                "Failed to import Agent, please try again later"),
+          message: apiError.message,
+          error: apiError,
         };
       }
-      const error = new Error(`Request failed: ${response.status}`);
+      const error = new ApiError(
+        errorData?.code ?? response.status,
+        typeof errMsg === "string"
+          ? errMsg
+          : `Request failed: ${response.status}`,
+        errorData?.details
+      );
       (error as any).detail = errMsg;
       throw error;
     }
@@ -709,13 +861,19 @@ export const importAgent = async (
       success: true,
       data: data,
       message: "Agent imported successfully",
+      error: undefined,
     };
   } catch (error) {
     log.error("Failed to import Agent:", error);
+    const apiError = toApiError(
+      error,
+      "Failed to import Agent, please try again later"
+    );
     return {
       success: false,
       data: (error as any).detail ? { detail: (error as any).detail } : null,
-      message: "Failed to import Agent, please try again later",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -961,6 +1119,7 @@ export const searchAgentInfo = async (
       example_questions: data.example_questions || [],
       current_version_no: data.current_version_no,
       allow_chat_metadata: data.allow_chat_metadata ?? false,
+      enable_protocol_repair_retry: data.enable_protocol_repair_retry ?? false,
     };
 
     return {
@@ -1379,7 +1538,7 @@ export const createSkill = async (skillData: {
       requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
-    const response = await fetch(API_ENDPOINTS.skills.create, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.skills.create, {
       method: "POST",
       headers: {
         ...getAuthHeaders(),
@@ -1388,17 +1547,13 @@ export const createSkill = async (skillData: {
       body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Request failed: ${response.status}`);
-    }
-
     const data = await response.json();
 
     return {
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill:", error);
@@ -1407,6 +1562,7 @@ export const createSkill = async (skillData: {
       data: null,
       message:
         error instanceof Error ? error.message : "Failed to create skill",
+      error,
     };
   }
 };
@@ -1616,30 +1772,11 @@ export const createSkillFromFile = async (
       "User-Agent": "AgentFrontEnd/1.0",
     };
 
-    const response = await fetch(endpoint, {
+    const response = await fetchWithAuth(endpoint, {
       method: method,
       headers: headers,
       body: formData,
     });
-
-    if (!response.ok) {
-      let errorData: any = {};
-      try {
-        errorData = await response.json();
-      } catch {
-        // JSON parse failed
-      }
-
-      const errorMessage =
-        typeof errorData.detail === "string"
-          ? errorData.detail
-          : Array.isArray(errorData.detail)
-            ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
-            : JSON.stringify(errorData.detail);
-      throw new Error(errorMessage || `Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
 
@@ -1647,6 +1784,7 @@ export const createSkillFromFile = async (
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill from file:", error);
@@ -1657,6 +1795,7 @@ export const createSkillFromFile = async (
         error instanceof Error
           ? error.message
           : "Failed to create skill from file",
+      error,
     };
   }
 };

@@ -66,9 +66,16 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/chat",
     Icon: Bot,
     labelKey: "sidebar.startChat",
-    order: 1,
+    order: 1.5,
     parentKey: null,
     navigationPath: "/newchat",
+  },
+  {
+    path: "/workbench",
+    Icon: Zap,
+    labelKey: "sidebar.agentWorkbench",
+    order: 1,
+    parentKey: null,
   },
   {
     path: "/agent-tasks",
@@ -179,7 +186,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -199,16 +206,19 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
   // Update selected key and expand parent menu when pathname changes
   useEffect(() => {
     const currentPath = getEffectiveRoutePath(pathname);
+    const routePath = currentPath.startsWith("/agents/")
+      ? "/agents"
+      : currentPath;
     const matchedKey =
-      currentPath === "/newchat"
+      routePath === "/newchat"
         ? "/chat"
-        : ROUTE_PATHS.includes(currentPath)
-          ? currentPath
+        : ROUTE_PATHS.includes(routePath)
+          ? routePath
           : null;
     setSelectedKey(matchedKey || "");
 
     // Auto-expand parent menu when visiting child page
-    const parentKey = findParentKey(currentPath);
+    const parentKey = findParentKey(routePath);
     setOpenKeys(parentKey ? [parentKey] : []);
   }, [pathname]);
 
@@ -249,7 +259,12 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     }
 
     const filtered = ROUTE_CONFIG.filter((route) => {
-      return accessibleRoutes.includes(route.path);
+      if (route.path === "/" && hideHomePage) return false;
+      if (route.path === "/workbench" && !enableAgentWorkbench) return false;
+      return (
+        accessibleRoutes.includes(route.path) ||
+        (route.path === "/workbench" && accessibleRoutes.includes("/chat"))
+      );
     });
 
     // Separate root items and children
@@ -274,7 +289,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       ...root,
       children: childrenByParent.get(root.path) || [],
     }));
-  }, [accessibleRoutes]);
+  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage]);
 
   /**
    * Create a menu item from route configuration

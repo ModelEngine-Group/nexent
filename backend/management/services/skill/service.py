@@ -14,10 +14,13 @@ from nexent.skills.skill_loader import SkillLoader
 from nexent.skills.upload import normalize_skill_upload
 from nexent.skills.text_codec import DecodedSkillFile, decode_skill_text
 from consts.const import (
+    MAX_SKILL_UPLOAD_SIZE_BYTES,
+    MAX_SKILL_UPLOAD_SIZE_MB,
     OFFICIAL_SKILLS_ZIP_PATH,
     ROOT_DIR,
 )
-from consts.exceptions import ForbiddenError, SkillException
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, ForbiddenError, SkillException
 from database import skill_db
 from database.group_db import query_group_ids_by_user
 
@@ -342,6 +345,8 @@ class SkillService:
 
             logger.info(f"Created skill '{skill_name}' with local files")
             return self._enrich_configs_from_yaml(result)
+        except AppException:
+            raise
         except SkillException:
             raise
         except Exception as e:
@@ -367,6 +372,18 @@ class SkillService:
         ingroup_permission: Optional[str] = None, rewrite_name: bool = False,
     ) -> Dict[str, Any]:
         """Share parsing and persistence while keeping operation-specific policies."""
+        if len(content) > MAX_SKILL_UPLOAD_SIZE_BYTES:
+            raise AppException(
+                ErrorCode.FILE_TOO_LARGE,
+                f"Skill upload exceeds the maximum size of {MAX_SKILL_UPLOAD_SIZE_MB} MB",
+                details={
+                    "resource": "skill_upload",
+                    "limit_mb": MAX_SKILL_UPLOAD_SIZE_MB,
+                    "limit_bytes": MAX_SKILL_UPLOAD_SIZE_BYTES,
+                    "actual_bytes": len(content),
+                },
+            )
+
         is_zip = kind == "zip"
         manifest_path = original_root = None
         text = None
@@ -627,6 +644,7 @@ class SkillService:
     def update_skill_from_file(
         self, skill_name: str, file_content: Union[bytes, str, io.BytesIO],
         file_type: str = "auto", tenant_id: Optional[str] = None, user_id: Optional[str] = None,
+        rewrite_name: bool = False,
     ) -> Dict[str, Any]:
         """Validate access before sharing the MD/ZIP replacement pipeline."""
         tenant_id = self._require_tenant_id(tenant_id)
@@ -637,7 +655,13 @@ class SkillService:
             raise ForbiddenError(_SKILL_UPDATE_FORBIDDEN_MESSAGE)
         content, kind = normalize_skill_upload(file_content, file_type)
         return self._save_skill_upload(
-            content, skill_name, kind, tenant_id=tenant_id, user_id=user_id, update=True
+            content,
+            skill_name,
+            kind,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            update=True,
+            rewrite_name=rewrite_name,
         )
 
     def update_skill(
@@ -1368,6 +1392,8 @@ def install_skills_for_tenant(
                     f"create_skill returned no skill_id for '{skill_name}', "
                     f"tenant {tenant_id}"
                 )
+        except AppException:
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to install skill ID {skill_id} into tenant {tenant_id}: {e}"
@@ -1474,9 +1500,46 @@ def install_skills_from_zip_for_tenant(
             if existing:
                 logger.info(
                     f"Skill '{official_name}' already exists for tenant {tenant_id} "
-                    "with a non-official source, skipping"
+                    "with a non-official source; installing the official package "
+                    "under a numbered alias"
                 )
-                installed.append(official_name)
+                alias_name = None
+                alias_existing = None
+                for suffix in range(1, 1001):
+                    candidate = f"{official_name}_{suffix}"
+                    candidate_existing = skill_db.get_skill_by_name(
+                        candidate,
+                        tenant_id,
+                    )
+                    if not candidate_existing or candidate_existing.get("source") == "official":
+                        alias_name = candidate
+                        alias_existing = candidate_existing
+                        break
+                if alias_name is None:
+                    logger.warning(
+                        "No free official alias found for skill '%s' in tenant %s",
+                        official_name,
+                        tenant_id,
+                    )
+                    continue
+                if alias_existing:
+                    service.update_skill_from_file(
+                        skill_name=alias_name,
+                        file_content=zip_content,
+                        file_type="zip",
+                        tenant_id=tenant_id,
+                        user_id=None,
+                        rewrite_name=True,
+                    )
+                else:
+                    service.create_skill_from_zip_bytes(
+                        zip_bytes=zip_content,
+                        skill_name=alias_name,
+                        source="official",
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                    )
+                installed.append(alias_name)
                 continue
 
             # The request name only selects a pre-existing official resource.
@@ -1495,6 +1558,8 @@ def install_skills_from_zip_for_tenant(
                 f"Installed skill '{installed_name}' for tenant {tenant_id} "
                 f"from ZIP {zip_filename}"
             )
+        except AppException:
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to install skill '{skill_name}' from ZIP for tenant {tenant_id}: {e}"

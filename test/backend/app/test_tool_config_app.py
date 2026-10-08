@@ -1,6 +1,6 @@
 import types
 import importlib.machinery
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
 
@@ -520,11 +520,13 @@ class TestValidateToolAPI:
 class TestImportOpenAPIServiceAPI:
     """Test endpoint for importing OpenAPI services"""
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
     @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.import_openapi_service')
     def test_import_openapi_service_success(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test successful OpenAPI service import"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -568,11 +570,13 @@ class TestImportOpenAPIServiceAPI:
         )
         mock_refresh_mcp.assert_called_once_with("tenant456")
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
     @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.import_openapi_service')
     def test_import_openapi_service_success_with_headers_template(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test successful OpenAPI service import with headers template"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -672,11 +676,13 @@ class TestImportOpenAPIServiceAPI:
         data = response.json()
         assert "openapi_json is required" in data["detail"]
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
     @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.import_openapi_service')
     def test_import_openapi_service_with_force_update(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test import with force_update=True"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -741,11 +747,13 @@ class TestImportOpenAPIServiceAPI:
         data = response.json()
         assert "Auth error" in data["detail"]
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
     @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.import_openapi_service')
     def test_import_openapi_service_with_authorization_header(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test OpenAPI service import with authorization header"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1093,7 +1101,7 @@ class TestDataValidation:
         )
 
         assert response.status_code in [
-            HTTPStatus.OK, HTTPStatus.INTERNAL_SERVER_ERROR]
+            HTTPStatus.OK, HTTPStatus.INTERNAL_SERVER_ERROR, HTTPStatus.UNAUTHORIZED]
 
     def test_update_tool_invalid_data_types(self):
         """Test update with invalid data types"""

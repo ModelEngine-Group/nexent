@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Layout, Button, Spin } from "antd";
 import { TopNavbar } from "@/components/navigation/TopNavbar";
@@ -40,7 +40,20 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const isSharePage = effectivePath.startsWith("/share/");
 
   // Sidebar collapse state
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(effectivePath === "/workbench");
+
+  useEffect(() => {
+    if (
+      effectivePath !== "/workbench" &&
+      !effectivePath.startsWith("/agents/") &&
+      effectivePath !== "/skill-space"
+    )
+      return;
+    const frame = requestAnimationFrame(() =>
+      setCollapsed(effectivePath === "/workbench")
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [effectivePath]);
 
   // Layout style calculations
   const headerReservedHeight = parseInt(HEADER_CONFIG.RESERVED_HEIGHT);
@@ -118,6 +131,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
         >
           {children}
         </Content>
+        {!isSpeedMode && <AuthDialogs />}
       </Layout>
     );
   }

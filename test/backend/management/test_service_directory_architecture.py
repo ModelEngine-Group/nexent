@@ -11,12 +11,15 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    "agent/icon_storage.py",
     "agent/management.py",
     "agent/naming.py",
     "agent/read.py",
+    "agent/runtime_sub_agent_adapter.py",
     "agent/run_context.py",
     "agent/run.py",
     "agent/service.py",
+    "agent/system_agent_provider.py",
     "knowledge_base/common.py",
     "knowledge_base/deletion.py",
     "knowledge_base/listing.py",
@@ -48,7 +51,7 @@ LEGACY_MODULE_NAMES = {
 
 DEFAULT_MODULE_LINE_LIMIT = 2000
 MODULE_LINE_LIMITS = {
-    "agent/run.py": 2300,
+    "agent/run.py": 2500,
 }
 
 

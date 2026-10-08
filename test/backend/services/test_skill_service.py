@@ -172,6 +172,8 @@ TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp",
 consts_const_mock.CONTAINER_SKILLS_PATH = os.path.abspath(os.sep)
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
 consts_const_mock.ROOT_DIR = "/tmp"
+consts_const_mock.MAX_SKILL_UPLOAD_SIZE_MB = 10
+consts_const_mock.MAX_SKILL_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
 consts_const_mock.PERMISSION_EDIT = "EDIT"
 consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
@@ -185,7 +187,12 @@ consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 consts_exceptions_mock.NotFoundException = type('NotFoundException', (Exception,), {})
 consts_exceptions_mock.ValidationError = type('ValidationError', (Exception,), {})
-consts_exceptions_mock.AppException = type('AppException', (Exception,), {})
+class AppException(Exception):
+    def __init__(self, _error_code=None, message=None, details=None):
+        self.details = details or {}
+        super().__init__(message or _error_code)
+
+consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Exception,), {})
 
 sys.modules['consts'] = consts_mock
@@ -1074,6 +1081,32 @@ class TestSkillServiceCreateSkill:
         assert result["name"] == "new_skill"
         mock_manager.save_skill.assert_called_once()
 
+    def test_create_skill_preserves_app_exception(self, mocker):
+        """Resource-limit exceptions from persistence must reach the API unchanged."""
+        quota_error = AppException(
+            "120104",
+            "Tenant skill limit reached",
+            details={"resource": "skills", "limit": 1},
+        )
+        mocker.patch(
+            "management.services.skill.service.skill_db.get_skill_by_name",
+            return_value=None,
+        )
+        mocker.patch(
+            "management.services.skill.service.skill_db.create_skill",
+            side_effect=quota_error,
+        )
+
+        service = SkillService(tenant_id="test-tenant")
+        service.skill_manager = MagicMock()
+        service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=None)
+
+        with pytest.raises(AppException) as exc_info:
+            service.create_skill({"name": "quota-skill"}, tenant_id="test-tenant")
+
+        assert exc_info.value is quota_error
+        service.skill_manager.save_skill.assert_not_called()
+
     def test_create_skill_with_params(self, mocker):
         mocker.patch(
             'management.services.skill.service.skill_db.get_skill_by_name',
@@ -1106,6 +1139,48 @@ class TestSkillServiceCreateSkill:
 
 class TestSkillServiceCreateSkillFromFile:
     """Test SkillService.create_skill_from_file method."""
+
+    def test_upload_rejects_content_over_configured_limit(self, monkeypatch):
+        """Skill uploads larger than the configured byte limit fail before parsing."""
+        service = SkillService(tenant_id="tenant1")
+        monkeypatch.setattr(
+            skill_service, "MAX_SKILL_UPLOAD_SIZE_BYTES", 10
+        )
+        with pytest.raises(AppException, match="Skill upload exceeds") as exc_info:
+            service.create_skill_from_file(b"12345678901", file_type="md")
+
+        assert exc_info.value.details == {
+            "resource": "skill_upload",
+            "limit_mb": consts_const_mock.MAX_SKILL_UPLOAD_SIZE_MB,
+            "limit_bytes": 10,
+            "actual_bytes": 11,
+        }
+
+    def test_upload_accepts_content_at_configured_limit(self, monkeypatch):
+        """The exact configured byte limit remains valid."""
+        service = SkillService(tenant_id="tenant1")
+        monkeypatch.setattr(
+            skill_service, "MAX_SKILL_UPLOAD_SIZE_BYTES", 10
+        )
+        monkeypatch.setattr(
+            skill_service, "SkillLoader",
+            type("Loader", (), {"parse": staticmethod(lambda _content: {
+                "name": "boundary_skill",
+                "description": "",
+                "content": "",
+                "tags": [],
+                "allowed_tools": [],
+            })}),
+        )
+        monkeypatch.setattr(
+            skill_service.skill_db, "create_skill",
+            lambda data, _tenant_id: {"skill_id": 1, "name": data["name"]},
+        )
+        service.skill_manager = MagicMock()
+
+        result = service.create_skill_from_file(b"1234567890", file_type="md")
+
+        assert result["name"] == "boundary_skill"
 
     def test_create_skill_from_md_bytes(self, mocker):
         mock_repo = MagicMock()
@@ -4857,6 +4932,48 @@ class TestUploadZipFilesWithZipError:
         assert "author: Example Author\n" in override
         assert override.endswith("# Instructions\n\nBody stays unchanged.\n")
 
+    def test_refresh_official_alias_rewrites_skill_identity(self):
+        """Refreshing an official alias keeps its directory and frontmatter aligned."""
+        import zipfile
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr(
+                "docx/SKILL.md",
+                "---\nname: docx\ndescription: Official DOCX\n---\nbody",
+            )
+
+        service = create_test_service()
+        service.skill_manager = MagicMock()
+        service._enrich_configs_from_yaml = lambda result: result
+
+        with patch.object(
+            skill_service.skill_db,
+            "get_skill_by_name",
+            return_value={"skill_id": 42, "name": "docx_1", "source": "official"},
+        ), patch.object(
+            skill_service.skill_db,
+            "update_skill",
+            return_value={"skill_id": 42, "name": "docx_1"},
+        ), patch.object(
+            service,
+            "_delete_local_skill_files",
+        ), patch.object(service, "_upload_zip_files") as mock_upload:
+            result = service.update_skill_from_file(
+                skill_name="docx_1",
+                file_content=zip_buffer.getvalue(),
+                file_type="zip",
+                tenant_id="test-tenant",
+                rewrite_name=True,
+            )
+
+        assert result["name"] == "docx_1"
+        assert mock_upload.call_args.args[1:3] == ("docx_1", "docx")
+        override = mock_upload.call_args.kwargs["file_overrides"][
+            "docx/SKILL.md"
+        ].decode("utf-8")
+        assert 'name: "docx_1"\n' in override
+
     def test_upload_zip_renamed_root_does_not_nest_target_dir(self, tmp_path):
         """Test ZIP root rename writes files directly under the target skill directory."""
         import zipfile
@@ -6569,6 +6686,35 @@ class TestSkillStreamingAndInstallation:
         assert result == [10, 20]
         database_skill_db_mock.create_skill.assert_called_once()
 
+    def test_install_skills_for_tenant_preserves_app_exception(self, mocker):
+        """Tenant skill quota errors must not be swallowed as generic install failures."""
+        quota_error = AppException(
+            "120104",
+            "Tenant skill limit reached",
+            details={"resource": "skills", "limit": 1},
+        )
+        mocker.patch.object(
+            database_skill_db_mock,
+            "get_skill_by_id_global",
+            return_value={"name": "official", "description": "template"},
+            create=True,
+        )
+        mocker.patch.object(
+            database_skill_db_mock,
+            "get_skill_by_name",
+            return_value=None,
+        )
+        mocker.patch.object(
+            database_skill_db_mock,
+            "create_skill",
+            side_effect=quota_error,
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            skill_service.install_skills_for_tenant([1], "tenant-1", "user-1")
+
+        assert exc_info.value is quota_error
+
     def test_get_official_skills_status_covers_installable_and_missing_resources(self, mocker, tmp_path):
         (tmp_path / "alpha.zip").write_bytes(b"zip")
         (tmp_path / "beta.zip").write_bytes(b"zip")
@@ -6994,7 +7140,7 @@ class TestSkillServiceReportedCoverageGaps:
             "user-1",
         )
 
-        assert result == ["official", "custom", "new"]
+        assert result == ["official", "custom_1", "new"]
         service.update_skill_from_file.assert_called_once_with(
             skill_name="official",
             file_content=b"official",
@@ -7002,7 +7148,74 @@ class TestSkillServiceReportedCoverageGaps:
             tenant_id="tenant-1",
             user_id=None,
         )
+        service.create_skill_from_file.assert_called_once_with(
+            file_content=b"new",
+            skill_name="new",
+            file_type="zip",
+            source="official",
+            tenant_id="tenant-1",
+            user_id="user-1",
+        )
+        service.create_skill_from_zip_bytes.assert_called_once_with(
+            zip_bytes=b"custom",
+            skill_name="custom_1",
+            source="official",
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+    def test_install_skills_from_zip_preserves_app_exception(self, mocker, tmp_path):
+        """Tenant skill quota errors from ZIP installation must propagate to the caller."""
+        (tmp_path / "quota.zip").write_bytes(b"quota")
+        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(skill_service.skill_db, "get_skill_by_name", return_value=None)
+        quota_error = AppException(
+            "120104",
+            "Tenant skill limit reached",
+            details={"resource": "skills", "limit": 1},
+        )
+        service = MagicMock()
+        service.create_skill_from_file.side_effect = quota_error
+        mocker.patch.object(skill_service, "SkillService", return_value=service)
+
+        with pytest.raises(AppException) as exc_info:
+            skill_service.install_skills_from_zip_for_tenant(
+                ["quota"], "tenant-1", "user-1"
+            )
+
+        assert exc_info.value is quota_error
         service.create_skill_from_file.assert_called_once()
+
+    def test_install_skills_from_zip_reuses_existing_official_alias(self, mocker, tmp_path):
+        (tmp_path / "docx.zip").write_bytes(b"docx")
+        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(
+            skill_service.skill_db,
+            "get_skill_by_name",
+            side_effect=lambda name, tenant: {
+                "skill_id": 1 if name == "docx" else 2,
+                "source": "custom" if name == "docx" else "official",
+            },
+        )
+        service = MagicMock()
+        mocker.patch.object(skill_service, "SkillService", return_value=service)
+
+        result = skill_service.install_skills_from_zip_for_tenant(
+            ["docx"],
+            "tenant-1",
+            "user-1",
+        )
+
+        assert result == ["docx_1"]
+        service.update_skill_from_file.assert_called_once_with(
+            skill_name="docx_1",
+            file_content=b"docx",
+            file_type="zip",
+            tenant_id="tenant-1",
+            user_id=None,
+            rewrite_name=True,
+        )
+        service.create_skill_from_zip_bytes.assert_not_called()
 
     def test_install_skills_from_zip_handles_missing_directory_and_scan_error(self, mocker, tmp_path):
         missing = tmp_path / "missing"

@@ -13,6 +13,7 @@ import type {
   ClarificationMessageData,
 } from "@/types/clarification";
 import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
+import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export function ClarificationMessageCard({
   data,
@@ -56,7 +57,13 @@ export function ClarificationMessageCard({
         restoreDraft: false,
         onStarted: resolve,
         onRejected: (error) =>
-          reject(new Error(ordinarySendError(error, i18n.language))),
+          reject(
+            new Error(
+              ordinarySendError(error, i18n.language, (value) =>
+                getConversationResourceLimitMessage(value, t)
+              )
+            )
+          ),
       });
       const config = thread.composer.getState().runConfig;
       thread.append({

@@ -3,8 +3,10 @@ FROM node:22-alpine AS builder
 ARG MIRROR
 ARG TARGETARCH
 ARG CONFIGURED_BASE_PATH=/
+ARG MAX_KNOWLEDGE_FILE_SIZE_MB=100
 
 ENV NEXT_PUBLIC_BASE_PATH=${CONFIGURED_BASE_PATH}
+ENV NEXT_PUBLIC_KNOWLEDGE_BASE_MAX_FILE_SIZE_MB=${MAX_KNOWLEDGE_FILE_SIZE_MB}
 
 # Build Next.js application
 WORKDIR /opt/frontend
@@ -69,7 +71,7 @@ RUN --mount=type=cache,id=nexent-web-apk-${TARGETARCH},target=/var/cache/apk,sha
     mkdir -p /var/cache/apk && \
     apk update && \
     (apk upgrade busybox || true) && \
-    apk add --no-scripts curl
+    apk add --no-scripts curl vim
 
 WORKDIR /opt/frontend-dist
 

@@ -10,6 +10,15 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
+
+@pytest.fixture(autouse=True)
+def _default_to_ordinary_agent(monkeypatch):
+    """Keep general SkillInstance tests scoped to an ordinary Agent."""
+    monkeypatch.setattr(
+        "backend.database.agent_db.is_system_agent",
+        lambda *_args, **_kwargs: False,
+    )
+
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
@@ -26,9 +35,32 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.MAX_SKILLS_PER_TENANT = 1000
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
 sys.modules['consts.model'] = MagicMock()
+
+error_code_mock = types.ModuleType('consts.error_code')
+error_code_mock.ErrorCode = types.SimpleNamespace(
+    TENANT_RESOURCE_EXCEEDED="120104",
+    FILE_TOO_LARGE="000403",
+)
+exceptions_mock = types.ModuleType('consts.exceptions')
+
+class AppException(Exception):
+    def __init__(self, _error_code=None, message=None, details=None):
+        self.details = details or {}
+        super().__init__(message or _error_code)
+
+
+class TenantResourceLimitError(AppException):
+    code = "120104"
+
+
+exceptions_mock.AppException = AppException
+exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
+sys.modules['consts.error_code'] = error_code_mock
+sys.modules['consts.exceptions'] = exceptions_mock
 
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()
@@ -882,6 +914,16 @@ class TestDeleteSkillsByAgentId:
         update_dict = update_call_args[0][0]
         assert update_dict['updated_by'] == 'deleter_user'
 
+    def test_delete_rejects_system_agent(self, monkeypatch):
+        """UT-BE-SAL-012."""
+        monkeypatch.setattr(
+            "backend.database.agent_db.is_system_agent",
+            lambda *_args, **_kwargs: True,
+        )
+
+        with pytest.raises(ValueError, match="managed by the platform"):
+            delete_skills_by_agent_id(1, "tenant1", "user1")
+
 
 # ===== delete_skill_instances_by_skill_id Tests =====
 
@@ -1292,6 +1334,26 @@ class TestGetSkillById:
 class TestCreateSkill:
     """Tests for create_skill function."""
 
+    def test_create_skill_rejects_tenant_limit(self, monkeypatch, mock_session):
+        """Creating a Skill at the tenant quota returns structured limit details."""
+        session, query = mock_session
+        query.filter.return_value.count.return_value = 1
+        monkeypatch.setattr("backend.database.skill_db.MAX_SKILLS_PER_TENANT", 1)
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        with pytest.raises(AppException) as exc_info:
+            create_skill({"name": "blocked"}, "tenant1")
+
+        assert "Tenant skill limit reached" in str(exc_info.value)
+        assert getattr(exc_info.value, "details", {}).get("resource") == "skills"
+        assert getattr(exc_info.value, "details", {}).get("limit") == 1
+        session.add.assert_not_called()
+
     def test_create_skill_basic(self, monkeypatch, mock_session):
         """Test creating a basic skill."""
         session, query = mock_session
@@ -1352,7 +1414,8 @@ class TestCreateSkill:
 
     def test_create_skill_truncates_description_to_database_limit(self, monkeypatch, mock_session):
         """Long third-party descriptions must not make skill uploads fail."""
-        session, _ = mock_session
+        session, query = mock_session
+        query.filter.return_value.count.return_value = 0
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
@@ -1361,6 +1424,9 @@ class TestCreateSkill:
         created = []
 
         class MockSkillInfoClass:
+            tenant_id = MagicMock()
+            delete_flag = MagicMock()
+
             def __init__(self, **kwargs):
                 self.skill_id = 1
                 for key, value in kwargs.items():

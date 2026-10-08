@@ -14,8 +14,16 @@ perspective.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import Any, Callable, Iterable
 
+from ...monitor import (
+    OPENINFERENCE_SPAN_KIND_AGENT,
+    AgentRunMetadata,
+    agent_monitoring_context,
+    get_agent_monitoring_context,
+    get_monitoring_manager,
+)
 from ..utils.observer import MessageObserver
 
 
@@ -33,9 +41,8 @@ class SubAgentToolWrapper:
       ``__getattr__`` / ``__setattr__`` so smolagents can mutate the wrapped
       agent's Tool contract fields without hitting read-only properties.
 
-    The wrapper is intentionally minimal — it does not duplicate any of
-    smolagents' Tool machinery. The inner agent remains the source of truth
-    for execution; the wrapper only annotates the stream.
+    The inner agent remains the source of truth for execution. The wrapper
+    annotates the observer stream and scopes the nested Agent trace.
     """
 
     # Managed-agent orchestration must stay in the trusted Runtime process.
@@ -51,6 +58,8 @@ class SubAgentToolWrapper:
         "_observer",
         "_agent_id",
         "_agent_name",
+        "_invocation_name",
+        "_runtime_identity",
         "_task_extractor",
     })
 
@@ -60,7 +69,9 @@ class SubAgentToolWrapper:
         observer: MessageObserver,
         agent_id: Any = None,
         agent_name: str | None = None,
+        invocation_name: str | None = None,
         task_extractor: Callable[[Iterable[Any], dict], str | None] | None = None,
+        runtime_identity: dict | None = None,
     ):
         # Set attributes through ``object.__setattr__`` so the new
         # ``__setattr__`` below (which forwards everything to the inner
@@ -68,12 +79,21 @@ class SubAgentToolWrapper:
         object.__setattr__(self, "_inner", inner_agent)
         object.__setattr__(self, "_observer", observer)
         object.__setattr__(self, "_agent_id", agent_id)
+        object.__setattr__(self, "_runtime_identity", {
+            key: value for key, value in (runtime_identity or {}).items()
+            if key in {"runtime_ref", "version_no", "display_name", "origin"} and value is not None
+        })
         object.__setattr__(
             self,
             "_agent_name",
             agent_name
             if agent_name is not None
             else getattr(inner_agent, "name", None) or "subagent",
+        )
+        object.__setattr__(
+            self,
+            "_invocation_name",
+            invocation_name,
         )
         # Optional callable that extracts the task string from the parent's
         # call args. Default: read the first positional arg or the ``task``
@@ -124,45 +144,57 @@ class SubAgentToolWrapper:
         during this invocation, even when sibling sub-agents execute in
         parallel.
         """
-        task_text = self._task_extractor(args, kwargs)
-        invocation_id = uuid.uuid4().hex
-        self._observer.add_subagent_start(
-            agent_id=self._agent_id,
-            agent_name=self._agent_name,
-            task=task_text,
-            invocation_id=invocation_id,
-        )
-        try:
-            return self._inner(*args, **kwargs)
-        finally:
-            self._observer.add_subagent_end(
-                agent_id=self._agent_id,
-                agent_name=self._agent_name,
-                invocation_id=invocation_id,
-            )
+        return self._invoke(self._inner, args, kwargs)
 
     # Some smolagents versions dispatch via ``forward`` rather than
     # ``__call__``. Forward through to the inner agent's ``forward`` if it
     # exists, but still wrap with the observer signals.
-    def forward(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+    def forward(self, *args: Any, **kwargs: Any) -> Any:
+        inner_forward = getattr(self._inner, "forward", None)
+        target = inner_forward if callable(inner_forward) else self._inner
+        return self._invoke(target, args, kwargs)
+
+    def _invoke(self, target: Callable, args: tuple, kwargs: dict) -> Any:
+        """Keep tracing and observer boundaries identical for both entry points."""
         task_text = self._task_extractor(args, kwargs)
         invocation_id = uuid.uuid4().hex
+        start_kwargs = dict(self._runtime_identity)
+        if self._invocation_name is not None:
+            start_kwargs["invocation_name"] = self._invocation_name
         self._observer.add_subagent_start(
             agent_id=self._agent_id,
             agent_name=self._agent_name,
             task=task_text,
             invocation_id=invocation_id,
+            **start_kwargs,
         )
         try:
-            inner_forward = getattr(self._inner, "forward", None)
-            if callable(inner_forward):
-                return inner_forward(*args, **kwargs)
-            return self._inner(*args, **kwargs)
+            manager = get_monitoring_manager()
+            parent = get_agent_monitoring_context() or AgentRunMetadata()
+            metadata = replace(
+                parent, agent_id=self._agent_id, agent_name=self._agent_name,
+                agent_display_name=getattr(self._inner, "display_name", None), query=task_text,
+            )
+            attributes = manager.build_agent_run_attributes(metadata, attributes={
+                "subagent.invocation_id": invocation_id,
+                **({"parent.agent.id": parent.agent_id} if parent.agent_id is not None else {}),
+                **({"parent.agent.name": parent.agent_name} if parent.agent_name is not None else {}),
+            })
+            with agent_monitoring_context(metadata), manager.trace_operation(
+                f"agent.subagent.{self._agent_name}", OPENINFERENCE_SPAN_KIND_AGENT, **attributes
+            ):
+                result = target(*args, **kwargs)
+                manager.set_openinference_output(result)
+                return result
         finally:
+            end_kwargs = dict(self._runtime_identity)
+            if self._invocation_name is not None:
+                end_kwargs["invocation_name"] = self._invocation_name
             self._observer.add_subagent_end(
                 agent_id=self._agent_id,
                 agent_name=self._agent_name,
                 invocation_id=invocation_id,
+                **end_kwargs,
             )
 
 

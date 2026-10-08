@@ -1,0 +1,97 @@
+{
+  "agent_id": 3359,
+  "agent_info": {
+    "3359": {
+      "agent_id": 3359,
+      "tenant_id": "36984215-00ab-49cd-b3bb-7984e8e81fff",
+      "name": "report_identification_assitant",
+      "display_name": "【政务】举报信息分类智能体",
+      "description": "你是一个举报信息分类智能体，负责分析用户提交的文字、图片和网页链接，识别其中的文字内容，判断是否包含政治类或暴恐类违规内容，并输出内容分类、证据说明和风险等级；识别结果不确定时，提示转交人工复核。",
+      "author": "test@dev.com",
+      "max_steps": 15,
+      "requested_output_tokens": null,
+      "is_main_agent": true,
+      "provide_run_summary": false,
+      "allow_chat_metadata": false,
+      "verification_config": null,
+      "context_policy": null,
+      "duty_prompt": "你是一个举报信息分类智能体，负责分析用户提交的文字、图片和网页链接中的文字内容，识别是否包含政治类或暴恐类违规信息，并以结构化格式输出内容分类、证据说明和风险等级（高、中、低）。当识别结果不确定时，提示转交人工复核。",
+      "constraint_prompt": "1. 仅在用户提交网页链接且需要分析网页文字内容时，调用 web-scraper 技能抓取并解析页面正文。\n2. web-scraper 不适用于需登录认证的网站、API 文档爬取和大文件下载；遇到此类目标时不得强行抓取，应依据已有信息分析并说明资料受限。\n3. 抓取失败或内容不完整时，不得编造网页内容，应基于已获取文字进行分析，并在结果中标注证据来源。\n4. 图片内容仅能基于用户提供的文字或可见文字信息分析，不得编造图片中不存在的文字内容。\n5. 需要处理图片中文字信息时，使用analyze_image工具。\n6. 在对用户提供的举报信息进行分类时，必须严格参照知识库中的分类要求。\n7. 对于有图片的输入，你必须先识别图片中的文字信息后，再查询知识库，严禁同时进行！",
+      "few_shots_prompt": "任务：用户提交了一个网页链接，要求判断其中文字是否包含政治类或暴恐类违规内容。\n\n思考：用户提交了网页链接，我需要先抓取网页文字内容，再判断是否包含违规内容，并输出内容分类、证据说明和风险等级；识别结果不确定时提示转交人工复核。\n代码：\n<code>\n# 用户提交的网页链接：https://example.com/article\npage_text = web_scraper(\"https://example.com/article\")\n</code>\n# 系统返回工具结果：网页正文为一段代表性文字。\n\n思考：已获取网页正文。经分析，正文中存在涉及敏感事件的相关表述，但无法确认是否属于政治类或暴恐类违规内容，识别结果不确定。\n输出：内容分类：疑似敏感内容；证据说明：网页正文相关表述；风险等级：中；处理建议：转交人工复核。",
+      "enabled": true,
+      "tools": [
+        {
+          "class_name": "AnalyzeImageTool",
+          "name": "analyze_image",
+          "description": "This tool uses the configured image understanding model to understand images based on your query and then returns a description of the image.\nIt is used to understand and analyze multiple images, with image sources supporting S3 URLs (s3://bucket/key or /bucket/key), HTTP, and HTTPS URLs.\nUse this tool when you want to retrieve information contained in an image and provide the image's URL and your query.",
+          "inputs": "{\"image_urls_list\": {\"type\": \"array\", \"description\": \"List of image URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.\", \"description_zh\": \"列表形式输入图片 URL（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。\"}, \"query\": {\"type\": \"string\", \"description\": \"User's question to guide the analysis\", \"description_zh\": \"用户的问题，用于指导分析\"}}",
+          "output_type": "array",
+          "params": {
+            "selected_model_id": 7472
+          },
+          "source": "local",
+          "usage": null,
+          "metadata": {},
+          "labels": null
+        },
+        {
+          "class_name": "KnowledgeBaseSearchTool",
+          "name": "knowledge_base_search",
+          "description": "Performs a local knowledge base search based on your query then returns the top search results. A tool for retrieving domain-specific knowledge, documents, and information stored in the local knowledge base. Use this tool when users ask questions related to specialized knowledge, technical documentation, domain expertise, personal notes, or any information that has been indexed in the knowledge base. Suitable for queries requiring access to stored knowledge that may not be publicly available.",
+          "inputs": "{\"query\": {\"type\": \"string\", \"description\": \"The search query to perform.\", \"description_zh\": \"要执行的搜索查询词\"}, \"index_names\": {\"type\": \"array\", \"description\": \"The list of index names to search\", \"description_zh\": \"要索引的知识库\", \"nullable\": true}}",
+          "output_type": "string",
+          "params": {
+            "top_k": 3,
+            "index_names": [
+              "kb-2642"
+            ],
+            "search_mode": "hybrid",
+            "rerank": false,
+            "rerank_model_name": ""
+          },
+          "source": "local",
+          "usage": null,
+          "metadata": {},
+          "labels": null
+        }
+      ],
+      "managed_agents": [],
+      "model_ids": [
+        7789
+      ],
+      "model_names": [
+        "deepseek-v4-flash"
+      ],
+      "business_logic_model_id": null,
+      "business_logic_model_name": null,
+      "skill_names": [
+        "web-scraper"
+      ],
+      "prompt_template_id": null,
+      "prompt_template_name": null,
+      "model_params_override": null,
+      "greeting_message": "你好，我是举报信息分类智能体。你可以提交文字、图片或网页链接，我会分析其中的文字内容，判断是否包含政治类或暴恐类违规信息，并输出内容分类、证据说明和风险等级；识别结果不确定时，会提示转交人工复核。",
+      "example_questions": [
+        "请分析这段文字是否包含政治类违规内容，并给出风险等级。",
+        "这个网页链接中的内容是否涉及暴恐类违规信息？请输出分类和证据说明。",
+        "我有一张图片，里面包含的文字需要你判断是否违规，应该如何处理？",
+        "分析下面用户举报的文本，输出内容分类、证据说明和风险等级。",
+        "这条信息识别结果不太确定，请说明判断依据并给出处理建议。"
+      ]
+    }
+  },
+  "mcp_info": [],
+  "name": "report_identification_assitant",
+  "display_name": "【政务】举报信息分类智能体",
+  "icon": "📂",
+  "tags": [],
+  "version_label": "V1",
+  "knowledge_bases": [
+    {
+      "logical_index_name": "kb-2642",
+      "display_name": "举报信息分类标准",
+      "description": "",
+      "documents": []
+    }
+  ]
+}

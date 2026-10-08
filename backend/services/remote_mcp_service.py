@@ -4,10 +4,17 @@ import tempfile
 import asyncio
 import socket
 import random
+from contextlib import AsyncExitStack
 from typing import Awaitable, Callable
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
+from consts.const import (
+    CAN_EDIT_ALL_USER_ROLES,
+    MCP_REQUEST_TIMEOUT_SECONDS,
+    NEXENT_MCP_DOCKER_IMAGE,
+    PERMISSION_EDIT,
+    PERMISSION_READ,
+)
 from consts.exceptions import (
     MCPConnectionError,
     MCPNameIllegal,
@@ -47,9 +54,6 @@ from services.mcp_container_service import MCPContainerManager
 from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger("remote_mcp_service")
-
-MCP_HEALTH_CHECK_TIMEOUT_SECONDS = 10
-
 
 def _iter_exception_chain(exc: BaseException):
     seen: set[int] = set()
@@ -129,16 +133,17 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
 
         async def list_mcp_tools() -> list:
             client = Client(transport=transport)
-            async with client:
+            async with AsyncExitStack() as stack:
+                await asyncio.wait_for(
+                    stack.enter_async_context(client),
+                    timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                )
                 # Verify the server can actually serve tools.
                 # This exercises API key validation and end-to-end connectivity,
                 # unlike is_connected() which only checks the initialize handshake.
                 return await client.list_tools()
 
-        tools_result = await asyncio.wait_for(
-            list_mcp_tools(),
-            timeout=MCP_HEALTH_CHECK_TIMEOUT_SECONDS,
-        )
+        tools_result = await list_mcp_tools()
         return [t.name for t in tools_result] if tools_result else []
     except BaseException as e:
         logger.debug(f"MCP protocol health check failed: {e}")
@@ -175,9 +180,16 @@ async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
                 httpx_client_factory=create_httpx_client,
             )
 
-        client = Client(transport=transport)
-        async with client:
-            return client.is_connected()
+        async def connect_client() -> bool:
+            client = Client(transport=transport)
+            async with AsyncExitStack() as stack:
+                await asyncio.wait_for(
+                    stack.enter_async_context(client),
+                    timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                )
+                return client.is_connected()
+
+        return await connect_client()
     except Exception as e:
         logger.debug(f"MCP protocol connect handshake failed: {e}")
         return False
@@ -454,7 +466,11 @@ async def add_mcp_service(
         if is_api:
             # Register OpenAPI service (same as agent config flow)
             try:
-                from services.tool_configuration_service import import_openapi_service, _refresh_openapi_services_in_mcp
+                from services.tool_configuration_service import (
+                    import_openapi_service,
+                    _refresh_openapi_services_in_mcp,
+                    update_tool_list,
+                )
                 import_openapi_service(
                     service_name=name,
                     openapi_json=resolved_config_json,
@@ -466,6 +482,9 @@ async def add_mcp_service(
                     force_update=True,
                 )
                 _refresh_openapi_services_in_mcp(tenant_id)
+                # Keep the persisted tool catalog in sync with the tenant MCP runtime.
+                # The agent configuration page reads /tool/list from this catalog.
+                await update_tool_list(tenant_id=tenant_id, user_id=user_id)
             except Exception as exc:
                 logger.warning(f"Failed to register OpenAPI service '{name}': {exc}")
             # Extract tool names from OpenAPI spec for display
@@ -1038,11 +1057,39 @@ async def delete_mcp_service(
         except Exception as exc:
             logger.warning(f"Failed to stop container: {exc}, but continue to delete MCP record")
 
+    is_openapi_service = (
+        isinstance(current_record.get("config_json"), dict)
+        and "openapi" in current_record["config_json"]
+    )
+
+    if is_openapi_service:
+        # API-to-MCP services have a separate service record and all their
+        # persisted tools use the shared ``outer-apis`` usage value.
+        try:
+            from services.tool_configuration_service import (
+                delete_openapi_service,
+                _refresh_openapi_services_in_mcp,
+            )
+
+            delete_openapi_service(
+                service_name=current_record.get("mcp_name") or "",
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            _refresh_openapi_services_in_mcp(tenant_id)
+        except Exception as exc:
+            logger.warning(
+                f"Failed to remove API-to-MCP service '{current_record.get('mcp_name')}': {exc}"
+            )
     # Hide the deleted MCP's tools and remove their editable agent draft bindings.
     # Cleanup must succeed before the MCP record is deleted to avoid stale bindings.
     set_mcp_tools_unavailable(
         tenant_id=tenant_id,
-        mcp_server_name=current_record.get("mcp_name") or "",
+        mcp_server_name=(
+            "outer-apis"
+            if is_openapi_service
+            else current_record.get("mcp_name") or ""
+        ),
         user_id=user_id,
     )
 

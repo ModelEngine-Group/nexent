@@ -188,23 +188,24 @@ class GuardrailEngine:
     def check_input(
         self,
         input_messages: List[Dict[str, Any]],
+        trusted_tail_count: int = 0,
     ) -> GuardrailDecision:
         """Screen the messages about to be sent to the LLM, per message.
 
-        Each message is classified as ``new_input`` (latest user turn) or
-        ``history`` and resolved via SeverityResolver. On ``mask`` all matching
-        messages are redacted in a copy returned as ``masked_messages``; the
-        overall action is the highest-rank across messages.
+        Screen the latest real user turn as ``new_input`` and earlier messages
+        as ``history``. Trusted request-only tail instructions are omitted from
+        screening but retained in the model-bound masked copy. On ``mask`` all
+        matching messages are redacted; the overall action is the highest rank.
 
         Args:
             input_messages: Messages about to be sent to the LLM.
+            trusted_tail_count: Number of trailing runtime-injected messages.
 
         Returns:
             A GuardrailDecision; carries ``masked_messages`` when masking.
             Never raises -- engine failures degrade to a pass.
         """
         try:
-            new_input_idx = self._find_new_input_index(input_messages)
             overall = "pass"
             chosen = None  # (rule, matched_text, source, user_severity)
             any_mask = False
@@ -213,7 +214,10 @@ class GuardrailEngine:
                 (dict(m) if isinstance(m, dict) else m)
                 for m in (input_messages or [])
             ]
-            for i, msg in enumerate(messages_copy):
+            tail_count = trusted_tail_count if 0 <= trusted_tail_count <= len(messages_copy) else 0
+            screened_count = len(messages_copy) - tail_count
+            new_input_idx = self._find_new_input_index(messages_copy[:screened_count])
+            for i, msg in enumerate(messages_copy[:screened_count]):
                 source = "new_input" if i == new_input_idx else "history"
                 screened = self._screen_message(msg, source)
                 if screened is None:
