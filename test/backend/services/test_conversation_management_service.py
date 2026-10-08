@@ -1,3 +1,4 @@
+from pathlib import Path
 import sys
 import types
 from unittest.mock import patch
@@ -30,24 +31,15 @@ def _stub_nexent_openai_model():
 
 _stub_nexent_openai_model()
 
-# Stub jinja2 to avoid importing the dependency during tests
-jinja2_mod = types.ModuleType("jinja2")
-class StrictUndefined:
-    pass
-class Template:
-    def __init__(self, text, undefined=None):
-        self.text = text
-    def render(self, ctx):
-        # very small render: replace {{content}} occurrence
-        return self.text.replace("{{content}}", ctx.get("content", ""))
-jinja2_mod.StrictUndefined = StrictUndefined
-jinja2_mod.Template = Template
-sys.modules["jinja2"] = jinja2_mod
+# Exercise the real Jinja renderer used by SDK prompt assembly.
+import jinja2
+
 # Stub nexent.core.agents.agent_model to satisfy imports in consts.model and agent_run_manager
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 agent_model_mod.ToolConfig = object
 agent_model_mod.AgentRunInfo = object
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
 # Stub nexent.core.agents.agent_context for agent_run_manager import

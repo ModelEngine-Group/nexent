@@ -2513,7 +2513,7 @@ class TestCreateAgentConfig:
                 model_name="test_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
-                managed_agents=[],
+                worker_agents=[],
                 enable_protocol_repair_retry=False,
                 external_a2a_agents=[],
                 context_manager_config=ANY,
@@ -2604,7 +2604,7 @@ class TestCreateAgentConfig:
                     model_name="test_model",
                     provide_run_summary=True,
                     allow_chat_metadata=False,
-                    managed_agents=[mock_sub_agent_config],
+                    worker_agents=[mock_sub_agent_config],
                     enable_protocol_repair_retry=False,
                     external_a2a_agents=[],
                     context_manager_config=ANY,
@@ -2674,7 +2674,7 @@ class TestCreateAgentConfig:
             assert child.name == "agent_7_v3"
             assert child.runtime_ref == "agent:7:v3"
             assert child.display_name == "Research"
-            assert mock_agent_config.call_args.kwargs["managed_agents"] == [child]
+            assert mock_agent_config.call_args.kwargs["worker_agents"] == [child]
             mock_query_sub.assert_called_once_with(
                 main_agent_id=99, tenant_id="tenant_1", version_no=0
             )
@@ -2956,7 +2956,7 @@ class TestCreateAgentConfig:
                 model_name="main_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
-                managed_agents=[],
+                worker_agents=[],
                 enable_protocol_repair_retry=False,
                 external_a2a_agents=[],
                 context_manager_config=ANY,
@@ -4840,7 +4840,7 @@ class TestCreateAgentRunInfo:
 
             # Verify that other functions were called correctly
             mock_join_query.assert_called_once_with(
-                minio_files=[], query="test query", history=[])
+                minio_files=[], query="test query", history=[], language="zh")
             mock_create_models.assert_called_once_with("tenant_1")
             mock_create_agent.assert_called_once_with(
                 agent_id="agent_1",

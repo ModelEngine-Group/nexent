@@ -18,6 +18,8 @@ if "nexent.core" not in sys.modules:
     core_package.__path__ = [str(_SDK_PACKAGE / "core")]
     sys.modules["nexent.core"] = core_package
 
+from nexent.core.concurrency import telemetry as telemetry_module
+
 from nexent.core.concurrency import (
     LanePolicy,
     ManagedTaskSpec,

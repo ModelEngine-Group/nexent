@@ -59,9 +59,9 @@ def runtime(service, monkeypatch, mocker):
     threads.start()
     set_default_thread_manager(threads)
 
-    def prompt(**_kwargs):
+    def prompt(language, operation, values):
         with tracer.start_as_current_span("title.prepare"):
-            return {"SYSTEM_PROMPT": "Generate a title", "USER_PROMPT": "{{ question }}"}
+            return SimpleNamespace(system="Generate a title", user=values["question"])
 
     def model(messages):
         with tracer.start_as_current_span("model.generate"):
@@ -71,7 +71,7 @@ def runtime(service, monkeypatch, mocker):
         with tracer.start_as_current_span("title.persist"):
             return True
 
-    prepare = mocker.patch.object(service, "get_generate_title_prompt_template", side_effect=prompt)
+    prepare = mocker.patch.object(service, "compose_auxiliary_prompt", side_effect=prompt)
     mocker.patch.object(service.tenant_config_manager, "get_model_config", return_value={
         "display_name": "test-model", "model_factory": "openai",
     })

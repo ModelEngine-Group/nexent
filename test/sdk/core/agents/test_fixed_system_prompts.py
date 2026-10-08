@@ -53,7 +53,7 @@ def test_ut_sdk_dpr_012_fixed_hitl_prompt_matches_approved_policy(language):
     from nexent.core.agents.clarification import clarification_policy
     from nexent.core.prompts import load_prompt
 
-    expected = EXPECTED_CLARIFICATION[language]
+    expected = ("### 向用户澄清\n" if language == "zh" else "### Clarifying with the User\n") + EXPECTED_CLARIFICATION[language]
     assert load_prompt(language, "agent/human_interaction")["clarification_policy"] == expected
     assert clarification_policy("nexent_ask_user", language=language) == expected.replace(
         "ask_user", "nexent_ask_user",

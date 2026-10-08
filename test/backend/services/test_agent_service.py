@@ -1,3 +1,5 @@
+import importlib.machinery
+from pathlib import Path
 import sys
 import asyncio
 import json
@@ -118,6 +120,8 @@ nexent_agent_model_mock = MagicMock()
 nexent_agent_model_mock.ToolConfig = MockToolConfig
 sys.modules["nexent"] = MagicMock()
 sys.modules["nexent.core"] = MagicMock()
+sys.modules["nexent.core"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 _concurrency_module = types.ModuleType("nexent.core.concurrency")
 
 
@@ -178,6 +182,8 @@ _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
 sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
+sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
 sys.modules["nexent.core.agents.agent_model"] = nexent_agent_model_mock
 sys.modules["nexent.core.agents.run_agent"] = MagicMock()
 context_input_mock = types.ModuleType("nexent.core.agents.context_input")
@@ -389,7 +395,6 @@ setattr(
 
 # Load real asset_owner_visibility (agent_service imports resolve_agent_list_permission)
 import importlib.util
-from pathlib import Path
 
 _asset_owner_path = (
     Path(__file__).resolve().parents[3]
@@ -508,7 +513,11 @@ elasticsearch_client_mock = MagicMock()
 nexent_mock = MagicMock()
 sys.modules["nexent"] = nexent_mock
 sys.modules["nexent.core"] = MagicMock()
+sys.modules["nexent.core"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 sys.modules["nexent.core.agents"] = MagicMock()
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
+sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
 sys.modules["nexent.core.models"] = MagicMock()
 sys.modules["nexent.core.utils"] = MagicMock()
 
@@ -8704,17 +8713,7 @@ async def test_import_agent_all_model_fields_in_database(
 def test_render_prompt_template_success(monkeypatch):
     """_render_prompt_template should render a jinja2 template successfully."""
 
-    class FakeTemplate:
-        def __init__(self, template_str):
-            self.template_str = template_str
-
-        def render(self, **context):
-            # Very small fake renderer for test purposes
-            return self.template_str.format(**context)
-
-    monkeypatch.setattr("nexent.core.agents.prompt.meta.Template", FakeTemplate)
-
-    tpl = "Hello {name}"
+    tpl = "Hello {{ name }}"
     rendered = _render_prompt_template(tpl, name="World")
     assert rendered == "Hello World"
 
@@ -8729,7 +8728,7 @@ def test_render_prompt_template_on_error_returns_original(monkeypatch):
         def render(self, **context):
             raise ValueError("render failed")
 
-    monkeypatch.setattr("nexent.core.agents.prompt.meta.Template", FailingTemplate)
+    monkeypatch.setitem(_render_prompt_template.__globals__, "Template", FailingTemplate)
 
     tpl = "Broken {template"
     # Should not raise; should return original string

@@ -194,7 +194,7 @@ async def test_build_nl2skill_run_info_adds_uploaded_files_to_request(mocker):
 
     mocker.patch.object(
         nl2skill_service,
-        "get_skill_creation_simple_prompt_template",
+        "get_nl2skill_prompt_template",
         side_effect=fake_template,
     )
     mocker.patch.object(
@@ -257,11 +257,11 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
     async def fake_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
         chunks = [
-            {"type": "model_thinking_output", "content": "Preparing.\n<FINAL_"},
-            {"type": "model_output_thinking", "content": "ANSWER>\n<SK"},
+            {"type": "model_thinking_output", "content": "Preparing.\n<final_"},
+            {"type": "model_output_thinking", "content": "answer>\n<sk"},
             {
                 "type": "model_output_thinking",
-                "content": "ILL>\n---\nname: demo\ndescription: Demo\ntags: [demo]\n---\n# Demo\n</skill>\n",
+                "content": "ill>\n---\nname: demo\ndescription: Demo\ntags: [demo]\n---\n# Demo\n</skill>\n",
             },
             {"type": "model_output_code", "content": '<file path="scripts/run.py">\nprint("ok")\n</file>\n'},
             {"type": "model_output_thinking", "content": "<summary>\nReady.\n</summary>\n</final_answer>"},
@@ -320,7 +320,7 @@ async def test_stream_parses_skill_start_after_reasoning_without_newline(mocker)
         yield json.dumps(
             {
                 "type": "model_output_thinking",
-                "content": "SKILL>\n# Demo\n</skill>\n",
+                "content": "skill>\n# Demo\n</skill>\n",
             }
         )
 

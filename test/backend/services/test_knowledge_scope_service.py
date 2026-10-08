@@ -34,7 +34,7 @@ def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker
         )
 
     root = node("system:root", "root-index")
-    root.managed_agents = [node("system:child", "child-index")]
+    root.worker_agents = [node("system:child", "child-index")]
     before = root.model_dump()
     walk = mocker.patch("backend.services.knowledge_scope_service._walk_agent_tree")
     version = mocker.patch("backend.services.knowledge_scope_service.resolve_root_version")
@@ -44,7 +44,7 @@ def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker
     scope = ConversationKnowledgeScopeRequest.model_validate({"local": {"mode": "inherit"}, "aidp": {"mode": "disabled"}})
     compiled, resolution = resolve_executable_knowledge_scope(root, scope, tenant_id="tenant", user_id="user")
     assert compiled.tools[0].params["index_names"] == ["root-index"]
-    assert compiled.managed_agents[0].tools[0].params["index_names"] == ["child-index"]
+    assert compiled.worker_agents[0].tools[0].params["index_names"] == ["child-index"]
     assert set(resolution.tool_params.agents) == {"system:root", "system:child"}
     assert root.model_dump() == before
     walk.assert_not_called()
@@ -53,7 +53,7 @@ def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker
     disabled = scope.model_copy(deep=True)
     disabled.local.mode = "disabled"
     cleared, _ = resolve_executable_knowledge_scope(root, disabled, tenant_id="tenant", user_id="user")
-    for agent in [cleared, *cleared.managed_agents]:
+    for agent in [cleared, *cleared.worker_agents]:
         assert agent.tools[0].params["index_names"] == []
         assert agent.tools[0].metadata["allowed_index_names"] == []
         assert agent.tools[0].metadata["untouched"] == "value"
@@ -66,7 +66,7 @@ def test_executable_knowledge_rejects_ambiguous_runtime_identity(child_ref, mock
     from nexent.core.agents.agent_model import AgentConfig
 
     root = AgentConfig(runtime_ref="system:root", name="root", description="test", model_name="model", tools=[])
-    root.managed_agents = [root.model_copy(update={"runtime_ref": child_ref})]
+    root.worker_agents = [root.model_copy(update={"runtime_ref": child_ref})]
     resolve = mocker.patch("backend.services.knowledge_scope_service.resolve_knowledge_scope")
     with pytest.raises(ValidationError):
         resolve_executable_knowledge_scope(root, ConversationKnowledgeScopeRequest(), tenant_id="tenant", user_id="user")

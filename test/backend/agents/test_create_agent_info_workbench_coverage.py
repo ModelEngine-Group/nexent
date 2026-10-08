@@ -135,6 +135,9 @@ def test_skill_script_tools_remove_mutating_tool_for_runtime_snapshot(monkeypatc
             self.__dict__.update(kwargs)
 
     monkeypatch.setattr(create_agent_info, "ToolConfig", Tool)
+    skill_service = types.ModuleType("management.services.skill.service")
+    skill_service.SkillService = SimpleNamespace(resolve_effective_config=lambda **kwargs: {"format": "pdf"})
+    monkeypatch.setitem(sys.modules, "management.services.skill.service", skill_service)
     tools = create_agent_info._get_skill_script_tools(
         agent_id=7,
         tenant_id="tenant-a",

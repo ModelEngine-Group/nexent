@@ -89,7 +89,11 @@ nexent_monitor_mock = MagicMock()
 sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = nexent_core_mock
 prompt_resource_stub = types.ModuleType('nexent.core.prompts')
-prompt_resource_stub.load_prompt = MagicMock()
+def _load_sdk_resource(language, path):
+    import yaml
+    source = Path(__file__).resolve().parents[3] / "sdk/nexent/core/prompts" / language / f"{path}.yaml"
+    return yaml.safe_load(source.read_text(encoding="utf-8"))
+prompt_resource_stub.load_prompt = _load_sdk_resource
 prompt_resource_stub.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core/prompts')]
 def _render_test_prompt(source, parameters):
     from jinja2 import Environment, StrictUndefined
@@ -252,7 +256,7 @@ class TestPromptService(unittest.TestCase):
             {"name": "tool1", "description": "Tool 1", "inputs": "{}", "output_type": "text"}
         ]
         mock_search_agent_info.return_value = {"name": "assistant1", "description": "Assistant 1"}
-        mock_get_prompt_template.return_value = {
+        mock_get_prompt_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
             "OPTIMIZE_SYSTEM_PROMPT": "Optimize section",
             "OPTIMIZE_USER_PROMPT": "Section {{ section_type }} {{ current_content }} {{ feedback }}"
         }
@@ -299,11 +303,11 @@ class TestPromptService(unittest.TestCase):
             ErrorCode.COMMON_MISSING_REQUIRED_FIELD
         )
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_join_info_for_optimize_prompt_section(self, mock_template):
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "Rendered optimize content"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "Rendered optimize content"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         result = join_info_for_optimize_prompt_section(
             prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "Template"},
@@ -323,7 +327,7 @@ class TestPromptService(unittest.TestCase):
         )
 
         self.assertEqual(result, "Rendered optimize content")
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertEqual(template_vars["section_type"], "constraint")
         self.assertEqual(template_vars["current_content"], "Original content")
         self.assertEqual(template_vars["feedback"], "Be clearer")
@@ -1027,7 +1031,7 @@ class TestPromptService(unittest.TestCase):
         # Assert - exception message should be present
         self.assertIn("LLM error", str(context.exception))
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_join_info_for_generate_system_prompt(self, mock_template):
         # Setup
         mock_prompt_for_generate = {"user_prompt": "Test User Prompt"}
@@ -1043,9 +1047,9 @@ class TestPromptService(unittest.TestCase):
                 "inputs": "input2", "output_type": "output2"}
         ]
 
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "Rendered content"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "Rendered content"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         # Execute
         result = join_info_for_generate_system_prompt(
@@ -1054,16 +1058,16 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         self.assertEqual(result, "Rendered content")
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertIn("tool1", template_vars["tool_description"])
         self.assertNotIn("知识库工具仅代表检索能力", template_vars["tool_description"])
         self.assertFalse(template_vars["has_local_knowledge_tool"])
         self.assertFalse(template_vars["has_aidp_knowledge_tool"])
-        mock_template.assert_called_once_with(
-            mock_prompt_for_generate["user_prompt"], undefined=StrictUndefined)
-        mock_template_instance.render.assert_called_once()
+        mock_template.assert_called_with(
+            mock_prompt_for_generate["user_prompt"], template_vars)
+        assert mock_template_instance.called
         # Check template variables
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertIn("tool_description", template_vars)
         self.assertIn("assistant_description", template_vars)
         self.assertEqual(
@@ -1449,7 +1453,7 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(result, [])
         mock_search_agent.assert_not_called()
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_join_info_for_generate_system_prompt_english(self, mock_template):
         """Test join_info_for_generate_system_prompt with English language"""
         # Setup
@@ -1463,9 +1467,9 @@ class TestPromptService(unittest.TestCase):
                 "inputs": "input1", "output_type": "output1"}
         ]
 
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "Rendered content"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "Rendered content"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         # Execute with English language
         result = join_info_for_generate_system_prompt(
@@ -1475,16 +1479,16 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         self.assertEqual(result, "Rendered content")
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertIn("tool1", template_vars["tool_description"])
         self.assertNotIn("Knowledge tools represent capabilities only", template_vars["tool_description"])
         self.assertFalse(template_vars["has_local_knowledge_tool"])
         self.assertFalse(template_vars["has_aidp_knowledge_tool"])
         # Check that English labels are used
-        call_args = mock_template_instance.render.call_args[0][0]
+        call_args = mock_template_instance.call_args[0][1]
         self.assertEqual(call_args["task_description"], mock_task_description)
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_join_info_for_generate_system_prompt_empty_tools_and_agents(self, mock_template):
         """Test join_info_for_generate_system_prompt with empty tools and sub-agents"""
         # Setup
@@ -1493,9 +1497,9 @@ class TestPromptService(unittest.TestCase):
         mock_task_description = "Test task"
         mock_tools = []
 
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "Rendered content"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "Rendered content"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         # Execute
         result = join_info_for_generate_system_prompt(
@@ -1504,12 +1508,12 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         self.assertEqual(result, "Rendered content")
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertEqual(template_vars["tool_description"], "")
         self.assertFalse(template_vars["has_local_knowledge_tool"])
         self.assertFalse(template_vars["has_aidp_knowledge_tool"])
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_join_info_for_generate_system_prompt_with_knowledge_base_names(self, mock_template):
         """Test join_info_for_generate_system_prompt with knowledge_base_display_names"""
         # Setup
@@ -1521,9 +1525,9 @@ class TestPromptService(unittest.TestCase):
                 "inputs": "{}", "output_type": "string"}
         ]
 
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "Rendered content with KB names"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "Rendered content with KB names"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         # Execute with knowledge base display names
         result = join_info_for_generate_system_prompt(
@@ -1534,12 +1538,12 @@ class TestPromptService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "Rendered content with KB names")
         # Verify that knowledge_base_names was passed to template
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertIn("knowledge_base_names", template_vars)
         self.assertEqual(template_vars["knowledge_base_names"], "")
         self.assertIn("知识库工具仅代表检索能力", template_vars["tool_description"])
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_join_info_for_generate_system_prompt_without_knowledge_base_names(self, mock_template):
         """Test join_info_for_generate_system_prompt without knowledge_base_display_names"""
         # Setup
@@ -1551,9 +1555,9 @@ class TestPromptService(unittest.TestCase):
                 "inputs": "{}", "output_type": "string"}
         ]
 
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "Rendered content"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "Rendered content"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         # Execute without knowledge base display names
         result = join_info_for_generate_system_prompt(
@@ -1561,7 +1565,7 @@ class TestPromptService(unittest.TestCase):
         )
 
         # Assert
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         # knowledge_base_names is always present but empty when not provided
         self.assertIn("knowledge_base_names", template_vars)
         self.assertEqual(template_vars["knowledge_base_names"], "")
@@ -1876,7 +1880,7 @@ class TestPromptService(unittest.TestCase):
         """Test that empty LLM result raises AppException"""
         with patch('backend.services.prompt_service.call_llm_for_system_prompt') as mock_call_llm:
             with patch('nexent.core.agents.prompt.meta.load_prompt') as mock_template:
-                mock_template.return_value = {
+                mock_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
                     "OPTIMIZE_SYSTEM_PROMPT": "System prompt",
                     "OPTIMIZE_USER_PROMPT": "User prompt",
                 }
@@ -1904,7 +1908,7 @@ class TestPromptService(unittest.TestCase):
         with patch('backend.services.prompt_service.call_llm_for_system_prompt') as mock_call_llm:
             with patch('nexent.core.agents.prompt.meta.load_prompt') as mock_template:
                 with patch('backend.services.prompt_service.join_info_for_optimize_prompt_section') as mock_join:
-                    mock_template.return_value = {
+                    mock_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
                         "OPTIMIZE_SYSTEM_PROMPT": "System prompt",
                         "OPTIMIZE_USER_PROMPT": "User prompt",
                     }
@@ -1924,12 +1928,12 @@ class TestPromptService(unittest.TestCase):
                     )
                     self.assertEqual(result["section_title"], "智能体角色")
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_join_info_for_optimize_prompt_section_english(self, mock_template):
         """Test join_info_for_optimize_prompt_section with English language"""
-        mock_instance = MagicMock()
-        mock_template.return_value = mock_instance
-        mock_instance.render.return_value = "Rendered"
+        mock_instance = mock_template
+        mock_instance.return_value = "Rendered"
+        mock_instance.side_effect = lambda source, parameters: mock_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         result = join_info_for_optimize_prompt_section(
             prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "Template {{ section_title }}"},
@@ -1945,16 +1949,16 @@ class TestPromptService(unittest.TestCase):
         )
 
         self.assertEqual(result, "Rendered")
-        render_args = mock_instance.render.call_args[0][0]
+        render_args = mock_instance.call_args[0][1]
         self.assertEqual(render_args["section_type"], "constraint")
         self.assertEqual(render_args["knowledge_base_names"], "")
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_join_info_for_optimize_prompt_section_without_kb(self, mock_template):
         """Test join_info_for_optimize_prompt_section without knowledge base"""
-        mock_instance = MagicMock()
-        mock_template.return_value = mock_instance
-        mock_instance.render.return_value = "Rendered"
+        mock_instance = mock_template
+        mock_instance.return_value = "Rendered"
+        mock_instance.side_effect = lambda source, parameters: mock_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         result = join_info_for_optimize_prompt_section(
             prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "Template"},
@@ -1969,7 +1973,7 @@ class TestPromptService(unittest.TestCase):
             knowledge_base_display_names=None,
         )
 
-        render_args = mock_instance.render.call_args[0][0]
+        render_args = mock_instance.call_args[0][1]
         self.assertEqual(render_args["knowledge_base_names"], "")
 
     def test_default_prompt_section_title_zh(self):
@@ -2667,11 +2671,11 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
 class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
     """Test aidp_kb_names rendering in join_info_for_generate_system_prompt."""
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_rendered_string_when_aidp_kb_display_names_set(self, mock_template):
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "rendered"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "rendered"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         join_info_for_generate_system_prompt(
             prompt_for_generate={"user_prompt": "tmpl"},
@@ -2684,14 +2688,14 @@ class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
             aidp_kb_display_names=["kb-1", "kb-2"],
         )
 
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertEqual(template_vars["aidp_kb_names"], "")
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_empty_string_when_aidp_kb_display_names_none(self, mock_template):
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "rendered"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "rendered"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         join_info_for_generate_system_prompt(
             prompt_for_generate={"user_prompt": "tmpl"},
@@ -2704,14 +2708,14 @@ class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
             aidp_kb_display_names=None,
         )
 
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertEqual(template_vars["aidp_kb_names"], "")
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_empty_string_when_aidp_kb_display_names_empty_list(self, mock_template):
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "rendered"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "rendered"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         join_info_for_generate_system_prompt(
             prompt_for_generate={"user_prompt": "tmpl"},
@@ -2724,14 +2728,14 @@ class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
             aidp_kb_display_names=[],
         )
 
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertEqual(template_vars["aidp_kb_names"], "")
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_default_value_is_empty_string(self, mock_template):
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "rendered"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "rendered"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         join_info_for_generate_system_prompt(
             prompt_for_generate={"user_prompt": "tmpl"},
@@ -2743,7 +2747,7 @@ class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
             language="en",
         )
 
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertEqual(template_vars["aidp_kb_names"], "")
 
 
@@ -2772,11 +2776,11 @@ class TestResolveAidpKbDisplayNames(unittest.TestCase):
 class TestJoinInfoForOptimizePromptSectionAidpKbNames(unittest.TestCase):
     """Test aidp_kb_names in join_info_for_optimize_prompt_section template context."""
 
-    @patch('backend.services.prompt_service.Template')
+    @patch('nexent.core.agents.prompt.meta.render_prompt_text')
     def test_aidp_kb_display_names_passed_to_template_context(self, mock_template):
-        mock_template_instance = MagicMock()
-        mock_template.return_value = mock_template_instance
-        mock_template_instance.render.return_value = "rendered"
+        mock_template_instance = mock_template
+        mock_template_instance.return_value = "rendered"
+        mock_template_instance.side_effect = lambda source, parameters: mock_template_instance.return_value if "task_description" in parameters else _render_test_prompt(source, parameters)
 
         join_info_for_optimize_prompt_section(
             prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "tmpl"},
@@ -2795,7 +2799,7 @@ class TestJoinInfoForOptimizePromptSectionAidpKbNames(unittest.TestCase):
             aidp_kb_display_names=["aidp-kb-a", "aidp-kb-b"],
         )
 
-        template_vars = mock_template_instance.render.call_args[0][0]
+        template_vars = mock_template_instance.call_args[0][1]
         self.assertEqual(template_vars["aidp_kb_names"], "")
 
 
@@ -3721,7 +3725,7 @@ class TestGreetingGeneration(unittest.TestCase):
 
         mock_generate_system_prompt.side_effect = mock_gen
 
-        mock_get_prompt_template.return_value = {
+        mock_get_prompt_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
             "GREETING_SYSTEM_PROMPT": "generate greeting",
             "USER_PROMPT": "Render {{ display_name }}",
         }
@@ -3787,7 +3791,7 @@ class TestGreetingGeneration(unittest.TestCase):
 
         mock_generate_system_prompt.side_effect = mock_gen
 
-        mock_get_prompt_template.return_value = {
+        mock_get_prompt_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
             "GREETING_SYSTEM_PROMPT": "generate greeting",
             "USER_PROMPT": "Render {{ display_name }}",
         }
@@ -3849,7 +3853,7 @@ class TestGreetingGeneration(unittest.TestCase):
 
         mock_generate_system_prompt.side_effect = mock_gen
 
-        mock_get_prompt_template.return_value = {
+        mock_get_prompt_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
             "GREETING_SYSTEM_PROMPT": "generate greeting",
             "USER_PROMPT": "Render {{ display_name }}",
         }
@@ -3913,7 +3917,7 @@ class TestGreetingGeneration(unittest.TestCase):
 
         mock_generate_system_prompt.side_effect = mock_gen
 
-        mock_get_prompt_template.return_value = {
+        mock_get_prompt_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
             "GREETING_SYSTEM_PROMPT": "generate greeting",
             "USER_PROMPT": "Render {{ display_name }}",
         }
@@ -4026,7 +4030,7 @@ class TestGreetingJsonDecodeError(unittest.TestCase):
 
         mock_generate_system_prompt.side_effect = mock_gen
 
-        mock_get_prompt_template.return_value = {
+        mock_get_prompt_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
             "GREETING_SYSTEM_PROMPT": "generate greeting",
             "USER_PROMPT": "Render {{ display_name }}",
         }
@@ -4139,7 +4143,7 @@ def test_join_info_for_optimize_prompt_section_full_context(mocker):
     prompt_for_optimize = {
         "OPTIMIZE_USER_PROMPT": "{{ section_type }} {{ task_description }} {{ tool_description }} {{ has_local_knowledge_tool }} {{ has_aidp_knowledge_tool }}"
     }
-    with mocker.patch("backend.services.prompt_service.Template", return_value=mocked_template):
+    with mocker.patch("nexent.core.agents.prompt.meta.render_prompt_text", side_effect=lambda source, parameters: mocked_template.render(parameters) if "task_description" in parameters else _render_test_prompt(source, parameters)):
         result = join_info_for_optimize_prompt_section(
             prompt_for_optimize=prompt_for_optimize,
             section_type="constraint",
@@ -4171,7 +4175,7 @@ def test_join_info_for_optimize_prompt_section_english_scope_instruction(mocker)
     mocked_template = MagicMock()
     mocked_template.render = MagicMock(side_effect=lambda *args, **kwargs: render_kwargs.update(kwargs or (args[0] if args else {})) or "ok")
 
-    with mocker.patch("backend.services.prompt_service.Template", return_value=mocked_template):
+    with mocker.patch("nexent.core.agents.prompt.meta.render_prompt_text", side_effect=lambda source, parameters: mocked_template.render(parameters) if "task_description" in parameters else _render_test_prompt(source, parameters)):
         join_info_for_optimize_prompt_section(
             prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "{{ tool_description }}"},
             section_type="constraint",
@@ -4195,7 +4199,7 @@ def test_join_info_for_optimize_prompt_section_without_knowledge_tool_omits_scop
         side_effect=lambda *args, **kwargs: render_kwargs.update(kwargs or (args[0] if args else {})) or "ok"
     )
 
-    with mocker.patch("backend.services.prompt_service.Template", return_value=mocked_template):
+    with mocker.patch("nexent.core.agents.prompt.meta.render_prompt_text", side_effect=lambda source, parameters: mocked_template.render(parameters) if "task_description" in parameters else _render_test_prompt(source, parameters)):
         join_info_for_optimize_prompt_section(
             prompt_for_optimize={"OPTIMIZE_USER_PROMPT": "{{ tool_description }}"},
             section_type="constraint",

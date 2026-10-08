@@ -39,7 +39,10 @@ def render_prompt_text(source: str, parameters: Mapping[str, Any]) -> str:
         raise TypeError("prompt source must be text")
     if not isinstance(parameters, Mapping):
         raise TypeError("prompt parameters must be a mapping")
-    return Environment(undefined=StrictUndefined, autoescape=False).from_string(source).render(**parameters)
+    environment = Environment(
+        undefined=StrictUndefined, autoescape=False, keep_trailing_newline=True,
+    )
+    return environment.from_string(source).render(**parameters)
 
 
 __all__ = ["load_prompt", "render_prompt_text"]

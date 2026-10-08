@@ -44,6 +44,7 @@ def _register_package(name: str) -> types.ModuleType:
 _nexent_pkg = _register_package("nexent")
 _nexent_core = _register_package("nexent.core")
 _nexent_core_agents = _register_package("nexent.core.agents")
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 _nexent_core_utils = _register_package("nexent.core.utils")
 _nexent_memory = _register_package("nexent.memory")
 _nexent_monitor = _register_package("nexent.monitor")

@@ -1,3 +1,4 @@
+import os
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,13 +63,24 @@ def test_candidate_only_budget_is_not_forwarded_to_legacy(tmp_path):
     )
 
 
-def test_comparison_arms_preserve_virtualenv_python_symlink(tmp_path):
+def test_comparison_arms_preserve_virtualenv_python_symlink(tmp_path, monkeypatch):
     real_python = tmp_path / "python3.11"
     real_python.touch()
     legacy_root = tmp_path / "legacy"
     legacy_python = legacy_root / "backend/.venv/bin/python"
     legacy_python.parent.mkdir(parents=True)
-    legacy_python.symlink_to(real_python)
+    if os.name == "nt":
+        # Simulate symlink resolution without requiring Windows symlink privileges.
+        legacy_python.touch()
+        original_resolve = Path.resolve
+        monkeypatch.setattr(
+            Path, "resolve",
+            lambda path, *args, **kwargs: (
+                real_python if path == legacy_python else original_resolve(path, *args, **kwargs)
+            ),
+        )
+    else:
+        legacy_python.symlink_to(real_python)
 
     legacy, _ = comparison_arms(
         legacy_root=legacy_root,

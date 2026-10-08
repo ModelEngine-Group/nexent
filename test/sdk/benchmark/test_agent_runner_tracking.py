@@ -289,11 +289,11 @@ def test_ut_sdk_dpr_010_parallel_executor_localizes_rendered_resources():
 
     zh_text = _format_tools_description({parallel_tool.name: parallel_tool}, language="zh")
     en_text = _format_tools_description({parallel_tool.name: parallel_tool}, language="en")
-    assert "并行执行多个互不依赖的工具或助手调用" in zh_text
+    assert "并行执行多个互不依赖的可用工具或子智能体调用" in zh_text
     assert "单个任务超时秒数" in zh_text
-    assert "Run multiple independent tool or agent calls" not in zh_text
+    assert "Run independent available tools or sub-agents in parallel" not in zh_text
     assert "Per-task timeout in seconds" not in zh_text
-    assert "Run multiple independent tool or agent calls" in en_text
+    assert "Run independent available tools or sub-agents in parallel" in en_text
     assert "Per-task timeout in seconds" in en_text
 
 

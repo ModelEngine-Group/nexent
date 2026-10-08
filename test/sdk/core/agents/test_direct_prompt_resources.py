@@ -109,7 +109,8 @@ def test_ut_sdk_fps_009_special_names_and_no_redundant_automation_path():
     assert (PROMPTS / "en/memory/dreaming_user.yaml").is_file()
     assert not (PROMPTS / "en/memory/dreaming_user_memory.yaml").exists()
     resources = list(PROMPTS.rglob("*.yaml"))
-    assert len(resources) == 62
+    expected = json.loads((ROOT / "test/assets/sdk_prompt_migration_hashes.json").read_text(encoding="utf-8"))
+    assert {path.relative_to(PROMPTS).as_posix() for path in resources} == set(expected)
     for resource in resources:
         if resource.stem.startswith(("nl2agent", "nl2skill", "agent_manager", "agent_worker")):
             continue
@@ -140,7 +141,8 @@ def test_ut_sdk_fps_011_languages_have_matching_paths_fields_and_jinja_variables
 
     en_paths = {p.relative_to(PROMPTS / "en") for p in (PROMPTS / "en").rglob("*.yaml")}
     zh_paths = {p.relative_to(PROMPTS / "zh") for p in (PROMPTS / "zh").rglob("*.yaml")}
-    assert len(en_paths) == len(zh_paths) == 31
+    assert en_paths == zh_paths
+    assert len(en_paths) == 36
     assert en_paths == zh_paths
 
     def flatten(value, prefix=""):
@@ -209,3 +211,48 @@ def test_ut_sdk_fps_012_tool_policy_registry_is_active_not_a_prompt_alias():
     assert result.audit["policy_version"] == "p1"
     assert "prompt_registry" in (ROOT / "backend/agents/create_agent_info.py").read_text(encoding="utf-8")
     assert "prompt_registry" in (ROOT / "sdk/nexent/core/agents/nexent_agent.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("source", ["Heading\n", "\nHeading\n\n", "Text {{ value }}\n"])
+def test_render_preserves_trailing_newlines(source):
+    """Attachment headers retain their separator when rendered with runtime values."""
+    from nexent.core.prompts import render_prompt_text
+
+    assert render_prompt_text(source, {"value": "content"}) == source.replace("{{ value }}", "content")
+
+
+@pytest.mark.parametrize("relative_path", [None, 1, [], {}])
+def test_resource_coordinates_reject_non_text_paths(relative_path):
+    from nexent.core.prompts import load_prompt
+
+    with pytest.raises(ValueError, match="safe relative YAML path"):
+        load_prompt("en", relative_path)
+
+
+@pytest.mark.parametrize("content", ["{}", "[]", "null", "plain text"])
+def test_resource_loader_rejects_empty_or_non_mapping_yaml(tmp_path, monkeypatch, content):
+    from nexent.core import prompts
+
+    resource = tmp_path / "en/agent/example.yaml"
+    resource.parent.mkdir(parents=True)
+    resource.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(prompts, "files", lambda package: tmp_path)
+
+    with pytest.raises(ValueError, match="non-empty mapping"):
+        prompts.load_prompt("en", "agent/example")
+
+
+@pytest.mark.parametrize("source,parameters,error", [(None, {}, "prompt source"), ("text", None, "prompt parameters")])
+def test_renderer_rejects_invalid_argument_types(source, parameters, error):
+    from nexent.core.prompts import render_prompt_text
+
+    with pytest.raises(TypeError, match=error):
+        render_prompt_text(source, parameters)
+
+
+def test_renderer_rejects_missing_runtime_values():
+    from jinja2 import UndefinedError
+    from nexent.core.prompts import render_prompt_text
+
+    with pytest.raises(UndefinedError, match="missing"):
+        render_prompt_text("Heading {{ missing }}\n", {})

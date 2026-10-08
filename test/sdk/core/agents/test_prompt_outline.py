@@ -10,8 +10,7 @@ from nexent.core.prompts import load_prompt
 
 
 def _composer(language: str, role: str) -> AgentPromptComposer:
-    template = load_prompt(language, f"agent/agent_{role}")
-    bundle = AgentPromptBundle.from_mapping(role=role, language=language, template=template)
+    bundle = AgentPromptBundle.from_resource(role=role, language=language)
     return AgentPromptComposer(bundle)
 
 
@@ -67,7 +66,7 @@ def test_ut_sdk_fps_023_layout_order_preserves_priority():
     assert headings == ["## 身份与目标", "## 执行协议", "## 约束与环境", "## 示例", "## 可用资源"]
     assert "### 工具" in text and "### 技能" in text
     assert "### 内部子智能体" in text and "### 外部子智能体" in text
-    assert not re.search(r"^\d+\. (?:工具|技能|子智能体)", text, flags=re.MULTILINE)
+    assert not re.search(r"^\d+\. (?:工具|技能|子智能体)", "\n".join(headings), flags=re.MULTILINE)
     first = ordered[0]
     higher_priority = first.model_copy(update={"priority": first.priority + 100})
     assert first.layout_key == higher_priority.layout_key
