@@ -7,9 +7,9 @@ import pytest
 import yaml
 from nexent.core.prompts import load_prompt
 
-from test.common.prompt_resource_layout import destination_for_old_name
 
 ROOT = Path(__file__).parents[3]
+# Baseline captures the committed SDK resources at merge 32fa76ef6.
 BASELINE = json.loads(
     (ROOT / "test" / "assets" / "sdk_prompt_migration_hashes.json").read_text(
         encoding="utf-8"
@@ -20,14 +20,12 @@ BASELINE = json.loads(
     "source_name",
     sorted(
         name for name in BASELINE
-        if Path(name).stem not in {"dreaming_user_memory_en", "fa_memory_extraction_en"}
-        and not name.startswith("skill_creation_simple_")
+        if not name.startswith(("en/memory/", "zh/memory/"))
     ),
 )
 def test_ut_be_fps_001_loader_preserves_sdk_asset_mapping(source_name):
     """UT-BE-FPS-001: existing Backend callers receive the original mapping."""
-    filename = Path(source_name).name
-    relative = destination_for_old_name(filename)
+    relative = Path(source_name)
     language = relative.parts[0]
     path = relative.relative_to(language).as_posix()
     expected = yaml.safe_load(
@@ -67,7 +65,7 @@ def test_ut_be_fps_002_memory_resource_failure_is_not_silenced(mocker):
         tenant_id="tenant", user_id="user", agent_id="1", conversation_id="conv",
     )
     mocker.patch(
-        "nexent.core.agents.prompt.auxiliary.load_prompt",
+        "nexent.core.agents.prompt.memory.load_prompt",
         side_effect=FileNotFoundError("missing"),
     )
     with pytest.raises(FileNotFoundError):

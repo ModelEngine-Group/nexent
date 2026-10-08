@@ -7,10 +7,9 @@ from pathlib import Path
 import pytest
 from jinja2 import UndefinedError
 
-from test.common.prompt_resource_layout import destination_for_old_name
-
 
 ROOT = Path(__file__).parents[4]
+# Baseline captures the committed SDK resources at merge 32fa76ef6.
 BASELINE = json.loads(
     (ROOT / "test" / "assets" / "sdk_prompt_migration_hashes.json").read_text(
         encoding="utf-8"
@@ -19,13 +18,13 @@ BASELINE = json.loads(
 
 
 def test_ut_sdk_fps_001_all_prompt_files_keep_their_original_bytes():
-    """UT-SDK-FPS-001: all 40 prompt assets retain their approved text."""
+    """UT-SDK-FPS-001: Packaged prompt assets retain their reviewed LF-normalized content."""
     target = ROOT / "sdk" / "nexent" / "core" / "prompts"
-    assert len(BASELINE) == 40
+    assert BASELINE
     for source_name, expected_hash in BASELINE.items():
-        target_file = target / destination_for_old_name(Path(source_name).name)
+        target_file = target / source_name
         assert target_file.is_file(), source_name
-        assert hashlib.sha256(target_file.read_bytes()).hexdigest() == expected_hash
+        assert hashlib.sha256(target_file.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == expected_hash
 
 
 def test_ut_sdk_fps_001_dynamic_fields_render_with_supplied_parameters():

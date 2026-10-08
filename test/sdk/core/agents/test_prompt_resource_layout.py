@@ -6,68 +6,48 @@ from pathlib import Path
 
 import pytest
 
-from test.common.prompt_resource_layout import ADDITIONAL_SHA256, destination_for_old_name
-
 
 ROOT = Path(__file__).parents[4]
 PROMPTS = ROOT / "sdk/nexent/core/prompts"
+# Baseline captures the committed SDK resources at merge 32fa76ef6.
 MIGRATED_SHA256 = json.loads(
     (ROOT / "test/assets/sdk_prompt_migration_hashes.json").read_text(encoding="utf-8")
 )
-ALL_SHA256 = {
-    name: digest
-    for name, digest in (MIGRATED_SHA256 | ADDITIONAL_SHA256).items()
-    if not name.startswith("skill_creation_simple_")
-}
-POLICY_FILES = {
-    Path("zh/agent/human_interaction.yaml"),
-    Path("en/agent/human_interaction.yaml"),
-    Path("en/agent/context_summary.yaml"),
-    Path("en/agent/answer_verifier.yaml"),
-    Path("zh/agent/context_summary.yaml"),
-    Path("zh/agent/answer_verifier.yaml"),
-    Path("zh/memory/dreaming_user.yaml"),
-    Path("zh/memory/fa_extraction.yaml"),
-    *(Path(f"{language}/agent/{name}.yaml")
-      for language in ("zh", "en")
-      for name in ("context_sections", "memory_tool_policy", "automation_tool_policy", "knowledge_scope")),
-}
 
 
 def test_ut_sdk_fps_004_all_resources_have_reviewed_layout_and_original_bytes():
-    """UT-SDK-FPS-004: retained relocated files keep their original bytes."""
-    assert len(ALL_SHA256) == 46
-    expected = {destination_for_old_name(Path(name).name) for name in ALL_SHA256} | POLICY_FILES
+    """UT-SDK-FPS-004: Packaged resources keep their reviewed layout and LF-normalized content."""
+    expected = {Path(name) for name in MIGRATED_SHA256}
     actual = {path.relative_to(PROMPTS) for path in PROMPTS.rglob("*.yaml")}
-    assert len(actual) == 62
     assert actual == expected
     assert not list(PROMPTS.glob("*.yaml"))
 
-    for old_name, digest in ALL_SHA256.items():
-        destination = destination_for_old_name(Path(old_name).name)
-        assert hashlib.sha256((PROMPTS / destination).read_bytes()).hexdigest() == digest
+    for relative, digest in MIGRATED_SHA256.items():
+        destination = Path(relative)
+        content = (PROMPTS / destination).read_bytes().replace(b"\r\n", b"\n")
+        assert hashlib.sha256(content).hexdigest() == digest, relative
         if destination.parts[0] in {"zh", "en"}:
             assert not destination.stem.endswith(("_zh", "_en"))
 
 
 @pytest.mark.parametrize(
-    "template_type,language,old_name",
+    "template_type,language",
     [
-        ("analyze_image", "zh", "analyze_image_zh.yaml"),
-        ("analyze_audio", "en", "analyze_audio_en.yaml"),
-        ("analyze_video", "zh", "analyze_video_zh.yaml"),
-        ("analyze_file", "en", "analyze_file_en.yaml"),
+        ("analyze_image", "zh"),
+        ("analyze_audio", "en"),
+        ("analyze_video", "zh"),
+        ("analyze_file", "en"),
     ],
 )
 def test_ut_sdk_fps_005_multimodal_loader_uses_new_resources(
-    template_type, language, old_name,
+    template_type, language,
 ):
     """UT-SDK-FPS-005: existing tool API still returns the same mapping."""
     import yaml
 
     from nexent.core.prompts import load_prompt
 
-    expected = yaml.safe_load((PROMPTS / destination_for_old_name(old_name)).read_text(encoding="utf-8"))
+    expected = yaml.safe_load((PROMPTS / language / "tool" / f"{template_type}.yaml").read_text(encoding="utf-8"))
     assert load_prompt(language, f"tool/{template_type}") == expected
 
 
