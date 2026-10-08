@@ -77,7 +77,6 @@ MAX_BINDING_CANDIDATES = 12
 
 _LOCAL_KNOWLEDGE_TOOL_NAMES = frozenset({
     "knowledge_base_search",
-    "ind_aidp_search",
 })
 _AIDP_KNOWLEDGE_TOOL_NAME = "aidp_search"
 

@@ -4699,9 +4699,9 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
 
         assert "Run workspace" in result
         assert f"Write every generated file under: {workspace / 'outputs'}" in result
-        assert "Use bare relative paths" not in result
-        assert "script_path='outputs/build.js'" not in result
-        assert "Direct subprocess, os.system, and shell calls" not in result
+        assert "Use bare relative paths" in result
+        assert "script_path='outputs/build.js'" in result
+        assert "Direct subprocess, os.system, and shell calls" in result
         push.assert_called_once_with()
 
     def test_initialize_sandbox_workspaces_sets_cwd_for_every_docker_kernel(
@@ -4743,7 +4743,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         assert len(unmarked_kernel_lease.calls) == 1
         assert "NEXENT_OUTPUT_DIR" in unmarked_kernel_lease.calls[0]
 
-    def test_initialize_sandbox_workspaces_retries_unhealthy_kernel_lease(
+    def test_initialize_sandbox_workspaces_retries_unhealthy_legacy_executor(
         self, nexent_agent_instance, tmp_path
     ):
         class RecoveringKernelLease:
@@ -4754,7 +4754,6 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
                 self.container = object()
                 self._unhealthy = False
                 self.calls = []
-                self.registered_bootstrap = []
 
             def __call__(self, code):
                 self.calls.append(code)
@@ -4763,11 +4762,6 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
                     raise RuntimeError("kernel channel failed")
                 self._unhealthy = False
                 return ["workspace", "outputs"]
-
-            def register_kernel_bootstrap_code(self, code):
-                result = self(code)
-                self.registered_bootstrap.append(code)
-                return result
 
         workspace = tmp_path / "user" / "run"
         (workspace / "outputs").mkdir(parents=True)
@@ -4780,9 +4774,8 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         assert len(executor.calls) == 2
         assert executor.calls[0] == executor.calls[1]
         assert executor._unhealthy is False
-        assert executor.registered_bootstrap == [executor.calls[0]]
 
-    def test_initialize_sandbox_workspaces_reports_retry_failure(
+    def test_initialize_sandbox_workspaces_reports_registered_bootstrap_failure_without_retry(
         self, nexent_agent_instance, tmp_path
     ):
         class FailingKernelLease:
@@ -4791,16 +4784,23 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             _unhealthy = True
             container = object()
 
+            def __init__(self):
+                self.calls = []
+
             def register_kernel_bootstrap_code(self, code):
+                self.calls.append(code)
                 raise RuntimeError("replacement bootstrap failed")
 
         workspace = tmp_path / "user" / "run"
         (workspace / "outputs").mkdir(parents=True)
         nexent_agent_instance.workspace_path = str(workspace)
-        nexent_agent_instance._sandbox_executors = [FailingKernelLease()]
+        executor = FailingKernelLease()
+        nexent_agent_instance._sandbox_executors = [executor]
 
         with pytest.raises(RuntimeError, match="replacement bootstrap failed"):
             nexent_agent_instance._initialize_sandbox_workspaces()
+
+        assert len(executor.calls) == 1
 
     def test_initialize_sandbox_workspaces_does_not_retry_healthy_failure(
         self, nexent_agent_instance, tmp_path
@@ -6741,6 +6741,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             timeout_seconds=300,
             workspace_path=nexent_agent_instance.workspace_path,
             network_enabled=False,
+            workspace_mapping=None,
         )
         tool.bind_execution_backend.assert_called_once_with(
             runner,

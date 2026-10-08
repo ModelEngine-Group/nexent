@@ -20,7 +20,7 @@ def test_safe_attributes_maps_part_diagnostics():
         "parallel_parts": 3,
         "timeout_seconds": 300,
         "poll_interval_ms": 200,
-        "queue_name": "process_part_q",
+        "queue_name": "parse_q",
     })
 
     assert attrs == {
@@ -29,7 +29,7 @@ def test_safe_attributes_maps_part_diagnostics():
         "processor.parallel_count": 3,
         "timeout.seconds": 300,
         "poll.interval_ms": 200,
-        "messaging.destination.name": "process_part_q",
+        "messaging.destination.name": "parse_q",
     }
 
 

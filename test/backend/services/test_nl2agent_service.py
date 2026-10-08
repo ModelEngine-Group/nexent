@@ -849,7 +849,7 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
 @pytest.mark.parametrize(
     ("enable_aidp_knowledge", "expected_knowledge_tools"),
     [
-        (True, {"aidp_search"}),
+        (True, {"aidp_search", "ind_aidp_search"}),
         (False, {"knowledge_base_search", "ind_aidp_search"}),
     ],
 )
@@ -868,6 +868,7 @@ async def test_installed_resource_catalog_filters_knowledge_tools_by_deployment(
                     "description": "Knowledge search",
                     "source": "local",
                     "is_available": True,
+                    "is_user_selectable": name == "ind_aidp_search",
                 }
                 for tool_id, name in enumerate(
                     (
