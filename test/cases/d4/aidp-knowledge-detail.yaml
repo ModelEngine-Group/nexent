@@ -16,11 +16,11 @@ cases:
       - The authenticated test account has EDIT access to one seeded AIDP knowledge base and READ access to one shared base.
       - The mock returns completed files and a mixture of recent task statuses, including one retryable failure with a reason.
       - The browser has the AIDP knowledge-base feature enabled.
-    test_data: {profile: mock, locale: zh-CN, task_retention_days: 30, status_values: [0, 1, 2, 3, 4, 5]}
+    test_data: {profile: mock, locale: zh-CN, task_retention_days: 30, status_values: [0, 1, 2, 3, 4, 5], vector_topk_range: [1, 100]}
     steps:
       - order: 1
         action: Open the overview and click a card or knowledge-base name.
-        expected: A full-width detail page opens with a breadcrumb, header and the three tabs Files, Upload tasks and Details; no list edit action remains.
+        expected: A full-width detail page opens with a breadcrumb, header and the three tabs Files, Upload tasks and Details; no list edit action remains, and the console has no deprecated AIDP Modal or Drawer API warnings.
       - order: 2
         action: Inspect Files and search by file name.
         expected: Only ingested files appear; download and delete follow the user's permission; pagination and table controls stay in the detail page.
@@ -31,13 +31,15 @@ cases:
         action: Open a failed task's failure details and retry it from the row action.
         expected: The drawer shows returned values only; retry submits a one-item file_uuids array and subsequent refresh reads the changed task status.
       - order: 5
-        action: Open Details and edit supported name/description, a supported setting and group permissions.
-        expected: Each save sends only its own changed fields and updates the returned value; unsupported similarity edits are absent.
+        action: Open Details and edit metadata from the header, a supported setting, then permission and groups from the permission section.
+        expected: Header edit shows name, description and directly visible permission/group controls; the lower editor contains only permission/group controls and sends no metadata fields; vector Top K uses the create-page slider style; unsupported similarity edits are absent.
     expected_results:
       - The page has the exact three tabs and full content width.
       - Ingested files and upload history remain separate live AIDP sources.
       - Status filters, raw status rendering, failure details and single-file retry follow the contract.
       - Detail settings and group permissions use separate authorized save operations.
+      - The header edit is the only path that submits a changed name or description; the lower permission editor submits only permission and group values.
+      - The vector Top K editor uses the same slider and numeric value control as the creation form.
     forbidden_side_effects:
       - No task-history record is written to Nexent PostgreSQL.
       - No operation from a READ_ONLY user changes upstream or local configuration.

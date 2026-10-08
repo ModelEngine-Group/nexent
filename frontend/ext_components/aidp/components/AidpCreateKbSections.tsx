@@ -8,7 +8,6 @@ import {
   InputNumber,
   Radio,
   Select,
-  Slider,
   Switch,
   Tooltip,
 } from "antd";
@@ -17,6 +16,7 @@ import { DownOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 
 import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/const/knowledgeBase";
 import { AidpKnowledgeBasePermissionFields } from "./AidpKnowledgeBaseModalParts";
+import AidpSliderNumberField from "./AidpSliderNumberField";
 import styles from "./AidpCreateKbSections.module.css";
 import type { AidpGroupOption } from "../hooks/useAidpGroupOptions";
 
@@ -44,70 +44,6 @@ interface AidpCreateKbSectionsProps {
   embeddingModelOptions: string[];
   embeddingModelsLoading: boolean;
 }
-
-interface SliderNumberFieldProps {
-  value?: number | null;
-  onChange?: (value: number | null) => void;
-  min: number;
-  max: number;
-  step: number;
-  unit?: string;
-  precision?: number;
-  marks: Record<number, string>;
-  ariaLabel: string;
-}
-
-const SliderNumberField: React.FC<SliderNumberFieldProps> = ({
-  value,
-  onChange,
-  min,
-  max,
-  step,
-  unit,
-  precision,
-  marks,
-  ariaLabel,
-}) => {
-  const safeValue = typeof value === "number" ? value : min;
-  return (
-    <div className="w-full">
-      <div className="flex w-full items-start gap-4">
-        <div className={styles.sliderTrackGroup}>
-          <Slider
-            className="min-w-0 flex-1"
-            min={min}
-            max={max}
-            step={step}
-            value={safeValue}
-            tooltip={{
-              formatter: (sliderValue) => `${sliderValue}${unit || ""}`,
-            }}
-            onChange={(nextValue) => onChange?.(nextValue)}
-            aria-label={ariaLabel}
-          />
-          <div className={styles.sliderMarks}>
-            <span>{marks[min]}</span>
-            <span>{marks[max]}</span>
-          </div>
-        </div>
-        <div className={styles.sliderValueGroup}>
-          <InputNumber
-            aria-label={ariaLabel}
-            className={styles.sliderValueInput}
-            min={min}
-            max={max}
-            step={step}
-            precision={precision}
-            controls={false}
-            value={value}
-            onChange={onChange}
-          />
-          <span className={styles.sliderUnit}>{unit || ""}</span>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 type CollapsibleSection = "graph" | "chunk" | "vector" | "retrieval";
 
@@ -210,7 +146,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
       className={styles.infoBanner}
       type="info"
       showIcon
-      message={t("aidpKnowledge.createGraphEnableHint")}
+      title={t("aidpKnowledge.createGraphEnableHint")}
     />
   );
 
@@ -221,7 +157,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
         type="info"
         showIcon
         closable
-        message={t("aidpKnowledge.createFormHint")}
+        title={t("aidpKnowledge.createFormHint")}
       />
 
       <section className={`${styles.formSection} ${styles.basicSection}`}>
@@ -519,7 +455,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                 },
               ]}
             >
-              <SliderNumberField
+              <AidpSliderNumberField
                 min={CHUNK_TOKEN_MIN}
                 max={CHUNK_TOKEN_MAX}
                 step={1}
@@ -553,7 +489,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                 },
               ]}
             >
-              <SliderNumberField
+              <AidpSliderNumberField
                 min={OVERLAP_PERCENT_MIN}
                 max={OVERLAP_PERCENT_MAX}
                 step={0.5}
@@ -665,7 +601,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
               label={label(t("aidpKnowledge.createSimilarity"))}
               rules={[{ required: true, type: "number", min: 0, max: 1 }]}
             >
-              <SliderNumberField
+              <AidpSliderNumberField
                 min={0}
                 max={1}
                 step={0.01}
@@ -679,7 +615,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
               label={label(t("aidpKnowledge.createTopk"))}
               rules={[{ required: true, type: "number", min: 1, max: 100 }]}
             >
-              <SliderNumberField
+              <AidpSliderNumberField
                 min={1}
                 max={100}
                 step={1}

@@ -19,7 +19,7 @@
   min-width: 0;
 }
 
-.infoBanner :global(.ant-alert-message) {
+.infoBanner :global(.ant-alert-title) {
   color: inherit;
   font-size: inherit;
   line-height: inherit;

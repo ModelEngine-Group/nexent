@@ -41,17 +41,18 @@ cases:
   - case_id: AKDT-D1-002
     feature_id: AKDT-001
     requirement_ids: [AKDT-001]
-    business_rule_ids: [AKDT-RULE-001, AKDT-RULE-007]
-    title: Detail information reads graph configuration and group access without truthiness coercion
+    business_rule_ids: [AKDT-RULE-001, AKDT-RULE-007, AKDT-RULE-009]
+    title: Detail information reads configuration and keeps edit controls scoped
     type: FE-COMP
     priority: P0
     status: active
     automation: automated
-    objective: Verify the detail page projects the returned configuration and local group permission while preserving false, zero and unknown values.
+    objective: Verify the detail page projects returned configuration, preserves false and zero values, and keeps metadata, permission and Top K edits in their intended controls.
     preconditions:
       - Render a KB detail response with graph_config represented once as JSON text and once as an object.
       - Include explicit false and zero values, private/shared permission variants and one missing safety value.
-    test_data: {profile: mock, graph_config_forms: [json_string, object]}
+      - Grant edit access and provide an available user-group option for the edit-control checks.
+    test_data: {profile: mock, graph_config_forms: [json_string, object], topk_range: [1, 100]}
     steps:
       - order: 1
         action: Render the configuration and graph sections for each response shape.
@@ -62,16 +63,23 @@ cases:
       - order: 3
         action: Render private and shared permission records with group IDs.
         expected: Scope and group names follow local permission data and the viewer's group-read permission.
+      - order: 4
+        action: Open the header edit, lower permission edit and vector Top K edit.
+        expected: The header form shows name, description and visible permission/group fields without a collapsed advanced section; the lower editor contains only permission and group fields; Top K uses the create-page slider and numeric value control.
     expected_results:
       - JSON text and object graph settings render consistently.
       - Boolean false and numeric zero remain distinct from missing values.
       - Effective permission and available group names come from the permission layer.
+      - The lower permission save sends only permission/group fields; the header form remains the only name/description editor.
+      - The Top K editor uses a 1-100 slider with a numeric value control.
     forbidden_side_effects:
       - No group IDs or AIDP task history are written during rendering.
       - No missing setting is presented as enabled or disabled.
-    unit_boundary: AIDP knowledge detail configuration parsing and permission presentation
-    inputs: [AIDP detail payload, graph_config value, local group permission record]
+    unit_boundary: AIDP knowledge detail configuration, permission presentation and edit controls
+    inputs: [AIDP detail payload, graph_config value, local group permission record, header and permission edit modes, vector Top K value]
     assertions:
       - Graph fields and the two separate Top K values render under the correct labels.
       - Explicit false and zero are preserved while absent values remain unknown.
       - Group names render only with group:read permission.
+      - Header and lower permission edit forms expose their separate allowed fields and omit the advanced-options collapse.
+      - The vector Top K edit control matches the creation page slider layout and range.

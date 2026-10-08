@@ -29,9 +29,10 @@ interface AidpKnowledgeDetailInformationProps {
   detail: AidpKbDetail;
   graphConfig: Record<string, unknown>;
   groupNames: string[];
+  canConfigureGroupPermissions: boolean;
   formatDateTime: (value: unknown) => string;
   onEditSetting: (setting: "chunk_mode" | "topk") => void;
-  onEditMetadata: () => void;
+  onEditPermissions: () => void;
 }
 
 const FIELD_GRID =
@@ -41,9 +42,10 @@ const AidpKnowledgeDetailInformation = ({
   detail,
   graphConfig,
   groupNames,
+  canConfigureGroupPermissions,
   formatDateTime,
   onEditSetting,
-  onEditMetadata,
+  onEditPermissions,
 }: AidpKnowledgeDetailInformationProps) => {
   const { t } = useTranslation();
   const canEdit = detail.permission === "EDIT";
@@ -193,14 +195,14 @@ const AidpKnowledgeDetailInformation = ({
           <h2 className="text-lg font-semibold leading-7 text-gray-800">
             {t("aidpKnowledge.detailPermissions")}
           </h2>
-          {canEdit && (
+          {canEdit && canConfigureGroupPermissions && (
             <Tooltip title={t("common.edit")}>
               <Button
                 type="text"
                 size="small"
                 aria-label={t("aidpKnowledge.detailPermissions")}
                 icon={<EditOutlined />}
-                onClick={onEditMetadata}
+                onClick={onEditPermissions}
               />
             </Tooltip>
           )}

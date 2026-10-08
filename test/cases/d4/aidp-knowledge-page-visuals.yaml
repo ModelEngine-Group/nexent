@@ -26,7 +26,7 @@ cases:
         expected: The create and view buttons align at the right, table column control follows them, and no edit operation appears in the overview. The table header and data rows are 40px high with 14px/22px body text and pale #F3F3F3 separators. Permission tags stay on one line and row actions use compact inline links. Resize the description column by 100px and verify every other column keeps its measured width; horizontal scrolling moves the middle columns while name and actions stay fixed. Hide and restore the creator column without hiding the required name or actions columns.
       - order: 3
         action: Open creation and inspect the page title, section titles, switches and paired fields at both viewport sizes.
-        expected: Breadcrumb labels and form section headings use 18px text, there is no step indicator or optional import stage, the page uses the available width, switches sit beside their labels, and paired inputs or sliders align without page-level horizontal overflow.
+        expected: Breadcrumb labels and form section headings use 18px text, there is no step indicator or optional import stage, the page uses the available width, switches sit beside their labels, and paired inputs or sliders align without page-level horizontal overflow. The browser console has no deprecated Ant Design Modal, Drawer or Alert API warnings.
       - order: 4
         action: Fill the required configuration and submit the create form.
         expected: The knowledge base is created directly with one create request, the browser opens its detail page, and no upload request is issued from creation.

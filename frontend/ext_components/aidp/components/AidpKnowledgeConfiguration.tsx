@@ -294,7 +294,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         open={Boolean(quickImportKb)}
         onCancel={() => setQuickImportKb(null)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         width={760}
         centered
       >

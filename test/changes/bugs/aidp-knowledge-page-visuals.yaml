@@ -28,3 +28,17 @@ changes:
     feature_contract_changed: false
     affected_features: {existing: [], added: [], modified: [], retired: []}
     affected_cases: {existing: [], added: [], modified: [AKPR-D1-014, AKPR-D4-005], retired: []}
+  - change_id: AKPR-BUG-003
+    change_type: bugfix
+    bug_id: AKPR-BUG-003
+    title: AIDP overview and create pages emit deprecated Ant Design warnings
+    description: Replace deprecated Modal and Alert props in the AIDP overview and creation pages.
+    observed_behavior: The overview Modal and creation page Alerts emit Ant Design warnings for destroyOnClose and message.
+    expected_behavior: The AIDP overview and creation pages use destroyOnHidden and Alert title without those deprecation warnings.
+    escaped_stage: D4
+    coverage_gap:
+      type: missing_assertion
+      description: The existing browser visual journey did not check that the overview and creation page render without deprecated Ant Design warnings.
+    feature_contract_changed: false
+    affected_features: {existing: [], added: [], modified: [], retired: []}
+    affected_cases: {existing: [], added: [], modified: [AKPR-D4-005], retired: []}

@@ -11,7 +11,6 @@ import {
   Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
   Select,
   Skeleton,
@@ -48,6 +47,7 @@ import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
 import AidpPagination from "./AidpPagination";
 import AidpDocumentList from "./AidpDocumentList";
 import AidpUpdateKbModal from "./AidpUpdateKbModal";
+import AidpSliderNumberField from "./AidpSliderNumberField";
 import AidpKnowledgeDetailInformation, {
   AidpDetailField,
 } from "./AidpKnowledgeDetailInformation";
@@ -170,11 +170,13 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
 }) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { groupOptions } = useAidpGroupOptions();
+  const { canConfigureGroupPermissions, groupOptions } = useAidpGroupOptions();
   const [activeTab, setActiveTab] = useState<DetailTab>("files");
   const [detail, setDetail] = useState<AidpKbDetail>(knowledgeBase);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [editingMetadata, setEditingMetadata] = useState(false);
+  const [editingKbMode, setEditingKbMode] = useState<
+    "metadata" | "permissions" | null
+  >(null);
   const [importOpen, setImportOpen] = useState(false);
   const [savingSetting, setSavingSetting] = useState(false);
   const [settingModal, setSettingModal] = useState<
@@ -698,7 +700,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
                       type="text"
                       size="small"
                       icon={<EditOutlined />}
-                      onClick={() => setEditingMetadata(true)}
+                      onClick={() => setEditingKbMode("metadata")}
                     />
                   </Tooltip>
                 )}
@@ -949,8 +951,9 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
             detail={detail}
             graphConfig={graphConfig}
             groupNames={groupNames}
+            canConfigureGroupPermissions={canConfigureGroupPermissions}
             formatDateTime={formatDetailDateTime}
-            onEditMetadata={() => setEditingMetadata(true)}
+            onEditPermissions={() => setEditingKbMode("permissions")}
             onEditSetting={(setting) => {
               settingForm.setFieldsValue({
                 value:
@@ -964,11 +967,12 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         ))}
 
       <AidpUpdateKbModal
-        open={editingMetadata}
+        open={editingKbMode !== null}
+        mode={editingKbMode || "metadata"}
         knowledgeBase={detail as AidpKnowledgeBaseItem}
-        onCancel={() => setEditingMetadata(false)}
+        onCancel={() => setEditingKbMode(null)}
         onSuccess={(updated) => {
-          setEditingMetadata(false);
+          setEditingKbMode(null);
           setDetail((current) => ({ ...current, ...updated }));
           onUpdated(updated);
           void refreshDetail();
@@ -985,7 +989,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         onCancel={() => setSettingModal(null)}
         onOk={() => void saveSetting()}
         confirmLoading={savingSetting}
-        destroyOnClose
+        destroyOnHidden
       >
         {settingModal && (
           <Form
@@ -1010,7 +1014,13 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
                   ]}
                 />
               ) : (
-                <InputNumber min={1} max={100} className="w-full" />
+                <AidpSliderNumberField
+                  min={1}
+                  max={100}
+                  step={1}
+                  marks={{ 1: "1", 100: "100" }}
+                  ariaLabel={t("aidpKnowledge.detailVectorTopK")}
+                />
               )}
             </Form.Item>
           </Form>
@@ -1035,7 +1045,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         closable={false}
         open={Boolean(failureTask)}
         onClose={() => setFailureTask(null)}
-        width={640}
+        size={640}
         styles={{
           header: { padding: "0 20px" },
           body: { padding: "16px 20px" },
@@ -1109,7 +1119,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         open={importOpen}
         onCancel={() => setImportOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         width={760}
         centered
       >

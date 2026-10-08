@@ -1,0 +1,16 @@
+schema_version: '1.0'
+changes:
+  - change_id: AKDT-BUG-001
+    change_type: bugfix
+    bug_id: AKDT-BUG-001
+    title: AIDP detail page emits deprecated Drawer and Modal warnings
+    description: Replace the deprecated Drawer width and Modal destroyOnClose props on the AIDP detail page.
+    observed_behavior: Opening the AIDP detail page emits Ant Design deprecation warnings for Drawer width and Modal destroyOnClose.
+    expected_behavior: The detail page uses Drawer size and Modal destroyOnHidden and produces no related deprecation warnings.
+    escaped_stage: D4
+    coverage_gap:
+      type: missing_assertion
+      description: The detail browser journey did not assert that opening the page produces no deprecated Modal or Drawer API warnings.
+    feature_contract_changed: false
+    affected_features: {existing: [], added: [], modified: [], retired: []}
+    affected_cases: {existing: [], added: [], modified: [AKDT-D4-001], retired: []}

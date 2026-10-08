@@ -13,3 +13,12 @@ changes:
       modified: []
       retired: []
     notes: The FAILED-to-vector-failure and UPLOADING-to-queued response mappings are provisional per user authorization. History filter values 0-5 and dir_path=/{knowledge_base_id} are confirmed. Retry uses the documented file_uuids example; real AIDP behavior remains to be checked by the user.
+  - change_id: AKDT-REQ-002
+    change_type: requirement
+    requirement_id: AKDT-001
+    title: Separate knowledge-base metadata and permission edits in detail
+    description: Show group permission controls directly from the header edit action, keep the dedicated permission-section action limited to permission and accessible groups, and edit vector retrieval Top K with the creation page slider control.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [AKDT-001], retired: []}
+    affected_cases: {existing: [], added: [], modified: [AKDT-D1-002, AKDT-D4-001], retired: []}
+    notes: Applies only to the AIDP detail page. The header edit remains the name/description entry point; the lower permission section never submits metadata fields.

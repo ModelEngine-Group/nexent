@@ -25,6 +25,8 @@ features:
         description: The Details tab shows configuration, permissions and graph settings; group permissions use the existing Nexent permission store, while AIDP detail/configuration values are read from AIDP and only supported settings can be edited.
       - rule_id: AKDT-RULE-008
         description: The page keeps table width, fixed file-name and action columns, resizable other columns, right-side pagination and stable table height without horizontal page overflow.
+      - rule_id: AKDT-RULE-009
+        description: The header edit opens name, description and directly visible permission/group controls; the separate permission-section edit changes only group permission and accessible groups. The supported vector Top K edit uses the same slider-and-value control as creation, while unsupported settings remain read-only.
     required_test_stages: [D1, D2, D3, D4, D5]
     source:
       requirement_ids: [AKDT-001]

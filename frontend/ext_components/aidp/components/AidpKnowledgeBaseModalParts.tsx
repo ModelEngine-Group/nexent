@@ -17,7 +17,7 @@ export const AIDP_MODAL_STYLES = {
 
 interface AidpModalHeaderProps {
   title: string;
-  subtitle: string;
+  subtitle?: string;
 }
 
 export const AidpKnowledgeBaseModalHeader: React.FC<AidpModalHeaderProps> = ({
@@ -31,7 +31,7 @@ export const AidpKnowledgeBaseModalHeader: React.FC<AidpModalHeaderProps> = ({
     <h2 className="text-xl font-semibold tracking-tight text-gray-900">
       {title}
     </h2>
-    <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+    {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
   </div>
 );
 
