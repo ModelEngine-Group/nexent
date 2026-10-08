@@ -557,6 +557,14 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
     },
   ];
 
+  const taskStatusOptions = [
+    { value: 1, label: t("aidpKnowledge.taskSuccess") },
+    { value: 2, label: t("aidpKnowledge.taskExtracting") },
+    { value: 3, label: t("aidpKnowledge.taskVectorFailed") },
+    { value: 4, label: t("aidpKnowledge.taskQueued") },
+    { value: 5, label: t("aidpKnowledge.taskGraphFailed") },
+  ];
+
   const taskColumns: ColumnsType<AidpDocumentItem> = [
     {
       title: t("aidpKnowledge.detailFileName"),
@@ -593,6 +601,12 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
       dataIndex: "status",
       key: "status",
       width: 120,
+      filters: taskStatusOptions.map(({ value, label }) => ({
+        text: label,
+        value,
+      })),
+      filterMultiple: false,
+      filteredValue: taskStatus === 0 ? null : [taskStatus],
       render: (status: AidpDocumentItem["status"]) => {
         const code = statusCode(status);
         const labelKeys: Record<number, string> = {
@@ -652,14 +666,6 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
   ];
 
   const privateScope = detail.ingroup_permission === "PRIVATE";
-  const taskStatusOptions = [
-    { value: 0, label: t("aidpKnowledge.taskAll") },
-    { value: 1, label: t("aidpKnowledge.taskSuccess") },
-    { value: 2, label: t("aidpKnowledge.taskExtracting") },
-    { value: 3, label: t("aidpKnowledge.taskVectorFailed") },
-    { value: 4, label: t("aidpKnowledge.taskQueued") },
-    { value: 5, label: t("aidpKnowledge.taskGraphFailed") },
-  ];
   const descriptionValue = (value: unknown): string => {
     if (value === undefined || value === null || value === "") return UNKNOWN;
     if (typeof value === "boolean")
@@ -866,13 +872,6 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
                 placeholder={t("aidpKnowledge.detailFileSearch")}
                 style={{ width: 220, maxWidth: "100%" }}
               />
-              <Select<TaskFilter>
-                value={taskStatus}
-                options={taskStatusOptions}
-                onChange={(value) => setTaskStatus(value)}
-                style={{ width: 136, maxWidth: "100%" }}
-                aria-label={t("aidpKnowledge.detailTaskStatus")}
-              />
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600">
                 <Tooltip title={t("aidpKnowledge.taskRetention", { days: 30 })}>
                   <span className="inline-flex shrink-0 cursor-help items-center gap-1 text-gray-500">
@@ -927,6 +926,16 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
               columns={taskColumns}
               dataSource={tasks}
               loading={loadingTasks}
+              onChange={(_pagination, filters) => {
+                const selectedStatus = filters.status?.[0];
+                setTaskStatus(
+                  typeof selectedStatus === "number" &&
+                    selectedStatus >= 1 &&
+                    selectedStatus <= 5
+                    ? (selectedStatus as TaskFilter)
+                    : 0
+                );
+              }}
               pagination={false}
               scroll={{ x: 885 }}
               locale={{
