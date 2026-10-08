@@ -222,6 +222,16 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
     detail.resource_status !== "UNAVAILABLE" &&
     detail.resource_status !== "ORPHANED";
 
+  useEffect(() => {
+    if (!settingModal) return;
+    settingForm.setFieldsValue({
+      value:
+        settingModal === "chunk_mode"
+          ? (detail.chunk_mode ?? 0)
+          : (detail.topk ?? 10),
+    });
+  }, [detail.chunk_mode, detail.topk, settingForm, settingModal]);
+
   const refreshDetail = useCallback(async () => {
     setLoadingDetail(true);
     try {
@@ -954,15 +964,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
             canConfigureGroupPermissions={canConfigureGroupPermissions}
             formatDateTime={formatDetailDateTime}
             onEditPermissions={() => setEditingKbMode("permissions")}
-            onEditSetting={(setting) => {
-              settingForm.setFieldsValue({
-                value:
-                  setting === "chunk_mode"
-                    ? (detail.chunk_mode ?? 0)
-                    : (detail.topk ?? 10),
-              });
-              setSettingModal(setting);
-            }}
+            onEditSetting={setSettingModal}
           />
         ))}
 
