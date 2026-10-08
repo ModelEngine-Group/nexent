@@ -4,7 +4,7 @@
 
 The backend API reference is maintained in Apifox. Please visit the live documentation here:
 
-[Nexent API](https://8icfxll43r.apifox.cn)
+[Nexent API](https://s.apifox.cn/487d01f6-1b3c-45fe-8185-307296a685e5)
 
 ## Northbound Open API (/nb/v1)
 

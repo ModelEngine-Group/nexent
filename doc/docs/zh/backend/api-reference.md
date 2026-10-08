@@ -4,7 +4,7 @@
 
 后端接口文档已托管在 Apifox，请通过以下链接查看最新版本：
 
-[Nexent API](https://8icfxll43r.apifox.cn)
+[Nexent API](https://s.apifox.cn/487d01f6-1b3c-45fe-8185-307296a685e5)
 
 ## 北向开放 API（/nb/v1）
 
