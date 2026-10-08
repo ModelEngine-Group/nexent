@@ -124,7 +124,7 @@ describe("CreateAgentModal", () => {
       "href",
       "/zh/agent-space"
     );
-    expect(screen.getByRole("button", { name: "创建", exact: true })).toHaveClass(
+    expect(screen.getByRole("button", { name: /^创建$/ })).toHaveClass(
       "!mt-[30px]"
     );
   });
@@ -150,7 +150,7 @@ describe("CreateAgentModal", () => {
       screen.getByPlaceholderText("我的智能体02"),
       "我的智能体02"
     );
-    await user.click(screen.getByRole("button", { name: "创建", exact: true }));
+    await user.click(screen.getByRole("button", { name: /^创建$/ }));
 
     await waitFor(() =>
       expect(onCreated).toHaveBeenCalledWith({

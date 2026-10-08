@@ -11,7 +11,6 @@ export default defineConfig({
       { find: "@", replacement: fileURLToPath(new URL("./", import.meta.url)) },
     ],
   },
-  esbuild: { jsx: "automatic" },
   test: {
     environment: "jsdom",
     include: ["tests/workbench/**/*.test.{ts,tsx}"],

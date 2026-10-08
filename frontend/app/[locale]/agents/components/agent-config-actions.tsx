@@ -40,7 +40,7 @@ export default function AgentConfigActions({
 }: {
   agentId?: number | null;
   readOnly?: boolean;
-  variant?: "buttons" | "menu";
+  variant?: "buttons" | "menu" | "table";
   onManageVersions?: (agentId: number) => void;
 }) {
   const { t } = useTranslation("common");
@@ -302,9 +302,45 @@ export default function AgentConfigActions({
     },
   ];
 
+  const handleDeleteAction = () =>
+    confirm.confirm({
+      title: t("businessLogic.config.modal.deleteTitle"),
+      content: t("businessLogic.config.modal.deleteContent", {
+        name: agentName,
+      }),
+      onOk: handleDelete,
+    });
+
   return (
     <>
-      {variant === "menu" ? (
+      {variant === "table" ? (
+        <>
+          <button
+            type="button"
+            className="text-[#0067d1] hover:text-[#0052a8] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={disabled || isReadOnly}
+            onClick={handleDeleteAction}
+          >
+            {t("agent.contextMenu.delete")}
+          </button>
+          <Dropdown
+            menu={{
+              items: menuItems?.filter(
+                (item) => item && (!("key" in item) || item.key !== "delete")
+              ),
+            }}
+            trigger={["click"]}
+          >
+            <Button
+              type="text"
+              size="small"
+              className="size-6 text-slate-400 hover:text-slate-600"
+              icon={<MoreHorizontal className="size-4" />}
+              aria-label={t("agentRepository.mine.menu.more")}
+            />
+          </Dropdown>
+        </>
+      ) : variant === "menu" ? (
         <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
           <Button
             type="text"

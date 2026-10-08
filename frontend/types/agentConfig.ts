@@ -156,6 +156,7 @@ export interface Agent {
   /** Nexent user_id of the agent creator (owner). */
   created_by?: string | null;
   create_time?: string;
+  update_time?: string;
   version_label?: string | null;
   version_create_time?: string | null;
   unavailable_reasons?: string[];
@@ -169,10 +170,7 @@ export interface Agent {
    * Shape: { "<model_id>": { temperature?: number|null, top_p?: number|null, extra_params?: Record<string, unknown>|null } }
    * NULL/undefined means inherit the model's default values.
    */
-  model_params_override?: Record<
-    string,
-    ModelParamsOverrideEntry
-  > | null;
+  model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   allow_chat_metadata?: boolean;

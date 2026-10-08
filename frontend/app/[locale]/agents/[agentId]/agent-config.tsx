@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "next/navigation";
 import { App, Alert, Button, Form, Tooltip } from "antd";
 import {
   Collapsible,
@@ -167,8 +168,10 @@ export default function AgentConfig({
   onPublished,
 }: AgentConfigProps) {
   const { t } = useTranslation("common");
+  const searchParams = useSearchParams();
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const publishIntentHandledForAgentRef = useRef<number | null>(null);
   const [isRefreshingAvailability, setIsRefreshingAvailability] =
     useState(false);
   const [activeConfigTab, setActiveConfigTab] =
@@ -337,6 +340,28 @@ export default function AgentConfig({
       // Field validation errors are rendered by Ant Design.
     }
   };
+
+  useEffect(() => {
+    if (
+      searchParams.get("publish") !== "1" ||
+      agentId === null ||
+      !editedAgent ||
+      isReadOnly ||
+      publishIntentHandledForAgentRef.current === agentId
+    ) {
+      return;
+    }
+
+    publishIntentHandledForAgentRef.current = agentId;
+    void form
+      .validateFields()
+      .then(async () => {
+        if (await save()) setIsPublishModalOpen(true);
+      })
+      .catch(() => {
+        // Field validation errors are rendered by Ant Design.
+      });
+  }, [agentId, editedAgent, form, isReadOnly, save, searchParams]);
 
   useEffect(() => {
     if (!saveError) {

@@ -2,33 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  App,
-  Button,
-  Col,
-  Empty,
-  Grid,
-  Input,
-  Modal,
-  Pagination,
-  Row,
-  Spin,
-  Tag,
-} from "antd";
+import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
 import {
   ChevronDown,
   ChevronUp,
-  Clock,
   FileInput,
-  Pencil,
+  LayoutGrid,
+  List,
   Search,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal from "@/components/agent/CreateAgentModal";
-import CreateResourceCard from "@/components/resource/CreateResourceCard";
-import ResourceCard from "@/components/resource/ResourceCard";
+import { StandardButton } from "@/components/common/StandardButton";
+import { StandardInput } from "@/components/common/StandardInput";
+import { StandardPaginator } from "@/components/common/StandardPaginator";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
   openImportWizardWithFile,
@@ -41,32 +30,19 @@ import type { Agent } from "@/types/agentConfig";
 import { AgentDetail } from "@/components/agent/agent-detail";
 import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
 
-import AgentConfigActions from "./components/agent-config-actions";
 import AgentAvatar from "./components/agent-avatar";
+import AgentListCard from "./components/agent-list-card";
+import AgentListTable from "./components/agent-list-table";
 import AgentVersion from "./agent-version";
-
-interface AgentCardItem extends Agent {
-  create_time?: string;
-  update_time?: string;
-}
-
-function getAgentTitle(agent: AgentCardItem) {
-  return agent.display_name || agent.name;
-}
-
-function formatAgentDate(agent: AgentCardItem) {
-  const source = agent.update_time || agent.create_time;
-  if (!source) return null;
-  const date = new Date(source);
-  return Number.isNaN(date.getTime()) ? source : date.toLocaleDateString();
-}
 
 function AgentConfigurationGuide({
   expanded,
   onToggle,
+  showEmptyListDivider,
 }: {
   expanded: boolean;
   onToggle: () => void;
+  showEmptyListDivider: boolean;
 }) {
   const { t } = useTranslation("common");
   const steps = [
@@ -111,13 +87,13 @@ function AgentConfigurationGuide({
         ) : null}
       </div>
 
-      <div className="mt-4 text-sm leading-5 text-[#191919]">
+      <div className="mt-2 text-sm leading-5 text-[#191919]">
         <p>{t("agentConfig.guide.description")}</p>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-[#666666]">
           <li>{t("agentConfig.guide.point.one")}</li>
           <li>{t("agentConfig.guide.point.two")}</li>
         </ol>
-        <div className="mt-5">
+        <div className="mt-[13px]">
           <div className="font-medium text-[#191919]">
             {t("agentConfig.guide.process.title")}
           </div>
@@ -139,10 +115,13 @@ function AgentConfigurationGuide({
               </div>
             ))}
           </div>
-          <div
-            aria-hidden="true"
-            className="mt-6 h-px w-full bg-[rgba(25,25,25,0.1)]"
-          />
+          {showEmptyListDivider ? (
+            <div
+              data-testid="agent-guide-divider"
+              aria-hidden="true"
+              className="mt-6 h-px w-full bg-[rgba(25,25,25,0.1)]"
+            />
+          ) : null}
         </div>
       </div>
     </div>
@@ -154,10 +133,12 @@ export default function AgentsPage() {
   const { message } = App.useApp();
   const pathname = usePathname();
   const router = useRouter();
-  const screens = Grid.useBreakpoint();
   const initialize = useAgentStore((state) => state.initialize);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [jumpPage, setJumpPage] = useState<number | null>(null);
+  const [view, setView] = useState<"grid" | "list">("grid");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
@@ -211,19 +192,26 @@ export default function AgentsPage() {
     [initialize, message, t]
   );
 
-  const columns = screens.xxl ? 4 : screens.xl ? 3 : screens.md ? 2 : 1;
-  const rows = screens.xs ? 2 : 3;
-  const itemsPerPage = Math.max(1, columns * rows - 1);
   const { agents, pagination, isLoading, isError, refetch } = useAgentList({
     search,
     page,
-    pageSize: itemsPerPage,
+    pageSize,
   });
   const isEmptyAgentList =
-    !isLoading && !isError && !search.trim() && agents.length === 0;
+    !isLoading &&
+    !isError &&
+    !search.trim() &&
+    agents.length === 0 &&
+    (pagination?.total ?? 0) === 0;
   const updateUrl = useCallback(
     (agentId: number) => {
       router.push(`${pathname}/${agentId}`);
+    },
+    [pathname, router]
+  );
+  const openPublishFlow = useCallback(
+    (agentId: number) => {
+      router.push(`${pathname}/${agentId}?publish=1`);
     },
     [pathname, router]
   );
@@ -281,7 +269,7 @@ export default function AgentsPage() {
   };
 
   return (
-    <div className="flex min-h-full w-full flex-col bg-white p-6">
+    <div className="flex h-full min-h-0 w-full flex-col bg-white p-6">
       <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
         <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
           {t("sidebar.agentDev")}
@@ -299,8 +287,9 @@ export default function AgentsPage() {
         ) : null}
       </header>
 
-      <section className="mt-3 w-full shrink-0">
+      <section className="mt-3 flex min-h-0 w-full flex-1 flex-col">
         <div
+          data-testid="agent-guide-background"
           className={
             isGuideExpanded
               ? "max-h-[1000px] overflow-hidden rounded-2xl p-6 opacity-100 transition-[max-height,opacity,padding] duration-300 ease-in-out [background:linear-gradient(180deg,rgba(236,243,255,1)_0px,rgba(255,255,255,0)_418px),rgba(255,255,255,1)]"
@@ -312,15 +301,12 @@ export default function AgentsPage() {
             <AgentConfigurationGuide
               expanded={isGuideExpanded}
               onToggle={() => setGuideExpanded(false)}
+              showEmptyListDivider={isEmptyAgentList}
             />
           ) : null}
         </div>
 
-        <div
-          className={`mt-4 flex min-h-0 flex-1 flex-col pb-5 ${
-            isGuideExpanded ? "px-6" : "px-0"
-          }`}
-        >
+        <div className="mt-3 flex min-h-0 flex-1 flex-col pb-5">
           {isEmptyAgentList ? (
             <div className="flex min-h-0 flex-1 items-center justify-center">
               <Empty
@@ -331,168 +317,213 @@ export default function AgentsPage() {
                   </span>
                 }
               >
-                <Button
-                  type="primary"
+                <StandardButton
+                  variant="primary"
                   onClick={() => setIsCreateOpen(true)}
-                  className="!h-8 !min-h-8 !rounded-[4px] !border-0 !bg-[#0067d1] !px-4 !py-[5px] !text-[14px] !font-normal !leading-[22px] !text-white ![letter-spacing:0px]"
                 >
                   {t("agent.action.create")}
-                </Button>
+                </StandardButton>
               </Empty>
             </div>
           ) : (
             <>
-              <div className="flex shrink-0 items-center gap-2">
-                <Input
-                  allowClear
-                  prefix={<Search className="size-4 text-slate-400" />}
-                  placeholder={t("agentSelector.searchPlaceholder")}
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                    setPage(1);
-                  }}
-                  className="!h-8 !w-[400px] max-w-full flex-none !rounded-[4px] !border-[#c9c9c9]"
-                />
-                <Button
-                  icon={<FileInput className="size-4" />}
-                  onClick={handleImport}
-                  className="!h-8 !min-h-8 !rounded-[4px] !border-[#c9c9c9] !bg-white !px-4 !py-[5px] !text-[14px] !font-normal !leading-[22px] !text-[#191919] ![letter-spacing:0px]"
+              <div
+                data-testid="agent-list-tabs"
+                className="flex h-8 w-full shrink-0 items-center gap-8 border-b border-solid border-[#dfdfdf]"
+              >
+                <button
+                  type="button"
+                  className="flex h-8 shrink-0 items-center border-b-2 border-[#0067d1] text-[14px] leading-[22px] ![letter-spacing:0px] text-[#0067d1]"
+                  aria-current="page"
                 >
-                  {t("agentConfig.button.import")}
-                </Button>
+                  {t("agentConfig.list.mine")}
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  title={t("agentConfig.list.importedUnavailable")}
+                  className="flex h-8 shrink-0 items-center text-[14px] leading-[22px] ![letter-spacing:0px] text-[#777777] disabled:cursor-not-allowed"
+                >
+                  {t("agentConfig.list.imported")}
+                </button>
               </div>
 
-              <div className="mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-5">
+              <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
+                <div
+                  className={`w-full max-w-full shrink-0 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
+                >
+                  <StandardInput
+                    allowClear
+                    prefix={<Search className="size-4 text-[#777777]" />}
+                    placeholder={t("agentSelector.searchPlaceholder")}
+                    value={search}
+                    onChange={(event) => {
+                      setSearch(event.target.value);
+                      setPage(1);
+                    }}
+                    className="!h-8 !w-full"
+                  />
+                </div>
+                <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
+                  <StandardButton
+                    icon={<FileInput className="size-4" />}
+                    onClick={handleImport}
+                  >
+                    {t("agentConfig.button.import")}
+                  </StandardButton>
+                  <StandardButton
+                    variant="primary"
+                    onClick={() => setIsCreateOpen(true)}
+                  >
+                    {t("agentConfig.list.new")}
+                  </StandardButton>
+                  <div className="flex h-8 items-center rounded-[4px] border border-solid border-[#c9c9c9]">
+                    <button
+                      type="button"
+                      className={`flex size-[30px] items-center justify-center ${
+                        view === "list"
+                          ? "bg-[#0067d1] text-white"
+                          : "text-[#777777]"
+                      }`}
+                      aria-label={t("agentConfig.list.listView")}
+                      aria-pressed={view === "list"}
+                      onClick={() => setView("list")}
+                    >
+                      <List className="size-4" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex size-[30px] items-center justify-center ${
+                        view === "grid"
+                          ? "bg-[#0067d1] text-white"
+                          : "text-[#777777]"
+                      }`}
+                      aria-label={t("agentConfig.list.gridView")}
+                      aria-pressed={view === "grid"}
+                      onClick={() => setView("grid")}
+                    >
+                      <LayoutGrid className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className={`mt-3 min-h-0 flex-1 ${
+                  view === "list"
+                    ? "overflow-hidden"
+                    : "overflow-y-auto overflow-x-hidden pb-5"
+                }`}
+              >
                 {isLoading ? (
-                  <div className="flex h-full items-center justify-center">
+                  <div className="flex min-h-40 items-center justify-center">
                     <Spin size="large" />
                   </div>
                 ) : isError ? (
-                  <div className="flex h-full flex-col items-center justify-center gap-3">
+                  <div className="flex min-h-40 flex-col items-center justify-center gap-3">
                     <p className="text-sm text-slate-500">
                       {t("agentRepository.mine.loadError")}
                     </p>
-                    <Button onClick={() => refetch()}>
+                    <StandardButton onClick={() => refetch()}>
                       {t("repository.common.retry")}
-                    </Button>
+                    </StandardButton>
                   </div>
                 ) : (
-                  <div className="flex h-full min-h-0 flex-col">
-                    <Row
-                      gutter={[20, 20]}
-                      className="min-h-0 content-start overflow-visible"
-                    >
-                      <Col
-                        xs={24}
-                        sm={12}
-                        xl={8}
-                        xxl={6}
-                        className="flex min-h-[136px]"
-                      >
-                        <CreateResourceCard
-                          title={t("agentConfig.button.new")}
-                          onClick={() => setIsCreateOpen(true)}
-                          className="min-h-0"
+                  <div
+                    className={`flex min-h-0 flex-col gap-3 ${view === "list" ? "h-full" : ""}`}
+                  >
+                    {agents.length > 0 ? (
+                      view === "list" ? (
+                        <AgentListTable
+                          agents={agents}
+                          onOpen={(selected) => void handleOpenDetail(selected)}
+                          onConfigure={updateUrl}
+                          onPublish={openPublishFlow}
+                          onManageVersions={handleManageVersions}
                         />
-                      </Col>
-                      {(agents as AgentCardItem[]).map((agent) => {
-                        const date = formatAgentDate(agent);
-                        return (
-                          <Col
-                            key={agent.id}
-                            xs={24}
-                            sm={12}
-                            xl={8}
-                            xxl={6}
-                            className="flex min-h-[136px]"
-                          >
-                            <ResourceCard
-                              className="h-full min-h-0"
-                              title={getAgentTitle(agent)}
-                              subtitle={
-                                agent.current_version_no
-                                  ? t("agentRepository.mine.currentVersion", {
-                                      version:
-                                        agent.version_name ||
-                                        `V${agent.current_version_no}`,
-                                    })
-                                  : undefined
+                      ) : (
+                        <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                          {agents.map((agent) => (
+                            <AgentListCard
+                              key={agent.id}
+                              agent={agent}
+                              onOpen={(selected) =>
+                                void handleOpenDetail(selected)
                               }
-                              icon={
-                                <AgentAvatar
-                                  agent={agent}
-                                  size={44}
-                                  iconSize={20}
-                                />
-                              }
-                              description={
-                                agent.description ||
-                                t("agentRepository.card.noDescription")
-                              }
-                              descriptionLines={2}
-                              actions={
-                                <div className="flex flex-col items-end gap-1.5">
-                                  <AgentConfigActions
-                                    agentId={Number(agent.id)}
-                                    readOnly={agent.permission === "READ_ONLY"}
-                                    variant="menu"
-                                    onManageVersions={handleManageVersions}
-                                  />
-                                  <Tag
-                                    color={
-                                      agent.current_version_no
-                                        ? "green"
-                                        : "orange"
-                                    }
-                                  >
-                                    {agent.current_version_no
-                                      ? t(
-                                          "agentRepository.mine.lifecycle.published"
-                                        )
-                                      : t(
-                                          "agentRepository.mine.lifecycle.draft"
-                                        )}
-                                  </Tag>
-                                </div>
-                              }
-                              meta={
-                                <span className="inline-flex items-center gap-1">
-                                  <Clock className="size-3.5" aria-hidden />
-                                  {date || "-"}
-                                </span>
-                              }
-                              footerLayout="inline"
-                              footer={
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
-                                  icon={
-                                    <Pencil className="size-3.5" aria-hidden />
-                                  }
-                                  onClick={() => updateUrl(Number(agent.id))}
-                                >
-                                  {t("agentRepository.mine.edit")}
-                                </Button>
-                              }
-                              onClick={() => void handleOpenDetail(agent)}
+                              onConfigure={updateUrl}
+                              onPublish={openPublishFlow}
+                              onManageVersions={handleManageVersions}
                             />
-                          </Col>
-                        );
-                      })}
-                    </Row>
-                    {(pagination?.total ?? 0) > itemsPerPage ? (
-                      <div className="flex shrink-0 justify-end pt-5">
-                        <Pagination
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <Empty className="py-12" />
+                    )}
+                    <div className="flex min-h-8 w-full flex-wrap items-center justify-between gap-3">
+                      <span className="text-[12px] leading-[18px] ![letter-spacing:0px] text-[#191919]">
+                        {t("agentConfig.list.total", {
+                          count: pagination?.total ?? 0,
+                        })}
+                      </span>
+                      <div className="flex h-auto flex-wrap items-center justify-end gap-2 md:h-8">
+                        <Select
+                          aria-label={t("agentConfig.list.pageSize")}
+                          value={pageSize}
+                          options={[10, 20, 50].map((size) => ({
+                            value: size,
+                            label: t("agentConfig.list.perPage", {
+                              count: size,
+                            }),
+                          }))}
+                          onChange={(nextSize) => {
+                            setPageSize(nextSize);
+                            setPage(1);
+                            setJumpPage(null);
+                          }}
+                          className="!h-8 !w-[116px] [&_.ant-select-selector]:!border-[#c9c9c9]"
+                        />
+                        <StandardPaginator
                           current={pagination?.page ?? page}
-                          pageSize={itemsPerPage}
+                          pageSize={pageSize}
                           total={pagination?.total ?? 0}
                           showSizeChanger={false}
                           onChange={setPage}
                         />
+                        <InputNumber
+                          aria-label={t("agentConfig.list.jumpPage")}
+                          min={1}
+                          max={Math.max(
+                            1,
+                            Math.ceil((pagination?.total ?? 0) / pageSize)
+                          )}
+                          controls={false}
+                          value={jumpPage}
+                          onChange={setJumpPage}
+                          className="!h-8 !w-10 [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-input]:!text-center"
+                        />
+                        <StandardButton
+                          className="!px-2"
+                          onClick={() => {
+                            if (jumpPage !== null) {
+                              setPage(
+                                Math.min(
+                                  jumpPage,
+                                  Math.max(
+                                    1,
+                                    Math.ceil(
+                                      (pagination?.total ?? 0) / pageSize
+                                    )
+                                  )
+                                )
+                              );
+                            }
+                          }}
+                        >
+                          {t("agentConfig.list.jump")}
+                        </StandardButton>
                       </div>
-                    ) : null}
+                    </div>
                   </div>
                 )}
               </div>
