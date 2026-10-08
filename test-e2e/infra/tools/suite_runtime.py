@@ -154,6 +154,12 @@ def finalize(directory, plan, rows, error=None):
             rows.append({"case_id": record["case_id"], "stage": record["stage"],
                          "result": "NOT_EXECUTED", "reason": error or "No terminal receipt", "evidence": []})
     summary_counts = dict(Counter(row["result"] for row in rows))
+    by_id = {record["case_id"]: record for record in plan}
+    for row in rows:
+        record = by_id.get(row["case_id"], {})
+        for key in ("feature_id", "title", "module", "owner"):
+            if key in record:
+                row.setdefault(key, record[key])
     incomplete = any(row["result"] in {"NOT_EXECUTED", "INTERRUPTED"} for row in rows)
     failures = any(row["result"] not in {"PASS", "RETIRED", "SKIPPED_BY_POLICY"} for row in rows)
     summary = {"schema_version": 1, "finished_at": now(), "planned": len(plan),
@@ -169,8 +175,16 @@ def finalize(directory, plan, rows, error=None):
     lines = ["# Nexent repository test report", "", f"Status: {summary['status']}",
              f"Cases: {len(rows)} / {len(plan)}", "", "| Result | Count |", "| --- | ---: |"]
     lines += [f"| {key} | {value} |" for key, value in sorted(summary_counts.items())]
-    lines += ["", "## Case results", "", "| Case | Stage | Result | Local evidence |", "| --- | --- | --- | --- |"]
-    lines += [f"| {row['case_id']} | {row['stage']} | {row['result']} | {', '.join(row.get('evidence', []))} |" for row in rows]
+    def cell(value):
+        return str(value if value is not None else "").replace("|", "\\|").replace("\n", "<br>").replace("\r", "")
+
+    lines += ["", "## Case results", "", "| Case | Stage | Title | Feature | Module | Owner | Result | Reason | Duration (s) | Executed at (UTC) | Cleanup | Local evidence |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    lines += ["| " + " | ".join(cell(value) for value in (
+        row['case_id'], row['stage'], row.get('title'), row.get('feature_id'), row.get('module'),
+        row.get('owner', 'Unassigned'), row['result'], row.get('reason'), row.get('duration_seconds'), row.get('executed_at'),
+        row.get('cleanup_reason') or row.get('cleanup_exit_code'),
+        ', '.join(row.get('evidence', [])))) + " |" for row in rows]
     if error:
         lines += ["", "Batch ended before completion. Inspect status.json and local logs."]
     (directory / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

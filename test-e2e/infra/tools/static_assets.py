@@ -90,7 +90,8 @@ def inventory(home: Path, selected: set[str] | None = None, source: Path | None 
         if selected is not None and item["asset_id"] not in selected and item["path"] not in selected:
             continue
         destination = safe_file(home / "assets", item["path"])
-        row = {"asset_id": item["asset_id"], "path": item["path"], "destination": check(destination, item)}
+        row = {"asset_id": item["asset_id"], "path": item["path"], "destination": check(destination, item),
+               "sha256": item["sha256"]}
         if source is not None:
             row["source"] = check(safe_file(source, item["path"]), item)
         rows.append(row)
@@ -104,7 +105,13 @@ def inventory(home: Path, selected: set[str] | None = None, source: Path | None 
 
 def apply(home: Path, source: Path, catalog: Path = CATALOG) -> list[dict]:
     rows = inventory(home, source=source, catalog=catalog)
-    errors = [row for row in rows if row["source"] != "READY" or row["destination"] not in {"READY", "MISSING"}]
+    receipt = home / "state/static-asset-provision.json"
+    previous = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() else {}
+    managed = {row["path"]: row.get("sha256") for row in previous.get("assets", [])}
+    replaceable = {row["path"] for row in rows if row["destination"] == "DIFFERENT" and
+                   managed.get(row["path"]) and sha256(safe_file(home / "assets", row["path"])) == managed[row["path"]]}
+    errors = [row for row in rows if row["source"] != "READY" or
+              (row["destination"] not in {"READY", "MISSING"} and row["path"] not in replaceable)]
     if errors:
         raise ValueError("Static assets differ or source is incomplete; inspect plan before applying")
     catalog_items = {entry["asset_id"]: entry for entry in entries(catalog)}
@@ -123,11 +130,21 @@ def apply(home: Path, source: Path, catalog: Path = CATALOG) -> list[dict]:
                 os.fsync(output.fileno())
             if check(Path(temporary), item) != "READY":
                 raise RuntimeError("Source changed while copying")
-            os.link(temporary, destination)  # Fails if another process created it.
+            if row["path"] in replaceable:
+                if sha256(destination) != managed[row["path"]]:
+                    raise RuntimeError("Managed destination changed while copying")
+                backup = safe_file(home / "state/static-asset-backups" / managed[row["path"]], row["path"])
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                if not backup.exists():
+                    shutil.copy2(destination, backup)
+                if sha256(backup) != managed[row["path"]]:
+                    raise RuntimeError("Managed asset backup verification failed")
+                os.replace(temporary, destination)
+            else:
+                os.link(temporary, destination)  # Fails if another process created it.
             row["destination"] = check(destination, item)
         finally:
             Path(temporary).unlink(missing_ok=True)
-    receipt = home / "state/static-asset-provision.json"
     receipt.parent.mkdir(parents=True, exist_ok=True)
     temporary_receipt = receipt.with_suffix(".json.next")
     temporary_receipt.write_text(json.dumps({"schema_version": 1, "assets": rows}, indent=2) + "\n", encoding="utf-8")

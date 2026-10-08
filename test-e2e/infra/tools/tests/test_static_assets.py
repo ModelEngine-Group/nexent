@@ -73,6 +73,25 @@ class AssetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown"):
             assets.inventory(self.home, selected={"AUD-999"}, catalog=self.catalog)
 
+    def test_managed_update_backs_up_old_bytes(self):
+        old = self.fixture()
+        assets.apply(self.home, self.source, self.catalog)
+        self.fixture(content=b"\x03\x00\x04\x00")
+        assets.apply(self.home, self.source, self.catalog)
+        backup = self.home / "state/static-asset-backups" / old["sha256"] / old["path"]
+        self.assertEqual(backup.read_bytes(), b"\x01\x00\x02\x00")
+        self.assertEqual((self.home / "assets" / old["path"]).read_bytes(), b"\x03\x00\x04\x00")
+
+    def test_user_modified_managed_asset_is_not_overwritten(self):
+        old = self.fixture()
+        assets.apply(self.home, self.source, self.catalog)
+        destination = self.home / "assets" / old["path"]
+        destination.write_bytes(b"\x05\x00")
+        self.fixture(content=b"\x03\x00\x04\x00")
+        with self.assertRaises(ValueError):
+            assets.apply(self.home, self.source, self.catalog)
+        self.assertEqual(destination.read_bytes(), b"\x05\x00")
+
 
 if __name__ == "__main__":
     unittest.main()

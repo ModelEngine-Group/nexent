@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import tomllib
+import time
 import uuid
 
 import yaml
@@ -306,6 +307,8 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
                         config_fingerprint(home) != provenance["config_sha256"]:
                     raise RuntimeError("Product source, test assets or machine config changed during batch")
                 case_id = record["case_id"]
+                case_started_at = now()
+                case_started_clock = time.monotonic()
                 reused = reused_rows.get(case_id)
                 if reused:
                     row = reused
@@ -331,6 +334,14 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
                         row["result"] = "AUTOMATION_ERROR"
                     row["evidence"] = [f"cases/{case_id}", f"logs/{case_id}.log"]
                 rows.append(row)
+                row.setdefault("executed_at", case_started_at)
+                row.setdefault("duration_seconds", round(time.monotonic() - case_started_clock, 3))
+                definition_path = repo / "test-e2e/cases" / case_id / "case.yaml"
+                if definition_path.is_file():
+                    case_definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+                    definition = case_definition.get("case", {})
+                    row.update(title=definition.get("title", ""), feature_id=definition.get("feature_id", ""),
+                               module=case_definition.get("module", ""))
                 save(directory / "progress.json", {"finished": len(rows), "planned": len(records), "last_case": case_id})
                 with (directory / "results.journal.jsonl").open("a", encoding="utf-8") as output:
                     output.write(json.dumps(row, ensure_ascii=False) + "\n")
