@@ -5,32 +5,26 @@ cases:
   - case_id: AKPR-D3-001
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
-    business_rule_ids: [AKPR-RULE-011, AKPR-RULE-013, AKPR-RULE-014]
-    title: Real AIDP create, readback and safety guard update close the loop
+    business_rule_ids: [AKPR-RULE-011, AKPR-RULE-013]
+    title: Real AIDP create and readback close the loop
     type: INTEGRATION
     priority: P0
     status: blocked
     automation: automated
-    objective: Verify against a reachable AIDP service that a created knowledge base returns the submitted chunking, graph and safety configuration and that a later safety guard change is visible on readback. This case stays blocked until the upstream safety guard contract is available on the target environment.
+    objective: Verify against a reachable AIDP service that a created knowledge base returns the submitted chunking, retrieval and graph configuration.
     preconditions:
       - A reachable AIDP service accepts Nexent credentials.
-      - The upstream build that exposes the safety guard field is deployed.
       - A disposable tenant and user group are available.
-    test_data: {profile: real_smoke, chunk_mode: 0, guard: [1, 0]}
+    test_data: {profile: real_smoke, chunk_mode: 0}
     steps:
       - order: 1
-        action: Create a knowledge base with chunking, retrieval, graph and safety configuration through the Nexent proxy.
+        action: Create a knowledge base with chunking, retrieval and graph configuration through the Nexent proxy.
         expected: The upstream accepts the payload and returns a knowledge base identifier.
       - order: 2
         action: Read the created knowledge base back.
-        expected: The chunking, retrieval, graph and safety values match the submitted configuration.
-      - order: 3
-        action: Disable the safety guard and read it back again.
-        expected: The readback reports the disabled state instead of the previous value.
+        expected: The chunking, retrieval and graph values match the submitted configuration.
     expected_results:
       - Submitted configuration is readable from the upstream.
-      - The safety guard round trip works in both directions.
-      - Failure of the upstream metadata update is distinguishable from success.
     forbidden_side_effects:
       - No duplicate knowledge base created by retries.
       - No permission row created without its knowledge base.
@@ -42,7 +36,7 @@ cases:
     observations:
       - Outgoing create payload field names and types
       - Readback values per configuration group
-      - Permission row and metadata update status after each step
+      - Permission row and configuration readback after creation
     cleanup:
       - Delete the created knowledge base through the proxy.
       - Remove local permission rows and document tag associations created by the case.

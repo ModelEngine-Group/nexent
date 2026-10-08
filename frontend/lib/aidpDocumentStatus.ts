@@ -56,8 +56,10 @@ export const AIDP_DOC_STATUS_POLL_MS = 10000;
 export const AIDP_DOC_UPLOAD_WATCH_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Normalize a status for comparison; AIDP capitalization is not guaranteed. */
-export const normalizeAidpDocStatus = (status?: string): string =>
-  (status || "").trim().toUpperCase();
+export const normalizeAidpDocStatus = (status?: string | number): string =>
+  String(status ?? "")
+    .trim()
+    .toUpperCase();
 
 /**
  * Whether the status means "still on its way in".
@@ -65,20 +67,27 @@ export const normalizeAidpDocStatus = (status?: string): string =>
  * Any status AIDP has not told us is terminal counts as in progress, so a new
  * upstream state keeps the column live instead of freezing the list.
  */
-export const isAidpDocProcessing = (status?: string): boolean => {
+export const isAidpDocProcessing = (status?: string | number): boolean => {
   const normalized = normalizeAidpDocStatus(status);
   if (!normalized) return false;
+  if (["2", "4"].includes(normalized)) return true;
+  if (["1", "3", "5"].includes(normalized)) return false;
   return !isAidpDocTerminal(normalized);
 };
 
 /** Whether the status means "finished, one way or the other". */
-export const isAidpDocTerminal = (status?: string): boolean =>
-  AIDP_DOC_TERMINAL_STATUSES.includes(normalizeAidpDocStatus(status));
+export const isAidpDocTerminal = (status?: string | number): boolean => {
+  const normalized = normalizeAidpDocStatus(status);
+  return (
+    ["1", "3", "5"].includes(normalized) ||
+    AIDP_DOC_TERMINAL_STATUSES.includes(normalized)
+  );
+};
 
 /** Structural view of a listed document, so this module stays import-free. */
 export interface AidpDocumentStatusView {
   file_ino_no?: string | number | null;
-  status?: string;
+  status?: string | number;
 }
 
 /** Structural view of an entry of the AIDP upload response `success_list`. */

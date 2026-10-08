@@ -341,7 +341,13 @@ def _extract_doc_status(raw: Dict[str, Any]) -> str | None:
     deployment that renames the field keeps working without a code change.
     """
     for key in _HISTORY_STATUS_KEYS:
-        status = _normalize_doc_status(raw.get(key))
+        value = raw.get(key)
+        # F12 confirmed that the canonical `status` field uses numeric codes
+        # (1-5). Other legacy aliases may be unrelated numeric state fields and
+        # remain ignored unless they contain a textual status.
+        if key == "status" and isinstance(value, (int, float)) and not isinstance(value, bool):
+            return str(int(value)) if int(value) == value else str(value)
+        status = _normalize_doc_status(value)
         if status is not None:
             return status
     return None
@@ -965,6 +971,19 @@ def _serialize_graph_config(config: Dict[str, Any]) -> str:
         "synonym_merge_enable": bool(config.get("synonym_merge_enable", False)),
         "disambiguation_enable": bool(config.get("disambiguation_enable", False)),
     }
+    llm_model_name = config.get("llm_model_name")
+    if llm_model_name is not None:
+        if not isinstance(llm_model_name, str) or not llm_model_name.strip():
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "Graph LLM model name must be a non-empty string",
+            )
+        if len(llm_model_name.encode("utf-8")) > 256:
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "Graph LLM model name must not exceed 256 UTF-8 bytes",
+            )
+        payload["llm_model_name"] = llm_model_name
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -1018,8 +1037,15 @@ def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
         result.pop("graph_config", None)
         result.pop("llm_model_name", None)
     else:
+        # Keep the internal legacy alias out of the upstream request body.
+        llm_model_name = result.pop("llm_model_name", None)
         graph_config = result.get("graph_config")
         if isinstance(graph_config, dict):
+            graph_config = dict(graph_config)
+            # Accept the legacy Nexent top-level property, but put it in the
+            # nested field required by AIDP's documented graph_config shape.
+            if llm_model_name is not None and "llm_model_name" not in graph_config:
+                graph_config["llm_model_name"] = llm_model_name
             result["graph_config"] = _serialize_graph_config(graph_config)
 
     _validate_chunking(result)
@@ -1460,6 +1486,60 @@ def remove_aidp_docs_impl(
         )
 
 
+def retry_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+) -> Dict[str, Any]:
+    """Retry one or more failed AIDP knowledge files using the documented array body."""
+    normalized_url = _validate_params(server_url, api_key)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    retry_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Retry"
+    retry_url = urljoin(f"{normalized_url}/", retry_path)
+    logger.info("Retrying %d AIDP documents for KB %s", len(file_uuids), kds_id)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                retry_url,
+                headers=headers,
+                json={"file_uuids": file_uuids},
+            ),
+            context=f"retry-docs:{kds_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP document retry response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP document retry request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "document retry")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP document retry response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
 async def stream_aidp_doc_impl(
     server_url: str,
     api_key: str,
@@ -1598,6 +1678,7 @@ def list_aidp_docs_impl(
     kds_id: str,
     page: int = 1,
     page_size: int = 10,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
     """List documents in a knowledge base via AIDP API."""
     normalized_url = _validate_params(server_url, api_key)
@@ -1608,6 +1689,8 @@ def list_aidp_docs_impl(
     }
 
     list_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles?page={page}&page_size={page_size}"
+    if isinstance(keyword, str) and keyword.strip():
+        list_path += f"&keyword={quote(keyword.strip(), safe='')}"
     list_url = urljoin(f"{normalized_url}/", list_path)
     logger.info("Listing AIDP documents from %s", list_url)
 
@@ -1894,6 +1977,8 @@ def list_aidp_doc_history_impl(
     kds_id: str,
     tenant_id: str | None = None,
     page: int = 1,
+    page_size: int | None = None,
+    status: int | None = None,
 ) -> Dict[str, Any]:
     """List a page of a channel directory regardless of processing status.
 
@@ -1954,6 +2039,8 @@ def list_aidp_doc_history_impl(
                     "fs_id": normalized_fs_id,
                     "dir_path": normalized_dir_path,
                     "page": normalized_page,
+                    **({"page_size": page_size} if isinstance(page_size, int) and page_size > 0 else {}),
+                    **({"status": status} if isinstance(status, int) and not isinstance(status, bool) else {}),
                 },
             ),
             context=f"list-doc-history:{normalized_fs_id}",

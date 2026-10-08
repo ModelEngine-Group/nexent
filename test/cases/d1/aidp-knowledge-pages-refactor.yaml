@@ -462,13 +462,13 @@ cases:
   - case_id: AKPR-D1-012
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
-    business_rule_ids: [AKPR-RULE-014]
+    business_rule_ids: []
     title: Safety guard serializes integer 1 and 0 and never omits an explicit disabled value
     type: BE-UT
     priority: P0
-    status: active
+    status: retired
     automation: automated
-    objective: Verify create and update serialization of the safety guard including the explicit zero and the absent-value distinction.
+    objective: Retired because AIDP knowledge-base safety guard support was removed from the product scope.
     preconditions:
       - Prepare create and update payloads with the guard enabled, explicitly disabled and absent.
     test_data: {profile: mock, values: ['enabled 1', 'explicit 0', absent]}

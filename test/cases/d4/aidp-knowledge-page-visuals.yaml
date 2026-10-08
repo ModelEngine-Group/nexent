@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D4
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKPR-D4-005
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-015, AKPR-RULE-016]
+    title: Overview and creation pages match their approved desktop layout
+    type: E2E
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify the rendered guide, knowledge cards, pagination, inline switches and paired create-form controls against the AIDP design at desktop and narrow widths.
+    preconditions:
+      - The AIDP-enabled instance is reachable with the authenticated test account.
+      - The instance has multiple knowledge bases with realistic metadata and an empty creation form.
+      - A fixed Playwright browser profile can access the local AIDP mock.
+    test_data: {profile: mock, desktop_viewport: [1920, 1080], narrow_viewport: [1024, 768]}
+    steps:
+      - order: 1
+        action: Open the overview and capture the expanded guide and first card row.
+        expected: At desktop width each row contains four 148px-high cards with 16px horizontal gaps and 12px vertical gaps. Cards have 24px horizontal and 16px vertical padding, a 40px icon, a 16px/500/24px title, a full-width two-line 12px/20px description, and one 12px/18px metadata row. The toolbar search is 360px by 32px, the primary button is 32px high, and the selected view uses the primary blue background. Pagination is aligned right, uses 32px controls, puts page-size selection before page numbers, and has a pale-blue selected page with no primary border.
+      - order: 2
+        action: Switch to table view and inspect the toolbar and column controls.
+        expected: The create and view buttons align at the right, table column control follows them, and no edit operation appears in the overview. The table header and data rows are 40px high with 14px/22px body text and pale #F3F3F3 separators. Permission tags stay on one line and row actions use compact inline links. Resize the description column by 100px and verify every other column keeps its measured width; horizontal scrolling moves the middle columns while name and actions stay fixed. Hide and restore the creator column without hiding the required name or actions columns.
+      - order: 3
+        action: Open creation and inspect the page header, switches and paired fields at both viewport sizes.
+        expected: The page uses the available width, switches sit beside their labels, and paired inputs or sliders align without page-level horizontal overflow.
+    expected_results:
+      - The running AIDP pages match the accepted layout and preserve Nexent visual conventions.
+      - The expanded guide uses the pale-blue gradient introduction panel with 24px padding, a configuration-flow heading and three 156px-high step cards; the step content stays create, upload and configure an agent, and collapse or reopen preserves the overview state.
+      - The narrow viewport remains usable without overlapping labels or page-level horizontal scrolling.
+      - Collapsing the guide preserves the keyword and page; changing page size resets to page one; the last partial page keeps the same content-panel height; a valid page jump navigates without a mutating request.
+      - No write request is issued while visually inspecting the pages.
+    forbidden_side_effects:
+      - No knowledge base is created, edited or deleted during this journey.
+      - No global style or ES page behavior is changed.
+    actor: Authenticated AIDP tenant user
+    journey:
+      - Inspect the overview guide and cards.
+      - Inspect the table toolbar and pagination.
+      - Inspect the full-page creation layout at desktop and narrow widths.
+    final_business_result:
+      - Users see the intended list and creation composition before beginning a knowledge-base operation.
+    failure_evidence:
+      - Save screenshots, computed layout measurements and browser console errors for both viewport sizes.
+    execution:
+      profiles:
+        - name: mock
+          required_services: [knowledge-provider]

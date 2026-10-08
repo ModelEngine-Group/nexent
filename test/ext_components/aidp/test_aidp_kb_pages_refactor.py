@@ -1,8 +1,7 @@
 """Unit tests for the AIDP knowledge base page refactor service helpers.
 
-Covers AKPR-D1-009 (defaults, chunk mode, overlap conversion), AKPR-D1-010
-(graph configuration validation and serialization) and AKPR-D1-012 (safety
-guard serialization).
+Covers the legacy implementation helpers for defaults, chunk mode, overlap
+conversion, and graph configuration validation and serialization.
 """
 
 import json
@@ -128,7 +127,7 @@ class TestValidateChunking:
 
 
 class TestApplyCreateDefaults:
-    """Defaults, chunk mode and the disabled safety guard survive the merge."""
+    """Creation defaults and chunk mode survive the merge."""
 
     def test_fills_chunk_mode_and_graph_defaults(self):
         result = _apply_create_defaults({"name": "kb"})
@@ -171,20 +170,15 @@ class TestApplyCreateDefaults:
         )
 
         assert isinstance(result["graph_config"], str)
-        assert json.loads(result["graph_config"])["domain"] == "finance"
-        assert result["llm_model_name"] == "llm-a"
+        graph_config = json.loads(result["graph_config"])
+        assert graph_config["domain"] == "finance"
+        assert graph_config["llm_model_name"] == "llm-a"
+        assert "llm_model_name" not in result
 
     def test_enabled_graph_without_config_is_left_alone(self):
         result = _apply_create_defaults({"name": "kb", "is_exist_graph": True})
 
         assert "graph_config" not in result
-
-    def test_keeps_explicit_disabled_safety_guard(self):
-        result = _apply_create_defaults(
-            {"name": "kb", "sensitive_intercept_enalbe": 0}
-        )
-
-        assert result["sensitive_intercept_enalbe"] == 0
 
     def test_rejects_invalid_overlap_ratio(self):
         with pytest.raises(AppException):

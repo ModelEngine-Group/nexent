@@ -385,6 +385,12 @@ export const API_ENDPOINTS = {
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    kbFiles: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files`,
+    kbUploadTasks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks`,
+    retryKbUploadTasks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks/retry`,
     removeKbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
     downloadKbDocument: (id: string) =>

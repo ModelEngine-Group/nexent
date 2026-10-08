@@ -39,3 +39,16 @@ changes:
       modified: []
       retired: []
     notes: The AIDP-only scope is preserved; the ES knowledge base path keeps its current components and endpoints. D3, D4 and D5 cases remain blocked until a disposable deployment and the upstream safety guard contract are available.
+  - change_id: AKPR-REQ-002
+    change_type: requirement
+    requirement_id: AKPR-001
+    title: Remove AIDP knowledge-base safety guard
+    description: Remove the safety guard from AIDP knowledge-base creation, update and detail interfaces because the feature is no longer in scope. Keep unrelated agent safety controls unchanged.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [AKPR-001, AKDT-001], retired: []}
+    affected_cases:
+      existing: []
+      added: []
+      modified: [AKPR-D2-003, AKPR-D3-001, AKPR-D4-003, AKPR-D5-001, AKPR-D5-003]
+      retired: [AKPR-D1-012]
+    notes: The API request and response models, AIDP-facing UI and mock no longer expose sensitive_intercept_enalbe. The ES knowledge-base path and unrelated agent safety controls are outside this change.

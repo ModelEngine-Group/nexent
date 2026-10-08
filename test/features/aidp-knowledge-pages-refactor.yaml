@@ -7,7 +7,7 @@ features:
   - feature_id: AKPR-001
     name: AIDP knowledge base list and creation page refactor
     status: active
-    description: AIDP knowledge bases are listed in a card or table overview with an independent name search, a collapsible three-step guide and a full-page file view per knowledge base; creation moves to a dedicated two-step page that carries permission, chunking, retrieval, graph, model and safety-guard configuration. The ES knowledge base path stays untouched.
+    description: AIDP knowledge bases are listed in a card or table overview with an independent name search, a collapsible three-step guide and a full-page file view per knowledge base; creation moves to a dedicated two-step page that carries permission, chunking, retrieval, graph and model configuration. The ES knowledge base path stays untouched.
     business_rules:
       - rule_id: AKPR-RULE-001
         description: The overview renders a knowledge base guide with the fixed steps "create knowledge base, upload files, configure the knowledge base in an agent"; the guide collapses and reopens without losing the rest of the page state.
@@ -35,8 +35,10 @@ features:
         description: The graph model is queried from the llm model category and the multimodal model from the vlm category, with independent fields and query caches; disabling either capability omits its hidden previous configuration instead of resubmitting it.
       - rule_id: AKPR-RULE-013
         description: Graph configuration serializes into the documented graph_config payload with documented defaults, maps the thinking switch inversely onto no_think_mode, keeps the graph Top K independent from the knowledge base Top K, and limits the editable prompt to 2048 UTF-8 bytes.
-      - rule_id: AKPR-RULE-014
-        description: The safety guard uses the exact field sensitive_intercept_enalbe with integer values 1 and 0 across create, update and query; an explicit 0 is always forwarded, an absent value is never reported as confirmed off, and a failed update is never presented as saved.
+      - rule_id: AKPR-RULE-015
+        description: The overview guide uses a rounded pale-blue gradient introduction area, a configuration-flow heading and three 156px-high step cards separated by 16px gaps; the knowledge-base cards keep a fixed Nexent icon, a full-width two-line description, and update time, document count and capacity on one aligned footer row, with stable card and right-aligned pagination geometry. Fonts and icons retain Nexent conventions.
+      - rule_id: AKPR-RULE-016
+        description: The full-page creation form follows the designed section order and spacing; graph and VLM switches sit beside their labels, same-row fields align, and the chunking and retrieval controls retain slider layout and consistent value widths.
     required_test_stages: [D1, D2, D3, D4, D5]
     source:
       requirement_ids: [AKPR-001]

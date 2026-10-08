@@ -1,0 +1,60 @@
+schema_version: '1.0'
+stage: D5
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKDT-D5-001
+    feature_id: AKDT-001
+    requirement_ids: [AKDT-001]
+    business_rule_ids: [AKDT-RULE-003, AKDT-RULE-005, AKDT-RULE-007, AKDT-RULE-008]
+    title: Detail operations preserve tenant boundaries and keep files live-only
+    type: SECURITY
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify user-group authorization protects detail reads and writes, retries cannot target another knowledge base's files, and no task/file history is written to Nexent storage.
+    preconditions:
+      - A disposable AIDP test tenant has private, shared-read and shared-edit knowledge bases with distinct file UUIDs.
+      - The AIDP mock and Nexent services are configured to record upstream calls and persistence operations.
+    test_data: {profile: mock, users: [owner, group_reader, group_editor, unrelated_tenant], cross_tenant_retry: true}
+    steps:
+      - order: 1
+        action: Query details, files, tasks and retry as each user role.
+        expected: Reads and edits match the local group permission matrix, and a retry with a UUID belonging to another base is rejected before upstream access.
+      - order: 2
+        action: Inspect Nexent database writes during file/task queries, retry, and detail edits.
+        expected: Only the existing group-permission/config records that are explicitly changed are persisted; file and task history are not stored.
+      - order: 3
+        action: Render the same overview after disabling the AIDP feature flag in a disposable ES deployment.
+        expected: The original ES page renders without AIDP detail components or calls.
+    expected_results:
+      - Unauthorized group members cannot read or mutate private or unrelated resources.
+      - Retry is scoped to files of the selected knowledge base and rejects invalid ownership.
+      - File/task records are queried live and are absent from Nexent PG history tables.
+      - ES knowledge-base UI and endpoints are unaffected.
+    forbidden_side_effects:
+      - No cross-tenant or cross-KB file disclosure or retry.
+      - No persistent copy of AIDP files, task records or task statistics.
+      - No AIDP request from the ES page.
+    risk_type: SECURITY
+    risk: A missing permission check or accidentally persisted remote record could expose another group's AIDP data or create a misleading stale local copy.
+    condition:
+      - Users with different group membership access the same tenant.
+      - A retry body contains an ID not belonging to the selected knowledge base.
+      - The page is rendered with the AIDP feature flag disabled.
+    metrics:
+      - Unauthorized detail, file, task and retry requests accepted.
+      - Cross-knowledge-base UUIDs forwarded to AIDP.
+      - Writes to local file/task-history storage during read or retry flows.
+      - AIDP requests issued by the ES page.
+    thresholds:
+      - Zero unauthorized reads or writes accepted.
+      - Zero cross-KB retry UUIDs forwarded upstream.
+      - Zero file/task history writes to Nexent PG.
+      - Zero AIDP endpoint calls from the ES route.
+    recovery_expectations:
+      - Rejected requests leave remote files and permission state unchanged and return an actionable authorization error.
+      - The ES page continues to work with its original local knowledge base services.
+    execution:
+      profiles:
+        - name: mock
+          required_services: [knowledge-provider]

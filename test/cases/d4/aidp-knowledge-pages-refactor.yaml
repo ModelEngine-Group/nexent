@@ -107,7 +107,7 @@ cases:
   - case_id: AKPR-D4-003
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
-    business_rule_ids: [AKPR-RULE-010, AKPR-RULE-011, AKPR-RULE-012, AKPR-RULE-013, AKPR-RULE-014]
+    business_rule_ids: [AKPR-RULE-010, AKPR-RULE-011, AKPR-RULE-012, AKPR-RULE-013]
     title: Creation page journey configures two steps and reports creation and upload results separately
     type: E2E
     priority: P0

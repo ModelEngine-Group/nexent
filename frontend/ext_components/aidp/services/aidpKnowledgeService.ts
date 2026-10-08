@@ -6,10 +6,7 @@
  */
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
-import type {
-  AidpKnowledgeBaseItem,
-  AidpKnowledgeBaseListResponse,
-} from "@/types/agentConfig";
+import type { AidpKnowledgeBaseListResponse } from "@/types/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
 
@@ -23,6 +20,7 @@ export interface AidpKbDetail {
   chunk_count?: number;
   embedding_model?: string;
   is_multimodal?: boolean;
+  caption_enable?: number | null;
   created_at?: string;
   updated_at?: string;
   permission?: "EDIT" | "READ_ONLY" | null;
@@ -38,8 +36,17 @@ export interface AidpKbDetail {
   user_name?: string | null;
   /** False when the reported document count is not a confirmed statistic. */
   document_count_reliable?: boolean;
-  /** Safety guard: 1 enabled, 0 disabled, null or absent unknown. */
-  sensitive_intercept_enalbe?: number | null;
+  chunk_mode?: number | null;
+  chunk_token_num?: number | null;
+  chunk_overlap_num?: number | null;
+  topk?: number | null;
+  similarity?: number | null;
+  rerank_model?: string | null;
+  vlm_model?: string | null;
+  llm_model_name?: string | null;
+  is_exist_graph?: boolean | null;
+  graph_config?: string | Record<string, unknown> | null;
+  created_by?: string | null;
 }
 
 export interface AidpDocumentItem {
@@ -55,9 +62,13 @@ export interface AidpDocumentItem {
    * Absent when the backend falls back to the completed-files listing, which
    * only ever reports ingested files.
    */
-  status?: string;
+  status?: string | number;
   /** Channel directory the file was ingested from. */
   dir_path?: string;
+  error_code?: string | number | null;
+  reason?: string | null;
+  extraction_failure_reason?: string | null;
+  [key: string]: unknown;
 }
 
 export interface AidpDocumentListResponse {
@@ -193,6 +204,8 @@ export interface AidpModelListResponse {
  * so the frontend never hand-builds the JSON payload.
  */
 export interface AidpGraphConfig {
+  /** Optional graph extraction LLM model; nested in AIDP graph_config. */
+  llm_model_name?: string;
   /** Extraction domain. */
   domain?: "medical" | "finance" | "general";
   /** Graph candidate Top K, independent from the knowledge base Top K. */
@@ -238,13 +251,6 @@ export interface AidpCreateKbPayload {
    * serializes it into the documented AIDP `graph_config` string.
    */
   graph_config?: AidpGraphConfig;
-  /** Knowledge graph extraction model taken from the llm category. */
-  llm_model_name?: string;
-  /**
-   * Safety guard: 1 enabled, 0 disabled. An explicit 0 must always be
-   * forwarded; the field is omitted only when the user never set it.
-   */
-  sensitive_intercept_enalbe?: number;
   /**
    * Nexent-side in-group permission. ``PRIVATE`` forces an empty
    * ``group_ids``; ``READ_ONLY`` / ``EDIT`` require a non-empty group list.
@@ -260,14 +266,9 @@ export interface AidpCreateKbPayload {
 export interface AidpSetPermissionPayload {
   ingroup_permission: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
-  /**
-   * Only include metadata fields when their values have changed. A safety
-   * guard that the user disabled is forwarded as an explicit 0 and must not
-   * be dropped by the backend whitelist.
-   */
+  /** Only include metadata fields when their values have changed. */
   name?: string;
   description?: string;
-  sensitive_intercept_enalbe?: number;
 }
 
 export interface AidpSaveSettingsResult {
@@ -280,6 +281,24 @@ export interface AidpSaveSettingsResult {
 export interface AidpUpdateKbPayload {
   name?: string;
   description?: string;
+  chunk_mode?: number;
+  topk?: number;
+}
+
+export interface AidpUploadTaskStats {
+  total: number;
+  extracting: number;
+  failed: number;
+  success: number;
+  queued: number;
+}
+
+export interface AidpUploadTaskListResponse {
+  value: AidpDocumentItem[];
+  total_count: number;
+  has_more: boolean;
+  stats: AidpUploadTaskStats;
+  retention_days: number;
 }
 
 // ---------- Helper: build URL with query params ----------
@@ -443,12 +462,14 @@ class AidpKnowledgeService {
     // Strip Content-Type from getAuthHeaders(): when body is FormData,
     // the browser must set "multipart/form-data; boundary=..." itself.
     // getAuthHeaders() hardcodes "application/json" which breaks multipart parsing.
-    const { "Content-Type": _ignored, ...restHeaders } =
-      getAuthHeaders() as Record<string, string>;
+    const requestHeaders = {
+      ...(getAuthHeaders() as Record<string, string>),
+    };
+    delete requestHeaders["Content-Type"];
 
     const response = await fetch(url, {
       method: "POST",
-      headers: restHeaders,
+      headers: requestHeaders,
       body: formData,
     });
 
@@ -568,6 +589,84 @@ class AidpKnowledgeService {
           ? result.processing_count
           : undefined,
     };
+  }
+
+  async listIngestedFiles(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = ""
+  ): Promise<AidpDocumentListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count:
+        typeof result.total_count === "number" ? result.total_count : undefined,
+      has_more:
+        typeof result.has_more === "boolean" ? result.has_more : undefined,
+      total_reliable: result.total_reliable !== false,
+      processing_count: 0,
+    };
+  }
+
+  async listUploadTasks(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = "",
+    status: number = 0
+  ): Promise<AidpUploadTaskListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbUploadTasks(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+      status,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count: Number(result.total_count) || 0,
+      has_more: result.has_more === true,
+      stats: {
+        total: Number(result.stats?.total) || 0,
+        extracting: Number(result.stats?.extracting) || 0,
+        failed: Number(result.stats?.failed) || 0,
+        success: Number(result.stats?.success) || 0,
+        queued: Number(result.stats?.queued) || 0,
+      },
+      retention_days: Number(result.retention_days) || 30,
+    };
+  }
+
+  async retryUploadTasks(
+    id: string,
+    fileUuids: string[]
+  ): Promise<AidpDocumentRemoveResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.retryKbUploadTasks(id), {});
+    const response = await fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file_uuids: fileUuids }),
+    });
+    const result =
+      (await response.json()) as Partial<AidpDocumentRemoveResponse>;
+    return normalizeAidpOperationResponse(result);
   }
 
   /**

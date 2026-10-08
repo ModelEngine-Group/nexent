@@ -26,7 +26,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { isAuthenticated } = useAuthenticationContext();
   const { isAuthorized } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, enableAidpKnowledge } = useDeployment();
 
   // Check if current route is setup page
   const isSetupPage = pathname?.includes("/setup");
@@ -38,9 +38,12 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const isHomePage = effectivePath === "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
   const isSharePage = effectivePath.startsWith("/share/");
+  const isAidpCreateKnowledgePage =
+    effectivePath === "/knowledges/create" && enableAidpKnowledge;
 
   // Sidebar collapse state
   const [collapsed, setCollapsed] = useState(effectivePath === "/workbench");
+  const effectiveCollapsed = collapsed || isAidpCreateKnowledgePage;
 
   useEffect(() => {
     if (effectivePath !== "/workbench") return;
@@ -67,7 +70,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     justifyContent: "flex-start",
     position: "fixed",
     top: headerReservedHeight,
-    bottom: isSetupPage ? 0 : footerReservedHeight,
+    bottom: isSetupPage || isAidpCreateKnowledgePage ? 0 : footerReservedHeight,
     left: 0,
     backgroundColor: "#fff",
     overflow: "visible",
@@ -106,7 +109,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     overflowY: "auto",
     overflowX: "hidden",
     position: "relative",
-    marginLeft: collapsed
+    marginLeft: effectiveCollapsed
       ? `${SIDER_CONFIG.COLLAPSED_WIDTH}px`
       : `${SIDER_CONFIG.EXPANDED_WIDTH}px`,
     backgroundColor: "#fff",
@@ -141,7 +144,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
         <Sider
           style={siderStyle}
           width={SIDER_CONFIG.EXPANDED_WIDTH}
-          collapsed={collapsed}
+          collapsed={effectiveCollapsed}
           onCollapse={setCollapsed}
           trigger={null}
           breakpoint="lg"
@@ -149,29 +152,31 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           className="dark:bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
         >
           <div style={siderInnerStyle}>
-            <SideNavigation collapsed={collapsed} />
+            <SideNavigation collapsed={effectiveCollapsed} />
           </div>
-          <Button
-            type="primary"
-            shape="circle"
-            size="small"
-            onClick={() => setCollapsed(!collapsed)}
-            style={{
-              position: "absolute",
-              top: "50%",
-              transform: "translateY(-50%)",
-              right: "-12px",
-              transition: "right 0.2s ease, left 0.2s ease",
-              zIndex: 40,
-            }}
-            icon={
-              collapsed ? (
-                <ChevronRight className="w-3 h-3" />
-              ) : (
-                <ChevronLeft className="w-3 h-3" />
-              )
-            }
-          />
+          {!isAidpCreateKnowledgePage && (
+            <Button
+              type="primary"
+              shape="circle"
+              size="small"
+              onClick={() => setCollapsed(!collapsed)}
+              style={{
+                position: "absolute",
+                top: "50%",
+                transform: "translateY(-50%)",
+                right: "-12px",
+                transition: "right 0.2s ease, left 0.2s ease",
+                zIndex: 40,
+              }}
+              icon={
+                collapsed ? (
+                  <ChevronRight className="w-3 h-3" />
+                ) : (
+                  <ChevronLeft className="w-3 h-3" />
+                )
+              }
+            />
+          )}
         </Sider>
 
         {/* Don't render children until authorization is complete (except home page) */}
@@ -187,7 +192,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
       </Layout>
 
       {/* Conditionally render footer */}
-      {!isSetupPage && (
+      {!isSetupPage && !isAidpCreateKnowledgePage && (
         <Footer style={footerStyle}>
           <FooterLayout />
         </Footer>

@@ -305,12 +305,6 @@ export interface AidpKnowledgeBaseItem {
    * overview must not present the value as a trustworthy statistic.
    */
   document_count_reliable?: boolean;
-  /**
-   * Safety guard state: 1 enabled, 0 disabled, null or absent means the
-   * response did not report it (never treat that as a confirmed disabled
-   * state).
-   */
-  sensitive_intercept_enalbe?: number | null;
 }
 
 export interface AidpKnowledgeBaseListResponse {

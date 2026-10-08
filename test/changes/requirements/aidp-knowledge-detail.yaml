@@ -1,0 +1,15 @@
+schema_version: '1.0'
+changes:
+  - change_id: AKDT-REQ-001
+    change_type: requirement
+    requirement_id: AKDT-001
+    title: AIDP knowledge base detail page
+    description: Add a full-page AIDP knowledge base detail experience with separate live lists for ingested files and 30-day upload history, file retry and failure details, configuration display, editable supported settings and user-group permissions. Leave the ES knowledge-base path unchanged.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [AKDT-001], modified: [], retired: []}
+    affected_cases:
+      existing: []
+      added: [AKDT-D1-001, AKDT-D1-002, AKDT-D2-001, AKDT-D2-002, AKDT-D2-003, AKDT-D3-001, AKDT-D4-001, AKDT-D5-001]
+      modified: []
+      retired: []
+    notes: The FAILED-to-vector-failure and UPLOADING-to-queued response mappings are provisional per user authorization. History filter values 0-5 and dir_path=/{knowledge_base_id} are confirmed. Retry uses the documented file_uuids example; real AIDP behavior remains to be checked by the user.

@@ -135,7 +135,9 @@ const IN_PROGRESS_STATUS_LABELS: Record<string, string> = {
  * status is shown verbatim rather than hidden, so a new AIDP status is visible
  * instead of silently blank.
  */
-const DocumentStatusCell: React.FC<{ status?: string }> = ({ status }) => {
+const DocumentStatusCell: React.FC<{ status?: string | number }> = ({
+  status,
+}) => {
   const { t } = useTranslation();
   const normalized = normalizeAidpDocStatus(status);
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Annotated, List, Optional
 from uuid import UUID
@@ -64,6 +65,7 @@ from ext_components.aidp.services.aidp_service import (
     list_aidp_docs_impl,
     list_aidp_models_impl,
     remove_aidp_docs_impl,
+    retry_aidp_docs_impl,
     select_aidp_channel,
     stream_aidp_doc_impl,
     update_aidp_kb_impl,
@@ -189,9 +191,6 @@ class CreateKbRequest(BaseModel):
     llm_model_name: Optional[str] = Field(
         None, description="Graph extraction model taken from the llm category"
     )
-    sensitive_intercept_enalbe: Optional[int] = Field(
-        None, ge=0, le=1, description="Safety guard: 1 enabled, 0 disabled"
-    )
     # Nexent-side permission payload. Never forwarded to AIDP.
     ingroup_permission: Optional[str] = Field(
         "READ_ONLY",
@@ -208,6 +207,8 @@ class UpdateKbRequest(BaseModel):
 
     name: Optional[str] = Field(None, description="Knowledge base name")
     description: Optional[str] = Field(None, description="Knowledge base description")
+    chunk_mode: Optional[int] = Field(None, ge=0, le=1, description="Chunk mode: 0 smart, 1 legal")
+    topk: Optional[int] = Field(None, ge=1, le=100, description="Vector retrieval Top K")
 
 
 class SetPermissionRequest(BaseModel):
@@ -215,12 +216,6 @@ class SetPermissionRequest(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, description="Changed KB name; omit when unchanged")
     description: Optional[str] = Field(None, description="Changed description; omit when unchanged")
-    sensitive_intercept_enalbe: Optional[int] = Field(
-        None,
-        ge=0,
-        le=1,
-        description="Changed safety guard value; an explicit 0 disables it and must not be dropped",
-    )
     ingroup_permission: str = Field(..., description="EDIT / READ_ONLY / PRIVATE")
     group_ids: Optional[List[int]] = Field(
         None,
@@ -237,6 +232,12 @@ class DownloadAidpDocumentRequest(BaseModel):
     """AIDP file selected for download."""
 
     file_uuid: UUID = Field(..., description="AIDP file UUID")
+
+
+class RetryAidpDocumentsRequest(BaseModel):
+    """AIDP accepts one or more failed file UUIDs in a single retry request."""
+
+    file_uuids: List[UUID] = Field(..., min_length=1)
 
 
 # ---------------------------------------------------------------------------
@@ -350,8 +351,17 @@ def _has_kb_card_metadata(row: dict) -> bool:
     has_name = bool(row.get("kds_name") or row.get("name"))
     has_description = "description" in row
     has_created_at = "created_at" in row or "create_time" in row
+    has_updated_at = "updated_at" in row or "update_time" in row
     has_multimodal = "is_multimodal" in row or "caption_enable" in row
-    return has_name and has_description and has_created_at and has_multimodal
+    has_document_count = row.get("document_count") is not None
+    return (
+        has_name
+        and has_description
+        and has_created_at
+        and has_updated_at
+        and has_multimodal
+        and has_document_count
+    )
 
 
 def _load_cached_kb_detail(server_url: str, api_key: str, kb_id: str) -> dict:
@@ -589,6 +599,102 @@ async def _load_doc_history(
     except Exception as exc:  # noqa: BLE001 - history is an optional enhancement
         _log_history_fallback(kds_id, f"unexpected history error: {exc!r}")
         return None
+
+
+def _task_status_code(item: dict) -> int | None:
+    """Read the six AIDP upload-task statuses confirmed for the detail page."""
+    raw = item.get("status")
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return raw if 1 <= raw <= 5 else None
+    if isinstance(raw, str):
+        normalized = raw.strip().upper()
+        if normalized.isdigit():
+            code = int(normalized)
+            return code if 1 <= code <= 5 else None
+        return {
+            "COMPLETED": 1,
+            "SUCCESS": 1,
+            "PROCESSING": 2,
+            "EXTRACTING": 2,
+            "VECTOR_INGESTION_FAILED": 3,
+            "FAILED": 3,
+            "UPLOADING": 4,
+            "QUEUED": 4,
+            "GRAPH_INGESTION_FAILED": 5,
+        }.get(normalized)
+    return None
+
+
+def _task_timestamp(item: dict) -> float | None:
+    """Convert the history timestamp to epoch seconds for the 30-day window."""
+    value = item.get("created_at") or item.get("updated_at")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+async def _load_upload_task_history(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+) -> list[dict]:
+    """Read AIDP History using the confirmed ``/{kds_id}`` directory path."""
+    channel = await run_blocking(
+        "aidp-upload-task-channel",
+        _resolve_doc_history_channel,
+        server_url,
+        api_key,
+        kds_id,
+        lane="control-io",
+        owner="config",
+    )
+    if not channel:
+        return []
+
+    collected: list[dict] = []
+    seen: set[str] = set()
+    for page in range(1, _HISTORY_PAGE_LIMIT + 1):
+        payload = await run_blocking(
+            "aidp-upload-tasks",
+            list_aidp_doc_history_impl,
+            server_url,
+            api_key,
+            channel["fs_id"],
+            f"/{kds_id}",
+            kds_id,
+            None,
+            page,
+            None,
+            0,
+            lane="control-io",
+            owner="config",
+        )
+        raw_items = payload.get("value") if isinstance(payload, dict) else None
+        items = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+        if not items:
+            break
+        added = 0
+        for item in items:
+            ids = _document_identities(item)
+            key = ids[0] if ids else f"page-{page}-row-{len(collected)}"
+            if key in seen:
+                continue
+            seen.add(key)
+            collected.append(item)
+            added += 1
+        if _history_reports_more(payload) is False or added == 0:
+            break
+        if _history_reports_more(payload) is None and len(items) < 10:
+            break
+    return collected
 
 
 def _is_processing_status(status: object) -> bool:
@@ -904,6 +1010,11 @@ async def list_knowledge_bases(
     items: list[dict] = []
     for row, (detail, resource_status) in zip(page_rows, detail_results):
         kb_id = row["kb_id"]
+        document_count = (
+            detail.get("document_count")
+            if detail.get("document_count") is not None
+            else row.get("document_count")
+        )
         items.append({
             "kds_id": kb_id,
             "kds_name": (
@@ -914,7 +1025,7 @@ async def list_knowledge_bases(
                 or ""
             ),
             "description": detail.get("description") or row.get("description") or "",
-            "document_count": detail.get("document_count", row.get("document_count", 0)),
+            "document_count": document_count if document_count is not None else 0,
             "chunk_count": detail.get("chunk_count", row.get("chunk_count", 0)),
             "embedding_model": detail.get("embedding_model") or row.get("embedding_model") or "",
             # ``is_multimodal`` is a Nexent-side concept (frontend sends it
@@ -931,6 +1042,12 @@ async def list_knowledge_bases(
                 or row.get("created_at")
                 or _timestamp_to_iso(row.get("create_time"))
             ),
+            "updated_at": (
+                detail.get("updated_at")
+                or _timestamp_to_iso(detail.get("update_time"))
+                or row.get("updated_at")
+                or _timestamp_to_iso(row.get("update_time"))
+            ),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),
             "group_ids": row.get("group_ids"),
@@ -944,10 +1061,10 @@ async def list_knowledge_bases(
             "is_private": detail.get("is_private", row.get("is_private")),
             "current_cap": detail.get("current_cap", row.get("current_cap")),
             "user_name": detail.get("user_name", row.get("user_name")),
-            # A document count is only a real statistic when the detail
-            # payload supplied it; the catalog fallback is a compatibility
-            # default, not a confirmed count.
-            "document_count_reliable": bool(detail),
+            # A count from either the AIDP detail response or its catalog row
+            # is confirmed data. The compatibility default above remains
+            # marked unreliable when neither response includes a count.
+            "document_count_reliable": document_count is not None,
         })
 
     total_ms = (time.perf_counter() - started_at) * 1000
@@ -1135,6 +1252,10 @@ async def get_knowledge_base(
     detail["kds_id"] = kds_id
     detail["permission"] = decision.permission
     detail["resource_status"] = resource_status
+    permission_record = aidp_permission_db.get_permission_by_kb_id(kds_id, tenant_id) or {}
+    detail["ingroup_permission"] = permission_record.get("ingroup_permission")
+    detail["group_ids"] = permission_record.get("group_ids") or []
+    detail["created_by"] = permission_record.get("owner_user_id")
     return JSONResponse(status_code=HTTPStatus.OK, content=detail)
 
 
@@ -1151,7 +1272,7 @@ async def update_knowledge_base(
     if not payload:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
-            detail="At least one field (name or description) must be provided for update",
+            detail="At least one supported knowledge base field must be provided for update",
         )
     server_url, api_key = _credentials()
     result = update_aidp_kb_impl(server_url, api_key, kds_id, payload)
@@ -1360,6 +1481,152 @@ async def list_documents(
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/files")
+async def list_ingested_files(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
+) -> JSONResponse:
+    """List only files AIDP confirms as ingested; upload history stays separate."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    server_url, api_key = _credentials()
+    normalized_keyword = (keyword or "").strip().casefold()
+
+    if normalized_keyword:
+        all_files = await _load_ingested_documents(server_url, api_key, kds_id)
+        matches = [
+            item for item in all_files
+            if normalized_keyword in str(item.get("file_name") or "").casefold()
+        ]
+        result = _paginate_history_documents({"value": matches}, page, page_size)
+        result["processing_count"] = 0
+        result["total_reliable"] = True
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+    list_result, count_result = await asyncio.gather(
+        run_blocking(
+            "aidp-list-ingested-files",
+            list_aidp_docs_impl,
+            server_url,
+            api_key,
+            kds_id,
+            page,
+            page_size,
+            lane="control-io",
+            owner="config",
+        ),
+        run_blocking(
+            "aidp-ingested-file-count",
+            _load_cached_doc_count,
+            server_url,
+            api_key,
+            kds_id,
+            lane="control-io",
+            owner="config",
+        ),
+        return_exceptions=True,
+    )
+    if isinstance(list_result, BaseException):
+        raise list_result
+    result = dict(list_result or {})
+    rows = result.get("value") if isinstance(result.get("value"), list) else []
+    total_reliable = not isinstance(count_result, BaseException)
+    total = int(count_result) if total_reliable else len(rows)
+    result.update({
+        "total_count": total,
+        "has_more": total > page * page_size if total_reliable else bool(result.get("next_link")),
+        "total_reliable": total_reliable,
+        "processing_count": 0,
+    })
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/upload-tasks")
+async def list_upload_tasks(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
+    status: Annotated[int, Query(ge=0, le=5)] = 0,
+) -> JSONResponse:
+    """Read the recent AIDP upload history, separate from the ingested file list."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    server_url, api_key = _credentials()
+    history = await _load_upload_task_history(server_url, api_key, kds_id)
+    cutoff = time.time() - (30 * 24 * 60 * 60)
+    recent = [
+        item for item in history
+        if _task_timestamp(item) is None or _task_timestamp(item) >= cutoff
+    ]
+    stats = {
+        "total": len(recent),
+        "extracting": sum(1 for item in recent if _task_status_code(item) == 2),
+        "failed": sum(1 for item in recent if _task_status_code(item) in (3, 5)),
+        "success": sum(1 for item in recent if _task_status_code(item) == 1),
+        "queued": sum(1 for item in recent if _task_status_code(item) == 4),
+    }
+    normalized_keyword = (keyword or "").strip().casefold()
+    filtered = [
+        item for item in recent
+        if (status == 0 or _task_status_code(item) == status)
+        and (not normalized_keyword or normalized_keyword in str(item.get("file_name") or "").casefold())
+    ]
+    filtered.sort(key=lambda item: _task_timestamp(item) or 0, reverse=True)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return JSONResponse(status_code=HTTPStatus.OK, content={
+        "value": filtered[start:end],
+        "total_count": len(filtered),
+        "has_more": end < len(filtered),
+        "total_reliable": True,
+        "stats": stats,
+        "retention_days": 30,
+    })
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/upload-tasks/retry")
+async def retry_upload_tasks(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: RetryAidpDocumentsRequest,
+) -> JSONResponse:
+    """Retry selected failed tasks; the upstream request always carries a UUID array."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    file_uuids = list(dict.fromkeys(str(file_uuid) for file_uuid in body.file_uuids))
+    history = await _load_upload_task_history(*_credentials(), kds_id)
+    failed_ids = {
+        str(item.get("file_uuid"))
+        for item in history
+        if _task_status_code(item) in (3, 5) and item.get("file_uuid")
+    }
+    invalid_ids = [file_uuid for file_uuid in file_uuids if file_uuid not in failed_ids]
+    if invalid_ids:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Only vector-ingestion or graph-ingestion failed files can be retried",
+        )
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-retry-upload-tasks",
+        retry_aidp_docs_impl,
+        server_url,
+        api_key,
+        kds_id,
+        file_uuids,
+        lane="control-io",
+        owner="config",
+    )
+    invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+    invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
 @aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/remove")
 async def remove_documents(
     request: Request,
@@ -1457,10 +1724,8 @@ async def set_permission(
                 detail=str(exc),
             )
 
-    # An explicit safety guard value of 0 must survive this whitelist: dropping
-    # it would silently leave the remote setting enabled.
     metadata = body.model_dump(
-        include={"name", "description", "sensitive_intercept_enalbe"},
+        include={"name", "description"},
         exclude_none=True,
     )
     if "name" in metadata:

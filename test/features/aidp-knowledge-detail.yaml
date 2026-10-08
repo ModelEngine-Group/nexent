@@ -1,0 +1,31 @@
+schema_version: '1.0'
+module:
+  id: AIDP-KNOWLEDGE
+  name: AIDP knowledge base
+  description: AIDP knowledge base overview, creation and detail pages inside the Nexent frontend.
+features:
+  - feature_id: AKDT-001
+    name: AIDP knowledge base detail page
+    status: active
+    description: Open an AIDP knowledge base from its name or card and manage its ingested files, upload task history, configuration and group permissions on a full-page detail view. Files and upload tasks are queried live from AIDP and are not stored in Nexent PostgreSQL.
+    business_rules:
+      - rule_id: AKDT-RULE-001
+        description: The detail header shows the knowledge base name, description, ingested file count, effective permission, creation time and creator; name/description editing and deletion remain available only to users with edit permission.
+      - rule_id: AKDT-RULE-002
+        description: The three detail tabs are Files, Upload tasks and Details; the file tab lists only successfully ingested AIDP files and the task tab lists AIDP History records retained for 30 days.
+      - rule_id: AKDT-RULE-003
+        description: File and task searches, pagination and statistics use their documented AIDP fields; unsupported column filters or sorting are not displayed, and no file or task history is persisted in Nexent PostgreSQL.
+      - rule_id: AKDT-RULE-004
+        description: Upload task status filters send numeric values 0 through 5 for All, Success, Extracting, Vector ingestion failed, Queued and Graph ingestion failed; response statuses are parsed separately, preserve the raw value and show unknown values without inventing a state.
+      - rule_id: AKDT-RULE-005
+        description: Failed task rows can retry one explicitly selected file; the backend accepts a non-empty array of one or more file UUIDs, checks edit permission and forwards only file_uuids to the documented AIDP Retry example.
+      - rule_id: AKDT-RULE-006
+        description: The failure drawer shows only returned task values and displays an em dash when an error code or update time is absent; retry remains in the failed row action.
+      - rule_id: AKDT-RULE-007
+        description: The Details tab shows configuration, permissions and graph settings; group permissions use the existing Nexent permission store, while AIDP detail/configuration values are read from AIDP and only supported settings can be edited.
+      - rule_id: AKDT-RULE-008
+        description: The page keeps table width, fixed file-name and action columns, resizable other columns, right-side pagination and stable table height without horizontal page overflow.
+    required_test_stages: [D1, D2, D3, D4, D5]
+    source:
+      requirement_ids: [AKDT-001]
+      spec_path: uploads/knowledge-base-detail-design/proposal.md

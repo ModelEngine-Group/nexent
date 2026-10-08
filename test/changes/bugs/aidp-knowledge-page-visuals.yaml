@@ -1,0 +1,16 @@
+schema_version: '1.0'
+changes:
+  - change_id: AKPR-BUG-001
+    change_type: bugfix
+    bug_id: AKPR-BUG-001
+    title: AIDP overview and creation pages miss the approved visual layout
+    description: Restore the approved spacing, card composition and full-width aligned controls on the AIDP knowledge base overview and creation page.
+    observed_behavior: The initial guide text touches the step indicator; initial cards put descriptions beside the icon and split metadata across rows; creation switches sit at the far edge and model fields do not align vertically. A later UCD inspection also found incorrect card typography and internal distribution, a 384px search instead of 360px, and 24px pagination controls with the size selector after the page numbers.
+    expected_behavior: The guide uses three spaced step cards; knowledge cards use a fixed 40px icon, a 16px medium title, a full-width 12px description and one aligned metadata row inside a 148px card with 24px/16px padding; the search is 360px by 32px; pagination uses 32px controls with size selection first and a pale-blue selected page. Creation controls occupy the full content width, place switches beside their labels and align fields in the same row.
+    escaped_stage: D4
+    coverage_gap:
+      type: missing_assertion
+      description: Existing checks cover guide content and form payloads but did not assert the approved visual hierarchy, card composition, switch grouping or field alignment in the rendered AIDP pages.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [AKPR-001], retired: []}
+    affected_cases: {existing: [], added: [AKPR-D1-013, AKPR-D1-014, AKPR-D4-005], modified: [], retired: []}

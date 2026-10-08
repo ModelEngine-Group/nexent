@@ -1,0 +1,77 @@
+schema_version: '1.0'
+stage: D1
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKDT-D1-001
+    feature_id: AKDT-001
+    requirement_ids: [AKDT-001]
+    business_rule_ids: [AKDT-RULE-002, AKDT-RULE-004, AKDT-RULE-006]
+    title: Task state display separates filter values from returned status
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify each documented numeric filter stays separate from returned status strings, provisional mappings remain explicit, and unknown raw values are preserved.
+    preconditions:
+      - Render the task status helpers and table with statuses COMPLETED, EXTRACTING, FAILED, UPLOADING, GRAPHFAILED and an unknown provider value.
+    test_data: {profile: mock, filter_values: [0, 1, 2, 3, 4, 5]}
+    steps:
+      - order: 1
+        action: Select each task status filter.
+        expected: The request receives the matching integer 0, 1, 2, 3, 4 or 5, including 0 for All.
+      - order: 2
+        action: Render records with the listed provider statuses.
+        expected: Known statuses show their documented labels, FAILED and UPLOADING use the recorded provisional mappings, and an unknown value remains visible as unknown with its raw value.
+      - order: 3
+        action: Open failure details for a record without an error code or update time.
+        expected: Missing fields show an em dash and do not use retry metadata or the current time.
+    expected_results:
+      - Request filters are numeric and never use a returned status string.
+      - The provisional mappings are isolated in one conversion function.
+      - Unknown or absent provider fields are not reported as success or as a specific failure.
+    forbidden_side_effects:
+      - No status is inferred from the selected filter.
+      - No missing error code is fabricated from a retry response.
+    unit_boundary: AIDP detail task status conversion and failure drawer field projection
+    inputs: [status filter selection, raw task status, optional error fields]
+    assertions:
+      - All sends status 0 and the other labels send their defined values through 5.
+      - FAILED and UPLOADING are visibly documented as provisional mappings.
+      - Unknown raw statuses are retained and missing error values render as an em dash.
+  - case_id: AKDT-D1-002
+    feature_id: AKDT-001
+    requirement_ids: [AKDT-001]
+    business_rule_ids: [AKDT-RULE-001, AKDT-RULE-007]
+    title: Detail information reads graph configuration and group access without truthiness coercion
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the detail page projects the returned configuration and local group permission while preserving false, zero and unknown values.
+    preconditions:
+      - Render a KB detail response with graph_config represented once as JSON text and once as an object.
+      - Include explicit false and zero values, private/shared permission variants and one missing safety value.
+    test_data: {profile: mock, graph_config_forms: [json_string, object]}
+    steps:
+      - order: 1
+        action: Render the configuration and graph sections for each response shape.
+        expected: Values appear in their corresponding named fields and a model name is not duplicated.
+      - order: 2
+        action: Inspect false, zero and missing values.
+        expected: False and zero remain off/zero; a missing safety value is shown as unknown.
+      - order: 3
+        action: Render private and shared permission records with group IDs.
+        expected: Scope and group names follow local permission data and the viewer's group-read permission.
+    expected_results:
+      - JSON text and object graph settings render consistently.
+      - Boolean false and numeric zero remain distinct from missing values.
+      - Effective permission and available group names come from the permission layer.
+    forbidden_side_effects:
+      - No group IDs or AIDP task history are written during rendering.
+      - No missing setting is presented as enabled or disabled.
+    unit_boundary: AIDP knowledge detail configuration parsing and permission presentation
+    inputs: [AIDP detail payload, graph_config value, local group permission record]
+    assertions:
+      - Graph fields and the two separate Top K values render under the correct labels.
+      - Explicit false and zero are preserved while absent values remain unknown.
+      - Group names render only with group:read permission.

@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D1
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKPR-D1-013
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-001, AKPR-RULE-002, AKPR-RULE-015]
+    title: Overview tutorial and knowledge cards follow the approved visual hierarchy
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the overview structure keeps clear guide spacing and the prototype card layout without changing the shared list state.
+    preconditions:
+      - Render the AIDP overview with four knowledge bases and a 1382-pixel desktop viewport.
+    test_data: {profile: mock, viewport_width: 1382, card_count: 4}
+    steps:
+      - order: 1
+        action: Render the expanded guide.
+        expected: The explanation heading and paragraph are distinct from three step cards with at least 24 pixels of separation.
+      - order: 2
+        action: Inspect one knowledge card.
+        expected: The fixed icon, name and menu occupy the first row, description uses the full card width, and update time, file count and capacity share one footer row.
+      - order: 3
+        action: Render a final page with fewer cards.
+        expected: Remaining cards keep the same width and height and the page footer stays at the bottom of the content area.
+    expected_results:
+      - Tutorial content has readable vertical separation and matches the three-step design.
+      - Card descriptions do not share a narrow icon column.
+      - Card metadata aligns on one row and cards do not stretch to fill unused grid space.
+    forbidden_side_effects:
+      - No fabricated timestamps, file counts or capacity values are rendered.
+      - No ES page component or global style changes are required.
+    unit_boundary: AIDP guide and card DOM structure at desktop viewport
+    inputs: [expanded guide, card metadata, short final page]
+    assertions:
+      - The guide paragraph and step cards have a rendered gap of at least 24 pixels.
+      - Every card exposes one footer row containing update time, document count and capacity.
+      - Card grid uses auto-fit columns and a short last page leaves card dimensions unchanged.
+  - case_id: AKPR-D1-014
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-010, AKPR-RULE-016]
+    title: Creation page keeps switches beside labels and aligns paired controls
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the AIDP create page is full-width, section controls have the designed visual grouping, and paired controls share a baseline.
+    preconditions:
+      - Render the first creation step at desktop width with safety, graph and VLM controls visible.
+    test_data: {profile: mock, viewport_width: 1382, chunk_modes: [0, 1]}
+    steps:
+      - order: 1
+        action: Render the page header and form.
+        expected: The creation form uses the available content width and the breadcrumb reads knowledge base / create knowledge base.
+      - order: 2
+        action: Inspect safety, graph and VLM toggle groups.
+        expected: Each switch sits beside its corresponding label and help icon.
+      - order: 3
+        action: Inspect fields that share a row.
+        expected: Both controls use the same label structure and their input or slider starts differ by no more than one pixel.
+    expected_results:
+      - No fixed narrow modal-sized content column constrains the create page.
+      - Switches are adjacent to their own labels rather than the far edge of the row.
+      - Paired model, chunking and retrieval controls align consistently.
+    forbidden_side_effects:
+      - No global Ant Design or ES knowledge-base style override is introduced.
+      - No change to values submitted for chunk_mode 0 or 1.
+    unit_boundary: AIDP create form section layout and toggle grouping
+    inputs: [desktop viewport, graph toggle, VLM toggle, paired model controls]
+    assertions:
+      - The creation header and form fill the available page content width.
+      - Switches are grouped within 12 pixels of their labels.
+      - Paired controls use consistent label and field alignment.

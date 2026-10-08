@@ -81,6 +81,9 @@ for mod in (_db_pkg, _db_client):
 
 # Production modules under test
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
+    CreateKbRequest,
+    SetPermissionRequest,
+    UpdateKbRequest,
     aidp_mgmt_router,
 )
 from apps.app_factory import register_exception_handlers  # noqa: E402
@@ -89,6 +92,11 @@ SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"
 USER_ID = "user-test"
 TENANT_ID = "tenant-test"
+
+
+def test_knowledge_base_api_models_do_not_expose_safety_guard():
+    for model in (CreateKbRequest, UpdateKbRequest, SetPermissionRequest):
+        assert "sensitive_intercept_enalbe" not in model.model_fields
 
 
 @pytest.mark.parametrize("metadata,remote_fails", [
@@ -630,7 +638,9 @@ class TestListKnowledgeBases:
             "kds_name": "Catalog KB",
             "description": "From catalog",
             "created_at": "2026-01-01T00:00:00Z",
+            "update_time": 1767225600,
             "caption_enable": 0,
+            "document_count": 8,
             "permission": "EDIT",
         }
         with patch.object(
@@ -641,8 +651,43 @@ class TestListKnowledgeBases:
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
 
         assert response.status_code == HTTPStatus.OK
-        assert response.json()["value"][0]["description"] == "From catalog"
+        item = response.json()["value"][0]
+        assert item["description"] == "From catalog"
+        assert item["updated_at"] == "2026-01-01T00:00:00Z"
+        assert item["document_count"] == 8
+        assert item["document_count_reliable"] is True
         mock_detail.assert_not_called()
+
+    def test_list_fetches_detail_when_catalog_lacks_update_time_or_document_count(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        incomplete_row = {
+            "kb_id": "kb-1",
+            "kds_id": "kb-1",
+            "kds_name": "Catalog KB",
+            "description": "From catalog",
+            "created_at": "2026-01-01T00:00:00Z",
+            "caption_enable": 0,
+            "permission": "EDIT",
+        }
+        with patch.object(
+            aidp_mgmt_app,
+            "_current_accessible_rows",
+            return_value=[incomplete_row],
+        ), patch.object(
+            aidp_mgmt_app,
+            "_load_cached_kb_detail",
+            return_value={"document_count": 8, "update_time": 1767225600},
+        ) as mock_detail:
+            response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+
+        assert response.status_code == HTTPStatus.OK
+        item = response.json()["value"][0]
+        assert item["updated_at"] == "2026-01-01T00:00:00Z"
+        assert item["document_count"] == 8
+        assert item["document_count_reliable"] is True
+        mock_detail.assert_called_once()
 
 
 # Use a lazy import for AppException at module load to avoid breaking the

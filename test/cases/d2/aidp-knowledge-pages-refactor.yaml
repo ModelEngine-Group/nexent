@@ -91,33 +91,31 @@ cases:
   - case_id: AKPR-D2-003
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
-    business_rule_ids: [AKPR-RULE-014]
-    title: Update request forwards an explicit disabled safety guard and reports partial failure
+    business_rule_ids: []
+    title: Update request changes metadata and reports partial failure
     type: CONTRACT
     priority: P0
     status: active
     automation: automated
-    objective: Verify the safety guard survives the update whitelist, an explicit zero is forwarded and permission success stays distinguishable from metadata failure.
+    objective: Verify that permission success stays distinguishable from a failed knowledge-base name or description update.
     preconditions:
       - An authenticated update reaches the AIDP management proxy for a base the caller may edit.
-    test_data: {profile: mock, guard: ['enabled to disabled', unchanged, 'disabled to enabled'], metadata_failure: true}
+    test_data: {profile: mock, metadata_change: [name, description], metadata_failure: true}
     steps:
       - order: 1
-        action: Disable the safety guard and save.
-        expected: The upstream metadata payload contains the field as integer 0.
+        action: Change the knowledge-base name or description and save.
+        expected: Only the changed name or description is sent to AIDP.
       - order: 2
-        action: Save again without changing the guard.
-        expected: The field is not resent when nothing changed.
+        action: Save again without changing metadata.
+        expected: No unchanged metadata field is resent.
       - order: 3
         action: Make the upstream metadata update fail after the permission write.
-        expected: The response distinguishes saved permissions from a failed metadata update and the readback keeps the previous guard value.
+        expected: The response distinguishes saved permissions from a failed metadata update and readback keeps the previous name and description.
     expected_results:
-      - An explicit 0 is forwarded and an unchanged value is omitted.
+      - Only changed metadata is forwarded and unchanged values are omitted.
       - Permission and metadata outcomes are separately reported.
-      - A metadata failure is never presented as a saved guard value.
+      - A metadata failure is never presented as a successful metadata save.
     forbidden_side_effects:
-      - No silent drop of the disabled value by the field whitelist.
-      - No boolean encoding.
       - No claimed success on upstream failure.
     contract:
       protocol: HTTP
@@ -125,7 +123,6 @@ cases:
       endpoint: /aidp-mgmt/knowledge-bases/{kds_id}/permission
       request_expectations:
         - Only explicitly changed metadata fields are sent.
-        - The safety guard is forwarded as an integer when it changed.
         - Permission and group fields keep their existing rules.
       response_expectations:
         - Permission save status and metadata update status are reported separately.

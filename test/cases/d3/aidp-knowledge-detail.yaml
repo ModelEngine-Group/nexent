@@ -1,0 +1,50 @@
+schema_version: '1.0'
+stage: D3
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKDT-D3-001
+    feature_id: AKDT-001
+    requirement_ids: [AKDT-001]
+    business_rule_ids: [AKDT-RULE-002, AKDT-RULE-003, AKDT-RULE-005]
+    title: AIDP mock keeps completed files separate from paged upload history and retries
+    type: INTEGRATION
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the local AIDP mock exercises the separate file and History sources, request paging and filtering, and array-based retry without local database history.
+    preconditions:
+      - Nexent config service and the AIDP management mock run in the declared local mock profile.
+      - Mock data includes completed and non-completed statuses for the same knowledge base.
+    test_data: {profile: mock, kds_id: aidp-kb-faq, page_size: 10, status: [0, 1, 2, 3, 4, 5]}
+    steps:
+      - order: 1
+        action: Query the files and upload-tasks endpoints for one knowledge base.
+        expected: The file response contains only completed records while task response includes History statuses and AIDP counts.
+      - order: 2
+        action: Query tasks with page, keyword and each numeric status.
+        expected: The mock applies the request fields, returns the matching rows and provides correct pagination/statistics.
+      - order: 3
+        action: Retry an explicit array containing one file UUID.
+        expected: The mock accepts the documented file_uuids body and records only the selected retry.
+    expected_results:
+      - Mock behavior makes accidental History/file mixing observable.
+      - Mock task filters and statistics match its fixture data.
+      - Mock retry behavior matches the adapter's documented sample shape.
+    forbidden_side_effects:
+      - No Nexent PG file or task-history record is created.
+      - No retry outside the requested UUID array is changed.
+    integration_boundary:
+      - Nexent FastAPI AIDP management routes.
+      - Local AIDP management mock KnowledgeFiles endpoints.
+      - Existing Nexent permission data only for authorization decisions.
+    observations:
+      - Captured request path and JSON body at the mock boundary.
+      - File and task response rows, counts and pagination metadata.
+      - Database writes limited to existing permission behavior; no file-history writes.
+    cleanup:
+      - Restore mock fixture state using the repository's isolated test state directory.
+      - Do not reset the user's persistent local mock state during browser acceptance.
+    execution:
+      profiles:
+        - name: mock
+          required_services: [knowledge-provider]

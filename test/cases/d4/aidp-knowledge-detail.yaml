@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D4
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKDT-D4-001
+    feature_id: AKDT-001
+    requirement_ids: [AKDT-001]
+    business_rule_ids: [AKDT-RULE-001, AKDT-RULE-002, AKDT-RULE-004, AKDT-RULE-005, AKDT-RULE-006, AKDT-RULE-007]
+    title: Knowledge base detail journey separates files, tasks and settings
+    type: E2E
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify the complete detail-page journey against the AIDP mock, including navigation, task filtering, failure details, row retry, configuration and permission controls.
+    preconditions:
+      - The authenticated test account has EDIT access to one seeded AIDP knowledge base and READ access to one shared base.
+      - The mock returns completed files and a mixture of recent task statuses, including one retryable failure with a reason.
+      - The browser has the AIDP knowledge-base feature enabled.
+    test_data: {profile: mock, locale: zh-CN, task_retention_days: 30, status_values: [0, 1, 2, 3, 4, 5]}
+    steps:
+      - order: 1
+        action: Open the overview and click a card or knowledge-base name.
+        expected: A full-width detail page opens with a breadcrumb, header and the three tabs Files, Upload tasks and Details; no list edit action remains.
+      - order: 2
+        action: Inspect Files and search by file name.
+        expected: Only ingested files appear; download and delete follow the user's permission; pagination and table controls stay in the detail page.
+      - order: 3
+        action: Open Upload tasks, search a name and choose each status filter.
+        expected: The page states tasks are retained for 30 days, status values 0-5 are sent, statistics remain independent from the current page, and processing rows do not appear as ingested files.
+      - order: 4
+        action: Open a failed task's failure details and retry it from the row action.
+        expected: The drawer shows returned values only; retry submits a one-item file_uuids array and subsequent refresh reads the changed task status.
+      - order: 5
+        action: Open Details and edit supported name/description, a supported setting and group permissions.
+        expected: Each save sends only its own changed fields and updates the returned value; unsupported similarity edits are absent.
+    expected_results:
+      - The page has the exact three tabs and full content width.
+      - Ingested files and upload history remain separate live AIDP sources.
+      - Status filters, raw status rendering, failure details and single-file retry follow the contract.
+      - Detail settings and group permissions use separate authorized save operations.
+    forbidden_side_effects:
+      - No task-history record is written to Nexent PostgreSQL.
+      - No operation from a READ_ONLY user changes upstream or local configuration.
+      - No list/card menu edits a knowledge base.
+    actor: Authenticated AIDP tenant user
+    journey:
+      - Enter the detail page from the overview.
+      - Inspect and search completed files.
+      - Inspect task statistics, filters and failure details.
+      - Retry one failed task and verify refresh behavior.
+      - Review and modify supported detail settings and permission groups.
+    final_business_result:
+      - The user can identify successfully ingested files separately from recent upload work and manage the knowledge base using the returned configuration and permission values.
+    failure_evidence:
+      - Retain screenshots for the three tabs and failure drawer, browser request evidence, and console errors.
+    execution:
+      profiles:
+        - name: mock
+          required_services: [knowledge-provider]

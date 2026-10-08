@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import logging
 import os
 import sys
@@ -678,6 +679,35 @@ class TestApplyCreateDefaults:
         )
         assert result["chunk_token_num"] == 0
         assert result["vlm_model"] == "my-vlm"
+
+    def test_graph_llm_model_is_serialized_inside_aidp_graph_config(self, aidp_mod):
+        result = aidp_mod._apply_create_defaults(
+            {
+                "name": "kb-graph",
+                "is_exist_graph": True,
+                "graph_config": {
+                    "domain": "general",
+                    "llm_model_name": "model-graph",
+                },
+            }
+        )
+
+        graph_config = json.loads(result["graph_config"])
+        assert graph_config["llm_model_name"] == "model-graph"
+
+    def test_legacy_top_level_graph_llm_model_is_moved_into_graph_config(self, aidp_mod):
+        result = aidp_mod._apply_create_defaults(
+            {
+                "name": "kb-graph",
+                "is_exist_graph": True,
+                "graph_config": {"domain": "general"},
+                "llm_model_name": "model-graph",
+            }
+        )
+
+        graph_config = json.loads(result["graph_config"])
+        assert graph_config["llm_model_name"] == "model-graph"
+        assert "llm_model_name" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -2996,6 +3026,22 @@ class TestListAidpDocHistoryImpl:
 
         assert "status" not in result["value"][0]
 
+    def test_numeric_canonical_status_is_preserved_as_a_code(self, aidp_service_module):
+        mock_resp = _make_success_response({
+            "value": [{"file_ino_no": "f-1", "status": 3}],
+        })
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        result = aidp_service_module.list_aidp_doc_history_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            fs_id="fs-1",
+            dir_path="/1",
+            kds_id=self._KB,
+        )
+
+        assert result["value"][0]["status"] == "3"
+
     def test_unreadable_status_payload_is_reported(
         self, aidp_service_module, caplog
     ):
@@ -3050,6 +3096,57 @@ class TestListAidpDocHistoryImpl:
                 kds_id=self._KB,
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    def test_status_filter_keeps_zero_and_page_size(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": []})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="post", response=mock_resp
+        )
+        aidp_service_module.list_aidp_doc_history_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            fs_id="fs-1",
+            dir_path="/1",
+            kds_id=self._KB,
+            page=2,
+            page_size=50,
+            status=0,
+        )
+        assert mock_client.post.call_args.kwargs["json"] == {
+            "fs_id": "fs-1",
+            "dir_path": "/1",
+            "page": 2,
+            "page_size": 50,
+            "status": 0,
+        }
+
+
+    def test_retry_posts_uuid_array_and_preserves_response(self, aidp_service_module):
+        expected = {
+            "summary": {"total": 2, "success": 2, "failed": 0},
+            "success_list": [{"file_uuid": "f-1"}, {"file_uuid": "f-2"}],
+            "failed_list": [],
+        }
+        mock_resp = _make_success_response(expected)
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="post", response=mock_resp
+        )
+
+        result = aidp_service_module.retry_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            file_uuids=["f-1", "f-2"],
+        )
+
+        assert mock_client.post.call_args[0][0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/KnowledgeFiles/Retry"
+        )
+        assert mock_client.post.call_args.kwargs["json"] == {
+            "file_uuids": ["f-1", "f-2"],
+        }
+        assert result == expected
 
     def test_response_without_list_carries_empty_value(self, aidp_service_module):
         """An empty directory is a valid answer, not a payload error."""

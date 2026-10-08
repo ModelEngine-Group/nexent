@@ -5,7 +5,7 @@ cases:
   - case_id: AKPR-D5-001
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
-    business_rule_ids: [AKPR-RULE-007, AKPR-RULE-014]
+    business_rule_ids: [AKPR-RULE-007]
     title: Restricted users never reach a modification endpoint
     type: SECURITY
     priority: P0
@@ -18,7 +18,7 @@ cases:
     test_data: {profile: real_smoke, roles: [READ_ONLY, 'USER without group', EDIT]}
     steps:
       - order: 1
-        action: As the read-only user, open the base and attempt edit, upload, delete and safety guard changes.
+        action: As the read-only user, open the base and attempt edit, upload and delete.
         expected: No modification entry is executable and no modification request is issued.
       - order: 2
         action: As a user without a valid group, submit the creation first step with a shared permission.
@@ -35,7 +35,7 @@ cases:
       - No local-only permission change without the upstream counterpart.
       - No exposure of upstream credentials in any error path.
     risk_type: SECURITY
-    risk: A user without edit permission could modify a knowledge base or its safety configuration through a stale or unguarded UI entry.
+    risk: A user without edit permission could modify a knowledge base through a stale or unguarded UI entry.
     condition:
       - Read-only permission on the selected knowledge base.
       - Shared permission without a valid same-tenant group.
@@ -106,40 +106,33 @@ cases:
   - case_id: AKPR-D5-003
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
-    business_rule_ids: [AKPR-RULE-012, AKPR-RULE-013, AKPR-RULE-014]
+    business_rule_ids: [AKPR-RULE-012, AKPR-RULE-013]
     title: Disabled capabilities and missing remote values are never reported as active or saved
     type: SECURITY
     priority: P0
     status: blocked
     automation: automated
-    objective: Verify that hidden configuration is not resubmitted, that missing remote values stay unknown and that a failed save is never presented as success. This case stays blocked until a deployment with a controllable upstream failure mode and the upstream safety contract is available.
+    objective: Verify that hidden configuration is not resubmitted and that a failed metadata save is never presented as success. This case stays blocked until a deployment with a controllable upstream failure mode is available.
     preconditions:
       - A deployed instance can reject a metadata update on demand.
-      - A knowledge base created before the safety field existed is available for readback.
-    test_data: {profile: real_smoke, graph: [true, false], multimodal: [true, false], guard_absent: true}
+    test_data: {profile: real_smoke, graph: [true, false], multimodal: [true, false]}
     steps:
       - order: 1
         action: Create a knowledge base with the graph and multimodal capabilities disabled.
         expected: No graph configuration and no hidden model field reaches the upstream request.
       - order: 2
-        action: Read back a knowledge base whose response omits the safety field.
-        expected: The UI reports the state as unknown instead of confirmed disabled.
-      - order: 3
-        action: Fail the metadata update after the guard change and inspect the UI.
+        action: Change the knowledge-base name or description, fail the metadata update and inspect the UI.
         expected: The change is reported as not saved and the previous value remains displayed.
     expected_results:
       - Hidden configuration stays out of requests.
-      - Missing remote values are not converted into confirmed states.
       - Failed saves are visible as failures.
     forbidden_side_effects:
       - No resubmission of a previously selected hidden model.
       - No success message after a failed upstream update.
-      - No safety field nested inside graph configuration.
     risk_type: SECURITY
-    risk: A user could believe a safety guard or graph configuration is active while the remote state is unknown or a save failed.
+    risk: A user could believe a graph or multimodal configuration is active while remote state is unknown, or believe metadata was saved when the update failed.
     condition:
       - Graph or multimodal capability disabled after a selection.
-      - Upstream response without the safety field.
       - Metadata update failure after a permission save.
     metrics:
       - Count of hidden configuration fields in outgoing payloads.

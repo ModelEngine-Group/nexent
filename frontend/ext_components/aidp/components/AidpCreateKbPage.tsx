@@ -11,19 +11,9 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 
-import {
-  Button,
-  Breadcrumb,
-  Divider,
-  Form,
-  Space,
-  Steps,
-  Upload,
-  message,
-} from "antd";
+import { Button, Breadcrumb, Form, Space, Steps, Upload, message } from "antd";
 import { InboxOutlined } from "@ant-design/icons";
 
-import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type {
   AidpGraphConfig,
   AidpModelItem,
@@ -42,17 +32,17 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import log from "@/lib/logger";
 
 import AidpCreateKbSections from "./AidpCreateKbSections";
+import styles from "./AidpCreateKbSections.module.css";
 
 const { Dragger } = Upload;
 
 /**
  * Default AIDP knowledge base configuration.
  *
- * The chunking, retrieval, embedding and caption values keep the semantics the
- * existing Nexent create call already had (1024 tokens, 128 token overlap,
- * similarity 0.0, Top K 10, embedding "default", captioning off). The graph
- * parameters use the documented AIDP defaults, which are not the prototype
- * sample values.
+ * The creation screen uses the agreed product defaults (1024 tokens, 128 token
+ * overlap, similarity 0.6, Top K 10, embedding "default", captioning off). The
+ * graph parameters use the documented AIDP defaults, which are not the
+ * prototype sample values.
  */
 const AIDP_CREATE_DEFAULTS = {
   chunk_token_num: 1024,
@@ -62,7 +52,7 @@ const AIDP_CREATE_DEFAULTS = {
   embedding_model: "default",
   is_personal: 0,
   topk: 10,
-  similarity: 0.0,
+  similarity: 0.6,
   smartsplit: 1,
   caption_enable: 0,
   is_exist_graph: false,
@@ -74,7 +64,6 @@ const AIDP_CREATE_DEFAULTS = {
   graph_prompt_language: "chinese" as const,
   graph_synonym_merge: false,
   graph_disambiguation: false,
-  sensitive_intercept_enalbe: 0,
 };
 
 /** Editable default extraction prompt (UTF-8 length is validated on submit). */
@@ -211,8 +200,6 @@ const AidpCreateKbPage: React.FC = () => {
       graph_synonym_merge: AIDP_CREATE_DEFAULTS.graph_synonym_merge,
       graph_disambiguation: AIDP_CREATE_DEFAULTS.graph_disambiguation,
       graph_prompt_text: DEFAULT_GRAPH_PROMPT,
-      sensitive_intercept_enalbe:
-        AIDP_CREATE_DEFAULTS.sensitive_intercept_enalbe === 1,
       ingroup_permission: isUser ? "PRIVATE" : "READ_ONLY",
       group_ids: [],
     });
@@ -294,6 +281,7 @@ const AidpCreateKbPage: React.FC = () => {
               prompt_text: values.graph_prompt_text || DEFAULT_GRAPH_PROMPT,
               synonym_merge_enable: !!values.graph_synonym_merge,
               disambiguation_enable: !!values.graph_disambiguation,
+              llm_model_name: values.llm_model_name,
             }
           : undefined;
 
@@ -313,10 +301,6 @@ const AidpCreateKbPage: React.FC = () => {
           vlm_model: values.caption_enable ? values.vlm_model || "" : "",
           is_exist_graph: !!values.is_exist_graph,
           graph_config: graphConfig,
-          llm_model_name: values.is_exist_graph
-            ? values.llm_model_name || ""
-            : "",
-          sensitive_intercept_enalbe: values.sensitive_intercept_enalbe ? 1 : 0,
           ingroup_permission: permission,
           group_ids: groupIds,
         });
@@ -486,7 +470,7 @@ const AidpCreateKbPage: React.FC = () => {
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col">
-      <header className="shrink-0 px-4 pb-5 pt-4 md:px-7 md:pt-5">
+      <header className="shrink-0 px-6 pt-4">
         <Breadcrumb
           items={[
             {
@@ -504,12 +488,12 @@ const AidpCreateKbPage: React.FC = () => {
             { title: t("aidpKnowledge.createPageTitle") },
           ]}
         />
-        <Steps className="mt-6" current={current} items={steps} size="small" />
+        <div className="mt-4">
+          <Steps current={current} items={steps} size="small" />
+        </div>
       </header>
 
-      <Divider className="my-0 shrink-0" />
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-7">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
         {/* Keep the first step mounted so form fields survive step changes. */}
         <div className={current === 0 ? "w-full" : "hidden"}>
           {renderStep0()}
@@ -517,7 +501,7 @@ const AidpCreateKbPage: React.FC = () => {
         {current === 1 && renderStep1()}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-200 bg-white px-4 py-3 md:px-7">
+      <footer className={styles.createFooter}>
         <div>
           {current === 1 && (
             <Button onClick={handleBack} disabled={loading}>
@@ -525,7 +509,7 @@ const AidpCreateKbPage: React.FC = () => {
             </Button>
           )}
         </div>
-        <Space wrap>
+        <Space size={10} wrap>
           <Button onClick={goBackToList} disabled={loading}>
             {t("common.cancel")}
           </Button>

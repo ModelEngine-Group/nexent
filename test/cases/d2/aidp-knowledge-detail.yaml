@@ -1,0 +1,131 @@
+schema_version: '1.0'
+stage: D2
+module: AIDP-KNOWLEDGE
+cases:
+  - case_id: AKDT-D2-001
+    feature_id: AKDT-001
+    requirement_ids: [AKDT-001]
+    business_rule_ids: [AKDT-RULE-002, AKDT-RULE-003]
+    title: Ingested-file endpoint queries only the AIDP file listing
+    type: CONTRACT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify file search and paging proxy only successfully ingested AIDP files and never substitutes History records or local PG rows.
+    preconditions:
+      - An authenticated caller has READ access to one AIDP knowledge base.
+      - The AIDP fixture contains one completed document and one processing History record with different IDs.
+    test_data: {profile: mock, page: 2, page_size: 20, keyword: handbook}
+    steps:
+      - order: 1
+        action: Request the file page with a keyword and page size.
+        expected: The request is forwarded to the AIDP KnowledgeFiles listing with page, page_size and keyword.
+      - order: 2
+        action: Inspect the file result and total.
+        expected: Only records from the ingested-file listing appear and the response reports its paging fields.
+      - order: 3
+        action: Deny READ access and repeat the request.
+        expected: The proxy rejects the request before contacting AIDP.
+    expected_results:
+      - File endpoint data comes only from the live ingested-file endpoint.
+      - Supported query fields are forwarded and totals are not computed from a task page.
+      - READ permission is enforced.
+    forbidden_side_effects:
+      - No History request is used as a file-list fallback.
+      - No file or task record is read from Nexent PostgreSQL.
+    contract:
+      protocol: HTTP
+      method: GET
+      endpoint: /aidp-mgmt/knowledge-bases/{kds_id}/files
+      request_expectations:
+        - page and page_size are positive; page_size is bounded to 100.
+        - keyword is forwarded when non-empty.
+        - READ permission is checked before the upstream request.
+      response_expectations:
+        - value contains only ingested-file records.
+        - total_count, has_more and total_reliable reflect the upstream listing/count result.
+  - case_id: AKDT-D2-002
+    feature_id: AKDT-001
+    requirement_ids: [AKDT-001]
+    business_rule_ids: [AKDT-RULE-002, AKDT-RULE-003, AKDT-RULE-004]
+    title: Upload-task endpoint forwards page, search, numeric status and local-upload directory
+    type: CONTRACT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify task queries use AIDP History with the knowledge-base file-system ID, dir_path /{kds_id}, and the supported request fields while returning AIDP statistics.
+    preconditions:
+      - An authenticated caller has READ access and the AIDP channel lookup returns an fs_id for the selected knowledge base.
+    test_data: {profile: mock, page: 2, page_size: 10, keyword: policy, status: 0, dir_path: /12}
+    steps:
+      - order: 1
+        action: Request task page 2 with a name keyword and status 0.
+        expected: The proxy sends page, page_size, keyword, status, fs_id and dir_path /{kds_id} to the AIDP History endpoint.
+      - order: 2
+        action: Repeat for statuses 1 through 5.
+        expected: Each numeric filter is forwarded unchanged and does not replace the response-record status.
+      - order: 3
+        action: Inspect total, processing, failed and success counts.
+        expected: Each count comes from the corresponding History response field, not the current page.
+    expected_results:
+      - All supported task request fields are passed to AIDP History.
+      - dir_path is constructed as a slash followed by the current knowledge base ID.
+      - Statistics and records remain upstream values and file records are separate.
+    forbidden_side_effects:
+      - No page-one-only result is sliced locally and labeled as an upstream page.
+      - No count is calculated from visible page rows.
+      - No task data is persisted in Nexent PostgreSQL.
+    contract:
+      protocol: HTTP
+      method: GET
+      endpoint: /aidp-mgmt/knowledge-bases/{kds_id}/upload-tasks
+      request_expectations:
+        - page, page_size, keyword and status are forwarded; status accepts integer 0 through 5, including 0.
+        - History body includes fs_id returned for the current KB and dir_path /{kds_id}.
+        - READ permission is checked before querying History.
+      response_expectations:
+        - value contains the requested page of History records.
+        - total_record_count, processing_record_count, failed_record_count and success_record_count preserve AIDP statistics.
+        - total_count and pagination flags match the History response.
+  - case_id: AKDT-D2-003
+    feature_id: AKDT-001
+    requirement_ids: [AKDT-001]
+    business_rule_ids: [AKDT-RULE-005, AKDT-RULE-007]
+    title: Retry forwards one or more selected file UUIDs and rejects unauthorized or empty requests
+    type: CONTRACT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify the retry proxy checks EDIT permission, validates an explicit non-empty UUID array and uses the AIDP documented request example.
+    preconditions:
+      - An authenticated caller and a valid knowledge base exist.
+    test_data: {profile: mock, file_uuids: [uuid-a, uuid-b]}
+    steps:
+      - order: 1
+        action: Submit one valid file UUID and then multiple valid UUIDs.
+        expected: The upstream body contains file_uuids as the same explicit array and no speculative fields.
+      - order: 2
+        action: Submit an empty array or malformed UUID.
+        expected: The request is rejected and AIDP is not called.
+      - order: 3
+        action: Submit as a READ_ONLY caller.
+        expected: The request is rejected before AIDP is called.
+    expected_results:
+      - Both single-file and multiple-file arrays are accepted when valid.
+      - Empty or malformed arrays are rejected.
+      - EDIT permission is required.
+    forbidden_side_effects:
+      - Empty input never means retry all files.
+      - No retry request contains retry_file_info or only_retry_graph.
+      - No retry request for a different knowledge base is issued.
+    contract:
+      protocol: HTTP
+      method: POST
+      endpoint: /aidp-mgmt/knowledge-bases/{kds_id}/upload-tasks/retry
+      request_expectations:
+        - Body requires a non-empty file_uuids array of UUIDs and deduplicates repeated IDs.
+        - EDIT permission is checked before upstream access.
+        - Upstream endpoint is POST KnowledgeFiles/Retry with only file_uuids in the body.
+      response_expectations:
+        - AIDP success_list and failed_list are preserved per file.
+        - Partial success is not collapsed into a blanket success response.
