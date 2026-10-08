@@ -16,7 +16,6 @@ license, copyright notices, and attribution requirements.
 | --- | --- | --- |
 | Unstructured | Apache License 2.0 | https://github.com/Unstructured-IO/unstructured |
 | smolagents | Apache License 2.0 | https://github.com/huggingface/smolagents |
-| Ray | Apache License 2.0 | https://github.com/ray-project/ray |
 | FastAPI | MIT License | https://github.com/fastapi/fastapi |
 | LangChain | MIT License | https://github.com/langchain-ai/langchain |
 | FastMCP | Apache License 2.0 | https://github.com/jlowin/fastmcp |
