@@ -125,11 +125,13 @@ interface ResizableTitleProps extends Omit<
   "onResize"
 > {
   width?: number;
-  onResize?: (width: number) => void;
+  minWidth?: number;
+  onResize?: (width: number, renderedWidths: Record<string, number>) => void;
 }
 
 const ResizableTitle: React.FC<ResizableTitleProps> = ({
   width,
+  minWidth = 88,
   onResize,
   children,
   ...rest
@@ -141,9 +143,22 @@ const ResizableTitle: React.FC<ResizableTitleProps> = ({
     event.preventDefault();
     event.stopPropagation();
     const startX = event.clientX;
-    const startWidth = width;
+    const startWidth =
+      event.currentTarget.parentElement?.getBoundingClientRect().width ?? width;
+    const renderedWidths: Record<string, number> = {};
+    event.currentTarget
+      .closest("table")
+      ?.querySelectorAll<HTMLTableCellElement>("th[data-column-key]")
+      .forEach((cell) => {
+        if (cell.dataset.columnKey)
+          renderedWidths[cell.dataset.columnKey] =
+            cell.getBoundingClientRect().width;
+      });
     const handleMove = (moveEvent: PointerEvent) => {
-      onResize(Math.max(88, startWidth + moveEvent.clientX - startX));
+      onResize(
+        Math.max(minWidth, startWidth + moveEvent.clientX - startX),
+        renderedWidths
+      );
     };
     const handleUp = () => {
       window.removeEventListener("pointermove", handleMove);
@@ -168,7 +183,7 @@ const ResizableTitle: React.FC<ResizableTitleProps> = ({
           role="separator"
           aria-orientation="vertical"
           aria-label={t("aidpKnowledge.resizeColumn")}
-          className="absolute right-0 top-0 z-10 h-full w-2 cursor-col-resize touch-none select-none after:absolute after:right-[3px] after:top-1/4 after:h-1/2 after:w-px after:bg-gray-300 hover:after:bg-blue-500"
+          className={styles.columnResizeHandle}
           onPointerDown={handlePointerDown}
           onClick={(event) => event.stopPropagation()}
         />
@@ -242,7 +257,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     const groupNames = isShared ? getGroupNames(kb.group_ids) : [];
 
     return (
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <div className={styles.tableScope}>
         {isPrivate ? (
           <Tag color="blue" className="mr-0">
             {t("aidpKnowledge.scopePrivate")}
@@ -272,7 +287,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         <Can permission="group:read">
           {groupNames.length > 0 && (
             <Tooltip title={groupNames.join("、")}>
-              <Tag className="mr-0 max-w-36 truncate">
+              <Tag className={`${styles.tableGroup} mr-0`}>
                 {t("aidpKnowledge.scopeGroupCount", {
                   count: groupNames.length,
                 })}
@@ -412,31 +427,50 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     </div>
   );
 
-  const handleResize = (key: AidpKbColumnKey, width: number) => {
-    setColumnWidths((current) => ({ ...current, [key]: width }));
+  const handleResize = (
+    key: AidpKbColumnKey,
+    width: number,
+    renderedWidths: Record<string, number>
+  ) => {
+    // Freeze the rendered widths before resizing so the browser cannot
+    // redistribute spare space across the other columns.
+    setColumnWidths((current) => ({
+      ...current,
+      ...renderedWidths,
+      [key]: width,
+    }));
   };
 
   const renderTable = () => {
     const baseWidths: Record<AidpKbColumnKey, number> = {
-      name: 220,
-      type: 210,
-      description: 280,
-      documents: 100,
-      capacity: 120,
-      creator: 140,
-      created_at: 140,
-      actions: 220,
+      name: 280,
+      type: 260,
+      description: 418,
+      documents: 120,
+      capacity: 160,
+      creator: 100,
+      created_at: 160,
+      actions: 144,
     };
     const makeColumn = (
       key: AidpKbColumnKey,
       column: ColumnsType<AidpKnowledgeBaseItem>[number]
     ) => ({
       ...column,
+      ellipsis: key !== "actions",
       width: columnWidths[key] ?? baseWidths[key],
       onHeaderCell: () =>
         ({
           width: columnWidths[key] ?? baseWidths[key],
-          onResize: (width: number) => handleResize(key, width),
+          minWidth:
+            key === "actions"
+              ? 144
+              : key === "name" || key === "type"
+                ? 120
+                : 88,
+          "data-column-key": key,
+          onResize: (width: number, renderedWidths: Record<string, number>) =>
+            handleResize(key, width, renderedWidths),
         }) as ResizableTitleProps,
     });
     const allColumns: Record<
@@ -451,7 +485,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         render: (_value, kb) => (
           <button
             type="button"
-            className={`${styles.tableName} max-w-full truncate text-left font-medium`}
+            className={`${styles.tableName} max-w-full truncate text-left`}
             title={kb.kds_name}
             onClick={(event) => {
               event.stopPropagation();
@@ -503,10 +537,10 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         title: t("aidpKnowledge.columnActions"),
         key: "actions",
         fixed: "right",
-        align: "right",
+        align: "left",
         render: (_value, kb) =>
           canModify(kb) ? (
-            <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+            <div className={styles.tableActions}>
               <Button
                 type="link"
                 size="small"
@@ -544,22 +578,33 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     );
 
     return (
-      <Table<AidpKnowledgeBaseItem>
-        rowKey="kds_id"
-        size="middle"
-        className="aidp-knowledge-table"
-        columns={activeKeys.map((key) => allColumns[key])}
-        dataSource={displayedKbs}
-        pagination={false}
-        components={{
-          header: { cell: ResizableTitle },
-        }}
-        scroll={{ x: totalWidth }}
-        onRow={(kb) => ({
-          onClick: () => onSelect(kb),
-          style: { cursor: "pointer" },
-        })}
-      />
+      <div
+        className={styles.tableArea}
+        style={
+          Object.keys(columnWidths).length
+            ? ({
+                "--aidp-table-width": `${totalWidth}px`,
+              } as React.CSSProperties)
+            : undefined
+        }
+      >
+        <Table<AidpKnowledgeBaseItem>
+          rowKey="kds_id"
+          size="middle"
+          className={styles.knowledgeTable}
+          columns={activeKeys.map((key) => allColumns[key])}
+          dataSource={displayedKbs}
+          pagination={false}
+          components={{
+            header: { cell: ResizableTitle },
+          }}
+          scroll={{ x: totalWidth }}
+          onRow={(kb) => ({
+            onClick: () => onSelect(kb),
+            style: { cursor: "pointer" },
+          })}
+        />
+      </div>
     );
   };
 

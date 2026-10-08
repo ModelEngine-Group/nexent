@@ -26,9 +26,9 @@ export const aidpKnowledgeVisualTheme: ThemeConfig = {
       itemActiveColor: "#0067d1",
     },
     Table: {
-      headerBg: "#f5f5f5",
+      headerBg: "#f3f3f3",
       headerColor: "#191919",
-      borderColor: "#ededed",
+      borderColor: "#f3f3f3",
     },
   },
 };

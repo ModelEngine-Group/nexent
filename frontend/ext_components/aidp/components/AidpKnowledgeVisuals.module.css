@@ -341,10 +341,114 @@
 
 .tableName {
   color: var(--aidp-primary);
+  font-weight: 400;
 }
 
 .tableName:hover {
   color: #0052a8;
+}
+
+.tableArea {
+  width: 100%;
+  min-width: 0;
+}
+
+.knowledgeTable :global(table) {
+  width: var(--aidp-table-width, 100%) !important;
+  min-width: var(--aidp-table-width, 100%) !important;
+}
+
+.knowledgeTable :global(.ant-table-thead > tr > th) {
+  height: 40px;
+  padding: 8px !important;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.knowledgeTable :global(.ant-table-tbody > tr > td) {
+  height: 40px;
+  padding: 4px 8px !important;
+  font-size: 14px;
+  line-height: 22px;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.knowledgeTable :global(.ant-table-thead > tr > th[data-column-key="name"]),
+.knowledgeTable :global(.ant-table-tbody > tr > td:first-child) {
+  padding-left: 16px !important;
+}
+
+.knowledgeTable :global(.ant-table-thead > tr > th::before) {
+  display: none;
+}
+
+.columnResizeHandle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 10;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.columnResizeHandle::after {
+  position: absolute;
+  right: 3px;
+  top: 25%;
+  height: 50%;
+  width: 1px;
+  background: #c9c9c9;
+  content: "";
+  opacity: 0;
+}
+
+.columnResizeHandle:hover::after {
+  background: var(--aidp-primary);
+  opacity: 1;
+}
+
+.tableScope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tableScope :global(.ant-tag) {
+  flex-shrink: 0;
+  height: 22px;
+  line-height: 20px;
+  border-radius: 4px;
+}
+
+.tableScope .tableGroup {
+  min-width: 0;
+  max-width: 96px;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tableActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.tableActions :global(.ant-btn) {
+  height: 24px;
+  padding: 0;
+  line-height: 22px;
+  font-size: 14px;
 }
 
 .pagination {
