@@ -3,6 +3,8 @@
 import ast
 from pathlib import Path
 
+from test.common.source_files import iter_project_python_files
+
 
 ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_PATHS = (
@@ -50,7 +52,7 @@ def test_ut_be_fps_018_backend_imports_only_current_assembly_modules():
         "nexent.core.prompts.evaluation",
         "nexent.core.prompts.user_context",
     )
-    for path in (ROOT / "backend").rglob("*.py"):
+    for path in iter_project_python_files(ROOT / "backend"):
         source = path.read_text(encoding="utf-8-sig")
         assert not any(module in source for module in old_modules), path
     direct_callers = {

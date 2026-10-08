@@ -3,6 +3,8 @@
 import ast
 from pathlib import Path
 
+from test.common.source_files import iter_project_python_files
+
 ROOT = Path(__file__).parents[3]
 
 
@@ -12,7 +14,7 @@ def test_ut_be_fps_005_backend_has_no_generic_template_type_adapter():
     assert "def get_prompt_template(" not in source
     assert "load_prompt_template" not in source
 
-    for file in (ROOT / "backend").rglob("*.py"):
+    for file in iter_project_python_files(ROOT / "backend"):
         if file == ROOT / "backend/utils/prompt_template_utils.py":
             continue
         text = file.read_text(encoding="utf-8")
@@ -31,7 +33,7 @@ def test_ut_be_fps_005_business_helpers_keep_field_merging():
 def test_ut_be_fps_006_production_prompt_loads_use_relative_paths():
     """UT-BE-FPS-006: each production call uses the two-argument API."""
     for root in (ROOT / "backend", ROOT / "sdk/nexent/core"):
-        for file in root.rglob("*.py"):
+        for file in iter_project_python_files(root):
             tree = ast.parse(file.read_text(encoding="utf-8-sig"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
@@ -47,7 +49,7 @@ def test_ut_be_fps_007_production_calls_use_new_prompt_layout():
         '"agent/nl2agent"', '"meta/nl2skills_',
     )
     for root in (ROOT / "backend", ROOT / "sdk/nexent/core"):
-        for file in root.rglob("*.py"):
+        for file in iter_project_python_files(root):
             source = file.read_text(encoding="utf-8-sig")
             if "load_prompt" not in source:
                 continue

@@ -12,7 +12,7 @@ Nexent packages built-in prompt YAML under `sdk/nexent/core/prompts/`. Backend s
 
 ## Parameters
 
-Callers pass current values to the SDK renderer. Agent configuration or conversation state supplies values such as `duty`, `constraint`, `few_shots`, and delegated tasks. NL2Agent, skill creation, and other workflows supply their tool names, skill drafts, document content, and related values. Missing required Jinja parameters raise an error instead of sending `{{...}}` to the model.
+Callers pass current values to the SDK renderer. Agent configuration or conversation state supplies values such as `duty`, `constraint`, `few_shots`, and delegated tasks. NL2Agent, skill creation, and other workflows supply their tool names, skill drafts, document content, and related values. Missing required Jinja parameters raise an error instead of sending unresolved template placeholders to the model.
 
 ## Extending a template
 

@@ -6,6 +6,8 @@ from types import MappingProxyType
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from test.common.source_files import iter_project_python_files
 from nexent.core.agents.prompt import (
     AgentPromptBundle,
     AgentPromptComposer,
@@ -126,7 +128,7 @@ def test_ut_sdk_dpr_009_prompt_package_has_single_responsibility_modules():
     assert not (agents_root / "context" / "prompt_composer.py").exists()
     repository_root = agents_root.parents[3]
     for source_root in (repository_root / "backend", repository_root / "sdk"):
-        for path in source_root.rglob("*.py"):
+        for path in iter_project_python_files(source_root):
             assert "context.prompt_composer" not in path.read_text(encoding="utf-8")
     assert AgentPromptComposer(AgentPromptBundle.from_mapping(
         role="managed", language="en", template=_template(),

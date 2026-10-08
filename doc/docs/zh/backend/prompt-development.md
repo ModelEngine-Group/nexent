@@ -12,7 +12,7 @@ Nexent 将内置提示词 YAML 放在 `sdk/nexent/core/prompts/`。Backend 收�
 
 ## 参数
 
-调用方将本轮实际值传给 SDK 渲染接口。Agent 运行时的 `duty`、`constraint`、`few_shots` 和角色任务等值由配置或会话提供。NL2Agent、技能创建及其他工作流也按当前任务传入工具名、技能草稿或文档内容。缺少必需的 Jinja 参数会报错，避免把 `{{...}}` 原样发给模型。
+调用方将本轮实际值传给 SDK 渲染接口。Agent 运行时的 `duty`、`constraint`、`few_shots` 和角色任务等值由配置或会话提供。NL2Agent、技能创建及其他工作流也按当前任务传入工具名、技能草稿或文档内容。缺少必需的 Jinja 参数会报错，避免把未渲染的模板占位符原样发给模型。
 
 ## 扩展模板
 
