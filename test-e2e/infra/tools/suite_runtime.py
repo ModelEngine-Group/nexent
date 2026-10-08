@@ -172,20 +172,76 @@ def finalize(directory, plan, rows, error=None):
     (directory / "checkpoints").mkdir(parents=True, exist_ok=True)
     (directory / "checkpoints/results.jsonl").write_text(
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+    render_report(directory, plan, rows, summary)
+    return summary
+
+
+def report_metrics(plan, rows):
+    """Count planned identities once; duplicates or missing results are never passes."""
+    by_id = {}
+    for row in rows:
+        by_id.setdefault(row["case_id"], []).append(row)
+    stages = {}
+    for record in plan:
+        matches = by_id.get(record["case_id"], [])
+        result = matches[0]["result"] if len(matches) == 1 else "INVALID_DUPLICATE" if matches else "NOT_EXECUTED"
+        stages.setdefault(record["stage"], Counter())[result] += 1
+    counts = sum(stages.values(), Counter())
+    planned = len(plan)
+    excluded = counts["RETIRED"] + counts["SKIPPED_BY_POLICY"]
+    passed = counts["PASS"]
+    return {"planned": planned, "passed": passed, "excluded": excluded,
+            "overall_pass_rate": passed / planned * 100 if planned else None,
+            "applicable_pass_rate": passed / (planned - excluded) * 100 if planned > excluded else None,
+            "stages": stages}
+
+
+def render_report(directory, plan, rows, summary):
+    """Refresh the reading view only, preserving final receipts and batch timestamps."""
+    metrics = report_metrics(plan, rows)
+    def percent(value):
+        return f"{value:.2f}%" if value is not None else "N/A"
+
     lines = ["# Nexent repository test report", "", f"Status: {summary['status']}",
-             f"Cases: {len(rows)} / {len(plan)}", "", "| Result | Count |", "| --- | ---: |"]
-    lines += [f"| {key} | {value} |" for key, value in sorted(summary_counts.items())]
+             f"Cases: {summary['recorded']} / {summary['planned']}",
+             f"Overall pass rate (PASS / planned): **{percent(metrics['overall_pass_rate'])}** "
+             f"({metrics['passed']} / {metrics['planned']})",
+             f"Applicable pass rate (excluding RETIRED and SKIPPED_BY_POLICY only): "
+             f"**{percent(metrics['applicable_pass_rate'])}** "
+             f"({metrics['passed']} / {metrics['planned'] - metrics['excluded']})",
+             "Blocked, abnormal, cleanup-failed and unexecuted cases do not count as passes.",
+             "", "| Result | Count |", "| --- | ---: |"]
+    lines += [f"| {key} | {value} |" for key, value in sorted(summary["counts"].items())]
+    lines += ["", "## Stage summary", "",
+              "| Stage | Planned | PASS | Not passed | Retired / policy skipped | Overall pass rate |",
+              "| --- | ---: | ---: | ---: | ---: | ---: |"]
+    for stage, counts in sorted(metrics["stages"].items()):
+        total = sum(counts.values())
+        excluded = counts["RETIRED"] + counts["SKIPPED_BY_POLICY"]
+        lines.append(f"| {stage} | {total} | {counts['PASS']} | {total - counts['PASS'] - excluded} | "
+                     f"{excluded} | {percent(counts['PASS'] / total * 100 if total else None)} |")
     def cell(value):
         return str(value if value is not None else "").replace("|", "\\|").replace("\n", "<br>").replace("\r", "")
 
-    lines += ["", "## Case results", "", "| Case | Stage | Title | Feature | Module | Owner | Result | Reason | Duration (s) | Executed at (UTC) | Cleanup | Local evidence |",
-              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
-    lines += ["| " + " | ".join(cell(value) for value in (
-        row['case_id'], row['stage'], row.get('title'), row.get('feature_id'), row.get('module'),
-        row.get('owner', 'Unassigned'), row['result'], row.get('reason'), row.get('duration_seconds'), row.get('executed_at'),
-        row.get('cleanup_reason') or row.get('cleanup_exit_code'),
-        ', '.join(row.get('evidence', [])))) + " |" for row in rows]
-    if error:
+    unsuccessful = [row for row in rows if row["result"] not in {"PASS", "RETIRED", "SKIPPED_BY_POLICY"}]
+    lines += ["", "## Case results — not passed only", "",
+              "PASS, RETIRED and SKIPPED_BY_POLICY rows are omitted from this detail table. "
+              "All results remain in checkpoints/results.jsonl and per-case evidence."]
+    for stage in sorted(set(metrics["stages"]) | {row["stage"] for row in unsuccessful}):
+        stage_rows = [row for row in unsuccessful if row["stage"] == stage]
+        lines += ["", f"### {stage} — {len(stage_rows)} not passed", ""]
+        if not stage_rows:
+            lines += ["No non-passing cases in this stage."]
+            continue
+        lines += ["| Case | Stage | Title | Feature | Module | Owner | Result | Reason | Duration (s) | Executed at (UTC) | Cleanup | Local evidence |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["| " + " | ".join(cell(value) for value in (
+            row['case_id'], row['stage'], row.get('title'), row.get('feature_id'), row.get('module'),
+            row.get('owner', 'Unassigned'), row['result'], row.get('reason'), row.get('duration_seconds'), row.get('executed_at'),
+            row.get('cleanup_reason') or row.get('cleanup_exit_code'),
+            ', '.join(row.get('evidence', [])))) + " |" for row in stage_rows]
+    if not unsuccessful:
+        lines += ["", "No non-passing cases."]
+    if summary.get("error"):
         lines += ["", "Batch ended before completion. Inspect status.json and local logs."]
     (directory / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return summary

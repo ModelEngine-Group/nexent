@@ -1,23 +1,22 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type TestUser = { id: string; username: string; password: string };
 
-const USERS: Record<string, { username: string; passwordEnv: string }> = {
-  super_admin: { username: "suadmin@nexent.com", passwordEnv: "NEXENT_SUPER_ADMIN_PASSWORD" },
-  tenant_a_admin: { username: "admin@nexent-test.com", passwordEnv: "NEXENT_TENANT_A_ADMIN_PASSWORD" },
-  tenant_a_dev: { username: "dev@nexent-test.com", passwordEnv: "NEXENT_TENANT_A_DEV_PASSWORD" },
-  tenant_a_user: { username: "user@nexent-test.com", passwordEnv: "NEXENT_TENANT_A_USER_PASSWORD" },
-  tenant_b_admin: { username: "adminb@nexent-test.com", passwordEnv: "NEXENT_TENANT_B_ADMIN_PASSWORD" },
-  tenant_b_dev: { username: "devb@nexent-test.com", passwordEnv: "NEXENT_TENANT_B_DEV_PASSWORD" },
-  tenant_b_user: { username: "userb@nexent-test.com", passwordEnv: "NEXENT_TENANT_B_USER_PASSWORD" },
-};
-
 export function testUser(id: string): TestUser {
-  const configured = USERS[id];
-  if (!configured) throw new Error(`unknown configured test user ${id}`);
-  const password = process.env[configured.passwordEnv];
+  const home = process.env.NEXENT_TEST_HOME || process.env.TEST_ROOT;
+  const repo = process.env.NEXENT_REPO;
+  const python = process.env.FIXED_TEST_PYTHON;
+  if (!home || !repo || !python) throw new Error("test user configuration requires test home, repository and FIXED_TEST_PYTHON");
+  // Use the shared YAML loader; only non-secret identity metadata crosses stdout.
+  const result = spawnSync(python, [join(repo, "test-e2e/infra/automation/d4/user_config.py"), id], {
+    encoding: "utf8", timeout: 10000, env: { ...process.env, NEXENT_TEST_HOME: home },
+  });
+  if (result.error || result.status !== 0) throw new Error(`config/users.yaml cannot resolve test user ${id}`);
+  const configured = JSON.parse(result.stdout) as { username: string; password_env_key: string };
+  const password = process.env[configured.password_env_key];
   if (!password) throw new Error(`configured password environment variable is missing for ${id}`);
   return { id, username: configured.username, password };
 }
