@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nexent.core.gateway.modality import OpenAILLMAdapter, OpenAILongContextLLMAdapter
-from nexent.core.gateway.modality.llm.llm_adapter import LLMAdapter, LLMRequest
+from nexent.core.gateway.llm.adapter import LLMAdapter, LLMRequest
 from nexent.core.gateway.model_context import LLMContext, LongContextLLMContext
 
 
@@ -134,7 +134,7 @@ def test_openai_llm_build_model(monkeypatch):
         )
     )
     fake = MagicMock()
-    monkeypatch.setattr("nexent.core.gateway.modality.llm.openai.OpenAIModel", fake)
+    monkeypatch.setattr("nexent.core.gateway.llm.providers.openai.OpenAIModel", fake)
     adapter._build_model()
     fake.assert_called_once()
     kwargs = fake.call_args[1]
@@ -154,7 +154,7 @@ def test_openai_llm_build_model(monkeypatch):
 def test_openai_llm_build_model_omits_unset_tunables(monkeypatch):
     adapter = OpenAILLMAdapter(_ctx())
     fake = MagicMock()
-    monkeypatch.setattr("nexent.core.gateway.modality.llm.openai.OpenAIModel", fake)
+    monkeypatch.setattr("nexent.core.gateway.llm.providers.openai.OpenAIModel", fake)
     adapter._build_model()
     kwargs = fake.call_args[1]
     assert "temperature" not in kwargs
@@ -177,7 +177,7 @@ async def test_openai_llm_invoke(monkeypatch):
 @pytest.mark.asyncio
 async def test_openai_llm_invoke_builds_model(monkeypatch):
     adapter = OpenAILLMAdapter(_ctx())
-    monkeypatch.setattr("nexent.core.gateway.modality.llm.openai.OpenAIModel", MagicMock())
+    monkeypatch.setattr("nexent.core.gateway.llm.providers.openai.OpenAIModel", MagicMock())
     await adapter.invoke(LLMRequest(messages=[]))
     assert adapter._model is not None
 
@@ -237,7 +237,7 @@ def test_long_context_build_model_defaults(monkeypatch):
     adapter = OpenAILongContextLLMAdapter(_lctx())
     fake = MagicMock()
     monkeypatch.setattr(
-        "nexent.core.gateway.modality.llm.openai.OpenAILongContextModel", fake
+        "nexent.core.gateway.llm.providers.openai.OpenAILongContextModel", fake
     )
     adapter._build_model()
     kwargs = fake.call_args[1]
@@ -254,7 +254,7 @@ def test_long_context_build_model_explicit(monkeypatch):
     )
     fake = MagicMock()
     monkeypatch.setattr(
-        "nexent.core.gateway.modality.llm.openai.OpenAILongContextModel", fake
+        "nexent.core.gateway.llm.providers.openai.OpenAILongContextModel", fake
     )
     adapter._build_model()
     kwargs = fake.call_args[1]
@@ -275,7 +275,7 @@ def test_long_context_analyze_long_text_reuses_built_model(monkeypatch):
     prebuilt.analyze_long_text.return_value = ("R2", "0%")
     adapter._model = prebuilt
     monkeypatch.setattr(
-        "nexent.core.gateway.modality.llm.openai.OpenAILongContextModel", MagicMock()
+        "nexent.core.gateway.llm.providers.openai.OpenAILongContextModel", MagicMock()
     )
     result, pct = adapter.analyze_long_text(
         text_content="t",
@@ -295,7 +295,7 @@ def test_long_context_analyze_long_text_builds_and_delegates(monkeypatch):
     fake_model = MagicMock()
     fake_model.analyze_long_text.return_value = ("RESULT", "100%")
     monkeypatch.setattr(
-        "nexent.core.gateway.modality.llm.openai.OpenAILongContextModel",
+        "nexent.core.gateway.llm.providers.openai.OpenAILongContextModel",
         MagicMock(return_value=fake_model),
     )
     result, pct = adapter.analyze_long_text(

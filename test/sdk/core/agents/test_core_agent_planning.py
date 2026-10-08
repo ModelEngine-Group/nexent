@@ -288,7 +288,7 @@ assert output_protocol_spec and output_protocol_spec.loader
 output_protocol_spec.loader.exec_module(output_protocol_module)
 
 CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "execution" / "code" / "legacy_agent.py"
-CORE_AGENT_NAME = "sdk.nexent.core.agents.core_agent"
+CORE_AGENT_NAME = "sdk.nexent.core.agents.execution.code.legacy_agent"
 sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core")]
 
 # ``sdk.nexent.core.agents`` is an isolated shim with an empty ``__path__``

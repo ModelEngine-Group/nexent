@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 import mcp.types
 import pytest
-from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
+from nexent.core.agents.resources.managed_mcp import ManagedMCPToolCollection
 from nexent.core.agents.nexent_agent import _wrap_tool_with_monitoring
 from nexent.core.concurrency import (
     ManagedTaskSpec,

@@ -1,14 +1,13 @@
-"""Compatibility regressions for relocated resource lifecycle and identity boundaries."""
+"""Regressions for resource lifecycle and identity boundaries."""
 
 import asyncio
-import importlib
 from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
-from nexent.core.agents.tool_user_context import (
+from nexent.core.agents.resources.managed_mcp import ManagedMCPToolCollection
+from nexent.core.agents.resources.tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,
     apply_user_context_to_mcp_tool,
 )
@@ -214,11 +213,3 @@ def test_foreign_context_object_is_preserved_without_mutation():
     assert foreign.content is content
     assert "tenant_id" in content["inputs"]
     assert apply_model_visible_tool_schemas_to_context_items(None, [tool]) == []
-
-
-def test_legacy_resource_modules_share_in_process_patch_targets():
-    for old, new in [
-        ("nexent.core.agents.tool_user_context", "nexent.core.agents.resources.tool_user_context"),
-        ("nexent.core.agents.managed_mcp", "nexent.core.agents.resources.managed_mcp"),
-    ]:
-        assert importlib.import_module(old) is importlib.import_module(new)

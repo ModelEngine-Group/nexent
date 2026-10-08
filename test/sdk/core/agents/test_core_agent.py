@@ -1,5 +1,5 @@
 """
-Unit tests for sdk.nexent.core.agents.core_agent module.
+Unit tests for sdk.nexent.core.agents.execution.code.legacy_agent module.
 
 This module tests CoreAgent class and its helper functions:
 - parse_code_blobs
@@ -304,10 +304,10 @@ def _load_core_agent_module():
     sys.modules["sdk.nexent.monitor"] = monitor_mod
 
     # Load the module
-    spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.core_agent", core_agent_path)
+    spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.execution.code.legacy_agent", core_agent_path)
     module = importlib.util.module_from_spec(spec)
     module.__package__ = "sdk.nexent.core.agents.execution.code"
-    sys.modules["sdk.nexent.core.agents.core_agent"] = module
+    sys.modules["sdk.nexent.core.agents.execution.code.legacy_agent"] = module
 
     # Override some functions with mock implementations
     def mock_truncate_content(content, max_length=1000):
@@ -2056,7 +2056,7 @@ class TestRunStreamRealExecution:
             module = importlib.util.module_from_spec(spec)
             module.__package__ = "sdk.nexent.core.agents.execution.code"
 
-            sys.modules["sdk.nexent.core.agents.core_agent"] = module
+            sys.modules["sdk.nexent.core.agents.execution.code.legacy_agent"] = module
 
             # Execute
             spec.loader.exec_module(module)

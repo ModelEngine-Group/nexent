@@ -1,10 +1,9 @@
-"""Compatibility alias for the relocated implementation.
+"""Stable public Agent entry point.
 
-Keep the legacy import and patch target attached to the same module instance.
+Execution remains delegated to the existing CodeAgent implementation.
+Future runtime selection belongs at this public boundary.
 """
 
-import sys
-from importlib import import_module
+from .execution.code.legacy_agent import CoreAgent
 
-_implementation = import_module(".execution.code.legacy_agent", __package__)
-sys.modules[__name__] = _implementation
+__all__ = ["CoreAgent"]

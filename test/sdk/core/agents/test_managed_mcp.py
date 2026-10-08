@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import mcp.types
 import mcpadapt.core
 import pytest
-from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
+from nexent.core.agents.resources.managed_mcp import ManagedMCPToolCollection
 from nexent.consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 

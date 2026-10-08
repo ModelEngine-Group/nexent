@@ -6,7 +6,7 @@ NativeAgent engine, execution-mode selector, model profile registry or HTTP send
 
 ## Implementation ownership
 
-| Existing import | Canonical implementation |
+| Previous location | Canonical implementation |
 | --- | --- |
 | `nexent.core.agents.core_agent` | `nexent.core.agents.execution.code.legacy_agent` |
 | `nexent.core.agents.managed_mcp` | `nexent.core.agents.resources.managed_mcp` |
@@ -19,23 +19,24 @@ protocol parsing, logging, verification, sandbox integration and context handlin
 remain in the relocated implementation. The existing LLM adapter still wraps the
 same OpenAI models and uses the existing transport and adapter registry.
 
-## Compatibility
+## Public and internal imports
 
-Old module paths alias the canonical module in `sys.modules`. They do not copy
-classes or functions into a second implementation. Both paths therefore share
-class identity, mutable module state and monkeypatch lookup sites. Existing
-serialized references to old class paths can still resolve through those imports.
-New internal resource and gateway aggregation imports use the canonical paths.
+`agents/core_agent.py` explicitly exports only `CoreAgent`. The public agents
+package retains its lazy export of the same class. The entry point does not alias
+an implementation module in `sys.modules`; implementation helpers and dependency
+patch targets belong to `execution/code/legacy_agent.py`. NexentAgent imports
+CoreAgent through the public entry and its formatting helper from the implementation.
 
-The new execution and resources package initializers do not load implementations.
-The public agents package retains lazy exports. The gateway retains its existing
-built-in adapter registration lifecycle; importing a legacy LLM alias does not
-register a duplicate adapter.
+The four old internal modules in the table above have been removed. Resource and
+LLM imports and test patch targets use their canonical paths. Direct users of these
+old internal paths must update their imports; old serialized internal module paths
+are no longer supported. No compatibility files remain for these internal modules.
+The gateway modality aggregation remains a public export and preserves adapter
+registration. Package discovery does not eagerly load Agent implementations.
 
-Tests that intentionally load source files with isolated dependencies now load
-the canonical physical file and use its new package depth. Their behavior
-assertions remain intact. Import compatibility is tested separately in fresh
-Python processes in both import orders.
+Tests cover public class identity in both import orders, rejection of removed
+internal paths, lazy package loading, canonical registration and serialization,
+and the existing resource and Agent behavior.
 
 ## Next development steps
 
