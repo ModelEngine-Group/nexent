@@ -14,10 +14,10 @@ export class ModelPage {
   constructor(readonly page: Page) {}
 
   private modelCard(capability: "llm" | "embedding"): Locator {
-    const heading = capability === "llm" ? "大语言模型" : "向量模型";
-    return this.page
-      .getByRole("heading", { name: heading, exact: true })
-      .locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' model-card ')]");
+    const fieldKey = capability === "llm" ? "llm.main" : "embedding.embedding";
+    // The product associates each model slot label with its select trigger.
+    // Scope selection to that slot instead of the removed model-card layout.
+    return this.page.locator(`[id="model-slot-${fieldKey}"]`).locator("xpath=..");
   }
 
   async open(): Promise<void> {
@@ -237,17 +237,17 @@ export class ModelPage {
     if (!response.ok()) throw new Error(`persisted model healthcheck returned ${response.status()}`);
   }
 
+  libraryRow(displayName: string): Locator {
+    const library = this.page.getByRole("heading", { name: "模型库", exact: true }).locator("xpath=ancestor::section[1]");
+    return library.locator("div")
+      .filter({ has: this.page.getByText(displayName, { exact: true }) })
+      .filter({ has: this.page.getByRole("button", { name: "编辑", exact: true }) }).last();
+  }
+
   async openEditDialog(displayName: string, typeLabel: string): Promise<Locator> {
-    await this.page.getByRole("button", { name: "修改或删除模型", exact: true }).click();
-    const manager = this.page.getByRole("dialog", { name: "修改自定义模型" });
-    await expect(manager).toBeVisible();
-    await manager.getByRole("button", { name: new RegExp(`^${typeLabel}`) }).click();
-    const compatibleSource = manager.getByRole("button", { name: /OpenAI.*兼容|OpenAI API Compatible/i });
-    await expect(compatibleSource).toBeVisible();
-    await compatibleSource.click();
-    const modelRow = manager.getByText(new RegExp(`^${displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\(`)).first();
-    await expect(modelRow).toBeVisible();
-    await modelRow.click();
+    const row = this.libraryRow(displayName);
+    await expect(row).toBeVisible();
+    await row.getByRole("button", { name: "编辑", exact: true }).click();
     const editor = this.page.getByRole("dialog", { name: "编辑模型" });
     await expect(editor).toBeVisible();
     return editor;

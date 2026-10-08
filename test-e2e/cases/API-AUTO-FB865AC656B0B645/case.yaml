@@ -14,7 +14,8 @@ case:
   objective: SUPER_ADMIN 上传 Logo/多语言文案持久化，资产接口优先持久文件、缺失回退内置 public 且 no-store，readLocaleConfig 异常安全｜核心流程
   preconditions:
   - Nexent 本地测试环境已启动，前端 server.js（port 3000）与配置后端 HTTP_BACKEND 可达。
-  - 设置 PROJECT_CONFIG_DIR 指向可写且独立于前端内置 public 的持久目录（如 ${NEXENT_TEST_HOME}/project-config）；内置 frontend/public 下存在回退资源 modelengine-logo.png、locales/zh/custom.json、locales/en/custom.json。
+  - 设置 PROJECT_CONFIG_DIR 指向可写且独立于前端内置 public 的持久目录（如 ${NEXENT_TEST_HOME}/project-config）；内置 frontend/public 下存在回退资源
+    modelengine-logo.png、locales/zh/custom.json、locales/en/custom.json。
   - 存在 SUPER_ADMIN 与普通用户隔离账号；非 speed 模式下 SUPER_ADMIN 校验依赖 HTTP_BACKEND /user/current_user_info 会话校验。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/project-config/（PROJECT_CONFIG_DIR 可写持久目录）
@@ -27,8 +28,8 @@ case:
     expected: SUPER_ADMIN 上传返回 200 且 body 为 {"message":"success update"}；持久目录 PROJECT_CONFIG_DIR 出现重命名后的 modelengine-logo.png、modelengine-logo2.png
       及 locales/{zh,en}/custom.json，内容含自定义文案并保留未覆盖的既有键。
   - order: 2
-    action: 使用 SUPER_ADMIN 会话 Cookie 对 /api/config/project-config 发起 multipart/form-data POST：携带文件字段 logo（PNG）、文本字段 configZh
-      与 configEn（JSON 字符串，含自定义文案键），记录响应状态码与 body。
+    action: 使用 SUPER_ADMIN 会话 Cookie 对 /api/config/project-config 发起 multipart/form-data POST：携带文件字段 logo（PNG）、文本字段
+      configZh 与 configEn（JSON 字符串，含自定义文案键），记录响应状态码与 body。
     expected: 无令牌请求返回 403 且 body 为 {"message":"Super admin access required"}，未在持久目录写入任何文件。
   - order: 3
     action: 使用无访问令牌请求对 /api/config/project-config 发起相同 multipart POST，记录响应状态码与 body。
@@ -42,13 +43,12 @@ case:
     action: 对 /modelengine-logo.png 发起 HEAD 请求，记录状态码、Cache-Control 及是否存在响应 body。
     expected: 持久 custom.json 缺失时 readLocaleConfig 回退内置 public 文件；损坏 JSON 时 readLocaleConfig 返回 {} 且不抛异常。
   - order: 6
-    action: 删除持久目录下 locales/zh/custom.json 后再次 GET /locales/zh/custom.json，记录是否回退内置 public 资源；再向持久目录写入非法 JSON 的 locales/zh/custom.json
-      并调用 readLocaleConfig("zh")，记录返回值及是否抛异常。
-    expected: 日志、报告中不出现明文访问令牌；清理持久文件后场景可重复执行。
+    action: 删除本次拥有的 zh/custom.json 验证 GET 内置回退；写入带批次标记的非法 JSON，再提交合法项目配置更新，验证读取助手安全空对象路径不抛异常，持久 GET 返回 {}。不宣称重建丢失的键。
+    expected: 缺失文件回退内置内容；损坏文件更新安全返回 200，随后 GET {}；不要求恢复 subtitle。
   - order: 7
     action: 校验上传/读取日志不泄露访问令牌明文；清理持久目录中的 logo 与 custom.json 后确认可重复执行。
     expected: 日志、报告中不出现明文访问令牌；清理持久文件后场景可重复执行。
-  expected_results:
+  expected_results: &id001
   - SUPER_ADMIN 上传返回 200 且 body 为 {"message":"success update"}；持久目录 PROJECT_CONFIG_DIR 出现重命名后的 modelengine-logo.png、modelengine-logo2.png
     及 locales/{zh,en}/custom.json，内容含自定义文案并保留未覆盖的既有键。
   - 无令牌请求返回 403 且 body 为 {"message":"Super admin access required"}，未在持久目录写入任何文件。
@@ -65,22 +65,14 @@ case:
   contract:
     protocol: HTTP API
     request_expectations:
-    - 启动前端 server.js 并设置 PROJECT_CONFIG_DIR 指向可写持久目录，确认内置 public 存在 modelengine-logo.png 与 locales/{zh,en}/custom.json 回退资源。
-    - 使用 SUPER_ADMIN 会话 Cookie 对 /api/config/project-config 发起 multipart/form-data POST：携带文件字段 logo（PNG）、文本字段 configZh 与 configEn（JSON
-      字符串，含自定义文案键），记录响应状态码与 body。
+    - 启动前端 server.js 并设置 PROJECT_CONFIG_DIR 指向可写持久目录，确认内置 public 存在 modelengine-logo.png 与 locales/{zh,en}/custom.json
+      回退资源。
+    - 使用 SUPER_ADMIN 会话 Cookie 对 /api/config/project-config 发起 multipart/form-data POST：携带文件字段 logo（PNG）、文本字段 configZh
+      与 configEn（JSON 字符串，含自定义文案键），记录响应状态码与 body。
     - 使用无访问令牌请求对 /api/config/project-config 发起相同 multipart POST，记录响应状态码与 body。
     - 上传成功后分别 GET /modelengine-logo.png、/modelengine-logo2.png、/locales/zh/custom.json、/locales/en/custom.json，记录状态码、Content-Type、Cache-Control
       与返回内容。
     - 对 /modelengine-logo.png 发起 HEAD 请求，记录状态码、Cache-Control 及是否存在响应 body。
-    - 删除持久目录下 locales/zh/custom.json 后再次 GET /locales/zh/custom.json，记录是否回退内置 public 资源；再向持久目录写入非法 JSON 的 locales/zh/custom.json
-      并调用 readLocaleConfig("zh")，记录返回值及是否抛异常。
+    - 删除本次拥有的 zh/custom.json 验证 GET 内置回退；写入带批次标记的非法 JSON，再提交合法项目配置更新，验证读取助手安全空对象路径不抛异常，持久 GET 返回 {}。不宣称重建丢失的键。
     - 校验上传/读取日志不泄露访问令牌明文；清理持久目录中的 logo 与 custom.json 后确认可重复执行。
-    response_expectations:
-    - SUPER_ADMIN 上传返回 200 且 body 为 {"message":"success update"}；持久目录 PROJECT_CONFIG_DIR 出现重命名后的 modelengine-logo.png、modelengine-logo2.png
-      及 locales/{zh,en}/custom.json，内容含自定义文案并保留未覆盖的既有键。
-    - 无令牌请求返回 403 且 body 为 {"message":"Super admin access required"}，未在持久目录写入任何文件。
-    - 资产 GET 返回 200，Content-Type 分别为 image/png 与 application/json; charset=utf-8，Cache-Control 恒为 no-store；持久文件存在时返回持久目录内容，缺失时回退内置
-      public 内容。
-    - 'HEAD 返回 200 且 Cache-Control: no-store，响应无 body。'
-    - 持久 custom.json 缺失时 readLocaleConfig 回退内置 public 文件；损坏 JSON 时 readLocaleConfig 返回 {} 且不抛异常。
-    - 日志、报告中不出现明文访问令牌；清理持久文件后场景可重复执行。
+    response_expectations: *id001

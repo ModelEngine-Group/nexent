@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "playwright/test";
+import { writeFileSync } from "node:fs";
 import { appPath } from "../runner/runtime-config";
 
 export class ChatPage {
@@ -54,6 +55,7 @@ export class ChatPage {
     const runResponse = this.page.waitForResponse(
       (response) => response.request().method() === "POST"
         && response.url().includes("/api/agent/run")
+        && response.request().postDataJSON()?.query === prompt
         && (response.headers()["content-type"] || "").includes("text/event-stream"),
       { timeout: 120_000 },
     );
@@ -121,10 +123,38 @@ export class ChatPage {
     // A cancelled message is incomplete, so it has no Completed badge.
     await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 120_000 });
     await expect(this.page.getByPlaceholder("发送消息...")).toBeEditable();
+    // Stop acknowledgement precedes persistence/worker finalization. Wait for
+    // the owned stream's terminal history before continuing or reconnecting.
+    await expect.poll(async () => {
+      const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
+      if (!response.ok()) return "history_unavailable";
+      const payload = await response.json();
+      const history = payload.data?.[0];
+      if (history?.streaming_message?.status === "streaming") return "streaming";
+      const assistant = history?.message?.filter((item: any) => item.role === "assistant").at(-1);
+      return assistant?.status || "missing";
+    }, { timeout: 60000, intervals: [500, 1000, 2000] }).toMatch(/^(stopped|completed|failed)$/);
+  }
+
+  async captureConversationState(path: string, marker: string): Promise<void> {
+    const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
+    const payload = await response.json().catch(() => ({}));
+    const history = payload.data?.[0];
+    const messages = (history?.message || []).map((item: any) => {
+      const parts = Array.isArray(item.message) ? item.message : [];
+      const final = parts.filter((part: any) => part.type === "final_answer").map((part: any) => String(part.content || "")).join("");
+      const text = typeof item.message === "string" ? item.message : parts.map((part: any) => String(part.content || "")).join("");
+      return {role:item.role, status:item.status, unit_types:parts.map((part:any)=>part.type),
+        contains_expected_marker:text.includes(marker), final_contains_expected_marker:final.includes(marker),
+        final_is_success:final.trim()==="success", final_length:final.length};
+    });
+    writeFileSync(path, JSON.stringify({http_status:response.status(), code:payload.code,
+      streaming_status:history?.streaming_message?.status || null, messages,
+      ui_user_count:await this.userMessages().count(), ui_assistant_count:await this.assistantMessages().count()},null,2)+"\n");
   }
 
   async messageText(message: Locator): Promise<string> {
-    return (await message.locator(".aui-md").allTextContents()).join("\n").trim();
+    return (await message.locator("[data-citation-index-map] .aui-md:visible").allTextContents()).join("\n").trim();
   }
 
   async assertTextStopsChanging(message: Locator): Promise<string> {
@@ -170,7 +200,11 @@ export class ChatPage {
   }
 
   async newConversation(displayName: string): Promise<void> {
-    await this.page.getByRole("button", { name: /新建?对话/, exact: true }).click();
+    // A history item can also be named New Chat. Only the creation action has Plus.
+    const create = this.page.getByRole("button", { name: /新建?对话/, exact: true })
+      .filter({ has: this.page.locator("svg.lucide-plus") });
+    await expect(create).toHaveCount(1);
+    await create.click();
     await expect(this.page.getByPlaceholder("搜索智能体...")).toBeVisible();
     await this.page.getByPlaceholder("搜索智能体...").fill(displayName);
     await this.page.getByRole("button", { name: new RegExp(displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).first().click();
@@ -227,12 +261,25 @@ export class ChatPage {
   async selectKnowledge(name: string): Promise<void> {
     await this.page.getByRole("button", { name: /知识库：/ }).click();
     const dialog = this.page.getByRole("dialog", { name: "当前对话知识库" });
-    await dialog.getByText("指定知识库", { exact: true }).click();
-    const item = dialog.getByText(name, { exact: true }).first();
+    // The current scope modal selects ResourceCards directly, not a mode radio.
+    await dialog.getByRole("searchbox", { name: "搜索知识库" }).fill(name);
+    const item = dialog.getByRole("option", { name, exact: true });
     await expect(item).toBeVisible();
-    await item.click();
-    await dialog.getByRole("button", { name: "确定", exact: true }).click();
+    if ((await item.getAttribute("aria-selected")) !== "true") await item.click();
+    await expect(item).toHaveAttribute("aria-selected", "true");
+    await dialog.getByRole("button", { name: /^确\s*定$/ }).click();
     await expect(dialog).toHaveCount(0);
+  }
+
+  async assertKnowledgeSelected(name: string, selected: boolean): Promise<void> {
+    await this.page.getByRole("button", { name: /知识库：/ }).click();
+    const dialog = this.page.getByRole("dialog", { name: "当前对话知识库" });
+    await dialog.getByRole("searchbox", { name: "搜索知识库" }).fill(name);
+    await expect(dialog.getByRole("option", { name, exact: true }))
+      .toHaveAttribute("aria-selected", String(selected));
+    // Inspection must not save or change the conversation's scope.
+    await dialog.getByRole("button", { name: /^取\s*消$/ }).click();
+    await expect(dialog).toBeHidden();
   }
 
   async uploadAttachment(filePath: string): Promise<void> {

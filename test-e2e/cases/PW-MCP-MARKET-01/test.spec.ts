@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { configuredModel, runToken } from "../../infra/automation/d4/runner/runtime-config";
@@ -21,6 +22,8 @@ journey("PW-MCP-MARKET-01", async (context) => {
   let adminPage: Awaited<ReturnType<typeof loginIsolated>>["page"] | undefined;
   let consumerPage: Awaited<ReturnType<typeof loginIsolated>>["page"] | undefined;
   let structuredTag = "";
+  let structuredDefinition = "";
+  let structuredTagId = 0;
   let publishDialogReadOnly = false;
   let repositoryTagVisible = false;
   let mineTagVisible = false;
@@ -42,14 +45,25 @@ journey("PW-MCP-MARKET-01", async (context) => {
       async () => {
         const libraries = await page.request.get("/api/tag-libraries");
         expect(libraries.ok()).toBe(true);
-        const library = (await libraries.json()).find((item: any) => item.status === "active" && item.resource_types?.includes("mcp_service"));
+        const library = (await libraries.json()).find((item: any) => item.status === "active" && item.bucket_key === "default_resource" && item.resource_types?.includes("mcp_service"));
         expect(library).toBeTruthy();
         const definitions = await page.request.get(`/api/tag-libraries/${library.bucket_id}/definitions`);
         expect(definitions.ok()).toBe(true);
-        const definition = (await definitions.json()).find((item: any) => item.status === "active" && item.values?.some((value: any) => value.status === "active"));
+        const definition = (await definitions.json()).find((item: any) => item.status === "active" && item.selection_mode !== "no_value" && item.values?.some((value: any) => value.status === "active"));
         expect(definition).toBeTruthy();
-        structuredTag = definition.values.find((value: any) => value.status === "active").display_value;
-        return `resolved active structured tag definition/value ${structuredTag}`;
+        const value = definition.values.find((value: any) => value.status === "active");
+        structuredTagId = Number(value.value_id);
+        expect(structuredTagId).toBeGreaterThan(0);
+        // Translation is presentation data; persisted IDs independently prove
+        // that the UI saved the chosen structured value rather than another tag.
+        const labels = JSON.parse(readFileSync(join(need("NEXENT_REPO"), "frontend/public/locales/zh/common.json"), "utf8"));
+        const definitionKeys: Record<string, string> = { agent_category: "agentCategory", keywords: "keywords" };
+        structuredDefinition = labels[`tagManagement.systemDefinition.${definitionKeys[definition.definition_key]}`] || definition.definition_name;
+        const suffix = String(value.display_value).replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+        structuredTag = definition.definition_key === "agent_category"
+          ? labels[`agentRepository.tag.${suffix}`] || value.display_value
+          : value.display_value;
+        return `resolved active definition ${structuredDefinition} and displayed value ${structuredTag}, value_id=${structuredTagId}`;
       },
     ],
     steps: [
@@ -59,15 +73,42 @@ journey("PW-MCP-MARKET-01", async (context) => {
         await page.getByRole("dialog").getByRole("button", { name: "编辑标签", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: /^编辑标签/ });
         await expect(dialog).toBeVisible();
-        await dialog.getByRole("combobox").click();
-        await page.locator(".ant-select-dropdown:visible").getByText(structuredTag, { exact: true }).click();
+        await dialog.getByPlaceholder("搜索标签名称或标识", { exact: true }).fill(structuredDefinition);
+        await dialog.getByRole("button", { name: structuredDefinition, exact: true }).click();
+        const selector = dialog.getByRole("combobox");
+        await selector.click();
+        const popup = page.locator(".ant-select-dropdown:visible");
+        await expect(popup.getByText(structuredTag, { exact: true })).toBeVisible();
+        // Use normal keyboard selection, never force-click through the known
+        // nested modal z-index defect. Persisted IDs still prove the chosen tag.
+        const options = popup.locator(".ant-select-item-option");
+        const active = popup.locator(".ant-select-item-option-active .ant-select-item-option-content");
+        const count = await options.count();
+        for (let index = 0; index <= count; index += 1) {
+          if ((await active.textContent())?.trim() === structuredTag) break;
+          await selector.press("ArrowDown");
+        }
+        await expect(active).toHaveText(structuredTag);
+        await selector.press("Enter");
+        await page.keyboard.press("Escape");
+        const saved = page.waitForResponse((response) => response.request().method() === "PUT" && /\/tag-libraries\/assignments\/mcp_service\//.test(response.url()));
         await dialog.getByRole("button", { name: /^保\s*存$/ }).click();
+        const response = await saved;
+        expect(response.ok()).toBe(true);
+        const assignment = await response.json();
+        expect(assignment.assignments.some((item: any) => Number(item.value_id) === structuredTagId)).toBe(true);
         await expect(dialog).toBeHidden();
         await page.keyboard.press("Escape");
         return `assigned structured tag ${structuredTag} to source MCP`;
       },
       async () => {
-        await expect(author.card(name)).toContainText(structuredTag);
+        try {
+          await expect(author.card(name)).toContainText(structuredTag);
+        } catch {
+          const failure = new Error(`MCP tag assignment saved value_id=${structuredTagId}, but Mine card did not display ${structuredTag} within 30000ms; card=${JSON.stringify(await author.card(name).innerText())}`);
+          failure.name = "ProductFailure";
+          throw failure;
+        }
         return `Mine card displays structured tag ${structuredTag}`;
       },
       async () => {
@@ -93,7 +134,7 @@ journey("PW-MCP-MARKET-01", async (context) => {
         if (!consumerPage) throw new Error("consumer context missing");
         const card = consumerPage.getByRole("heading", { name, exact: true })
           .locator("xpath=ancestor::div[contains(concat(' ',normalize-space(@class),' '),' rounded-xl ') and contains(concat(' ',normalize-space(@class),' '),' shadow-sm ')][1]");
-        await card.getByRole("button", { name: /^(安装|Install)$/ }).click();
+        await card.getByRole("button", { name: /^(安\s*装|Install)$/ }).click();
         const dialog = consumerPage.locator('[role="dialog"]:visible').filter({ hasText: name });
         await expect(dialog).toBeVisible();
         await dialog.getByRole("textbox").first().fill(installedName);

@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: config/models.yaml；assets/evaluation/eval_set.xlsx；expected/evaluation_expected.json
   steps:
   - order: 1
-    action: 打开/evaluation→Runs，点击【Create Evaluation】。
+    action: 打开/evaluation→评测，点击【创建评测】。
     expected: 选择控件与当前页面一致。
   - order: 2
     action: 选择Published Agent和明确Version。
@@ -33,7 +33,7 @@ case:
     action: 选择1+ Evaluator，检查type/status。
     expected: /space/evaluators不虚构编辑动作。
   - order: 5
-    action: 选择With Set并选择run_id Set，配置Mapping。
+    action: 选择有评测集评测并选择run_id Set，确认query/expected/actual默认Mapping。
     expected: /space/evaluators不虚构编辑动作。
   - order: 6
     action: 点击【Try it out】，等待真实Agent+Evaluator试运行并检查Trial Result。
@@ -42,13 +42,13 @@ case:
     action: 提交正式Run。
     expected: /space/evaluators不虚构编辑动作。
   - order: 8
-    action: 列表定位新run，等待PENDING/RUNNING轮询变化。
+    action: 按创建响应的run ID定位新行，检查等待中/运行中或已完成状态。
     expected: /space/evaluators不虚构编辑动作。
   - order: 9
     action: 等待COMPLETED或明确失败终态。
     expected: /space/evaluators不虚构编辑动作。
   - order: 10
-    action: 成功后点击run进入/evaluation/{id}。
+    action: 成功后点击该run的查看按钮进入/evaluation/{id}。
     expected: /space/evaluators不虚构编辑动作。
   - order: 11
     action: 检查case结果、score/evaluator输出等满足expected结构。
@@ -65,16 +65,16 @@ case:
     legacy_row: 48
   actor: Nexent browser user
   journey:
-  - 打开/evaluation→Runs，点击【Create Evaluation】。
+  - 打开/evaluation→评测，点击【创建评测】。
   - 选择Published Agent和明确Version。
   - 选择真实Judge Model。
   - 选择1+ Evaluator，检查type/status。
-  - 选择With Set并选择run_id Set，配置Mapping。
+  - 选择有评测集评测并选择run_id Set，确认query/expected/actual默认Mapping。
   - 点击【Try it out】，等待真实Agent+Evaluator试运行并检查Trial Result。
   - 提交正式Run。
-  - 列表定位新run，等待PENDING/RUNNING轮询变化。
+  - 按创建响应的run ID定位新行，检查等待中/运行中或已完成状态。
   - 等待COMPLETED或明确失败终态。
-  - 成功后点击run进入/evaluation/{id}。
+  - 成功后点击该run的查看按钮进入/evaluation/{id}。
   - 检查case结果、score/evaluator输出等满足expected结构。
   final_business_result:
   - 选择控件与当前页面一致。

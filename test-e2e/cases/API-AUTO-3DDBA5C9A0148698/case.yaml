@@ -37,60 +37,68 @@ case:
       查询参数），记录 200 响应中的 resource_type、resource_id、assignment_count、assignment_capacity(=100)、assignments[] 结构。
     expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
   - order: 4
-    action: 以可编辑账号对 agent/skill/tool/mcp_service 调用 PUT /tag-libraries/assignments/{resource_type}/{resource_id}，body 为 {"value_ids":[...]}，断言
-      200 后 assignment_count 与 assignments[]（含 definition_id/definition_key/definition_name/selection_mode/value_id/display_value/value_status）与提交一致；随后再次
+    action: 以可编辑账号对 agent/skill/tool/mcp_service 调用 PUT /tag-libraries/assignments/{resource_type}/{resource_id}，body
+      为 {"value_ids":[...]}，断言 200 后 assignment_count 与 assignments[]（含 definition_id/definition_key/definition_name/selection_mode/value_id/display_value/value_status）与提交一致；随后再次
       GET 校验分配持久化。
     expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   - order: 5
-    action: 对 single_select 定义向同一资源提交多个 value_ids，断言 400（detail 为 "A single-select tag definition accepts only one assigned
-      value"），且原分配保持不变。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+    action: 对 single_select 定义向同一资源提交多个 value_ids，断言 400（detail 为 "A single-select tag definition accepts only one
+      assigned value"），且原分配保持不变。
+    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
+      DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
+      404。
   - order: 6
-    action: 构造提交包含未激活或不属于该资源库的 value_id，断言 400（detail 为 "Each assigned tag value must be active and belong to the resource
-      library"）。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+    action: 构造提交包含未激活或不属于该资源库的 value_id，断言 400（detail 为 "Each assigned tag value must be active and belong to the
+      resource library"）。
+    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
+      DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
+      404。
   - order: 7
     action: 构造提交超过 100 个 value_ids，断言 409（Resource tag assignment capacity exceeded，details.scope=assignment）。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
+      DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
+      404。
   - order: 8
-    action: 对 knowledge_base 调用 GET/PUT /tag-libraries/assignments/knowledge_base/{index_name}；对 knowledge_document 携带 provider/knowledge_base_id
-      查询参数读写，断言文档 canonical resource_id 为 base64 编码、所属桶为 knowledge_content。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+    action: 对 knowledge_base 调用 GET/PUT /tag-libraries/assignments/knowledge_base/{index_name}；对 knowledge_document
+      携带 provider/knowledge_base_id 查询参数读写，断言文档 canonical resource_id 为 base64 编码、所属桶为 knowledge_content。
+    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
+      DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
+      404。
   - order: 9
     action: 调用 PUT /tag-libraries/assignments/{resource_type}/bulk，body 为 {"targets":[{"resource_id":"...","value_ids":[...]}]}，断言返回数组且每项
       outcome ∈ {updated, not_found_or_forbidden, validation}：可编辑目标返回 assignment，跨租户/不可编辑目标返回 not_found_or_forbidden。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
+      DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
+      404。
   - order: 10
     action: 调用 POST /tag-libraries/assignments/{resource_type}/filter，body 为 {"resource_ids":[...],"predicates":[{"definition_id":...,"value_ids":[...]}]}，断言返回
-      {resource_type, matched_resource_ids}；对 knowledge_document 类型断言 400（detail 为 "document resources must use the batch-status
-      endpoint"）；对非法 resource_type 断言 400。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+      {resource_type, matched_resource_ids}；对 knowledge_document 类型断言 400（detail 为 "document resources must use
+      the batch-status endpoint"）；对非法 resource_type 断言 400。
+    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
+      DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
+      404。
   - order: 11
-    action: 以 DEV/USER 角色调用任一治理接口（如 GET /tag-libraries/{bucket_id}/definitions），断言 403（detail 为 "Tag library management permission
-      is required"）；以 SU/ADMIN/SPEED/ASSET_OWNER 调用同一接口断言 200。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+    action: 以 DEV/USER 读取标签桶及定义返回 200；以合法 POST /tag-libraries/{bucket_id}/definitions 创建请求验证写入返回 403，detail 为 Tag
+      library management permission is required；回读确认无新增定义。
+    expected: 已认证读取 200、治理写入 403；拒绝写入无副作用。
   - order: 12
-    action: 以对目标资源仅可读不可编辑的账号调用 PUT replace，断言 404（detail 为 "Resource not found"）；对跨租户或不存在的 resource_id 调用 GET/PUT，断言 404 且响应不可区分资源存在性。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+    action: 以对目标资源仅可读不可编辑的账号调用 PUT replace，断言 404（detail 为 "Resource not found"）；对跨租户或不存在的 resource_id 调用 GET/PUT，断言
+      404 且响应不可区分资源存在性。
+    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
+      DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
+      404。
   - order: 13
     action: 补充异常断言：对上述非法/失败条件至少重复一次，确认重试不产生重复分配、脏状态或权限绕过；完成后清理临时标签定义/值与分配。
-    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER
-      返回 403、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
-  expected_results:
+    expected: 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对
+      DEV/USER 返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回
+      404。
+  expected_results: &id001
   - 功能结果与代码契约一致，测试过程无未处理异常。
   - 关键状态在 API 返回、数据库/存储和后续读取中保持一致（replace 后 GET 可见同一 assignment_count）。
   - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
   - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER 返回 403、对
-    SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+  - 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理写接口对 DEV/USER
+    返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取、对 SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
   forbidden_side_effects: []
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
@@ -104,27 +112,24 @@ case:
       桶及其 active 定义/值，确认统一标签库预置成功。
     - 以可读账号对六类资源逐一调用 GET /tag-libraries/assignments/{resource_type}/{resource_id}（knowledge_document 携带 provider/knowledge_base_id
       查询参数），记录 200 响应中的 resource_type、resource_id、assignment_count、assignment_capacity(=100)、assignments[] 结构。
-    - 以可编辑账号对 agent/skill/tool/mcp_service 调用 PUT /tag-libraries/assignments/{resource_type}/{resource_id}，body 为 {"value_ids":[...]}，断言
-      200 后 assignment_count 与 assignments[]（含 definition_id/definition_key/definition_name/selection_mode/value_id/display_value/value_status）与提交一致；随后再次
+    - 以可编辑账号对 agent/skill/tool/mcp_service 调用 PUT /tag-libraries/assignments/{resource_type}/{resource_id}，body
+      为 {"value_ids":[...]}，断言 200 后 assignment_count 与 assignments[]（含 definition_id/definition_key/definition_name/selection_mode/value_id/display_value/value_status）与提交一致；随后再次
       GET 校验分配持久化。
-    - 对 single_select 定义向同一资源提交多个 value_ids，断言 400（detail 为 "A single-select tag definition accepts only one assigned value"），且原分配保持不变。
-    - 构造提交包含未激活或不属于该资源库的 value_id，断言 400（detail 为 "Each assigned tag value must be active and belong to the resource library"）。
+    - 对 single_select 定义向同一资源提交多个 value_ids，断言 400（detail 为 "A single-select tag definition accepts only one assigned
+      value"），且原分配保持不变。
+    - 构造提交包含未激活或不属于该资源库的 value_id，断言 400（detail 为 "Each assigned tag value must be active and belong to the resource
+      library"）。
     - 构造提交超过 100 个 value_ids，断言 409（Resource tag assignment capacity exceeded，details.scope=assignment）。
-    - 对 knowledge_base 调用 GET/PUT /tag-libraries/assignments/knowledge_base/{index_name}；对 knowledge_document 携带 provider/knowledge_base_id
-      查询参数读写，断言文档 canonical resource_id 为 base64 编码、所属桶为 knowledge_content。
+    - 对 knowledge_base 调用 GET/PUT /tag-libraries/assignments/knowledge_base/{index_name}；对 knowledge_document 携带
+      provider/knowledge_base_id 查询参数读写，断言文档 canonical resource_id 为 base64 编码、所属桶为 knowledge_content。
     - 调用 PUT /tag-libraries/assignments/{resource_type}/bulk，body 为 {"targets":[{"resource_id":"...","value_ids":[...]}]}，断言返回数组且每项
       outcome ∈ {updated, not_found_or_forbidden, validation}：可编辑目标返回 assignment，跨租户/不可编辑目标返回 not_found_or_forbidden。
     - 调用 POST /tag-libraries/assignments/{resource_type}/filter，body 为 {"resource_ids":[...],"predicates":[{"definition_id":...,"value_ids":[...]}]}，断言返回
-      {resource_type, matched_resource_ids}；对 knowledge_document 类型断言 400（detail 为 "document resources must use the batch-status
-      endpoint"）；对非法 resource_type 断言 400。
-    - 以 DEV/USER 角色调用任一治理接口（如 GET /tag-libraries/{bucket_id}/definitions），断言 403（detail 为 "Tag library management permission
-      is required"）；以 SU/ADMIN/SPEED/ASSET_OWNER 调用同一接口断言 200。
-    - 以对目标资源仅可读不可编辑的账号调用 PUT replace，断言 404（detail 为 "Resource not found"）；对跨租户或不存在的 resource_id 调用 GET/PUT，断言 404 且响应不可区分资源存在性。
+      {resource_type, matched_resource_ids}；对 knowledge_document 类型断言 400（detail 为 "document resources must use
+      the batch-status endpoint"）；对非法 resource_type 断言 400。
+    - 以 DEV/USER 读取标签桶及定义返回 200；以合法 POST /tag-libraries/{bucket_id}/definitions 创建请求验证写入返回 403，detail 为 Tag library
+      management permission is required；回读确认无新增定义。
+    - 以对目标资源仅可读不可编辑的账号调用 PUT replace，断言 404（detail 为 "Resource not found"）；对跨租户或不存在的 resource_id 调用 GET/PUT，断言 404
+      且响应不可区分资源存在性。
     - 补充异常断言：对上述非法/失败条件至少重复一次，确认重试不产生重复分配、脏状态或权限绕过；完成后清理临时标签定义/值与分配。
-    response_expectations:
-    - 功能结果与代码契约一致，测试过程无未处理异常。
-    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致（replace 后 GET 可见同一 assignment_count）。
-    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-    - 六类资源分配 get/replace/bulk/filter 的响应结构、状态码（200/400/403/404/409）与 assignment_capacity=100 契约与源码一致；治理接口对 DEV/USER 返回 403、对
-      SU/ADMIN/SPEED/ASSET_OWNER 返回 200；fail-closed 的越权/跨租户访问统一返回 404。
+    response_expectations: *id001

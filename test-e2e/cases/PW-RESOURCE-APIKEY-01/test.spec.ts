@@ -166,9 +166,22 @@ journey("PW-RESOURCE-APIKEY-01", async ({ page, contract, expect }) => {
     await resource.ensureCurrentTenant(tenantName);
     await resource.openTab("API Key");
     const row = await resource.apiKeyRow(keyEmail);
-    adminKeyPersisted = (await row.locator("code").innerText()).trim() === secret;
-    expect(adminKeyPersisted).toBeTruthy();
-    return "after reload the administrator list retained the new key under its owned user, as designed";
+    // Only refresh reveals the secret; current product lists mask it.
+    // Compare without placing any key in assertion diagnostics.
+    const prefix = secret.includes("-") ? secret.slice(0, secret.lastIndexOf("-")) : secret;
+    const expectedMask = `${prefix.slice(0, 8)}****${secret.slice(-4)}`;
+    try {
+      await expect.poll(async () => {
+        const visible = (await row.locator("code").innerText()).trim();
+        return visible === expectedMask && visible !== secret;
+      }, { timeout: 30000 }).toBe(true);
+      adminKeyPersisted = true;
+    } catch {
+      const error = new Error("owned user's refreshed API Key mask/ownership did not persist in the administrator list after reload");
+      error.name = "ProductFailure";
+      throw error;
+    }
+    return "after reload the administrator list retained the new key's matching mask under its owned user, without exposing the secret";
   });
   await contract.step("STEP-06", async () => {
     await resource.revokeApiKey(keyEmail);
@@ -193,7 +206,7 @@ journey("PW-RESOURCE-APIKEY-01", async ({ page, contract, expect }) => {
   });
   await contract.assertion("ASSERT-02", async () => {
     expect(adminKeyPersisted).toBeTruthy();
-    return "administrator full-key visibility and persisted user ownership match the refresh result";
+    return "administrator masked-key visibility and persisted user ownership match the refresh result";
   });
   await contract.assertion("ASSERT-03", async () => {
     expect(revoked).toBeTruthy();

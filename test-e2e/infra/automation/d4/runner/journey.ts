@@ -223,7 +223,6 @@ export function journey(caseId: string, body: (context: JourneyContext) => Promi
       evidence.push(relative(required("RESULT_DIR"), failureJson).replaceAll("\\", "/"));
       writeFileSync(networkJsonl, networkEvidence.map((row) => JSON.stringify(row)).join("\n") + (networkEvidence.length ? "\n" : ""), "utf8");
       evidence.push(relative(required("RESULT_DIR"), networkJsonl).replaceAll("\\", "/"));
-      try { await contract.cleanup(); } catch { /* cleanup details are retained */ }
       // Configuration/asset/contract failures can happen while the page is
       // still about:blank. A pure-white image is misleading evidence, so only
       // capture a screenshot after a product page has actually been opened.
@@ -234,6 +233,8 @@ export function journey(caseId: string, body: (context: JourneyContext) => Promi
           evidence.push(relative(required("RESULT_DIR"), failurePng).replaceAll("\\", "/"));
         } catch { /* browser may be unavailable */ }
       }
+      // Capture the failing UI before cleanup can navigate or delete its data.
+      try { await contract.cleanup(); } catch { /* cleanup details are retained */ }
       try {
         await page.context().tracing.stop({ path: traceZip });
         if (existsSync(traceZip)) evidence.push(relative(required("RESULT_DIR"), traceZip).replaceAll("\\", "/"));

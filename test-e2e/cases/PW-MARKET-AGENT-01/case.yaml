@@ -6,7 +6,7 @@ case:
   feature_id: V5-PW-MARKET-AGENT-01
   business_rule_ids:
   - V5-PW-MARKET-AGENT-01-RULE-01
-  title: Mine申请上架→Admin Review→Repository→其他租户Copy
+  title: Mine申请上架→Admin Review→Repository→同租户其他用户Copy
   type: E2E
   priority: P1
   status: active
@@ -15,7 +15,7 @@ case:
   preconditions:
   - 作者已发布run_id Agent
   - Admin reviewer
-  - 消费者租户
+  - 同租户、不同于作者的消费者账号；普通上架记录仅租户内共享，官方记录单独处理。
   test_data:
     legacy_asset_declaration: config/users.yaml
   steps:
@@ -32,10 +32,10 @@ case:
     action: 消费者进入Repository搜索run_id Agent。
     expected: Copy后资源归消费者租户。
   - order: 5
-    action: 打开详情并执行Copy/导入。
+    action: 从仓库卡片打开复制预检弹窗并执行Copy/导入。
     expected: Copy后资源归消费者租户。
   - order: 6
-    action: 到/agents确认复制得到消费者可编辑副本。
+    action: 按导入响应/前后列表差集捕获独立副本ID，到对应编辑器确认可编辑且配置保留；同租户重名允许产品自动添加数字后缀。
     expected: Copy后资源归消费者租户。
   - order: 7
     action: 清理时下架/删除测试发布项。
@@ -55,8 +55,8 @@ case:
   - 确认状态进入审核中。
   - Admin进入Review，打开申请并批准。
   - 消费者进入Repository搜索run_id Agent。
-  - 打开详情并执行Copy/导入。
-  - 到/agents确认复制得到消费者可编辑副本。
+  - 从仓库卡片打开复制预检弹窗并执行Copy/导入。
+  - 按导入响应/前后列表差集捕获独立副本ID，到对应编辑器确认可编辑且配置保留；同租户重名允许产品自动添加数字后缀。
   - 清理时下架/删除测试发布项。
   final_business_result:
   - Review仅管理员可见。

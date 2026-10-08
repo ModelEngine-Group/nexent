@@ -109,6 +109,12 @@ export class AgentPage {
     return trigger.locator("xpath=../..");
   }
 
+  async openToolsSkills(): Promise<void> {
+    const tab = this.page.getByRole("tab", { name: "工具与技能", exact: true });
+    await tab.click();
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+  }
+
   async openAdvanced(): Promise<void> {
     const tab = this.page.getByRole("tab", { name: /高级设置|高级配置/ });
     await tab.click();
@@ -341,10 +347,11 @@ export class AgentPage {
     const stream = await streamPromise;
     if (stream.status() >= 500) throw new Error(`agent debug stream returned ${stream.status()}`);
     await expect(messages).toHaveCount(before + 1, { timeout: 300000 });
-    if (expectedMarker) await expect(messages.last().getByText(expectedMarker, { exact: true })).toBeVisible({ timeout: 300000 });
+    const responseText = messages.last().locator("[data-citation-index-map] .aui-md:visible");
+    if (expectedMarker) await expect.poll(async () => (await responseText.allTextContents()).join("\n"), { timeout: 300000 }).toContain(expectedMarker);
     await expect(debugPanel.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 300000 });
     await expect(send).toBeVisible({ timeout: 300000 });
-    const answer = (await messages.last().innerText()).trim();
+    const answer = (await responseText.allTextContents()).join("\n").trim();
     if (!answer) throw new Error("agent debug completed without a rendered response");
     if (expectedMarker && !answer.includes(expectedMarker)) throw new Error(`agent debug response omitted marker ${expectedMarker}`);
     return answer;
@@ -355,15 +362,21 @@ export class AgentPage {
     return this.sendDebug(prompt, expectedMarker);
   }
 
-  async exportSelected(): Promise<Download> {
+  async exportSelected(displayName: string): Promise<Download> {
+    await this.open();
+    await this.page.getByPlaceholder("按名称或描述搜索", { exact: true }).fill(displayName);
+    const card = this.page.getByRole("button", { name: displayName, exact: true }).locator("xpath=..");
+    await expect(card).toHaveCount(1);
+    await card.getByRole("button", { name: "更多操作", exact: true }).click();
     const download = this.page.waitForEvent("download");
-    await this.page.locator("button:has(svg.lucide-file-output)").click();
+    await this.page.getByRole("menuitem", { name: "导出", exact: true }).click();
     return download;
   }
 
   async openImport(filePath: string): Promise<void> {
+    await this.open();
     const chooser = this.page.waitForEvent("filechooser");
-    await this.page.getByRole("button", { name: "导入", exact: true }).click();
+    await this.page.getByRole("button", { name: /^导\s*入$/ }).click();
     await (await chooser).setFiles(filePath);
     await expect(this.page.getByRole("dialog", { name: "安装智能体" })).toBeVisible({ timeout: 120_000 });
   }
@@ -378,7 +391,7 @@ export class AgentPage {
     await expect(dialog.getByText("所有智能体名称冲突已解决。您可以继续下一步。", { exact: true })).toBeVisible({ timeout: 120_000 });
   }
 
-  async installImportedAgent(modelName: string): Promise<void> {
+  async installImportedAgent(modelName: string, onImported: (id: number) => void): Promise<number> {
     const dialog = this.page.getByRole("dialog", { name: "安装智能体" });
     await dialog.getByRole("button", { name: "下一步", exact: true }).click();
     await expect(dialog.getByText("选择模型", { exact: true })).toBeVisible();
@@ -389,17 +402,26 @@ export class AgentPage {
     const modelOption = this.page.getByText(modelName, { exact: true }).last();
     await expect(modelOption).toBeVisible();
     await modelOption.click();
-    while (await dialog.getByRole("button", { name: "下一步", exact: true }).count()) {
-      await dialog.getByRole("button", { name: "下一步", exact: true }).click();
+    const next = dialog.getByRole("button", { name: "下一步", exact: true });
+    for (let step = 0; step < 8 && await next.isVisible(); step += 1) {
+      await expect(next).toBeEnabled();
+      await next.click();
     }
+    await expect(next).toBeHidden();
     const imported = this.page.waitForResponse(
       (response) => response.request().method() === "POST" && /agent.*import|import.*agent/i.test(response.url()),
       { timeout: 300_000 },
     );
-    await dialog.getByRole("button", { name: "安装", exact: true }).click();
+    await dialog.getByRole("button", { name: /^安\s*装$/ }).click();
     const response = await imported;
     if (!response.ok()) throw new Error(`agent import returned ${response.status()}`);
+    const body = await response.json();
+    const id = Number(body?.agent_id || body?.data?.agent_id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("agent import response omitted agent_id");
+    // Register ownership before any later navigation or UI assertion can fail.
+    onImported(id);
     await expect(dialog).toBeHidden({ timeout: 120_000 });
+    return id;
   }
 
   async openDebugCompare(): Promise<void> {
@@ -424,18 +446,26 @@ export class AgentPage {
     const debugPanel = this.page.locator("section:not(.hidden)", {
       has: this.page.getByRole("heading", { name: /^(调试|Debug)$/ }),
     });
-    const messages = debugPanel.locator("[data-slot='aui_assistant-message-root']:visible");
-    const before = await messages.count();
+    // Each compare column owns a separate history. Global DOM indices interleave
+    // old and new replies after the first round, so count each column separately.
+    const selectors = debugPanel.getByRole("combobox");
+    await expect(selectors).toHaveCount(2);
+    const columns = [0, 1].map((index) => selectors.nth(index).locator(
+      "xpath=ancestor::div[contains(@class, 'flex h-full w-full flex-col')][1]",
+    ));
+    const histories = columns.map((column) => column.locator("[data-slot='aui_assistant-message-root']:visible"));
+    const before = await Promise.all(histories.map((history) => history.count()));
     const composer = debugPanel.locator('textarea[placeholder="发送消息..."]:visible');
     await composer.fill(prompt);
     await debugPanel.getByRole("button", { name: "发送", exact: true }).click();
-    await expect(messages).toHaveCount(before + 2, { timeout: 300000 });
+    await Promise.all(histories.map((history, index) => expect(history).toHaveCount(before[index] + 1, { timeout: 300000 })));
     const result: string[] = [];
-    for (let index = before; index < before + 2; index += 1) {
-      const answer = messages.nth(index);
+    for (let index = 0; index < histories.length; index += 1) {
+      const answer = histories[index].nth(before[index]);
+      const responseText = answer.locator("[data-citation-index-map] .aui-md:visible");
       if (expectedMarker) {
         try {
-          await expect(answer).toContainText(expectedMarker, { timeout: 300000 });
+          await expect.poll(async () => (await responseText.allTextContents()).join("\n"), { timeout: 300000 }).toContain(expectedMarker);
         } catch (error) {
           const rendered = (await answer.innerText().catch(() => "")).trim();
           if (rendered && !/连接中|connecting/i.test(rendered)) {
@@ -446,7 +476,7 @@ export class AgentPage {
           throw error;
         }
       }
-      result.push((await answer.innerText()).trim());
+      result.push((await responseText.allTextContents()).join("\n").trim());
     }
     await expect(debugPanel.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 300000 });
     await expect(debugPanel.getByRole("button", { name: "发送", exact: true })).toBeVisible({ timeout: 300000 });
@@ -464,7 +494,7 @@ export class AgentPage {
       .first();
     const toggle = compareControl.getByRole("switch");
     if ((await toggle.getAttribute("aria-checked")) === "true") await toggle.click();
-    await expect(this.page.getByPlaceholder("发送消息...").last()).toBeVisible();
+    await expect(debugPanel.locator('textarea[placeholder="发送消息..."]:visible')).toHaveCount(1);
   }
 
   async publish(): Promise<Locator> {
@@ -475,6 +505,7 @@ export class AgentPage {
   }
 
   async publishVersion(versionName: string, releaseNote: string): Promise<void> {
+    const editorUrl = this.page.url();
     const modal = await this.publish();
     await modal.getByPlaceholder("请输入版本名称").fill(versionName);
     await modal.getByPlaceholder("请输入发布说明（可选）").fill(releaseNote);
@@ -490,6 +521,12 @@ export class AgentPage {
     const response = await published;
     if (!response.ok()) throw new Error(`agent publish returned ${response.status()}`);
     await expect(modal).toBeHidden();
+    // Publish may return to the warehouse. Resume the same owned Agent's
+    // editor before checking the current-version tag and editing its Draft.
+    if (this.page.url() !== editorUrl) {
+      await this.page.goto(editorUrl, { waitUntil: "domcontentloaded" });
+      await this.dismissCreationGuidance();
+    }
     await expect(this.page.getByText(versionName, { exact: true }).first()).toBeVisible();
   }
 

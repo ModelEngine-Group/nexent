@@ -57,7 +57,7 @@ journey("PW-AGENT-03", async (context) => {
         return `selected editable Draft ${agentDisplay} in Basic configuration`;
       },
       async () => {
-        await agents.openSection("工具与技能");
+        await agents.openToolsSkills();
         return "opened the product Tools & Skills tab";
       },
       async () => {
@@ -70,11 +70,11 @@ journey("PW-AGENT-03", async (context) => {
       },
       async () => {
         alternateDisplay = `D4 Switch ${token}`;
+        await agents.open();
         alternateId = await agents.create(alternateDisplay, `d4_switch_${token}`);
         await agents.select(agentDisplay);
-        await agents.openSection("工具与技能");
+        await agents.openToolsSkills();
         await expect(page.getByText(toolName, { exact: true }).first()).toBeVisible();
-        await page.getByRole("tab", { name: /^选择技能/ }).click();
         await expect(page.getByText(skillName, { exact: true }).first()).toBeVisible();
         return "switched to a second Draft and back; both Tool and Skill autosaves were recovered";
       },
@@ -103,9 +103,8 @@ journey("PW-AGENT-03", async (context) => {
       async () => {
         await page.reload({ waitUntil: "domcontentloaded" });
         await agents.select(agentDisplay);
-        await agents.openSection("工具与技能");
+        await agents.openToolsSkills();
         await expect(page.getByText(toolName, { exact: true }).first()).toBeVisible();
-        await page.getByRole("tab", { name: /^选择技能/ }).click();
         await expect(page.getByText(skillName, { exact: true }).first()).toBeVisible();
         return "Tool and Skill bindings survived a full refresh";
       },

@@ -94,10 +94,20 @@ async def test_mcp_port_check_suggest_and_no_store_cache_contract(tenant_a_admin
         checked = await api.get("/mcp/port/check", params={"port": 9})
         suggested = await api.get("/mcp/port/suggest")
         invalid = await api.get("/mcp/port/check", params={"port": 70000})
+        invalid_low = await api.get("/mcp/port/check", params={"port": 0})
     assert_status(checked, 200)
     assert_status(suggested, 200)
     assert_status(invalid, 422)
-    assert "no-store" in suggested.headers.get("cache-control", "").lower()
+    assert_status(invalid_low, 422)
+    assert checked.json()["status"] == "success"
+    assert isinstance(checked.json()["data"]["available"], bool)
+    assert suggested.json()["status"] == "success"
+    suggested_port = suggested.json()["data"]["port"]
+    assert isinstance(suggested_port, int) and not isinstance(suggested_port, bool)
+    assert 1 <= suggested_port <= 65535
+    assert "no-store" in checked.headers.get("cache-control", "").lower()
+    assert checked.headers.get("pragma", "").lower() == "no-cache"
+    assert checked.headers.get("expires") == "0"
 
 
 

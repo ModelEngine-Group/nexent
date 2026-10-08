@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { runToken } from "../../infra/automation/d4/runner/runtime-config";
@@ -17,10 +18,20 @@ journey("PW-CHAT-01", async (context) => {
   let agentDisplay = "";
   let stoppedText = "";
   let originalThreadTitle = "";
+  const ownedConversationIds = new Set<number>();
+  // Stop validates an in-progress stream, including visible reasoning. Other
+  // journeys still require final-answer Markdown through ChatPage.messageText.
+  const streamText = async (message: ReturnType<ChatPage["assistantMessages"]>) => {
+    const collapsed = message.locator('.aui-reasoning-root button[data-state="closed"]');
+    while (await collapsed.count()) await collapsed.first().click();
+    return (await message.locator(".aui-md:visible").allTextContents()).join("\n").trim();
+  };
 
   contract.deferCleanup(async () => {
-    for (const title of [firstTitle, secondTitle, originalThreadTitle].filter(Boolean)) {
-      if (await page.getByRole("button", { name: title, exact: true }).count()) await chat.deleteThread(title);
+    try {
+      if (ownedConversationIds.size) await chat.captureConversationState(join(contract.caseDir,"conversation-state.json"), `CONTINUE-${token}`);
+    } finally {
+      for (const id of ownedConversationIds) await chat.deleteConversationById(id);
     }
   });
 
@@ -41,14 +52,25 @@ journey("PW-CHAT-01", async (context) => {
         return "selected the product's Execution mode; no independent ReAct control was assumed";
       },
       async () => {
-        const message = await chat.startMessage(`先原样输出标记 ${firstMarker}，再逐项详细列出 1 到 80，每项写一句不同的说明。`);
-        await expect.poll(async () => chat.messageText(message), { timeout: 120_000 }).toContain(firstMarker);
+        const message = await chat.startMessage(`先原样输出标记 ${firstMarker}，再逐项详细列出 1 到 1200，每项写一句不同的说明。必须逐项输出，不能使用代码、循环或省略号代替；这个长输出用于验证用户中途停止，不要提前总结。`);
+        ownedConversationIds.add(chat.currentConversationId());
+        await expect.poll(async () => (await streamText(message)).length, { timeout: 120_000 }).toBeGreaterThan(0);
+        const initial = await streamText(message);
+        await expect.poll(async () => (await streamText(message)).length, { timeout: 120_000 }).toBeGreaterThan(initial.length);
+        await expect(page.locator("button:has(svg.lucide-square)")).toBeVisible();
         return "assistant message appeared and grew through the real streaming channel";
       },
       async () => {
         const message = chat.assistantMessages().last();
         await chat.stopGeneration();
-        stoppedText = await chat.assertTextStopsChanging(message);
+        let stable = 0;
+        stoppedText = await streamText(message);
+        await expect.poll(async () => {
+          const current = await streamText(message);
+          stable = current === stoppedText ? stable + 1 : 0;
+          stoppedText = current;
+          return stable;
+        }, { timeout: 15000, intervals: [1000] }).toBeGreaterThanOrEqual(4);
         expect(stoppedText.length).toBeGreaterThan(0);
         return `Stop terminated the old stream at ${stoppedText.length} visible characters`;
       },
@@ -60,7 +82,11 @@ journey("PW-CHAT-01", async (context) => {
           error.name = "ProductFailure";
           throw error;
         }
-        expect(text).toContain("CONTINUE-" + token);
+        if (!(await chat.messageText(response)).includes("CONTINUE-" + token)) {
+          const error = new Error("The real continuation request completed after Stop but the final answer omitted its required CONTINUE marker; runtime/provider root cause requires retained evidence review");
+          error.name = "ProductFailure";
+          throw error;
+        }
         return "the stopped conversation accepted and completed a second message";
       },
       async () => {
@@ -68,13 +94,15 @@ journey("PW-CHAT-01", async (context) => {
         await page.reload({ waitUntil: "domcontentloaded" });
         await chat.openThread(originalThreadTitle);
         await expect(chat.userMessages().filter({ hasText: firstMarker })).toHaveCount(1);
-        expect(await chat.messageText(chat.assistantMessages().first())).toBe(stoppedText);
+        await expect.poll(() => streamText(chat.assistantMessages().first()), { timeout: 30000 }).toBe(stoppedText);
         return "refresh plus sidebar reopen restored both history and the exact stopped assistant text";
       },
       async () => {
         await chat.renameActiveThread(firstTitle);
         await chat.newConversation(agentDisplay);
-        await chat.sendAndWait(`只回复：${secondMarker}`);
+        await chat.startMessage(`只回复：${secondMarker}`);
+        ownedConversationIds.add(chat.currentConversationId());
+        await chat.waitForCompletion();
         await chat.renameActiveThread(secondTitle);
         return "used the supported sidebar New action and renamed both run-scoped conversations";
       },
@@ -88,7 +116,9 @@ journey("PW-CHAT-01", async (context) => {
         return "switching the two named conversations preserved mutually isolated message histories";
       },
       async () => {
+        const deletedId = chat.currentConversationId();
         await chat.deleteThread(secondTitle);
+        ownedConversationIds.delete(deletedId);
         return "deleted the second test conversation and observed its sidebar item disappear";
       },
     ],

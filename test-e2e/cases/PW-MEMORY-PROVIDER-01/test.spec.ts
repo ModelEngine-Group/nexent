@@ -7,7 +7,7 @@ import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 
 const required = (name: string): string => {
   const value = process.env[name] || "";
-  if (!value) throw new Error(`required real test asset ${name} is missing`);
+  if (!value) { const error = new Error(`required real test asset ${name} is missing`); error.name = "DependencyFailure"; throw error; }
   return value;
 };
 
@@ -16,9 +16,9 @@ journey("PW-MEMORY-PROVIDER-01", async (context) => {
   const token = runToken("PW-MEMORY-PROVIDER-01");
   const name = `memory-provider-${token}`;
   const marker = `EXTMEM-${token}`;
-  const plugin = required("NEXENT_EXTERNAL_MEMORY_PLUGIN");
-  const endpoint = required("NEXENT_EXTERNAL_MEMORY_ENDPOINT");
-  const apiKey = required("NEXENT_EXTERNAL_MEMORY_API_KEY");
+  let plugin = "";
+  let endpoint = "";
+  let apiKey = "";
   const chat = new ChatPage(page);
   let agent = "";
   let created = false;
@@ -37,7 +37,7 @@ journey("PW-MEMORY-PROVIDER-01", async (context) => {
     preconditions: [
       async () => { expect(configuredFeature("memory")).toBe(true); return "Memory feature is enabled"; },
       async () => { await loginCurrent(page, "tenant_a_admin"); return "authorized administrator authenticated"; },
-      async () => { agent = resolveReadyAsset("agents", "d4_chat_display_name", "PW-MEMORY-PROVIDER-01"); return `real provider ${plugin} and real Agent ${agent} are configured`; },
+      async () => { plugin = required("NEXENT_EXTERNAL_MEMORY_PLUGIN"); endpoint = required("NEXENT_EXTERNAL_MEMORY_ENDPOINT"); apiKey = required("NEXENT_EXTERNAL_MEMORY_API_KEY"); agent = resolveReadyAsset("agents", "d4_chat_display_name", "PW-MEMORY-PROVIDER-01"); return `real provider ${plugin} and real Agent ${agent} are configured`; },
     ],
     steps: [
       async () => { await page.goto(appPath("/memory")); await expect(page.getByText(/外部记忆|External memory/, { exact: true })).toBeVisible(); return "opened external-memory management"; },

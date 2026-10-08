@@ -20,7 +20,7 @@ journey("PW-CHART-01", async (context) => {
     await dialog.dismiss();
   });
   contract.deferCleanup(async () => {
-    if (await page.getByRole("button", { name: title, exact: true }).count()) await chat.deleteThread(title);
+    if (citationConversationId) await chat.deleteConversationById(citationConversationId);
   });
 
   await executeFixedScenario(context, {
@@ -35,7 +35,9 @@ journey("PW-CHART-01", async (context) => {
     ],
     steps: [
       async () => {
-        await chat.sendAndWait("严格只输出下面代码块，不要解释：\n```mermaid\ngraph LR\n  NX_A[Alpha] --> NX_B[Beta]\n```");
+        await chat.startMessage("严格只输出下面代码块，不要解释：\n```mermaid\ngraph LR\n  NX_A[Alpha] --> NX_B[Beta]\n```");
+        citationConversationId = chat.currentConversationId();
+        await chat.waitForCompletion();
         return "requested a minimal valid Mermaid block and waited for streaming completion";
       },
       async () => {

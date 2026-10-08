@@ -13,20 +13,22 @@ export class KnowledgePage {
   async open(requireConfiguredEmbedding = true): Promise<void> {
     await this.page.goto(appPath("/knowledges"), { waitUntil: "domcontentloaded" });
     if (requireConfiguredEmbedding) {
-      await expect(this.page.getByText("知识库列表", { exact: true })).toBeVisible();
+      await expect(this.page.getByRole("heading", { name: "知识库", exact: true })).toBeVisible();
       await expect(this.page.getByRole("button", { name: /创\s*建/ })).toBeVisible();
       return;
     }
-    await expect(this.page.getByText(/知识库列表|尚未配置向量模型|需要配置向量化模型/).first()).toBeVisible();
+    await expect(this.page.getByRole("heading", { name: "知识库", exact: true })
+      .or(this.page.getByText(/尚未配置向量模型|需要配置向量化模型/)).first()).toBeVisible();
   }
 
   async beginCreate(name: string, embeddingDisplayName: string): Promise<void> {
     await this.page.getByRole("button", { name: /创\s*建/ }).click();
-    const nameInput = this.page.getByPlaceholder("请输入知识库名称");
+    const nameInput = this.page.getByPlaceholder("例如：产品知识中心", { exact: true });
     await expect(nameInput).toBeVisible();
     await nameInput.fill(name);
-    const creationHeader = nameInput.locator("xpath=ancestor::div[contains(@class,'flex-wrap')][1]");
-    const modelSelector = creationHeader.getByRole("combobox").first();
+    const dialog = nameInput.locator("xpath=ancestor::*[@role='dialog'][1]");
+    const modelSelector = dialog.getByText(/^向量模型\s*\*?$/)
+      .locator("xpath=..").getByRole("combobox");
     await modelSelector.click();
     const option = this.page.getByText(embeddingDisplayName, { exact: true }).last();
     await expect(option).toBeVisible();
@@ -37,12 +39,14 @@ export class KnowledgePage {
     return this.page.locator("input[type='file'][accept*='.txt']").last();
   }
 
-  async createByUpload(name: string, embeddingDisplayName: string, filePath: string): Promise<CreatedKnowledge> {
+  async createByUpload(name: string, embeddingDisplayName: string, filePath: string,
+    onCreated?: (id: string) => void): Promise<CreatedKnowledge> {
     await this.beginCreate(name, embeddingDisplayName);
-    return this.finishCreateByUpload(name, [filePath]);
+    return this.finishCreateByUpload(name, [filePath], onCreated);
   }
 
-  async finishCreateByUpload(name: string, filePaths: string[]): Promise<CreatedKnowledge> {
+  async finishCreateByUpload(name: string, filePaths: string[],
+    onCreated?: (id: string) => void): Promise<CreatedKnowledge> {
     const encoded = encodeURIComponent(name);
     const createPromise = this.page.waitForResponse(
       (response) => response.request().method() === "POST" && response.url().includes(`/api/indices/${encoded}`),
@@ -53,10 +57,15 @@ export class KnowledgePage {
       { timeout: 300000 },
     );
     await this.uploadInput().setInputFiles(filePaths);
+    const submit = this.page.getByRole("dialog").getByRole("button", { name: "创建并进入", exact: true });
+    await expect(submit).toBeEnabled();
+    await submit.click();
     const created = await createPromise;
     if (!created.ok()) throw new Error(`knowledge create returned ${created.status()}`);
     const payload = await created.json();
     const id = String(payload?.id || payload?.data?.id || name);
+    // Register ownership before processing can fail, so case cleanup can recover.
+    onCreated?.(id);
     const processed = await processPromise;
     if (processed.status() !== 201) throw new Error(`knowledge process returned ${processed.status()}`);
     return { id, createStatus: created.status(), processStatus: processed.status() };

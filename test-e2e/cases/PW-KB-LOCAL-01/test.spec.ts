@@ -29,7 +29,7 @@ journey("PW-KB-LOCAL-01", async (context) => {
       async () => {
         await loginCurrent(page, "tenant_a_admin");
         await knowledge.open();
-        await expect(page.getByText("知识库列表", { exact: true })).toBeVisible();
+        await expect(page.getByRole("heading", { name: "知识库", exact: true })).toBeVisible();
         return "opened the Nexent Local knowledge-base branch";
       },
       async () => {
@@ -53,13 +53,14 @@ journey("PW-KB-LOCAL-01", async (context) => {
         return `entered create mode with run-scoped name ${knowledgeName} and selected the READY embedding`;
       },
       async () => {
-        const created = await knowledge.finishCreateByUpload(knowledgeName, [alpha, beta]);
-        knowledgeId = created.id;
-        registerReadyAsset("knowledge", "d4_local_cleanup_id", knowledgeId, "PW-KB-LOCAL-01", {
-          service: "config", identity: "tenant_a_admin", method: "DELETE",
-          path: `/indices/${encodeURIComponent(knowledgeId)}`, allowed_statuses: [200, 404],
+        const created = await knowledge.finishCreateByUpload(knowledgeName, [alpha, beta], (id) => {
+          knowledgeId = id;
+          registerReadyAsset("knowledge", "d4_local_cleanup_id", id, "PW-KB-LOCAL-01", {
+            service: "config", identity: "tenant_a_admin", method: "DELETE",
+            path: `/indices/${encodeURIComponent(id)}`, allowed_statuses: [200, 404],
+          });
         });
-        return "setInputFiles submitted alpha and beta, creating the Local KB through the product's create-on-upload contract";
+        return "selected alpha and beta, explicitly submitted Create and Enter, and registered cleanup before processing";
       },
       async () => {
         await knowledge.waitUntilReady("alpha-nx-92831.txt");

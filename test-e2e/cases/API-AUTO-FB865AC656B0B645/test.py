@@ -157,7 +157,9 @@ async def test_super_admin_project_config_asset_persistence(super_admin) -> None
             assert recover.status_code == 200, recover.text
             recovered_zh = await api.get("/locales/zh/custom.json")
             assert recovered_zh.status_code == 200
-            assert recovered_zh.json().get("pageSubtitle") == f"恢复副标题 {marker}"
+            # The declared malformed-file contract is safe empty fallback,
+            # not reconstruction of keys that no longer exist in the old data.
+            assert recovered_zh.json() == {}
 
             for response in (upload, unauthorized, zh, en, fallback, recover):
                 assert super_admin.access_token not in response.text

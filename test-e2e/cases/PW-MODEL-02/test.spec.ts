@@ -1,4 +1,5 @@
 import type { Locator } from "playwright/test";
+import { readFileSync } from "node:fs";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { configuredModel, runToken, testAssetPath } from "../../infra/automation/d4/runner/runtime-config";
@@ -34,12 +35,19 @@ journey("PW-MODEL-02", async (context) => {
       },
       async () => {
         await loginCurrent(page, "tenant_a_admin");
+        const deployment = await page.request.get("/api/tenant_config/deployment_version");
+        if (!deployment.ok()) throw new Error(`deployment info returned ${deployment.status()}`);
+        if ((await deployment.json()).enable_aidp_knowledge === true) {
+          const error = new Error("PW-MODEL-02 requires Local Knowledge; the deployed UI is configured for AIDP");
+          error.name = "DependencyFailure";
+          throw error;
+        }
         await knowledge.open(false);
-        expect(await page.getByText(/DataMate配置/).count()).toBeGreaterThanOrEqual(0);
         return "the current /knowledges local Nexent branch is reachable by the tenant administrator";
       },
       async () => {
         expect(alpha.endsWith("alpha-nx-92831.txt")).toBeTruthy();
+        expect(readFileSync(alpha, "utf8")).toContain(marker);
         return `fixed alpha corpus is resolved locally and declares marker ${marker}`;
       },
     ],
@@ -75,11 +83,12 @@ journey("PW-MODEL-02", async (context) => {
       },
       async () => {
         await knowledge.open();
-        const created = await knowledge.createByUpload(knowledgeName, modelName, alpha);
-        createdKnowledgeId = created.id;
-        registerReadyAsset("knowledge", "d4_model02_id", created.id, "PW-MODEL-02", {
-          service: "config", identity: "tenant_a_admin", method: "DELETE",
-          path: `/indices/${encodeURIComponent(created.id)}`, allowed_statuses: [200, 404],
+        const created = await knowledge.createByUpload(knowledgeName, modelName, alpha, (id) => {
+          createdKnowledgeId = id;
+          registerReadyAsset("knowledge", "d4_model02_id", id, "PW-MODEL-02", {
+            service: "config", identity: "tenant_a_admin", method: "DELETE",
+            path: `/indices/${encodeURIComponent(id)}`, allowed_statuses: [200, 404],
+          });
         });
         registerReadyAsset("knowledge", "d4_model02_name", knowledgeName, "PW-MODEL-02");
         return `created Local KB ${knowledgeName} with the target embedding and submitted alpha for processing`;

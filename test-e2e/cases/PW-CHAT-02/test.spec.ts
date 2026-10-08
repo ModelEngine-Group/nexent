@@ -20,9 +20,10 @@ journey("PW-CHAT-02", async (context) => {
   let noToolAnswer = "";
   let completedToolCount = 0;
   let wireAfterTool = 0;
+  let conversationId: number | undefined;
 
   contract.deferCleanup(async () => {
-    if (await chat.activeThread().count()) await chat.deleteActiveThread();
+    if (conversationId) await chat.deleteConversationById(conversationId);
   });
 
   await executeFixedScenario(context, {
@@ -52,9 +53,9 @@ journey("PW-CHAT-02", async (context) => {
         return `entered an explicit ${toolName} request`;
       },
       async () => {
-        const before = await chat.assistantMessages().count();
-        await page.getByRole("button", { name: "发送", exact: true }).click();
-        await expect(chat.assistantMessages()).toHaveCount(before + 1, { timeout: 120_000 });
+        const prompt = await page.getByPlaceholder("发送消息...").inputValue();
+        await chat.startMessage(prompt);
+        conversationId = chat.currentConversationId();
         return "sent the request and observed the real streaming turn start";
       },
       async () => {
@@ -69,7 +70,7 @@ journey("PW-CHAT-02", async (context) => {
         if ((await trigger.getAttribute("data-state")) === "closed") await trigger.click();
         const completedTool = page.getByRole("button", { name: new RegExp(`(?:Used tool:|已使用工具[:：]?)\\s*${toolName}`) }).last();
         await expect(completedTool).toBeVisible();
-        toolAnswer = (await chat.assistantMessages().last().innerText()).trim();
+        toolAnswer = await chat.messageText(chat.assistantMessages().last());
         return "tool execution reached complete state and the assistant produced its final answer";
       },
       async () => {
@@ -87,7 +88,7 @@ journey("PW-CHAT-02", async (context) => {
         completedToolCount = await page.getByRole("button", { name: toolLabel }).count();
         wireAfterTool = readFileSync(wirePath, "utf8").length;
         const response = await chat.sendAndWait(`不要调用任何工具，只回复：${noToolMarker}`);
-        noToolAnswer = (await response.innerText()).trim();
+        noToolAnswer = await chat.messageText(response);
         expect(noToolAnswer).toContain(noToolMarker);
         await expect(page.getByRole("button", { name: toolLabel })).toHaveCount(completedToolCount);
         expect(readFileSync(wirePath, "utf8").slice(wireAfterTool)).not.toContain('\"tool\": \"' + toolName + '\"');

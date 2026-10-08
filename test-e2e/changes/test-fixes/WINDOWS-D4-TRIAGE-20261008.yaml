@@ -1,0 +1,156 @@
+schema_version: '1.0'
+change:
+  change_id: WINDOWS-D4-TRIAGE-20261008
+  change_type: test-fix
+  title: Repair D4 current UI slot and tab navigation
+  description: Select model slots through the product label-associated trigger ID;
+    do not depend on the removed model-card CSS layout. Open Tools and Skills as
+    a tab and assert its selected state, not as a collapsible configuration section.
+    Preserve real provider calls, persisted binding assertions, owned-resource cleanup
+    and failure-only screenshots and traces. Use the model library row edit entry.
+    Check the deployed Local Knowledge capability and the actual fixed corpus before
+    running the embedding journey. Follow the current local knowledge create dialog
+    and explicit submit action; register the new knowledge base before processing can
+    fail. No product code changes. The user authorized switching only the Windows
+    deployment knowledge mode to Local, with its original environment backed up.
+    Prepare the controlled MCP service for the Tool and Skill case; return to the
+    Agent list before creating its second Draft. Scope repeated Debug marker matches
+    and count Compare history per column instead of taking global DOM indices.
+    Use current SkillSpace search, create and ResourceCard entries, and register
+    owned Skill cleanup immediately after creation, independently of other cases.
+    Assert markers in rendered answer Markdown, not exact whole-text elements or
+    reasoning/tool panels. On closing Compare, scope the composer to the visible
+    Debug panel. Follow the Skill listing menu and review list items; choose an
+    isolated copy name and register its cleanup before later UI assertions. Match
+    Ant two-character button labels with optional spacing. Capture failing UI
+    screenshots before cleanup navigates away or deletes the resource.
+    Configure the Skill journey's Agent with the required runnable Basic fields.
+    Locate review applications through the current paginated UI, which has no search
+    field. Reuse the existing author session during cleanup rather than attempting
+    a second sign-in while already authenticated.
+    Follow the owned Agent list card export menu and return to the list for import.
+    Register imported IDs from the import response before UI checks, not from a
+    legacy URL query parameter. Check real MCP health response and the owned card
+    connection status, and accept Ant spacing in its enable button.
+    Assert imported Agent names through current editor input values. Compare
+    multi-Agent card display names with configured display names, not internal
+    runtime variables; retain the server conversation ID for failure cleanup.
+    Bind the existing STT WAV and browser fake-audio keys in the controller's
+    case-local prepared environment; fail on missing audio or conflicting overrides.
+    Locate the configured multimodal model in the current model library and do
+    not hardcode a provider model name in the VLM journey.
+    Wait for the complete STT marker in the Composer before stopping capture,
+    independently of the already-arrived wire frame. Scope New Chat to the Plus
+    action, not a history item with that title. Select the default-resource tag
+    library and its definition using localized labels, then verify persisted value IDs.
+    Use normal keyboard tag selection while independently recording the nested
+    popup pointer obstruction as a product defect; never force-click it. Persist
+    received STT frames on a Composer sync timeout and classify this as a product
+    failure only after the wire's complete marker was independently verified.
+    Select the Knowledge Scope ResourceCard through its named option and selected
+    state, not the removed mode radio. Register Chat conversation IDs before
+    response assertions and planning waits. Match spaced Evaluation upload/confirm
+    buttons and register run-owned set/label cleanup before any creation.
+    Bind and read back the Scope Agent's built-in knowledge retrieval tool in
+    addition to require_metadata. Correct the static Evaluation Excel answer
+    header from unsupported expected to answer while preserving its marker.
+    Derive repository request matching independently of responsive page size.
+    Read Chat answer Markdown separately from reasoning and tool outputs and
+    register each conversation before later assertions for failure cleanup.
+    Filter Knowledge selection by name and assert aria-selected. Match literal
+    escaped-newline label placeholders. Resume the owned Agent editor after
+    publishing and verify current_version through a read-only request rather
+    than waiting for a removed frontend request. Prepare a published evaluator
+    with query/expected/actual mappings. Follow the current Create Evaluation
+    cards, separate trial result modal, localized states and owned run ID.
+    Search virtualized evaluator options before selection. Bind Evaluation Set
+    and label cleanup to creation-response IDs in the controller registry and
+    accept the real default Ant OK button. Do not rename a conversation merely
+    to navigate the Scope journey; rename remains independently tested. Resolve
+    resource tenant names from configured identities and the authoritative list.
+    Follow Agent Repository ResourceCards, current Mine tab and tag metadata,
+    and capture copied ownership before UI assertions. Require external Memory
+    and Container assets inside preconditions and report missing dependencies
+    instead of automation errors. The current NL2Agent entry is editor-only.
+    Observe visible reasoning/answer growth only for the in-progress Stop case,
+    without treating reasoning as the final answer in other cases. Require
+    Knowledge selection reset/restoration and Agent listing removal explicitly;
+    never silently skip the take-down business step.
+    Restore the evaluator after switching Evaluation modes, confirm selected
+    state and the actual trial request, and inspect the visible scoring cell
+    rather than an SVG title. Reopen Scope by the server conversation ID when
+    generated titles are duplicated; keep reset and restoration assertions.
+    Match each Chat response to its submitted query and wait for owned terminal
+    message persistence after Stop before continuing or refreshing. Retain
+    content-free history status/marker evidence before owned cleanup to distinguish
+    a backend answer failure from an assistant DOM restoration problem.
+  affected_features:
+    existing:
+    - V5-PW-MODEL-01
+    - V5-PW-MODEL-02
+    - V5-PW-AGENT-03
+    - V5-PW-KB-LOCAL-01
+    - V5-PW-AGENT-02
+    - V5-PW-PROMPT-02
+    - V5-PW-SKILL-01
+    - V5-PW-SKILL-02
+    - V5-PW-AGENT-IMPORT-01
+    - V5-PW-MCP-REMOTE-01
+    - V5-PW-MCP-MARKET-01
+    - V5-PW-MCP-API-01
+    - V5-PW-MCP-CONTAINER-01
+    - V5-PW-CHAT-04
+    - V5-PW-MEDIA-STT-01
+    - V5-PW-MEDIA-VLM-01
+    - V5-PW-CHAT-01
+    - V5-PW-CHAT-05
+    - V5-PW-CHAT-03
+    - V5-PW-EVAL-SET-01
+    - V5-PW-CHAT-02
+    - V5-PW-AUTO-37453582F1CFB11D
+    - V5-PW-VERSION-01
+    - V5-PW-EVAL-RUN-01
+    - V5-PW-CHART-01
+    - V5-PW-RESOURCE-04
+    - V5-PW-MARKET-AGENT-01
+    - V5-PW-NL2AGENT-01
+    - V5-PW-MEMORY-PROVIDER-01
+    - V5-PW-RESOURCE-APIKEY-01
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - PW-MODEL-01
+    - PW-MODEL-02
+    - PW-AGENT-03
+    - PW-KB-LOCAL-01
+    - PW-AGENT-02
+    - PW-PROMPT-02
+    - PW-SKILL-01
+    - PW-SKILL-02
+    - PW-AGENT-IMPORT-01
+    - PW-MCP-REMOTE-01
+    - PW-MCP-MARKET-01
+    - PW-MCP-API-01
+    - PW-MCP-CONTAINER-01
+    - PW-CHAT-04
+    - PW-MEDIA-STT-01
+    - PW-MEDIA-VLM-01
+    - PW-CHAT-01
+    - PW-CHAT-05
+    - PW-CHAT-03
+    - PW-EVAL-SET-01
+    - PW-CHAT-02
+    - PW-AUTO-37453582F1CFB11D
+    - PW-VERSION-01
+    - PW-EVAL-RUN-01
+    - PW-CHART-01
+    - PW-RESOURCE-04
+    - PW-MARKET-AGENT-01
+    - PW-NL2AGENT-01
+    - PW-MEMORY-PROVIDER-01
+    - PW-RESOURCE-APIKEY-01
+    retired: []

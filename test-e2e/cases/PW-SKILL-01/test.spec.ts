@@ -22,14 +22,20 @@ journey("PW-SKILL-01", async (context) => {
     preconditions:[async()=>"the test creates a valid run-scoped SKILL.md",async()=>"real LLM model is configured"],
     steps:[
       async()=>{await loginCurrent(page,authorIdentity);await skills.open();return`opened SkillSpace Mine as the configured market author ${authorIdentity}`;},
-      async()=>{await skills.upload(name,marker);return"uploaded a valid run-scoped SKILL.md";},
+      async()=>{await skills.upload(name,marker,()=>registerReadyAsset("skills","d4_created_name",name,"PW-SKILL-01",{
+        service:"config",identity:authorIdentity,method:"DELETE",path:`/skills/${encodeURIComponent(name)}`,allowed_statuses:[200,404],
+      }));return"uploaded a valid run-scoped SKILL.md and registered owned cleanup";},
       async()=>{await skills.search(name);await skills.edit(name,marker);return"edited an allowed field and saved";},
-      async()=>{await skills.open();await skills.search(name);await expect(skills.card(name)).toBeVisible();registerReadyAsset("skills","d4_created_name",name,"PW-SKILL-01");return"refresh proved Mine persistence";},
-      async()=>{await agents.open();agentId=await agents.create(`Skill Agent ${token}`,`skill_agent_${token}`);const modelName=configuredModel("llm").displayName;await agents.selectModel(modelName);return`created isolated Agent with exact configured LLM ${modelName}`;},
+      async()=>{await skills.open();await skills.search(name);await expect(skills.card(name)).toBeVisible();return"refresh proved Mine persistence";},
+      async()=>{await agents.open();agentId=await agents.create(`Skill Agent ${token}`,`skill_agent_${token}`);const modelName=configuredModel("llm").displayName;await agents.selectModel(modelName);
+        await agents.setDescription(`Skill runtime validation ${token}`);
+        await agents.ensureAuthor();
+        await agents.setPrompts({duty:"根据已绑定技能的指导回答；需要时读取技能内容，不要猜测技能要求。"});
+        return`created a runnable isolated Agent with exact configured LLM ${modelName}, author, description and role Prompt`;},
       async()=>{await agents.bindSkill(name);return"bound exact Skill and waited for autosave";},
       async()=>{await agents.openDebug();await agents.sendDebug(`使用 ${name}，只回复 ${marker}`,marker);return"real model Debug completed";},
       async()=>{await expect(page.locator("body")).toContainText(marker);return"rendered answer contained deterministic Skill marker";},
-      async()=>"registered cleanup will remove the Skill after the market journey consumes it",
+      async()=>"case-local cleanup will remove this owned Skill; the market journey prepares its own asset independently",
     ],
     assertions:[async()=>{await skills.open();await skills.search(name);await expect(skills.card(name)).toBeVisible();return"Skill was really created/edited and survived refresh";},async()=>"Agent binding autosave and Debug both completed",async()=>"malicious archive handling remains assigned to D5"],
   });

@@ -28,7 +28,7 @@ case:
     action: 等待多个Agent执行卡片/步骤出现。
     expected: 刷新恢复。
   - order: 4
-    action: 确认卡片名称与配置协作Agent对应。
+    action: 确认卡片展示名与配置协作Agent的display name对应，不以内部runtime变量名代替展示名。
     expected: 真实并行由timestamp/trace判断。
   - order: 5
     action: 等待正常场景完成，各卡片进入终态且主回答出现。
@@ -54,7 +54,7 @@ case:
   - 选择多Agent主Agent。
   - 发送触发多个协作Agent的固定任务。
   - 等待多个Agent执行卡片/步骤出现。
-  - 确认卡片名称与配置协作Agent对应。
+  - 确认卡片展示名与配置协作Agent的display name对应，不以内部runtime变量名代替展示名。
   - 等待正常场景完成，各卡片进入终态且主回答出现。
   - 执行一个受控部分失败场景，观察失败卡片与成功卡片同时保留。
   - 刷新会话确认终态展示恢复。

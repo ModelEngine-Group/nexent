@@ -60,22 +60,18 @@ def configured_model(model_type: str) -> dict:
 async def model_id(model_type: str, identity) -> int:
     """Use only the configured model name/type within the authenticated tenant."""
     from shared.model_selection import select_configured_model
+    from shared.model_catalog import load_model_catalog
     model = configured_model(model_type)
-    async with client("config", token=identity.access_token) as api:
-        response = await api.get("/model/list")
-        selected_response = await api.get("/config/load_config")
-    assert_status(response, 200)
-    body = response.json()
-    rows = body if isinstance(body, list) else body.get("data") or body.get("models") or []
+    rows, selected_config, reader = await load_model_catalog(identity)
     selected_id = None
-    if selected_response.status_code == 200:
-        selected = ((selected_response.json().get('config') or {}).get('models') or {}).get(
+    if selected_config:
+        selected = ((selected_config.get('config') or {}).get('models') or {}).get(
             {'multi_embedding':'multiEmbedding'}.get(model_type,model_type)) or {}
         selected_id = selected.get('id') or selected.get('model_id')
     numeric = select_configured_model(model, model_type, rows, selected_id=selected_id)
     from shared.model_health import ensure_model_health
     row = next(row for row in rows if int(row.get('model_id') or row.get('id') or 0) == numeric)
-    await ensure_model_health(identity, model, row)
+    await ensure_model_health(reader, model, row)
     return numeric
 
 

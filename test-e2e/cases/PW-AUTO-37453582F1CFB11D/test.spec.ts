@@ -1,275 +1,197 @@
-import type { Page } from 'playwright/test';
-import { journey } from '../../infra/automation/d4/runner/journey';
-import { executeFixedScenario } from '../../infra/automation/d4/runner/scenario';
-import { loginCurrent } from '../../infra/automation/d4/runner/sessions';
-import { appPath } from '../../infra/automation/d4/runner/runtime-config';
+import { journey } from "../../infra/automation/d4/runner/journey";
+import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
+import { loginCurrent, loginIsolated } from "../../infra/automation/d4/runner/sessions";
+import { appPath, runToken } from "../../infra/automation/d4/runner/runtime-config";
+import { registerReadyAsset } from "../../infra/automation/d4/runner/assets";
+import { SkillPage } from "../../infra/automation/d4/pages/skill.page";
 
-const CASE_ID = 'PW-AUTO-37453582F1CFB11D';
-const REPOSITORY_TAB = '仓库';
-const MINE_TAB = '我的 Skill';
-const SEARCH_PLACEHOLDER = '搜索 Skill 名称、描述或标签';
-const DETAIL_LABEL = '详情';
-const COPY_LABEL = '复制';
-const COPY_MODAL_TITLE = '复制为我的 Skill';
-const NAME_PLACEHOLDER = '请输入 Skill 名称';
-const TAG_FILTER_BUTTON = '标签筛选';
-const NO_TAG_DEFINITIONS = '暂无启用的标签定义';
-const DUPLICATE_TEXT = /当前租户已存在同名 Skill/;
-const SUCCESS_TEXT = /Skill 已复制为|Skill 复制成功/;
-const SUMMARY_TEXT = /个 Skill/;
+const ID = "PW-AUTO-37453582F1CFB11D";
+const SEARCH = "搜索 Skill 名称、描述或标签";
 
-interface Listing {
-  skill_repository_id: number;
-  name: string;
-  description?: string | null;
-  tags?: string[];
-}
-
-interface ListResponse {
-  items?: Listing[];
-  pagination?: { total?: number };
-}
-
-function repositoryCard(page: Page, name: string) {
-  return page.getByRole('heading', { name, exact: true }).locator('xpath=ancestor::article[1]');
-}
-
-function extractCount(text: string): number {
-  const idx = text.indexOf('个 Skill');
-  if (idx === -1) return Number.NaN;
-  const matches = text.slice(0, idx).match(/[0-9]+/g);
-  if (!matches) return Number.NaN;
-  return Number(matches[matches.length - 1]);
-}
-
-async function waitForRepositoryList(page: Page): Promise<ListResponse> {
-  const response = await page.waitForResponse(
-    (candidate) =>
-      candidate.request().method() === 'GET' &&
-      candidate.url().split('?')[0].endsWith('/repository/skill') &&
-      candidate.url().includes('page_size=6'),
-    { timeout: 120000 },
-  );
-  return (await response.json()) as ListResponse;
-}
-
-async function deleteSkillInMine(page: Page, name: string): Promise<void> {
-  await page.getByRole('tab', { name: MINE_TAB }).click();
-  await page.getByPlaceholder(SEARCH_PLACEHOLDER).fill(name);
-  const card = repositoryCard(page, name);
-  try {
-    await card.first().waitFor({ state: 'visible', timeout: 15000 });
-  } catch {
-    return;
-  }
-  await card.getByRole('button', { name: '更多操作' }).click();
-  await page.getByRole('menuitem', { name: '删除', exact: true }).click();
-  const confirm = page.getByRole('dialog').filter({ hasText: name });
-  await confirm.getByRole('button', { name: '删除', exact: true }).click();
-}
-
-journey("PW-AUTO-37453582F1CFB11D", async ({ page, contract, expect }) => {
-  let listResponse: ListResponse = { items: [], pagination: { total: 0 } };
-  let listings: Listing[] = [];
-  let copySource: Listing;
-  let conflictName = '';
-  let copiedName = '';
-
-  let defaultTabIsRepository = false;
-  let summaryText = '';
-  let initialTotal = 0;
-  let searchRequestUrl = '';
-  let searchItemNames: string[] = [];
-  let tagFilterApplied = false;
-  let tagFilterDowngraded = false;
-  let tagPredicatesRequestUrl = '';
-  let filteredItemNames: string[] = [];
-  let detailName = '';
-  let detailHasDescription = false;
-  let detailTagSection = false;
-  let copyModalOpened = false;
+journey(ID, async (context) => {
+  const { page, contract, expect } = context;
+  const token = runToken(ID);
+  const prefix = `d4-repo-${token}`;
+  const source = `${prefix}-a`;
+  const second = `${prefix}-b`;
+  const conflict = `d4-existing-${token}`;
+  const copy = `d4-copy-${token}`;
+  const tagName = `d4-tag-${token}`;
+  const tagValue = `d4-value-${token}`;
+  const skills = new SkillPage(page);
+  let reviewer: Awaited<ReturnType<typeof loginIsolated>> | undefined;
+  let bucketId = 0;
+  let definitionId = 0;
+  let valueId = 0;
+  let sourceId = 0;
+  const owned = new Set<string>();
+  let total = 0;
   let conflictStatus = 0;
-  let conflictTextVisible = false;
-  let successAbsentOnConflict = false;
-  let successStatus = 0;
-  let successVisible = false;
-  let copyFoundInMine = false;
+  let installedStatus = 0;
+  let filtered: any[] = [];
+  let predicates: any[] = [];
+  const searchBox = () => page.getByPlaceholder(SEARCH, { exact: true }).locator("visible=true");
+  const card = (name: string) => skills.card(name).locator("visible=true");
+  const repositoryResponse = (predicate: (url: URL) => boolean = () => true) => page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET" && url.pathname.endsWith("/repository/skill") &&
+      url.searchParams.get("status") === "shared" && predicate(url);
+  });
+  const registerSkill = (name: string) => {
+    owned.add(name);
+    registerReadyAsset("skills", `repository_${name}`, name, ID, {
+      service: "config", identity: "tenant_a_dev", method: "DELETE",
+      path: `/skills/${encodeURIComponent(name)}`, allowed_statuses: [200, 404],
+    });
+  };
+  contract.deferCleanup(async () => {
+    try {
+      if (sourceId && reviewer) {
+        const cleared = await reviewer.page.request.put(`/api/tag-libraries/assignments/skill/${sourceId}`, { data: { value_ids: [] } });
+        if (![200, 404].includes(cleared.status())) throw new Error(`owned tag assignment cleanup returned ${cleared.status()}`);
+      }
+      for (const name of owned) {
+        const deleted = await page.request.delete(`/api/skills/${encodeURIComponent(name)}`);
+        if (![200, 404].includes(deleted.status())) throw new Error(`owned Skill cleanup returned ${deleted.status()}`);
+      }
+      if (reviewer) for (const path of [
+        valueId ? `/api/tag-libraries/${bucketId}/definitions/${definitionId}/values/${valueId}` : "",
+        definitionId ? `/api/tag-libraries/${bucketId}/definitions/${definitionId}` : "",
+      ].filter(Boolean)) {
+        const response = await reviewer.page.request.delete(path);
+        if (![200, 404].includes(response.status())) throw new Error(`owned tag cleanup returned ${response.status()}`);
+      }
+    } finally { await reviewer?.context.close(); }
+  });
 
-  await executeFixedScenario({ page, contract, expect }, {
-    preconditions: [
-      async () => {
-        await loginCurrent(page, 'tenant_a_dev');
-        const promise = waitForRepositoryList(page);
-        await page.goto(appPath('/skill-space'), { waitUntil: 'domcontentloaded' });
-        listResponse = await promise;
-        listings = listResponse.items ?? [];
-        if (listings.length < 2) {
-          throw new Error(`shared repository requires at least 2 listings, found ${listings.length}`);
-        }
-        copySource = listings[0];
-        const conflict = listings.find((item) => item.name !== copySource.name);
-        if (!conflict) {
-          throw new Error('no second distinct listing name available for the rename-conflict check');
-        }
-        conflictName = conflict.name;
-        copiedName = `d4-copy-${Date.now()}`;
-        initialTotal = listResponse.pagination?.total ?? 0;
-      },
-    ],
+  await executeFixedScenario(context, {
+    preconditions: [async () => {
+      await loginCurrent(page, "tenant_a_dev");
+      for (const name of [source, second, conflict]) {
+        await skills.open();
+        await skills.upload(name, token, () => registerSkill(name));
+      }
+      reviewer = await loginIsolated(page, "tenant_a_admin");
+      const libraries = await reviewer.page.request.get("/api/tag-libraries");
+      expect(libraries.ok()).toBe(true);
+      const bucket = (await libraries.json()).find((item: any) => item.bucket_key === "default_resource" && item.status === "active");
+      expect(bucket).toBeTruthy(); bucketId = bucket.bucket_id;
+      const created = await reviewer.page.request.post(`/api/tag-libraries/${bucketId}/definitions`, { data: {
+        definition_key: `d4_${token}`, definition_name: tagName,
+        selection_mode: "single_select", initial_values: [tagValue],
+      } });
+      expect(created.ok()).toBe(true);
+      const definition = await created.json(); definitionId = definition.definition_id;
+      registerReadyAsset("tags", "repository_definition", String(definitionId), ID, {
+        service: "config", identity: "tenant_a_admin", method: "DELETE",
+        path: `/tag-libraries/${bucketId}/definitions/${definitionId}`, allowed_statuses: [200, 404],
+      });
+      const definitions = await reviewer.page.request.get(`/api/tag-libraries/${bucketId}/definitions`);
+      expect(definitions.ok()).toBe(true);
+      const detail = (await definitions.json()).find((item: any) => item.definition_id === definitionId);
+      expect(detail.values).toHaveLength(1); valueId = detail.values[0].value_id;
+      registerReadyAsset("tags", "repository_value", String(valueId), ID, {
+        service: "config", identity: "tenant_a_admin", method: "DELETE",
+        path: `/tag-libraries/${bucketId}/definitions/${definitionId}/values/${valueId}`, allowed_statuses: [200, 404],
+      });
+      const inventory = await page.request.get("/api/skills"); expect(inventory.ok()).toBe(true);
+      const original = (await inventory.json()).skills.filter((item: any) => item.name === source);
+      expect(original).toHaveLength(1); sourceId = Number(original[0].skill_id);
+      const assigned = await reviewer.page.request.put(`/api/tag-libraries/assignments/skill/${sourceId}`, { data: { value_ids: [valueId] } });
+      expect(assigned.ok()).toBe(true);
+      expect((await assigned.json()).assignments.some((item: any) => item.value_id === valueId)).toBe(true);
+      registerReadyAsset("tags", "repository_assignment", String(sourceId), ID, {
+        service: "config", identity: "tenant_a_admin", method: "PUT",
+        path: `/tag-libraries/assignments/skill/${sourceId}`, json: { value_ids: [] }, allowed_statuses: [200, 404],
+      });
+      for (const name of [source, second]) {
+        await skills.open(); await skills.search(name); await skills.apply(name);
+        await new SkillPage(reviewer.page).approve(name);
+      }
+      const waiting = repositoryResponse();
+      await page.goto(appPath("/skill-space"));
+      const response = await waiting; expect(response.ok()).toBe(true);
+      total = (await response.json()).pagination.total;
+      expect(total).toBeGreaterThanOrEqual(2);
+      return "prepared two owned shared listings, one uniquely controlled tag and a proven existing local conflict name; all IDs registered for cleanup";
+    }],
     steps: [
+      async () => { await expect(page.getByRole("tab", { name: /^仓库/ })).toHaveAttribute("data-state", "active"); return "fresh route selected Repository by default"; },
       async () => {
-        const tab = page.getByRole('tab', { name: REPOSITORY_TAB });
-        await expect(tab).toBeVisible();
-        defaultTabIsRepository = (await tab.getAttribute('data-state')) === 'active';
+        await expect(page.getByRole("tab", { name: /^仓库/ })).toContainText(total.toLocaleString());
+        await expect(card(source)).toBeVisible(); await expect(card(second)).toBeVisible();
+        return "repository count badge matches unfiltered API pagination total and both prepared cards render";
       },
       async () => {
-        const summary = page.getByText(SUMMARY_TEXT).first();
-        await expect(summary).toBeVisible();
-        summaryText = (await summary.innerText()).trim();
-        await expect(page.locator('article').first()).toBeVisible();
+        const waiting = repositoryResponse((url) => url.searchParams.get("search") === prefix);
+        await searchBox().fill(prefix); const response = await waiting;
+        expect(response.ok()).toBe(true); const items = (await response.json()).items;
+        expect(items.map((item: any) => item.name).sort()).toEqual([source, second].sort());
+        await expect(card(source)).toBeVisible(); await expect(card(second)).toBeVisible();
+        return "keyword search returned exactly the two owned listings, not arbitrary shared records";
       },
       async () => {
-        const requestPromise = page.waitForResponse(
-          (candidate) =>
-            candidate.request().method() === 'GET' &&
-            candidate.url().split('?')[0].endsWith('/repository/skill') &&
-            candidate.url().includes('search='),
-        );
-        await page.getByPlaceholder(SEARCH_PLACEHOLDER).fill(copySource.name);
-        const response = await requestPromise;
-        searchRequestUrl = response.url();
-        const payload = (await response.json()) as ListResponse;
-        searchItemNames = (payload.items ?? []).map((item) => item.name);
+        await page.getByRole("button", { name: "标签筛选", exact: true }).click();
+        const popup = page.locator(".ant-popover:visible");
+        await popup.getByRole("combobox").first().click();
+        await page.locator(".ant-select-item-option:visible").filter({ hasText: tagName }).click();
+        const waiting = repositoryResponse((url) => Boolean(url.searchParams.get("tag_predicates")));
+        await popup.getByRole("combobox").last().click();
+        await page.locator(".ant-select-item-option:visible").filter({ hasText: tagValue }).click();
+        const response = await waiting; expect(response.ok()).toBe(true);
+        predicates = JSON.parse(new URL(response.url()).searchParams.get("tag_predicates")!);
+        filtered = (await response.json()).items;
+        expect(predicates).toEqual([{ definition_id: definitionId, value_ids: [valueId] }]);
+        expect(filtered.map((item) => item.name)).toEqual([source]);
+        expect(filtered[0].tags).toContain(tagValue);
+        await page.getByRole("button", { name: "标签筛选", exact: true }).click();
+        await expect(card(second)).toHaveCount(0);
+        return "exact controlled tag_predicates filtered to the tagged source, with no downgrade when tags are missing";
       },
       async () => {
-        await page.getByRole('button', { name: TAG_FILTER_BUTTON, exact: true }).click();
-        if ((await page.getByText(NO_TAG_DEFINITIONS).count()) > 0) {
-          tagFilterDowngraded = true;
-          await page.keyboard.press('Escape');
-          return;
-        }
-        await page.getByRole('combobox', { name: /筛选/ }).last().click();
-        const option = page.getByRole('option').first();
-        try {
-          await option.waitFor({ state: 'visible', timeout: 5000 });
-        } catch {
-          tagFilterDowngraded = true;
-          await page.keyboard.press('Escape');
-          return;
-        }
-        const requestPromise = page.waitForResponse(
-          (candidate) =>
-            candidate.request().method() === 'GET' &&
-            candidate.url().split('?')[0].endsWith('/repository/skill') &&
-            candidate.url().includes('tag_predicates='),
-        );
-        await option.click();
-        const response = await requestPromise;
-        tagPredicatesRequestUrl = response.url();
-        const payload = (await response.json()) as ListResponse;
-        filteredItemNames = (payload.items ?? []).map((item) => item.name);
-        tagFilterApplied = true;
+        await page.getByRole("button", { name: source, exact: true }).locator("visible=true").click();
+        const dialog = page.locator(".skill-detail-modal:visible");
+        await expect(dialog.getByRole("heading", { name: source, exact: true })).toBeVisible();
+        await expect(dialog).toContainText(`deterministic D4 skill ${token}`);
+        await expect(dialog).toContainText(tagValue);
+        return "current ResourceDetail shows the owned listing name, description and controlled tag";
       },
       async () => {
-        await repositoryCard(page, copySource.name).getByRole('button', { name: DETAIL_LABEL, exact: true }).click();
-        const dialog = page.locator('.skill-repository-detail-modal');
-        await expect(dialog).toBeVisible();
-        detailName = (await dialog.locator('h2').innerText()).trim();
-        detailHasDescription = copySource.description
-          ? (await dialog.getByText(copySource.description).count()) > 0
-          : (await dialog.getByText('暂无描述').count()) > 0;
-        detailTagSection = (await dialog.getByText('标签', { exact: true }).count()) > 0;
+        await page.locator(".skill-detail-modal:visible .ant-modal-close").click();
+        await card(source).getByRole("button", { name: /^复\s*制$/ }).click();
+        await expect(page.getByRole("dialog", { name: "复制为我的 Skill", exact: true })).toBeVisible();
+        return "opened copy/rename dialog from the real ResourceCard footer";
       },
       async () => {
-        const dialog = page.locator('.skill-repository-detail-modal');
-        await dialog.locator('.ant-modal-close').click();
-        await expect(dialog).toBeHidden();
-        await repositoryCard(page, copySource.name).getByRole('button', { name: COPY_LABEL, exact: true }).click();
-        const copyModal = page.getByRole('dialog').filter({ hasText: COPY_MODAL_TITLE });
-        await expect(copyModal).toBeVisible();
-        copyModalOpened = true;
+        const modal = page.getByRole("dialog", { name: "复制为我的 Skill", exact: true });
+        await modal.getByPlaceholder("请输入 Skill 名称").fill(conflict);
+        const waiting = page.waitForResponse((r) => r.request().method() === "POST" && /\/repository\/skill\/\d+\/install$/.test(new URL(r.url()).pathname));
+        const [response] = await Promise.all([waiting, modal.getByRole("button", { name: /^复\s*制$/ }).click()]);
+        conflictStatus = response.status(); expect(conflictStatus).toBe(409);
+        expect((await response.json()).message.type).toBe("skill_duplicate");
+        await expect(modal).toContainText(/当前租户已存在同名 Skill/);
+        await expect(modal).toBeVisible();
+        return "proven local name conflict returned 409/skill_duplicate and no success navigation";
       },
       async () => {
-        const copyModal = page.getByRole('dialog').filter({ hasText: COPY_MODAL_TITLE });
-        await copyModal.getByPlaceholder(NAME_PLACEHOLDER).fill(conflictName);
-        const installPromise = page.waitForResponse(
-          (candidate) =>
-            candidate.request().method() === 'POST' &&
-            candidate.url().split('?')[0].endsWith('/install') &&
-            candidate.url().includes('/repository/skill/'),
-        );
-        await copyModal.getByRole('button', { name: COPY_LABEL, exact: true }).click();
-        const response = await installPromise;
-        conflictStatus = response.status();
-        conflictTextVisible = (await page.getByText(DUPLICATE_TEXT).count()) > 0;
-        successAbsentOnConflict = (await page.getByText(SUCCESS_TEXT).count()) === 0;
-      },
-      async () => {
-        const copyModal = page.getByRole('dialog').filter({ hasText: COPY_MODAL_TITLE });
-        await copyModal.getByPlaceholder(NAME_PLACEHOLDER).fill(copiedName);
-        const installPromise = page.waitForResponse(
-          (candidate) =>
-            candidate.request().method() === 'POST' &&
-            candidate.url().split('?')[0].endsWith('/install') &&
-            candidate.url().includes('/repository/skill/'),
-        );
-        await copyModal.getByRole('button', { name: COPY_LABEL, exact: true }).click();
-        const response = await installPromise;
-        successStatus = response.status();
-        await expect(page.getByText(SUCCESS_TEXT)).toBeVisible({ timeout: 120000 });
-        successVisible = true;
-        await copyModal.waitFor({ state: 'hidden' });
-        await page.getByRole('tab', { name: MINE_TAB }).click();
-        await page.getByPlaceholder(SEARCH_PLACEHOLDER).fill(copiedName);
-        try {
-          await repositoryCard(page, copiedName).first().waitFor({ state: 'visible', timeout: 15000 });
-          copyFoundInMine = true;
-        } catch {
-          copyFoundInMine = false;
-        }
-        contract.deferCleanup(async () => {
-          await deleteSkillInMine(page, copiedName);
-        });
+        const modal = page.getByRole("dialog", { name: "复制为我的 Skill", exact: true });
+        await modal.getByPlaceholder("请输入 Skill 名称").fill(copy);
+        const waiting = page.waitForResponse((r) => r.request().method() === "POST" && /\/repository\/skill\/\d+\/install$/.test(new URL(r.url()).pathname));
+        const [response] = await Promise.all([waiting, modal.getByRole("button", { name: /^复\s*制$/ }).click()]);
+        installedStatus = response.status(); expect(response.ok()).toBe(true); registerSkill(copy);
+        await expect(page.getByText(/Skill 已复制为|Skill 复制成功/)).toBeVisible();
+        await expect(modal).toBeHidden(); await skills.open(); await skills.search(copy);
+        await expect(card(copy)).toBeVisible();
+        return "unique rename copied successfully and Mine contains the independently owned copy";
       },
     ],
     assertions: [
-      async () => {
-        expect(defaultTabIsRepository).toBe(true);
-        expect(initialTotal).toBeGreaterThanOrEqual(2);
-        expect(extractCount(summaryText)).toBe(initialTotal);
-      },
-      async () => {
-        expect(searchRequestUrl).toContain('search=');
-        for (const name of searchItemNames) {
-          expect(name.toLowerCase()).toContain(copySource.name.toLowerCase());
-        }
-      },
-      async () => {
-        if (tagFilterDowngraded) {
-          expect(initialTotal).toBeGreaterThanOrEqual(2);
-          return;
-        }
-        expect(tagFilterApplied).toBe(true);
-        expect(tagPredicatesRequestUrl).toContain('tag_predicates=');
-        for (const name of filteredItemNames) {
-          expect(listings.some((item) => item.name === name)).toBe(true);
-        }
-      },
-      async () => {
-        expect(detailName).toBe(copySource.name);
-        expect(detailHasDescription).toBe(true);
-        expect(detailTagSection).toBe(true);
-      },
-      async () => {
-        expect(conflictStatus).toBe(409);
-        expect(conflictTextVisible).toBe(true);
-        expect(successAbsentOnConflict).toBe(true);
-      },
-      async () => {
-        expect(successStatus).toBe(200);
-        expect(successVisible).toBe(true);
-        expect(copyFoundInMine).toBe(true);
-      },
+      async () => { expect(total).toBeGreaterThanOrEqual(2); return "default Repository route/count and prepared grid checked"; },
+      async () => "keyword response and both rendered owned listings matched",
+      async () => { expect(predicates[0].value_ids).toEqual([valueId]); expect(filtered.map((item) => item.name)).toEqual([source]); return "unique tag filter was actually executed"; },
+      async () => "detail displayed name, description and tag",
+      async () => { expect(conflictStatus).toBe(409); return "existing local name was rejected without overwriting it"; },
+      async () => { expect(installedStatus).toBe(200); await expect(card(copy)).toBeVisible(); return "renamed copy visible in Mine; independent IDs/names retained for cleanup"; },
     ],
   });
 });

@@ -7,14 +7,14 @@ import { registerReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { McpPage } from "../../infra/automation/d4/pages/mcp.page";
 import { AgentPage } from "../../infra/automation/d4/pages/agent.page";
 
-const need = (name: string) => { const value = process.env[name] || ""; if (!value) throw new Error(`${name} is required`); return value; };
+const need = (name: string) => { const value = process.env[name] || ""; if (!value) { const error = new Error(`${name} is required from the existing machine configuration`); error.name = "DependencyFailure"; throw error; } return value; };
 
 journey("PW-MCP-CONTAINER-01", async (context) => {
   const { page, expect, contract } = context;
   const token = runToken("PW-MCP-CONTAINER-01");
   const name = `mcp-container-${token}`.slice(0, 20);
-  const config = need("NEXENT_TEST_MCP_CONTAINER_CONFIG");
-  const port = Number(need("NEXENT_TEST_MCP_CONTAINER_PORT"));
+  let config = "";
+  let port = 0;
   const mcp = new McpPage(page);
   let creationAttempted = false;
   contract.deferCleanup(async () => {
@@ -28,8 +28,8 @@ journey("PW-MCP-CONTAINER-01", async (context) => {
   await executeFixedScenario(context, {
     preconditions: [
       async () => { const response = await page.request.get("/api/health"); expect(response.status()).toBeLessThan(500); return "Docker-backed local stack is reachable"; },
-      async () => { JSON.parse(config); return "controlled Test MCP container config is valid JSON"; },
-      async () => { expect(port).toBeGreaterThan(0); expect(port).toBeLessThan(65536); return `reserved port ${port} is configured`;
+      async () => { config = need("NEXENT_TEST_MCP_CONTAINER_CONFIG"); JSON.parse(config); return "controlled Test MCP container config is valid JSON"; },
+      async () => { port = Number(need("NEXENT_TEST_MCP_CONTAINER_PORT")); expect(port).toBeGreaterThan(0); expect(port).toBeLessThan(65536); return `reserved port ${port} is configured`;
       },
     ],
     steps: [

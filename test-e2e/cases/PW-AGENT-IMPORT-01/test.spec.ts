@@ -40,10 +40,10 @@ journey("PW-AGENT-IMPORT-01", async (context) => {
     ],
     steps: [
       async () => {
-        const download = await agents.exportSelected();
+        const download = await agents.exportSelected(sourceAgent);
         exportedPath = join(contract.caseDir, download.suggestedFilename());
         await download.saveAs(exportedPath);
-        return "used the current Agent action icon to start a real browser download";
+        return "used the owned Agent list card's More menu to start a real browser download";
       },
       async () => `download completed and was saved as ${exportedPath}`,
       async () => {
@@ -57,10 +57,9 @@ journey("PW-AGENT-IMPORT-01", async (context) => {
       },
       async () => {
         await agents.resolveImportConflict(importedVariable, importedDisplay);
-        await agents.installImportedAgent(modelName);
-        await expect(page.getByText(importedDisplay, { exact: true }).first()).toBeVisible({ timeout: 120_000 });
-        const id = new URL(page.url()).searchParams.get("agent_id");
-        importedId = Number(id || 0);
+        await agents.installImportedAgent(modelName, (id) => { importedId = id; });
+        await agents.select(importedDisplay);
+        await expect(page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(importedDisplay);
         expect(importedId).toBeGreaterThan(0);
         return `wizard preview resolved the initial source-name conflict, selected ${modelName}, and imported Agent id=${importedId}`;
       },
@@ -78,7 +77,7 @@ journey("PW-AGENT-IMPORT-01", async (context) => {
       },
       async () => {
         await agents.select(importedDisplay);
-        await expect(page.getByText(importedDisplay, { exact: true }).first()).toBeVisible();
+        await expect(page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(importedDisplay);
         const answer = await agents.debug(`只回复：IMPORTED-${token}`, `IMPORTED-${token}`);
         expect(answer).toContain(`IMPORTED-${token}`);
         return "opened the successfully imported Agent, read its configuration, and completed a real Debug turn";
@@ -92,7 +91,7 @@ journey("PW-AGENT-IMPORT-01", async (context) => {
       },
       async () => "the second import exposed an explicit conflict path and did not silently overwrite the existing Agent",
       async () => {
-        await expect(page.getByText(importedDisplay, { exact: true }).first()).toBeVisible();
+        await expect(page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(importedDisplay);
         return "the imported Agent remained selectable and runnable after the wizard completed";
       },
     ],

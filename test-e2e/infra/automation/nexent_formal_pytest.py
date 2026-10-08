@@ -120,11 +120,35 @@ async def _required_identity(identity_id: str):
 def _redact_reason(value: str) -> str:
     value = re.sub(r"(?i)bearer\s+[a-z0-9._~+/=-]+", "Bearer ***", value)
     value = re.sub(
-        r"(?i)(api[_-]?key|access[_-]?key|password|secret|token)(\s*[:=]\s*)['\"]?[^\s,'\"}]+",
+        r"(?i)(api[_-]?key|access[_-]?key|northbound_admin_key|password|secret|token)(\s*[:=]\s*)['\"]?[^\s,'\"}]+",
         r"\1\2***",
         value,
     )
+    value = re.sub(r'\bnexent-[A-Za-z0-9_-]{16,}\b', '[REDACTED_KEY]', value)
     return value
+
+
+def redact_report(report, fixtures):
+    """Scrub credentials before terminal and JUnit reporters persist traceback locals."""
+    secrets = []
+    for name, value in fixtures.items():
+        if isinstance(value, str) and len(value) >= 8 and re.search(r'password|secret|token|key', name, re.I):
+            secrets.append(value)
+        for key in ('access_token', 'refresh_token', 'password'):
+            secret = getattr(value, key, None)
+            if isinstance(secret, str) and len(secret) >= 8:
+                secrets.append(secret)
+    def scrub(text):
+        for secret in sorted(set(secrets), key=len, reverse=True):
+            text = text.replace(secret, '[REDACTED]')
+        return _redact_reason(text)
+    if report.longrepr:
+        # Keep pytest's skip tuple structure; failed tracebacks can be text.
+        if isinstance(report.longrepr, tuple):
+            report.longrepr = (*report.longrepr[:2], scrub(str(report.longrepr[2])))
+        else:
+            report.longrepr = scrub(str(report.longrepr))
+    report.sections = [(name, scrub(text)) for name, text in report.sections]
 
 
 def _database_dependency_failure(value: BaseException | None) -> bool:
@@ -281,6 +305,7 @@ def _marker_value(item: pytest.Item, name: str) -> str:
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     outcome = yield
     report = outcome.get_result()
+    redact_report(report, item.funcargs)
     # A setup error/skip never reaches the call phase. Record it immediately;
     # otherwise record the final call result. Teardown failures are surfaced by
     # pytest/JUnit and intentionally do not create a second result for one case.

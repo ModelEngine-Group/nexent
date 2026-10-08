@@ -92,12 +92,19 @@ export class McpPage {
       failure.name = "ProductFailure";
       throw failure;
     }
-    await expect(this.page.getByText("mcp服务器连接成功", { exact: true })).toBeVisible();
+    const body = await checked.json();
+    if (body.status !== "success") {
+      const failure = new Error(`MCP ${name} health response did not report success`);
+      failure.name = "ProductFailure";
+      throw failure;
+    }
+    // Mine renders health on the owned card, not in the old global toast.
+    await expect(card.getByText("连接成功", { exact: true })).toBeVisible();
   }
 
   async enable(name: string): Promise<void> {
-    const button = this.card(name).getByRole("button", { name: /启用|已启用/ });
-    if ((await button.innerText()).trim() === "启用") await button.click();
+    const button = this.card(name).getByRole("button", { name: /^启\s*用$|^已启用$/ });
+    if ((await button.innerText()).replace(/\s/g, "") === "启用") await button.click();
     await expect(button).toHaveText("已启用");
   }
 

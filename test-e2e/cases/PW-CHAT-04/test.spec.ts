@@ -14,11 +14,10 @@ journey("PW-CHAT-04", async (context) => {
   let agent = "";
   let childA = "";
   let childB = "";
-  let runtimeChildA = "";
-  let runtimeChildB = "";
+  let conversationId = 0;
   let cardCount = 0;
   let cardTexts: string[] = [];
-  contract.deferCleanup(async () => { if (await page.getByRole("button", { name: title, exact: true }).count()) await chat.deleteThread(title); });
+  contract.deferCleanup(async () => { if (conversationId > 0) await chat.deleteConversationById(conversationId); });
   await executeFixedScenario(context, {
     preconditions: [
       async () => { agent = resolveReadyAsset("agents", "d4_multi_display_name", "PW-CHAT-04"); childA = resolveReadyAsset("agents", "d4_multi_child_a_display_name", "PW-CHAT-04"); childB = resolveReadyAsset("agents", "d4_multi_child_b_display_name", "PW-CHAT-04"); expect(childA).not.toBe(childB); return `main Agent ${agent} has two explicitly named collaborators`; },
@@ -26,7 +25,7 @@ journey("PW-CHAT-04", async (context) => {
     ],
     steps: [
       async () => { await loginCurrent(page, "tenant_a_admin"); await chat.openAgent(agent); await chat.selectMode("执行"); return `selected multi-Agent ${agent}`; },
-      async () => { await chat.startMessage(`必须分别委派 ${childA} 和 ${childB} 完成两个子任务，最后汇总标记 MULTI-${token}。`); return "submitted a deterministic multi-collaborator task"; },
+      async () => { await chat.startMessage(`必须分别委派 ${childA} 和 ${childB} 完成两个子任务，最后汇总标记 MULTI-${token}。`); conversationId = chat.currentConversationId(); return "submitted a deterministic multi-collaborator task and registered its server conversation ID for cleanup"; },
       async () => {
         try {
           await expect(page.locator("[data-subagent-id]")).toHaveCount(2, { timeout: 240000 });
@@ -38,11 +37,10 @@ journey("PW-CHAT-04", async (context) => {
         cardCount = await page.locator("[data-subagent-id]").count(); cardTexts = await page.locator("[data-subagent-id]").allInnerTexts(); return `observed ${cardCount} real sub-Agent cards: ${JSON.stringify(cardTexts)}`;
       },
       async () => {
-        runtimeChildA = resolveReadyAsset("agents", "d4_multi_child_a_runtime_name", "PW-CHAT-04");
-        runtimeChildB = resolveReadyAsset("agents", "d4_multi_child_b_runtime_name", "PW-CHAT-04");
         const rendered = cardTexts.join("\n");
-        if (!rendered.includes(runtimeChildA) || !rendered.includes(runtimeChildB)) {
-          const error = new Error(`sub-Agent events omitted configured runtime collaborator names; expected=${JSON.stringify([runtimeChildA, runtimeChildB])}; cards=${JSON.stringify(cardTexts)}`);
+        // User-visible cards expose display names, not internal runtime variables.
+        if (!rendered.includes(childA) || !rendered.includes(childB)) {
+          const error = new Error(`sub-Agent cards omitted configured collaborator display names; expected=${JSON.stringify([childA, childB])}; cards=${JSON.stringify(cardTexts)}`);
           error.name = "ProductFailure";
           throw error;
         }
@@ -54,7 +52,7 @@ journey("PW-CHAT-04", async (context) => {
     ],
     assertions: [
       async () => { expect(cardCount).toBeGreaterThanOrEqual(2); return "multiple visible collaborator states agree with the final result"; },
-      async () => { await expect(page.getByText(runtimeChildA, { exact: true }).first()).toBeVisible(); await expect(page.getByText(/CONTROLLED_FAILURE|Error|失败/).first()).toBeVisible(); return "partial failure did not discard the successful collaborator"; },
+      async () => { await expect(page.locator("[data-subagent-id]").filter({ hasText: childA }).first()).toBeVisible(); await expect(page.getByText(/CONTROLLED_FAILURE|Error|失败/).first()).toBeVisible(); return "partial failure did not discard the successful collaborator"; },
       async () => { await expect(page.locator("[data-subagent-id]")).toHaveCount(cardCount * 2); return "persisted collaboration UI recovered after refresh"; },
       async () => "actual parallelism is intentionally judged from runtime timestamps/trace rather than simultaneous spinners",
     ],

@@ -20,6 +20,28 @@ from test_asset_lib import implementation_hash  # noqa: E402
 
 
 class RunnerOutcomeTests(unittest.TestCase):
+    def test_failed_pytest_dependencies_are_not_product_failures(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'checkpoints').mkdir()
+            row = {'case_id': 'CTR-TEST', 'stage': 'D2', 'result': 'BLOCKED_BY_DEPENDENCY',
+                   'failure_reason': 'disabled feature credential-fixture', 'asset_role': 'mcp.upload_image_route'}
+            path = root / 'checkpoints/results.jsonl'
+            path.write_text(json.dumps(row) + '\n', encoding='utf-8')
+            counts = {'tests': 1, 'failures': 1, 'errors': 0}
+            details = run_cases.pytest_failure_details(root, 'CTR-TEST', 'D2', counts,
+                                                       {'API_KEY': 'credential-fixture'})
+            self.assertEqual(details['status'], 'BLOCKED_BY_DEPENDENCY')
+            self.assertNotIn('credential-fixture', details['reason'])
+            self.assertEqual(run_cases.pytest_failure_details(root, 'FOREIGN', 'D2', counts, {}), {})
+            self.assertEqual(run_cases.pytest_failure_details(root, 'CTR-TEST', 'D2',
+                                                              dict(counts, errors=1), {}), {})
+            for outcome in ('PASS', 'FAIL'):
+                path.write_text(json.dumps(dict(row, result=outcome)), encoding='utf-8')
+                self.assertEqual(run_cases.pytest_failure_details(root, 'CTR-TEST', 'D2', counts, {}), {})
+            path.write_text((json.dumps(row) + '\n') * 2, encoding='utf-8')
+            self.assertEqual(run_cases.pytest_failure_details(root, 'CTR-TEST', 'D2', counts, {}), {})
+
     def test_vitest_runs_all_subscenarios_in_the_case_local_file(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary)

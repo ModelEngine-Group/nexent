@@ -9,8 +9,10 @@ feature:
   description: 'MCP / Remote MCP: 端口 check/suggest 与 cache header'
   business_rules:
   - rule_id: F-084-RULE-01
-    description: 端口 check/suggest 与 cache header
+    description: 端口 check 返回 available 和禁止缓存头；suggest 返回范围内端口；check 对 1–65535 外的端口返回
+      422。
   required_test_stages:
   - D2
   source:
-    notes: Migrated from V5 01_代码功能清单 without changing the functional description.
+    notes: Clarified against original port endpoint contract from ee181cf34e; cache
+      headers belong to check, not suggest.

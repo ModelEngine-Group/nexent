@@ -15,11 +15,11 @@ const setting = (name: string, fallback: string) => process.env[name] || fallbac
 journey("PW-SKILL-02", async (context)=>{
   const {page,expect,contract}=context; const name=resolveReadyAsset("skills","d4_created_name","PW-SKILL-02"); const skills=new SkillPage(page);
   const authorIdentity=setting("NEXENT_TEST_MARKET_AUTHOR", "tenant_a_dev");
+  const copyName=`${name}-copy-${runToken("PW-SKILL-02")}`;
   let adminContext: Awaited<ReturnType<typeof loginIsolated>>["context"]|undefined; let consumerContext: Awaited<ReturnType<typeof loginIsolated>>["context"]|undefined;
   contract.deferCleanup(async()=>{
     try {
-      if (consumerContext) await new SkillPage(consumerContext.pages()[0]).delete(name);
-      await loginCurrent(page,authorIdentity);
+      // The main page remains the author session; reviewers/consumers are isolated.
       await skills.setNotShared(name);
       await skills.delete(name);
     } finally {
@@ -32,14 +32,16 @@ journey("PW-SKILL-02", async (context)=>{
     steps:[
       async()=>{await loginCurrent(page,authorIdentity);await skills.open();await skills.search(name);await skills.apply(name);return"the same author that created the Skill applied to list it";},
       async()=>{await expect(skills.card(name)).toContainText(/审核中|待审核/);return"Mine status became pending";},
-      async()=>{const s=await loginIsolated(page,setting("NEXENT_TEST_MARKET_ADMIN", "tenant_a_admin"));adminContext=s.context;const adminSkills=new SkillPage(s.page);await adminSkills.open("审核中心");await adminSkills.search(name);await expect(s.page.getByText(name,{exact:true})).toBeVisible();return"tenant administrator found the application in Review";},
+      async()=>{const s=await loginIsolated(page,setting("NEXENT_TEST_MARKET_ADMIN", "tenant_a_admin"));adminContext=s.context;const adminSkills=new SkillPage(s.page);await adminSkills.open("审核中心");await adminSkills.search(name);await expect(s.page.getByRole("heading",{name,exact:true})).toBeVisible();return"tenant administrator located the owned application in the paginated Review list";},
       async()=>{const adminSkills=new SkillPage(adminContext!.pages()[0]);await adminSkills.approve(name);return"admin approved and status updated";},
       async()=>{const s=await loginIsolated(page,"tenant_a_admin");consumerContext=s.context;const consumerSkills=new SkillPage(s.page);await consumerSkills.open("仓库");await consumerSkills.search(name);await expect(consumerSkills.card(name)).toBeVisible();return"same-tenant consumer with Repository access found the approved Skill";},
-      async()=>{const p=consumerContext!.pages()[0];await new SkillPage(p).install(name);return"consumer installed/copied the Skill";},
-      async()=>{const p=consumerContext!.pages()[0];const consumerSkills=new SkillPage(p);await consumerSkills.open();await consumerSkills.search(name);await expect(consumerSkills.card(name)).toBeVisible();return"consumer Mine contains an openable copy";},
+      async()=>{const p=consumerContext!.pages()[0];await new SkillPage(p).install(name,copyName,()=>registerReadyAsset("skills","d4_installed_name",copyName,"PW-SKILL-02",{
+        service:"config",identity:"tenant_a_admin",method:"DELETE",path:`/skills/${encodeURIComponent(copyName)}`,allowed_statuses:[200,404],
+      }));return`consumer installed/copied the Skill as ${copyName}`;},
+      async()=>{const p=consumerContext!.pages()[0];const consumerSkills=new SkillPage(p);await consumerSkills.open();await consumerSkills.search(copyName);await expect(consumerSkills.card(copyName)).toBeVisible();return"consumer Mine contains an openable independently named copy";},
       async()=>"Agent-selector bindability is covered by PW-SKILL-01 using the same Skill contract",
     ],
-    assertions:[async()=>"Review was performed with an admin context",async()=>"approval exposed the listing in Repository",async()=>{const p=consumerContext!.pages()[0];await expect(new SkillPage(p).card(name)).toBeVisible();return"consumer owns an installed usable copy";}],
+    assertions:[async()=>"Review was performed with an admin context",async()=>"approval exposed the listing in Repository",async()=>{const p=consumerContext!.pages()[0];await expect(new SkillPage(p).card(copyName)).toBeVisible();return"consumer owns an installed usable copy";}],
   });
 });
 

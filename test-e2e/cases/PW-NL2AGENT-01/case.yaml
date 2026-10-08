@@ -20,7 +20,7 @@ case:
     legacy_asset_declaration: config/models.yaml；expected/nl2agent_expected.json
   steps:
   - order: 1
-    action: 未选择Agent时确认NL2Agent显示不可用提示。
+    action: 未选择Agent的仓库列表确认无可执行NL2Agent入口，创建/选择可编辑Agent后方可进入生成面板。
     expected: 无可编辑Agent时NL2Agent不可用。
   - order: 2
     action: 创建/选中可编辑Draft，确认composer启用。
@@ -60,7 +60,7 @@ case:
     legacy_row: 18
   actor: Nexent browser user
   journey:
-  - 未选择Agent时确认NL2Agent显示不可用提示。
+  - 未选择Agent的仓库列表确认无可执行NL2Agent入口，创建/选择可编辑Agent后方可进入生成面板。
   - 创建/选中可编辑Draft，确认composer启用。
   - 输入固定目标需求并发送。
   - 按oracle回答澄清问题。

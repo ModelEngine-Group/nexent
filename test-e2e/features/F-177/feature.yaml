@@ -9,10 +9,10 @@ feature:
   description: '平台资源治理 / 统一标签: 标签库/定义/值 CRUD、状态与排序、资源批量绑定、过滤投影和使用统计'
   business_rules:
   - rule_id: F-177-RULE-01
-    description: 标签库/定义/值 CRUD、状态与排序、资源批量绑定、过滤投影和使用统计
+    description: 标签桶与定义 GET 允许已认证用户读取；定义/值治理写入要求 MANAGE。资源分配另按目标资源权限校验，越权 fail-closed；保留 CRUD、状态、排序、绑定、过滤和统计契约。
   required_test_stages:
   - D1
   - D2
   - D3
   source:
-    notes: Migrated from V5 01_代码功能清单 without changing the functional description.
+    notes: Migrated from V5; read/write ACL split verified against product commit 1fc57eab9 during Windows D2 triage.

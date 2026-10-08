@@ -179,9 +179,19 @@ async def test_tag_library_definition_value_crud(tenant_a_admin, tenant_a_dev):
         bucket_id = default_bucket['bucket_id']
         await _cleanup_stale_batch_definitions(admin, bucket_id)
 
-        denied = await dev.get('/tag-libraries')
+        readonly = await dev.get('/tag-libraries')
+        assert_status(readonly, 200)
+        readonly_definitions = await dev.get(f'/tag-libraries/{bucket_id}/definitions')
+        assert_status(readonly_definitions, 200)
+        denied = await dev.post(f'/tag-libraries/{bucket_id}/definitions', json={
+            'definition_name': run_id + '-denied',
+            'selection_mode': 'multi_select', 'initial_values': [run_id + '-denied-value'],
+        })
         assert_status(denied, 403)
         assert _detail(denied) == MANAGE_DENIED
+        after_denial = await dev.get(f'/tag-libraries/{bucket_id}/definitions')
+        assert_status(after_denial, 200)
+        assert after_denial.json() == readonly_definitions.json()
 
         create = await admin.post(
             '/tag-libraries/' + str(bucket_id) + '/definitions',

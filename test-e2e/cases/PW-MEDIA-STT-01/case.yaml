@@ -29,7 +29,7 @@ case:
     action: 点击Composer语音/麦克风入口。
     expected: 连接结束后UI无悬挂。
   - order: 4
-    action: 用测试浏览器虚拟麦克风播放stt_zh_number.wav。
+    action: 用绑定固定WAV的虚拟麦克风播放stt_zh_number.wav，等待wire和Composer均出现完整92831后再停止。
     expected: 连接结束后UI无悬挂。
   - order: 5
     action: 等待停止/转写完成，确认Composer文本被填充。
@@ -57,7 +57,7 @@ case:
   - 在/models确认STT已配置并通过真实连通性检查。
   - 打开/newchat选择测试Agent。
   - 点击Composer语音/麦克风入口。
-  - 用测试浏览器虚拟麦克风播放stt_zh_number.wav。
+  - 用绑定固定WAV的虚拟麦克风播放stt_zh_number.wav，等待wire和Composer均出现完整92831后再停止。
   - 等待停止/转写完成，确认Composer文本被填充。
   - 按oracle检查转写含Nexent和92831（允许标点/数字表示差异）。
   - 点击发送并等待Chat完成。

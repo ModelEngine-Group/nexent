@@ -31,10 +31,10 @@ case:
     action: 刷新Mine搜索run_id Skill。
     expected: 恶意ZIP/路径穿越由SEC。
   - order: 5
-    action: 到/agents选择run_id Agent。
+    action: 创建独立Agent，配置真实模型、作者、描述与角色提示词，满足Debug运行前置条件。
     expected: 恶意ZIP/路径穿越由SEC。
   - order: 6
-    action: Basic→Skills搜索并绑定该Skill，等待autosave。
+    action: 在工具与技能Tab搜索并绑定该Skill，等待autosave。
     expected: 恶意ZIP/路径穿越由SEC。
   - order: 7
     action: 点击Debug发送固定输入并等待真实模型完成。
@@ -43,7 +43,7 @@ case:
     action: 按expected marker/结构确认Skill效果。
     expected: 恶意ZIP/路径穿越由SEC。
   - order: 9
-    action: 返回skill-space清理Skill。
+    action: 登记本用例的独立清理，完成持久化断言后清理本次创建的Skill和Agent。
     expected: 恶意ZIP/路径穿越由SEC。
   expected_results:
   - Skill真实创建/编辑且刷新存在。
@@ -60,11 +60,11 @@ case:
   - 点击创建/上传Skill，使用run_id名称并上传固定Skill资产或按当前表单创建。
   - 等待创建成功，打开编辑并修改允许字段后保存。
   - 刷新Mine搜索run_id Skill。
-  - 到/agents选择run_id Agent。
-  - Basic→Skills搜索并绑定该Skill，等待autosave。
+  - 创建独立Agent，配置真实模型、作者、描述与角色提示词，满足Debug运行前置条件。
+  - 在工具与技能Tab搜索并绑定该Skill，等待autosave。
   - 点击Debug发送固定输入并等待真实模型完成。
   - 按expected marker/结构确认Skill效果。
-  - 返回skill-space清理Skill。
+  - 登记本用例的独立清理，完成持久化断言后清理本次创建的Skill和Agent。
   final_business_result:
   - Skill真实创建/编辑且刷新存在。
   - Agent绑定持久化并可运行。

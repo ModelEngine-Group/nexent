@@ -26,7 +26,7 @@ case:
     action: 确认状态进入审核中。
     expected: 批准后Repository可见。
   - order: 3
-    action: Admin进入Review搜索申请并打开。
+    action: Admin进入Review分页列表，按独立Skill名称定位本次申请。
     expected: 安装后消费者Mine有可用副本。
   - order: 4
     action: 点击批准并等待状态更新。
@@ -35,7 +35,7 @@ case:
     action: 消费者Repository搜索run_id Skill。
     expected: 安装后消费者Mine有可用副本。
   - order: 6
-    action: 打开详情并点击安装/复制到Mine。
+    action: 在Repository的Skill卡片点击复制，填写独立副本名称并确认复制到Mine。
     expected: 安装后消费者Mine有可用副本。
   - order: 7
     action: 切消费者Mine确认Skill出现且可打开。
@@ -56,10 +56,10 @@ case:
   journey:
   - 作者Mine定位run_id Skill并申请上架。
   - 确认状态进入审核中。
-  - Admin进入Review搜索申请并打开。
+  - Admin进入Review分页列表，按独立Skill名称定位本次申请。
   - 点击批准并等待状态更新。
   - 消费者Repository搜索run_id Skill。
-  - 打开详情并点击安装/复制到Mine。
+  - 在Repository的Skill卡片点击复制，填写独立副本名称并确认复制到Mine。
   - 切消费者Mine确认Skill出现且可打开。
   - 可选到Agent选择器确认该Skill可被绑定。
   final_business_result:

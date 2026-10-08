@@ -82,12 +82,10 @@ journey("PW-VERSION-01", async (context) => {
       async () => {
         await page.reload({ waitUntil: "domcontentloaded" });
         await agents.select(agentDisplay);
-        const refreshedCurrent = page.waitForResponse(
-          (response) => response.request().method() === "GET" && /\/api\/agent\/\d+\/current_version(?:\?|$)/.test(response.url()),
-        );
-        await page.reload({ waitUntil: "domcontentloaded" });
-        await agents.select(agentDisplay);
-        const currentResponse = await refreshedCurrent;
+        // The editor now loads version details, not the legacy current_version
+        // request. Verify the refreshed UI plus the persisted read-only API.
+        await expect(page.getByText(versionTwo, { exact: true }).first()).toBeVisible();
+        const currentResponse = await page.request.get(`/api/agent/${agentId}/current_version`);
         expect(currentResponse.ok()).toBeTruthy();
         const currentPayload = await currentResponse.json();
         expect(currentPayload.version_name).toBe(versionTwo);

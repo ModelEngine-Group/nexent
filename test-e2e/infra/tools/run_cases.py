@@ -200,6 +200,27 @@ def result_reason(value: object, env: dict[str, str]) -> str:
     return text[:4000]
 
 
+def pytest_failure_details(result_dir: Path, case_id: str, stage: str,
+                           summary: dict[str, int], env: dict[str, str]) -> dict:
+    """Refine one failed item, never turn JUnit failures or teardown errors green."""
+    if summary.get('tests') != 1 or summary.get('failures', 0) + summary.get('errors', 0) != 1:
+        return {}
+    try:
+        rows = [json.loads(line) for line in
+                (result_dir / 'checkpoints/results.jsonl').read_text(encoding='utf-8').splitlines()
+                if line.strip()]
+        if len(rows) != 1:
+            return {}
+        row = rows[0]
+        allowed = {'BLOCKED', 'BLOCKED_BY_DEPENDENCY', 'TIMEOUT', 'AUTOMATION_ERROR'}
+        if row.get('case_id') != case_id or row.get('stage') != stage or row.get('result') not in allowed:
+            return {}
+        return {'status': row['result'], 'reason': result_reason(row.get('failure_reason'), env),
+                'dependency_case_id': row.get('dependency_case_id'), 'asset_role': row.get('asset_role')}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
 def playwright_outcome(result_dir: Path, case_id: str, env: dict[str, str]) -> dict:
     """Read the audited terminal record, not just Playwright's process exit."""
     try:
@@ -270,6 +291,11 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
         observed, summary = junit_outcome(result_dir / "junit.xml")
         if observed != "PASS" or exit_code == 0:
             status = observed
+        if framework == 'pytest' and observed == 'FAIL':
+            refined = pytest_failure_details(result_dir, case_id, record['stage'], summary, run_env)
+            if refined:
+                status = refined.pop('status')
+                details.update(refined)
     elif framework == "custom":
         observed, summary = tap_outcome(last_log)
         if observed != "PASS" or exit_code == 0:

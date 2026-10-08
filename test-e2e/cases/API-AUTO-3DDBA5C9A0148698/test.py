@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import uuid
 
 import pytest
 
@@ -39,8 +40,8 @@ async def test_resource_tag_assignment_contract(super_admin, tenant_a_admin, ten
     matrix = [
         (super_admin, 200),
         (tenant_a_admin, 200),
-        (tenant_a_dev, 403),
-        (tenant_a_user, 403),
+        (tenant_a_dev, 200),
+        (tenant_a_user, 200),
     ]
     for identity, expected in matrix:
         async with client('config', token=identity.access_token) as api:
@@ -54,6 +55,21 @@ async def test_resource_tag_assignment_contract(super_admin, tenant_a_admin, ten
     assert 'default_resource' in buckets
     assert 'knowledge_content' in buckets
     default_bucket_id = buckets['default_resource']['bucket_id']
+
+    for identity in (tenant_a_dev, tenant_a_user):
+        async with client('config', token=identity.access_token) as api:
+            before = await api.get(f'/tag-libraries/{default_bucket_id}/definitions')
+            assert_status(before, 200)
+            denied = await api.post(f'/tag-libraries/{default_bucket_id}/definitions', json={
+                'definition_name': f'denied-{CASE_ID}-{uuid.uuid4().hex[:8]}',
+                'selection_mode': 'multi_select', 'initial_values': ['owned-denial-probe'],
+            })
+            assert_status(denied, 403)
+            denied_body = denied.json()
+            assert (denied_body.get('message') or denied_body.get('detail')) == 'Tag library management permission is required'
+            after = await api.get(f'/tag-libraries/{default_bucket_id}/definitions')
+            assert_status(after, 200)
+            assert after.json() == before.json(), 'Denied management must not mutate definitions'
 
     async with client('config', token=tenant_a_admin.access_token) as api:
         definitions_response = await api.get(f'/tag-libraries/{default_bucket_id}/definitions')

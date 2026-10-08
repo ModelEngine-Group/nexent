@@ -372,6 +372,12 @@ async def prepare_vlm(identity) -> dict:
 
 
 async def prepare_stt(identity) -> dict:
+    wav = Path(os.environ.get("NEXENT_TEST_STT_WAV") or test_root() / "assets/audio/stt_zh_number.wav").resolve()
+    if not wav.is_file() or wav.stat().st_size == 0:
+        raise ValueError("STT preparation requires the configured non-empty WAV fixture")
+    browser_audio = os.environ.get("NEXENT_TEST_BROWSER_FAKE_AUDIO")
+    if browser_audio and Path(browser_audio).resolve() != wav:
+        raise ValueError("Browser fake audio must match the configured STT WAV fixture")
     stt_ready = True
     stt_failure = ""
     try:
@@ -379,7 +385,12 @@ async def prepare_stt(identity) -> dict:
     except Exception as exc:
         stt_ready = False
         stt_failure = f"{type(exc).__name__}: {exc}"
-    return {"NEXENT_TEST_STT_READY": "1" if stt_ready else "0", "NEXENT_TEST_STT_FAILURE": stt_failure}
+    return {
+        "NEXENT_TEST_STT_READY": "1" if stt_ready else "0",
+        "NEXENT_TEST_STT_FAILURE": stt_failure,
+        "NEXENT_TEST_STT_WAV": wav.as_posix(),
+        "NEXENT_TEST_BROWSER_FAKE_AUDIO": wav.as_posix(),
+    }
 
 
 async def prepare_chat(identity) -> dict:
@@ -458,10 +469,26 @@ async def prepare_multi(identity) -> dict:
 
 async def prepare_scope(identity) -> dict:
     require_metadata_id = await _controlled_tool_id(identity, "require_metadata")
+    async with client("config", token=identity.access_token) as api:
+        response = await api.get("/tool/list")
+    assert_status(response, 200)
+    rows = response.json()
+    matches = [row for row in rows
+               if row.get("origin_name") == "knowledge_base_search" and row.get("source") != "mcp"]
+    if len(matches) != 1:
+        raise AssertionError("scope Agent requires exactly one built-in knowledge_base_search tool")
+    retrieval_id = int(matches[0].get("tool_id") or matches[0]["id"])
     scope_id, scope_name, _ = await _create_agent(
         identity, prefix="D4 Scope Agent", model_type="llm",
-        enabled_tool_ids=[require_metadata_id], allow_chat_metadata=True,
+        enabled_tool_ids=[require_metadata_id, retrieval_id], allow_chat_metadata=True,
     )
+    async with client("config", token=identity.access_token) as api:
+        read_back = await api.post("/agent/search_info", json={"agent_id": scope_id, "version_no": 0})
+    assert_status(read_back, 200)
+    body = read_back.json().get("data") or read_back.json()
+    persisted = {int(tool["tool_id"]) for tool in body.get("tools", [])}
+    if not {require_metadata_id, retrieval_id}.issubset(persisted):
+        raise AssertionError("scope Agent did not persist both metadata and retrieval tool bindings")
     _register_agent("d4_scope", scope_id, scope_name)
 
     return {"NEXENT_TEST_SCOPE_AGENT": scope_name}
@@ -508,7 +535,11 @@ async def prepare_evaluation(identity) -> dict:
                 "score_range_min": 0,
                 "score_range_max": 1,
                 "pass_threshold": 0.8,
-                "input_fields": [{"name": "output", "required": True}],
+                "input_fields": [
+                    {"name": "query", "required": True},
+                    {"name": "expected", "required": True},
+                    {"name": "actual", "required": True},
+                ],
             },
         )
         assert_status(evaluator, 200)
@@ -521,6 +552,15 @@ async def prepare_evaluation(identity) -> dict:
                 "path": f"/evaluators/{evaluator_id}", "allowed_statuses": [200, 404],
             },
         )
+        published = await api.post(
+            f"/evaluators/{evaluator_id}/publish",
+            json={"version_name": "daily-baseline", "release_note": "D4 deterministic fixture"},
+        )
+        assert_status(published, 200)
+        read_back = await api.get(f"/evaluators/{evaluator_id}")
+        assert_status(read_back, 200)
+        if (_data(read_back) or {}).get("status") != "PUBLISHED":
+            raise AssertionError("prepared evaluation fixture must be PUBLISHED for UI selection")
 
     judge = configured_model("llm")
     judge_name = str(judge.get("preferred_model") or judge.get("display_name") or judge.get("model")).split(",")[0]

@@ -10,4 +10,5 @@ preparation:
   - configurable_skill
   anchors: true
   special_assets: false
-  d4_groups: []
+  d4_groups:
+  - mcp

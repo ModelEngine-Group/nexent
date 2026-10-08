@@ -6,6 +6,7 @@ import { appPath, configuredModel } from "../../infra/automation/d4/runner/runti
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
 import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { ModelPage } from "../../infra/automation/d4/pages/model.page";
 
 const root = () => process.env.TEST_ROOT || "";
 const fixture = (name: string) => join(root(), "assets", "d4", name);
@@ -31,7 +32,7 @@ journey("PW-MEDIA-VLM-01", async (context) => {
     preconditions: [
       async () => {
         expect(agent).not.toBe("");
-        expect(configuredVlmModel).toBe("qwen3.7-plus");
+        expect(configuredVlmModel).not.toBe("");
         expect(preparedVlmModel).toBe(configuredVlmModel);
         return `explicit VLM Agent ${agent} is bound to the exact models.yaml model/display name ${configuredVlmModel}`;
       },
@@ -40,10 +41,11 @@ journey("PW-MEDIA-VLM-01", async (context) => {
     ],
     steps: [
       async () => {
-        await page.goto(appPath("/models"));
+        const models = new ModelPage(page);
+        await models.open();
         // Multimodal Agent chat uses an LLM registry record, as prepared by
         // _resolve_multimodal_chat_model; the vision oracle remains the image answer.
-        const modelRow = page.getByRole("row").filter({ has: page.getByText(configuredVlmModel, { exact: true }).first() });
+        const modelRow = models.libraryRow(configuredVlmModel);
         await expect(modelRow).toBeVisible();
         return `confirmed the configured multimodal chat model has the exact UI name ${configuredVlmModel}; connectivity was preflighted`;
       },
