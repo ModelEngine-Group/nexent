@@ -2,6 +2,27 @@
 
 This directory is the Git-owned source of truth for requirement-driven tests. The existing `test/backend`, `test/sdk`, and `test/ext_components` suites remain separate Legacy UT.
 
+## Traditional UT and formal test responsibilities
+
+Traditional UT is permanently maintained, not scheduled for replacement by D1. Every product-code change assesses and verifies relevant UT locally, with success/boundary/error coverage and defect regressions; PR CI reruns its configured UT set. No workflow or GitHub required-check changes are made by the formal runner. UT is not registered as a formal Case or counted in the functional baseline.
+
+All existing D1 Cases/scripts are preserved, including unit overlap. New D1 should prove component contracts and real internal collaboration with controlled external boundaries. D3 proves actual inter-component/service/protocol runtime integration. Neither function calls nor mocks alone determine the stage. Only add a stage when it supplies necessary distinct evidence; no five-stage quota or mandatory edits to both suites apply.
+
+Requirement and bug design templates record a Traditional UT + D1-D5 responsibility matrix. Keep UT selectors/results and formal Case IDs/results separate. Python backend/sdk coverage, frontend coverage and functional outcomes are not mixed. Daily consumes repository assets and does not rewrite/promote them.
+
+Current product Changes also record `traditional_ut` with `decision` (`reuse`, `strengthen`, `add`, `exempt`), `behaviors` and `reason`. Confirm repository-relative `test_selectors` after implementation. Validate with `--require-ut-change <Change-ID>` in design and implementation phases; repeat for each current Change. Historical Changes remain compatible. Exemptions require a non-behavior rationale; this metadata is not proof of test execution or GitHub merge protection.
+
+### Acceptance implementation integrity
+
+New or acceptance-modified automated Cases declare stable `case.acceptance` obligations referencing existing steps, final expectations and forbidden side effects, plus actual test-name `acceptance_bindings` in execution.yaml. See the maintained [acceptance contract](../.agents/skills/nexent-test-assets/references/acceptance-integrity.md).
+
+```bash
+python test-e2e/infra/tools/validate_test_assets.py --phase design --require-acceptance-case <Case-ID>
+python test-e2e/infra/tools/validate_test_assets.py --phase implementation --require-acceptance-case <Case-ID>
+```
+
+Repeat the flag for each added/acceptance-modified Case; unchanged legacy Cases remain compatible. Without metadata, execution remains unchanged but acceptance completeness is `UNREVIEWED`. Actual mapped test absence, skips or failures cannot become a complete PASS. The runner saves `acceptance-execution.json` and separate execution/acceptance fields locally; batch reports retain this distinction. A mapped green execution is not semantic certification: independently inspect the actual assertions and preserve requirement-to-assertion evidence; use targeted negative/mutation checks for high-risk rules. No person-approval requirement is introduced.
+
 For setup, failure diagnosis, Case/script changes and local verification, see the [developer guide (中文)](DEVELOPER_GUIDE.zh-CN.md).
 
 ## Layout
@@ -96,8 +117,9 @@ The comparison records HEAD and actual source hashes, missing/exclusive lines
 and branches, and legacy test contexts and assertions associated with exclusive
 coverage. These are review leads; executing a line does not prove a requirement
 was asserted. Failures, collection errors, skips and timeouts mean partial
-evidence, not successful replacement of Legacy UT. A complete behavioral review
-and stable passing execution are required before retiring old tests.
+evidence, not complete functional acceptance. This comparison is diagnostic,
+not a replacement or retirement gate: traditional UT remains permanently
+maintained alongside the preserved formal D1-D5 suite.
 
 ## Candidate batch entrypoint and Ubuntu Daily transition
 

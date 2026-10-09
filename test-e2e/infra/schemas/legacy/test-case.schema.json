@@ -74,6 +74,20 @@
         "test_data": {"type": "object", "additionalProperties": true},
         "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}},
         "expected_results": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmpty"}},
+        "acceptance": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "description"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^AC-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
+              "description": {"$ref": "#/$defs/nonEmpty"},
+              "steps": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+              "expected_results": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+              "forbidden_side_effects": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}
+            }
+          }
+        },
         "forbidden_side_effects": {"$ref": "#/$defs/stringList"},
         "tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "source": {"type": "object", "additionalProperties": true},

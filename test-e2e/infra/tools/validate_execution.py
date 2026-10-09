@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from jsonschema import Draft202012Validator
 
+from acceptance_integrity import binding_issues, contract_issues
 from test_asset_lib import (
     ValidationIssue, case_index, discover_documents, implementation_hash,
     render_issues, repository_root, case_contract_hash,
@@ -14,7 +15,7 @@ from test_asset_lib import (
 
 
 FRAMEWORKS = {"pytest", "vitest", "playwright", "custom"}
-EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes", "preparation", "timeout_seconds"}
+EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes", "preparation", "timeout_seconds", "acceptance_bindings"}
 IMPLEMENTATION_FIELDS = {"framework", "file", "selector", "profiles"}
 
 
@@ -30,6 +31,9 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
             "contract_hash": case_contract_hash(stage, case), "execution": None,
         }
         entries[case_id] = record
+        issues.extend(ValidationIssue(case_path, "acceptance", problem) for problem in contract_issues(case))
+        if "acceptance" in case:
+            record["acceptance"] = case["acceptance"]
         if not execution_path.is_file():
             if phase == "implementation" and case.get("status") == "active" and case.get("automation") == "automated":
                 issues.append(ValidationIssue(case_path, case_id, "Active automated case has no execution.yaml"))
@@ -40,6 +44,9 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
             continue
         if raw.get("case_id") != case_id:
             issues.append(ValidationIssue(execution_path, "case_id", "Execution Case ID differs from its directory"))
+        required_acceptance = phase == "implementation" and case.get("automation") == "automated"
+        issues.extend(ValidationIssue(execution_path, "acceptance_bindings", problem)
+                      for problem in binding_issues(case, raw.get("acceptance_bindings"), required=required_acceptance))
         timeout_seconds = raw.get("timeout_seconds")
         if timeout_seconds is not None and (type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 7200):
             issues.append(ValidationIssue(execution_path, "timeout_seconds", "Case timeout must be an integer from 1 to 7200 seconds"))
@@ -87,6 +94,8 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
                 "required_assets": raw.get("required_assets", []),
                 "required_mock_services": raw.get("required_mock_services", []),
             }
+            if "acceptance_bindings" in raw:
+                record["execution"]["acceptance_bindings"] = raw["acceptance_bindings"]
             if isinstance(timeout_seconds, int) and not isinstance(timeout_seconds, bool) and 1 <= timeout_seconds <= 7200:
                 record["execution"]["timeout_seconds"] = timeout_seconds
             if "preparation" in raw:

@@ -167,7 +167,8 @@ def finalize(directory, plan, rows, error=None):
                "execution_complete": not (incomplete or error or duplicates or unexpected),
                "status": "INCOMPLETE" if incomplete or error or duplicates or unexpected else "FAILED" if failures else "PASSED",
                "error": error, "duplicate_case_ids": duplicates, "unexpected_case_ids": unexpected,
-               "d6_complete": True}
+               "d6_complete": True,
+               "acceptance_counts": dict(Counter(row.get("acceptance_status", "UNREVIEWED") for row in rows))}
     save(directory / "summary.json", summary)
     (directory / "checkpoints").mkdir(parents=True, exist_ok=True)
     (directory / "checkpoints/results.jsonl").write_text(
@@ -212,6 +213,13 @@ def render_report(directory, plan, rows, summary):
              "Blocked, abnormal, cleanup-failed and unexecuted cases do not count as passes.",
              "", "| Result | Count |", "| --- | ---: |"]
     lines += [f"| {key} | {value} |" for key, value in sorted(summary["counts"].items())]
+    lines += ["", "## Acceptance implementation evidence", "",
+              "PASS rates above describe recorded execution, not semantic completeness. "
+              "Legacy Cases without obligation metadata remain UNREVIEWED. "
+              "Mapped tests passing does not certify that their assertions implement the written contract.",
+              "", "| Mapping / execution state | Count |", "| --- | ---: |"]
+    acceptance_counts = Counter(row.get("acceptance_status", "UNREVIEWED") for row in rows)
+    lines += [f"| {key} | {value} |" for key, value in sorted(acceptance_counts.items())]
     lines += ["", "## Stage summary", "",
               "| Stage | Planned | PASS | Not passed | Retired / policy skipped | Overall pass rate |",
               "| --- | ---: | ---: | ---: | ---: | ---: |"]

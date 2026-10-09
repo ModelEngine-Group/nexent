@@ -49,7 +49,7 @@ DEPENDENCY_ORDER = {
     case_id: index
     for index, case_id in enumerate(
         (
-            "PW-AUTH-01", "PW-AUTH-02", "PW-AUTH-03", "PW-AUTH-04", "PW-PROFILE-01",
+            "PW-AUTH-01", "PW-AUTH-02", "PW-PROFILE-01",
             "PW-RESOURCE-01", "PW-RESOURCE-02", "PW-RESOURCE-03", "PW-RESOURCE-04",
             "PW-RESOURCE-APIKEY-01", "PW-QUOTA-LOCAL-01",
             "PW-MODEL-01", "PW-MODEL-02", "PW-MEDIA-STT-01", "PW-MEDIA-VLM-01",

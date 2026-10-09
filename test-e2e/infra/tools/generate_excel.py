@@ -200,7 +200,7 @@ def build_workbook(root: Path) -> Workbook:
     info.append(["Generated view", "Seven read-only sheets; implementation and traceability fields are merged into each D1-D5 case row"])
     info.append(["Stages", "D1 unit/component; D2 API/contract; D3 integration/runtime; D4 browser journey; D5 risk validation"])
     info.append(["Legacy UT", "Kept under test/ and not counted as formal D1-D5 execution coverage"])
-    info.append(["Policy", "A2A is included across applicable stages; OAuth/CAS remains skipped by policy"])
+    info.append(["Policy", "A2A is included across applicable stages; OAuth/CAS browser journeys are excluded from this baseline"])
     info.column_dimensions["A"].width = 24
     info.column_dimensions["B"].width = 110
     for row in info.iter_rows():

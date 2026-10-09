@@ -5,15 +5,18 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from test_asset_lib import case_index, discover_documents, render_issues, repository_root, require_documents, validate_schema_documents
+from acceptance_integrity import contract_issues
+from test_asset_lib import ValidationIssue, case_index, discover_documents, render_issues, repository_root, require_documents, validate_schema_documents
 
 
 def validate(root: Path, allow_empty: bool = False):
     documents = discover_documents(root, "cases")
     issues = require_documents(root, "cases", documents, allow_empty)
     issues.extend(validate_schema_documents(root, "cases", documents))
-    _, semantic_issues = case_index(documents)
+    cases, semantic_issues = case_index(documents)
     issues.extend(semantic_issues)
+    for _, case, path in cases.values():
+        issues.extend(ValidationIssue(path, "acceptance", problem) for problem in contract_issues(case))
     return issues
 
 

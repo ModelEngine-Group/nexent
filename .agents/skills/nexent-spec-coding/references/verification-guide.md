@@ -12,13 +12,15 @@ Before implementation, record affected feature IDs, business rules, acceptance c
 - Missing, unimplemented, skipped or expected-failure required cases remain incomplete. Required P0/P1 cases cannot be accepted that way.
 - Keep product, environment, provider, asset and test-implementation failures distinguishable.
 - If implementation reveals a requirement change, revise the requirement and structured case contract explicitly; never silently weaken assertions.
-- Legacy UT may supply transition evidence but cannot satisfy formal D1-D5 Case coverage.
+- Traditional UT is a permanent product-PR obligation: run relevant UT locally and record actual selectors/results; CI reruns its configured UT set. Maintain success/error/boundary and defect-regression assertions for changed unit behavior. Existing adequate tests may be reused; a non-behavior exemption needs a reason. Missing execution is BLOCKED, not an exemption.
+- UT can prove a unit acceptance requirement but cannot count as formal Case execution or substitute for necessary higher-boundary proof. Report UT separately from D1-D5 and frontend coverage separately from Python coverage.
 
 ## Choose the proof surface
 
 | Stage | Required proof surface |
 | --- | --- |
-| D1 | Isolated function, SDK or component execution |
+| Traditional UT | Isolated unit/domain-rule behavior, boundary/error/regression assertions |
+| D1 (new Cases) | Component contract with real internal collaboration and controlled external boundaries |
 | D2 | Running API/protocol boundary and contract assertions |
 | D3 | Integrated runtime/provider path with observable state and cleanup |
 | D4 | Playwright browser journey and final business outcome |
@@ -26,11 +28,13 @@ Before implementation, record affected feature IDs, business rules, acceptance c
 
 Use all applicable stages for mixed changes. Mocks provide deterministic primary coverage. Optional real-smoke profiles prove selected real-provider integrations and remain separately identified.
 
+Keep all existing D1 Cases/scripts and type labels, including unit-oriented overlap. New D1 must add necessary component evidence beyond UT; D3 proves inter-component/service/protocol runtime flow. Do not infer stages from function calls or mocks. Follow acceptance-integrity.md for affected formal obligations: script execution status, obligation mapping and semantic completeness are separate. An unreviewed legacy script PASS is not certified full acceptance.
+
 For bugs, current-fix ACs and evidence-backed regression impact determine applicability. A full functional coverage matrix does not require all listed Cases or all five stages to execute. Global asset validation checks consistency without authorizing generation of historical coverage. Missing/unavailable baseline coverage is a limitation, not an N/A proof surface or an automatic test-generation task.
 
 ## Evidence and status
 
-- Tie each artifact to acceptance criteria and formal case IDs.
+- Tie artifacts to acceptance criteria and either actual UT selectors or formal Case IDs, keeping the two result sets separate.
 - Redact keys, authorization headers, cookies, tokens, private prompts and sensitive user data.
 - Prefer textual results and local artifact paths. D4 retains screenshots/traces only for failures unless a case requires otherwise.
 - Use `PENDING`, `PASS`, `FAIL` and `BLOCKED`. A completed implementation task never implies acceptance.

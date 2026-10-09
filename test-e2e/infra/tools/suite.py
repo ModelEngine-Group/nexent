@@ -246,7 +246,10 @@ def worker(repo, home, record, directory, settings):
              "cleanup_exit_code": cleanup_code, "reason": reason,
              "cleanup_reason": "Case cleanup failed; inspect runtime/cleanup-results.jsonl and logs/cleanup.log"
                 if cleanup_code else None,
-             "test_evidence": test_details.get("evidence", []), "evidence": [directory.name]})
+             "test_evidence": test_details.get("evidence", []), "evidence": [directory.name],
+             "execution_status": test_details.get("execution_status", outcome),
+             "acceptance_status": test_details.get("acceptance_status", "UNREVIEWED"),
+             "acceptance_semantic_review": test_details.get("acceptance_semantic_review", "UNREVIEWED")})
     return 0 if outcome == "PASS" and not cleanup_code else 1
 
 

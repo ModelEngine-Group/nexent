@@ -26,8 +26,13 @@ class CaseLayoutTests(unittest.TestCase):
     def test_case_registry_and_feature_navigation(self) -> None:
         issues, registry = inspect(REPO)
         self.assertEqual(issues, [])
-        self.assertEqual(len(registry["cases"]), 667)
-        self.assertEqual(len(expected_pages(REPO)), 360)
+        defined = {path.parent.name for path in (REPO / "test-e2e/cases").glob("*/case.yaml")}
+        registered = [record["case_id"] for record in registry["cases"]]
+        self.assertTrue(defined)
+        self.assertEqual(set(registered), defined)
+        self.assertEqual(len(registered), len(defined))
+        features = {path.parent.name for path in (REPO / "test-e2e/features").glob("*/feature.yaml")}
+        self.assertEqual({path.parent.name for path in expected_pages(REPO)}, features)
 
     def test_d4_queue_uses_case_local_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -45,15 +50,16 @@ class CaseLayoutTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             item = json.loads(queue.read_text(encoding="utf-8"))["items"][0]
             self.assertEqual(item["id"], "PW-AGENT-01")
-            self.assertEqual(len(item["step_items"]), 10)
-            self.assertEqual(len(item["assertion_items"]), 5)
+            case = yaml.safe_load((REPO / "test-e2e/cases/PW-AGENT-01/case.yaml").read_text(encoding="utf-8"))["case"]
+            self.assertEqual(len(item["step_items"]), len(case["steps"]))
+            self.assertEqual(len(item["assertion_items"]), len(case["expected_results"]))
 
     def test_every_active_d4_contract_can_be_enriched(self) -> None:
         issues, registry = inspect(REPO)
         self.assertEqual(issues, [])
         active = [record for record in registry["cases"]
                   if record["stage"] == "D4" and record["status"] == "active"]
-        self.assertEqual(len(active), 45)
+        self.assertTrue(active)
         with tempfile.TemporaryDirectory() as temporary:
             for record in active:
                 case_id = record["case_id"]

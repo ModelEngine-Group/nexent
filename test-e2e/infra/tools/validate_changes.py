@@ -24,6 +24,40 @@ CHANGE_DIRECTORIES = {
 }
 
 
+def traditional_ut_issues(root: Path, plan: object, phase: str) -> list[str]:
+    """Check UT intent/selectors, not execution or whether an exemption is justified."""
+    if not isinstance(plan, dict):
+        return ["Current product change requires a traditional_ut responsibility record"]
+    issues = []
+    if not isinstance(plan.get("decision"), str) or plan["decision"] not in {"reuse", "strengthen", "add", "exempt"}:
+        issues.append("Invalid traditional_ut decision")
+    if not isinstance(plan.get("reason"), str) or not plan["reason"].strip():
+        issues.append("traditional_ut requires a rationale; unavailable execution is not an exemption")
+    if plan.get("decision") == "exempt":
+        if plan.get("test_selectors"):
+            issues.append("A UT exemption cannot also declare selected tests")
+        return issues
+    if not plan.get("behaviors"):
+        issues.append("traditional_ut must identify unit behaviors or regressions")
+    selectors = plan.get("test_selectors", [])
+    if not isinstance(selectors, list) or any(not isinstance(value, str) for value in selectors):
+        return issues + ["traditional_ut test_selectors must be a list of reported repository selectors"]
+    if phase == "implementation" and not selectors:
+        issues.append("Confirm actual traditional UT selectors after implementation")
+    allowed = [root / "test" / name for name in ("backend", "sdk", "ext_components")]
+    allowed.append(root / "frontend")
+    for selector in selectors:
+        filename = selector.split("::", 1)[0]
+        path = (root / filename).resolve()
+        if not filename or not any(path.is_relative_to(directory.resolve()) for directory in allowed):
+            issues.append("UT selector must stay in traditional test/ or frontend/, never test-e2e or a local absolute path")
+        elif Path(filename).is_absolute() or ":" in filename or "\\" in filename:
+            issues.append("UT selectors must use repository-relative forward-slash paths")
+        elif phase == "implementation" and not path.is_file():
+            issues.append(f"Traditional UT file does not exist: {filename}")
+    return issues
+
+
 def validate(root: Path, allow_empty: bool = False):
     documents = discover_documents(root, "changes")
     issues = require_documents(root, "changes", documents, allow_empty)

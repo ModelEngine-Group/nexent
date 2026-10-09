@@ -4,7 +4,7 @@ Use this template when a bug's owning capability has no usable SPEC. With an exi
 
 Describe the complete coherent capability's final expected behavior, including its normal path and directly related boundaries. Keep this documentation scope separate from the current fix and execution scope. Do not create proposal.md or task.md just to fill out a document set.
 
-Reuse the requirement design's `D1-D5 Test Design` matrix and `Acceptance Traceability` columns. Link real Feature, rule and Case IDs. Structured assets own the complete case steps and assertions; this document summarizes their relationships. Record relevant missing coverage without automatically generating it. `N/A` means a stage is irrelevant; `GAP` means a relevant behavior has no known Case; `UNKNOWN` means the baseline is unavailable or the association is unconfirmed. GAP/UNKNOWN are document annotations, not Case IDs or passing results.
+Reuse the requirement design's `Traditional UT + D1-D5 Test Responsibilities` matrix and `Acceptance Traceability` columns. Link real Feature/rule/Case IDs; keep UT intentions and later selectors in their separate column. Structured assets own formal case steps/assertions. Record missing coverage without generating unrelated history. `N/A` means irrelevant with a reason; `GAP` means applicable but uncovered; `UNKNOWN` means unavailable/unconfirmed. These are annotations, not test IDs or passes. Unavailable prerequisites are BLOCKED, not N/A.
 
 Replace placeholders and remove this usage guide in the completed document.
 
@@ -35,23 +35,23 @@ Replace placeholders and remove this usage guide in the completed document.
 
 <Include only current-fix acceptance and justified regressions. Retained behavior described above is not automatically a new AC.>
 
-## D1-D5 Test Design
+## Traditional UT + D1-D5 Test Responsibilities
 
-| Feature / rule | D1 | D2 | D3 | D4 | D5 | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| <linked Feature/rule ID> | <linked Case ID or annotation> | <Case ID or annotation> | <Case ID or annotation> | <Case ID or annotation> | <Case ID or annotation> | <per-Case reuse/strengthen/add/regression-only/unaffected; evidence and profiles> |
+| Feature / rule / AC | Traditional UT | D1 | D2 | D3 | D4 | D5 | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| <linked ID> | <regression behavior; reuse/strengthen/add> | <Case ID or annotation> | <Case ID or annotation> | <Case ID or annotation> | <Case ID or annotation> | <Case ID or annotation> | <impact, distinct boundary, profiles and exclusions> |
 
 <Inventory the known coverage of the defined capability, including relevant retained behavior. Retrieve candidates through SPEC associations, Feature rules, Case steps/assertions and script/API references, then read them to confirm coverage. A shared module name alone is insufficient impact evidence. Explain why a new Case or proof layer is necessary; zero new Cases is valid. Unknown or deferred coverage does not become required work solely to fill a matrix column.>
 
 ## Test Implementation Strategy
 
-<Which Case contracts, primary scripts and execution.yaml bindings need changes and why. Reuse correct existing scripts unchanged for regression-only Cases. Preserve IDs and use existing machine configuration/asset helpers. List the current-fix execution selection separately from the full coverage inventory; synchronize it with the bug change record.>
+<Assess traditional UT for every product bug, retaining a test that detects the defect (reuse is valid with evidence). State formal contracts/scripts/bindings needing changes; reuse correct regression-only scripts. Preserve all existing D1 even if unit-oriented. New D1 proves component collaboration; D3 proves runtime integration. List relevant local UT and formal execution selections separately; align formal selection with the bug record. Apply acceptance-integrity.md to changed formal obligations.>
 
 ## Acceptance Traceability
 
-| AC | Design | Code areas | Formal case IDs | Evidence | Result |
-| --- | --- | --- | --- | --- | --- |
-| AC-001 | <section/decision> | <actual paths> | <selected Case IDs> | <sanitized commands and local artifacts> | PENDING |
+| AC | Design | Code areas | Traditional UT | Formal case IDs | Evidence | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| AC-001 | <section/decision> | <actual paths> | <actual selectors or justified N/A> | <selected Case IDs or justified N/A> | <separate UT/formal commands and local artifacts> | PENDING |
 
 <Use PENDING/PASS/FAIL/BLOCKED. Update this table after execution. Link failed reproduction and rerun evidence; do not fabricate results. Existing task.md can remain the evidence owner if it already exists.>
 

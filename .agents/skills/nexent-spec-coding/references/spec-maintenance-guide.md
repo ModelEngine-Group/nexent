@@ -35,7 +35,7 @@ Use a lightweight design when no usable SPEC exists. Describe the complete coher
 | Overall component responsibilities, key flow, interfaces/data and relevant failure behavior | Required in design.md to the extent supported by evidence |
 | Evidence paths/symbols/tests and observation date or code revision | Required for documented behavior claims |
 | This bug's reproduction, observed defect, expected correction and regression ACs | Required, clearly separated from the functional coverage inventory |
-| Feature/business-rule to D1-D5 Case matrix | Use the same columns as the requirement design template; link existing IDs and distinguish changed, regression-only and unaffected coverage |
+| Feature/business-rule to Traditional UT + D1-D5 matrix | Use the same columns as the requirement design template; separate UT intentions/selectors from formal Case IDs and distinguish changed, regression-only and unaffected coverage |
 | Unrelated coverage gaps or unavailable test baseline | Record as limitations/deferred work; they do not automatically become this fix's acceptance criteria |
 | Uncertain peripheral details, exhaustive branches, historical rationale, diagrams | Optional; omit most unconfirmed detail rather than inventing it |
 | Uncertainty affecting the fix's behavior, design or acceptance | Must be resolved before implementation; cannot be omitted as peripheral |

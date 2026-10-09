@@ -34,6 +34,7 @@ import yaml
 from test_asset_lib import repository_root
 from validate_execution import inspect
 from coverage_support import frontend_arguments, python_arguments, python_report
+from acceptance_integrity import execution_report
 
 
 ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
@@ -332,9 +333,18 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
         details["reason"] = "Process exited nonzero despite a PASS result; inspect step logs"
     if status != "PASS" and not details["reason"]:
         details["reason"] = f"{framework} reported {status}; inspect local evidence"
+    execution_status = status
+    acceptance = execution_report(record, result_dir, execution_status)
+    if status == "PASS" and acceptance["status"] in {"INCOMPLETE", "FAIL", "BLOCKED"}:
+        status = acceptance["status"]
+        details["reason"] = "Mapped acceptance tests were missing, blocked or failed; inspect acceptance-execution.json"
+    (result_dir / "acceptance-execution.json").write_text(
+        json.dumps(acceptance, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (result_dir / "status.json").write_text(json.dumps({
         "schema_version": 1, "case_id": case_id,
         "stage": record["stage"], "status": status,
+        "execution_status": execution_status, "acceptance_status": acceptance["status"],
+        "acceptance_semantic_review": acceptance["semantic_review"],
         "exit_code": exit_code, "steps_completed": number,
         "command_results": step_results, **details,
         **({"test_summary": summary} if summary is not None else {}),

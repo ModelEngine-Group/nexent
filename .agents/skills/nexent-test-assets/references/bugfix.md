@@ -13,6 +13,10 @@ Distinguish missing SPEC documentation, test assets unavailable in this checkout
 
 ## Select regression coverage
 
+Always assess traditional UT for the defect and necessary adjacent regressions. Use nexent-python-tests to implement or demonstrate existing regression coverage; its evidence belongs in the change's UT column, not a formal Case ID. A UT-only defect may have no new formal Cases. Reusing or adding formal coverage does not remove UT obligations. Preserve existing D1 even when it overlaps UT; distinguish unit, component and runtime proof before adding a layer.
+
+Record traditional_ut in the current bug Change as described in lifecycle.md, and require it with --require-ut-change <Change-ID> in design and implementation validation. Actual local run evidence stays outside the formal record. A no_gap decision may refer to demonstrated UT regression coverage without claiming a formal Case exists; explain that distinction and any no-formal-change rationale.
+
 Choose one or more outcomes based on evidence:
 
 - reuse a formal Case that already fails for the correct reason;

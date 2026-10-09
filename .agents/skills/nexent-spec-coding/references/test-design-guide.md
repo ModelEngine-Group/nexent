@@ -11,6 +11,7 @@ For current-change requirements or bug acceptance, and justified regressions:
 - define independently verifiable cases with explicit preconditions, data, steps, expected results and forbidden side effects;
 - identify mock and optional real-smoke profiles without embedding credentials or developer-local assets;
 - record exclusions with a concrete reason rather than silently omitting a normally applicable stage.
+- assess traditional UT independently for every product-code change; describe unit success/boundary/error/regression intentions and reuse/strengthen/add decisions. Do not invent final UT selectors during design. A non-behavior exemption requires a concrete reason; unavailable prerequisites are blockers.
 
 Write formal assets through `nexent-test-assets`. Structured YAML/JSON files are the source of truth. Excel is a deterministic generated view and must not be edited as the source.
 
@@ -20,13 +21,18 @@ For bugfixes, follow the SPEC's existing Feature/rule/Case associations and chec
 
 | Stage | Primary responsibility | Typical type |
 | --- | --- | --- |
-| D1 | Isolated unit or component behavior | `BE-UT`, `SDK-UT`, `FE-COMP` |
+| Traditional UT | Isolated function/class/domain behavior, boundaries, errors and regressions | Existing test/ suites, no formal Case ID |
+| D1 (new Cases) | Component contract and real internal collaboration with substituted external boundaries | Compatible `BE-UT`, `SDK-UT`, `FE-COMP` |
 | D2 | API and protocol contracts | `API-IT`, `CONTRACT` |
 | D3 | Integrated runtime and provider behavior | `AGENT-IT`, `INTEGRATION` |
 | D4 | Complete browser user journeys | `E2E` |
 | D5 | Security, reliability, performance and deployment risk | `SECURITY`, `RELIABILITY`, `PERFORMANCE`, `DEPLOYMENT` |
 
 Use the lowest stage that proves a behavior, then add higher stages only when their boundary adds necessary evidence. Mixed features commonly need several stages. D1 success never establishes D2-D5 results.
+
+Preserve all existing D1 contracts/scripts, including unit-oriented overlap; do not delete, retire or reclassify them to fit the new policy. New D1 should add evidence beyond traditional UT; D3 executes actual inter-component/service/configuration/protocol runtime paths. Choose by boundary and real/substituted dependencies, not by function invocation, directory or the presence of mocks. A feature can require UT and D2/D3 without a new D1.
+
+For example, tool invocation D1 proves internal argument/result/error handling; D3 proves Agent-to-provider-to-tool runtime flow. A direct function substitute differs from a protocol Mock reached through the actual product integration. Avoid asserting the same chain twice without a distinct risk rationale.
 
 No per-stage or per-bug count is required. Existing Cases may be sufficient with zero additions. Use parameterized variants when they prove the same contract; create distinct Case IDs for independent behavior or necessary independent proof. Every added layer needs a specific boundary/risk reason. Do not treat unrelated historical gaps in the functional inventory as this fix's tasks.
 
@@ -49,4 +55,6 @@ No per-stage or per-bug count is required. Existing Cases may be sufficient with
 5. Run the selected Cases locally; broaden only when impact analysis warrants additional proof.
 6. Run `python test-e2e/infra/tools/validate_test_assets.py --phase implementation --generate` before closeout.
 
-Legacy implementation-oriented tests remain separate. They may continue to run during transition, but they are not formal D1-D5 assets and cannot satisfy formal Case or execution-binding coverage.
+Traditional UT remains permanently maintained and runs locally and in PR CI. It can prove unit-level acceptance in the change's traceability, but is not a formal Case and cannot substitute for required component/API/runtime/journey/risk evidence. D1-D5 runs locally when applicable and in Daily. Use separate UT and formal Case columns; no mandatory edits to both directories or per-stage additions apply.
+
+For new/acceptance-modified Cases use nexent-test-assets/references/acceptance-integrity.md. Validate structure and collection, then independently check actual inputs/assertions against every obligation. Mapping and test execution alone do not establish semantic completeness.

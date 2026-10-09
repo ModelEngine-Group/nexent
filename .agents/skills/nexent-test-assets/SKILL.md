@@ -14,6 +14,8 @@ Paths are relative to the repository root. Authoritative assets live under `test
 ## Boundaries
 
 - Do not reuse or register tests from `test/backend`, `test/sdk`, or `test/ext_components` as formal D1 cases. Those are Legacy UT.
+- Traditional UT is permanently maintained alongside this suite, not a transition baseline to replace. Assess both suites for every product change; use `nexent-python-tests` for Python UT. UT-only proof can satisfy a unit acceptance requirement in the change record, but cannot count as execution of a formal Case.
+- Preserve all existing D1 definitions/scripts, including unit-oriented and overlapping Cases. Do not bulk delete, retire, migrate or relabel them. New D1 should add component-contract evidence beyond unit assertions; read [case-design.md](references/case-design.md) for the UT/D1/D3 boundary. A feature need not add a D1 if UT and higher-layer tests already supply the necessary proof.
 - A Case's primary script lives beside its `case.yaml`; shared framework helpers live under `test-e2e/infra/automation/`. Do not make a shared helper the primary Case binding.
 - Design cases before product implementation. Implement fixed scripts and case-local `execution.yaml` after product implementation, except an intentional bug reproduction may be written earlier.
 - Update only affected Case directories, then validate the complete derived registry.
@@ -44,6 +46,8 @@ Read only the references needed for the selected mode.
 4. During requirement design, run `python test-e2e/infra/tools/validate_test_assets.py --phase design --generate`.
 5. After fixed scripts and case-local bindings exist, run `python test-e2e/infra/tools/validate_test_assets.py --phase implementation --generate`; omit `--generate` for a read-only drift check.
 6. Run affected selectors through `python test-e2e/infra/tools/run_cases.py <Case-ID> --test-home <machine-local-directory>` and report exact results. Static validation is not execution evidence.
+
+For new or acceptance-modified Cases, read [acceptance-integrity.md](references/acceptance-integrity.md). Give each acceptance obligation a stable ID, map every obligation to actual collected tests, and check the assertions against the requirement. Mapping or hashes alone do not certify completeness. Existing unmapped Cases remain executable but acceptance completeness is unreviewed; confirmed gaps must not be described as full acceptance passes.
 
 ## Status rules
 

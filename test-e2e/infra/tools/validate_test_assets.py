@@ -14,15 +14,36 @@ import validate_changes
 import validate_execution
 import validate_features
 import validate_traceability
-from test_asset_lib import ValidationIssue, render_issues, repository_root
+from test_asset_lib import ValidationIssue, case_index, change_index, discover_documents, render_issues, repository_root
 
 
-def validate(root: Path, phase: str, regenerate: bool) -> list[ValidationIssue]:
+def validate(root: Path, phase: str, regenerate: bool,
+             require_acceptance_cases: list[str] | None = None,
+             require_ut_changes: list[str] | None = None) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     issues.extend(validate_features.validate(root))
     issues.extend(validate_cases.validate(root))
     issues.extend(validate_changes.validate(root))
     issues.extend(validate_traceability.validate(root))
+    changes, _ = change_index(discover_documents(root, "changes"))
+    for change_id in require_ut_changes or []:
+        if change_id not in changes:
+            issues.append(ValidationIssue(root / "test-e2e/changes", change_id, "Selected UT Change does not exist"))
+        elif "traditional_ut" not in changes[change_id]:
+            issues.append(ValidationIssue(root / "test-e2e/changes", change_id, "Current product Change requires traditional_ut assessment"))
+    for change_id, change in changes.items():
+        if "traditional_ut" in change:
+            issues.extend(ValidationIssue(root / "test-e2e/changes", change_id, problem)
+                          for problem in validate_changes.traditional_ut_issues(root, change["traditional_ut"], phase))
+    if require_acceptance_cases:
+        cases, _ = case_index(discover_documents(root, "cases"))
+        for case_id in require_acceptance_cases:
+            if case_id not in cases:
+                issues.append(ValidationIssue(root / "test-e2e/cases", case_id, "Selected acceptance Case does not exist"))
+            else:
+                _, case, path = cases[case_id]
+                if not case.get("acceptance"):
+                    issues.append(ValidationIssue(path, "acceptance", "Current-change Case requires explicit acceptance obligations"))
     execution_issues, registry = validate_execution.inspect(root, phase)
     issues.extend(execution_issues)
     if issues:
@@ -56,9 +77,13 @@ def main() -> int:
     parser.add_argument("--root", type=Path)
     parser.add_argument("--phase", choices=("design", "implementation"), default="implementation")
     parser.add_argument("--generate", action="store_true")
+    parser.add_argument("--require-acceptance-case", action="append", default=[], metavar="CASE_ID",
+                        help="Require obligation metadata for an added or acceptance-modified Case; repeat per Case")
+    parser.add_argument("--require-ut-change", action="append", default=[], metavar="CHANGE_ID",
+                        help="Require traditional UT assessment for a current product Change; repeat per Change")
     args = parser.parse_args()
     root = repository_root(args.root)
-    issues = validate(root, args.phase, args.generate)
+    issues = validate(root, args.phase, args.generate, args.require_acceptance_case, args.require_ut_change)
     if issues:
         print(render_issues(root, issues))
         print(f"Case-centric validation failed with {len(issues)} issue(s).")

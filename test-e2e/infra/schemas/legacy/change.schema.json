@@ -44,6 +44,21 @@
         "description": {"$ref": "#/$defs/nonEmpty"}
       }
     },
+    "traditionalUt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["decision", "behaviors", "reason"],
+      "properties": {
+        "decision": {"enum": ["reuse", "strengthen", "add", "exempt"]},
+        "behaviors": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/nonEmpty"}},
+        "reason": {"$ref": "#/$defs/nonEmpty"},
+        "test_selectors": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/nonEmpty"}}
+      },
+      "allOf": [
+        {"if": {"properties": {"decision": {"const": "exempt"}}},
+         "then": {"properties": {"test_selectors": {"maxItems": 0}}},
+         "else": {"properties": {"behaviors": {"minItems": 1}}}}
+      ]
+    },
     "change": {
       "type": "object",
       "additionalProperties": false,
@@ -62,6 +77,7 @@
         "feature_contract_changed": {"type": "boolean"},
         "affected_features": {"$ref": "#/$defs/featureDelta"},
         "affected_cases": {"$ref": "#/$defs/caseDelta"},
+        "traditional_ut": {"$ref": "#/$defs/traditionalUt"},
         "no_case_change_reason": {"type": "string"},
         "notes": {"type": "string"}
       },
