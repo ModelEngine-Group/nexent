@@ -421,12 +421,12 @@ class TestConversationManagementService(unittest.TestCase):
                 agent_request, [], self.user_id, self.tenant_id)
 
     @patch('backend.services.conversation_management_service.save_message')
-    def test_save_conversation_user_strips_current_time_prefix(self, mock_save_message):
-        """When query has [Current time: ...] prefix, it should be stripped before persisting."""
+    def test_save_conversation_user_strips_runtime_time_marker(self, mock_save_message):
+        """Remove the appended runtime time marker before persisting the user request."""
         mock_save_message.return_value = 1001
         agent_request = AgentRequest(
             conversation_id=456,
-            query="[Current time: 2026-01-01 20:00:00]\n\nWhat is the weather?",
+            query="What is the weather?\n\n[Current time: 2026-01-01 20:00:00]",
             minio_files=[],
             history=[]
         )

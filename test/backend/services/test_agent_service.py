@@ -19816,13 +19816,13 @@ def test_inject_user_timezone_time_without_header():
     assert result == "What time is it?"
 
 
-def test_inject_user_timezone_time_with_existing_prefix():
-    """Should not double-inject when query already has [Current time:] prefix."""
+def test_inject_user_timezone_time_with_existing_marker():
+    """Do not append a second runtime time marker."""
     from unittest.mock import MagicMock
 
     request = MagicMock()
     request.headers = {"x-user-timezone": "Asia/Shanghai"}
-    prefixed = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    prefixed = "What time is it?\n\n[Current time: 2026-01-01 20:00:00]"
     result = prepend_current_time(prefixed, request.headers.get("x-user-timezone"))
     assert result == prefixed
 

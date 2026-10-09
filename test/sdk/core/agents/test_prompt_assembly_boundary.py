@@ -20,7 +20,7 @@ def test_ut_sdk_fps_037_assembly_functions_are_grouped_by_purpose():
         "evaluation.py": {"compose_evaluation_set_cases", "format_agent_profile_context"},
         "document.py": {"compose_document_cluster_summary"},
         "memory.py": {"compose_memory_prompt"},
-        "user_context.py": {"render_user_context", "has_current_time_prefix"},
+        "user_context.py": {"render_user_context", "has_current_time_marker"},
     }
     for filename, names in expected.items():
         source = (ASSEMBLY_PACKAGE / filename).read_text(encoding="utf-8")
