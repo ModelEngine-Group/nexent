@@ -46,7 +46,7 @@ from consts.exceptions import (
 from permissions.depends import require
 from permissions.models import CurrentUser
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
-from services.audit_service import record_security_event
+from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
 from management.services.agent.service import (
     get_agent_info_impl,
@@ -104,10 +104,6 @@ from utils.auth_utils import (
 
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
-
-# Upper bound for identifier lists copied into audit details so a payload
-# with hundreds of entries cannot bloat the audit line.
-_AUDIT_DETAIL_LIST_LIMIT = 20
 require_agent_create_permission = require("agent:create")
 logger = logging.getLogger("agent_app")
 
@@ -514,8 +510,8 @@ async def update_agent_info_api(
     # the log - patch_keys carries field names only.
     audit_details = {"agent_id": request.agent_id,
                      "display_name": request.display_name,
-                     "model_ids": request.model_ids[:_AUDIT_DETAIL_LIST_LIMIT] if request.model_ids else None,
-                     "patch_keys": sorted(request.model_dump(exclude_unset=True, exclude_none=True))[:_AUDIT_DETAIL_LIST_LIMIT]}
+                     "model_ids": request.model_ids[:AUDIT_DETAIL_LIST_LIMIT] if request.model_ids else None,
+                     "patch_keys": sorted(request.model_dump(exclude_unset=True, exclude_none=True))[:AUDIT_DETAIL_LIST_LIMIT]}
     try:
         result = await update_agent_info_impl(request, authorization)
         record_security_event("agent_update", request=http_request,

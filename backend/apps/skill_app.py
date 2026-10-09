@@ -19,7 +19,7 @@ from consts.model import (
 from permissions.depends import require
 from permissions.models import CurrentUser
 from services.asset_owner_visibility import can_view_skill
-from services.audit_service import record_security_event
+from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from services.agent_draft_permission_service import (
     AgentDraftEditError,
     ResourceBindingError,
@@ -46,10 +46,6 @@ _NOT_FOUND_TEXT = "not found"
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
-
-# Upper bound for identifier lists copied into audit details so a payload
-# with hundreds of entries cannot bloat the audit line.
-_AUDIT_DETAIL_LIST_LIMIT = 20
 require_skill_create_permission = require("skill:create")
 
 
@@ -160,7 +156,7 @@ async def install_skills(
         )
         record_security_event("skill_install", request=http_request,
                               user_id=user_id, tenant_id=effective_tenant_id,
-                              details={"skill_names": request.skill_names[:_AUDIT_DETAIL_LIST_LIMIT] if request.skill_names else None})
+                              details={"skill_names": request.skill_names[:AUDIT_DETAIL_LIST_LIMIT] if request.skill_names else None})
         return JSONResponse(content={
             "message": "Skills installed successfully",
             "installed": installed_names,
@@ -683,7 +679,7 @@ async def update_skill_by_id(
         record_security_event("skill_update", request=http_request,
                               user_id=user_id, tenant_id=tenant_id,
                               details={"skill_id": skill_id,
-                                       "patch_keys": sorted(update_data.keys())[:_AUDIT_DETAIL_LIST_LIMIT]})
+                                       "patch_keys": sorted(update_data.keys())[:AUDIT_DETAIL_LIST_LIMIT]})
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -766,7 +762,7 @@ async def update_skill(
         record_security_event("skill_update", request=http_request,
                               user_id=user_id, tenant_id=tenant_id,
                               details={"skill_name": skill_name,
-                                       "patch_keys": sorted(update_data.keys())[:_AUDIT_DETAIL_LIST_LIMIT]})
+                                       "patch_keys": sorted(update_data.keys())[:AUDIT_DETAIL_LIST_LIMIT]})
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
