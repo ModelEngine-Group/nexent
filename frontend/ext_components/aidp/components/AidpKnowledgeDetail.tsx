@@ -558,6 +558,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
   ];
 
   const taskStatusOptions = [
+    { value: 0, label: t("aidpKnowledge.taskAll") },
     { value: 1, label: t("aidpKnowledge.taskSuccess") },
     { value: 2, label: t("aidpKnowledge.taskExtracting") },
     { value: 3, label: t("aidpKnowledge.taskVectorFailed") },
@@ -606,7 +607,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         value,
       })),
       filterMultiple: false,
-      filteredValue: taskStatus === 0 ? null : [taskStatus],
+      filteredValue: [taskStatus],
       render: (status: AidpDocumentItem["status"]) => {
         const code = statusCode(status);
         const labelKeys: Record<number, string> = {
