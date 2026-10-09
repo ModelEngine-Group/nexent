@@ -407,9 +407,23 @@
   opacity: 0;
 }
 
-.columnResizeHandle:hover::after {
+.columnResizeHandle:hover::after,
+.columnResizeHandle:focus-visible::after {
   background: var(--aidp-primary);
   opacity: 1;
+}
+
+.columnResizeHandle:focus-visible {
+  outline: 1px solid var(--aidp-primary);
+  outline-offset: -1px;
+}
+
+.tableCellText {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tableScope {
