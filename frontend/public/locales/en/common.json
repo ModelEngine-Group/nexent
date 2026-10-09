@@ -3,7 +3,7 @@
   "workbench.landingGreeting": "Hi, I'm Nexent. What can I help you with?",
   "workbench.landingGreetingHi": "Hi, I'm Nexent",
   "workbench.landingGreetingAsk": "What can I help you with",
-  "workbench.askMeLikeThis": "You can ask me like this",
+  "workbench.askMeLikeThis": "Recommended prompts",
   "workbench.recommendedPrompts": "Suggested prompts",
   "workbench.landingExamples.agent.category": "Agent creation",
   "workbench.landingExamples.agent.template": "Create [agent name]: an agent for [target users] named [agent name], whose core function is [core responsibility]. Output: [output format]; must: [key constraints].",
