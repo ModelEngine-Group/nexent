@@ -1425,14 +1425,9 @@ class NexentAgent:
         language = getattr(self.observer, "lang", "en")
         mapping = getattr(self, "workspace_mapping", None)
         display_workspace = mapping.container_root if mapping is not None else workspace
-        file_lines = "\n".join(
-            render_user_context(language, "workspace_file", item) for item in downloaded
-        )
         workspace_note = render_user_context(language, "workspace_note", {
-            "workspace": display_workspace, "outputs": display_workspace / "outputs",
+            "workspace": display_workspace,
         })
-        if file_lines:
-            workspace_note += render_user_context(language, "workspace_files", {"file_lines": file_lines})
         self._push_file_workspace_to_sandbox()
         self._initialize_sandbox_workspaces()
         return query + workspace_note

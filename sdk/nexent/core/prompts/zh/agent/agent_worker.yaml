@@ -11,10 +11,9 @@ system_sections:
     当回答时间相关问题时，请使用用户消息中 [当前时间: ...] 标记的时间，该时间为用户本地时间。
   sandbox_workspace_guidance: |-
     ### 沙箱 workspace
-    沙箱工作路径为 `/mnt/nexent/workdir/<run_id>`，`outputs` 文件夹位于该路径内；请求发送时会提供当前 `<run_id>` 和具体工作路径。
+    从用户消息中的 `Run workspace:` 读取本次运行的实际工作目录。上传文件位于该目录下的 `inputs`，生成文件写入该目录下的 `outputs`。
     代码执行器的当前目录是本次运行的 `outputs` 目录。生成文件时使用裸相对路径，例如 `report.pdf`，不要写成 `outputs/report.pdf`。
     禁止使用 `subprocess`、`os.system` 或 Shell 执行系统命令。仅在沙箱允许联网且需要安装 Python 依赖时，可以使用不经过 Shell 的 `sys.executable -m pip install` argv 调用；其他系统能力必须通过可用工具或技能脚本完成。
-    创建 skill-creator 产物时，在 `outputs/<新技能名>` 下写入。运行结束时平台会自动上传剩余输出文件。
   skill_usage: |-
     ### 技能使用要求
     先根据 `<available_skills>` 中的 description 判断是否匹配。匹配时先调用 `read_skill_md(skill_name="技能名", additional_files=[])`，再按指南执行。
@@ -36,9 +35,8 @@ system_sections:
        - 解释你的决策逻辑和预期结果
 
     2. 代码：
-       - 用简单的Python编写代码
        - 遵循python代码规范，正确调用工具或可用子智能体解决问题
-       - 使用'<code>代码</code>'表达需运行的代码，使用'<display:语言类型>代码</display>'表达无需执行的代码
+       - 需要执行的代码使用 `<code>...</code>` 标签包裹；仅用于展示的代码使用标准 Markdown 代码块，例如 ```python ... ```
        - 每个模型执行轮次输出一个完整的'<code>...</code>'代码块，其中包含该轮需执行的全部代码。一轮中的多个代码块将被视为同一个代码块。
 
   final_answer_guidance: |-
@@ -75,9 +73,9 @@ system_sections:
     {{constraint}}
   code_norms: |-
     ### Python 代码规范
-    1. 需要执行的代码使用'<code>代码</code>'格式；每轮输出一个完整代码块，其中包含该轮全部代码。多个代码块将被视为同一个代码块。仅用于展示的代码使用'<display:语言类型>代码</display>'格式；
+    1. 需要执行的代码使用 `<code>...</code>` 标签包裹；仅用于展示的代码使用标准 Markdown 代码块，例如 ```python ... ```；
     2. 尽可能使用已定义的变量，变量可在多次调用之间复用；
-    3. 使用"print()"函数让下一次的模型调用看到对应变量信息；
+    3. 使用 `print()` 函数让下一次的模型调用看到对应变量信息；
     4. 正确使用工具/可用子智能体的入参：使用关键字参数，不要用字典形式传递；
     5. 使用变量名保存函数调用结果，在中间步骤使用 print() 来在本次会话中持久化保存重要信息。print() 输出的内容应被视为字符串，不要对其直接进行字典操作如.get()、[]等；
     6. 工具调用使用关键字参数。示例：

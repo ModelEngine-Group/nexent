@@ -475,3 +475,20 @@ def test_ut_sdk_dpr_004_rejects_unversioned_or_invalid_policy(values):
     """UT-SDK-DPR-004: SDK never guesses a missing policy version."""
     with pytest.raises(ValueError, match="prompt tool policy"):
         PromptToolPolicySnapshot.from_mapping(values)
+
+
+
+def test_scheduled_task_internal_tool_appears_only_in_policy():
+    composer = AgentPromptComposer(_bundle())
+    tools = {
+        "create_scheduled_task_proposal": {"name": "create_scheduled_task_proposal", "description": "duplicate"},
+        "search": {"name": "search", "description": "Search documents"},
+    }
+    items = composer.compose_context_inputs(
+        language="en", is_manager=False, tools=tools, enable_automation_tool_policy=True,
+    )
+    ids = {item.id for item in items}
+    assert "tool:create_scheduled_task_proposal" not in ids
+    assert "tool:search" in ids
+    assert "system:automation_tool_policy" in ids
+    assert "create_scheduled_task_proposal" in tools

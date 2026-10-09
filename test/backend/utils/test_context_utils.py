@@ -434,7 +434,7 @@ def test_rendered_roles_and_sections_match_context_semantics():
     first_user = next(index for index, message in enumerate(messages) if message["role"] == "user")
     assert all(message["role"] == "system" for message in messages[:first_user])
     assert any(message["role"] == "system" and "Core Responsibilities" in str(message) for message in messages)
-    assert any(message["role"] == "user" and "knowledge_base_search" in str(message) for message in messages)
+    assert any(message["role"] == "system" and "knowledge_base_search" in str(message) for message in messages)
 
 
 def test_agent_presearch_result_is_rendered_into_model_context():

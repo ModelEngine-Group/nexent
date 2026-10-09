@@ -224,8 +224,4 @@ def test_workspace_prompt_uses_container_paths_and_localized_resource(bind_agent
     mocker.patch.object(bind_agent, '_push_file_workspace_to_sandbox')
     mocker.patch.object(bind_agent, '_initialize_sandbox_workspaces')
     result = bind_agent._prepare_file_workspace('query')
-    assert result.startswith('query\n\n')
-    assert '/mnt/work/user/run/outputs' in result
-    assert str(bind_agent.workspace_path) not in result
-    assert "script_path='outputs/build.js'" in result
-    assert ('Run workspace' if language == 'en' else '本次运行的工作目录') in result
+    assert result == 'query\n\nRun workspace: /mnt/work/user/run'

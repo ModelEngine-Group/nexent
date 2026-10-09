@@ -4349,7 +4349,7 @@ def test_run_injects_current_time_when_missing():
 
     list(agent.run(task="What time is it?", stream=True))
 
-    assert agent.task.startswith("[Current time:")
+    assert agent.task.startswith("What time is it?\n\n[Current time:")
     assert "What time is it?" in agent.task
 
 
@@ -4389,9 +4389,9 @@ def test_managed_agent_call_injects_only_dynamic_workspace_paths(tmp_path):
     agent("create test.txt")
 
     managed_task = agent.run.call_args.args[0]
-    assert "[Nexent run workspace]" in managed_task
-    assert str(workspace / "outputs") in managed_task
-    assert str(workspace / "inputs") in managed_task
+    assert f"Run workspace: {workspace}" in managed_task
+    assert str(workspace / "outputs") not in managed_task
+    assert str(workspace / "inputs") not in managed_task
     assert "current working directory" not in managed_task
     assert "Never prefix a relative output path" not in managed_task
     assert "upload_to_s3" not in managed_task

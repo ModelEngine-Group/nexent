@@ -1770,7 +1770,7 @@ Additional Args:
         ```
         """
         max_steps = max_steps or self.max_steps
-        # Prepend current time to the user task instead of baking it into the
+        # Append current time before the workspace path in the user task rather than the
         # system prompt. This keeps the system prefix stable so prompt/KV caches
         # can hit across requests; only the trailing user message varies.
         # If the caller (e.g. backend run_agent_stream) already injected a
@@ -1905,10 +1905,8 @@ Additional Args:
             if self.workspace_path else ()
         )
         if self.workspace_path and not any(marker in task for marker in markers):
-            output_dir = os.path.join(self.workspace_path, "outputs")
             task = render_user_context(getattr(self, "lang", "en"), "delegated_workspace", {
-                "task": task, "workspace": self.workspace_path, "outputs": output_dir,
-                "inputs": os.path.join(self.workspace_path, "inputs"),
+                "task": task, "workspace": self.workspace_path,
             })
         composer = AgentPromptComposer.from_compatibility_templates(self.prompt_templates)
         full_task = composer.render_delegated_task(name=self.name, task=task)

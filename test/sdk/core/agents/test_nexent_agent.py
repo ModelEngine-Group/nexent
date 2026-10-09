@@ -4697,11 +4697,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         with patch.object(nexent_agent_instance, "_push_file_workspace_to_sandbox") as push:
             result = nexent_agent_instance._prepare_file_workspace("query")
 
-        assert "Run workspace" in result
-        assert f"Write every generated file under: {workspace / 'outputs'}" in result
-        assert "Use bare relative paths" in result
-        assert "script_path='outputs/build.js'" in result
-        assert "Direct subprocess, os.system, and shell calls" in result
+        assert result == f"query\n\nRun workspace: {workspace}"
         push.assert_called_once_with()
 
     def test_initialize_sandbox_workspaces_sets_cwd_for_every_docker_kernel(
@@ -5269,7 +5265,8 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         nexent_agent_instance._finalize_file_workspace()
         nexent_agent_instance._cleanup_file_workspace()
 
-        assert str(workspace / "inputs" / "000_input.csv") in query
+        assert query == f"analyze\n\nRun workspace: {workspace}"
+        download_tool.forward.assert_called_once()
         upload_tool.forward.assert_called_once_with(str(output), "outputs/result.txt")
         assert not workspace.exists()
         assert any(

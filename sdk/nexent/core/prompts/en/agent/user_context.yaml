@@ -1,5 +1,5 @@
 current_time_prefix: "[Current time:"
-current_time: "[Current time: {{ time }}]\n\n{{ query }}"
+current_time: "{{ query }}\n\n[Current time: {{ time }}]"
 file_intro: "User uploaded files. The file information is as follows:\n"
 file_query: "\n\nUser wants to answer questions based on the information in the above files: {{ query }}"
 file_with_presigned_url: |-
@@ -11,20 +11,9 @@ history_file_intro: "\n[Attached files]:\n"
 history_file_with_presigned_url: "  - {{ name }}: {{ s3_url }} (for non-MCP tools), presigned_url: {{ presigned_url }} (for [MCP] tools)"
 history_file_without_presigned_url: "  - {{ name }}: {{ s3_url }}"
 history_file_overflow: "  - ... (and {{ count }} more files)"
-workspace_note: |2-
-
-
-  Run workspace: {{ workspace }}
-  Write every generated file under: {{ outputs }}
-  The code executor already runs in that outputs directory. Use bare relative paths such as 'report.pdf', not 'outputs/report.pdf', to avoid creating an outputs/outputs directory.
-  Exception: run_skill_script(source='workspace') resolves script_path from the run workspace root. If code writes a generated script as bare 'build.js', call run_skill_script with script_path='outputs/build.js'. The generated script itself still writes output artifacts with bare filenames because its CWD is outputs.
-  Direct subprocess, os.system, and shell calls for system commands are blocked by the code executor. Use run_skill_script with a skill-bundled wrapper, or use a shell-free Python/Node.js API instead. When sandbox networking is enabled, only a shell-free argv call to sys.executable -m pip install is permitted for dependency installation.
-  For skill-creator output packages, create the new skill under outputs/<new-skill> with normal code-executor file APIs; write_skill_file edits installed tenant skills and does not create files in this run workspace.
-  Files created there are uploaded to MinIO automatically when the run finishes.
-workspace_files: "\nUploaded files are available locally:\n{{ file_lines }}"
-workspace_file: "- {{ name }}: {{ path }}"
-delegated_workspace_marker: "[Nexent run workspace]"
-delegated_workspace: "{{ task }}\n\n[Nexent run workspace]\nRun workspace: {{ workspace }}\nWrite every generated file under: {{ outputs }}\nUploaded input files are under {{ inputs }}."
+workspace_note: "\n\nRun workspace: {{ workspace }}"
+delegated_workspace_marker: "Run workspace:"
+delegated_workspace: "{{ task }}\n\nRun workspace: {{ workspace }}"
 additional_arguments: "\nYou have been provided with these additional arguments, that you can access using the keys as variables in your python code:\n{{ arguments }}."
 runtime_metadata: |-
 

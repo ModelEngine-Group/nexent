@@ -51,6 +51,17 @@ def test_time_marker_uses_page_language_and_is_stripped(time_context, language, 
     query = time_context.prepend_current_time(
         "question", "Asia/Shanghai", now=datetime(2026, 9, 28, tzinfo=timezone.utc), language=language,
     )
-    assert query.startswith(marker)
+    assert query.startswith("question\n\n" + marker)
     assert time_context.strip_current_time_prefix(query) == "question"
     assert time_context.prepend_current_time(query, "Asia/Shanghai", language=language) == query
+
+
+@pytest.mark.parametrize("language,marker", [("en", "Current time"), ("zh", "当前时间")])
+def test_time_context_keeps_workspace_last_and_strips_runtime_time(time_context, language, marker):
+    request = "question\n\nRun workspace: /run/1"
+    result = time_context.prepend_current_time(
+        request, "Asia/Shanghai", now=datetime(2026, 10, 9, tzinfo=timezone.utc), language=language,
+    )
+    assert result == f"question\n\n[{marker}: 2026-10-09 08:00:00]\n\nRun workspace: /run/1"
+    assert time_context.strip_current_time_prefix(result) == request
+    assert time_context.prepend_current_time(result, "Asia/Shanghai", language=language) == result

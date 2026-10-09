@@ -1,5 +1,5 @@
 current_time_prefix: "[当前时间:"
-current_time: "[当前时间: {{ time }}]\n\n{{ query }}"
+current_time: "{{ query }}\n\n[当前时间: {{ time }}]"
 file_intro: "用户上传了文件，文件信息如下：\n"
 file_query: "\n\n用户希望基于以上文件信息回答问题：{{ query }}"
 file_with_presigned_url: |-
@@ -11,20 +11,9 @@ history_file_intro: "\n[附件]：\n"
 history_file_with_presigned_url: "  - {{ name }}: {{ s3_url }}（供非 MCP 工具使用），presigned_url: {{ presigned_url }}（供 [MCP] 工具使用）"
 history_file_without_presigned_url: "  - {{ name }}: {{ s3_url }}"
 history_file_overflow: "  - ……（另有 {{ count }} 个文件）"
-workspace_note: |2-
-
-
-  本次运行的工作目录：{{ workspace }}
-  请将生成的文件写入：{{ outputs }}
-  代码执行器已在 outputs 目录运行。请使用 'report.pdf' 这样的相对文件名，避免使用 'outputs/report.pdf' 创建 outputs/outputs 目录。
-  run_skill_script(source='workspace') 从运行工作目录解析 script_path。代码以 'build.js' 文件名生成脚本后，请使用 script_path='outputs/build.js' 调用。脚本的工作目录仍为 outputs，生成文件时继续使用相对文件名。
-  代码执行器禁止通过 subprocess、os.system 和 shell 调用系统命令。请用 run_skill_script 调用技能提供的封装脚本，或使用不经过 shell 的 Python/Node.js API。启用沙箱网络后，安装依赖仅允许通过无 shell 的参数列表调用 sys.executable -m pip install。
-  使用 skill-creator 生成技能包时，请通过代码执行器文件 API 在 outputs/<new-skill> 下创建技能。write_skill_file 修改已安装的租户技能，不会在本次运行工作目录中创建文件。
-  运行结束后，生成文件会自动上传到 MinIO。
-workspace_files: "\n上传的文件可在以下本地路径读取：\n{{ file_lines }}"
-workspace_file: "- {{ name }}: {{ path }}"
-delegated_workspace_marker: "[Nexent 运行工作区]"
-delegated_workspace: "{{ task }}\n\n[Nexent 运行工作区]\n本次运行的工作目录：{{ workspace }}\n请将生成的文件写入：{{ outputs }}\n上传的输入文件位于 {{ inputs }}。"
+workspace_note: "\n\nRun workspace: {{ workspace }}"
+delegated_workspace_marker: "Run workspace:"
+delegated_workspace: "{{ task }}\n\nRun workspace: {{ workspace }}"
 additional_arguments: "\n你还可以在 Python 代码中通过同名变量访问以下参数：\n{{ arguments }}。"
 runtime_metadata: |-
 

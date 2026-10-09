@@ -249,6 +249,9 @@ class AgentPromptComposer:
 
         if include_tools and tools:
             for name, tool in tools.items():
+                tool_name = getattr(tool, "name", name) if not isinstance(tool, dict) else tool.get("name", name)
+                if name == "create_scheduled_task_proposal" or tool_name == "create_scheduled_task_proposal":
+                    continue
                 payload = {
                     "name": name,
                     "description": getattr(tool, "description", None) if not isinstance(tool, dict) else tool.get("description", ""),
@@ -280,7 +283,7 @@ class AgentPromptComposer:
             )
             inputs.append(ContextItemInput(
                 id="knowledge_base:summary", type=ContextItemType.KNOWLEDGE_BASE,
-                content={"text": heading + "\n" + guidance + summary_text, "role": "user"},
+                content={"text": heading + "\n" + guidance + summary_text, "role": "system"},
                 source=tuple(f"knowledge_base:{item['index_name']}" for item in summaries), priority=10,
                 metadata={"authority": "retrieved"},
             ))
@@ -289,7 +292,7 @@ class AgentPromptComposer:
             inputs.append(ContextItemInput(
                 id="knowledge_scope:resources",
                 type=ContextItemType.KNOWLEDGE_BASE,
-                content={"text": render_knowledge_scope_resources(language, knowledge_scope), "role": "user"},
+                content={"text": render_knowledge_scope_resources(language, knowledge_scope), "role": "system"},
                 source=("knowledge_scope:runtime",),
                 priority=20,
                 metadata={"authority": "retrieved"},

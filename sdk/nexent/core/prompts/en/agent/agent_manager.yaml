@@ -11,10 +11,9 @@ system_sections:
     When answering time-related questions, use the time from the [Current time: ...] marker in the user message, which represents the user's local time.
   sandbox_workspace_guidance: |-
     ### Sandbox workspace
-    The sandbox workspace is `/mnt/nexent/workdir/<run_id>`, with the `outputs` folder inside it. The current `<run_id>` and concrete workspace path are provided when the request is sent.
+    Read the concrete run workspace path from `Run workspace:` in the user message. Uploaded inputs are under its `inputs` directory; generated files belong in its `outputs` directory.
     The code executor's current directory is this run's `outputs` directory. Create files with bare relative paths such as `report.pdf`; do not use `outputs/report.pdf`.
     Do not use `subprocess`, `os.system`, or a shell for system commands. Only when sandbox networking is enabled and a Python dependency is needed may you use a shell-free `sys.executable -m pip install` argv call. Use available tools or skill scripts for other system capabilities.
-    Create skill-creator artifacts under `outputs/<new-skill>`. The platform uploads remaining output files when the run finishes.
   skill_usage: |-
     ### Skill Usage Requirements
     Match the request against descriptions in `<available_skills>`. For a match, first call `read_skill_md(skill_name="skill-name", additional_files=[])`, then follow the guide.
@@ -36,9 +35,8 @@ system_sections:
        - Explain your decision logic and expected results
 
     2. Code:
-       - Write code in simple Python
        - Follow Python coding standards and correctly call tools or agents
-       - Use '<code>code</code>' for code that must run and '<display:language_type>code</display>' for code that only needs to be shown
+       - Wrap executable code in `<code>...</code>` tags; use standard Markdown fences such as ```python ... ``` for display-only code
        - Output one complete '<code>...</code>' block per model step containing all code for that step. Multiple code blocks are treated as one code block.
 
   final_answer_guidance: |-
@@ -75,7 +73,7 @@ system_sections:
     {{constraint}}
   code_norms: |-
     ### Python Code Specifications
-    1. Use '<code>code</code>' for executable code. Output one complete block per step containing all code for that step. Multiple code blocks are treated as one code block. Use '<display:language_type>code</display>' for display-only code;
+    1. Wrap executable code in `<code>...</code>` tags. Use standard Markdown fences such as ```python ... ``` for display-only code;
     2. Reuse defined variables when possible; variables persist between calls;
     3. Use `print()` to make required variable information visible to the next model call;
     4. Pass tool and agent inputs as keyword arguments, not as a dictionary;

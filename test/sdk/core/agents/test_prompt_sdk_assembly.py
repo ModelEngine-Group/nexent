@@ -65,7 +65,8 @@ def test_ut_sdk_fps_027_structured_knowledge_scope_and_summaries(language):
     )["policy"]
     assert "Allowed KB" in by_id["knowledge_scope:resources"].content["text"]
     assert "Facts" in by_id["knowledge_base:summary"].content["text"]
-    assert by_id["knowledge_scope:resources"].content["role"] == "user"
+    assert by_id["knowledge_scope:resources"].content["role"] == "system"
+    assert by_id["knowledge_base:summary"].content["role"] == "system"
     assert by_id["knowledge_base:summary"].source == ("knowledge_base:allowed-index",)
 
     empty = composer.compose_context_inputs(language=language, knowledge_scope={
@@ -89,3 +90,54 @@ def test_ut_sdk_fps_027_structured_knowledge_scope_and_summaries(language):
     no_indexes = composer.compose_context_inputs(language=language, knowledge_base_no_indexes=True)
     summary = next(item for item in no_indexes if item.id == "knowledge_base:summary")
     assert labels["no_indexes"] in summary.content["text"]
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+@pytest.mark.parametrize("role", ["manager", "managed"])
+def test_all_instruction_modules_and_knowledge_are_merged_into_system(language, role):
+    from nexent.core.agents.context.models import ContextItem
+    from nexent.core.agents.context.rendering import ContextItemRenderer
+    from nexent.core.models.message_utils import merge_system_messages
+
+    composer = AgentPromptComposer(AgentPromptBundle.from_resource(role=role, language=language))
+    inputs = composer.compose_context_inputs(
+        language=language, is_manager=role == "manager", duty="Test duty",
+        constraint="Test constraint", few_shots="Test example",
+        enable_planning=True, verification_enabled=True, sandbox_workspace_enabled=True,
+        enable_memory_tool_policy=True, enable_automation_tool_policy=True,
+        tools={"search": {"name": "search", "description": "Search documents"}},
+        skills=[{"name": "test-skill", "description": "Test skill"}],
+        memory_list=[{"memory": "Remembered user preference", "memory_level": "user"}],
+        worker_agents={"worker": {"name": "worker", "description": "Test worker", "tools": []}},
+        external_a2a_agents={"remote": {"agent_id": "remote", "name": "remote", "description": "Test remote"}},
+        knowledge_scope={
+            "local_capable": True, "aidp_capable": False,
+            "local_disabled": False, "aidp_disabled": False,
+            "local_display_names": ["Allowed KB"], "aidp_display_names": [],
+        },
+        knowledge_base_summaries=[{
+            "index_name": "allowed-index", "display_name": "Allowed KB", "summary": "Knowledge facts",
+        }],
+    )
+    renderer = ContextItemRenderer()
+    items = [ContextItem.from_input(value) for value in inputs]
+    rendered = renderer.render(items)
+    for item in items:
+        if item.type.value == "memory":
+            assert renderer.render([item])[0]["role"] == "user"
+        else:
+            assert all(message["role"] == "system" for message in renderer.render([item])), item.id
+    request = {"role": "user", "content": [{"type": "text", "text": "Actual user request"}]}
+    merged = merge_system_messages([*rendered, request])
+    systems = [message for message in merged if message["role"] == "system"]
+    assert len(systems) == 1
+    assert len(systems[0]["content"]) == 1
+    text = systems[0]["content"][0]["text"]
+    for item in items:
+        if item.id in {"knowledge_base:summary", "knowledge_scope:resources"}:
+            assert item.content["text"] in text
+            assert item.metadata["authority"] == "retrieved"
+    assert "Knowledge facts" in text and "Allowed KB" in text
+    assert "Actual user request" not in text
+    assert "Remembered user preference" not in text
+    assert merged[-1] == request

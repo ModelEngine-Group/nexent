@@ -19800,7 +19800,7 @@ def test_inject_user_timezone_time_with_valid_timezone():
         result = prepend_current_time(
             "What time is it?", request.headers.get("x-user-timezone")
         )
-    assert result.startswith("[Current time:")
+    assert result.startswith("What time is it?\n\n[Current time:")
     assert "What time is it?" in result
 
 
