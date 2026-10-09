@@ -3,6 +3,10 @@
   color: #191919;
 }
 
+.createForm [hidden] {
+  display: none !important;
+}
+
 .infoBanner:global(.ant-alert) {
   box-sizing: border-box;
   min-height: 46px;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import type { TFunction } from "i18next";
 
 import {
@@ -68,20 +68,11 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
   const [expanded, setExpanded] = useState<Record<CollapsibleSection, boolean>>(
     {
       graph: false,
-      chunk: true,
-      vector: true,
-      retrieval: true,
+      chunk: false,
+      vector: false,
+      retrieval: false,
     }
   );
-
-  useEffect(() => {
-    if (graphEnabled) {
-      // The graph toggle lives in the Ant Design form, so sync its enabled state
-      // to the independent accordion UI when a form value is loaded.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setExpanded((current) => ({ ...current, graph: true }));
-    }
-  }, [graphEnabled]);
 
   const toggleSection = (section: CollapsibleSection) =>
     setExpanded((current) => ({ ...current, [section]: !current[section] }));
@@ -120,9 +111,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
     hint?: string,
     action?: React.ReactNode
   ) => {
-    const isGraph = section === "graph";
     const isExpanded = expanded[section];
-    const disabled = isGraph && !graphEnabled;
     const panelId = `aidp-create-${section}-panel`;
 
     return (
@@ -130,15 +119,14 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
         <div className={styles.sectionHeadingTitle}>
           <button
             type="button"
-            className="flex h-9 items-center gap-2 rounded px-1 text-left text-lg font-semibold leading-7 text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed"
-            aria-expanded={isExpanded && !disabled}
+            className="flex h-9 items-center gap-2 rounded px-1 text-left text-lg font-semibold leading-7 text-gray-800 hover:bg-gray-50"
+            aria-expanded={isExpanded}
             aria-controls={panelId}
             aria-label={
               isExpanded
                 ? t("aidpKnowledge.createCollapseSection", { section: title })
                 : t("aidpKnowledge.createExpandSection", { section: title })
             }
-            disabled={disabled}
             onClick={() => toggleSection(section)}
           >
             <DownOutlined
@@ -248,12 +236,9 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
             <Switch aria-label={t("aidpKnowledge.createGraphEnable")} />
           </Form.Item>
         )}
-        <div
-          id="aidp-create-graph-panel"
-          hidden={!expanded.graph || !graphEnabled}
-        >
-          {graphEnabled && sectionHint}
-          <div className={`${styles.formGrid} mt-5`}>
+        <div id="aidp-create-graph-panel" hidden={!expanded.graph}>
+          {sectionHint}
+          <div className={`${styles.formGrid} mt-5`} hidden={!graphEnabled}>
             {graphEnabled && (
               <>
                 <Form.Item
@@ -442,7 +427,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           t("aidpKnowledge.createSectionChunk"),
           t("aidpKnowledge.createChunkSectionHint")
         )}
-        <p className={styles.defaultsHint}>
+        <p className={styles.defaultsHint} hidden={!expanded.chunk}>
           {t("aidpKnowledge.createDefaultsHint")}
         </p>
         <div id="aidp-create-chunk-panel" hidden={!expanded.chunk}>
@@ -571,7 +556,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           t("aidpKnowledge.createSectionVector"),
           t("aidpKnowledge.createVectorSectionHint")
         )}
-        <p className={styles.defaultsHint}>
+        <p className={styles.defaultsHint} hidden={!expanded.vector}>
           {t("aidpKnowledge.createDefaultsHint")}
         </p>
         <div id="aidp-create-vector-panel" hidden={!expanded.vector}>
@@ -657,7 +642,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           t("aidpKnowledge.createSectionRetrieval"),
           t("aidpKnowledge.createRetrievalSectionHint")
         )}
-        <p className={styles.defaultsHint}>
+        <p className={styles.defaultsHint} hidden={!expanded.retrieval}>
           {t("aidpKnowledge.createDefaultsHint")}
         </p>
         <div id="aidp-create-retrieval-panel" hidden={!expanded.retrieval}>
