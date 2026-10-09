@@ -40,7 +40,11 @@ from .prompt_cache import (
     extract_prompt_cache_usage,
     resolve_prompt_cache_profile,
 )
-from .message_utils import content_has_multimodal_blocks, prepare_messages_for_smolagents_text_flattening
+from .message_utils import (
+    content_has_multimodal_blocks,
+    merge_system_messages,
+    prepare_messages_for_smolagents_text_flattening,
+)
 from .context_overflow import (
     ProviderContextOverflowRetryExhausted,
     ProviderContextOverflowRetryUnsafe,
@@ -354,6 +358,7 @@ class OpenAIModel(OpenAIServerModel):
                  _suppress_attempt_stream: bool = False,
                  _retry_empty_response: bool = True,
                  **kwargs, ) -> ChatMessage:
+        messages = merge_system_messages(messages or [])
         _monitoring_operation.set("chat_completion")
 
         if _token_tracker is None:
@@ -464,6 +469,8 @@ class OpenAIModel(OpenAIServerModel):
         )
 
         completion_kwargs["stream_options"] = {"include_usage": True}
+        if "messages" in completion_kwargs:
+            completion_kwargs["messages"] = merge_system_messages(completion_kwargs["messages"])
 
         # Provider-specific extras (e.g. Qwen3 chat_template_kwargs) - only
         # set when the caller actually supplied something so default OpenAI
@@ -1088,6 +1095,8 @@ class OpenAIModel(OpenAIServerModel):
         identity to catch a stale or cross-model W2 snapshot before the
         provider call.
         """
+        if "messages" in completion_kwargs:
+            completion_kwargs["messages"] = merge_system_messages(completion_kwargs["messages"])
         snapshot = self._coerce_context_budget_snapshot(context_budget_snapshot)
         if snapshot is not None:
             self._verify_w1_w2_consistency(

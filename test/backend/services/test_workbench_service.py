@@ -18,13 +18,13 @@ def test_runtime_copy_preserves_live_clients_and_isolates_nested_configuration()
     client = local()
     source = AgentConfig(name="root", model_name="test", description="", tools=[
         ToolConfig(class_name="KnowledgeBaseSearchTool", name="search", params={"client": client, "index_names": ["a", "b"]}),
-    ], managed_agents=[AgentConfig(name="child", model_name="test", description="", tools=[])])
+    ], worker_agents=[AgentConfig(name="child", model_name="test", description="", tools=[])])
     identity = workbench_service.RuntimeAgentIdentity("system:root", None, None, "root", "Root", "SYSTEM")
     overlay = workbench_service.RootRuntimeOverlay(None, None, (), None)
     result = workbench_service.RuntimeMountService().resolve_root(workbench_service.RuntimeRootDescriptor(identity, source), overlay).root.agent_config
     assert result.tools[0].params["client"] is client
     assert result.tools[0] is not source.tools[0]
-    assert result.managed_agents[0] is not source.managed_agents[0]
+    assert result.worker_agents[0] is not source.worker_agents[0]
     result.tools[0].params["index_names"].append("c")
     assert source.tools[0].params["index_names"] == ["a", "b"]
 
@@ -199,9 +199,9 @@ def test_runtime_composer_mounts_request_scoped_children_without_mutating_root()
     result = workbench_service.RuntimeAgentTreeComposer().compose(root, [child])
 
     assert result is not root
-    assert result.managed_agents[0] is not child
-    assert result.managed_agents[0].name == "child"
-    assert root.managed_agents == []
+    assert result.worker_agents[0] is not child
+    assert result.worker_agents[0].name == "child"
+    assert root.worker_agents == []
 
 
 @pytest.mark.parametrize("origin,agent_id,runtime_ref", [("PERSISTED", 7, "agent:7:v3"), ("SYSTEM", None, "system:assistant")])
@@ -231,13 +231,13 @@ def test_ut_be_wb_001_persisted_plan_compiles_the_effective_root_only(mocker):
     mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", return_value={"name": "Root"})
     _, plan = workbench_service.resolve_workbench_config(_config(3), tenant_id="tenant")
     child = AgentConfig(name="Child", description="", tools=[], model_name="child-model")
-    root = AgentConfig(name="Root", description="", tools=[], model_name="root-model", managed_agents=[child])
+    root = AgentConfig(name="Root", description="", tools=[], model_name="root-model", worker_agents=[child])
     tree = workbench_service.compile_runtime_mount_plan(plan, root)
     assert tree.root.agent_config is not root
     assert tree.root.agent_config.runtime_ref == "agent:99:v4"
     assert [child.runtime_ref for child in plan.child_mounts] == ["agent:7:v3"]
-    assert tree.root.agent_config.managed_agents[0].model_name == "child-model"
-    assert tree.root.agent_config.managed_agents[0] is not child
+    assert tree.root.agent_config.worker_agents[0].model_name == "child-model"
+    assert tree.root.agent_config.worker_agents[0] is not child
     assert root.runtime_ref is None
 
 

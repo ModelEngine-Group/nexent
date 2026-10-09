@@ -15,7 +15,7 @@ from smolagents.tools import Tool
 
 from ...core.gateway.modality import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
-from ...core.utils.prompt_template_utils import get_prompt_template
+from ..prompts import load_prompt
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
 from ...multi_modal.load_save_object import LoadSaveObjectManager
 from ...multi_modal.utils import detect_content_type_from_bytes
@@ -146,8 +146,7 @@ class AnalyzeVideoTool(Tool):
             raise ValueError("video_url must contain a video")
 
         language = self.observer.lang if self.observer else "en"
-        prompts = get_prompt_template(
-            template_type='analyze_video', language=language)
+        prompts = load_prompt(language, "tool/analyze_video")
         system_prompt = Template(
             prompts['system_prompt'], undefined=StrictUndefined).render({'query': query})
 

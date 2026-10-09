@@ -13,7 +13,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ...core.utils.observer import MessageObserver, ProcessType
-from ...core.utils.prompt_template_utils import get_prompt_template
+from ..prompts import load_prompt
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
 from ...storage import MinIOStorageClient
 from ...multi_modal.load_save_object import LoadSaveObjectManager
@@ -245,8 +245,7 @@ class AnalyzeTextFileTool(Tool):
         """
         language = getattr(self.observer, "lang",
                            "en") if self.observer else "en"
-        prompts = get_prompt_template(
-            template_type='analyze_file', language=language)
+        prompts = load_prompt(language, "tool/analyze_file")
         system_prompt_template = Template(
             prompts['system_prompt'], undefined=StrictUndefined)
         user_prompt_template = Template(

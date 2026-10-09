@@ -15,12 +15,12 @@ import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 /**
  * Convert custom code tags to standard markdown code fences
  * - <code>...</code> → ```python ... ```
- * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
+ * - <display:language>...</display> → ```language ... ```
  */
 const convertToMarkdownCodeFences = (content: string): string => {
   // Handle complete blocks
   content = content.replace(
-    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    /<display:(\w+)>([\s\S]*?)<\/display>/g,
     (_match, language, code) => {
       return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
     }

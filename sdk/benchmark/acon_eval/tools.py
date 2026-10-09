@@ -1,11 +1,9 @@
 """ACON QA benchmark tools for nexent agent.
 
-Provides WikipediaSearchTool and FinalAnswerTool as smolagents.Tool
-subclasses, plus a helper to register them in nexent's tool namespace
+Provides WikipediaSearchTool as a smolagents.Tool subclass, plus a helper
+to register it in nexent's tool namespace
 so that NexentAgent.create_local_tool() can find them via globals().
 """
-from typing import Any
-
 import requests
 from smolagents.tools import Tool
 
@@ -65,21 +63,6 @@ class WikipediaSearchTool(Tool):
         )
 
 
-class FinalAnswerTool(Tool):
-    name = "final_answer"
-    description = "Provides a final answer to the given problem."
-    inputs = {
-        "answer": {
-            "type": "any",
-            "description": "The final answer to the problem",
-        },
-    }
-    output_type = "any"
-
-    def forward(self, answer: Any) -> Any:
-        return answer
-
-
 # ---------------------------------------------------------------------------
 # Tool registration and ToolConfig builders
 # ---------------------------------------------------------------------------
@@ -94,7 +77,7 @@ def register_acon_tools():
     """
     import nexent.core.tools as _tools_mod
     import nexent.core.agents.nexent_agent as _agent_mod
-    for cls in (WikipediaSearchTool, FinalAnswerTool):
+    for cls in (WikipediaSearchTool,):
         setattr(_tools_mod, cls.__name__, cls)
         setattr(_agent_mod, cls.__name__, cls)
 
@@ -111,21 +94,6 @@ def build_wikipedia_search_tool_config(port: str = "8005") -> ToolConfig:
     )
 
 
-def build_final_answer_tool_config() -> ToolConfig:
-    return ToolConfig(
-        class_name="FinalAnswerTool",
-        name="final_answer",
-        description=FinalAnswerTool.description,
-        inputs=str(FinalAnswerTool.inputs),
-        output_type=FinalAnswerTool.output_type,
-        params={},
-        source="local",
-    )
-
-
 def get_acon_tool_configs(port: str = "8005") -> list[ToolConfig]:
     """Return the standard ACON QA tool config list."""
-    return [
-        build_wikipedia_search_tool_config(port=port),
-        build_final_answer_tool_config(),
-    ]
+    return [build_wikipedia_search_tool_config(port=port)]

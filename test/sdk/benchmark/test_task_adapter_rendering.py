@@ -65,7 +65,7 @@ def _agent_run_info():
             name="agent",
             max_steps=5,
             tools=[SimpleNamespace(class_name="SearchTool")],
-            managed_agents=[SimpleNamespace(name="helper")],
+            worker_agents=[SimpleNamespace(name="helper")],
             context_items=[context_item],
             context_manager_config=context_manager_config,
         ),

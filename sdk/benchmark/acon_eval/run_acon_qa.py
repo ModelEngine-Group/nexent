@@ -2,7 +2,7 @@
 """Run ACON multi-objective QA benchmark with nexent agent.
 
 Loads ACON's nq_multi_8 data, builds a nexent CoreAgent with
-wikipedia_search + final_answer tools, evaluates with EM/F1 scoring.
+wikipedia_search tool, evaluates with EM/F1 scoring.
 
 Supports three modes:
   baseline        — no context compression
@@ -67,11 +67,10 @@ def build_qa_system_prompt(num_objectives: int) -> str:
     answer_slots = "; ".join(f"answer{i}" for i in range(1, num_objectives + 1))
 
     return f"""You are a multi-hop QA agent. The input contains multiple sub-questions separated by "; ".
-Answer them sequentially by actually calling `wikipedia_search`, then call `final_answer`.
+Answer them sequentially by actually calling `wikipedia_search`, then return the final result in `<final_answer>...</final_answer>`.
 
 # Tools
 - `wikipedia_search(query: str, n_results: int = 3)` — searches the local 2018 Wikipedia retriever.
-- `final_answer(answer: str)` — submits the final answer.
 
 # Mandatory Tool-Use Protocol
 For every search, you must use a real code block:
@@ -100,7 +99,7 @@ For each sub-question, in order:
 - If the last 2 searches returned completely irrelevant results (no mention of the target entity), the query angle is wrong. Do NOT search a third time with minor wording tweaks of the same query. Instead, search the main entity broadly (e.g. "Formula One history" instead of "chain F1"), or if already at 3, infer the best answer from any indirect clues in the observations and output ANSWER_Q<number>.
 - Self-check: if you catch yourself writing "I'm not finding it", "Perhaps", "Let me search for" or similar frustration phrases, you have already done enough searching. Output ANSWER_Q<number> with your best inference immediately.
 - After 3 searches, you already have your answer. Do NOT write "However", "But", "I'm not sure", "I'm not entirely sure", "Let me try one more", "Let me check directly", or any similar hesitation phrase. These words mean you have a candidate answer but are delaying. Output that candidate as ANSWER_Q<number> right now and move on. Uncertainty is expected and acceptable — your best guess IS the answer.
-- If the conversation contains a user message starting with "Summary of earlier steps in this task:", that message is an authoritative checkpoint of your progress. Before each search, check its JSON fields: "status", "search_counts", "pending_q", "next_action". If pending_q is empty and next_action says to call final_answer, call final_answer immediately — do not search again. If a question is marked "exhausted" in the summary, do not search it further.
+- If the conversation contains a user message starting with "Summary of earlier steps in this task:", that message is an authoritative checkpoint of your progress. Before each search, check its JSON fields: "status", "search_counts", "pending_q", "next_action". If pending_q is empty and next_action says to return the final answer, emit the final envelope immediately and do not search again. If a question is marked "exhausted" in the summary, do not search it further.
 
 # Query Rules
 - Prefer entity-focused queries, e.g. "Asha Bhosle Guinness", not "most prolific singer ever".
@@ -131,15 +130,13 @@ Rules:
 - Use the registered ANSWER_Q markers to construct the final answer.
 
 # Final Answer
-Before calling `final_answer`, count your answers.
+Before returning the final envelope, count your answers.
 The final answer must contain exactly one answer per sub-question.
 Never submit a partial answer.
 
-Use a real code block:
+Return exactly:
 
-<code>
-final_answer(answer="{answer_slots}")
-</code>
+<final_answer>{answer_slots}</final_answer>
 
 Start answering the real questions, starting with obtaining ANSWER_Q1.
 """

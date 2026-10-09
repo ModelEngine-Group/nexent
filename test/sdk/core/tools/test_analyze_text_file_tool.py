@@ -175,8 +175,8 @@ class TestAnalyzeTextFileTool:
             "system_prompt": "System prompt for {{query}}",
             "user_prompt": "User prompt"
         }
-        monkeypatch.setattr(module, "get_prompt_template",
-                            lambda template_type, language: prompts)
+        monkeypatch.setattr(module, "load_prompt",
+                            lambda language, path: prompts)
         llm_model.analyze_long_text.return_value = (
             MagicMock(content="analysis"), 12.5)
 
@@ -193,15 +193,14 @@ class TestAnalyzeTextFileTool:
             "system_prompt": "{{query}}",
             "user_prompt": "",
         })
-        monkeypatch.setattr(module, "get_prompt_template", mock_get_template)
+        monkeypatch.setattr(module, "load_prompt", mock_get_template)
         llm_model.analyze_long_text.return_value = (
             MagicMock(content="analysis"), 0)
 
         result = tool.analyze_file("Explain", "text")
 
         assert result == ("analysis", 0)
-        mock_get_template.assert_called_once_with(
-            template_type="analyze_file", language="en")
+        mock_get_template.assert_called_once_with("en", "tool/analyze_file")
 
 
 class TestAnalyzeTextFileToolValidateUrlAccess:

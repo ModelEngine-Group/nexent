@@ -69,7 +69,12 @@ from services.thread_lifecycle_service import (
     runtime_thread_manager,
 )
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt, compose_auxiliary_prompt
+from nexent.core.agents.prompt.evaluation import (
+    compose_analysis_report,
+    compose_evaluator_run_prompt, render_analysis_failures, render_analysis_stats,
+    render_evaluation_section,
+)
 
 
 _QUERY_FORMAT_ERR_MSG = "AI returned invalid format for test queries"
@@ -362,14 +367,13 @@ def _generate_friendly_error_message(
     if not model_id or not _is_llm_related_error(exc):
         return default_msg
     try:
-        template = get_prompt_template("evaluation_error_explain", language)
-        user_prompt = template["USER_PROMPT"].replace(
-            "{{error_message}}", str(exc)[:500]
+        prompt = compose_auxiliary_prompt(
+            language, "evaluation_error", {"error_message": str(exc)[:500]}
         )
         response = call_llm_for_system_prompt(
             model_id=model_id,
-            user_prompt=user_prompt,
-            system_prompt=template["SYSTEM_PROMPT"],
+            user_prompt=prompt.user,
+            system_prompt=prompt.system,
             tenant_id=tenant_id or "",
         )
         return (response or "").strip() or default_msg
@@ -564,7 +568,7 @@ def _format_runtime_context(
     with unused allocation flowing forward to later steps.
     """
     if not runtime_events:
-        return "## Agent Execution Log\n\n(No execution data)"
+        return render_evaluation_section("en", "runtime_empty")
 
     stats = _extract_runtime_stats(runtime_events)
     steps = _group_events_by_step(runtime_events)
@@ -584,12 +588,14 @@ def _format_runtime_context(
         remaining -= available
         step_text = _format_step_text(step_events, available)
         if step_text.strip():
-            step_outputs.append(f"Step {step_idx + 1}:\n{step_text}")
+            step_outputs.append(render_evaluation_section(
+                "en", "runtime_step", {"index": step_idx + 1, "content": step_text}
+            ))
 
-    parts = ["## Agent Execution Log"]
+    parts = [render_evaluation_section("en", "runtime_header")]
     parts.extend(step_outputs)
     parts.append(_format_stats_summary(stats))
-    parts.append(f"\n─ Final Answer ─\n{actual_section}")
+    parts.append("\n" + render_evaluation_section("en", "runtime_final", {"content": actual_section}))
     return "\n".join(parts)
 
 
@@ -621,12 +627,12 @@ def _truncate_actual_answer(
 # Tool events emit a fixed argument line first, then their content is trimmable.
 # Final-answer / token-count events are skipped entirely.
 _EVENT_LABELS: dict[str, str] = {
-    "tool": "  → ",
-    "kb": "  [KB] ",
-    "log": "    ",
-    "artifact": "  [Artifact] ",
-    "file": "  [File created] ",
-    "error": "  [ERROR] ",
+    "tool": "runtime_label_tool",
+    "kb": "runtime_label_kb",
+    "log": "runtime_label_log",
+    "artifact": "runtime_label_artifact",
+    "file": "runtime_label_file",
+    "error": "runtime_label_error",
 }
 
 # Event types whose ``content`` field is subject to per-step budget trimming.
@@ -668,7 +674,9 @@ def _classify_step_event(e: dict) -> tuple[str, str, str] | None:
         name = e.get("tool_name", "")
         args = e.get("tool_arguments") or {}
         arg_str = ", ".join(f"{k}={v}" for k, v in args.items())
-        fixed_line = f"  → {name}({arg_str})"
+        fixed_line = render_evaluation_section(
+            "en", "runtime_tool_call", {"name": name, "arguments": arg_str}
+        )
         content = str(e.get("content") or "")
         cat = "tool" if content.strip() else ""
         return (cat, content, fixed_line)
@@ -716,7 +724,8 @@ def _distribute_budget_and_trim(
         carry = 0
         raw = str(evt.get("content", ""))
         trimmed = _trim_content(raw, event_budget)
-        label = _EVENT_LABELS.get(evt_type, "")
+        label_field = _EVENT_LABELS.get(evt_type)
+        label = render_evaluation_section("en", label_field) if label_field else ""
         results.append(f"{label}{trimmed}")
         saved = max(0, event_budget - len(trimmed))
         carry += saved
@@ -764,13 +773,7 @@ def _format_step_text(step_events: list[dict], available: int) -> str:
 
 def _format_stats_summary(stats: dict) -> str:
     """Format the runtime stats block appended after the step log."""
-    return (
-        f"\n─ Stats ─\n"
-        f"Steps: {stats['steps']} | Tool calls: {stats['tool_calls']} | "
-        f"Output tokens: {stats['output_tokens']} | Errors: {stats['errors']}\n"
-        f"Max steps reached: {stats['max_steps_reached']} | "
-        f"Has final answer: {stats['has_final_answer']}"
-    )
+    return "\n" + render_evaluation_section("en", "runtime_stats", stats)
 
 
 def _extract_token_count(evt: dict) -> int | None:
@@ -834,14 +837,14 @@ def _format_conversation_history(
     """
     if not conversation_history:
         return ""
-    lines = ["## Previous Conversation Turns"]
+    lines = [render_evaluation_section("en", "history_header")]
     for msg in conversation_history:
         role = msg.get("role", "")
         content = msg.get("content", "")
         if role == "user":
-            lines.append(f"User: {content}")
+            lines.append(render_evaluation_section("en", "history_user", {"content": content}))
         elif role == "assistant":
-            lines.append(f"Agent: {content}")
+            lines.append(render_evaluation_section("en", "history_agent", {"content": content}))
     return "\n".join(lines) + "\n\n"
 
 
@@ -861,19 +864,15 @@ def _build_evaluator_prompt(
     conversation history, then substitutes ``{{query}}``, ``{{expected}}``,
     ``{{actual}}`` and ``{{runtime_stats}}`` placeholders.
     """
-    prompt = ev["prompt"]
-    history = _format_conversation_history(conversation_history)
-    if history:
-        prompt = history + prompt
-    prompt = prompt.replace("{{query}}", str(query))
-    prompt = prompt.replace("{{expected}}", str(expected))
-    prompt = prompt.replace("{{actual}}", str(actual))
-    if runtime_events and "{{runtime_stats}}" in prompt:
-        ctx = _format_runtime_context(
+    runtime_context = None
+    if runtime_events and "{{runtime_stats}}" in ev["prompt"]:
+        runtime_context = _format_runtime_context(
             runtime_events, str(actual), max_tokens=context_window
         )
-        prompt = prompt.replace("{{runtime_stats}}", ctx)
-    return prompt
+    return compose_evaluator_run_prompt(
+        ev["prompt"], query=query, expected=expected, actual=actual,
+        runtime_context=runtime_context, conversation_history=conversation_history,
+    )
 
 
 def _call_one_llm_evaluator(
@@ -1254,15 +1253,15 @@ def _build_agent_profile_parts(profile: dict) -> list:
     Conditionally includes each populated profile field so empty fields
     don't pollute the prompt.
     """
-    parts = [f"## Agent Profile\n- Name: {profile['name']}"]
+    parts = [render_evaluation_section("en", "agent_profile_name", {"value": profile["name"]})]
     if profile["description"]:
-        parts.append(f"- Description: {profile['description']}")
+        parts.append(render_evaluation_section("en", "agent_profile_description", {"value": profile["description"]}))
     if profile["duty_prompt"]:
-        parts.append(f"- Duty: {profile['duty_prompt']}")
+        parts.append(render_evaluation_section("en", "agent_profile_duty", {"value": profile["duty_prompt"]}))
     if profile["constraint_prompt"]:
-        parts.append(f"- Constraints: {profile['constraint_prompt']}")
+        parts.append(render_evaluation_section("en", "agent_profile_constraints", {"value": profile["constraint_prompt"]}))
     if profile["business_description"]:
-        parts.append(f"- Business Context: {profile['business_description']}")
+        parts.append(render_evaluation_section("en", "agent_profile_business", {"value": profile["business_description"]}))
     return parts
 
 
@@ -1331,15 +1330,18 @@ def _generate_test_queries(
         )
 
     profile_parts = _build_agent_profile_parts(profile)
-    tpl = get_prompt_template("evaluation_generate_queries", language)
-    user_prompt = "\n".join(profile_parts)
-    user_prompt += f"\n\nGenerate {query_count} test cases for this agent."
+    prompt = compose_auxiliary_prompt(
+        language, "evaluation_cases", {
+            "profile": "\n".join(profile_parts), "count": query_count,
+            "max_turns": MAX_TURNS_PER_SESSION,
+        }
+    )
 
     try:
         response = call_llm_for_system_prompt(
             model_id=model_id,
-            user_prompt=user_prompt,
-            system_prompt=tpl["SYSTEM_PROMPT"],
+            user_prompt=prompt.user,
+            system_prompt=prompt.system,
             tenant_id=tenant_id,
         )
     except Exception as exc:
@@ -1783,9 +1785,9 @@ def execute_agent_evaluation_run(
 
         # Preload evaluators and judge template (loaded once, reused for all cases)
         evaluators = _preload_evaluators_for_run(run, tenant_id)
-        judge_system_prompt = get_prompt_template(
-            "evaluation_judge_system", run.get("language", "zh")
-        )["SYSTEM_PROMPT"]
+        judge_system_prompt = compose_auxiliary_prompt(
+            run.get("language", "zh"), "evaluation_judge"
+        ).system
 
         # Resolve judge model context window once (used for runtime_events trimming)
         context_window = _resolve_judge_context_window(judge_model_id, tenant_id)
@@ -1978,12 +1980,7 @@ def _render_analysis_stats_block(total: int, passed: int, thresholds: dict) -> s
     Includes the evaluator threshold map when present so the LLM knows the
     pass/fail rules for every score column.
     """
-    stats_block = f"Total cases: {total}, Passed: {passed}, Failed: {total - passed}, Pass rate: {passed}/{total}"
-    if thresholds:
-        stats_block += (
-            f"\nEvaluator pass thresholds: {json.dumps(thresholds, ensure_ascii=False)}"
-        )
-    return stats_block
+    return render_analysis_stats(total, passed, thresholds)
 
 
 def _render_analysis_failures_block(failure_examples: list) -> str:
@@ -1993,25 +1990,11 @@ def _render_analysis_failures_block(failure_examples: list) -> str:
     ~20).  Each case is compacted onto one readable line per block so
     token counts stay low and the model can parse cleanly.
     """
-    if not failure_examples:
-        return "\nNo failed cases."
-    failures_block = ""
-    for i, ex in enumerate(failure_examples[:MAX_FAILURE_EXAMPLES]):
-        # Compact newlines out of the user query so each case fits on one
-        # readable line in the LLM prompt window (keeps token counts low
-        # and improves model parseability).
-        q = (ex["query"] or "(empty)").replace("\n", " ")[:1000]
-        failures_block += f"\nCase {i + 1}: Q={q}\n"
-        failures_block += f"Score: {json.dumps(ex['score'], ensure_ascii=False)}\n"
-        if ex["reason"]:
-            failures_block += f"Reason: {ex['reason']}\n"
-        if ex["answer"]:
-            failures_block += f"Answer: {ex['answer']}\n"
-    return failures_block
+    return render_analysis_failures(failure_examples, MAX_FAILURE_EXAMPLES)
 
 
 def _call_analysis_llm_and_parse(
-    run: dict, language: str, user_prompt: str, tenant_id: str
+    run: dict, prompt: AuxiliaryPrompt, tenant_id: str
 ) -> dict:
     """Call the analysis LLM and parse the JSON response.
 
@@ -2019,11 +2002,10 @@ def _call_analysis_llm_and_parse(
     parsed response is not a dict; the caller is responsible for catching
     and logging the underlying ``Exception`` for observability.
     """
-    template = get_prompt_template("evaluation_analyze_report", language)
     response = call_llm_for_system_prompt(
         model_id=int(run["judge_model_id"]),
-        user_prompt=user_prompt,
-        system_prompt=template["SYSTEM_PROMPT"],
+        user_prompt=prompt.user,
+        system_prompt=prompt.system,
         tenant_id=tenant_id,
     )
     data = json.loads(response) if isinstance(response, str) else response
@@ -2121,15 +2103,15 @@ def generate_analysis_report_impl(
     failure_examples = [_build_analysis_failure_example(c) for c in failed_cases]
 
     # ── Render prompt blocks ─────────────────────────────────────────────
-    stats_block = _render_analysis_stats_block(total, passed, thresholds)
-    failures_block = _render_analysis_failures_block(failure_examples)
-
-    user_prompt = f"{stats_block}\n\nFailed case details (up to {MAX_FAILURE_EXAMPLES} examples):{failures_block}"
-    prompt_chars = len(user_prompt)
+    prompt = compose_analysis_report(
+        language, total=total, passed=passed, thresholds=thresholds,
+        failure_examples=failure_examples, max_examples=MAX_FAILURE_EXAMPLES,
+    )
+    prompt_chars = len(prompt.user)
 
     # ── LLM call + cache write ───────────────────────────────────────────
     try:
-        data = _call_analysis_llm_and_parse(run, language, user_prompt, tenant_id)
+        data = _call_analysis_llm_and_parse(run, prompt, tenant_id)
     except Exception as exc:
         # WARNING so ops can see the LLM failure independently of the stack
         # trace.  prompt_chars is an approximation of token consumption
@@ -2384,9 +2366,7 @@ async def trial_run_evaluator_impl(
             ev = get_evaluator(eid, tenant_id)
             if ev and ev.get("status") == "PUBLISHED":
                 evaluators[eid] = ev
-    judge_system_prompt = get_prompt_template(
-        "evaluation_judge_system", language
-    )["SYSTEM_PROMPT"]
+    judge_system_prompt = compose_auxiliary_prompt(language, "evaluation_judge").system
 
     if JiuwenSDKAdapter is None:
         raise JiuwenSDKUnavailableError("Jiuwen SDK adapter is unavailable")

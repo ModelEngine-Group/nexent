@@ -1344,6 +1344,7 @@ async def build_nl2agent_run_info(
         minio_files=request.minio_files,
         query=request.query,
         history=request.history,
+        language=language,
     )
     model_config_list = await create_model_config_list(tenant_id)
     agent_config = create_nl2agent_agent_config(language)
