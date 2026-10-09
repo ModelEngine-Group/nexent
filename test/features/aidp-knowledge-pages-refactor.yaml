@@ -41,6 +41,8 @@ features:
         description: The full-page creation form follows the designed section order and spacing; page and section titles use 18px text; graph and VLM switches sit beside their labels, same-row fields align, and the chunking and retrieval controls retain slider layout and consistent value widths.
       - rule_id: AKPR-RULE-017
         description: The current breadcrumb title on the create and detail pages and the detail information section headings use 18px text while ancestor breadcrumb links remain visually secondary.
+      - rule_id: AKPR-RULE-018
+        description: Selecting or dropping files immediately sends one multipart batch through Nexent to AIDP. Each uploading row displays the batch transfer percentage on its icon and only its total file size below its name. Keep dashed borders until per-file acceptance; success is solid near-black. Only failed rows expose a local delete action. Confirm and all close controls stay disabled until requests return success or failure; Confirm only dismisses results. Preserve the 50-file cap and independent scrolling.
     required_test_stages: [D1, D2, D3, D4, D5]
     source:
       requirement_ids: [AKPR-001]

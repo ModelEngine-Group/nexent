@@ -69,19 +69,26 @@ cases:
     test_data: {profile: real_smoke, documents: 2, one_failing_upload: true}
     steps:
       - order: 1
-        action: Open the writable knowledge base and upload a document.
-        expected: The document appears and its processing status reaches a terminal state through polling.
+        action: Open the writable knowledge base and choose Import files.
+        expected: A 764px right-side drawer opens with the click-or-drop area, supported-format notes, a scrollable file list and fixed Cancel/Confirm actions.
       - order: 2
+        action: Select or drop a supported document, wait for the upload response and then activate Confirm.
+        expected: Selection starts upload immediately; transfer completion shows waiting until AIDP responds. Accepted rows become solid near-black and remain visible; Confirm closes without uploading again.
+      - order: 3
+        action: Wait for the accepted document's processing status to reach a terminal state.
+        expected: The document appears and its processing status reaches a terminal state through polling.
+      - order: 4
         action: Download the processed document.
         expected: The browser receives the original file with its name.
-      - order: 3
+      - order: 5
         action: Delete the document and confirm the dialog.
         expected: The document disappears from the list and the deletion reports its own result.
-      - order: 4
+      - order: 6
         action: Open the read-only knowledge base and attempt the same operations.
         expected: Upload and delete are unavailable while browsing and download remain permitted.
     expected_results:
       - Upload reaches a terminal processing state.
+      - The import drawer keeps completed and failed rows visible, with independent scrolling and fixed Confirm action; it exposes no retry action.
       - The downloaded file matches the uploaded original.
       - Deletion removes the document after confirmation.
       - Permission gates match the documented read and edit rules.
@@ -91,8 +98,8 @@ cases:
       - No document of another base rendered in the current view.
     actor: Authenticated test tenant user
     journey:
-      - Open a writable knowledge base file view.
-      - Upload and wait for processing to finish.
+      - Open a writable knowledge base file view and its import drawer.
+      - Select a supported document, observe its automatic upload, confirm the drawer and wait for processing to finish.
       - Download the document.
       - Delete the document with confirmation.
       - Check the same controls on a read-only base.

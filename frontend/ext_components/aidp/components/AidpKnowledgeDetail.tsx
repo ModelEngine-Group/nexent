@@ -45,7 +45,7 @@ import {
 } from "@/lib/aidpKnowledgeDisplay";
 import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
 import AidpPagination from "./AidpPagination";
-import AidpDocumentList from "./AidpDocumentList";
+import AidpImportDrawer from "./AidpImportDrawer";
 import AidpUpdateKbModal from "./AidpUpdateKbModal";
 import AidpSliderNumberField from "./AidpSliderNumberField";
 import AidpKnowledgeDetailInformation, {
@@ -354,7 +354,6 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
   ]);
 
   const uploadComplete = useCallback(() => {
-    setImportOpen(false);
     void fetchFiles(1, fileKeyword, filePageSize);
     void fetchTasks(1, taskKeyword, taskStatus, taskPageSize);
     void refreshDetail();
@@ -1126,30 +1125,14 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         )}
       </Drawer>
 
-      <Modal
-        title={t("aidpKnowledge.importFileTitle", { name: detail.kds_name })}
+      <AidpImportDrawer
+        title={t("aidpKnowledge.importDrawerTitle")}
         open={importOpen}
-        onCancel={() => setImportOpen(false)}
-        footer={null}
-        destroyOnHidden
-        width={760}
-        centered
-      >
-        <AidpDocumentList
-          activeKb={knowledgeBase}
-          documents={[]}
-          totalDocs={0}
-          totalReliable={false}
-          hasMore={false}
-          isLoading={false}
-          currentPage={1}
-          pageSize={PAGE_SIZE}
-          onPageChange={() => undefined}
-          onDocsUploaded={uploadComplete}
-          onRefresh={() => void fetchFiles(filePage, fileKeyword, filePageSize)}
-          uploadOnly
-        />
-      </Modal>
+        knowledgeBase={knowledgeBase}
+        onClose={() => setImportOpen(false)}
+        onDocsUploaded={uploadComplete}
+        onRefresh={() => void fetchFiles(filePage, fileKeyword, filePageSize)}
+      />
     </div>
   );
 };

@@ -85,3 +85,44 @@ cases:
       - No stepper or optional-upload control is rendered; one submit calls create once and does not call upload.
       - Switches are grouped within 12 pixels of their labels.
       - Paired controls use consistent label and field alignment.
+  - case_id: AKPR-D1-015
+    feature_id: AKPR-001
+    requirement_ids: [AKPR-001]
+    business_rule_ids: [AKPR-RULE-018]
+    title: AIDP import drawer uploads on selection and keeps results until confirmation
+    type: FE-COMP
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify selection immediately uploads valid files, actual transfer progress is distinct from AIDP acceptance, and Confirm closes without a second upload.
+    preconditions:
+      - Render the import drawer with a writable mock knowledge base and a mocked upload API response.
+    test_data: {profile: mock, file: guide.txt, upload_bytes: [716800, 2621440]}
+    steps:
+      - order: 1
+        action: Select multiple supported files together.
+        expected: One multipart batch starts automatically; every row has a dashed gray border and Confirm is disabled while the request is active.
+      - order: 2
+        action: Report intermediate progress, then complete browser transfer without resolving the upload response.
+        expected: Each uploading ring shows the same batch percentage; the second line only shows the file size. Transfer completion changes rings to waiting indicators, borders stay dashed, Confirm remains disabled, and no delete action is present.
+      - order: 3
+        action: Resolve the upload response as accepted.
+        expected: The row changes to a solid near-black border and the accepted file id is passed to the parent refresh flow; the drawer remains open.
+      - order: 4
+        action: Click Confirm.
+        expected: The drawer closes and no additional upload request is sent.
+    expected_results:
+      - Choosing a valid file immediately uploads it through the existing AIDP route.
+      - Progress text and ring are derived from the upload event, not a timer.
+      - A successful response changes the row border to solid near-black.
+      - Results remain visible until Confirm, which never sends files again.
+    forbidden_side_effects:
+      - No per-file transferred-byte text or batch-progress label is rendered.
+      - No retry action is rendered in the import row.
+      - No change to the ES upload component.
+    unit_boundary: AIDP import drawer automatic upload, progress, result retention and confirmation
+    inputs: [mock knowledge base, supported file, progress event, accepted upload response]
+    assertions:
+      - The upload API is called on selection and not on confirmation.
+      - The rows share batch percentage rings and display only their own total file sizes while uploading.
+      - Mixed responses map by file name; accepted rows become solid near-black and are reported to their parent. Only failed rows show delete; deleting removes a frontend row without any network call. Network errors mark all rows failed and enable Confirm. A 50-file selection makes one request, and further batches contain only newly selected files.

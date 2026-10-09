@@ -9,6 +9,7 @@ import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import type { AidpKnowledgeBaseListResponse } from "@/types/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
+import { handleSessionExpired } from "@/lib/session";
 
 // ---------- Additional types for AIDP management ----------
 
@@ -504,6 +505,98 @@ class AidpKnowledgeService {
       AidpUploadSuccessItem,
       AidpUploadFailedItem
     >(result);
+  }
+
+  /** Upload one selection as a multipart batch; progress covers the whole body. */
+  async uploadDocsWithProgress(
+    id: string,
+    files: File[],
+    onProgress: (loaded: number, total: number) => void,
+    signal: AbortSignal
+  ): Promise<AidpUploadResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {});
+    const formData = new FormData();
+    for (const file of files) formData.append("files", file);
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const abort = () => xhr.abort();
+      const cleanUp = () => signal.removeEventListener("abort", abort);
+
+      if (signal.aborted) {
+        reject(new DOMException("Upload aborted", "AbortError"));
+        return;
+      }
+
+      xhr.open("POST", url);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader(
+        "X-User-Timezone",
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+      );
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress(event.loaded, event.total);
+      };
+      xhr.upload.onload = () => onProgress(1, 1);
+      xhr.onload = () => {
+        cleanUp();
+        if (xhr.status < 200 || xhr.status >= 300) {
+          if (xhr.status === 401 || xhr.status === 499) handleSessionExpired();
+          const errorText = xhr.responseText || "";
+          log.error("AIDP document upload failed:", errorText);
+          let errorMessage = xhr.statusText || `HTTP ${xhr.status}`;
+          if (errorText) {
+            try {
+              const payload = JSON.parse(errorText) as {
+                message?: unknown;
+                details?: { upstream_reason?: unknown } | null;
+              };
+              const upstreamReason = payload.details?.upstream_reason;
+              if (typeof upstreamReason === "string" && upstreamReason.trim()) {
+                errorMessage = upstreamReason.trim();
+              } else if (
+                typeof payload.message === "string" &&
+                payload.message.trim()
+              ) {
+                errorMessage = payload.message.trim();
+              }
+            } catch {
+              errorMessage = errorText;
+            }
+          }
+          reject(new Error(errorMessage));
+          return;
+        }
+
+        try {
+          const result = JSON.parse(
+            xhr.responseText
+          ) as Partial<AidpUploadResponse>;
+          resolve(
+            normalizeAidpOperationResponse<
+              AidpUploadSuccessItem,
+              AidpUploadFailedItem
+            >(result)
+          );
+        } catch (error) {
+          reject(
+            error instanceof Error
+              ? error
+              : new Error("Invalid upload response")
+          );
+        }
+      };
+      xhr.onerror = () => {
+        cleanUp();
+        reject(new Error("Network error while uploading document"));
+      };
+      xhr.onabort = () => {
+        cleanUp();
+        reject(new DOMException("Upload aborted", "AbortError"));
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      xhr.send(formData);
+    });
   }
 
   /**

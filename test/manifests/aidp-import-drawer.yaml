@@ -1,0 +1,20 @@
+schema_version: '1.0'
+cases:
+- case_id: AKPR-D1-015
+  stage: D1
+  status: implemented
+  contract_hash: sha256:6c4a5f0c2060b7e3780c73a01331faeae9528c1f10de5bb60e37c8fcdfb54355
+  implementation_hash: sha256:2bd0dcafdd0bd3669182569189845378bce21ae3c9ce22083b83b9fdca5ad631
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/AidpImportDrawer.test.tsx
+    selector: AKPR-D1-015
+    profiles:
+    - mock
+  - framework: vitest
+    file: test/automation/d1/AidpUploadService.test.tsx
+    selector: AKPR-D1-015
+    profiles:
+    - mock
+  notes: 'Run from frontend: npx vitest run --config vitest.aidp.config.ts. This proves
+    mocked component and browser transport behavior, not live AIDP acceptance.'

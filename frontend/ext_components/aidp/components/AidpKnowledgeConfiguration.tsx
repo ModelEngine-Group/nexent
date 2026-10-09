@@ -21,7 +21,7 @@ import AidpKnowledgeList, {
   type AidpKbColumnKey,
   type AidpKbViewMode,
 } from "./AidpKnowledgeList";
-import AidpDocumentList from "./AidpDocumentList";
+import AidpImportDrawer from "./AidpImportDrawer";
 
 const AidpKnowledgeConfiguration: React.FC = () => {
   const { t } = useTranslation();
@@ -94,6 +94,8 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   );
 
   useEffect(() => {
+    // Fetch the list when the debounced query or page size changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchKbs(1, debouncedKbKeyword, kbPageSize);
   }, [fetchKbs, debouncedKbKeyword, kbPageSize]);
 
@@ -160,7 +162,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             message.success(t("aidpKnowledge.deleteKbSuccess"));
             setSelectedKb(null);
             void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
-          } catch (error) {
+          } catch {
             message.error(t("aidpKnowledge.deleteKbFailed"));
           }
         },
@@ -287,36 +289,18 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         />
       </div>
 
-      <Modal
-        title={t("aidpKnowledge.importFileTitle", {
-          name: quickImportKb?.kds_name || "",
-        })}
-        open={Boolean(quickImportKb)}
-        onCancel={() => setQuickImportKb(null)}
-        footer={null}
-        destroyOnHidden
-        width={760}
-        centered
-      >
-        {quickImportKb && (
-          <AidpDocumentList
-            activeKb={quickImportKb}
-            documents={[]}
-            totalDocs={0}
-            totalReliable={false}
-            hasMore={false}
-            isLoading={false}
-            currentPage={1}
-            pageSize={10}
-            onPageChange={() => undefined}
-            onDocsUploaded={handleQuickDocsUploaded}
-            onRefresh={() =>
-              void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize)
-            }
-            uploadOnly
-          />
-        )}
-      </Modal>
+      {quickImportKb && (
+        <AidpImportDrawer
+          title={t("aidpKnowledge.importDrawerTitle")}
+          open
+          knowledgeBase={quickImportKb}
+          onClose={() => setQuickImportKb(null)}
+          onDocsUploaded={handleQuickDocsUploaded}
+          onRefresh={() =>
+            void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize)
+          }
+        />
+      )}
     </div>
   );
 };

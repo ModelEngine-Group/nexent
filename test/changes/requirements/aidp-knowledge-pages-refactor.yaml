@@ -65,3 +65,29 @@ changes:
       modified: [AKPR-D1-014, AKPR-D4-005]
       retired: []
     notes: The create API payload and permission/configuration fields remain unchanged; file upload remains available from the detail page. No ES page behavior changes.
+  - change_id: AKPR-REQ-004
+    change_type: requirement
+    requirement_id: AKPR-001
+    title: Stage AIDP file imports in a scrollable drawer with visible per-file progress
+    description: Replace the AIDP import modal with one shared right-side drawer used from the overview and detail page. Selecting or dropping files stages them for review; Import sends them to AIDP. Keep a 50-file cap including failures, independent scrolling, browser-measured progress, status-specific dashed/solid borders, and delete-only failure actions.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [AKPR-001], retired: []}
+    affected_cases:
+      existing: []
+      added: [AKPR-D1-015]
+      modified: [AKPR-D4-002]
+      retired: []
+    notes: Superseded by AKPR-REQ-005 for upload timing, confirmation and in-flight deletion. The new drawer is AIDP-only; the ES upload UI is unchanged.
+  - change_id: AKPR-REQ-005
+    change_type: requirement
+    requirement_id: AKPR-001
+    title: Restore immediate AIDP upload on selection and use Confirm to dismiss results
+    description: Selecting or dropping files immediately starts the existing Nexent-to-AIDP upload. Confirm only closes the drawer; transfer completion must wait for the actual AIDP result before success. Preserve successful and failed rows for review, and disable deletion of in-flight files because cancelling a browser request cannot reliably withdraw an upstream AIDP upload.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [AKPR-001], retired: []}
+    affected_cases:
+      existing: []
+      added: []
+      modified: [AKPR-D1-015, AKPR-D4-002]
+      retired: []
+    notes: One selection sends one multipart batch with repeated files fields. Copy batch progress to each uploading ring, show total file size without transferred-byte text, and expose delete only on failed rows. Confirm, Cancel, Escape and mask/close actions are disabled until the upload response returns; transfer 100% alone does not enable them. No separate backend staging, MinIO, ES or AIDP API changes.
