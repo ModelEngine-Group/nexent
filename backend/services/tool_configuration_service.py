@@ -70,6 +70,7 @@ from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
 from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from nexent.core.concurrency import run_blocking
 from management.services.knowledge_base.service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
@@ -1412,7 +1413,11 @@ async def validate_tool_impl(
             else:
                 return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
         elif source == ToolSourceEnum.LOCAL.value:
-            return _validate_local_tool(tool_name, inputs, params, tenant_id, user_id)
+            return await run_blocking(
+                "validate-local-tool", _validate_local_tool,
+                tool_name, inputs, params, tenant_id, user_id,
+                lane="model-tool-io", owner="services.tool_configuration_service",
+            )
         elif source == ToolSourceEnum.LANGCHAIN.value:
             return _validate_langchain_tool(tool_name, inputs)
         else:

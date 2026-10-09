@@ -2127,12 +2127,16 @@ async def create_tool_config_list(
                 from ext_components.aidp.services.aidp_access_service import (
                     resolve_current_aidp_access,
                 )
-                snapshot = resolve_current_aidp_access(
+                snapshot = await run_blocking(
+                    "resolve-runtime-aidp-access",
+                    resolve_current_aidp_access,
                     server_url=AIDP_SERVER_URL,
                     api_key=AIDP_API_KEY,
                     user_id=user_id,
                     tenant_id=tenant_id,
                     aidp_tenant_id=AIDP_TENANT_ID,
+                    lane="control-io",
+                    owner="agents.create_agent_info",
                 )
                 _allowed_kds_set = set(snapshot.accessible_id_set)
                 _kds_name_to_id_map = {

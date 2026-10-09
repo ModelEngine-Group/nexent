@@ -210,11 +210,15 @@ async def get_agent_knowledge_capabilities_api(
         return {
             "code": 0,
             "message": "success",
-            "data": get_agent_knowledge_capabilities(
+            "data": await run_blocking(
+                "agent-knowledge-capabilities",
+                get_agent_knowledge_capabilities,
                 agent_id=agent_id,
                 tenant_id=tenant_id,
                 version_no=version_no,
                 user_id=user_id,
+                lane="control-io",
+                owner="apps.agent_app",
             ),
         }
     except ValueError as exc:
