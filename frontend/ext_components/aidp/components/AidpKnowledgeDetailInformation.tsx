@@ -7,6 +7,7 @@ import { EditOutlined } from "@ant-design/icons";
 
 import type { AidpKbDetail } from "../services/aidpKnowledgeService";
 import { AIDP_UNKNOWN_VALUE } from "@/lib/aidpKnowledgeDisplay";
+import AidpGroupNamesDisplay from "./AidpGroupNamesDisplay";
 
 export const AidpDetailField = ({
   label,
@@ -224,11 +225,19 @@ const AidpKnowledgeDetailInformation = ({
             label={t("aidpKnowledge.detailAllowedGroups")}
             className="@min-[640px]:col-span-2"
           >
-            {privateScope
-              ? t("aidpKnowledge.detailOwnerOnly")
-              : groupNames.length > 0
-                ? groupNames.join("、")
-                : (detail.group_ids || []).join("、") || AIDP_UNKNOWN_VALUE}
+            {privateScope ? (
+              t("aidpKnowledge.detailOwnerOnly")
+            ) : groupNames.length > 0 || (detail.group_ids || []).length > 0 ? (
+              <AidpGroupNamesDisplay
+                groupNames={
+                  groupNames.length > 0
+                    ? groupNames
+                    : (detail.group_ids || []).map(String)
+                }
+              />
+            ) : (
+              AIDP_UNKNOWN_VALUE
+            )}
           </AidpDetailField>
         </dl>
       </section>

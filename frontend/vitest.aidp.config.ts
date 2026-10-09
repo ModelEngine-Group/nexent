@@ -45,6 +45,7 @@ export default defineConfig({
     include: [
       "test/automation/d1/AidpImportDrawer.test.tsx",
       "test/automation/d1/AidpUploadService.test.tsx",
+      "test/automation/d1/AidpGroupNamesDisplay.test.tsx",
     ],
     clearMocks: true,
   },

@@ -48,6 +48,7 @@ import AidpPagination from "./AidpPagination";
 import AidpImportDrawer from "./AidpImportDrawer";
 import AidpUpdateKbModal from "./AidpUpdateKbModal";
 import AidpSliderNumberField from "./AidpSliderNumberField";
+import AidpGroupNamesDisplay from "./AidpGroupNamesDisplay";
 import AidpKnowledgeDetailInformation, {
   AidpDetailField,
 } from "./AidpKnowledgeDetailInformation";
@@ -759,11 +760,20 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
           <div className="flex min-w-0 items-center gap-3">
             <TeamOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
             <AidpDetailField label={t("aidpKnowledge.detailAllowedGroups")}>
-              {privateScope
-                ? t("aidpKnowledge.detailOwnerOnly")
-                : groupNames.length > 0
-                  ? groupNames.join("、")
-                  : (detail.group_ids || []).join("、") || UNKNOWN}
+              {privateScope ? (
+                t("aidpKnowledge.detailOwnerOnly")
+              ) : groupNames.length > 0 ||
+                (detail.group_ids || []).length > 0 ? (
+                <AidpGroupNamesDisplay
+                  groupNames={
+                    groupNames.length > 0
+                      ? groupNames
+                      : (detail.group_ids || []).map(String)
+                  }
+                />
+              ) : (
+                UNKNOWN
+              )}
             </AidpDetailField>
           </div>
           <div className="flex min-w-0 items-center gap-3">
