@@ -92,6 +92,7 @@ import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
+import { WorkbenchLandingExamples } from "@/features/workbench/components/WorkbenchLandingExamples";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -217,6 +218,8 @@ export interface ThreadProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 /**
@@ -272,6 +275,8 @@ export const Thread: FC<ThreadProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent, modelSelectionScope);
@@ -528,6 +533,8 @@ export const Thread: FC<ThreadProps> = ({
         workbenchResources={workbenchResources}
         onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
         onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+        workbenchSkillPopover={workbenchSkillPopover}
+        workbenchKnowledgePopover={workbenchKnowledgePopover}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -655,6 +662,8 @@ interface ThreadViewProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -708,6 +717,8 @@ const ThreadView: FC<ThreadViewProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
   const workbenchLanding = Boolean(
@@ -836,9 +847,20 @@ const ThreadView: FC<ThreadViewProps> = ({
             "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
             variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
             workbenchLanding &&
-              "mt-auto flex-none overflow-visible px-4 pb-0 pt-6 sm:px-8"
+              "relative mt-auto flex-none max-w-[1123px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
+          {workbenchLanding && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-full z-0 h-[437px] w-[682px] -translate-x-1/2 -translate-y-1/2"
+              style={{
+                marginTop: 73,
+                background:
+                  "radial-gradient(50% 50% at 50% 50%, rgba(148,181,255,0.42) 0%, rgba(187,161,255,0.24) 48%, rgba(255,255,255,0) 100%)",
+              }}
+            />
+          )}
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
@@ -867,7 +889,8 @@ const ThreadView: FC<ThreadViewProps> = ({
             className={cn(
               "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
               variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8",
-              workbenchLanding && "static mb-auto gap-4 px-4 pb-6 pt-8 sm:px-8"
+              workbenchLanding &&
+                "static mb-auto max-w-[1123px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
             <ThreadScrollToBottom />
@@ -898,7 +921,13 @@ const ThreadView: FC<ThreadViewProps> = ({
               workbenchResources={workbenchResources}
               onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+              workbenchSkillPopover={workbenchSkillPopover}
+              workbenchKnowledgePopover={workbenchKnowledgePopover}
             />
+            {workbenchLanding &&
+              workbenchPresentation?.mode === "generic_chat" && (
+                <WorkbenchLandingExamples />
+              )}
           </ThreadPrimitive.ViewportFooter>
         )}
       </div>

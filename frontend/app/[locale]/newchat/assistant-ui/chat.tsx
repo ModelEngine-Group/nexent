@@ -56,6 +56,8 @@ export interface ChatProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -112,6 +114,8 @@ export const Chat: FC<ChatProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -163,6 +167,8 @@ export const Chat: FC<ChatProps> = ({
           workbenchResources={workbenchResources}
           onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
           onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+          workbenchSkillPopover={workbenchSkillPopover}
+          workbenchKnowledgePopover={workbenchKnowledgePopover}
           skillFiles={skillFiles}
           knowledgeScope={knowledgeScope}
           knowledgePreview={knowledgePreview}
@@ -214,6 +220,8 @@ export const Chat: FC<ChatProps> = ({
       workbenchResources={workbenchResources}
       onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
       onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+      workbenchSkillPopover={workbenchSkillPopover}
+      workbenchKnowledgePopover={workbenchKnowledgePopover}
     />
   );
 };

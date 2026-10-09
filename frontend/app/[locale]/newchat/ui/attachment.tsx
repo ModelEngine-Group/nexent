@@ -1,6 +1,6 @@
 "use client";
 
-import { type FC, useState, useEffect } from "react";
+import { type FC, type ReactNode, useState, useEffect } from "react";
 import {
   ArchiveIcon,
   CodeIcon,
@@ -11,6 +11,7 @@ import {
   MusicIcon,
   PlusIcon,
   PresentationIcon,
+  UploadIcon,
   VideoIcon,
   XIcon,
 } from "lucide-react";
@@ -21,11 +22,8 @@ import {
   type CompleteAttachment,
 } from "@assistant-ui/react";
 import { TooltipIconButton } from "./tooltip-icon-button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { storageService } from "@/services/storageService";
 import log from "@/lib/logger";
@@ -56,31 +54,71 @@ const getFileIcon = (filename: string | undefined, contentType?: string) => {
   const ext = filename?.split(".").pop()?.toLowerCase() || "";
   const mimeType = contentType?.toLowerCase() || "";
 
-  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"].includes(ext)) {
+  if (
+    ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"].includes(ext)
+  ) {
     return null; // Will show thumbnail instead
   }
-  if (["doc", "docx", "odt", "rtf", "txt"].includes(ext) || mimeType.includes("word")) {
+  if (
+    ["doc", "docx", "odt", "rtf", "txt"].includes(ext) ||
+    mimeType.includes("word")
+  ) {
     return <FileTextIcon className="size-5" />;
   }
-  if (["xls", "xlsx", "csv", "ods"].includes(ext) || mimeType.includes("spreadsheet") || mimeType.includes("excel")) {
+  if (
+    ["xls", "xlsx", "csv", "ods"].includes(ext) ||
+    mimeType.includes("spreadsheet") ||
+    mimeType.includes("excel")
+  ) {
     return <FileSpreadsheetIcon className="size-5" />;
   }
-  if (["ppt", "pptx", "odp"].includes(ext) || mimeType.includes("presentation")) {
+  if (
+    ["ppt", "pptx", "odp"].includes(ext) ||
+    mimeType.includes("presentation")
+  ) {
     return <PresentationIcon className="size-5" />;
   }
   if (["pdf"].includes(ext) || mimeType.includes("pdf")) {
     return <FileTextIcon className="size-5" />;
   }
-  if (["zip", "rar", "7z", "tar", "gz"].includes(ext) || mimeType.includes("zip") || mimeType.includes("archive")) {
+  if (
+    ["zip", "rar", "7z", "tar", "gz"].includes(ext) ||
+    mimeType.includes("zip") ||
+    mimeType.includes("archive")
+  ) {
     return <ArchiveIcon className="size-5" />;
   }
-  if (["mp4", "avi", "mov", "wmv", "mkv", "webm"].includes(ext) || mimeType.includes("video")) {
+  if (
+    ["mp4", "avi", "mov", "wmv", "mkv", "webm"].includes(ext) ||
+    mimeType.includes("video")
+  ) {
     return <VideoIcon className="size-5" />;
   }
-  if (["mp3", "wav", "ogg", "flac", "aac", "m4a"].includes(ext) || mimeType.includes("audio")) {
+  if (
+    ["mp3", "wav", "ogg", "flac", "aac", "m4a"].includes(ext) ||
+    mimeType.includes("audio")
+  ) {
     return <MusicIcon className="size-5" />;
   }
-  if (["js", "ts", "jsx", "tsx", "py", "java", "cpp", "c", "h", "css", "html", "json", "xml", "yaml", "yml"].includes(ext)) {
+  if (
+    [
+      "js",
+      "ts",
+      "jsx",
+      "tsx",
+      "py",
+      "java",
+      "cpp",
+      "c",
+      "h",
+      "css",
+      "html",
+      "json",
+      "xml",
+      "yaml",
+      "yml",
+    ].includes(ext)
+  ) {
     return <CodeIcon className="size-5" />;
   }
 
@@ -149,11 +187,11 @@ const AttachmentPreview: FC<{
     type === "image" ||
     contentType?.startsWith("image/") === true ||
     ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"].includes(
-      extension,
+      extension
     );
   const isComposer = mode === "composer";
   const localImageUrl = useFileSrc(
-    isComposer && isImage ? attachment.file : undefined,
+    isComposer && isImage ? attachment.file : undefined
   );
   const objectName = attachment.object_name || "";
   const stablePreviewUrl = objectName
@@ -191,6 +229,75 @@ const AttachmentPreview: FC<{
     }
   };
 
+  // Composer mode renders a compact single-line chip inside the input box:
+  // blue document icon (or image thumbnail), truncated name, always-visible ×.
+  if (isComposer) {
+    return (
+      <>
+        <div
+          className="group/attachment flex h-8 max-w-65 items-center gap-2 rounded-lg border bg-card py-1 pl-2 pr-1 text-left"
+          onClick={handleCardClick}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handleCardClick();
+            }
+          }}
+          role={isImage && localImageUrl ? "button" : undefined}
+          tabIndex={isImage && localImageUrl ? 0 : undefined}
+          aria-label={
+            isImage && localImageUrl
+              ? t("chat.attachments.preview", { name })
+              : undefined
+          }
+        >
+          {isImage && thumbnailUrl ? (
+            <img
+              src={thumbnailUrl}
+              alt={name}
+              className="size-5 shrink-0 rounded object-cover"
+            />
+          ) : (
+            <span className="shrink-0 text-blue-600 [&_svg]:size-4">
+              {getFileIcon(name, contentType)}
+            </span>
+          )}
+          <span className="min-w-0 flex-1 truncate text-sm leading-5 text-[#191919]">
+            {name}
+          </span>
+          <AttachmentPrimitive.Remove
+            aria-label={t("chat.attachments.remove", { name })}
+            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-black/5 hover:text-foreground"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <XIcon className="size-3.5" />
+          </AttachmentPrimitive.Remove>
+        </div>
+
+        <Dialog open={isLocalPreviewOpen} onOpenChange={setIsLocalPreviewOpen}>
+          <DialogContent
+            className="flex max-h-[80vh] max-w-3xl flex-col p-0"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+          >
+            <DialogHeader className="border-b px-4 py-3">
+              <h2 className="truncate text-base font-medium">{name}</h2>
+            </DialogHeader>
+            {localImageUrl && (
+              <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+                <img
+                  src={localImageUrl}
+                  alt={name}
+                  className="max-h-[calc(70vh-60px)] max-w-full object-contain"
+                />
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
   return (
     <>
       <div className="group/attachment relative inline-flex">
@@ -207,7 +314,11 @@ const AttachmentPreview: FC<{
           }}
           role={isComposer && !isImage ? undefined : "button"}
           tabIndex={isComposer && !isImage ? undefined : 0}
-          aria-label={isComposer && !isImage ? undefined : t("chat.attachments.preview", { name })}
+          aria-label={
+            isComposer && !isImage
+              ? undefined
+              : t("chat.attachments.preview", { name })
+          }
         >
           <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300">
             {isImage && thumbnailUrl ? (
@@ -283,7 +394,7 @@ const AttachmentPreview: FC<{
           fileName={name}
           fileType={contentType || attachment.type}
           fileSize={attachment.size}
-          previewUrl={''}
+          previewUrl={""}
           downloadUrl={attachment.download_url}
           onClose={() => setIsRemotePreviewOpen(false)}
         />
@@ -292,14 +403,33 @@ const AttachmentPreview: FC<{
   );
 };
 
-export const ComposerAddAttachment: FC = () => {
+export const ComposerAddAttachment: FC<{
+  label?: string;
+  icon?: ReactNode;
+  className?: string;
+}> = ({ label, icon, className }) => {
   const { t } = useTranslation();
 
   return (
     <ComposerPrimitive.AddAttachment asChild multiple>
-      <TooltipIconButton tooltip={t("chat.composer.addAttachment")}>
-        <PlusIcon className="size-4" />
-      </TooltipIconButton>
+      {label ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={
+            className ??
+            "h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
+          }
+        >
+          {icon ?? <UploadIcon className="size-4" />}
+          {label}
+        </Button>
+      ) : (
+        <TooltipIconButton tooltip={t("chat.composer.addAttachment")}>
+          <PlusIcon className="size-4" />
+        </TooltipIconButton>
+      )}
     </ComposerPrimitive.AddAttachment>
   );
 };
@@ -309,12 +439,7 @@ export const ComposerAttachments: FC = () => {
     <div className="flex flex-wrap gap-2 px-2 py-1">
       <ComposerPrimitive.Attachments>
         {({ attachment }) => {
-          return (
-            <AttachmentPreview
-              attachment={attachment}
-              mode="composer"
-            />
-          );
+          return <AttachmentPreview attachment={attachment} mode="composer" />;
         }}
       </ComposerPrimitive.Attachments>
     </div>
@@ -331,12 +456,7 @@ export const MessageAttachments: FC<{ align?: "start" | "end" }> = ({
       >
         <MessagePrimitive.Attachments>
           {({ attachment }) => {
-            return (
-              <AttachmentPreview
-                attachment={attachment}
-                mode="message"
-              />
-            );
+            return <AttachmentPreview attachment={attachment} mode="message" />;
           }}
         </MessagePrimitive.Attachments>
       </div>

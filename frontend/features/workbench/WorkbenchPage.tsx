@@ -10,7 +10,6 @@ import {
   type FC,
 } from "react";
 import { useAuiState } from "@assistant-ui/react";
-import { Sparkles } from "lucide-react";
 import { Chat } from "@/app/newchat/assistant-ui/chat";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type {
@@ -77,6 +76,9 @@ import {
   previewWorkbenchAgent,
   SkillPicker,
 } from "@/features/workbench";
+import { SkillPopoverContent } from "./components/SkillPopoverContent";
+import { KnowledgePopoverContent } from "./components/KnowledgePopoverContent";
+import type { SkillListItem } from "@/services/skillService";
 
 type CreatedAgentResult = {
   agentId: number;
@@ -706,6 +708,70 @@ const HomeContent: FC = () => {
     ]
   );
 
+  const handleMountWorkbenchSkill = useCallback(
+    async (skill: SkillListItem) => {
+      const skillId = Number(skill.skill_id);
+      const mounts = [
+        ...workbenchState.config.skill_mounts,
+        {
+          skill_id: skillId,
+          config_values: { ...(skill.config_values || {}) },
+        },
+      ];
+      if (mounts.length > 20) {
+        message.warning("最多选择 20 个 Skills");
+        return;
+      }
+      const nextConfig = { ...workbenchState.config, skill_mounts: mounts };
+      const numericConversationId = Number(activeConversationId);
+      if (
+        Number.isInteger(numericConversationId) &&
+        numericConversationId > 0
+      ) {
+        try {
+          await saveWorkbenchConfig(numericConversationId, nextConfig);
+        } catch (error) {
+          message.error(
+            error instanceof Error ? error.message : "资源配置保存失败"
+          );
+          return;
+        }
+      } else {
+        dispatchWorkbench({ type: "replace-skills", mounts });
+      }
+      dispatchWorkbench({
+        type: "set-skill-names",
+        names: { ...workbenchState.skillNames, [skillId]: skill.name },
+      });
+    },
+    [
+      activeConversationId,
+      saveWorkbenchConfig,
+      workbenchState.config,
+      dispatchWorkbench,
+    ]
+  );
+
+  const workbenchSkillPopover = (
+    <SkillPopoverContent
+      mountedSkillIds={
+        new Set(workbenchState.config.skill_mounts.map((m) => m.skill_id))
+      }
+      onMount={(skill) => void handleMountWorkbenchSkill(skill)}
+      onUnmount={(skillId) => void handleRemoveWorkbenchSkill(skillId)}
+    />
+  );
+
+  const workbenchKnowledgePopover = (
+    <KnowledgePopoverContent
+      value={knowledgeScope}
+      capabilities={knowledgeCapabilities ?? null}
+      onApply={(scope, preview) =>
+        handleKnowledgeScopeChange(scope, preview) as Promise<void> | void
+      }
+    />
+  );
+
   const handleReplaceWorkbenchSkills = useCallback(
     async (
       mounts: import("@/features/workbench").WorkbenchSkillMount[],
@@ -1205,15 +1271,14 @@ const HomeContent: FC = () => {
             modelSelectionScope="tenant"
             fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
             landingContent={
-              <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-6 text-center">
-                <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/10">
-                  <Sparkles className="size-8 text-primary" />
-                </div>
-                <h1 className="text-balance text-2xl font-semibold text-foreground md:text-3xl">
-                  {t(
-                    "workbench.landingGreeting",
-                    "你好，我是 Nexent，需要我帮你做什么？"
-                  )}
+              <div className="flex w-full flex-col items-center text-center">
+                <h1 className="text-[36px] leading-[54px] text-[#191919]">
+                  <span className="font-bold">
+                    {t("workbench.landingGreetingHi", "你好，我是Nexent")}
+                  </span>{" "}
+                  <span className="font-normal">
+                    {t("workbench.landingGreetingAsk", "需要我帮你做什么")}
+                  </span>
                 </h1>
               </div>
             }
@@ -1310,6 +1375,8 @@ const HomeContent: FC = () => {
             }
             onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
             onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
+            workbenchSkillPopover={workbenchSkillPopover}
+            workbenchKnowledgePopover={workbenchKnowledgePopover}
             workbenchPresentation={{
               mode: workbenchState.config.mode,
               onExitCreation: () => void changeCreationMode("generic_chat"),

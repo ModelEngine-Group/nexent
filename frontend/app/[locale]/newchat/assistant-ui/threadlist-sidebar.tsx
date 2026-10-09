@@ -1,23 +1,14 @@
-import { useRouter } from "next/navigation";
-import { PanelLeftIcon, PlusIcon, Repeat2Icon } from "lucide-react";
+import { useState } from "react";
+import { PanelLeftIcon, PlusIcon, SearchIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import type { SidebarProps } from "@/components/ui/sidebar";
-import {
-  ThreadListPrimitive,
-  ThreadListItemPrimitive,
-  ThreadListItemMorePrimitive,
-} from "@assistant-ui/react";
-import {
-  BatchSidebarFooter,
-  BatchSelectionProvider,
-  ThreadList,
-} from "./thread-list";
+import { ThreadListPrimitive } from "@assistant-ui/react";
+import { BatchSelectionProvider, ThreadList } from "./thread-list";
 import { useSidebar } from "@/components/ui/sidebar";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -36,22 +27,21 @@ export function ThreadListSidebar({
   generatedTitles,
   onPrepareNewConversation,
   onNewConversation,
-  showLegacySwitch = true,
   ...props
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
   const { t } = useTranslation();
-  const router = useRouter();
   const isMobile = useIsMobile();
   const isCollapsed = state === "collapsed" || isMobile;
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (isCollapsed) {
     return (
-      <div className="h-full" style={{ backgroundColor: "#F2F8FF" }}>
+      <div className="h-full" style={{ backgroundColor: "#FFFFFF" }}>
         <Sidebar
           collapsible="none"
           className={cn(props.className, "!h-full")}
-          style={{ backgroundColor: "#F2F8FF", ...props.style }}
+          style={{ backgroundColor: "#FFFFFF", ...props.style }}
           {...props}
         >
           <SidebarHeader>
@@ -79,20 +69,6 @@ export function ThreadListSidebar({
             </div>
           </SidebarHeader>
           <SidebarContent />
-          {showLegacySwitch && (
-            <SidebarFooter>
-              <TooltipIconButton
-                tooltip={t("chat.sidebar.switchToLegacy")}
-                side="right"
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                onClick={() => router.push("/chat")}
-              >
-                <Repeat2Icon className="size-4" />
-              </TooltipIconButton>
-            </SidebarFooter>
-          )}
         </Sidebar>
       </div>
     );
@@ -101,39 +77,49 @@ export function ThreadListSidebar({
   return (
     <ThreadListPrimitive.Root asChild>
       <div
-        className="h-full w-64 min-w-64 max-w-64 p-2"
-        style={{ backgroundColor: "#F2F8FF" }}
+        className="h-full w-64 min-w-64 max-w-64"
+        style={{ backgroundColor: "#FFFFFF" }}
       >
         <BatchSelectionProvider onNewConversation={onNewConversation}>
           <Sidebar
             {...props}
             collapsible="none"
-            variant="inset"
-            className={cn(props.className, "!h-full !w-full min-w-0")}
-            style={{ backgroundColor: "#F2F8FF", ...props.style }}
+            className={cn(
+              props.className,
+              "!h-full !w-full min-w-0 [&_[data-sidebar=sidebar]]:bg-white"
+            )}
+            style={{ backgroundColor: "#FFFFFF", ...props.style }}
           >
             <SidebarHeader>
-              <div className="flex items-center gap-2 px-1">
+              <div className="flex flex-col gap-2 px-1">
+                <div className="flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-2">
+                  <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder={t("chat.sidebar.searchHistory")}
+                    aria-label={t("chat.sidebar.searchHistory")}
+                    className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                  <SidebarTrigger className="size-8 shrink-0" />
+                </div>
                 <ThreadListPrimitive.New
-                  className="flex h-9 flex-1 items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-white"
+                  className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
                   onClick={onPrepareNewConversation}
                 >
                   <PlusIcon className="size-4 shrink-0" />
                   {t("chat.sidebar.newConversation")}
                 </ThreadListPrimitive.New>
-                <SidebarTrigger className="size-8 shrink-0" />
               </div>
             </SidebarHeader>
             <SidebarContent className="focus:outline-none">
-              <ThreadList generatedTitles={generatedTitles} />
-            </SidebarContent>
-            <SidebarFooter>
-              <BatchSidebarFooter
-                onSwitchToLegacy={
-                  showLegacySwitch ? () => router.push("/chat") : undefined
-                }
+              <ThreadList
+                generatedTitles={generatedTitles}
+                searchQuery={searchQuery}
               />
-            </SidebarFooter>
+              {/* AgentGroupsPanel (design component demo) removed from the
+                  sidebar until its placement is confirmed. */}
+            </SidebarContent>
           </Sidebar>
         </BatchSelectionProvider>
       </div>

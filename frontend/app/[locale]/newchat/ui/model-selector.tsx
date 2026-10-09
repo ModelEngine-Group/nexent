@@ -17,6 +17,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { Select } from "antd";
 import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { ReasoningCapability } from "@/types/modelConfig";
@@ -46,9 +47,6 @@ export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
   { id: "medium", name: "Medium" },
   { id: "high", name: "High" },
 ];
-
-const getReasoningEffortName = (option: ModelSelectorEffortOption): string =>
-  option.id;
 
 export type ModelOption = {
   id: string;
@@ -369,13 +367,17 @@ export const modelSelectorTriggerVariants = cva(
 export type ModelSelectorTriggerProps = ComponentPropsWithoutRef<
   typeof PopoverTrigger
 > &
-  VariantProps<typeof modelSelectorTriggerVariants>;
+  VariantProps<typeof modelSelectorTriggerVariants> & {
+    /** Show the active effort level inside the trigger value. */
+    showEffort?: boolean;
+  };
 
 function ModelSelectorTrigger({
   className,
   variant,
   size,
   children,
+  showEffort,
   ...props
 }: ModelSelectorTriggerProps) {
   return (
@@ -388,7 +390,7 @@ function ModelSelectorTrigger({
       {...props}
     >
       <CpuIcon className="size-4" />
-      {children ?? <ModelSelectorValue />}
+      {children ?? <ModelSelectorValue showEffort={showEffort} />}
       <ChevronDownIcon className="size-4 opacity-50 ml-1.5" />
     </PopoverTrigger>
   );
@@ -436,7 +438,9 @@ function ModelSelectorValue({
     effort !== undefined
       ? (() => {
           const option = efforts?.find((e) => e.id === effort);
-          return option ? getReasoningEffortName(option) : undefined;
+          return option
+            ? t(`chat.modelSelector.effort.${option.id}`, option.name)
+            : undefined;
         })()
       : undefined;
 
@@ -613,9 +617,11 @@ function ModelSelectorItem({
         <>
           {model.icon && <ModelIcon>{model.icon}</ModelIcon>}
           <span className="flex min-w-0 flex-col">
-            <span className="truncate font-medium">{model.name}</span>
+            <span className="truncate text-base leading-[22px] font-medium">
+              {model.name}
+            </span>
             {model.description && (
-              <span className="text-muted-foreground truncate text-xs">
+              <span className="truncate text-sm leading-[22px] text-[rgba(25,25,25,0.5)]">
                 {model.description}
               </span>
             )}
@@ -743,10 +749,30 @@ function ModelSelectorEffort({
   );
 }
 
+// Bottom "view models" link per the design, routing to the model admin page.
+function ModelSelectorFooter() {
+  const { t } = useTranslation();
+  const router = useRouter();
+
+  return (
+    <div className="border-t px-3 py-2">
+      <button
+        type="button"
+        className="text-sm leading-[22px] text-[#191919] hover:text-[#197BD5]"
+        onClick={() => router.push("/models")}
+      >
+        {t("chat.modelSelector.viewModels")}
+      </button>
+    </div>
+  );
+}
+
 export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
   VariantProps<typeof modelSelectorTriggerVariants> & {
     /** Render a search input above the model list. */
     searchable?: boolean;
+    /** Show the active effort level next to the model name in the trigger. */
+    showEffort?: boolean;
     className?: string;
     contentClassName?: string;
   };
@@ -804,6 +830,7 @@ const ModelSelectorImpl = ({
   searchable,
   variant,
   size,
+  showEffort,
   className,
   contentClassName,
   ...rootProps
@@ -814,12 +841,14 @@ const ModelSelectorImpl = ({
       <ModelSelectorTrigger
         variant={variant}
         size={size}
+        showEffort={showEffort}
         className={className}
       />
       <ModelSelectorContent className={contentClassName}>
         {searchable && <ModelSelectorSearch />}
         <ModelSelectorEffort />
         <ModelSelectorList />
+        <ModelSelectorFooter />
       </ModelSelectorContent>
     </ModelSelectorRoot>
   );
