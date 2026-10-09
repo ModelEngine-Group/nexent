@@ -1721,7 +1721,9 @@ async def run_agent_stream(
         if runtime_knowledge_tree:
             resolve_scope_kwargs["runtime_agent_tree"] = runtime_knowledge_tree
 
-        resolved_scope = resolve_knowledge_scope(
+        resolved_scope = await run_blocking(
+            "resolve-runtime-knowledge-scope",
+            resolve_knowledge_scope,
             scope=source_scope,
             agent_id=agent_request.agent_id,
             tenant_id=resolved_tenant_id,
@@ -1729,6 +1731,8 @@ async def run_agent_stream(
             version_no=agent_request.version_no,
             is_debug=bool(agent_request.is_debug),
             request_tool_params=agent_request.tool_params,
+            lane="control-io",
+            owner="management.services.agent.run",
             **resolve_scope_kwargs,
         )
         agent_request.tool_params = resolved_scope.tool_params

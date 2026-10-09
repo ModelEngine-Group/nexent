@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Header, HTTPException, Body, Query, Request
 from fastapi.responses import JSONResponse
+from nexent.core.concurrency import run_blocking
 
 from consts.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
 from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
@@ -56,7 +57,11 @@ async def list_tools_api(
 async def search_tool_info_api(request: ToolInstanceSearchRequest, authorization: Optional[str] = Header(None)):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        return search_tool_info_impl(request.agent_id, request.tool_id, tenant_id, user_id)
+        return await run_blocking(
+            "search-tool-config", search_tool_info_impl,
+            request.agent_id, request.tool_id, tenant_id, user_id,
+            lane="control-io", owner="apps.tool_config_app",
+        )
     except (HTTPException, AppException):
         raise
     except TokenExpiredError as e:
@@ -79,14 +84,17 @@ async def update_tool_info_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        result = update_tool_info_impl(request, tenant_id, user_id)
         # Tool params may embed API keys and never reach the log.
         record_security_event("tool_config_update", request=http_request,
                               user_id=user_id, tenant_id=tenant_id,
                               details={"tool_id": request.tool_id,
                                        "agent_id": request.agent_id,
                                        "enabled": request.enabled})
-        return result
+        return await run_blocking(
+            "update-tool-config", update_tool_info_impl,
+            request, tenant_id, user_id,
+            lane="control-io", owner="apps.tool_config_app",
+        )
     except ValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
     except (AgentDraftEditError, ResourceBindingError) as exc:
