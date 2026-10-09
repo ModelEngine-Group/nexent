@@ -23,21 +23,19 @@ import {
   DatabaseOutlined,
   EllipsisOutlined,
   FileAddOutlined,
-  FileTextOutlined,
   ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
   TableOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
 import { Trash2 } from "lucide-react";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import {
   AIDP_UNKNOWN_VALUE,
-  formatAidpCapacity,
   formatAidpCreator,
   formatAidpDateTime,
-  formatAidpDocumentCount,
   normalizeAidpKbType,
 } from "@/lib/aidpKnowledgeDisplay";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -68,14 +66,7 @@ export type AidpKbViewMode = "cards" | "table";
 
 /** Every column the overview can render. */
 export type AidpKbColumnKey =
-  | "name"
-  | "type"
-  | "description"
-  | "documents"
-  | "capacity"
-  | "creator"
-  | "created_at"
-  | "actions";
+  "name" | "type" | "description" | "creator" | "created_at" | "actions";
 
 /** Columns the user cannot hide: the entry point and the row actions. */
 export const AIDP_KB_REQUIRED_COLUMNS: AidpKbColumnKey[] = ["name", "actions"];
@@ -85,8 +76,6 @@ export const AIDP_KB_DEFAULT_COLUMNS: AidpKbColumnKey[] = [
   "name",
   "type",
   "description",
-  "documents",
-  "capacity",
   "creator",
   "created_at",
   "actions",
@@ -96,8 +85,6 @@ const COLUMN_LABEL_KEYS: Record<AidpKbColumnKey, string> = {
   name: "aidpKnowledge.columnName",
   type: "aidpKnowledge.columnType",
   description: "aidpKnowledge.columnDescription",
-  documents: "aidpKnowledge.columnDocuments",
-  capacity: "aidpKnowledge.columnCapacity",
   creator: "aidpKnowledge.columnCreator",
   created_at: "aidpKnowledge.columnCreatedAt",
   actions: "aidpKnowledge.columnActions",
@@ -132,9 +119,7 @@ const BASE_COLUMN_WEIGHTS: Record<AidpKbColumnKey, number> = {
   name: 280,
   type: 260,
   description: 418,
-  documents: 120,
-  capacity: 160,
-  creator: 100,
+  creator: 180,
   created_at: 160,
   actions: 144,
 };
@@ -354,39 +339,20 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
           <div className={styles.cardMetadata}>
             <span
               className={styles.cardDate}
-              title={`${t("aidpKnowledge.cardUpdated")} ${formatAidpDateTime(kb.updated_at)}`}
+              title={`${t("aidpKnowledge.cardCreated")} ${formatAidpDateTime(kb.created_at)}`}
             >
               <ClockCircleOutlined aria-hidden="true" />
               <span className={styles.metadataValue}>
-                {t("aidpKnowledge.cardUpdated")} {formatCardDate(kb.updated_at)}
+                {t("aidpKnowledge.cardCreated")} {formatCardDate(kb.created_at)}
               </span>
             </span>
             <span
               className={styles.cardStatistic}
-              title={t("aidpKnowledge.cardDocuments", {
-                count: formatAidpDocumentCount(
-                  kb.document_count,
-                  kb.document_count_reliable
-                ),
-              })}
+              title={t("aidpKnowledge.columnCreator")}
             >
-              <FileTextOutlined aria-hidden="true" />
+              <UserOutlined aria-hidden="true" />
               <span className={styles.metadataValue}>
-                {formatAidpDocumentCount(
-                  kb.document_count,
-                  kb.document_count_reliable
-                )}
-              </span>
-            </span>
-            <span
-              className={styles.cardStatistic}
-              title={t("aidpKnowledge.cardCapacity", {
-                value: formatAidpCapacity(kb.current_cap),
-              })}
-            >
-              <DatabaseOutlined aria-hidden="true" />
-              <span className={styles.metadataValue}>
-                {formatAidpCapacity(kb.current_cap)}
+                {formatAidpCreator(kb.creator_name)}
               </span>
             </span>
           </div>
@@ -533,22 +499,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         ellipsis: true,
         render: (value: string | undefined) =>
           renderText(value?.trim() || AIDP_UNKNOWN_VALUE),
-      }),
-      documents: makeColumn("documents", {
-        title: t("aidpKnowledge.columnDocuments"),
-        key: "documents",
-        render: (_value, kb) =>
-          renderText(
-            formatAidpDocumentCount(
-              kb.document_count,
-              kb.document_count_reliable
-            )
-          ),
-      }),
-      capacity: makeColumn("capacity", {
-        title: t("aidpKnowledge.columnCapacity"),
-        key: "capacity",
-        render: (_value, kb) => renderText(formatAidpCapacity(kb.current_cap)),
       }),
       creator: makeColumn("creator", {
         title: t("aidpKnowledge.columnCreator"),

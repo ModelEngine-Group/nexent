@@ -4610,6 +4610,7 @@
   "aidpKnowledge.cardCapacity": "Capacity {{value}}",
   "aidpKnowledge.cardDocuments": "Documents {{count}}",
   "aidpKnowledge.cardUpdated": "Updated",
+  "aidpKnowledge.cardCreated": "Created",
   "aidpKnowledge.overviewTitle": "Knowledge bases",
   "aidpKnowledge.importFile": "Import files",
   "aidpKnowledge.importFileTitle": "Import files to {{name}}",

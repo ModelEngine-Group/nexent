@@ -4621,6 +4621,7 @@
   "aidpKnowledge.cardCapacity": "容量 {{value}}",
   "aidpKnowledge.cardDocuments": "文档 {{count}}",
   "aidpKnowledge.cardUpdated": "更新于",
+  "aidpKnowledge.cardCreated": "创建于",
   "aidpKnowledge.overviewTitle": "知识库",
   "aidpKnowledge.importFile": "导入文件",
   "aidpKnowledge.importFileTitle": "导入文件至 {{name}}",
