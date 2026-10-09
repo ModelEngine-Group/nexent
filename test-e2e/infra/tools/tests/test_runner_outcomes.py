@@ -20,6 +20,41 @@ from test_asset_lib import implementation_hash  # noqa: E402
 
 
 class RunnerOutcomeTests(unittest.TestCase):
+    def test_d4_cli_never_runs_unprepared_worker_directly(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, home = root / 'repo', root / 'home'
+            repo.mkdir()
+            record = {'case_id': 'PW-TEST-01', 'stage': 'D4', 'status': 'active',
+                      'execution': {'implementations': [{'framework': 'playwright'}]}}
+            for code, expected in ((0, 0), (1, 1), (3, 1)):
+                with patch.object(sys, 'argv', ['run_cases.py', 'PW-TEST-01', '--test-home', str(home)]), \
+                        patch.object(run_cases, 'repository_root', return_value=repo), \
+                        patch.object(run_cases, 'inspect', return_value=([], {'cases': [record]})), \
+                        patch.object(run_cases, 'machine_environment', return_value={}), \
+                        patch.object(run_cases, 'run_prepared_d4_case', return_value=code) as prepared, \
+                        patch.object(run_cases, 'run_one') as unprepared:
+                    self.assertEqual(run_cases.main(), expected)
+                prepared.assert_called_once_with('PW-TEST-01', repo, home.resolve(), {})
+                unprepared.assert_not_called()
+
+    def test_d4_cli_uses_suite_preparation_and_preserves_failure_exit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            home = repo.parent / 'fixture-test-home'
+            environment = {'NEXENT_TEST_HOME': str(home)}
+            for exit_code in (0, 1, 3):
+                with patch.object(run_cases.subprocess, 'run') as process:
+                    process.return_value.returncode = exit_code
+                    self.assertEqual(run_cases.run_prepared_d4_case('PW-FILE-01', repo, home, environment), exit_code)
+                args, kwargs = process.call_args
+                self.assertEqual(args[0], [sys.executable,
+                    str(repo / 'test-e2e/infra/scripts/run-suite.py'), 'run',
+                    '--test-home', str(home), '--case', 'PW-FILE-01', '--execute'])
+                self.assertEqual(kwargs['env'], environment)
+                self.assertEqual(kwargs['cwd'], repo)
+                self.assertFalse(kwargs['check'])
+
     def test_failed_pytest_dependencies_are_not_product_failures(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

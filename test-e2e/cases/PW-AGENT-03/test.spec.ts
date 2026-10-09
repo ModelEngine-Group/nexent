@@ -20,6 +20,18 @@ journey("PW-AGENT-03", async (context) => {
   let toolAnswer = "";
   let skillAnswer = "";
   let agentId = 0;
+  let serviceName = "";
+  let expectedToolId = 0;
+
+  const assertOwnedToolBinding = async () => {
+    const response = await page.request.post("/api/agent/search_info", {
+      data: { agent_id: agentId, version_no: 0 },
+    });
+    expect(response.ok()).toBe(true);
+    const payload = await response.json();
+    const agent = payload.data || payload;
+    expect(agent.tools.some((tool: any) => Number(tool.tool_id || tool.id) === expectedToolId)).toBe(true);
+  };
 
   contract.deferCleanup(async () => {
     if (alternateId > 0) await agents.delete(alternateId);
@@ -46,6 +58,16 @@ journey("PW-AGENT-03", async (context) => {
         return `resolved fixed READY Skill ${skillName}`;
       },
       async () => {
+        serviceName = resolveReadyAsset("mcp", "service_name", "PW-AGENT-03");
+        const listed = await page.request.get("/api/tool/list");
+        expect(listed.ok()).toBe(true);
+        const payload = await listed.json();
+        const tools = Array.isArray(payload) ? payload : payload.data || payload.tools || [];
+        const matches = tools.filter((tool: any) => tool.source === "mcp"
+          && tool.usage === serviceName && tool.origin_name === toolName);
+        expect(matches).toHaveLength(1);
+        expectedToolId = Number(matches[0].tool_id || matches[0].id);
+        expect(expectedToolId).toBeGreaterThan(0);
         expect(wirePath).not.toBe("");
         wireOffset = existsSync(wirePath) ? readFileSync(wirePath, "utf8").length : 0;
         return `real LLM tool calling is configured; wire evidence will be read from ${wirePath}`;
@@ -61,8 +83,9 @@ journey("PW-AGENT-03", async (context) => {
         return "opened the product Tools & Skills tab";
       },
       async () => {
-        await agents.bindTool(toolName);
-        return `searched and selected controlled MCP tool ${toolName}`;
+        await agents.bindToolFromService(serviceName, toolName);
+        await assertOwnedToolBinding();
+        return `selected ${toolName} from the current-case service ${serviceName}; persisted tool id=${expectedToolId}`;
       },
       async () => {
         await agents.bindSkill(skillName);
@@ -74,6 +97,7 @@ journey("PW-AGENT-03", async (context) => {
         alternateId = await agents.create(alternateDisplay, `d4_switch_${token}`);
         await agents.select(agentDisplay);
         await agents.openToolsSkills();
+        await assertOwnedToolBinding();
         await expect(page.getByText(toolName, { exact: true }).first()).toBeVisible();
         await expect(page.getByText(skillName, { exact: true }).first()).toBeVisible();
         return "switched to a second Draft and back; both Tool and Skill autosaves were recovered";
@@ -104,6 +128,7 @@ journey("PW-AGENT-03", async (context) => {
         await page.reload({ waitUntil: "domcontentloaded" });
         await agents.select(agentDisplay);
         await agents.openToolsSkills();
+        await assertOwnedToolBinding();
         await expect(page.getByText(toolName, { exact: true }).first()).toBeVisible();
         await expect(page.getByText(skillName, { exact: true }).first()).toBeVisible();
         return "Tool and Skill bindings survived a full refresh";

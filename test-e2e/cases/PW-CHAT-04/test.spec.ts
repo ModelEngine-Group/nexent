@@ -25,7 +25,7 @@ journey("PW-CHAT-04", async (context) => {
     ],
     steps: [
       async () => { await loginCurrent(page, "tenant_a_admin"); await chat.openAgent(agent); await chat.selectMode("执行"); return `selected multi-Agent ${agent}`; },
-      async () => { await chat.startMessage(`必须分别委派 ${childA} 和 ${childB} 完成两个子任务，最后汇总标记 MULTI-${token}。`); conversationId = chat.currentConversationId(); return "submitted a deterministic multi-collaborator task and registered its server conversation ID for cleanup"; },
+      async () => { await chat.startMessage(`请完成以下两个已明确的独立子任务：必须委派 ${childA} 执行任务A，只返回 CHILD_A_OK；必须委派 ${childB} 执行任务B，只返回 CHILD_B_OK。两个任务均不需要额外输入，不要自行代替协作者回答。等待两个协作者返回后汇总它们的结果，并原样包含 MULTI-${token}。`); conversationId = chat.currentConversationId(); return "submitted two concrete collaborator tasks and registered the server conversation ID for cleanup"; },
       async () => {
         try {
           await expect(page.locator("[data-subagent-id]")).toHaveCount(2, { timeout: 240000 });

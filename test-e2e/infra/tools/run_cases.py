@@ -322,6 +322,20 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
     return case_id, status, result_dir
 
 
+def run_prepared_d4_case(case_id: str, repo: Path, home: Path, env: dict[str, str]) -> int:
+    """Use the same owned preparation and cleanup as the repository suite.
+
+    The suite worker calls run_one directly after preparing declared assets,
+    so routing the CLI here does not recurse back into this entry point.
+    """
+    launcher = repo / "test-e2e/infra/scripts/run-suite.py"
+    return subprocess.run(
+        [sys.executable, str(launcher), "run", "--test-home", str(home),
+         "--case", case_id, "--execute"],
+        cwd=repo, env=env, check=False,
+    ).returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("case_ids", nargs="*")
@@ -356,6 +370,9 @@ def main() -> int:
     env = machine_environment(home, repo)
     failed = 0
     for case_id in dict.fromkeys(args.case_ids):
+        if cases[case_id]["stage"] == "D4":
+            failed += run_prepared_d4_case(case_id, repo, home, env) != 0
+            continue
         actual_id, status, result_dir = run_one(cases[case_id], repo, home, env)
         print(f"{actual_id}: {status}; local evidence: {result_dir}")
         failed += status != "PASS"

@@ -14,7 +14,7 @@ case:
   objective: 只验证用户可见多Agent展示，不用UI证明后端并行。
   preconditions:
   - 主Agent绑定2+协作Agent
-  - 有固定多协作任务
+  - 有完整定义的固定多协作任务：任务A由第一个协作者返回CHILD_A_OK，任务B由第二个协作者返回CHILD_B_OK，两者均无需额外输入
   test_data:
     legacy_asset_declaration: config/models.yaml；可选services/test-a2a/
   steps:
@@ -22,7 +22,7 @@ case:
     action: 选择多Agent主Agent。
     expected: 多Agent可见状态和最终结果一致。
   - order: 2
-    action: 发送触发多个协作Agent的固定任务。
+    action: 发送两个具体且无需额外输入的固定子任务，明确要求分别委派给两个配置协作者、等待两者返回并汇总本次MULTI标记。
     expected: 部分失败不丢其他结果。
   - order: 3
     action: 等待多个Agent执行卡片/步骤出现。
@@ -52,7 +52,7 @@ case:
   actor: Nexent browser user
   journey:
   - 选择多Agent主Agent。
-  - 发送触发多个协作Agent的固定任务。
+  - 发送两个具体且无需额外输入的固定子任务，明确要求分别委派给两个配置协作者、等待两者返回并汇总本次MULTI标记。
   - 等待多个Agent执行卡片/步骤出现。
   - 确认卡片展示名与配置协作Agent的display name对应，不以内部runtime变量名代替展示名。
   - 等待正常场景完成，各卡片进入终态且主回答出现。
