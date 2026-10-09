@@ -1,60 +1,52 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Database } from "lucide-react";
+import { Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
+import { formatDate } from "@/lib/date";
+import type { KnowledgeBase } from "@/types/knowledgeBase";
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
 import type { KnowledgeItem, SelectedItem } from "./types";
 
-const MOCK_KNOWLEDGE: KnowledgeItem[] = [
-  {
-    id: "1",
-    name: "市场监督知识库",
-    category: "市场",
-    iconBg: "#8B7BF6",
-    description:
-      "本知识库聚焦大健康基础科普指引，涵盖饮食营养、运动健身、作息睡眠、慢病预防、体检解读等健康知识，包含知识要点、常见误区、日常建议、风险提示等常见问答答案，为用户提供一站式、标准化的健康生活参考。",
-    meta: ["2025-03-25 使用过", "7文档", "18块"],
-  },
-  {
-    id: "2",
-    name: "麻醉知识库",
-    category: "医学知识",
-    iconBg: "#7B5BF2",
-    description:
-      "本知识库聚焦大健康基础科普指引，涵盖饮食营养、运动健身、作息睡眠、慢病预防、体检解读等健康知识，包含知识要点、常见误区、日常建议、风险提示等常见问答答案，为用户提供一站式、标准化的健康生活参考。",
-    meta: ["2025-03-25 使用过", "7文档", "18块"],
-  },
-  {
-    id: "3",
-    name: "皮肤科基础医疗知识库",
-    category: "医学知识",
-    iconBg: "#9F8CF8",
-    description:
-      "本知识库聚焦大健康基础科普指引，涵盖饮食营养、运动健身、作息睡眠、慢病预防、体检解读等健康知识，包含知识要点、常见误区、日常建议、风险提示等常见问答答案，为用户提供一站式、标准化的健康生活参考。",
-    meta: ["2025-03-25 使用过", "7文档", "18块"],
-  },
-  {
-    id: "4",
-    name: "骨科知识库",
-    category: "医学知识",
-    iconBg: "#8B7BF6",
-    description:
-      "本知识库聚焦大健康基础科普指引，涵盖饮食营养、运动健身、作息睡眠、慢病预防、体检解读等健康知识，包含知识要点、常见误区、日常建议、风险提示等常见问答答案，为用户提供一站式、标准化的健康生活参考。",
-    meta: ["2025-03-25 使用过", "7文档", "18块"],
-  },
-  {
-    id: "5",
-    name: "心血管疾病专家知识库",
-    category: "医学知识",
-    iconBg: "#7B5BF2",
-    description:
-      "本知识库聚焦大健康基础科普指引，涵盖饮食营养、运动健身、作息睡眠、慢病预防、体检解读等健康知识，包含知识要点、常见误区、日常建议、风险提示等常见问答答案，为用户提供一站式、标准化的健康生活参考。",
-    meta: ["2025-03-25 使用过", "7文档", "18块"],
-  },
+const PAGE_SIZE = 10;
+
+const ICON_BG_PALETTE = [
+  "#8B7BF6",
+  "#7B5BF2",
+  "#9F8CF8",
+  "#5B8DEF",
+  "#3B82F6",
+  "#4D6BFE",
 ];
+
+function iconColorFor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return ICON_BG_PALETTE[hash % ICON_BG_PALETTE.length];
+}
+
+function toKnowledgeItem(kb: KnowledgeBase): KnowledgeItem {
+  const meta: string[] = [];
+  const updated = formatDate(kb.updatedAt);
+  if (updated) meta.push(`${updated} 更新`);
+  meta.push(`${kb.documentCount}文档`);
+  meta.push(`${kb.chunkCount}块`);
+  return {
+    id: kb.id,
+    name: kb.display_name || kb.name,
+    category: kb.source || undefined,
+    description: kb.description ?? "",
+    iconBg: iconColorFor(kb.id),
+    meta,
+  };
+}
 
 function KnowledgeRow({
   item,
@@ -118,33 +110,62 @@ export function AddKnowledgeDrawer({
   onConfirm,
 }: AddKnowledgeDrawerProps) {
   const { t } = useTranslation("common");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(["1", "2"])
-  );
-  const [keyword, setKeyword] = useState("");
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId ?? null;
+  const { data: knowledgeBases, isLoading, refetch } = useKnowledgeList(tenantId);
 
-  const items = useMemo(
-    () =>
-      MOCK_KNOWLEDGE.filter(
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [keyword, setKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const [tagFilter, setTagFilter] = useState("");
+
+  const allItems = useMemo(() => (knowledgeBases ?? []).map(toKnowledgeItem), [
+    knowledgeBases,
+  ]);
+
+  // Knowledge bases carry no user tags; expose the real `source` (来源) as the filter.
+  const tagOptions = useMemo(() => {
+    const sources = new Set<string>();
+    allItems.forEach((item) => {
+      if (item.category) sources.add(item.category);
+    });
+    return Array.from(sources)
+      .sort()
+      .map((value) => ({ value, label: value }));
+  }, [allItems]);
+
+  const items = useMemo(() => {
+    let filtered = allItems;
+    const kw = keyword.trim().toLowerCase();
+    if (kw) {
+      filtered = filtered.filter(
         (item) =>
-          !keyword ||
-          item.name.includes(keyword) ||
-          item.description.includes(keyword)
-      ),
-    [keyword]
-  );
+          item.name.toLowerCase().includes(kw) ||
+          item.description.toLowerCase().includes(kw)
+      );
+    }
+    if (tagFilter) {
+      filtered = filtered.filter((item) => item.category === tagFilter);
+    }
+    return filtered;
+  }, [allItems, keyword, tagFilter]);
+
+  // Reset to the first page whenever the search or tag changes.
+  useEffect(() => {
+    setPage(1);
+  }, [keyword, tagFilter]);
+
+  const pagedItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const selected: SelectedItem[] = useMemo(
     () =>
-      MOCK_KNOWLEDGE.filter((item) => selectedIds.has(item.id)).map((item) => ({
-        id: item.id,
-        label: item.name,
-      })),
-    [selectedIds]
+      allItems
+        .filter((item) => selectedIds.has(item.id))
+        .map((item) => ({ id: item.id, label: item.name })),
+    [allItems, selectedIds]
   );
 
-  const allSelected =
-    items.length > 0 && items.every((item) => selectedIds.has(item.id));
+  const allSelected = items.length > 0 && items.every((item) => selectedIds.has(item.id));
 
   const toggle = (id: string) => {
     setSelectedIds((prev) => {
@@ -161,16 +182,18 @@ export function AddKnowledgeDrawer({
       title={t("resourcePicker.addKnowledge", "添加知识库")}
       searchPlaceholder={t("resourcePicker.search.knowledge", "搜索知识库名称及描述")}
       selected={selected}
-      tagOptions={[{ value: "tag", label: t("resourcePicker.tag", "标签") }]}
+      tagOptions={tagOptions}
       listTitle={t("resourcePicker.list.knowledge", "知识库列表")}
-      total={500}
+      total={items.length}
+      page={page}
+      onPageChange={setPage}
       showConfirm
       onClose={onClose}
-      onConfirm={() =>
-        onConfirm?.(MOCK_KNOWLEDGE.filter((item) => selectedIds.has(item.id)))
-      }
+      onConfirm={() => onConfirm?.(allItems.filter((item) => selectedIds.has(item.id)))}
       onRemoveSelected={(id) => toggle(id)}
       onSearch={setKeyword}
+      onTagChange={(value) => setTagFilter(value ?? "")}
+      onRefresh={() => refetch()}
       onSelectAll={(checked) =>
         setSelectedIds(new Set(checked ? items.map((item) => item.id) : []))
       }
@@ -184,16 +207,24 @@ export function AddKnowledgeDrawer({
         </button>
       }
     >
-      <div className="flex flex-col gap-2">
-        {items.map((item) => (
-          <KnowledgeRow
-            key={item.id}
-            item={item}
-            selected={selectedIds.has(item.id)}
-            onToggle={() => toggle(item.id)}
-          />
-        ))}
-      </div>
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Spin />
+        </div>
+      ) : items.length === 0 ? (
+        <Empty description={t("resourcePicker.empty", "暂无数据")} />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {pagedItems.map((item) => (
+            <KnowledgeRow
+              key={item.id}
+              item={item}
+              selected={selectedIds.has(item.id)}
+              onToggle={() => toggle(item.id)}
+            />
+          ))}
+        </div>
+      )}
     </AddResourceDrawer>
   );
 }

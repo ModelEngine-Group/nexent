@@ -1,49 +1,46 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Cpu } from "lucide-react";
+import { Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
+import { useModelList } from "@/hooks/model/useModelList";
+import type { ModelOption } from "@/types/modelConfig";
 import { AddResourceDrawer } from "./AddResourceDrawer";
 import type { ModelGroup, ModelItem, SelectedItem } from "./types";
 
-const MOCK_GROUPS: ModelGroup[] = [
-  { key: "doubao", label: "豆包", icon: "豆", iconBg: "#4D6BFE" },
-  { key: "qwen", label: "通义千问", icon: "通", iconBg: "#7B5BF2" },
-  { key: "deepseek", label: "DeepSeek", icon: "DS", iconBg: "#2E5BFF" },
-  { key: "zhipu", label: "智谱", icon: "智", iconBg: "#3B82F6" },
-  { key: "moonshot", label: "月之暗面", icon: "月", iconBg: "#1F2329" },
+const PAGE_SIZE = 10;
+
+const ICON_BG_PALETTE = [
+  "#4D6BFE",
+  "#7B5BF2",
+  "#2E5BFF",
+  "#3B82F6",
+  "#1F2329",
 ];
 
-const MOCK_MODELS: Record<string, ModelItem[]> = {
-  doubao: [
-    { id: "d1", name: "doubao-1.5-pro-32k", tags: ["128k", "文本推理", "工具调用"] },
-    { id: "d2", name: "doubao-pro-32k", tags: ["128k", "文本推理", "工具调用"] },
-    { id: "d3", name: "doubao-lite-32k", tags: ["128k", "文本推理", "工具调用"] },
-  ],
-  qwen: [
-    { id: "q1", name: "qwen-max", tags: ["128k", "文本推理", "工具调用"] },
-    { id: "q2", name: "qwen-plus", tags: ["128k", "文本推理", "工具调用"] },
-    { id: "q3", name: "qwen-turbo", tags: ["128k", "文本推理", "工具调用"] },
-  ],
-  deepseek: [
-    { id: "v1", name: "deepseek-v4.1-flash", tags: ["1000k", "文本推理", "深度思考", "工具调用"] },
-    { id: "v2", name: "deepseek-reasoner", tags: ["1000k", "文本推理", "工具调用"] },
-    { id: "v3", name: "deepseek-chat", tags: ["1000k", "文本推理", "工具调用"] },
-    { id: "v4", name: "deepseek-v4-pro", tags: ["1000k", "文本推理", "工具调用"] },
-    { id: "v5", name: "deepseek-v4-flash", tags: ["1000k", "文本推理", "工具调用"] },
-    { id: "v6", name: "deepseek-v3.2", tags: ["1000k", "文本推理", "工具调用"] },
-  ],
-  zhipu: [
-    { id: "z1", name: "glm-4-plus", tags: ["128k", "文本推理", "工具调用"] },
-    { id: "z2", name: "glm-4-air", tags: ["128k", "文本推理", "工具调用"] },
-  ],
-  moonshot: [
-    { id: "m1", name: "moonshot-v1-8k", tags: ["8k", "文本推理", "工具调用"] },
-    { id: "m2", name: "moonshot-v1-32k", tags: ["32k", "文本推理", "工具调用"] },
-  ],
-};
+function iconColorFor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return ICON_BG_PALETTE[hash % ICON_BG_PALETTE.length];
+}
+
+function toModelItem(model: ModelOption): ModelItem {
+  const tags: string[] = [];
+  if (model.contextWindowTokens) {
+    tags.push(`${Math.round(model.contextWindowTokens / 1000)}k`);
+  }
+  if (model.source) tags.push(model.source);
+  return {
+    id: String(model.id),
+    name: model.displayName || model.name,
+    tags,
+  };
+}
 
 export interface AddModelDrawerProps {
   open: boolean;
@@ -53,26 +50,67 @@ export interface AddModelDrawerProps {
 
 export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps) {
   const { t } = useTranslation("common");
-  const [activeGroup, setActiveGroup] = useState("deepseek");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(["v1"])
-  );
+  const { llmModels, isLoading } = useModelList({ enabled: open });
+
+  const [activeGroup, setActiveGroup] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [keyword, setKeyword] = useState("");
+  const [page, setPage] = useState(1);
+
+  // Base helper: source key for a model (falls back for models without one).
+  const sourceOf = (model: ModelOption) => model.source || "unknown";
+
+  // Group the account's own LLM models by their source in first-seen order.
+  const groups: ModelGroup[] = useMemo(() => {
+    const sources: string[] = [];
+    llmModels.forEach((model) => {
+      const source = sourceOf(model);
+      if (!sources.includes(source)) sources.push(source);
+    });
+    return sources.map((source) => ({
+      key: source,
+      label: source,
+      icon: source.charAt(0).toUpperCase(),
+      iconBg: iconColorFor(source),
+    }));
+  }, [llmModels]);
+
+  // Default to the first available source group.
+  useEffect(() => {
+    if (groups.length > 0 && !groups.some((group) => group.key === activeGroup)) {
+      setActiveGroup(groups[0].key);
+    }
+  }, [groups, activeGroup]);
+
+  const allModels = useMemo(() => llmModels.map(toModelItem), [llmModels]);
 
   const activeModels = useMemo(() => {
-    const list = MOCK_MODELS[activeGroup] ?? [];
+    const list = llmModels
+      .filter((model) => !activeGroup || sourceOf(model) === activeGroup)
+      .map(toModelItem);
+    const kw = keyword.trim().toLowerCase();
+    if (!kw) return list;
     return list.filter(
       (item) =>
-        !keyword || item.name.includes(keyword) || item.tags.some((tag) => tag.includes(keyword))
+        item.name.toLowerCase().includes(kw) ||
+        item.tags.some((tag) => tag.toLowerCase().includes(kw))
     );
-  }, [activeGroup, keyword]);
+  }, [llmModels, activeGroup, keyword]);
 
-  const selected: SelectedItem[] = useMemo(() => {
-    const all = Object.values(MOCK_MODELS).flat();
-    return all
-      .filter((item) => selectedIds.has(item.id))
-      .map((item) => ({ id: item.id, label: item.name }));
-  }, [selectedIds]);
+  // Reset to the first page whenever the source group or search changes.
+  useEffect(() => {
+    setPage(1);
+  }, [keyword, activeGroup]);
+
+  const pagedModels = activeModels.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const selected: SelectedItem[] = useMemo(
+    () =>
+      allModels
+        .filter((item) => selectedIds.has(item.id))
+        .map((item) => ({ id: item.id, label: item.name })),
+    [allModels, selectedIds]
+  );
 
   const toggleModel = (id: string) => {
     setSelectedIds((prev) => {
@@ -83,7 +121,7 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
     });
   };
 
-  const activeGroupConf = MOCK_GROUPS.find((g) => g.key === activeGroup);
+  const activeGroupConf = groups.find((g) => g.key === activeGroup);
 
   return (
     <AddResourceDrawer
@@ -92,83 +130,97 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
       searchPlaceholder={t("resourcePicker.search.model", "按名称、描述检索")}
       selected={selected}
       listTitle={t("resourcePicker.list.model", "模型列表")}
-      total={500}
+      total={activeModels.length}
+      page={page}
+      onPageChange={setPage}
       showConfirm={false}
       onClose={onClose}
       onConfirm={() => onConfirm?.([])}
       onRemoveSelected={(id) => toggleModel(id)}
       onSearch={setKeyword}
     >
-      <div className="flex h-full gap-4">
-        <div className="flex w-[216px] shrink-0 flex-col gap-1">
-          {MOCK_GROUPS.map((group) => (
-            <button
-              key={group.key}
-              type="button"
-              onClick={() => setActiveGroup(group.key)}
-              className={cn(
-                "flex h-11 cursor-pointer items-center gap-2 rounded-[2px] border-0 bg-transparent px-3 text-left text-[14px] leading-[22px]",
-                activeGroup === group.key
-                  ? "bg-[#E6F2FD] text-[#0067D1]"
-                  : "text-[#191919]"
-              )}
-            >
-              <span
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] text-white"
-                style={{ background: group.iconBg }}
-              >
-                {group.icon}
-              </span>
-              {group.label}
-              <span className="ml-auto text-[12px] text-[#B3B3B3]">›</span>
-            </button>
-          ))}
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Spin />
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto pl-2">
-          {activeModels.map((item) => {
-            const isSelected = selectedIds.has(item.id);
-            return (
-              <div
-                key={item.id}
-                onClick={() => toggleModel(item.id)}
+      ) : (
+        <div className="flex h-full gap-4">
+          <div className="flex w-[216px] shrink-0 flex-col gap-1">
+            {groups.map((group) => (
+              <button
+                key={group.key}
+                type="button"
+                onClick={() => setActiveGroup(group.key)}
                 className={cn(
-                  "flex h-[59px] shrink-0 cursor-pointer items-center justify-between rounded-[2px] py-[9px] pl-5 pr-7",
-                  isSelected ? "bg-[#E6F2FD]" : "bg-white"
+                  "flex h-11 cursor-pointer items-center gap-2 rounded-[2px] border-0 bg-transparent px-3 text-left text-[14px] leading-[22px]",
+                  activeGroup === group.key
+                    ? "bg-[#E6F2FD] text-[#0067D1]"
+                    : "text-[#191919]"
                 )}
               >
-                <div className="flex items-center gap-3">
-                  <span
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white"
-                    style={{ background: activeGroupConf?.iconBg ?? "#2E5BFF" }}
+                <span
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] text-white"
+                  style={{ background: group.iconBg }}
+                >
+                  {group.icon}
+                </span>
+                {group.label}
+                <span className="ml-auto text-[12px] text-[#B3B3B3]">›</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto pl-2">
+            {pagedModels.length === 0 ? (
+              <Empty description={t("resourcePicker.empty", "暂无数据")} />
+            ) : (
+              pagedModels.map((item) => {
+                const isSelected = selectedIds.has(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => toggleModel(item.id)}
+                    className={cn(
+                      "flex h-[59px] shrink-0 cursor-pointer items-center justify-between rounded-[2px] py-[9px] pl-5 pr-7",
+                      isSelected ? "bg-[#E6F2FD]" : "bg-white"
+                    )}
                   >
-                    <Cpu size={13} />
-                  </span>
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span
-                      className={cn(
-                        "truncate text-[14px] leading-[22px]",
-                        isSelected ? "font-medium text-[#0067D1]" : "font-medium text-[#191919]"
-                      )}
-                    >
-                      {item.name}
-                    </span>
-                    <div className="flex gap-2">
-                      {item.tags.map((tag) => (
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white"
+                        style={{ background: activeGroupConf?.iconBg ?? "#2E5BFF" }}
+                      >
+                        <Cpu size={13} />
+                      </span>
+                      <div className="flex min-w-0 flex-col gap-0.5">
                         <span
-                          key={tag}
-                          className="h-5 rounded-[2px] bg-[#F5F5F5] px-2 text-[12px] leading-[20px] text-[#393939]"
+                          className={cn(
+                            "truncate text-[14px] leading-[22px]",
+                            isSelected
+                              ? "font-medium text-[#0067D1]"
+                              : "font-medium text-[#191919]"
+                          )}
                         >
-                          {tag}
+                          {item.name}
                         </span>
-                      ))}
+                        <div className="flex gap-2">
+                          {item.tags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="h-5 rounded-[2px] bg-[#F5F5F5] px-2 text-[12px] leading-[20px] text-[#393939]"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </AddResourceDrawer>
   );
 }

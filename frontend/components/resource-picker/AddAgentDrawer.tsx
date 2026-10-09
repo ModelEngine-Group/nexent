@@ -1,69 +1,61 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot } from "lucide-react";
+import { Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
+import { formatDate } from "@/lib/date";
+import type { Agent } from "@/types/agentConfig";
+import type { A2AExternalAgent } from "@/services/a2aService";
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
 import type { AgentCardItem, SelectedItem } from "./types";
 
-const MOCK_AGENTS: AgentCardItem[] = [
-  {
-    id: "1",
-    name: "健康小助手",
-    description:
-      "一个专业、全面的健康管理咨询助手，致力于为用户提供可靠、实用的健康信息与生活指导。",
-    iconBg: "#8B7BF6",
-    publishedAt: "2026-01-23",
-    online: false,
-  },
-  {
-    id: "2",
-    name: "健康小助手",
-    description:
-      "一个专业、全面的健康管理咨询助手，致力于为用户提供可靠、实用的健康信息与生活指导。",
-    iconBg: "#5B8DEF",
-    publishedAt: "2026-01-23",
-    online: true,
-  },
-  {
-    id: "3",
-    name: "健康小助手",
-    description:
-      "一个专业、全面的健康管理咨询助手，致力于为用户提供可靠、实用的健康信息与生活指导。",
-    iconBg: "#7B5BF2",
-    publishedAt: "2026-01-23",
-    online: false,
-  },
-  {
-    id: "4",
-    name: "健康小助手",
-    description:
-      "一个专业、全面的健康管理咨询助手，致力于为用户提供可靠、实用的健康信息与生活指导。",
-    iconBg: "#3B82F6",
-    publishedAt: "2026-01-23",
-    online: false,
-  },
-  {
-    id: "5",
-    name: "健康小助手",
-    description:
-      "一个专业、全面的健康管理咨询助手，致力于为用户提供可靠、实用的健康信息与生活指导。",
-    iconBg: "#8B7BF6",
-    publishedAt: "2026-01-23",
-    online: false,
-  },
-  {
-    id: "6",
-    name: "健康小助手",
-    description:
-      "一个专业、全面的健康管理咨询助手，致力于为用户提供可靠、实用的健康信息与生活指导。",
-    iconBg: "#2E5BFF",
-    publishedAt: "2026-01-23",
-    online: false,
-  },
+const PAGE_SIZE = 10;
+
+const ICON_BG_PALETTE = [
+  "#8B7BF6",
+  "#5B8DEF",
+  "#7B5BF2",
+  "#3B82F6",
+  "#2E5BFF",
+  "#4D6BFE",
 ];
+
+function iconColorFor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return ICON_BG_PALETTE[hash % ICON_BG_PALETTE.length];
+}
+
+function toLocalCard(agent: Agent): AgentCardItem {
+  return {
+    id: String(agent.id),
+    name: agent.display_name || agent.name,
+    description: agent.description ?? "",
+    iconBg: iconColorFor(String(agent.id)),
+    publishedAt: formatDate(agent.create_time ?? agent.update_time),
+    online: agent.is_available !== false,
+    tags: agent.tags ?? [],
+  };
+}
+
+function toExternalCard(agent: A2AExternalAgent): AgentCardItem {
+  return {
+    id: String(agent.id),
+    name: agent.name,
+    description: agent.description ?? "",
+    iconBg: iconColorFor(String(agent.id)),
+    publishedAt: formatDate(agent.create_time),
+    online: agent.is_available !== false,
+    tags: [],
+  };
+}
 
 function AgentCard({
   item,
@@ -99,7 +91,7 @@ function AgentCard({
         {item.description}
       </p>
       <div className="mt-auto flex gap-3.5 text-[12px] leading-[18px] text-[#999]">
-        <span>🕑 发布于 {item.publishedAt}</span>
+        {item.publishedAt && <span>🕑 发布于 {item.publishedAt}</span>}
         <span>⊙ {item.online ? "已上线" : "未上线"}</span>
       </div>
     </div>
@@ -114,33 +106,70 @@ export interface AddAgentDrawerProps {
 
 export function AddAgentDrawer({ open, onClose, onConfirm }: AddAgentDrawerProps) {
   const { t } = useTranslation("common");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(["1"])
-  );
+  const { availableAgents: localAgents, isLoading: isLocalLoading } =
+    usePublishedAgentList();
+  const { availableAgents: externalAgents, isLoading: isExternalLoading } =
+    useExternalAgents();
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [tab, setTab] = useState("local");
   const [keyword, setKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const [tagFilter, setTagFilter] = useState("");
 
-  const agents = useMemo(
-    () =>
-      MOCK_AGENTS.filter(
+  const localCards = useMemo(() => localAgents.map(toLocalCard), [localAgents]);
+  const externalCards = useMemo(() => externalAgents.map(toExternalCard), [externalAgents]);
+
+  const allCards = useMemo(() => [...localCards, ...externalCards], [
+    localCards,
+    externalCards,
+  ]);
+
+  const tagOptions = useMemo(() => {
+    const tags = new Set<string>();
+    localAgents.forEach((agent) =>
+      (agent.tags ?? []).forEach((tag) => tags.add(tag))
+    );
+    return Array.from(tags)
+      .sort()
+      .map((value) => ({ value, label: value }));
+  }, [localAgents]);
+
+  const filterCards = (cards: AgentCardItem[]): AgentCardItem[] => {
+    let filtered = cards;
+    const kw = keyword.trim().toLowerCase();
+    if (kw) {
+      filtered = filtered.filter(
         (item) =>
-          !keyword ||
-          item.name.includes(keyword) ||
-          item.description.includes(keyword)
-      ),
-    [keyword]
-  );
+          item.name.toLowerCase().includes(kw) ||
+          item.description.toLowerCase().includes(kw)
+      );
+    }
+    if (tagFilter) {
+      filtered = filtered.filter((item) => (item.tags ?? []).includes(tagFilter));
+    }
+    return filtered;
+  };
+
+  // Reset to the first page whenever the search, tag or tab changes.
+  useEffect(() => {
+    setPage(1);
+  }, [keyword, tagFilter, tab]);
+
+  const filteredAgents = filterCards(tab === "local" ? localCards : externalCards);
+  const agents = filteredAgents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const isLoading = tab === "local" ? isLocalLoading : isExternalLoading;
 
   const selected: SelectedItem[] = useMemo(
     () =>
-      MOCK_AGENTS.filter((item) => selectedIds.has(item.id)).map((item) => ({
-        id: item.id,
-        label: item.name,
-      })),
-    [selectedIds]
+      allCards
+        .filter((item) => selectedIds.has(item.id))
+        .map((item) => ({ id: item.id, label: item.name })),
+    [allCards, selectedIds]
   );
 
-  const allSelected = agents.length > 0 && agents.every((a) => selectedIds.has(a.id));
+  const allSelected =
+    filteredAgents.length > 0 && filteredAgents.every((a) => selectedIds.has(a.id));
 
   const toggle = (id: string) => {
     setSelectedIds((prev) => {
@@ -157,35 +186,46 @@ export function AddAgentDrawer({ open, onClose, onConfirm }: AddAgentDrawerProps
       title={t("resourcePicker.addAgent", "添加子智能体")}
       searchPlaceholder={t("resourcePicker.search.agent", "按名称、描述检索")}
       selected={selected}
-      tagOptions={[{ value: "tag", label: "标签" }]}
+      tagOptions={tab === "local" ? tagOptions : undefined}
       listTitle={t("resourcePicker.list.agent", "智能体列表")}
       tabs={[
         { key: "local", label: t("resourcePicker.tab.localAgent", "本地智能体") },
         { key: "external", label: t("resourcePicker.tab.externalAgent", "外部智能体") },
       ]}
       activeTab={tab}
-      total={500}
+      total={filteredAgents.length}
+      page={page}
+      onPageChange={setPage}
       showConfirm
       onClose={onClose}
-      onConfirm={() => onConfirm?.(MOCK_AGENTS.filter((a) => selectedIds.has(a.id)))}
+      onConfirm={() => onConfirm?.(allCards.filter((a) => selectedIds.has(a.id)))}
       onRemoveSelected={(id) => toggle(id)}
       onSearch={setKeyword}
+      onTagChange={(value) => setTagFilter(value ?? "")}
       onTabChange={setTab}
       onSelectAll={(checked) =>
-        setSelectedIds(new Set(checked ? agents.map((a) => a.id) : []))
+        setSelectedIds(new Set(checked ? filteredAgents.map((a) => a.id) : []))
       }
       allSelected={allSelected}
     >
-      <div className="grid grid-cols-2 content-start gap-2">
-        {agents.map((item) => (
-          <AgentCard
-            key={item.id}
-            item={item}
-            selected={selectedIds.has(item.id)}
-            onToggle={() => toggle(item.id)}
-          />
-        ))}
-      </div>
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Spin />
+        </div>
+      ) : agents.length === 0 ? (
+        <Empty description={t("resourcePicker.empty", "暂无数据")} />
+      ) : (
+        <div className="grid grid-cols-2 content-start gap-2">
+          {agents.map((item) => (
+            <AgentCard
+              key={item.id}
+              item={item}
+              selected={selectedIds.has(item.id)}
+              onToggle={() => toggle(item.id)}
+            />
+          ))}
+        </div>
+      )}
     </AddResourceDrawer>
   );
 }

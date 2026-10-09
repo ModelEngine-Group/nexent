@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Drawer, Input, Select } from "antd";
 import { Check, ChevronDown, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -52,7 +52,7 @@ export function SearchRow({
   placeholder: string;
   tagOptions?: TagOption[];
   onSearch?: (keyword: string) => void;
-  onTagChange?: (value: string) => void;
+  onTagChange?: (value?: string) => void;
 }) {
   return (
     <div className="flex shrink-0 items-center gap-2">
@@ -78,6 +78,7 @@ export function SearchRow({
       />
       {tagOptions && (
         <Select
+          allowClear
           placeholder="标签"
           options={tagOptions}
           onChange={onTagChange}
@@ -252,15 +253,17 @@ export function ResourceTabs({
 export function ResourcePagination({
   total,
   pageSize = 10,
+  current,
   onPageChange,
 }: {
   total: number;
   pageSize?: number;
-  onPageChange?: (page: number) => void;
+  current: number;
+  onPageChange: (page: number) => void;
 }) {
   const { t } = useTranslation("common");
-  const [current, setCurrent] = useState(1);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const safeCurrent = Math.min(Math.max(1, current), pageCount);
 
   const pages = useMemo(() => {
     const count = pageCount;
@@ -273,8 +276,7 @@ export function ResourcePagination({
 
   const goTo = (page: number) => {
     const next = Math.min(Math.max(1, page), pageCount);
-    setCurrent(next);
-    onPageChange?.(next);
+    if (next !== safeCurrent) onPageChange(next);
   };
 
   return (
@@ -297,7 +299,7 @@ export function ResourcePagination({
         <button
           type="button"
           aria-label="prev"
-          onClick={() => goTo(current - 1)}
+          onClick={() => goTo(safeCurrent - 1)}
           className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[4px] border-0 bg-transparent text-[#666]"
         >
           ‹
@@ -317,7 +319,7 @@ export function ResourcePagination({
               onClick={() => goTo(page)}
               className={cn(
                 "flex h-8 w-8 cursor-pointer items-center justify-center rounded-[4px] border-0 text-[14px]",
-                page === current
+                page === safeCurrent
                   ? "bg-[#E6F2FD] text-[#0067D1]"
                   : "bg-transparent text-[#191919]"
               )}
@@ -329,7 +331,7 @@ export function ResourcePagination({
         <button
           type="button"
           aria-label="next"
-          onClick={() => goTo(current + 1)}
+          onClick={() => goTo(safeCurrent + 1)}
           className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[4px] border-0 bg-transparent text-[#666]"
         >
           ›
@@ -337,8 +339,9 @@ export function ResourcePagination({
       </div>
       <div className="flex h-8 w-[89px] items-center rounded-[2px] border border-[#D9D9D9] px-2.5">
         <input
+          key={safeCurrent}
           type="text"
-          defaultValue={current}
+          defaultValue={safeCurrent}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               const value = Number((e.target as HTMLInputElement).value);
@@ -366,11 +369,13 @@ export interface AddResourceDrawerProps {
   activeTab?: string;
   showConfirm?: boolean;
   total: number;
+  page?: number;
+  onPageChange?: (page: number) => void;
   onClose: () => void;
   onConfirm?: () => void;
   onRemoveSelected?: (id: string) => void;
   onSearch?: (keyword: string) => void;
-  onTagChange?: (value: string) => void;
+  onTagChange?: (value?: string) => void;
   onTabChange?: (key: string) => void;
   onSelectAll?: (checked: boolean) => void;
   onRefresh?: () => void;
@@ -395,6 +400,8 @@ export function AddResourceDrawer({
   activeTab,
   showConfirm = true,
   total,
+  page = 1,
+  onPageChange,
   onClose,
   onConfirm,
   onRemoveSelected,
@@ -464,7 +471,11 @@ export function AddResourceDrawer({
 
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
 
-      <ResourcePagination total={total} />
+      <ResourcePagination
+        total={total}
+        current={page}
+        onPageChange={onPageChange ?? (() => {})}
+      />
 
       <div className="flex shrink-0 justify-end gap-3">
         <button

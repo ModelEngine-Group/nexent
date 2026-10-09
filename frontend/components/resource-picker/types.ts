@@ -23,6 +23,7 @@ export interface AgentCardItem {
   iconBg: string;
   publishedAt?: string;
   online?: boolean;
+  tags?: string[];
 }
 
 /** Row entry for the "add knowledge" drawer. */
