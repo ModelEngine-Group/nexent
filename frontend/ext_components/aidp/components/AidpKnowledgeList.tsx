@@ -402,7 +402,11 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     renderedWidths: Record<string, number>
   ) => {
     const resized = resizeAidpColumnPair(renderedWidths, key, nextKey, delta);
-    if (resized[key] === renderedWidths[key]) return;
+    if (
+      Math.abs(resized[key] - columnWidths[key]) < 0.02 &&
+      Math.abs(resized[nextKey] - columnWidths[nextKey]) < 0.02
+    )
+      return;
     // Preserve hidden-column preferences in the same weight scale.
     setColumnWeights((current) => {
       const totalWeight = activeKeys.reduce(
