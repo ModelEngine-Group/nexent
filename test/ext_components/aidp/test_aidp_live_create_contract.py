@@ -100,6 +100,24 @@ def test_all_models_does_not_send_service_filter(aidp_service_module):
     assert "service=" not in client.get.call_args.args[0]
 
 
+@pytest.mark.parametrize("domain,expected", [
+    ("常规", "不能使用代词"), ("医疗", "Disease (疾病)"),
+    ("金融", "Stock (股票)"), ("法律法规", "Law (法律法规)"),
+])
+def test_chinese_template_returns_complete_captured_prompts(mock_aidp_server, domain, expected):
+    response = TestClient(mock_aidp_server.app).get(
+        f"{mock_aidp_server._KB_PREFIX}/GraphConfigTemplate?language=chinese",
+        headers={"Authorization": "Bearer mock-aidp-key"},
+    )
+    assert response.status_code == 200
+    parameter = next(p for p in response.json()["value"] if p["param_key"] == "prompt_text")
+    text = parameter["template"][domain]
+    assert 200 < len(text) <= 4096
+    assert text.startswith("---Role---\n") and expected in text
+    assert "关系" in text and text.count("\n") >= 10
+    assert parameter["param_value"] == parameter["template"]["常规"]
+
+
 def test_old_internal_aliases_translate_without_graph_topk(aidp_service_module):
     config = {**graph_config(), "domain": "general", "prompt_language": "chinese",
               "no_think_mode": False, "retrieve_subgraph_hop": 3, "retrieve_default_topk": 5}

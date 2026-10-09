@@ -739,8 +739,11 @@ class CreateKbBody(BaseModel):
 
 
 def _graph_template(language: str) -> Dict[str, Any]:
-    """Contract fixtures; English templates are synthetic, not production defaults."""
-    english = language == "english"
+    """Use the captured Chinese response; English templates remain synthetic fixtures."""
+    if language == "chinese":
+        fixture = Path(__file__).with_name("graph_config_template_chinese.json")
+        return json.loads(fixture.read_text(encoding="utf-8"))
+    english = True
     prompts = {
         domain: (f"Extract entity relationship triples for the {domain} domain."
                  if english else f"你是{domain}领域的信息抽取专家，请抽取明确的实体及其关系三元组。")
