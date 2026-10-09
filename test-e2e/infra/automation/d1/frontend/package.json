@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "pretest": "node ensure-product-react.mjs",
-    "test": "vitest run --config vitest.config.ts --reporter=json"
+    "test": "vitest run --config vitest.config.ts --reporter=json",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage"
   },
   "devDependencies": {
     "@dnd-kit/sortable": "^10.0.0",
@@ -29,6 +30,7 @@
     "react-shiki": "^0.10.1",
     "typescript": "5.8.3",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.2.4"
+    "vitest": "3.2.7",
+    "@vitest/coverage-v8": "3.2.7"
   }
 }

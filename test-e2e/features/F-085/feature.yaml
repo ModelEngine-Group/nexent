@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: F-085-RULE-01
     description: Docker image upload SSE、env、端口、container_started/success/error
-  required_test_stages:
-  - D2
+  required_test_stages: []
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

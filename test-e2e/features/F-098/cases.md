@@ -7,4 +7,3 @@
 - D1 [UT-FE-AUTO-BECEA5CE0869F353](../../cases/UT-FE-AUTO-BECEA5CE0869F353/case.yaml) · active
 - D3 [API-099](../../cases/API-099/case.yaml) · active
 - D3 [API-100](../../cases/API-100/case.yaml) · active
-- D3 [API-AUTO-877981976E0A978F](../../cases/API-AUTO-877981976E0A978F/case.yaml) · active

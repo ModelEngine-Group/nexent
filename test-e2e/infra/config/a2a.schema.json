@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mock"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "mock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_url", "product_url", "control_token_env_key"],
+      "properties": {
+        "control_url": {"type": "string", "pattern": "^https?://"},
+        "product_url": {"type": "string", "pattern": "^https?://"},
+        "control_token_env_key": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+        "fault_proxy_control_url": {"type": "string", "pattern": "^https?://"},
+        "nacos_proxy_product_url": {"type": "string", "pattern": "^https?://"}
+      }
+    }
+  }
+}

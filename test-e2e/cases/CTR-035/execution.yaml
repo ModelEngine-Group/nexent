@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: CTR-035
+timeout_seconds: 240
+implementations:
+- framework: pytest
+  file: test.py
+  selector: CTR-035
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

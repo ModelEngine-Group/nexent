@@ -14,12 +14,12 @@ case:
   title: Browser shows retry output incrementally without blank steps
   type: E2E
   priority: P0
-  status: blocked
+  status: active
   automation: automated
   objective: Verify a user sees only successful raw code and one executed action in a real conversation.
   preconditions:
   - A local Nexent instance
-  - test tenant and controllable model provider are configured.
+  - Test tenant is configured; the existing runner starts its container-reachable controlled HTTP fixture, and the case creates an owned model and published Agent.
   test_data:
     profile: mock
     sequences:

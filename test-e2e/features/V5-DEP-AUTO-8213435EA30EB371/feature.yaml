@@ -12,7 +12,6 @@ feature:
   business_rules:
   - rule_id: V5-DEP-AUTO-8213435EA30EB371-RULE-01
     description: 纠正性迁移幂等与数据一致性：role_permission_t 序列重同步 + user_tenant 触发器空租户跳过预置
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

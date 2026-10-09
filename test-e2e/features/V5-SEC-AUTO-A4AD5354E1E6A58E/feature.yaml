@@ -12,7 +12,6 @@ feature:
   business_rules:
   - rule_id: V5-SEC-AUTO-A4AD5354E1E6A58E-RULE-01
     description: 标签库治理与资源分配接口跨租户越权(IDOR)及权限矩阵防护
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -4,81 +4,76 @@ module: V5-BASELINE
 case:
   case_id: PW-A2A-DISCOVERY-01
   feature_id: V5-PW-A2A-DISCOVERY-01
-  business_rule_ids:
-  - V5-PW-A2A-DISCOVERY-01-RULE-01
+  business_rule_ids: [V5-PW-A2A-DISCOVERY-01-RULE-01]
   title: Advanced A2A发现→选择外部Agent→建立关系→Debug调用
   type: E2E
   priority: P0
-  status: blocked
+  status: active
   automation: automated
-  objective: 依据Collaborative Agent真实Discovery入口测试外部A2A接入。
+  objective: Advanced A2A发现→选择外部Agent→建立关系→Debug调用
   preconditions:
-  - Test A2A支持discovery/stream
-  - 认证Header/idkey/JWT本地配置
-  - 主Agent可编辑
+  - 受控 A2A Mock 与所需真实 Nexent 服务就绪，无其他批次故障。
+  - 配置真实 LLM 和本地身份，地址读取统一配置。
+  - 本次隔离 Agent 可编辑；独立客户端可访问配置的服务。
   test_data:
-    legacy_asset_declaration: config/a2a.yaml；services/test-a2a/；config/models.yaml
+    configuration: config/a2a.yaml; config/models.yaml; config/users.yaml
+    ownership: 动态资源 ID、本次唯一 nonce，凭据不存入用例。
   steps:
   - order: 1
-    action: 主Agent→Advanced→Collaborative Agents。
-    expected: Search/Select是真实当前UI。
+    action: 创建本次隔离主 Agent 并配置真实模型，进入 Advanced 协作智能体
+    expected: Agent 动态创建且可编辑，配置 autosave 成功
   - order: 2
-    action: 点击A2A发现/添加外部Agent，打开Discovery Modal。
-    expected: 建立关系后可真实调用。
+    action: 点击 A2A发现打开 Discovery Modal
+    expected: 真实发现窗口可见
   - order: 3
-    action: 填Test A2A URL及当前UI真实协议/认证/Header字段。
-    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+    action: 填写配置中的 Mock 卡片 URL 与本次 nonce 自定义请求头
+    expected: 不硬编码部署地址、资源 ID 或密钥
   - order: 4
-    action: 点击【Search】真实发现。
-    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+    action: 通过 UI 发起真实 URL 发现
+    expected: 返回动态 Agent ID，卡片可见，立即登记资源清理
   - order: 5
-    action: 选中固定Test Agent并点击【Select Agent】。
-    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+    action: 点击当前 UI 添加为子 Agent
+    expected: 关系创建成功，目标为本次发现的 Agent
   - order: 6
-    action: 等待autosave，关闭再打开确认关系存在。
-    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+    action: 关闭并刷新配置页
+    expected: 外部协作者和真实关系回读保持一致
   - order: 7
-    action: Debug发送触发外部Agent的问题。
-    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+    action: Debug 发送明确委派外部 Agent 的查询
+    expected: 真实模型执行委派并完成回答
   - order: 8
-    action: 等待A2A流式/最终marker结果。
-    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+    action: 检查外部服务确定性结果
+    expected: 最终答案明确展示 total 字段的值 1283，允许中文或表格展示，不要求固定等号格式；统计值必须一致
   - order: 9
-    action: 检查Test A2A wire log。
-    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+    action: 归档本次发现和实际调用的脱敏 wire
+    expected: 发现 nonce 请求头与 Debug 时间窗口的外部请求均存在
   - order: 10
-    action: 移除A2A关系并确认刷新消失。
-    expected: Header/JWT/idkey/metadata由CONTRACT从wire断言。
+    action: 通过 UI 移除关系并刷新
+    expected: 关系和协作者展示均消失
   expected_results:
-  - Search/Select是真实当前UI。
-  - 建立关系后可真实调用。
-  - Header/JWT/idkey/metadata由CONTRACT从wire断言。
-  forbidden_side_effects: []
+  - 发现和绑定使用本次拥有的动态资源
+  - Debug 真实委派并返回外部结果，wire 有实际调用
+  - 移除后的关系持久化为空
+  forbidden_side_effects:
+  - 不复用固定 Agent ID，不重新生成已有 API Key，不把模拟浏览器结果计为真实调用。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 03_Playwright_Journey
     legacy_row: 33
-  actor: Nexent browser user
+  actor: Nexent browser test administrator and independent A2A client
   journey:
-  - 主Agent→Advanced→Collaborative Agents。
-  - 点击A2A发现/添加外部Agent，打开Discovery Modal。
-  - 填Test A2A URL及当前UI真实协议/认证/Header字段。
-  - 点击【Search】真实发现。
-  - 选中固定Test Agent并点击【Select Agent】。
-  - 等待autosave，关闭再打开确认关系存在。
-  - Debug发送触发外部Agent的问题。
-  - 等待A2A流式/最终marker结果。
-  - 检查Test A2A wire log。
-  - 移除A2A关系并确认刷新消失。
+  - 创建本次隔离主 Agent 并配置真实模型，进入 Advanced 协作智能体
+  - 点击 A2A发现打开 Discovery Modal
+  - 填写配置中的 Mock 卡片 URL 与本次 nonce 自定义请求头
+  - 通过 UI 发起真实 URL 发现
+  - 点击当前 UI 添加为子 Agent
+  - 关闭并刷新配置页
+  - Debug 发送明确委派外部 Agent 的查询
+  - 检查外部服务确定性结果
+  - 归档本次发现和实际调用的脱敏 wire
+  - 通过 UI 移除关系并刷新
   final_business_result:
-  - Search/Select是真实当前UI。
-  - 建立关系后可真实调用。
-  - Header/JWT/idkey/metadata由CONTRACT从wire断言。
+  - 发现和绑定使用本次拥有的动态资源
+  - Debug 真实委派并返回外部结果，wire 有实际调用
+  - 移除后的关系持久化为空
   failure_evidence:
-  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-A2A-DISCOVERY-01/
-
-    - screenshot.png / trace.zip / video.webm
-
-    - console.log / network.har / failure.json
-
-    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'
+  - 本地 assertions.json、events.jsonl、失败截图及 Trace；成功不留截图与 Trace。

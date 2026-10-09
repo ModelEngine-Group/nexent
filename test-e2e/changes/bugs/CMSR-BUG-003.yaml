@@ -5,15 +5,15 @@ change:
   bug_id: CMSR-BUG-003
   title: Step labels arrive after content and disappear from reasoning
   description: Emit and render a step label before the first model token while preserving it across retries.
-  observed_behavior: The persisted step_count follows model output and is queued for a nonexistent later chunk, so the UI
-    omits Step 1.
-  expected_behavior: A running step displays its label first; retry output follows it; old late labels prepend to existing
-    reasoning; terminal label-only cards are removed.
+  observed_behavior: The persisted step_count follows model output and is queued for a nonexistent later chunk,
+    so the UI omits Step 1.
+  expected_behavior: A running step displays its label first; retry output follows it; old late labels prepend to
+    existing reasoning; terminal label-only cards are removed.
   escaped_stage: production
   coverage_gap:
     type: missing_boundary
-    description: Existing tests asserted label suppression but not the actual CoreAgent event order or running UI state before
-      the first token.
+    description: Existing tests asserted label suppression but not the actual CoreAgent event order or running UI
+      state before the first token.
   feature_contract_changed: true
   affected_features:
     existing: []
@@ -30,5 +30,4 @@ change:
     - CMSR-D2-001
     - CMSR-D3-001
     - CMSR-D4-001
-    - CMSR-D5-001
     retired: []

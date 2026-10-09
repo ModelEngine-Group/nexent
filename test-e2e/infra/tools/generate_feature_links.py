@@ -25,7 +25,9 @@ def expected_pages(root: Path) -> dict[Path, str]:
         lines = [f"# {feature_id} 关联用例", "", "此页由结构化用例生成，不手工编辑。", ""]
         for stage, case_id, status in sorted(owned[feature_id]):
             lines.append(f"- {stage} [{case_id}](../../cases/{case_id}/case.yaml) · {status}")
-        pages[target] = "\n".join(lines) + "\n"
+        if not owned[feature_id]:
+            lines.append("当前测试基线未保留关联用例。")
+        pages[target] = "\n".join(lines).rstrip() + "\n"
     return pages
 
 

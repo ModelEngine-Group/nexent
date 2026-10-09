@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: V5-DEP-AUTO-6D109C4E590A97BF-RULE-01
     description: 验证迁移为 conversation_source_search_t 新增 retrieval_highlight_terms JSONB 列并将 score_overall 放宽为 numeric(14,6)，高精度相关度分与高亮词可无损持久化与回读
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

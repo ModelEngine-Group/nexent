@@ -27,7 +27,7 @@ from shared.factories.files import _remove_object as _delete_attachment, _upload
 from shared.factories.tenant import isolated_accounts
 
 
-CASES = ["SEC-001", "SEC-002", "SEC-003", "REL-001", "REL-002", "REL-003", "DEP-001", "DEP-002", "DEP-003", "DEP-004"]
+CASES = ["SEC-001", "SEC-002", "SEC-003", "REL-001", "REL-002", "REL-003", "DEP-001", "DEP-003"]
 
 
 async def _file_acl(owner, attacker, kb_owner) -> None:

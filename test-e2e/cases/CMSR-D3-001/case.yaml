@@ -14,11 +14,11 @@ case:
   title: Agent retry streams success and persists only committed output
   type: AGENT-IT
   priority: P0
-  status: blocked
+  status: active
   automation: automated
   objective: Verify the full Nexent Agent, observer, SSE and persistence path with controlled provider failure.
   preconditions:
-  - Local Nexent services and a disposable test conversation are available.
+  - Local Nexent services and a disposable test conversation are available; the existing runner starts its container-reachable controlled HTTP fixture.
   test_data:
     profile: mock
     sequences:
@@ -60,8 +60,5 @@ case:
   execution:
     profiles:
     - name: mock
-      required_services:
-      - model-provider
-    - name: real_smoke
       required_services:
       - model-provider

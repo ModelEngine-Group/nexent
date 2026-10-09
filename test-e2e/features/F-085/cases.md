@@ -2,5 +2,4 @@
 
 此页由结构化用例生成，不手工编辑。
 
-- D2 [CTR-026](../../cases/CTR-026/case.yaml) · active
-- D2 [CTR-027](../../cases/CTR-027/case.yaml) · active
+当前测试基线未保留关联用例。

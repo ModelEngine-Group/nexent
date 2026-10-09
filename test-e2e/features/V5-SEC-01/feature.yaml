@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: V5-SEC-01-RULE-01
     description: 跨租户IDOR矩阵
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

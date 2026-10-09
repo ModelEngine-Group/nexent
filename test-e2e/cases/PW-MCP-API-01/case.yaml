@@ -31,7 +31,7 @@ case:
     action: 执行健康检查，打开详情确认转换出的Tool名称/参数可见。
     expected: schema/参数映射精确断言由CONTRACT。
   - order: 5
-    action: 到Agent Tools绑定确定性转换工具。
+    action: 从工具目录解析本次服务生成的唯一转换工具实际名称，在Agent Tools的outer-apis分组绑定，不以API服务名假设分组名称。
     expected: schema/参数映射精确断言由CONTRACT。
   - order: 6
     action: Debug固定调用，等待LLM→MCP→Test API完成。
@@ -57,7 +57,7 @@ case:
   - 填写Test API/OpenAPI地址、认证/必要参数和run_id名称。
   - 提交转换/创建并等待完成。
   - 执行健康检查，打开详情确认转换出的Tool名称/参数可见。
-  - 到Agent Tools绑定确定性转换工具。
+  - 从工具目录解析本次服务生成的唯一转换工具实际名称，在Agent Tools的outer-apis分组绑定，不以API服务名假设分组名称。
   - Debug固定调用，等待LLM→MCP→Test API完成。
   - 检查Test API wire log和结果marker。
   - 删除run_id MCP。

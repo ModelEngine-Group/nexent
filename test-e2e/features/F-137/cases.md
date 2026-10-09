@@ -2,7 +2,6 @@
 
 此页由结构化用例生成，不手工编辑。
 
-- D1 [UT-BE-AUTO-C0F44F945573C769](../../cases/UT-BE-AUTO-C0F44F945573C769/case.yaml) · active
 - D1 [UT-BE-AUTO-D5F8CD7A3BA7CBA9](../../cases/UT-BE-AUTO-D5F8CD7A3BA7CBA9/case.yaml) · active
 - D1 [UT-FE-AUTO-21C38AB35F467377](../../cases/UT-FE-AUTO-21C38AB35F467377/case.yaml) · active
 - D3 [AGT-059](../../cases/AGT-059/case.yaml) · active

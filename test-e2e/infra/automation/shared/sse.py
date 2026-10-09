@@ -87,8 +87,17 @@ async def read_sse(response: httpx.Response, limit: int = 1000) -> list[dict[str
                     "duration_seconds": round(time.monotonic() - started, 3)}) + "\n")
 
 
-def assert_terminal_event(events: list[dict[str, Any]]) -> None:
+def assert_terminal_event(events: list[dict[str, Any]], *, allow_error: bool = False) -> None:
     assert events, "SSE stream returned no events"
+    if allow_error:
+        # Only an explicit final root error is a failed terminal. A nested
+        # child's error, arbitrary model prose or an unfinished stream is not.
+        payloads = [item.get('data') for item in events if item.get('data') is not None]
+        last = payloads[-1] if payloads else None
+        if (isinstance(last, dict) and last.get('type') == 'error'
+                and isinstance(last.get('content'), str) and last['content'].strip()
+                and last.get('depth', 0) == 0):
+            return
     names = {str(item.get("event", "")).lower() for item in events}
     def terminal_payload(value: Any) -> bool:
         if isinstance(value, dict):

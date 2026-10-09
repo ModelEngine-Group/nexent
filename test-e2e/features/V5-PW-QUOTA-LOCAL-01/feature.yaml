@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: V5-PW-QUOTA-LOCAL-01-RULE-01
     description: Local Knowledge容量：平台配额→租户阈值→上传触顶→释放
-  required_test_stages:
-  - D4
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

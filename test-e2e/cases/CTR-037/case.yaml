@@ -9,71 +9,40 @@ case:
   title: security credentials + requirement index 校验 Agent Card｜异常/边界/越权
   type: INTEGRATION
   priority: P0
-  status: blocked
+  status: active
   automation: automated
   objective: security credentials + requirement index 校验 Agent Card｜异常/边界/越权
   preconditions:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/a2a.yaml；${NEXENT_TEST_HOME}/services/test-a2a/
-  - Test A2A Server/Registry 已启动并清空本次 wire log。
+  - Nexent服务与仓库受控A2A Mock就绪，无其他故障注入批次。
+  - config/a2a.yaml符合统一Schema，控制令牌由既有环境或secrets.env提供。
+  - 使用本次动态ID、唯一source URL及受控测试身份，不借用历史资源。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/config/a2a.yaml
-
-      - ${NEXENT_TEST_HOME}/services/test-a2a/'
+    configuration: config/a2a.yaml
+    mock_service: a2a-agent
   steps:
   - order: 1
-    action: 启动/确认 ${NEXENT_TEST_HOME}/services/test-a2a/ 与需要的本地 Registry/Nacos 测试服务可用。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: 发现JWT卡片后提交缺失、未知、越界和负index配置
+    expected: 返回400或422，失败配置不写入
   - order: 2
-    action: 从 config/a2a.yaml 读取 endpoint、JWT/idkey/custom header/metadata 配置，secret 仅从 secrets.env 注入。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: 外租户尝试保存凭据
+    expected: 404，原资源不受影响
   - order: 3
-    action: 通过 Nexent A2A client 实际发现远程 Agent，记录发现结果、能力描述和协议版本。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - order: 4
-    action: 执行“security credentials + requirement index 校验 Agent Card｜异常/边界/越权”对应的发现、关系、发布或调用流程，所有调用必须走真实 A2A HTTP/stream
-      协议。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 5
-    action: 在 Test A2A Server wire log 中检查 Authorization/idkey/custom header/metadata/消息体与 Nexent 配置一致。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 6
-    action: streaming 场景确认增量事件有序结束；停止/超时场景确认连接释放且不会重复回调。
-    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
-  - order: 7
-    action: 本地 Agent 发布 A2A 时从外部测试客户端反向发现并调用一次，验证对外协议而不仅是 UI 状态。
-    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
-  - order: 8
-    action: '清理 A2A 关系/发布记录并归档 wire log。
-
-      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
-    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+    action: 回读配置及wire后清理
+    expected: configured scheme为空，未产生额外外部请求，删除回读404
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  - 返回400或422，失败配置不写入
+  - 404，原资源不受影响
+  - configured scheme为空，未产生额外外部请求，删除回读404
   forbidden_side_effects: []
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 182
   integration_boundary:
-  - LOCAL_REAL_PROTOCOL：连接本地 Test A2A Agent/Registry，走真实 A2A 协议；Header/JWT/metadata 必须抓取实际请求验证。
+  - Nexent实际HTTP API与受控外部A2A服务及本地持久化，非Mock自测。
   observations:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  - 返回400或422，失败配置不写入
+  - 404，原资源不受影响
+  - configured scheme为空，未产生额外外部请求，删除回读404
   cleanup:
-  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。
+  - 清理本次动态资源或恢复故障场景；本地保留脱敏wire、JUnit及清理记录。

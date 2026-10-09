@@ -5,15 +5,15 @@ change:
   bug_id: CMSR-BUG-004
   title: Reasoning-only output budget exhaustion lacks actionable diagnosis
   description: Correlate rejected output with the model budget and response shape without leaking content by default.
-  observed_behavior: A model exhausts 4096 output tokens on reasoning-only content three times; logs classify generic protocol
-    failure and the UI blames protocol compliance.
-  expected_behavior: Each rejection identifies budget exhaustion versus malformed Action, with bounded output preview available
-    only by explicit diagnostic opt-in.
+  observed_behavior: A model exhausts 4096 output tokens on reasoning-only content three times; logs classify generic
+    protocol failure and the UI blames protocol compliance.
+  expected_behavior: Each rejection identifies budget exhaustion versus malformed Action, with bounded output preview
+    available only by explicit diagnostic opt-in.
   escaped_stage: production
   coverage_gap:
     type: missing_assertion
-    description: Existing tests checked repair lifecycle markers but not model budget, reasoning-only response shape, attempt
-      correlation or diagnostic privacy.
+    description: Existing tests checked repair lifecycle markers but not model budget, reasoning-only response shape,
+      attempt correlation or diagnostic privacy.
   feature_contract_changed: true
   affected_features:
     existing: []
@@ -25,6 +25,5 @@ change:
     existing: []
     added:
     - CMSR-D1-004
-    modified:
-    - CMSR-D5-001
+    modified: []
     retired: []

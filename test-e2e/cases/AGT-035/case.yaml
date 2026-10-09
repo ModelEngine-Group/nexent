@@ -11,7 +11,7 @@ case:
   priority: P0
   status: active
   automation: automated
-  objective: 请求级工具参数覆盖 DB；未知参数400；KB元字段重算｜核心流程
+  objective: 回读本次实际 Agent 与 Tool 名称构造覆盖映射，验证真实 wire 参数覆盖 DB 并得到 42；不使用其他 Agent 的缓存名称
   preconditions:
   - Nexent 本地测试全栈已启动，health check 通过。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。

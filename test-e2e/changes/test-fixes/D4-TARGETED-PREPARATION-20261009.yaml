@@ -21,6 +21,11 @@ change:
     requested clarification and the script waited for collaborator cards.
     Define both independent tasks before submitting; preserve collaborator,
     partial-failure, final-marker and refresh assertions.
+    The PW-CHAT-04 refresh step also required an unrelated conversation rename.
+    Reopen the existing sidebar title after refresh instead; retain the exact
+    persisted collaborator-card count and partial-failure checks. Record the
+    independently observed product rename-cache defect without making it a
+    prerequisite for the collaboration Case.
   affected_features:
     existing: [V5-PW-FILE-01, V5-PW-AGENT-03, V5-PW-CHAT-04]
     added: []

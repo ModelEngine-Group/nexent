@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: D4-CONTAINER-CONFIG-BRIDGE-20261009
+  change_type: test-fix
+  title: Resolve existing container MCP asset from maintained YAML
+  description: >-
+    PW-MCP-CONTAINER-01 was blocked by a missing environment variable even
+    though the operator already supplied a valid controlled MCP JSON definition
+    in config/mcp.yaml container_config. Bridge that existing field in the
+    configuration controller only when the explicit variable is absent. Accept
+    a JSON string or mapping, reject invalid/non-object values without leaking
+    contents, and do not invent a missing asset or modify machine configuration.
+    Keep UI creation, health, tools, enable/disable and deletion assertions.
+    Observe terminal UI submission state and verify the committed service with
+    a read-only lookup before searching for its card. Do not await the complete
+    SSE body: the frontend cancels the reader on either terminal event.
+    HTTP 200 can still precede deployment rollback; preserve that failure
+    instead of reporting an unrelated locator error.
+  affected_features:
+    existing: [V5-PW-MCP-CONTAINER-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-MCP-CONTAINER-01]
+    retired: []

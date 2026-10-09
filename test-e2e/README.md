@@ -59,6 +59,46 @@ python test-e2e/infra/tools/run_cases.py AGT-001 --test-home /absolute/path/to/m
 
 On Windows, the Python used to launch the command may be the installed Python launcher; the direct runner switches to `<test-home>/runtime/test-venv` before loading test dependencies. Use a Windows absolute path for `--test-home`. The runner creates results under `<test-home>/runs/repository-local/`. It does not install dependencies, deploy the product, or contact GitHub. D4 failure screenshots and traces are retained by the fixed Playwright journey; successful journeys do not retain them. D1 frontend cases require dependencies installed for `infra/automation/d1/frontend`; D4 requires Playwright under its package or the product frontend package.
 
+## D1 code coverage and Legacy UT comparison
+
+Python D1 measures the same `backend/` and `sdk/` source scope as Legacy UT,
+including branches. Frontend components use Vitest V8 with a separate frontend
+denominator. Install the frontend package with `npm ci` before collecting its
+coverage. The pinned coverage provider must match the Vitest version.
+
+```bash
+# One or more D1 cases; ordinary execution stays unchanged without --coverage.
+python test-e2e/infra/tools/run_cases.py UT-SDK-001 --test-home /absolute/path/to/my-test-home --coverage
+# All active D1 cases, using the dedicated test-home Python automatically.
+python test-e2e/infra/tools/run_d1_coverage.py --test-home /absolute/path/to/my-test-home
+# Run both independent suites concurrently at the current worktree version.
+python test-e2e/infra/tools/run_d1_coverage.py --test-home /absolute/path/to/my-test-home --compare-legacy --workers 4 --timeout 300
+# Recheck only frontend components or regenerate reports from retained raw data.
+python test-e2e/infra/tools/run_d1_coverage.py --test-home /absolute/path/to/my-test-home --framework vitest
+python test-e2e/infra/tools/run_d1_coverage.py --test-home /absolute/path/to/my-test-home --report-batch /absolute/path/to/my-test-home/runs/d1-coverage/<batch>
+```
+
+Comparison batches stay under `<test-home>/runs/d1-coverage/`. Each suite owns
+its raw data, logs and JUnit; Python reports include XML, JSON and HTML. Frontend
+reports include HTML, JSON, LCOV and Cobertura and are never merged with Python.
+The custom Node D1 case is executed but does not contribute to those percentages.
+No deployment or result upload is performed. Existing PR CI is not switched.
+
+Python comparison normalizes both reports to the union of their observed
+in-scope source files: example/benchmark modules imported only by one suite
+remain uncovered in the other, rather than disappearing from its denominator.
+Source-inspection-only tests with no executed product code are retained as
+test results and recorded as empty coverage data, not mixed into branch data.
+The comparison launcher defaults its Windows child interpreters to UTF-8 text
+mode, matching Linux CI when legacy tests omit an explicit file encoding.
+
+The comparison records HEAD and actual source hashes, missing/exclusive lines
+and branches, and legacy test contexts and assertions associated with exclusive
+coverage. These are review leads; executing a line does not prove a requirement
+was asserted. Failures, collection errors, skips and timeouts mean partial
+evidence, not successful replacement of Legacy UT. A complete behavioral review
+and stable passing execution are required before retiring old tests.
+
 ## Candidate batch entrypoint and Ubuntu Daily transition
 
 The candidate repository batch entrypoint is now available:

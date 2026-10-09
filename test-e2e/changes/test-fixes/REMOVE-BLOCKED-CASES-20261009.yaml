@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: REMOVE-BLOCKED-CASES-20261009
+  change_type: test-fix
+  title: Remove eleven explicitly excluded test cases
+  description: >-
+    Physically remove eleven cases at the user request after the remaining-case
+    classification. CTR-03 in the request is interpreted as CTR-030, the MCP
+    fault-injection case identified in that classification. Remove case-local
+    contracts, scripts, bindings and stale formal references. Preserve feature
+    definitions and historical results. This reduces scope, not product defects.
+  affected_features:
+    existing: [F-060, F-079, F-088, F-098, F-099, F-112, F-121, F-152, F-177, V5-PW-QUOTA-LOCAL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: Deleted IDs are recorded in notes rather than dangling execution references; originals are backed up outside Git.
+  notes: >-
+    Removed IDs: AGT-028, API-122, API-156, API-AUTO-3113089C9736B2A4, API-AUTO-65B7BDD10507AA51, API-AUTO-877981976E0A978F, API-AUTO-A6E1DD8E535C0821, API-AUTO-A89B8311DF78ECC0, API-AUTO-FDE1F77FE645881D, CTR-030, PW-QUOTA-LOCAL-01.

@@ -13,10 +13,11 @@ case:
   automation: automated
   objective: 文档标签投影状态机(pending/synced/failed/unsupported)、local ES 真实写入与 aidp 降级、失败退避重试、知识库删除清理及 synced-only 标签筛选｜跨服务集成
   preconditions:
-  - 后端服务、PostgreSQL（nexent schema）与本地 Elasticsearch/向量库已启动，统一标签管理迁移 v2.5.2_unified_tag_management.sql 已执行，租户已预置 default_resource/knowledge_content
+  - 后端服务、PostgreSQL（nexent schema）与本地 Elasticsearch/向量库已启动，统一标签管理所需的数据结构可用，租户已预置 default_resource/knowledge_content
     两个桶及六类资源类型绑定。
   - 可用 SU/ADMIN 账号登录，持有 RESOURCE/TAG_LIBRARY/MANAGE 治理权限；分配接口经 tag_resource_adapters 按调用者现有 read/edit 权限 fail-closed 解析。
   - 已生成当次 run_id，所有新建标签定义/值/文档均属于可清理的测试租户；TAG_DOCUMENT_PROJECTION_ENABLED 开启。
+  - 自动发现部署的 ES 端口时使用该部署 config 容器中的凭据；显式 URL 覆盖仍使用显式凭据，不写回本地配置或日志。
   - 已创建本地(local)知识库及至少一个真实文档（provider_document_id 指向本地 ES 的 path_or_url），可用 provider=aidp 的文档验证 unsupported 降级路径。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml

@@ -63,6 +63,12 @@ It creates `a2a-agent` and `nacos-a2a` proxies on host ports `18888` and `18848`
 Nacos 3.2.1 requires Base64 auth token and identity variables during process startup even in the no-auth profile. The Compose file contains local-test defaults; override all three values on a shared host.
 The A2A Admin API always requires an administrator token. On a fresh test container the mock initializes the configured administrator, logs in, and then registers the Agent Card; no manual console visit is required.
 
+Registration is restart-safe: an HTTP 409 triggers a lookup of the configured
+name and version. Only a card with this Mock's description and advertised
+endpoints can be updated; its identity is read back before readiness succeeds.
+A foreign card, failed update, or mismatched readback remains NOT READY.
+This does not delete Nacos data or treat arbitrary conflicts as success.
+
 ## Control example
 
 ```bash
@@ -73,6 +79,14 @@ curl -X POST http://127.0.0.1:8888/__test/scenario \
 ```
 
 Never use production credentials in this service. Request observations redact authorization and application-key values.
+
+The `/__test/auth-fixture` and `/__test/nacos-fixture` endpoints require the
+configured control token and return `Cache-Control: no-store`. They expose only
+this controlled stack's current test credentials, so fixed product tests do not
+embed credentials in scripts. Never persist their response bodies as evidence.
+Machine-local `config/a2a.yaml` follows `infra/config/a2a.schema.json`; its optional
+Nacos proxy addresses enable controlled latency tests. Tests remove only their
+named toxic and verify recovery; they never reset the entire proxy or Nacos data.
 
 ## Unit tests
 

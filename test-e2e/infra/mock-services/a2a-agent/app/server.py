@@ -247,6 +247,40 @@ def create_app(settings: Settings | None = None) -> Starlette:
             return JSONResponse({"status": "cleared"})
         return JSONResponse({"items": state.observations.list()})
 
+    async def auth_fixture(request: Request) -> Response:
+        if not _authorized_control(request, state):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        key = request.query_params.get("agent", "jwt")
+        profile = AUTH_PROFILES.get(key)
+        mode = request.query_params.get("mode", "jwt")
+        if not profile or mode not in profile.modes:
+            return JSONResponse({"error": "unknown auth profile"}, status_code=400)
+        headers = {"X-HW-ID": profile.hardware_id}
+        credentials = {"hwId": profile.hardware_id}
+        if mode == "appkey":
+            headers["X-HW-APPKEY"] = profile.app_key
+            credentials["hwAppKey"] = profile.app_key
+            index = 0
+        else:
+            token = state.jwt.issue(profile.key, profile.hardware_id)
+            headers["Authorization"] = f"Bearer {token}"
+            credentials["hwBearerJwt"] = token
+            index = 1 if "appkey" in profile.modes else 0
+        return JSONResponse({"discovery_headers": headers,
+                             "security_credentials": credentials,
+                             "requirement_index": index},
+                            headers={"Cache-Control": "no-store"})
+
+    async def nacos_fixture(request: Request) -> Response:
+        if not _authorized_control(request, state):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return JSONResponse({"nacos_addr": settings.nacos_server_url,
+                             "nacos_username": settings.nacos_username,
+                             "nacos_password": settings.nacos_password,
+                             "namespace_id": settings.nacos_namespace,
+                             "agent_name": settings.nacos_agent_name},
+                            headers={"Cache-Control": "no-store"})
+
     async def issue_jwt(request: Request) -> Response:
         agent_key = request.query_params.get("agent", "jwt")
         profile = AUTH_PROFILES.get(agent_key)
@@ -262,6 +296,8 @@ def create_app(settings: Settings | None = None) -> Starlette:
         Route("/__test/scenario", scenarios, methods=["GET", "POST"]),
         Route("/__test/reset", reset, methods=["POST"]),
         Route("/__test/observations", observations, methods=["GET", "DELETE"]),
+        Route("/__test/auth-fixture", auth_fixture, methods=["GET"]),
+        Route("/__test/nacos-fixture", nacos_fixture, methods=["GET"]),
     ]
     routes.extend(Mount(f"/{key}", app=_agent_app(settings, key, state)) for key in AUTH_PROFILES)
     app = Starlette(routes=routes, lifespan=lifespan)

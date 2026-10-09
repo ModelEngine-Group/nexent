@@ -13,6 +13,7 @@ import pytest
 
 from d3.assets import asset_path, model_request, get_test_asset
 from shared.cases import case_params
+from shared.audio import stt_transport_audio
 from shared.config import controlled_asset_url, load_secret_env, load_yaml, service_url
 from shared.http import MODEL_TIMEOUT, assert_status, client, redacted_response_body
 from shared.factories.tenant import isolated_accounts
@@ -334,7 +335,7 @@ async def _stt_core() -> None:
     assert keywords, "STT oracle must define required_keywords"
     config = model_request("stt")
     events = await asyncio.to_thread(
-        _ws_exchange, "stt", config, audio_path.read_bytes(), keywords
+        _ws_exchange, "stt", config, stt_transport_audio(audio_path), keywords
     )
     assert events and not any("error" in str(item).lower() for item in events)
     final_texts = [

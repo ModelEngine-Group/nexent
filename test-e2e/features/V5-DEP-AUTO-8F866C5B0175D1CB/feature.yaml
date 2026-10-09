@@ -13,7 +13,6 @@ feature:
   - rule_id: V5-DEP-AUTO-8F866C5B0175D1CB-RULE-01
     description: 一次性标签数据迁移 backfill：tool.labels、skill.skill_tags、agent_repository.tags、skill_repository.tags、mcp_record.tags、mcp_community.tags、mcp_market.tags
       迁移为 keywords 定义/值/分配，含 preflight 冲突检测与 post_backfill 奇偶校验
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

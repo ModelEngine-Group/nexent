@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -20,6 +21,52 @@ from test_asset_lib import implementation_hash  # noqa: E402
 
 
 class RunnerOutcomeTests(unittest.TestCase):
+    def test_container_config_yaml_bridge_and_explicit_override(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            config = home / 'config'
+            config.mkdir()
+            for filename in ('daily.env', 'secrets.env'):
+                (config / filename).write_text('', encoding='utf-8')
+            (config / 'environment.yaml').write_text('{}', encoding='utf-8')
+            expected = {'mcpServers': {'controlled': {'command': 'python', 'args': ['fixture.py']}}}
+            for value in (expected, json.dumps(expected)):
+                (config / 'mcp.yaml').write_text(yaml.safe_dump({'container_config': value}), encoding='utf-8')
+                with patch.dict(os.environ, {}, clear=True):
+                    env = run_cases.machine_environment(home, home)
+                self.assertEqual(json.loads(env['NEXENT_TEST_MCP_CONTAINER_CONFIG']), expected)
+            with patch.dict(os.environ, {'NEXENT_TEST_MCP_CONTAINER_CONFIG': '{"explicit":true}'}, clear=True):
+                env = run_cases.machine_environment(home, home)
+            self.assertEqual(json.loads(env['NEXENT_TEST_MCP_CONTAINER_CONFIG']), {'explicit': True})
+
+    def test_container_config_missing_does_not_invent_asset(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            config = home / 'config'
+            config.mkdir()
+            for filename in ('daily.env', 'secrets.env'):
+                (config / filename).write_text('', encoding='utf-8')
+            (config / 'environment.yaml').write_text('{}', encoding='utf-8')
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertNotIn('NEXENT_TEST_MCP_CONTAINER_CONFIG', run_cases.machine_environment(home, home))
+            (config / 'mcp.yaml').write_text('container_config: ""', encoding='utf-8')
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertNotIn('NEXENT_TEST_MCP_CONTAINER_CONFIG', run_cases.machine_environment(home, home))
+
+    def test_container_config_invalid_is_rejected_without_leaking_value(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            config = home / 'config'
+            config.mkdir()
+            for filename in ('daily.env', 'secrets.env'):
+                (config / filename).write_text('', encoding='utf-8')
+            (config / 'environment.yaml').write_text('{}', encoding='utf-8')
+            for value in ('credential-not-valid-json', '[1,2]'):
+                (config / 'mcp.yaml').write_text(yaml.safe_dump({'container_config': value}), encoding='utf-8')
+                with patch.dict(os.environ, {}, clear=True), self.assertRaises(ValueError) as failed:
+                    run_cases.machine_environment(home, home)
+                self.assertNotIn(value, str(failed.exception))
+
     def test_d4_cli_never_runs_unprepared_worker_directly(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

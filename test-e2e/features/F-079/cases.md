@@ -7,4 +7,3 @@
 - D2 [API-083](../../cases/API-083/case.yaml) · active
 - D2 [API-AUTO-3B93C0FC608E9BAE](../../cases/API-AUTO-3B93C0FC608E9BAE/case.yaml) · active
 - D2 [API-AUTO-CB6D1F33A0BA0636](../../cases/API-AUTO-CB6D1F33A0BA0636/case.yaml) · active
-- D3 [API-AUTO-A89B8311DF78ECC0](../../cases/API-AUTO-A89B8311DF78ECC0/case.yaml) · active

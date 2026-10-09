@@ -4,16 +4,15 @@ module:
   name: Migrated V5 baseline
 feature:
   feature_id: V5-DEP-AUTO-03A2CF91A730FDBE
-  name: cas-mock 服务 smoke：启动、健康检查、/cas/login 表单认证与 CASTGC 会话、/cas/p3/serviceValidate 票据校验与 TTL 过期、/cas/logout 撤销及与 Nexent
-    CAS 回调集成
+  name: cas-mock 服务 smoke：启动、健康检查、/cas/login 表单认证与 CASTGC 会话、/cas/p3/serviceValidate 票据校验与 TTL 过期、/cas/logout 撤销及与
+    Nexent CAS 回调集成
   status: active
-  description: 新增的本地 CAS 2.0 mock 服务是 Nexent 本地 SSO 单点登录与回调集成的测试依赖；若该服务启动失败、/healthz 不通过、CASTGC 会话建立/撤销或 serviceValidate 票据校验行为错误，将导致本地
-    SSO 登录/回调集成全面不可用，且难以区分是 Nexent 侧还是 mock 侧问题。
+  description: 新增的本地 CAS 2.0 mock 服务是 Nexent 本地 SSO 单点登录与回调集成的测试依赖；若该服务启动失败、/healthz 不通过、CASTGC 会话建立/撤销或 serviceValidate
+    票据校验行为错误，将导致本地 SSO 登录/回调集成全面不可用，且难以区分是 Nexent 侧还是 mock 侧问题。
   business_rules:
   - rule_id: V5-DEP-AUTO-03A2CF91A730FDBE-RULE-01
-    description: cas-mock 服务 smoke：启动、健康检查、/cas/login 表单认证与 CASTGC 会话、/cas/p3/serviceValidate 票据校验与 TTL 过期、/cas/logout 撤销及与
-      Nexent CAS 回调集成
-  required_test_stages:
-  - D5
+    description: cas-mock 服务 smoke：启动、健康检查、/cas/login 表单认证与 CASTGC 会话、/cas/p3/serviceValidate 票据校验与 TTL 过期、/cas/logout
+      撤销及与 Nexent CAS 回调集成
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

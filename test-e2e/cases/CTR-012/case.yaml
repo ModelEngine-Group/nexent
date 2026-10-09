@@ -41,7 +41,7 @@ case:
     action: 执行 Nexent 自带的模型连通性/健康检查，真实请求外部 Provider；保存实际 HTTP 状态、响应耗时和脱敏后的错误信息。
     expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
   - order: 4
-    action: 按“STT WebSocket 配置、流式音频、断线/错误｜核心流程”执行目标操作；若涉及 LLM/Embedding/Rerank/VLM/STT/TTS，必须触发一次真实推理/向量化/重排/识别/合成，而不是只检查配置保存成功。
+    action: 根据资产文件声明的格式读取音频；WAV 要求单声道 PCM16，解码并重采样为 16000 Hz 裸 PCM16；声明的 .pcm 按已有 16000 Hz 单声道 PCM16 契约校验非空和偶数字节后直接发送，不重新解码为 WAV。分块实时发送，保留原文件和关键词 oracle。
     expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   - order: 5
     action: 对 LLM 检查 stream 正常结束、回答非空、model_id/model_name 正确；对 Embedding 检查向量维度；对 Rerank 检查目标文档进入期望 Top-N。
@@ -72,6 +72,7 @@ case:
   integration_boundary:
   - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
   observations:
+  - 传输音频必须匹配产品的 16000 Hz 单声道 PCM16 协议；最终转写及关键词断言不因输入修复而放宽。
   - 功能结果与代码契约一致，测试过程无未处理异常。
   - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
   - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。

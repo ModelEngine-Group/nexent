@@ -5,14 +5,15 @@ change:
   bug_id: CMSR-BUG-002
   title: Valid semantic repair omits streamed and persisted model output
   description: Restore successful protocol-repair attempt streaming, commit and persistence at step one.
-  observed_behavior: The corrected action executes but the model output is suppressed; the browser stays Connecting and stored
-    units omit the successful raw content.
-  expected_behavior: Invalid output rolls back and valid corrected output streams before completion, commits and persists
-    with sanitized lifecycle logs.
+  observed_behavior: The corrected action executes but the model output is suppressed; the browser stays Connecting
+    and stored units omit the successful raw content.
+  expected_behavior: Invalid output rolls back and valid corrected output streams before completion, commits and
+    persists with sanitized lifecycle logs.
   escaped_stage: production
   coverage_gap:
     type: missing_boundary
-    description: Existing tests covered provider transport retry but asserted that semantic repair output should be hidden.
+    description: Existing tests covered provider transport retry but asserted that semantic repair output should
+      be hidden.
   feature_contract_changed: true
   affected_features:
     existing: []
@@ -28,5 +29,4 @@ change:
     - CMSR-D2-001
     - CMSR-D3-001
     - CMSR-D4-001
-    - CMSR-D5-001
     retired: []

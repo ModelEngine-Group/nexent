@@ -10,7 +10,7 @@ journey("PW-CHAT-04", async (context) => {
   const { page, expect, contract } = context;
   const chat = new ChatPage(page);
   const token = runToken("PW-CHAT-04");
-  const title = `multi-agent-${token}`;
+  let title = "";
   let agent = "";
   let childA = "";
   let childB = "";
@@ -48,7 +48,24 @@ journey("PW-CHAT-04", async (context) => {
       },
       async () => { await chat.waitForCompletion(420000); await expect(page.getByText("Completed", { exact: true })).toHaveCount(cardCount); await expect(chat.assistantMessages().last()).toContainText(`MULTI-${token}`); return "normal run reached terminal cards and a main answer"; },
       async () => { const response = await chat.sendAndWait(`让 ${childA} 正常完成；让 ${childB} 调用受控失败工具 always_fail，保留成功和失败详情，最后回复 PARTIAL-${token}。`, 420000); await expect(response).toContainText(`PARTIAL-${token}`); await expect(response.getByText(/CONTROLLED_FAILURE|Error|失败/).first()).toBeVisible(); return "controlled partial failure retained both successful and failed details"; },
-      async () => { await chat.renameActiveThread(title); await page.reload({ waitUntil: "domcontentloaded" }); await chat.openThread(title); await expect(page.locator("[data-subagent-id]")).toHaveCount(cardCount * 2); return "refresh restored terminal collaboration cards"; },
+      async () => {
+        title = await chat.currentThreadTitle();
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await chat.openThread(title);
+        // Completed history starts collapsed; nested cards are not mounted
+        // until the user opens the collaboration summaries.
+        const summaries = chat.assistantMessages().getByRole("button", {
+          name: new RegExp(`^${cardCount} subagent calls$`),
+        });
+        await expect(summaries).toHaveCount(2);
+        for (let index = 0; index < 2; index += 1) {
+          const summary = summaries.nth(index);
+          if (await summary.getAttribute("data-state") === "closed") await summary.click();
+          await expect(summary).toHaveAttribute("data-state", "open");
+        }
+        await expect(page.locator("[data-subagent-id]")).toHaveCount(cardCount * 2);
+        return "expanded both persisted collaboration summaries and recovered every terminal card without requiring an unrelated rename";
+      },
     ],
     assertions: [
       async () => { expect(cardCount).toBeGreaterThanOrEqual(2); return "multiple visible collaborator states agree with the final result"; },

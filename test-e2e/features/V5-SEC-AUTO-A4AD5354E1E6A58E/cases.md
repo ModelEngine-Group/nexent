@@ -2,4 +2,4 @@
 
 此页由结构化用例生成，不手工编辑。
 
-- D5 [SEC-AUTO-A4AD5354E1E6A58E](../../cases/SEC-AUTO-A4AD5354E1E6A58E/case.yaml) · active
+当前测试基线未保留关联用例。

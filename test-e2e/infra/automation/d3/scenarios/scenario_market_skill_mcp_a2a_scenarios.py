@@ -20,7 +20,7 @@ from shared.sse import assert_terminal_event, read_sse
 
 CASES = [
     "CTR-018", "CTR-019", "API-071", "API-074", "API-075", "API-081", "API-082",
-    "AGT-040", "AGT-041", "CTR-028", "CTR-029", "CTR-030",
+    "AGT-040", "AGT-041", "CTR-028", "CTR-029",
     "CTR-031", "CTR-032", "CTR-033", "CTR-036", "CTR-037", "CTR-038",
     "API-094", "API-095", "API-096",
 ]
@@ -238,7 +238,6 @@ async def execute_market_skill_mcp_a2a_scenario(case: dict, tenant_a_user) -> No
         "AGT-041": lambda: _nl2skill(False),
         "CTR-028": lambda: _mcp_agent(tenant_a_user, "core"),
         "CTR-029": lambda: _mcp_agent(tenant_a_user, "invalid"),
-        "CTR-030": lambda: _mcp_agent(tenant_a_user, "outage"),
         "API-096": lambda: _local_a2a_settings(tenant_a_user),
     }
     await handlers[case_id]()

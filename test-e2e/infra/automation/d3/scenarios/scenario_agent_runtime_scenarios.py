@@ -15,9 +15,11 @@ from d3.assets import asset_path, temporary_conversation, get_test_asset
 from shared.cases import case_params
 from shared.http import MODEL_TIMEOUT, assert_status, client
 from shared.sse import assert_terminal_event, read_sse
+from shared.runtime_fault import owned_failure_model, fault_control
+from shared.auth import sign_in
 
 
-RUNTIME_CASES = ['AGT-013', 'AGT-014', 'AGT-015', 'AGT-016', 'AGT-017', 'AGT-018', 'AGT-019', 'AGT-020', 'AGT-021', 'AGT-022', 'AGT-023', 'AGT-024', 'AGT-025', 'AGT-026', 'AGT-027', 'AGT-028', 'AGT-029', 'AGT-030', 'AGT-031', 'AGT-032', 'AGT-033', 'AGT-034', 'AGT-035', 'AGT-036', 'AGT-037', 'AGT-038', 'AGT-039']
+RUNTIME_CASES = ['AGT-013', 'AGT-014', 'AGT-015', 'AGT-016', 'AGT-017', 'AGT-018', 'AGT-019', 'AGT-020', 'AGT-021', 'AGT-022', 'AGT-023', 'AGT-024', 'AGT-025', 'AGT-026', 'AGT-027', 'AGT-029', 'AGT-030', 'AGT-031', 'AGT-032', 'AGT-033', 'AGT-034', 'AGT-035', 'AGT-036', 'AGT-037', 'AGT-038', 'AGT-039']
 
 
 def _agent_asset(key: str) -> int:
@@ -91,11 +93,18 @@ async def _basic_stream(identity, mode: str) -> None:
         text = _event_text(events)
         assert "error" in text or "failed" in text or "not_found" in text or "not found" in text
     else:
-        events = await _run(
-            identity, _agent_asset("basic_id"), "Provider failure probe",
-            model_id=absent_numeric_id(__name__),
-        )
-        assert "error" in _event_text(events) or "failed" in _event_text(events)
+        owner = await sign_in('tenant_a_admin')
+        assert owner.tenant_id == identity.tenant_id, 'Fault model owner and runtime user must share the declared tenant'
+        async with owned_failure_model(owner, 'AGT-015') as (model_id, nonce):
+            events = await _run(
+                identity, _agent_asset("basic_id"), "Provider failure probe",
+                model_id=model_id,
+            )
+            receipt = await fault_control(nonce)
+            assert receipt['calls'] >= 1, 'Runtime did not reach the selected failure provider'
+            payloads = [event.get('data') for event in events if isinstance(event.get('data'), dict)]
+            assert payloads and payloads[-1].get('type') == 'error', 'Provider failure has no explicit root error terminal'
+            assert_terminal_event(events, allow_error=True)
 
 
 async def _resume(identity, valid: bool) -> None:
@@ -353,7 +362,7 @@ async def _nested(identity, mode: str) -> None:
         "failure": "Ask the failing child, then return a bounded error without inventing its result.",
     }
     events = await _run(identity, agent_id, queries[mode])
-    assert_terminal_event(events)
+    assert_terminal_event(events, allow_error=mode == "failure")
     text = _event_text(events)
     assert "agent" in text
     if mode == "failure":
@@ -399,9 +408,12 @@ async def _metadata(identity, mode: str) -> None:
 async def _tool_params(identity, valid: bool) -> None:
     agent_id = _agent_asset("tool_id")
     if valid:
-        agent_name = str(get_test_asset("agents", "mcp_name"))
         service_name = str(get_test_asset("mcp", "service_name"))
         async with client("config", token=identity.access_token) as api:
+            agent = await api.post('/agent/search_info', json={'agent_id': agent_id, 'version_no': 0})
+            assert_status(agent, 200)
+            agent_row = agent.json().get('data') or agent.json()
+            agent_name = str(agent_row['name'])
             listed = await api.get("/tool/list")
             assert_status(listed, 200)
             tools = [tool for tool in listed.json()
@@ -497,7 +509,6 @@ async def execute_agent_runtime_scenario(case: dict, tenant_a_user) -> None:
         "AGT-025": lambda: _planning(tenant_a_user, "failure"),
         "AGT-026": lambda: _nested(tenant_a_user, "core"),
         "AGT-027": lambda: _nested(tenant_a_user, "boundary"),
-        "AGT-028": lambda: _nested(tenant_a_user, "failure"),
         "AGT-029": lambda: _parallel(tenant_a_user, "core"),
         "AGT-030": lambda: _parallel(tenant_a_user, "boundary"),
         "AGT-031": lambda: _parallel(tenant_a_user, "failure"),

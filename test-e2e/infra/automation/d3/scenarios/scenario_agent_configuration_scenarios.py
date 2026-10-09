@@ -168,6 +168,14 @@ async def _agent_crud_negative(identity) -> None:
         duplicate_id = None
         try:
             async with client("config", token=identity.access_token) as api:
+                checked = await api.post("/agent/check_name", json={"items": [{
+                    "name": payload["name"], "display_name": payload["display_name"],
+                }]})
+                assert_status(checked, 200)
+                conflicts = checked.json()
+                assert len(conflicts) == 1
+                assert conflicts[0]["name_conflict"] is True
+                assert conflicts[0]["display_name_conflict"] is True
                 duplicate = await api.post("/agent/update", json={**payload, "agent_id": None})
                 if duplicate.status_code == 200:
                     duplicate_id = int(duplicate.json().get("agent_id") or 0)
@@ -178,13 +186,28 @@ async def _agent_crud_negative(identity) -> None:
                                      "path": "/agent", "json": {"agent_id": duplicate_id},
                                      "allowed_statuses": [200, 404]},
                         )
+                assert_status(duplicate, 200)
+                assert duplicate_id and duplicate_id != agent_id, 'duplicate create did not produce a distinct resource'
+                listed = await api.get("/agent/list")
+                assert_status(listed, 200)
+                rows = {int(row["agent_id"]): row for row in listed.json()}
+                original_reasons = set(rows[agent_id].get("unavailable_reasons") or [])
+                duplicate_reasons = set(rows[duplicate_id].get("unavailable_reasons") or [])
+                required = {"duplicate_name", "duplicate_display_name"}
+                assert not original_reasons.intersection(required), 'original agent was marked duplicate'
+                assert required.issubset(duplicate_reasons), 'duplicate names were not marked unavailable'
+                # Availability is derived from the reason list in the list API.
+                assert rows[duplicate_id].get("is_available") is False
                 invalid = await api.post("/agent/update", json={"agent_id": agent_id, "max_steps": 0})
                 missing = await api.request("DELETE", "/agent", json={"agent_id": absent_numeric_id(__name__)})
-            assert duplicate.status_code in {400, 409}, (
-                f"duplicate agent creation returned {duplicate.status_code}: {redacted_response_body(duplicate)}"
-            )
+                original = await api.post('/agent/search_info', json={'agent_id': agent_id, 'version_no': 0})
             assert_status(invalid, 422)
-            assert_status(missing, 404)
+            assert_status(missing, 200)
+            assert missing.json() == {}, 'idempotent delete response changed'
+            assert_status(original, 200)
+            for field in ('name', 'display_name', 'max_steps'):
+                if field in payload:
+                    assert original.json().get(field) == payload[field], f'negative request modified original {field}'
         finally:
             if duplicate_id and duplicate_id != agent_id:
                 async with client("config", token=identity.access_token) as api:
@@ -282,14 +305,23 @@ async def _prompt_generate(identity, mode: str) -> None:
             "has_selected_resources": False,
         }
         if mode == "boundary":
-            payload["task_description"] = ""
+            async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
+                before = await api.post("/agent/search_info", json={"agent_id": agent_id, "version_no": 0})
+                assert_status(before, 200)
+                snapshot = before.json()
+                for blank in ("", " \t\r\n", "\u3000"):
+                    payload["task_description"] = blank
+                    response = await api.post("/prompt/generate", json=payload)
+                    assert_status(response, 422)
+                    assert "text/event-stream" not in response.headers.get("content-type", "")
+                    errors = response.json().get("detail", [])
+                    assert any(item.get("loc", [])[-1:] == ["task_description"] for item in errors)
+                    after = await api.post("/agent/search_info", json={"agent_id": agent_id, "version_no": 0})
+                    assert_status(after, 200)
+                    assert after.json() == snapshot, "invalid input changed the draft"
+            return
         async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
             async with api.stream("POST", "/prompt/generate", json=payload) as response:
-                if mode == "boundary":
-                    assert response.status_code in {400, 404, 422}, (
-                        f"empty task_description returned HTTP {response.status_code}"
-                    )
-                    return
                 assert_status(response, 200)
                 events = await read_sse(response)
         if mode == "failure":

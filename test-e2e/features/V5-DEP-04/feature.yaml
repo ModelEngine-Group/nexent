@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: V5-DEP-04-RULE-01
     description: 旧版本升级、迁移幂等、大数据统一标签与 HITL 条件表/触发器兼容性
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

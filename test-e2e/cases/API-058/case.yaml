@@ -45,7 +45,7 @@ case:
     action: 最少执行一次 Agent Chat Smoke，确认保存后的配置真正进入 Runtime，而不是只验证数据库。
     expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
   - order: 8
-    action: 异常场景提交缺字段、重复名称、非法资源ID或无权限资源，确认明确 4xx 且原配置不被部分覆盖。
+    action: 使用本用例已有 Agent 的 name/display_name 调用 check_name，确认两项冲突；创建独立的同名 Agent 后读取列表，确认后创建项带 duplicate_name/duplicate_display_name 且不可用，原项不带重复原因。非法 max_steps 要求 422；删除不存在 Agent 按幂等契约返回 200 和空对象，随后确认原 Agent 字段未变。
     expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
   - order: 9
     action: '删除临时 Agent 和导出文件。
@@ -66,6 +66,7 @@ case:
   integration_boundary:
   - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
   observations:
+  - 重复名称采用冲突检测和后创建项不可用契约，不把创建返回 200 单独视为通过；不要求创建接口拒绝重复项。
   - 功能结果与代码契约一致，测试过程无未处理异常。
   - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
   - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。

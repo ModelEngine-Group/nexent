@@ -17,7 +17,7 @@ from shared.sse import assert_terminal_event, read_sse
 from shared.factories.files import register_uploaded_files
 
 
-CASES = [f"PERF-{number:02d}" for number in range(1, 11)]
+CASES = [f"PERF-{number:02d}" for number in range(1, 11) if number != 6]
 
 
 async def _agent_run(identity, marker: str) -> list[dict]:

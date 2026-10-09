@@ -3,21 +3,17 @@ change:
   change_id: WINDOWS-D2-TRIAGE-20260930
   change_type: test-fix
   title: Repair D2 contract fixtures and dependency classification
-  description: Split authenticated tag reads from management writes against 1fc57eab9;
-    retain rejected-write nonmutation assertions. Exercise real icon service and storage
-    validation at controlled boundaries, preserving unique version URLs, permissions
-    and no-write failures. Use repository icon_url and an owned icon. Prepare model
-    catalog/health through one verified same-tenant administrator; runtime requests
-    keep the original user's session and tenant permissions. Scope private MCP fixtures
-    to a new owned group rather than legacy NULL public scope. Keep private detail
-    access denial as a product assertion. Remove an unsupported project-config key
-    reconstruction oracle, retaining the declared safe-empty malformed JSON contract.
-    Redact failure diagnostics before log/JUnit persistence. Refine only single failed
-    pytest items with matching terminal dependency/timeout/infrastructure evidence,
-    never PASS. Do not modify product code, machine credentials or existing safety
-    policies. Correct API-088 to verify no-store on port/check, following the original
-    ee181cf34e endpoint contract; replace unrelated generic MCP steps with port API
-    behavior.
+  description: Split authenticated tag reads from management writes against 1fc57eab9; retain rejected-write nonmutation
+    assertions. Exercise real icon service and storage validation at controlled boundaries, preserving unique version
+    URLs, permissions and no-write failures. Use repository icon_url and an owned icon. Prepare model catalog/health
+    through one verified same-tenant administrator; runtime requests keep the original user's session and tenant
+    permissions. Scope private MCP fixtures to a new owned group rather than legacy NULL public scope. Keep private
+    detail access denial as a product assertion. Remove an unsupported project-config key reconstruction oracle,
+    retaining the declared safe-empty malformed JSON contract. Redact failure diagnostics before log/JUnit persistence.
+    Refine only single failed pytest items with matching terminal dependency/timeout/infrastructure evidence, never
+    PASS. Do not modify product code, machine credentials or existing safety policies. Correct API-088 to verify
+    no-store on port/check, following the original ee181cf34e endpoint contract; replace unrelated generic MCP steps
+    with port API behavior.
   affected_features:
     existing:
     - F-081
@@ -36,7 +32,6 @@ change:
     - API-129
     - API-130
     - API-164
-    - CTR-026
     added: []
     modified:
     - API-086

@@ -66,7 +66,32 @@ export class McpPage {
     await panel.getByPlaceholder("请填写服务名称").fill(name);
     await panel.getByPlaceholder("请输入端口号").fill(String(port));
     await panel.getByPlaceholder("服务描述").fill(`controlled container ${name}`);
+    const deploying = this.page.waitForResponse((response) =>
+      response.request().method() === "POST" && response.url().includes("/mcp/add-from-config/stream"));
     await dialog.getByRole("button", { name: "保存并添加", exact: true }).click();
+    const response = await deploying;
+    if (!response.ok()) {
+      const error = new Error(`container MCP creation returned HTTP ${response.status()}`);
+      error.name = "ProductFailure";
+      throw error;
+    }
+    // The application cancels its SSE reader after either terminal event.
+    // response.finished()/text() may therefore never provide a response body.
+    // Observe the application's terminal UI state, then verify the committed
+    // service through a read-only lookup; HTTP 200 alone is not success.
+    await expect.poll(async () => {
+      if (!(await dialog.isVisible())) return true;
+      const save = dialog.getByRole("button", { name: "保存并添加", exact: true });
+      // While deploying the button changes its accessible label; do not let
+      // isEnabled's locator wait abort the outer terminal-state polling.
+      if (!(await save.isVisible())) return false;
+      return save.isEnabled();
+    }, { timeout: 180000, message: "container MCP deployment must reach a terminal UI state" }).toBe(true);
+    if (await this.findId(name) === null) {
+      const error = new Error("container MCP deployment completed without a registered service; inspect the owned deployment and server logs");
+      error.name = "ProductFailure";
+      throw error;
+    }
     await this.search(name);
   }
 

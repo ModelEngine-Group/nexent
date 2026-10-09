@@ -18,6 +18,8 @@ class ServerContractTests(unittest.TestCase):
         response = self.client.get("/basic/.well-known/agent-card.json")
         self.assertEqual(200, response.status_code)
         self.assertEqual("JSONRPC", response.json()["supportedInterfaces"][1]["protocolBinding"])
+        self.assertTrue(response.json()['name'].isidentifier(),
+                        'basic collaborator name must be usable as an executable Agent identifier')
 
     def test_protected_card_rejects_and_accepts_idkey(self) -> None:
         url = "/idkey/.well-known/agent-card.json"
@@ -48,6 +50,8 @@ class ServerContractTests(unittest.TestCase):
         self.assertIn("total=1283", response.text)
 
     def test_control_routes_require_token(self) -> None:
+        self.assertEqual(401, self.client.get('/__test/auth-fixture').status_code)
+        self.assertEqual(401, self.client.get('/__test/nacos-fixture').status_code)
         self.assertEqual(401, self.client.get("/__test/scenario").status_code)
         response = self.client.get(
             "/__test/scenario",
@@ -55,6 +59,23 @@ class ServerContractTests(unittest.TestCase):
         )
         self.assertEqual(200, response.status_code)
         self.assertIn("happy-jsonrpc", response.json()["available"])
+
+    def test_controlled_auth_fixture_matches_live_profile(self) -> None:
+        for agent, mode in (('idkey', 'appkey'), ('jwt', 'jwt'), ('both', 'appkey'), ('both', 'jwt')):
+            response = self.client.get('/__test/auth-fixture', params={'agent': agent, 'mode': mode},
+                                       headers={'X-A2A-Control-Token': app.state.mock.settings.control_token})
+            self.assertEqual(200, response.status_code)
+            self.assertEqual('no-store', response.headers['cache-control'])
+            card = self.client.get(f'/{agent}/.well-known/agent-card.json',
+                                   headers=response.json()['discovery_headers'])
+            self.assertEqual(200, card.status_code)
+
+    def test_controlled_nacos_fixture_is_not_cached(self) -> None:
+        response = self.client.get('/__test/nacos-fixture',
+                                   headers={'X-A2A-Control-Token': app.state.mock.settings.control_token})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual('no-store', response.headers['cache-control'])
+        self.assertEqual(app.state.mock.settings.nacos_agent_name, response.json()['agent_name'])
 
     def test_metadata_evidence_is_fingerprinted(self) -> None:
         import hashlib

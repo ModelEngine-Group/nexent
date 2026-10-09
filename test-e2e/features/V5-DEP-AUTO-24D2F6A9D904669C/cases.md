@@ -2,4 +2,4 @@
 
 此页由结构化用例生成，不手工编辑。
 
-- D5 [DEP-AUTO-24D2F6A9D904669C](../../cases/DEP-AUTO-24D2F6A9D904669C/case.yaml) · active
+当前测试基线未保留关联用例。

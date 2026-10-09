@@ -36,7 +36,7 @@ case:
       置为 DELETE_REQUESTED。
     expected: forward 返回 cancelled 结果，chunks_stored=0、total_indexed=0，不向 ES 写入文档。
   - order: 4
-    action: 轮询 task_id 终态（任务详情/结果查询接口或 Celery result backend），分别记录 process、forward、cleanup_source 各阶段返回结果。
+    action: 返回的 task_id 为 cleanup_source 链尾 ID；轮询本次链尾终态后，仅沿 parent_id 定位 forward 和 process，核对链根和各阶段 SUCCESS，分别读取阶段结果；不得把链尾结果当作 process 或扫描其他批次的任务。
     expected: cleanup_source 以 skipped_reason="document_delete_requested" 跳过，不发起源文件删除请求。
   - order: 5
     action: 断言 process 阶段返回 cancelled 结果（chunks=None、cancelled=true、message 含 "Processing cancelled because document deletion

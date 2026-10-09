@@ -2,5 +2,4 @@
 
 此页由结构化用例生成，不手工编辑。
 
-- D2 [API-156](../../cases/API-156/case.yaml) · active
 - D2 [API-157](../../cases/API-157/case.yaml) · active

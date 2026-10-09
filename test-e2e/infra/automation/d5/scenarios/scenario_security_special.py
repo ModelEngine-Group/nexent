@@ -18,7 +18,7 @@ from shared.factories.provider import owned_provider_client
 from shared.sse import assert_terminal_event, read_sse
 
 
-CASES = ["SEC-01", "SEC-02", "SEC-03", "SEC-04", "SEC-05", "SEC-06", "SEC-07", "SEC-08", "SEC-09", "SEC-10"]
+CASES = ["SEC-02", "SEC-03", "SEC-04", "SEC-06", "SEC-07", "SEC-09", "SEC-10"]
 
 
 async def _memory_provider_idor(owner, attacker) -> None:

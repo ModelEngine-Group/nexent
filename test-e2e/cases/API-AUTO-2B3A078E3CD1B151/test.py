@@ -35,22 +35,6 @@ def _read_task_meta(task_id):
         return None
 
 
-def _find_child_task(parent_id):
-    backend = _redis_service().backend_client
-    prefix = 'celery-task-meta-'
-    for key in backend.scan_iter(match=f'{prefix}*'):
-        raw = backend.get(key)
-        if not raw:
-            continue
-        try:
-            meta = json.loads(_decode(raw))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        if meta.get('parent_id') == parent_id:
-            return _decode(key).replace(prefix, '', 1)
-    return None
-
-
 async def _wait_terminal(task_id, timeout_s=90.0):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -61,14 +45,20 @@ async def _wait_terminal(task_id, timeout_s=90.0):
     raise TimeoutError(f'task {task_id} never reached terminal state within {timeout_s}s')
 
 
-async def _wait_child(parent_id, timeout_s=30.0):
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        child = _find_child_task(parent_id)
-        if child:
-            return child
-        await asyncio.sleep(0.3)
-    raise TimeoutError(f'child of task {parent_id} never appeared within {timeout_s}s')
+async def _chain_stages(cleanup_id):
+    """Walk only this submitted chain backwards, never scan another run's tasks."""
+    cleanup_meta = await _wait_terminal(cleanup_id)
+    forward_id = cleanup_meta.get('parent_id')
+    assert isinstance(forward_id, str) and forward_id != cleanup_id, 'cleanup task has no distinct forward parent'
+    forward_meta = await _wait_terminal(forward_id)
+    process_id = forward_meta.get('parent_id')
+    assert isinstance(process_id, str) and process_id not in {cleanup_id, forward_id}, 'forward task has no distinct process parent'
+    process_meta = await _wait_terminal(process_id)
+    for meta in (cleanup_meta, forward_meta, process_meta):
+        assert meta.get('status') == 'SUCCESS', 'delete-fence chain did not finish successfully'
+        assert meta.get('root_id') in (None, process_id), 'task belongs to a different chain root'
+    assert not process_meta.get('parent_id'), 'expected process root, found another parent'
+    return process_id, process_meta, forward_id, forward_meta, cleanup_meta
 
 
 def _embedding_model_name():
@@ -161,19 +151,15 @@ async def test_delete_fence_cancels_process_forward_cleanup_chain(tenant_a_admin
         async with client('data_process', token=tenant_a_admin.access_token) as api:
             response = await api.post('/tasks', json=payload)
         assert_status(response, 201)
-        task_id = response.json()['task_id']
-        assert task_id
-
-        process_meta = await _wait_terminal(task_id)
-        assert process_meta.get('status') == 'SUCCESS'
+        cleanup_id = response.json()['task_id']
+        assert cleanup_id
+        task_id, process_meta, forward_id, forward_meta, cleanup_meta = await _chain_stages(cleanup_id)
         process_result = process_meta.get('result') or {}
         assert process_result.get('cancelled') is True
         assert process_result.get('chunks') is None
         assert 'Processing cancelled because document deletion was requested.' in str(process_result.get('message', ''))
         assert redis_service.backend_client.get(f'dp:{task_id}:chunks') is None
 
-        forward_id = await _wait_child(task_id)
-        forward_meta = await _wait_terminal(forward_id)
         forward_result = forward_meta.get('result') or {}
         assert forward_result.get('chunks_stored') == 0
         es_result = forward_result.get('es_result') or {}
@@ -181,8 +167,6 @@ async def test_delete_fence_cancels_process_forward_cleanup_chain(tenant_a_admin
         assert es_result.get('total_indexed') == 0
         assert 'Indexing cancelled because document was deleted.' in str(es_result.get('message', ''))
 
-        cleanup_id = await _wait_child(forward_id)
-        cleanup_meta = await _wait_terminal(cleanup_id)
         cleanup_result = cleanup_meta.get('result') or {}
         source_cleanup = cleanup_result.get('source_cleanup') or {}
         assert source_cleanup.get('attempted') is False

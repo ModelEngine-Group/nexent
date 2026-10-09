@@ -55,6 +55,7 @@ def configured_product_elasticsearch():
     from management.services.knowledge_base import common
 
     host = os.environ.get('NEXENT_TEST_ELASTICSEARCH_URL', '').strip()
+    discovered_host = not bool(host)
     if not host:
         container = os.environ.get('NEXENT_TEST_ELASTICSEARCH_CONTAINER', 'nexent-elasticsearch')
         ports = (_inspect_deployment(container).get('NetworkSettings') or {}).get('Ports') or {}
@@ -74,7 +75,10 @@ def configured_product_elasticsearch():
             detail='NEXENT_TEST_ELASTICSEARCH_URL must be an HTTP(S) URL',
         )
     api_key = os.environ.get('ELASTICSEARCH_API_KEY', '').strip()
-    if not api_key:
+    if discovered_host or not api_key:
+        # Pair an automatically discovered endpoint with its deployed key,
+        # rather than a product .env loaded by a host-side import. Explicit
+        # endpoint overrides retain their explicit credential precedence.
         container = os.environ.get('NEXENT_TEST_CONFIG_CONTAINER', 'nexent-config')
         config = _inspect_deployment(container)
         values = dict(row.split('=', 1) for row in config.get('Config', {}).get('Env', [])

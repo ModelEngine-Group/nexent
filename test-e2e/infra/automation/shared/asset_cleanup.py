@@ -259,14 +259,17 @@ async def cleanup_registered_assets(*, owner_case_ids: set[str] | None = None) -
                 method = str(cleanup.get("method") or "DELETE").upper()
                 path = str(cleanup["path"])
                 async with client(service, token=identity.access_token) as api:
-                    response = await api.request(method, path, json=cleanup.get("json"))
+                    request_options = {"json": cleanup.get("json")}
+                    if cleanup.get("params") is not None:
+                        request_options["params"] = cleanup["params"]
+                    response = await api.request(method, path, **request_options)
                     if section == 'owned_knowledge' and method == 'DELETE' and response.status_code == 409:
                         # The product refuses KB deletion while its files are
                         # processing. Retry only this exact owned index, with
                         # a bounded wait; never generalize 409 to success.
                         for _ in range(12):
                             await asyncio.sleep(5)
-                            response = await api.request(method, path, json=cleanup.get("json"))
+                            response = await api.request(method, path, **request_options)
                             if response.status_code != 409:
                                 break
                     if (section == 'owned_evaluation_sets' and method == 'DELETE'
@@ -282,7 +285,7 @@ async def cleanup_registered_assets(*, owner_case_ids: set[str] | None = None) -
                         )
                         if recovered:
                             record['recovered_run_ids'] = recovered
-                            response = await api.request(method, path, json=cleanup.get('json'))
+                            response = await api.request(method, path, **request_options)
                     if (section == 'tag_definitions' and method == 'DELETE'
                             and response.status_code == 409
                             and re.fullmatch(rf'/tag-libraries/([0-9]+)/definitions/{re.escape(str(key))}', path)):
@@ -306,7 +309,7 @@ async def cleanup_registered_assets(*, owner_case_ids: set[str] | None = None) -
                                     if removed.status_code not in (200, 404):
                                         record['child_delete_http_status'] = removed.status_code
                                         raise RuntimeError('owned tag value deletion failed')
-                                response = await api.request(method, path, json=cleanup.get('json'))
+                                response = await api.request(method, path, **request_options)
                     if (section == 'owned_knowledge' and method == 'DELETE'
                             and path == f'/indices/{key}' and response.status_code == 409):
                         # This exact batch-owned KB still has unfinished uploads.
@@ -337,7 +340,7 @@ async def cleanup_registered_assets(*, owner_case_ids: set[str] | None = None) -
                                 removed_count += 1
                             record['owned_child_files_deleted'] = removed_count
                             for _ in range(12):
-                                response = await api.request(method, path, json=cleanup.get("json"))
+                                response = await api.request(method, path, **request_options)
                                 if response.status_code != 409:
                                     break
                                 await asyncio.sleep(5)

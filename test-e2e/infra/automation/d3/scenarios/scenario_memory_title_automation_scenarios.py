@@ -20,7 +20,7 @@ from shared.sse import assert_terminal_event, read_sse
 
 CASES = [
     "AGT-047", "AGT-048", "API-118", "API-119", "API-120", "API-121",
-    "API-122", "API-123", "AGT-049", "AGT-050", "AGT-051", "AGT-052",
+    "API-123", "AGT-049", "AGT-050", "AGT-051", "AGT-052",
     "AGT-053", "AGT-054", "AGT-055", "AGT-056",
 ]
 

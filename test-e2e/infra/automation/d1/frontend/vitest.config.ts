@@ -14,11 +14,6 @@ export default defineConfig({
     fs: {
       allow: [path.resolve(__dirname), repo],
     },
-    deps: {
-      // These packages import CSS or assistant-ui state through ESM. Keep
-      // them in Vite's transform pipeline so CSS handling and vi.mock work.
-      inline: ["react-shiki", /^@assistant-ui\//],
-    },
   },
   plugins: [
     react(),
@@ -61,11 +56,29 @@ export default defineConfig({
     ],
   },
   test: {
+    server: {
+      deps: {
+        // External Node imports bypass Vite aliases and can load a second React.
+        // Transform React consumers so they share the configured runner instance.
+        inline: ["react-shiki", /[/\\]@assistant-ui[/\\]/, "zustand", /[/\\]@radix-ui[/\\]/,
+          /[/\\]@floating-ui[/\\]/, "framer-motion", "motion-dom", "motion-utils"],
+      },
+    },
     globals: true,
     environment: "jsdom",
     setupFiles: [path.resolve(__dirname, "setup.ts")],
     include: [path.resolve(__dirname, "../../../../cases/**/*.test.{ts,tsx}").split(path.sep).join("/")],
     clearMocks: true,
+    coverage: {
+      provider: "v8",
+      enabled: false,
+      all: true,
+      allowExternal: true,
+      include: [path.join(frontend, "**/*.{js,jsx,ts,tsx}").split(path.sep).join("/")],
+      exclude: ["**/node_modules/**", "**/.next/**", "**/*.d.ts", "**/*.{test,spec}.{js,jsx,ts,tsx}"],
+      reporter: ["json", "json-summary", "lcov", "cobertura", "html"],
+      reportOnFailure: true,
+    },
     // Generated suites install module-level mock implementations. Restoring
     // them before each test erases mockResolvedValue/mockImplementation and
     // turns valid service stubs into undefined-returning functions.

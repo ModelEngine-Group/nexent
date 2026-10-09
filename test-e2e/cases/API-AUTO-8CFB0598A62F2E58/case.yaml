@@ -4,68 +4,47 @@ module: V5-BASELINE
 case:
   case_id: API-AUTO-8CFB0598A62F2E58
   feature_id: F-184
-  business_rule_ids:
-  - F-184-RULE-01
-  title: 移除 MARKET_BACKEND 后 /api/market/* 与 /api/repository/* 统一转发至 HTTP_BACKEND、后端不可用保持 502｜跨服务集成与降级
+  business_rule_ids: [F-184-RULE-01]
+  title: Market与Repository代理原路径及状态透传、隔离上游故障恢复
   type: INTEGRATION
   priority: P0
   status: active
   automation: automated
-  objective: 移除 MARKET_BACKEND 后 /api/market/* 与 /api/repository/* 统一转发至 HTTP_BACKEND、后端不可用保持 502｜跨服务集成与降级
+  objective: 分开验证代理传输契约与已注册Repository业务接口，不以旧Market的200作为代理通过条件。
   preconditions:
-  - Nexent 本地测试全栈已启动（前端反向代理服务 server.js 与配置后端 HTTP_BACKEND），health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
-  - 前端服务以 HTTP_BACKEND 指向本地配置后端启动；配置后端已提供 /api/market/* 与 /api/repository/* 接口（含 /repository/agent/tags、/repository/skill/tags），且环境不再存在独立
-    MARKET_BACKEND 目标。
+  - 配置后端和前端已启动，使用已有服务配置及隔离租户管理员账号（具备Skill Repository权限）。
+  - Node.js及frontend的http-proxy依赖已准备，测试使用仓库server.js真实函数及错误处理。
+  - 故障注入仅针对测试创建的loopback上游，不停止共享容器。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env'
+    upstream_statuses: [200, 403, 404]
+    routes: ['/api/market/*', '/api/repository/*']
   steps:
   - order: 1
-    action: 从 config/users.yaml 读取隔离测试账号并登录获取会话；启动前端反向代理服务，确认启动日志仅打印 HTTP/WS/MinIO 后端目标，不存在 Market Backend Target。
-    expected: /api/market/* 与 /api/repository/* 经前端 handleAllApiProxy 转发至 HTTP_BACKEND（配置后端），由单一后端承载，不再存在独立 MARKET_BACKEND
-      目标。
+    action: 在动态本地端口启动临时HTTP上游及运行生产代理函数的HTTP服务。
+    expected: 所有资源为本用例创建，不需要固定端口或修改环境变量。
   - order: 2
-    action: 通过前端服务对 /api/market/agents、/api/market/tags、/api/market/categories 发起真实 HTTP GET，记录响应状态、响应体结构与上游来源标识。
-    expected: 请求以原始 /api/market/*、/api/repository/* 路径到达配置后端，前缀不被剥离。
+    action: 分别发送Market和Repository请求，包含编码查询参数，由上游返回200、403、404。
+    expected: 原始路径及查询参数、方法不变，状态和JSON正文及上游标识正确透传；不得分流到Runtime。
   - order: 3
-    action: 通过前端服务对 /api/repository/agent、/api/repository/skill、/api/repository/agent/tags、/api/repository/skill/tags 发起真实
-      HTTP GET（含 tag/tag_predicates 过滤参数），记录响应。
-    expected: 配置后端不可用时返回 502 Bad Gateway 语义，前端页面不挂起、不崩溃；恢复后端后请求重新可用。
+    action: 仅关闭临时上游，再请求两类路径，然后恢复临时上游并重试。
+    expected: 上游不可达返回502及Backend unavailable，恢复后返回原有200正文。
   - order: 4
-    action: 依据配置后端访问日志/响应内容确认以上请求均以原始 /api/market、/api/repository 完整路径到达配置后端（路径未被剥离），且未命中任何独立市场后端。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 使用相同账号分别直连真实配置后端及经过真实前端请求Repository列表、标签和过滤接口。
+    expected: 列表、标签及合法过滤返回200，缺definition_id/value_ids的非法谓词返回400；前端状态及JSON与上游一致。
   - order: 5
-    action: 令配置后端 HTTP_BACKEND 变为不可达（停止或隔离），再次通过前端服务请求 /api/market/agents 与 /api/repository/agent，记录响应状态与响应体。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 比较真实旧Market接口的直连与代理响应。
+    expected: 状态及JSON一致；上游404应透传404，不证明旧页面可用或已退役。
   - order: 6
-    action: 恢复配置后端后重放同一请求，确认市场/仓库接口恢复可用。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 7
-    action: 检查前端服务日志与错误响应不含明文 Token/API Key/密码；保存脱敏的请求/响应摘要。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 8
-    action: 清理测试过程产生的临时账号/会话，确保可重复执行。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 关闭所有临时监听及代理对象，保存脱敏证据。
+    expected: 无残留监听，不影响共享服务，无凭据泄露。
   expected_results:
-  - /api/market/* 与 /api/repository/* 经前端 handleAllApiProxy 转发至 HTTP_BACKEND（配置后端），由单一后端承载，不再存在独立 MARKET_BACKEND 目标。
-  - 请求以原始 /api/market/*、/api/repository/* 路径到达配置后端，前缀不被剥离。
-  - 配置后端不可用时返回 502 Bad Gateway 语义，前端页面不挂起、不崩溃；恢复后端后请求重新可用。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  forbidden_side_effects: []
-  source:
-    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
-    legacy_sheet: 02_测试用例基线
-    legacy_row: 530
+  - 原始路径及查询参数、上游状态与JSON响应正确透传。
+  - 隔离上游故障返回502，恢复后可用。
+  - 已注册Repository业务接口返回200，旧Market路由不与代理契约混淆。
+  forbidden_side_effects: [停止共享产品容器, 将旧页面残留伪报为通过, 泄露凭据]
   integration_boundary:
-  - LOCAL_FULL_STACK：使用本地真实前端反向代理与配置后端（HTTP_BACKEND）；不得以纯 Mock 代替代理链路。
-  observations:
-  - /api/market/* 与 /api/repository/* 经前端 handleAllApiProxy 转发至 HTTP_BACKEND（配置后端），由单一后端承载，不再存在独立 MARKET_BACKEND 目标。
-  - 请求以原始 /api/market/*、/api/repository/* 路径到达配置后端，前缀不被剥离。
-  - 配置后端不可用时返回 502 Bad Gateway 语义，前端页面不挂起、不崩溃；恢复后端后请求重新可用。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  cleanup:
-  - JUnit/XML、请求/响应摘要（脱敏）、前端代理服务日志、配置后端访问日志；后端不可达场景保存 502 响应快照。
+  - loopback受控上游与真实server.js处理函数通过HTTP交互，另验证真实部署前端与配置后端。
+  observations: [上游请求回执, HTTP状态和JSON, 502及恢复证据]
+  cleanup: [关闭临时监听及代理对象]
+  source:
+    notes: Strengthened existing V5 proxy case; legacy Market page lifecycle is deferred, not silently retired.

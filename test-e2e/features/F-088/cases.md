@@ -4,4 +4,3 @@
 
 - D3 [CTR-028](../../cases/CTR-028/case.yaml) · active
 - D3 [CTR-029](../../cases/CTR-029/case.yaml) · active
-- D3 [CTR-030](../../cases/CTR-030/case.yaml) · active

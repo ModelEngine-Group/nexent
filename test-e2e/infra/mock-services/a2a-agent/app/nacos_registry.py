@@ -24,6 +24,28 @@ class NacosRegistry:
         self.state = RegistryState()
         self._token: str | None = None
 
+    @staticmethod
+    def _check_result(response: httpx.Response) -> dict:
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("code") not in (None, 0, 200):
+            raise RuntimeError("Nacos rejected A2A registry operation")
+        return payload
+
+    @staticmethod
+    def _owns_card(existing: dict, desired: dict) -> bool:
+        # Nacos adds legacy fields while normalizing A2A 1.0 cards. Compare
+        # identity and advertised endpoints rather than serialized objects.
+        def endpoints(card: dict) -> set[str]:
+            return {item.get("url") for item in card.get("supportedInterfaces", []) if item.get("url")}
+
+        return (
+            existing.get("name") == desired["name"]
+            and existing.get("version") == desired["version"]
+            and existing.get("description") == desired["description"]
+            and endpoints(existing) == endpoints(desired)
+        )
+
     async def _login(self, client: httpx.AsyncClient) -> str | None:
         response = await client.post(
             self.settings.nacos_login_path,
@@ -63,24 +85,40 @@ class NacosRegistry:
                 "basic",
                 name=self.settings.nacos_agent_name,
             )
+            registration = {
+                "namespaceId": self.settings.nacos_namespace,
+                "agentName": self.settings.nacos_agent_name,
+                "registrationType": self.settings.nacos_registration_type,
+                "agentCard": json.dumps(card, ensure_ascii=False),
+            }
             response = await client.post(
                 self.settings.nacos_register_path,
                 headers=headers,
-                data={
+                data=registration,
+            )
+            if response.status_code == 409:
+                lookup = {
                     "namespaceId": self.settings.nacos_namespace,
                     "agentName": self.settings.nacos_agent_name,
-                    "registrationType": self.settings.nacos_registration_type,
-                    "agentCard": json.dumps(card, ensure_ascii=False),
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if payload.get("code") not in (None, 0, 200) and payload.get("data") not in (
-                "ok",
-                "true",
-                "success",
-            ):
-                raise RuntimeError(f"Nacos rejected A2A registration: {payload}")
+                    "version": card["version"],
+                }
+                existing = self._check_result(await client.get(
+                    self.settings.nacos_register_path, headers=headers, params=lookup,
+                )).get("data")
+                if not isinstance(existing, dict) or not self._owns_card(existing, card):
+                    raise RuntimeError("Nacos Agent Card conflict is not owned by this Mock")
+                response = await client.put(
+                    self.settings.nacos_register_path, headers=headers,
+                    data={**registration, "setAsLatest": "true"},
+                )
+                self._check_result(response)
+                persisted = self._check_result(await client.get(
+                    self.settings.nacos_register_path, headers=headers, params=lookup,
+                )).get("data")
+                if not isinstance(persisted, dict) or not self._owns_card(persisted, card):
+                    raise RuntimeError("Nacos Agent Card update did not persist the Mock identity")
+            else:
+                self._check_result(response)
             self.state = RegistryState(registered=True)
 
     async def register_with_retry(self) -> None:

@@ -33,6 +33,7 @@ import yaml
 
 from test_asset_lib import repository_root
 from validate_execution import inspect
+from coverage_support import frontend_arguments, python_arguments, python_report
 
 
 ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
@@ -74,6 +75,20 @@ def machine_environment(home: Path, repo: Path) -> dict[str, str]:
         service = services.get(name, {}) if isinstance(services, dict) else {}
         if isinstance(service, dict) and service.get("url"):
             env[variable] = str(service["url"]).rstrip("/")
+    # Preserve explicit operator overrides while bridging the maintained YAML
+    # asset into the existing D4 variable. Never invent a container definition.
+    mcp_path = home / "config/mcp.yaml"
+    if not env.get("NEXENT_TEST_MCP_CONTAINER_CONFIG") and mcp_path.is_file():
+        mcp_settings = yaml.safe_load(mcp_path.read_text(encoding="utf-8")) or {}
+        configured = mcp_settings.get("container_config") if isinstance(mcp_settings, dict) else None
+        if configured:
+            try:
+                definition = json.loads(configured) if isinstance(configured, str) else configured
+            except ValueError:
+                raise ValueError("config/mcp.yaml container_config must contain valid JSON") from None
+            if not isinstance(definition, dict):
+                raise ValueError("config/mcp.yaml container_config must contain an object")
+            env["NEXENT_TEST_MCP_CONTAINER_CONFIG"] = json.dumps(definition, ensure_ascii=False)
     env.update(NEXENT_REPO=str(repo), NEXENT_TEST_HOME=str(home), TEST_ROOT=str(home))
     return env
 
@@ -101,13 +116,16 @@ def d4_plan(case_path: Path, result_dir: Path) -> Path:
     return plan
 
 
-def command_for(record: dict, repo: Path, result_dir: Path, env: dict[str, str]) -> tuple[list[list[str]], Path]:
+def command_for(record: dict, repo: Path, result_dir: Path, env: dict[str, str], *, coverage: bool = False) -> tuple[list[list[str]], Path]:
     entry = record["execution"]["implementations"][0]
     script = repo / entry["file"]
     framework = entry["framework"]
+    if coverage and record["stage"] != "D1":
+        raise ValueError("Code coverage collection is supported only for D1")
     if framework == "pytest":
         return [[sys.executable, "-m", "pytest", "-c", str(repo / "test-e2e/pytest.ini"),
-                 str(script), f"--junitxml={result_dir / 'junit.xml'}"]], repo
+                 str(script), f"--junitxml={result_dir / 'junit.xml'}",
+                 *(python_arguments(repo, result_dir / "coverage/python", env) if coverage else [])]], repo
     if framework == "custom" and script.suffix in {".ts", ".js", ".mjs"}:
         node = shutil.which("node")
         if not node:
@@ -124,7 +142,8 @@ def command_for(record: dict, repo: Path, result_dir: Path, env: dict[str, str])
         return [[node, str(binary), "run", "--config", str(package / "vitest.config.ts"),
                  str(script),
                  "--reporter=default", "--reporter=junit",
-                 f"--outputFile.junit={result_dir / 'junit.xml'}"]], package
+                 f"--outputFile.junit={result_dir / 'junit.xml'}",
+                 *(frontend_arguments(result_dir / "coverage/frontend") if coverage else [])]], package
     if framework == "playwright":
         package = repo / "test-e2e/infra/automation/d4"
         binary = package / "node_modules/playwright/cli.js"
@@ -247,7 +266,8 @@ def playwright_outcome(result_dir: Path, case_id: str, env: dict[str, str]) -> d
                 "evidence": [], "cleanup_failed": False}
 
 
-def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result_dir: Path | None = None) -> tuple[str, str, Path]:
+def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result_dir: Path | None = None,
+            coverage: bool = False) -> tuple[str, str, Path]:
     case_id = record["case_id"]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     if result_dir is None:
@@ -261,7 +281,7 @@ def run_one(record: dict, repo: Path, home: Path, env: dict[str, str], *, result
     if os.name != "nt":
         result_dir.chmod(0o700)
     run_env = dict(env, RESULT_DIR=str(result_dir))
-    commands, cwd = command_for(record, repo, result_dir, run_env)
+    commands, cwd = command_for(record, repo, result_dir, run_env, coverage=coverage)
     framework = record["execution"]["implementations"][0]["framework"]
     exit_code = 0
     step_results = []
@@ -341,6 +361,7 @@ def main() -> int:
     parser.add_argument("case_ids", nargs="*")
     parser.add_argument("--test-home", type=Path)
     parser.add_argument("--list", action="store_true", help="List case IDs and stages without running")
+    parser.add_argument("--coverage", action="store_true", help="Collect D1 Python and frontend coverage separately")
     args = parser.parse_args()
     repo = repository_root()
     issues, registry = inspect(repo)
@@ -361,6 +382,8 @@ def main() -> int:
                    if cases[case_id]["status"] != "active" or not cases[case_id]["execution"]]
     if unavailable:
         parser.error("Not executable: " + ", ".join(unavailable))
+    if args.coverage and any(cases[case_id]["stage"] != "D1" for case_id in args.case_ids):
+        parser.error("--coverage requires exclusively D1 Case IDs")
     home = args.test_home or Path(os.environ.get("NEXENT_TEST_HOME", ""))
     if not str(home) or str(home) == ".":
         parser.error("Set --test-home or NEXENT_TEST_HOME to a machine-local directory")
@@ -369,13 +392,21 @@ def main() -> int:
         parser.error("Test home must be outside the Git checkout")
     env = machine_environment(home, repo)
     failed = 0
+    data_files = []
     for case_id in dict.fromkeys(args.case_ids):
         if cases[case_id]["stage"] == "D4":
             failed += run_prepared_d4_case(case_id, repo, home, env) != 0
             continue
-        actual_id, status, result_dir = run_one(cases[case_id], repo, home, env)
+        actual_id, status, result_dir = run_one(cases[case_id], repo, home, env, coverage=args.coverage)
         print(f"{actual_id}: {status}; local evidence: {result_dir}")
         failed += status != "PASS"
+        if args.coverage and cases[case_id]["execution"]["implementations"][0]["framework"] == "pytest":
+            data_files.append(result_dir / "coverage/python/.coverage")
+    if data_files:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        directory = home / "runs/repository-local" / f"{stamp}-d1-coverage"
+        python_report(repo, directory / "python", data_files)
+        print(f"Python coverage: {directory / 'python'}")
     return 1 if failed else 0
 
 
