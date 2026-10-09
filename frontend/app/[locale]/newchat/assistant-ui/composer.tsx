@@ -3,6 +3,7 @@
 import {
   useMemo,
   useState,
+  useEffect,
   useSyncExternalStore,
   type FC,
   type ReactNode,
@@ -21,8 +22,11 @@ import {
   Circle,
   ListChecks,
   ChevronDown,
+  Compass,
   Database,
   Bot,
+  Plus,
+  Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -43,6 +47,15 @@ import {
 } from "@/components/ui/tooltip";
 import { ModelSelector, type ModelOption } from "../ui/model-selector";
 import { ComposerAttachments, ComposerAddAttachment } from "../ui/attachment";
+import {
+  useWorkbenchComposerTag,
+  setWorkbenchComposerTag,
+} from "@/features/workbench/lib/workbench-composer-tag";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Collapsible,
   CollapsibleContent,
@@ -102,6 +115,8 @@ export interface ComposerProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 // Simple tooltip wrapper
@@ -213,6 +228,77 @@ const SkillComposerDirectiveChip: FC<LexicalDirectiveChipProps> = ({
   />
 );
 
+// Blue category tag rendered inline before the composer text after clicking
+// a landing example; auto-clears when the composer text is emptied.
+const WorkbenchComposerTagPrefix: FC = () => {
+  const tag = useWorkbenchComposerTag();
+  const text = useAuiState((s) => s.composer.text);
+
+  useEffect(() => {
+    if (!text?.trim()) setWorkbenchComposerTag(null);
+  }, [text]);
+
+  if (!tag || !text?.trim()) return null;
+  return (
+    <span className="shrink-0 py-2 pl-4 text-xs font-normal leading-5 text-[#197BD5]">
+      {tag}
+    </span>
+  );
+};
+
+// Workbench toolbar dropdown that replaces the standalone planning/execution
+// switcher row, matching the design's "规划模式" entry in the composer toolbar.
+const WorkbenchPlanningMenu: FC<{
+  chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
+  disabled?: boolean;
+}> = ({ chatMode, onChatModeChange, disabled }) => {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const options: { value: ChatMode; label: string }[] = [
+    { value: "planning", label: t("chat.composer.planningMode") },
+    { value: "execution", label: t("chat.composer.executionMode") },
+  ];
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          className="h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
+        >
+          <Compass className="size-4" />
+          {chatMode === "planning"
+            ? t("chat.composer.planningMode")
+            : t("chat.composer.executionMode")}
+          <ChevronDown className="size-4 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-56 p-1">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={cn(
+              "flex h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 hover:bg-accent",
+              chatMode === option.value ? "text-foreground" : "text-foreground"
+            )}
+            onClick={() => {
+              onChatModeChange(option.value);
+              setOpen(false);
+            }}
+          >
+            {option.label}
+            {chatMode === option.value && <Check className="size-4" />}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+};
+
 export const Composer: FC<ComposerProps> = ({
   models,
   selectedModelId,
@@ -240,6 +326,8 @@ export const Composer: FC<ComposerProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const { t, i18n } = useTranslation();
   const aui = useAui();
@@ -366,10 +454,8 @@ export const Composer: FC<ComposerProps> = ({
 
   return (
     <div className="relative w-full min-w-0">
-      {workbenchPresentation &&
-        !compact &&
-        !creationMode &&
-        workbenchPresentation.actions}
+      {/* Creation mode entry buttons ("Skill 创建 / Agent创建") are hidden per
+          the workbench design; creation flows remain reachable elsewhere. */}
       {workbenchPresentation && !compact && creationMode && (
         <div className="mb-2 h-7" aria-hidden="true" />
       )}
@@ -405,7 +491,7 @@ export const Composer: FC<ComposerProps> = ({
         )}
 
         {/* Mode switcher above input */}
-        {!compact && !creationMode && (
+        {!compact && !creationMode && !workbenchPresentation && (
           <div className="flex items-center border-b border-border px-3 py-2">
             {/* Mode switcher */}
             <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
@@ -467,7 +553,11 @@ export const Composer: FC<ComposerProps> = ({
             {!compact && <ComposerAttachments />}
             {skillFiles ? (
               <LexicalComposerInput
-                placeholder={t("chat.composer.placeholder")}
+                placeholder={
+                  workbenchPresentation
+                    ? t("chat.composer.workbenchPlaceholder")
+                    : t("chat.composer.placeholder")
+                }
                 className="relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
                 submitMode="enter"
                 autoFocus
@@ -475,17 +565,25 @@ export const Composer: FC<ComposerProps> = ({
                 directiveChip={SkillComposerDirectiveChip}
               />
             ) : (
-              <ComposerPrimitive.Input
-                data-workbench-composer
-                placeholder={t("chat.composer.placeholder")}
-                className={cn(
-                  "mb-1 max-h-48 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground",
-                  workbenchPresentation && "px-4 py-2"
-                )}
-                rows={1}
-                submitMode="enter"
-                autoFocus
-              />
+              <div className="flex items-start">
+                {workbenchPresentation && <WorkbenchComposerTagPrefix />}
+                <ComposerPrimitive.Input
+                  data-workbench-composer
+                  placeholder={
+                    workbenchPresentation
+                      ? t("chat.composer.workbenchPlaceholder")
+                      : t("chat.composer.placeholder")
+                  }
+                  className={cn(
+                    "mb-1 max-h-48 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground",
+                    workbenchPresentation && "min-h-[88px] px-4 py-2",
+                    workbenchPresentation && "w-auto min-w-0 flex-1"
+                  )}
+                  rows={1}
+                  submitMode="enter"
+                  autoFocus
+                />
+              </div>
             )}
             {!compact && workbenchResources && (
               <SelectedResourceChips
@@ -532,7 +630,7 @@ export const Composer: FC<ComposerProps> = ({
                   workbenchPresentation && "flex-wrap sm:flex-nowrap"
                 )}
               >
-                {showModelSelector && (
+                {!compact && !workbenchPresentation && showModelSelector && (
                   <ModelSelector
                     models={models}
                     value={selectedModelId}
@@ -553,31 +651,79 @@ export const Composer: FC<ComposerProps> = ({
                     className="shrink-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground"
                   />
                 )}
-                {!compact && workbenchResources && (
-                  <>
+                {!compact && workbenchResources && workbenchPresentation && (
+                  <TooltipWrapper tooltip={t("chat.composer.addAgent")}>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+                      className="size-8 shrink-0 p-0"
                       disabled={isRunning}
                       onClick={workbenchResources.onSelectAgent}
                     >
-                      <Bot className="size-3.5" />
-                      Agent
+                      <Plus className="size-4" />
                     </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 shrink-0 gap-1.5 px-2 text-xs"
-                      disabled={isRunning}
-                      onClick={onOpenWorkbenchSkillPicker}
-                    >
-                      <Lightbulb className="size-3.5" />
-                      Skills
-                    </Button>
-                  </>
+                  </TooltipWrapper>
+                )}
+                {!compact && !creationMode && workbenchPresentation && (
+                  <WorkbenchPlanningMenu
+                    chatMode={chatMode}
+                    onChatModeChange={onChatModeChange}
+                    disabled={isRunning}
+                  />
+                )}
+                {!compact && workbenchResources && !workbenchPresentation && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+                    disabled={isRunning}
+                    onClick={workbenchResources.onSelectAgent}
+                  >
+                    <Bot className="size-3.5" />
+                    Agent
+                  </Button>
+                )}
+                {!compact && workbenchResources && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          "h-8 shrink-0 gap-1.5 px-2 text-xs",
+                          workbenchPresentation &&
+                            "text-base leading-6 text-foreground"
+                        )}
+                        disabled={isRunning}
+                        onClick={
+                          workbenchSkillPopover
+                            ? undefined
+                            : onOpenWorkbenchSkillPicker
+                        }
+                      >
+                        <Lightbulb
+                          className={cn(
+                            "size-3.5",
+                            workbenchPresentation && "size-4"
+                          )}
+                        />
+                        {workbenchPresentation
+                          ? t("chat.composer.skills")
+                          : "Skills"}
+                        {workbenchPresentation && (
+                          <ChevronDown className="size-4 opacity-50" />
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    {workbenchSkillPopover ? (
+                      <PopoverContent align="start" className="w-80 p-0">
+                        {workbenchSkillPopover}
+                      </PopoverContent>
+                    ) : null}
+                  </Popover>
                 )}
                 {!compact &&
                   !creationMode &&
@@ -585,24 +731,51 @@ export const Composer: FC<ComposerProps> = ({
                     knowledgeCapabilities?.sources.local.enabled ||
                     knowledgeCapabilities?.sources.aidp.enabled ||
                     knowledgeScope) && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-foreground"
-                      onClick={() => setKnowledgeModalOpen(true)}
-                      disabled={isRunning}
-                      title={
-                        isRunning
-                          ? t("chat.knowledgeScope.runningDisabled")
-                          : knowledgeSummary
-                      }
-                    >
-                      <Database className="size-3.5 shrink-0" />
-                      <span className="truncate">
-                        {workbenchPresentation ? "知识库" : knowledgeSummary}
-                      </span>
-                    </Button>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className={cn(
+                            "h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-foreground",
+                            workbenchPresentation &&
+                              "text-base leading-6 text-foreground"
+                          )}
+                          onClick={
+                            workbenchKnowledgePopover
+                              ? undefined
+                              : () => setKnowledgeModalOpen(true)
+                          }
+                          disabled={isRunning}
+                          title={
+                            isRunning
+                              ? t("chat.knowledgeScope.runningDisabled")
+                              : knowledgeSummary
+                          }
+                        >
+                          <Database
+                            className={cn(
+                              "size-3.5 shrink-0",
+                              workbenchPresentation && "size-4"
+                            )}
+                          />
+                          <span className="truncate">
+                            {workbenchPresentation
+                              ? t("chat.composer.knowledgeBase")
+                              : knowledgeSummary}
+                          </span>
+                          {workbenchPresentation && (
+                            <ChevronDown className="size-4 shrink-0 opacity-50" />
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      {workbenchKnowledgePopover ? (
+                        <PopoverContent align="start" className="w-80 p-0">
+                          {workbenchKnowledgePopover}
+                        </PopoverContent>
+                      ) : null}
+                    </Popover>
                   )}
                 {!compact &&
                   allowRuntimeMetadata &&
@@ -613,9 +786,38 @@ export const Composer: FC<ComposerProps> = ({
                       disabled={isRunning}
                     />
                   )}
+                {!compact && workbenchPresentation && (
+                  <ComposerAddAttachment
+                    label={t("chat.composer.uploadFile")}
+                  />
+                )}
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-1">
-                {!compact && <ComposerAddAttachment />}
+                {!compact && workbenchPresentation && showModelSelector && (
+                  <ModelSelector
+                    models={models}
+                    value={selectedModelId}
+                    onValueChange={onModelChange}
+                    deepThinking={deepThinking}
+                    onDeepThinkingChange={onDeepThinkingChange}
+                    effort={thinkingEffort}
+                    showEffort={Boolean(workbenchPresentation)}
+                    onEffortChange={(value) => {
+                      if (
+                        value === "low" ||
+                        value === "medium" ||
+                        value === "high"
+                      )
+                        onThinkingEffortChange?.(value);
+                    }}
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 text-base leading-6 text-foreground [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:leading-6"
+                  />
+                )}
+                {!compact && !workbenchPresentation && (
+                  <ComposerAddAttachment />
+                )}
                 {!compact && (
                   <AuiIf condition={(s) => !s.composer.dictation}>
                     <Tooltip>
@@ -627,9 +829,17 @@ export const Composer: FC<ComposerProps> = ({
                               variant="ghost"
                               size="icon"
                               disabled={!isDictationConfigured}
-                              className="size-8 text-muted-foreground"
+                              className={cn(
+                                "size-8 text-muted-foreground",
+                                workbenchPresentation && "size-9"
+                              )}
                             >
-                              <Mic className="size-4" />
+                              <Mic
+                                className={cn(
+                                  "size-4",
+                                  workbenchPresentation && "size-6"
+                                )}
+                              />
                             </Button>
                           </ComposerPrimitive.Dictate>
                         </span>
@@ -651,9 +861,17 @@ export const Composer: FC<ComposerProps> = ({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="size-8 text-destructive hover:text-destructive"
+                            className={cn(
+                              "size-8 text-destructive hover:text-destructive",
+                              workbenchPresentation && "size-9"
+                            )}
                           >
-                            <MicOff className="size-4" />
+                            <MicOff
+                              className={cn(
+                                "size-4",
+                                workbenchPresentation && "size-6"
+                              )}
+                            />
                           </Button>
                         </ComposerPrimitive.StopDictation>
                       </TooltipTrigger>
@@ -666,6 +884,7 @@ export const Composer: FC<ComposerProps> = ({
                 <ComposerSendOrCancel
                   onSend={prepareSend}
                   disabled={disabled}
+                  workbench={Boolean(workbenchPresentation)}
                 />
               </div>
             </div>
@@ -706,10 +925,11 @@ export const Composer: FC<ComposerProps> = ({
 // the click handler to actually fire. The tooltip wrapper sits outside so its
 // Trigger can use `asChild` against the Button. `AuiIf` toggles between the
 // two branches declaratively based on `thread.isRunning`.
-const ComposerSendOrCancel: FC<{ onSend: () => void; disabled?: boolean }> = ({
-  onSend,
-  disabled,
-}) => {
+const ComposerSendOrCancel: FC<{
+  onSend: () => void;
+  disabled?: boolean;
+  workbench?: boolean;
+}> = ({ onSend, disabled, workbench = false }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -737,11 +957,19 @@ const ComposerSendOrCancel: FC<{ onSend: () => void; disabled?: boolean }> = ({
           <ComposerPrimitive.Send asChild onClick={onSend}>
             <Button
               size="icon"
-              className="size-8 rounded-full ml-2"
+              className={cn(
+                "size-8 rounded-full ml-2",
+                workbench &&
+                  "size-[30px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-70"
+              )}
               disabled={disabled || !hasText}
               aria-label={t("chat.composer.send")}
             >
-              <ArrowUp className="size-5" />
+              {workbench ? (
+                <Send className="size-5" />
+              ) : (
+                <ArrowUp className="size-5" />
+              )}
             </Button>
           </ComposerPrimitive.Send>
         </TooltipWrapper>
