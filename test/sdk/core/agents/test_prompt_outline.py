@@ -73,7 +73,7 @@ def test_ut_sdk_fps_023_layout_order_preserves_priority():
 
 
 def test_ut_sdk_fps_024_dynamic_context_headings_do_not_change_roles():
-    """UT-SDK-FPS-024: retrieved material has titles but remains user data."""
+    """UT-SDK-FPS-024: knowledge descriptions use system; retrieved memories use user."""
     composer = _composer("en", "manager")
     items = composer.compose_context_inputs(
         language="en", is_manager=True, memory_list=["remembered fact"],
@@ -83,6 +83,8 @@ def test_ut_sdk_fps_024_dynamic_context_headings_do_not_change_roles():
     )
     messages = ContextItemRenderer().render(normalize_context_inputs(items))
     dynamic = [message["content"][0]["text"] for message in messages if message["role"] == "user"]
+    stable = [message["content"][0]["text"] for message in messages if message["role"] == "system"]
     assert any(text.startswith("## Retrieved Memory") and "remembered fact" in text for text in dynamic)
-    assert any(text.startswith("## Available Knowledge Base Indexes") for text in dynamic)
-    assert any(text.startswith("## Knowledge Base Summary") for text in dynamic)
+    assert any(text.startswith("## Available Knowledge Base Indexes") for text in stable)
+    assert any(text.startswith("## Knowledge Base Summary") for text in stable)
+    assert not any("## Available Knowledge Base Indexes" in text or "## Knowledge Base Summary" in text for text in dynamic)

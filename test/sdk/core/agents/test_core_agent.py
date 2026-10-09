@@ -4333,11 +4333,11 @@ def _create_minimal_core_agent_for_time_tests():
     return agent
 
 
-def test_run_preserves_existing_current_time_prefix():
-    """When task already has [Current time: ...] prefix, run() should not re-inject."""
+def test_run_preserves_existing_current_time_marker():
+    """A current runtime suffix must not be appended twice."""
     agent = _create_minimal_core_agent_for_time_tests()
 
-    prefixed_task = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    prefixed_task = "What time is it?\n\n[Current time: 2026-01-01 20:00:00]"
     list(agent.run(task=prefixed_task, stream=True))
 
     assert agent.task == prefixed_task

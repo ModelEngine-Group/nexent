@@ -112,7 +112,7 @@ def test_every_backend_item_payload_serializes_and_renders(language):
         (ContextItemType.TOOL, "system"),
         (ContextItemType.SKILL, "system"),
         (ContextItemType.MEMORY, "user"),
-        (ContextItemType.KNOWLEDGE_BASE, "user"),
+        (ContextItemType.KNOWLEDGE_BASE, "system"),
         (ContextItemType.WORKER_AGENT, "system"),
         (ContextItemType.EXTERNAL_AGENT, "system"),
     ],

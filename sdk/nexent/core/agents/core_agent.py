@@ -32,7 +32,7 @@ from ...monitor import get_monitoring_manager
 
 from ..model_errors import ModelErrorCode, ModelInvocationTerminalError
 from ..utils.observer import MessageObserver, ProcessType
-from .prompt.user_context import has_current_time_prefix, render_user_context
+from .prompt.user_context import has_current_time_marker, render_user_context
 from .prompt import AgentPromptComposer
 from ..utils.model_output_diagnostics import (
     bounded_rejected_output_preview,
@@ -1776,7 +1776,7 @@ Additional Args:
         # If the caller (e.g. backend run_agent_stream) already injected a
         # user-timezone-aware locale marker, skip to avoid double
         # injection. Otherwise fall back to the server's local timezone.
-        if has_current_time_prefix(task):
+        if has_current_time_marker(task):
             self.task = task
         else:
             self.task = render_user_context(getattr(self, "lang", "en"), "current_time", {

@@ -39,7 +39,7 @@ def test_user_context_matches_page_language(language, marker, workspace_label):
         "time": "2026-09-28 12:30:00", "query": "question",
     })
     assert value.startswith("question\n\n" + marker)
-    assert user_context.has_current_time_prefix(value)
+    assert user_context.has_current_time_marker(value)
     workspace = user_context.render_user_context(language, "workspace_note", {
         "workspace": "/run/1", "outputs": "/run/1/outputs",
     })
@@ -81,7 +81,7 @@ def test_time_follows_request_and_precedes_workspace(language, marker):
     query = "question\n\nRun workspace: /run/1"
     result = user_context.render_user_context(language, "current_time", {"query": query, "time": "2026-10-09 09:00:00"})
     assert result == f"question\n\n[{marker}: 2026-10-09 09:00:00]\n\nRun workspace: /run/1"
-    assert user_context.has_current_time_prefix(result)
+    assert user_context.has_current_time_marker(result)
 
 
 @pytest.mark.parametrize("language", ["en", "zh"])
