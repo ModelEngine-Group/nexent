@@ -904,6 +904,17 @@ async def list_knowledge_bases(
         [row.get("owner_user_id") for row in page_rows], tenant_id,
         lane="control-io", owner="config",
     )
+    # Older local permission fixtures used the literal ``user_id`` as an
+    # owner placeholder before Nexent user IDs were persisted. Resolve that
+    # legacy value to the authenticated Nexent account while keeping real
+    # owner IDs strictly tenant-scoped through the user table above.
+    if any(row.get("owner_user_id") == "user_id" for row in page_rows):
+        current_user_name = await run_blocking(
+            "aidp-current-creator-name", get_nexent_creator_names,
+            [user_id], tenant_id, lane="control-io", owner="config",
+        )
+        if current_user_name.get(user_id):
+            creator_names["user_id"] = current_user_name[user_id]
 
     detail_semaphore = asyncio.Semaphore(5)
 

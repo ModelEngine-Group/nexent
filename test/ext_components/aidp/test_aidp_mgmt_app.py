@@ -552,6 +552,37 @@ class TestListKnowledgeBases:
         assert body["total_count"] == 0
         assert body["has_more"] is False
 
+    def test_list_resolves_legacy_owner_placeholder_to_current_nexent_user(self, monkeypatch):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from types import SimpleNamespace
+
+        def creator_lookup(user_ids, _tenant_id):
+            return {USER_ID: "admin@nexent.com"} if USER_ID in user_ids else {}
+
+        monkeypatch.setattr(aidp_mgmt_app, "get_nexent_creator_names", creator_lookup)
+        with patch.object(
+            aidp_mgmt_app,
+            "_current_accessible_rows",
+            return_value=[
+                {
+                    "kb_id": "kb-legacy",
+                    "owner_user_id": "user_id",
+                    "permission": "EDIT",
+                    "ingroup_permission": "PRIVATE",
+                    "group_ids": [],
+                }
+            ],
+        ), patch.object(
+            aidp_mgmt_app,
+            "get_aidp_kb_impl",
+            return_value={"kds_name": "Legacy KB", "description": "desc"},
+        ):
+            response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["value"][0]["creator_name"] == "admin@nexent.com"
+
     def test_list_marks_kb_unavailable_when_aidp_detail_fails(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
