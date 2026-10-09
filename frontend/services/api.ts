@@ -396,6 +396,7 @@ export const API_ENDPOINTS = {
     downloadKbDocument: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
     models: `${API_BASE_URL}/aidp-mgmt/models`,
+    graphTemplate: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/graph-template`,
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,

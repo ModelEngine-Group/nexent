@@ -1,0 +1,16 @@
+schema_version: '1.0'
+changes:
+  - change_id: AKPR-BUG-004
+    change_type: bugfix
+    bug_id: AKPR-BUG-004
+    title: AIDP live creation rejects graph keys and value formats accepted by the mock
+    description: Align models, graph templates, create serialization and mock validation with the live requests supplied during integration. Resolve creator names from Nexent permission owners and display local import in both languages.
+    observed_behavior: Creation returns 400 for graph Top K and boolean or English graph values. The mock drops graph fields without validation. The UI queries model categories separately, limits prompts to 2048 bytes and displays empty remote creator and import metadata.
+    expected_behavior: Creation submits seven template graph keys plus the LLM identifier using Chinese strings and a 1 to 4096 character prompt. Model categories share one query; server templates switch by language and domain without overwriting manual text. Creators resolve from Nexent users and import source is localized local import. Unknown creator records display an em dash. Update time, file count and capacity are deferred.
+    escaped_stage: D3
+    coverage_gap:
+      type: missing_contract
+      description: The old baseline encoded graph Top K, booleans and a byte limit. The mock accepted these incorrect requests and ignored graph fields, so successful mock execution did not prove live request compatibility.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [AKPR-001], retired: []}
+    affected_cases: {existing: [], added: [], modified: [AKPR-D1-010, AKPR-D1-011, AKPR-D2-002, AKPR-D2-004], retired: []}

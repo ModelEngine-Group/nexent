@@ -45,6 +45,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -725,6 +726,59 @@ class CreateKbBody(BaseModel):
     embedding_model: Optional[str] = None
     is_multimodal: Optional[bool] = None
     vision_model: Optional[str] = None
+    chunk_token_num: int = 1024
+    chunk_overlap_num: int = 128
+    chunk_mode: int = 0
+    is_personal: int = 0
+    topk: int = 10
+    similarity: float = 0.6
+    caption_enable: int = 0
+    vlm_model: str = ""
+    is_exist_graph: bool = False
+    graph_config: Optional[str] = None
+
+
+def _graph_template(language: str) -> Dict[str, Any]:
+    """Contract fixtures; English templates are synthetic, not production defaults."""
+    english = language == "english"
+    prompts = {
+        domain: (f"Extract entity relationship triples for the {domain} domain."
+                 if english else f"你是{domain}领域的信息抽取专家，请抽取明确的实体及其关系三元组。")
+        for domain in ("医疗", "金融", "常规", "法律法规")
+    }
+    entries = [
+        ("retrieve_subgraph_hop", "子图扩展跳数", "2", "^[1-3]$", True),
+        ("no_think_mode", "禁用LLM思考过程", "是", "^(是|否)$", True),
+        ("prompt_language", "提示词语言", "英文" if english else "中文", "^(中文|英文)$", False),
+        ("domain", "领域类型", "常规", "^(医疗|金融|常规|法律法规)$", False),
+        ("prompt_text", "知识抽取提示词", prompts["常规"], r"^[\s\S]{1,4096}$", False),
+        ("synonym_merge_enable", "同义词检测开关", "否", "^(是|否)$", True),
+        ("disambiguation_enable", "实体消歧开关", "否", "^(是|否)$", True),
+    ]
+    value = [dict(param_key=key, param_name=name, param_value=default,
+                  regexp=regexp, is_modifiable=modifiable, param_desc=name)
+             for key, name, default, regexp, modifiable in entries]
+    value[4]["template"] = prompts
+    return {"value": value}
+
+
+def _validate_graph_request(body: CreateKbBody) -> None:
+    if not body.is_exist_graph:
+        return
+    try:
+        config = json.loads(body.graph_config or "")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "graph_config must be a JSON string") from exc
+    parameters = _graph_template("chinese")["value"]
+    allowed = {p["param_key"] for p in parameters} | {"llm_model_name"}
+    if not isinstance(config, dict) or set(config) - allowed:
+        raise HTTPException(400, "Unrecognized graph configuration parameter")
+    for parameter in parameters:
+        value = config.get(parameter["param_key"])
+        if not isinstance(value, str) or re.fullmatch(parameter["regexp"], value) is None:
+            raise HTTPException(400, f"Invalid graph parameter: {parameter['param_key']}")
+    if "llm_model_name" in config and not isinstance(config["llm_model_name"], str):
+        raise HTTPException(400, "Invalid llm_model_name")
 
 
 class UpdateKbBody(BaseModel):
@@ -1025,10 +1079,12 @@ def create_knowledge_base(
 ) -> JSONResponse:
     """Create a new knowledge base. AIDP uses PUT on the collection endpoint."""
     _check_auth(authorization)
+    _validate_graph_request(body)
 
     kds_id = f"aidp-kb-{uuid.uuid4().hex[:8]}"
     now = int(time.time())
     new_kb = {
+        **body.model_dump(exclude_none=True),
         "kds_id": kds_id,
         "kds_name": body.name,
         "description": body.description or "",
@@ -1049,6 +1105,15 @@ def create_knowledge_base(
     logger.info("CREATE  kds_id=%s name=%r", kds_id, body.name)
     _save_state()
     return JSONResponse(content=new_kb)
+
+
+@app.get(f"{_KB_PREFIX}/GraphConfigTemplate")
+def graph_config_template(
+    language: str = Query("chinese", pattern="^(chinese|english)$"),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    return JSONResponse(content=_graph_template(language))
 
 
 @app.get(f"{_KB_PREFIX}/{{kds_id}}")
@@ -1631,11 +1696,17 @@ def fusion_search(
 # backend's ``_is_kb_applicable`` post-filters by "All" or the requested app).
 _MOCK_MODELS: List[Dict[str, Any]] = [
     {
+        "model_name": "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
+        "display_name": "bge-m3", "model_type": "embedding",
+        "application": ["KnowledgeBase", "MemoryBase"], "service": "embedding",
+    },
+    {
         "api_key": "",
         "application": "All",
         "created_at": 1782716626,
         "max_tokens": 32768,
         "model_name": "model_1",
+        "display_name": "Qwen3-8B", "model_type": "llm",
         "properties": {"description": "General purpose LLM.", "model_type": "external"},
         "service": "llm",
         "temperature": 0.6,
@@ -1646,6 +1717,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
     {
         "application": ["KnowledgeBase"],
         "model_name": "Qwen3-VL-8B-Instruct",
+        "display_name": "Qwen3-VL-8B-Instruct", "model_type": "vlm",
         "properties": {"description": "Vision-language model served internally for caption generation.", "model_type": "internal"},
         "service": "llm",
         "url": "http://caption-service.model-service.svc.cluster.local:8111/v1/chat/completions",
@@ -1656,6 +1728,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "created_at": 1783070801,
         "max_tokens": 32768,
         "model_name": "Qwen3-VL-32B-Instruct",
+        "display_name": "Qwen3-VL-32B-Instruct", "model_type": "vlm",
         "properties": {"description": "Larger vision-language model for high-quality captioning.", "model_type": "external"},
         "service": "llm",
         "temperature": 0.6,
@@ -1669,6 +1742,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "created_at": 1783474808,
         "max_tokens": 32780,
         "model_name": "InternVL2-26B",
+        "display_name": "InternVL2-26B", "model_type": "vlm",
         "properties": {"description": "Open-source multimodal model.", "model_type": "external"},
         "service": "llm",
         "temperature": 1.5,
@@ -1683,6 +1757,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "application": ["DocumentParsing"],
         "created_at": 1783062626,
         "model_name": "doc-parser-only",
+        "display_name": "Document parser", "model_type": "llm",
         "properties": {"description": "Should NOT appear for KnowledgeBase.", "model_type": "external"},
         "service": "llm",
     },
@@ -1691,7 +1766,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
 
 @app.get(_MODELS_PREFIX)
 def list_models(
-    service: str = Query("llm"),
+    service: str = Query(""),
     app: str = Query("KnowledgeBase"),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
@@ -1701,10 +1776,11 @@ def list_models(
     raw seed data here.
     """
     _check_auth(authorization)
-    logger.info("LIST MODELS  service=%s app=%s returned=%d", service, app, len(_MOCK_MODELS))
+    models = [m for m in _MOCK_MODELS if not service or m["model_type"] == service]
+    logger.info("LIST MODELS  service=%s app=%s returned=%d", service, app, len(models))
     return JSONResponse(content={
         "service": service,
-        "models": _MOCK_MODELS,
+        "models": models,
     })
 
 

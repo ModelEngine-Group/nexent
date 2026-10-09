@@ -54,7 +54,7 @@ cases:
     priority: P0
     status: active
     automation: automated
-    objective: Verify the create proxy forwards chunking, retrieval, graph, model and safety fields while preserving legacy field names and existing defaults.
+    objective: Verify the create proxy forwards the verified chunking, retrieval and model fields and graph JSON string, omits obsolete graph Top K and smartsplit, and preserves existing product defaults.
     preconditions:
       - An authenticated create request reaches the AIDP management proxy with a recorded upstream payload.
     test_data: {profile: mock, chunk_mode: [0, 1], graph_enabled: [true, false], multimodal: [true, false]}
@@ -132,31 +132,31 @@ cases:
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
     business_rule_ids: [AKPR-RULE-012]
-    title: Model queries select a single category per control
+    title: Model query returns all advertised types when no service filter is supplied
     type: CONTRACT
     priority: P0
     status: active
     automation: automated
-    objective: Verify the model query proxy passes one category per request and returns only models applicable to the knowledge base application.
+    objective: Verify the model query proxy omits the service filter for the unified query and returns models applicable to KnowledgeBase with their types, display names and identifiers.
     preconditions:
-      - A controllable upstream model fixture serves distinct payloads per category.
+      - A controllable upstream model fixture serves an all-category payload and optional category-filtered responses.
     test_data: {profile: mock, categories: [llm, vlm, embedding]}
     steps:
       - order: 1
-        action: Query the graph model list.
-        expected: The request carries the llm category and the response exposes only llm models.
+        action: Query all models without a service parameter.
+        expected: The request has app=KnowledgeBase without service and exposes embedding, llm and vlm models with model_type.
       - order: 2
-        action: Query the multimodal model list.
+        action: Query models with an explicit vlm service filter.
         expected: The request carries the vlm category and the response exposes only vlm models.
       - order: 3
         action: Query an unsupported or failing category.
         expected: A stable error or an empty result is returned without falling back to another category.
     expected_results:
-      - One category is requested per control.
-      - Responses are not reused across categories.
+      - One query populates all three controls.
+      - Controls split the returned model types without changing identifiers.
       - Failures do not silently substitute another category.
     forbidden_side_effects:
-      - No shared cache entry across categories.
+      - No model_type category mixing.
       - No fabricated model identifier on failure.
       - No change to existing non-AIDP model endpoints.
     contract:
@@ -164,10 +164,10 @@ cases:
       method: GET
       endpoint: /aidp-mgmt/models
       request_expectations:
-        - The service parameter carries exactly one requested category.
+        - The service parameter is optional; omitting it retrieves all categories.
         - The application parameter keeps the knowledge base scope.
         - No credential is returned to the browser.
       response_expectations:
-        - Only models of the requested category are returned.
+        - Model response preserves model_type, model_name and display_name for applicable models.
         - An unavailable category yields a stable error or an empty list.
         - Results are filtered to the knowledge base application scope.

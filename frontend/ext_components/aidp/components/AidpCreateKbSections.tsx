@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 
 import {
   Alert,
+  Button,
   Form,
   Input,
   InputNumber,
@@ -19,17 +20,14 @@ import { AidpKnowledgeBasePermissionFields } from "./AidpKnowledgeBaseModalParts
 import AidpSliderNumberField from "./AidpSliderNumberField";
 import styles from "./AidpCreateKbSections.module.css";
 import type { AidpGroupOption } from "../hooks/useAidpGroupOptions";
+import type { AidpGraphTemplate, AidpModelOption } from "@/types/aidpGraph";
+import { graphChoices, graphParameter } from "@/lib/aidpGraphConfig";
 
-const GRAPH_PROMPT_MAX_BYTES = 2048;
+const GRAPH_PROMPT_MAX_CHARS = 4096;
 const CHUNK_TOKEN_MIN = 256;
 const CHUNK_TOKEN_MAX = 4096;
 const OVERLAP_PERCENT_MIN = 1;
 const OVERLAP_PERCENT_MAX = 40;
-
-const byteLength = (value: string): number =>
-  typeof TextEncoder === "undefined"
-    ? value.length
-    : new TextEncoder().encode(value).length;
 
 interface AidpCreateKbSectionsProps {
   form: FormInstance;
@@ -37,12 +35,14 @@ interface AidpCreateKbSectionsProps {
   canConfigureGroupPermissions: boolean;
   groupOptions: AidpGroupOption[];
   ingroupPermission?: string;
-  llmModelOptions: string[];
+  llmModelOptions: AidpModelOption[];
   llmModelsLoading: boolean;
-  vlmModelOptions: string[];
+  vlmModelOptions: AidpModelOption[];
   vlmModelsLoading: boolean;
-  embeddingModelOptions: string[];
+  embeddingModelOptions: AidpModelOption[];
   embeddingModelsLoading: boolean;
+  graphTemplate?: AidpGraphTemplate;
+  onRestorePrompt: () => void;
 }
 
 type CollapsibleSection = "graph" | "chunk" | "vector" | "retrieval";
@@ -59,6 +59,8 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
   vlmModelsLoading,
   embeddingModelOptions,
   embeddingModelsLoading,
+  graphTemplate,
+  onRestorePrompt,
 }) => {
   const graphEnabled = Form.useWatch("is_exist_graph", form) === true;
   const captionEnabled = Form.useWatch("caption_enable", form) === true;
@@ -83,6 +85,20 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
 
   const toggleSection = (section: CollapsibleSection) =>
     setExpanded((current) => ({ ...current, [section]: !current[section] }));
+
+  const graphRule = (
+    key: string,
+    convert: (value: unknown) => string = String
+  ) => ({
+    validator: (_rule: unknown, value: unknown) => {
+      const parameter = graphParameter(graphTemplate, key);
+      if (parameter && new RegExp(parameter.regexp, "u").test(convert(value)))
+        return Promise.resolve();
+      return Promise.reject(
+        new Error(t("aidpKnowledge.createGraphValueInvalid"))
+      );
+    },
+  });
 
   const label = (text: string, hint?: string) => (
     <span className={styles.formLabel}>
@@ -132,7 +148,10 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           </button>
           {hint && (
             <Tooltip title={hint}>
-              <QuestionCircleOutlined className="cursor-help text-gray-400" />
+              <QuestionCircleOutlined
+                className="cursor-help text-gray-400"
+                aria-label={hint}
+              />
             </Tooltip>
           )}
         </div>
@@ -224,7 +243,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
         {sectionHeading(
           "graph",
           t("aidpKnowledge.createSectionGraph"),
-          t("aidpKnowledge.createGraphEnableHint"),
+          t("aidpKnowledge.createGraphSectionHint"),
           <Form.Item name="is_exist_graph" valuePropName="checked" noStyle>
             <Switch aria-label={t("aidpKnowledge.createGraphEnable")} />
           </Form.Item>
@@ -239,46 +258,52 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
               <>
                 <Form.Item
                   name="graph_domain"
-                  label={t("aidpKnowledge.createGraphDomain")}
+                  label={label(
+                    t("aidpKnowledge.createGraphDomain"),
+                    t("aidpKnowledge.createGraphDomainHint")
+                  )}
                   className={styles.fullSpan}
+                  rules={[graphRule("domain")]}
                 >
                   <Select
-                    options={[
-                      {
-                        value: "general",
-                        label: t("aidpKnowledge.createGraphDomainGeneral"),
-                      },
-                      {
-                        value: "medical",
-                        label: t("aidpKnowledge.createGraphDomainMedical"),
-                      },
-                      {
-                        value: "finance",
-                        label: t("aidpKnowledge.createGraphDomainFinance"),
-                      },
-                    ]}
+                    options={graphChoices(graphTemplate, "domain").map(
+                      (value) => ({
+                        value,
+                        label: t(
+                          (
+                            {
+                              常规: "aidpKnowledge.createGraphDomainGeneral",
+                              医疗: "aidpKnowledge.createGraphDomainMedical",
+                              金融: "aidpKnowledge.createGraphDomainFinance",
+                              法律法规: "aidpKnowledge.createGraphDomainLegal",
+                            } as Record<string, string>
+                          )[value] || value
+                        ),
+                      })
+                    )}
                   />
                 </Form.Item>
                 <Form.Item
-                  name="graph_topk"
-                  label={label(
-                    t("aidpKnowledge.createGraphTopk"),
-                    t("aidpKnowledge.createGraphTopkHint")
-                  )}
-                  rules={[{ type: "number", min: 1, max: 100 }]}
-                >
-                  <InputNumber style={{ width: "100%" }} min={1} max={100} />
-                </Form.Item>
-                <Form.Item
                   name="graph_hop"
-                  label={label(t("aidpKnowledge.createGraphHop"))}
-                  rules={[{ type: "number", min: 1, max: 3 }]}
+                  label={label(
+                    t("aidpKnowledge.createGraphHop"),
+                    t("aidpKnowledge.createGraphHopHint")
+                  )}
+                  rules={[graphRule("retrieve_subgraph_hop")]}
                 >
                   <InputNumber style={{ width: "100%" }} min={1} max={3} />
                 </Form.Item>
                 <Form.Item
                   name="graph_thinking"
-                  label={label(t("aidpKnowledge.createGraphThinking"))}
+                  label={label(
+                    t("aidpKnowledge.createGraphThinking"),
+                    t("aidpKnowledge.createGraphThinkingHint")
+                  )}
+                  rules={[
+                    graphRule("no_think_mode", (value) =>
+                      value ? "否" : "是"
+                    ),
+                  ]}
                 >
                   <Select
                     options={[
@@ -289,19 +314,23 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                 </Form.Item>
                 <Form.Item
                   name="graph_prompt_language"
-                  label={label(t("aidpKnowledge.createGraphPromptLanguage"))}
+                  label={label(
+                    t("aidpKnowledge.createGraphPromptLanguage"),
+                    t("aidpKnowledge.createGraphLanguageHint")
+                  )}
+                  rules={[graphRule("prompt_language")]}
                 >
                   <Select
-                    options={[
-                      {
-                        value: "chinese",
-                        label: t("aidpKnowledge.createGraphPromptZh"),
-                      },
-                      {
-                        value: "english",
-                        label: t("aidpKnowledge.createGraphPromptEn"),
-                      },
-                    ]}
+                    options={graphChoices(graphTemplate, "prompt_language").map(
+                      (value) => ({
+                        value,
+                        label: t(
+                          value === "中文"
+                            ? "aidpKnowledge.createGraphPromptZh"
+                            : "aidpKnowledge.createGraphPromptEn"
+                        ),
+                      })
+                    )}
                   />
                 </Form.Item>
                 <Form.Item
@@ -312,23 +341,40 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                   )}
                   className={styles.fullSpan}
                   rules={[
-                    {
-                      validator: (_rule, value: string) =>
-                        byteLength(value || "") <= GRAPH_PROMPT_MAX_BYTES
-                          ? Promise.resolve()
-                          : Promise.reject(
-                              new Error(
-                                t("aidpKnowledge.createGraphPromptTooLong")
-                              )
-                            ),
-                    },
+                    graphRule("prompt_text", (value) =>
+                      typeof value === "string" ? value : ""
+                    ),
                   ]}
+                  extra={
+                    <Button
+                      type="link"
+                      className="!px-0"
+                      disabled={!graphTemplate}
+                      onClick={onRestorePrompt}
+                    >
+                      {t("aidpKnowledge.createGraphUseDefaultPrompt")}
+                    </Button>
+                  }
                 >
-                  <Input.TextArea rows={6} />
+                  <Input.TextArea
+                    rows={6}
+                    showCount={{
+                      formatter: ({ value }) =>
+                        `${Array.from(value).length} / ${GRAPH_PROMPT_MAX_CHARS}`,
+                    }}
+                  />
                 </Form.Item>
                 <Form.Item
                   name="graph_synonym_merge"
-                  label={label(t("aidpKnowledge.createGraphSynonymMerge"))}
+                  label={label(
+                    t("aidpKnowledge.createGraphSynonymMerge"),
+                    t("aidpKnowledge.createGraphSynonymHint")
+                  )}
+                  rules={[
+                    graphRule("synonym_merge_enable", (value) =>
+                      value ? "是" : "否"
+                    ),
+                  ]}
                 >
                   <Select
                     options={[
@@ -339,7 +385,15 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                 </Form.Item>
                 <Form.Item
                   name="graph_disambiguation"
-                  label={label(t("aidpKnowledge.createGraphDisambiguation"))}
+                  label={label(
+                    t("aidpKnowledge.createGraphDisambiguation"),
+                    t("aidpKnowledge.createGraphDisambiguationHint")
+                  )}
+                  rules={[
+                    graphRule("disambiguation_enable", (value) =>
+                      value ? "是" : "否"
+                    ),
+                  ]}
                 >
                   <Select
                     options={[
@@ -372,10 +426,8 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                         : t("aidpKnowledge.createModelNone")
                     }
                     placeholder={t("aidpKnowledge.createModelSearch")}
-                    options={llmModelOptions.map((name) => ({
-                      label: name,
-                      value: name,
-                    }))}
+                    optionFilterProp="label"
+                    options={llmModelOptions}
                   />
                 </Form.Item>
               </>
@@ -385,7 +437,11 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
       </section>
 
       <section className={styles.formSection}>
-        {sectionHeading("chunk", t("aidpKnowledge.createSectionChunk"))}
+        {sectionHeading(
+          "chunk",
+          t("aidpKnowledge.createSectionChunk"),
+          t("aidpKnowledge.createChunkSectionHint")
+        )}
         <p className={styles.defaultsHint}>
           {t("aidpKnowledge.createDefaultsHint")}
         </p>
@@ -438,7 +494,10 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           <div className={styles.formGrid}>
             <Form.Item
               name="chunk_token_num"
-              label={label(t("aidpKnowledge.createChunkTokenNum"))}
+              label={label(
+                t("aidpKnowledge.createChunkTokenNum"),
+                t("aidpKnowledge.createChunkTokenHint")
+              )}
               rules={[
                 {
                   required: true,
@@ -507,7 +566,11 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
       </section>
 
       <section className={styles.formSection}>
-        {sectionHeading("vector", t("aidpKnowledge.createSectionVector"))}
+        {sectionHeading(
+          "vector",
+          t("aidpKnowledge.createSectionVector"),
+          t("aidpKnowledge.createVectorSectionHint")
+        )}
         <p className={styles.defaultsHint}>
           {t("aidpKnowledge.createDefaultsHint")}
         </p>
@@ -515,7 +578,10 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           <div className={styles.formGrid}>
             <Form.Item
               name="embedding_model"
-              label={label(t("aidpKnowledge.createEmbeddingModel"))}
+              label={label(
+                t("aidpKnowledge.createEmbeddingModel"),
+                t("aidpKnowledge.createEmbeddingHint")
+              )}
               rules={[{ required: true }]}
             >
               <Select
@@ -526,10 +592,8 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                     ? t("aidpKnowledge.createModelLoading")
                     : t("aidpKnowledge.createModelNone")
                 }
-                options={embeddingModelOptions.map((name) => ({
-                  label: name,
-                  value: name,
-                }))}
+                optionFilterProp="label"
+                options={embeddingModelOptions}
               />
             </Form.Item>
             <Form.Item
@@ -578,10 +642,8 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                       : t("aidpKnowledge.createModelNone")
                   }
                   placeholder={t("aidpKnowledge.createModelSearch")}
-                  options={vlmModelOptions.map((name) => ({
-                    label: name,
-                    value: name,
-                  }))}
+                  optionFilterProp="label"
+                  options={vlmModelOptions}
                 />
               </Form.Item>
             </Form.Item>
@@ -590,7 +652,11 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
       </section>
 
       <section className={`${styles.formSection} ${styles.lastSection}`}>
-        {sectionHeading("retrieval", t("aidpKnowledge.createSectionRetrieval"))}
+        {sectionHeading(
+          "retrieval",
+          t("aidpKnowledge.createSectionRetrieval"),
+          t("aidpKnowledge.createRetrievalSectionHint")
+        )}
         <p className={styles.defaultsHint}>
           {t("aidpKnowledge.createDefaultsHint")}
         </p>
@@ -598,7 +664,10 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           <div className={styles.formGrid}>
             <Form.Item
               name="similarity"
-              label={label(t("aidpKnowledge.createSimilarity"))}
+              label={label(
+                t("aidpKnowledge.createSimilarity"),
+                t("aidpKnowledge.createSimilarityHint")
+              )}
               rules={[{ required: true, type: "number", min: 0, max: 1 }]}
             >
               <AidpSliderNumberField
@@ -612,7 +681,10 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
             </Form.Item>
             <Form.Item
               name="topk"
-              label={label(t("aidpKnowledge.createTopk"))}
+              label={label(
+                t("aidpKnowledge.createTopk"),
+                t("aidpKnowledge.createTopkHint")
+              )}
               rules={[{ required: true, type: "number", min: 1, max: 100 }]}
             >
               <AidpSliderNumberField

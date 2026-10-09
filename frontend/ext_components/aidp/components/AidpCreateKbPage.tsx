@@ -11,18 +11,20 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 
-import { Button, Breadcrumb, Form, Space, message } from "antd";
+import { Alert, Button, Breadcrumb, Form, Space, message } from "antd";
 
-import type {
-  AidpGraphConfig,
-  AidpModelItem,
-} from "@/ext_components/aidp/services/aidpKnowledgeService";
+import type { AidpGraphConfig } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import { USER_ROLES } from "@/const/auth";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import log from "@/lib/logger";
+import {
+  graphParameter,
+  graphPrompt,
+  modelOptions,
+} from "@/lib/aidpGraphConfig";
 
 import AidpCreateKbSections from "./AidpCreateKbSections";
 import styles from "./AidpCreateKbSections.module.css";
@@ -31,39 +33,27 @@ import styles from "./AidpCreateKbSections.module.css";
  * Default AIDP knowledge base configuration.
  *
  * The creation screen uses the agreed product defaults (1024 tokens, 128 token
- * overlap, similarity 0.6, Top K 10, embedding "default", captioning off). The
- * graph parameters use the documented AIDP defaults, which are not the
- * prototype sample values.
+ * overlap, similarity 0.6, Top K 10 and captioning off). Model identifiers and
+ * graph defaults come from AIDP's model and graph template endpoints.
  */
 const AIDP_CREATE_DEFAULTS = {
   chunk_token_num: 1024,
   /** Overlap as a percentage of the chunk size; 128/1024 = 12.5%. */
   chunk_overlap_percent: 12.5,
   chunk_mode: 0,
-  embedding_model: "default",
   is_personal: 0,
   topk: 10,
   similarity: 0.6,
-  smartsplit: 1,
   caption_enable: 0,
   is_exist_graph: false,
-  graph_domain: "general" as const,
-  graph_topk: 5,
+  graph_domain: "常规" as const,
   graph_hop: 2,
   /** UI switch; the submitted `no_think_mode` is its inverse. */
   graph_thinking: false,
-  graph_prompt_language: "chinese" as const,
+  graph_prompt_language: "中文" as const,
   graph_synonym_merge: false,
   graph_disambiguation: false,
 };
-
-/** Editable default extraction prompt (UTF-8 length is validated on submit). */
-const DEFAULT_GRAPH_PROMPT = `你作为专业知识图谱抽取引擎，仅执行输入文本中实体、关系、属性三元组的标准化提取。
-严格遵循构图任务约定的输出字段与结构，输出合法、固定格式的 JSON 数组，不输出 Markdown 标记、解释、推理过程或其他冗余文本。
-仅依据输入文本和其中明确的上下文提取信息，不编造实体、关系或属性，不补充原文没有提供的事实。
-实体名称应保持一致；同一实体使用统一表述，不合并无法确认是同一对象的实体。
-关系和属性使用明确、简洁的表述，保留原文中的否定、条件和范围限定。
-没有可提取信息时输出空数组 []。`;
 
 /**
  * Dedicated AIDP knowledge base creation page.
@@ -110,53 +100,88 @@ const AidpCreateKbPage: React.FC = () => {
   );
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
 
-  // ---- Model queries: one category per control, independent caches ----
-  const { data: llmModelsData, isLoading: llmModelsLoading } = useQuery({
-    queryKey: ["aidp-models", "llm", "KnowledgeBase"],
-    queryFn: () => aidpKnowledgeService.listModels("llm", "KnowledgeBase"),
+  const modelsQuery = useQuery({
+    queryKey: ["aidp-models", "all", "KnowledgeBase"],
+    queryFn: () => aidpKnowledgeService.listModels("", "KnowledgeBase"),
+    enabled: isDeploymentReady && enableAidpKnowledge,
     staleTime: 5 * 60 * 1000,
   });
-  const { data: vlmModelsData, isLoading: vlmModelsLoading } = useQuery({
-    queryKey: ["aidp-models", "vlm", "KnowledgeBase"],
-    queryFn: () => aidpKnowledgeService.listModels("vlm", "KnowledgeBase"),
-    staleTime: 5 * 60 * 1000,
-  });
-  const { data: embeddingModelsData, isLoading: embeddingModelsLoading } =
-    useQuery({
-      queryKey: ["aidp-models", "embedding", "KnowledgeBase"],
-      queryFn: () =>
-        aidpKnowledgeService.listModels("embedding", "KnowledgeBase"),
-      staleTime: 5 * 60 * 1000,
-    });
-
-  const modelNames = useCallback(
-    (data: { models?: AidpModelItem[] } | undefined) => {
-      const models: AidpModelItem[] = data?.models ?? [];
-      return models
-        .map((m) => m.model_name)
-        .filter(
-          (name): name is string => typeof name === "string" && name.length > 0
-        );
-    },
-    []
-  );
-
   const llmModelOptions = useMemo(
-    () => modelNames(llmModelsData),
-    [llmModelsData, modelNames]
+    () => modelOptions(modelsQuery.data?.models ?? [], "llm"),
+    [modelsQuery.data]
   );
   const vlmModelOptions = useMemo(
-    () => modelNames(vlmModelsData),
-    [vlmModelsData, modelNames]
+    () => modelOptions(modelsQuery.data?.models ?? [], "vlm"),
+    [modelsQuery.data]
   );
-  // `default` keeps the established semantics of the existing create call, so
-  // it stays selectable even when AIDP advertises other embedding models.
-  const embeddingModelOptions = useMemo(() => {
-    const advertised = modelNames(embeddingModelsData);
-    return advertised.includes(AIDP_CREATE_DEFAULTS.embedding_model)
-      ? advertised
-      : [AIDP_CREATE_DEFAULTS.embedding_model, ...advertised];
-  }, [embeddingModelsData, modelNames]);
+  const embeddingModelOptions = useMemo(
+    () => modelOptions(modelsQuery.data?.models ?? [], "embedding"),
+    [modelsQuery.data]
+  );
+  const graphEnabled = Form.useWatch("is_exist_graph", form) === true;
+  const promptLanguage = Form.useWatch("graph_prompt_language", form) || "中文";
+  const graphDomain = Form.useWatch("graph_domain", form) || "常规";
+  const templateQuery = useQuery({
+    queryKey: ["aidp-graph-template", promptLanguage],
+    queryFn: () =>
+      aidpKnowledgeService.graphTemplate(
+        promptLanguage === "英文" ? "english" : "chinese"
+      ),
+    enabled: graphEnabled && isDeploymentReady && enableAidpKnowledge,
+    staleTime: 5 * 60 * 1000,
+  });
+  const initializedGraph = useRef(false);
+  const previousDefaultPrompt = useRef("");
+  useEffect(() => {
+    const data = templateQuery.data;
+    if (!data || !graphEnabled) return;
+    if (!initializedGraph.current) {
+      const value = (key: string) => graphParameter(data, key)?.param_value;
+      const defaults: Record<string, unknown> = {
+        graph_domain: value("domain"),
+        graph_hop: Number(value("retrieve_subgraph_hop")),
+        graph_thinking: value("no_think_mode") === "否",
+        graph_synonym_merge: value("synonym_merge_enable") === "是",
+        graph_disambiguation: value("disambiguation_enable") === "是",
+      };
+      Object.entries(defaults).forEach(([field, initial]) => {
+        if (!form.isFieldTouched(field)) form.setFieldValue(field, initial);
+      });
+      initializedGraph.current = true;
+    }
+    const nextPrompt = graphPrompt(
+      data,
+      form.getFieldValue("graph_domain") || graphDomain
+    );
+    const currentPrompt = form.getFieldValue("graph_prompt_text") || "";
+    if (
+      !form.isFieldTouched("graph_prompt_text") ||
+      currentPrompt === previousDefaultPrompt.current
+    ) {
+      form.setFieldValue("graph_prompt_text", nextPrompt);
+    }
+    previousDefaultPrompt.current = nextPrompt;
+  }, [form, graphDomain, graphEnabled, templateQuery.data]);
+  const restoreDefaultPrompt = useCallback(() => {
+    const prompt = graphPrompt(templateQuery.data, graphDomain);
+    form.setFieldValue("graph_prompt_text", prompt);
+    previousDefaultPrompt.current = prompt;
+  }, [form, graphDomain, templateQuery.data]);
+  useEffect(() => {
+    for (const [field, options] of [
+      ["embedding_model", embeddingModelOptions],
+      ["llm_model_name", llmModelOptions],
+      ["vlm_model", vlmModelOptions],
+    ] as const) {
+      if (
+        options.length &&
+        !form.isFieldTouched(field) &&
+        !options.some((option) => option.value === form.getFieldValue(field))
+      ) {
+        form.setFieldValue(field, options[0].value);
+      }
+    }
+  }, [embeddingModelOptions, form, llmModelOptions, vlmModelOptions]);
 
   // ---- Defaults ----
   useEffect(() => {
@@ -166,17 +191,15 @@ const AidpCreateKbPage: React.FC = () => {
       chunk_mode: AIDP_CREATE_DEFAULTS.chunk_mode,
       topk: AIDP_CREATE_DEFAULTS.topk,
       similarity: AIDP_CREATE_DEFAULTS.similarity,
-      embedding_model: AIDP_CREATE_DEFAULTS.embedding_model,
       caption_enable: AIDP_CREATE_DEFAULTS.caption_enable === 1,
       is_exist_graph: AIDP_CREATE_DEFAULTS.is_exist_graph,
       graph_domain: AIDP_CREATE_DEFAULTS.graph_domain,
-      graph_topk: AIDP_CREATE_DEFAULTS.graph_topk,
       graph_hop: AIDP_CREATE_DEFAULTS.graph_hop,
       graph_thinking: AIDP_CREATE_DEFAULTS.graph_thinking,
       graph_prompt_language: AIDP_CREATE_DEFAULTS.graph_prompt_language,
       graph_synonym_merge: AIDP_CREATE_DEFAULTS.graph_synonym_merge,
       graph_disambiguation: AIDP_CREATE_DEFAULTS.graph_disambiguation,
-      graph_prompt_text: DEFAULT_GRAPH_PROMPT,
+      graph_prompt_text: "",
       ingroup_permission: isUser ? "PRIVATE" : "READ_ONLY",
       group_ids: [],
     });
@@ -217,18 +240,17 @@ const AidpCreateKbPage: React.FC = () => {
       const graphConfig: AidpGraphConfig | undefined = values.is_exist_graph
         ? {
             domain: values.graph_domain || AIDP_CREATE_DEFAULTS.graph_domain,
-            retrieve_default_topk:
-              values.graph_topk ?? AIDP_CREATE_DEFAULTS.graph_topk,
-            retrieve_subgraph_hop:
-              values.graph_hop ?? AIDP_CREATE_DEFAULTS.graph_hop,
+            retrieve_subgraph_hop: String(
+              values.graph_hop ?? AIDP_CREATE_DEFAULTS.graph_hop
+            ),
             // The UI switch is the inverse of the submitted thinking mode.
-            no_think_mode: !values.graph_thinking,
+            no_think_mode: values.graph_thinking ? "否" : "是",
             prompt_language:
               values.graph_prompt_language ||
               AIDP_CREATE_DEFAULTS.graph_prompt_language,
-            prompt_text: values.graph_prompt_text || DEFAULT_GRAPH_PROMPT,
-            synonym_merge_enable: !!values.graph_synonym_merge,
-            disambiguation_enable: !!values.graph_disambiguation,
+            prompt_text: values.graph_prompt_text,
+            synonym_merge_enable: values.graph_synonym_merge ? "是" : "否",
+            disambiguation_enable: values.graph_disambiguation ? "是" : "否",
             llm_model_name: values.llm_model_name,
           }
         : undefined;
@@ -239,11 +261,9 @@ const AidpCreateKbPage: React.FC = () => {
         chunk_token_num: chunkTokens,
         chunk_overlap_num: overlapTokens,
         chunk_mode: values.chunk_mode ?? AIDP_CREATE_DEFAULTS.chunk_mode,
-        embedding_model:
-          values.embedding_model || AIDP_CREATE_DEFAULTS.embedding_model,
+        embedding_model: values.embedding_model,
         topk: values.topk ?? AIDP_CREATE_DEFAULTS.topk,
         similarity: values.similarity ?? AIDP_CREATE_DEFAULTS.similarity,
-        smartsplit: AIDP_CREATE_DEFAULTS.smartsplit,
         is_personal: AIDP_CREATE_DEFAULTS.is_personal,
         caption_enable: values.caption_enable ? 1 : 0,
         vlm_model: values.caption_enable ? values.vlm_model || "" : "",
@@ -305,6 +325,23 @@ const AidpCreateKbPage: React.FC = () => {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
+        {(modelsQuery.isError || (graphEnabled && templateQuery.isError)) && (
+          <Alert
+            type="error"
+            showIcon
+            title={t("aidpKnowledge.createConfigurationLoadFailed")}
+            action={
+              <Button
+                onClick={() => {
+                  void modelsQuery.refetch();
+                  if (graphEnabled) void templateQuery.refetch();
+                }}
+              >
+                {t("common.retry")}
+              </Button>
+            }
+          />
+        )}
         <AidpCreateKbSections
           form={form}
           t={t}
@@ -312,11 +349,13 @@ const AidpCreateKbPage: React.FC = () => {
           groupOptions={groupOptions}
           ingroupPermission={ingroupPermission}
           llmModelOptions={llmModelOptions}
-          llmModelsLoading={llmModelsLoading}
+          llmModelsLoading={modelsQuery.isLoading}
           vlmModelOptions={vlmModelOptions}
-          vlmModelsLoading={vlmModelsLoading}
+          vlmModelsLoading={modelsQuery.isLoading}
           embeddingModelOptions={embeddingModelOptions}
-          embeddingModelsLoading={embeddingModelsLoading}
+          embeddingModelsLoading={modelsQuery.isLoading}
+          graphTemplate={templateQuery.data}
+          onRestorePrompt={restoreDefaultPrompt}
         />
       </div>
 
@@ -329,6 +368,12 @@ const AidpCreateKbPage: React.FC = () => {
           <Button
             type="primary"
             loading={loading}
+            disabled={
+              modelsQuery.isLoading ||
+              modelsQuery.isError ||
+              (graphEnabled &&
+                (templateQuery.isPending || templateQuery.isError))
+            }
             onClick={() => void handleSubmit()}
           >
             {t("aidpKnowledge.createSubmit")}

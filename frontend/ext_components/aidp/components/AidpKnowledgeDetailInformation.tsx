@@ -7,6 +7,7 @@ import { EditOutlined } from "@ant-design/icons";
 
 import type { AidpKbDetail } from "../services/aidpKnowledgeService";
 import { AIDP_UNKNOWN_VALUE } from "@/lib/aidpKnowledgeDisplay";
+import { graphBoolean } from "@/lib/aidpGraphConfig";
 import AidpGroupNamesDisplay from "./AidpGroupNamesDisplay";
 
 export const AidpDetailField = ({
@@ -90,7 +91,7 @@ const AidpKnowledgeDetailInformation = ({
             {formatDateTime(detail.updated_at)}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
-            {detail.created_by || detail.user_name || AIDP_UNKNOWN_VALUE}
+            {detail.creator_name || AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
         </dl>
       </section>
@@ -145,7 +146,9 @@ const AidpKnowledgeDetailInformation = ({
         ) : (
           <dl className={FIELD_GRID}>
             <AidpDetailField label={t("aidpKnowledge.detailGraphModel")}>
-              {detail.llm_model_name || AIDP_UNKNOWN_VALUE}
+              {displayValue(
+                graphConfig.llm_model_name || detail.llm_model_name
+              )}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphHops")}>
               {displayValue(graphConfig.retrieve_subgraph_hop)}
@@ -153,26 +156,20 @@ const AidpKnowledgeDetailInformation = ({
             <AidpDetailField label={t("aidpKnowledge.detailGraphDomain")}>
               {displayValue(graphConfig.domain)}
             </AidpDetailField>
-            <AidpDetailField label={t("aidpKnowledge.detailGraphTopK")}>
-              {displayValue(graphConfig.retrieve_default_topk)}
-            </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphThinking")}>
               {displayValue(
-                graphConfig.no_think_mode === undefined
+                graphBoolean(graphConfig.no_think_mode) === undefined
                   ? undefined
-                  : !graphConfig.no_think_mode
+                  : !graphBoolean(graphConfig.no_think_mode)
               )}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphSynonym")}>
-              {displayValue(graphConfig.synonym_merge_enable)}
+              {displayValue(graphBoolean(graphConfig.synonym_merge_enable))}
             </AidpDetailField>
             <AidpDetailField
               label={t("aidpKnowledge.detailGraphDisambiguation")}
             >
-              {displayValue(graphConfig.disambiguation_enable)}
-            </AidpDetailField>
-            <AidpDetailField label={t("aidpKnowledge.detailGraphModel")}>
-              {detail.llm_model_name || AIDP_UNKNOWN_VALUE}
+              {displayValue(graphBoolean(graphConfig.disambiguation_enable))}
             </AidpDetailField>
             <AidpDetailField
               label={t("aidpKnowledge.detailGraphPromptLanguage")}

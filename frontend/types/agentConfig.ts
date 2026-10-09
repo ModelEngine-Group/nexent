@@ -302,6 +302,8 @@ export interface AidpKnowledgeBaseItem {
   current_cap?: number | null;
   /** Creator display name from AIDP; absent when the response omits it. */
   user_name?: string | null;
+  /** Nexent account name resolved from the local permission owner. */
+  creator_name?: string | null;
   /**
    * False when the backend could not confirm a real document count, so the
    * overview must not present the value as a trustworthy statistic.

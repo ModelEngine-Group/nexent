@@ -202,6 +202,39 @@ def _bearer() -> dict:
     return {"Authorization": "Bearer fake-token"}
 
 
+def test_detail_creator_comes_from_nexent_owner_in_current_tenant(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    lookup = MagicMock(return_value={"local-owner": "admin@example.test"})
+    monkeypatch.setattr(module.perms, "require_permission", lambda *a, **kw: MagicMock(permission="EDIT"))
+    monkeypatch.setattr(module, "get_aidp_kb_impl", lambda *a: {"kds_name": "资料库", "user_name": "remote-user"})
+    monkeypatch.setattr(module.aidp_permission_db, "get_permission_by_kb_id",
+                        lambda *a: {"owner_user_id": "local-owner", "group_ids": []})
+    monkeypatch.setattr(module, "get_nexent_creator_names", lookup)
+    result = _client().get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()).json()
+    assert result["creator_name"] == "admin@example.test"
+    assert result["created_by"] == "local-owner"
+    lookup.assert_called_once_with(["local-owner"], TENANT_ID)
+
+
+def test_models_without_service_query_requests_all_categories(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    lookup = MagicMock(return_value={"models": [], "service": ""})
+    monkeypatch.setattr(module, "list_aidp_models_impl", lookup)
+    response = _client().get("/aidp-mgmt/models?app=KnowledgeBase", headers=_bearer())
+    assert response.status_code == 200
+    assert lookup.call_args.args[2:] == ("", "KnowledgeBase")
+
+
+def test_graph_template_route_is_authenticated_and_not_a_knowledge_base_id(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    lookup = MagicMock(return_value={"value": [{"param_key": "domain"}]})
+    monkeypatch.setattr(module, "get_aidp_graph_template_impl", lookup)
+    result = _client().get("/aidp-mgmt/knowledge-bases/graph-template?language=english", headers=_bearer())
+    assert result.status_code == 200 and result.json()["value"][0]["param_key"] == "domain"
+    lookup.assert_called_once_with(SERVER_URL, API_KEY, "english")
+    assert _client().get("/aidp-mgmt/knowledge-bases/graph-template").status_code == 401
+
+
 # --- Auth (401) -----------------------------------------------------------
 
 

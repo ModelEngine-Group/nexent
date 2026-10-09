@@ -628,7 +628,7 @@ class TestApplyCreateDefaults:
         assert result["is_personal"] == 0
         assert result["topk"] == 10
         assert result["similarity"] == 0.0
-        assert result["smartsplit"] == 1
+        assert "smartsplit" not in result
         assert result["caption_enable"] == 0
 
     def test_preserves_client_supplied_values(self, aidp_mod):
@@ -688,6 +688,7 @@ class TestApplyCreateDefaults:
                 "graph_config": {
                     "domain": "general",
                     "llm_model_name": "model-graph",
+                    "prompt_text": "Extract entity relationships.",
                 },
             }
         )
@@ -700,7 +701,7 @@ class TestApplyCreateDefaults:
             {
                 "name": "kb-graph",
                 "is_exist_graph": True,
-                "graph_config": {"domain": "general"},
+                "graph_config": {"domain": "general", "prompt_text": "Extract entity relationships."},
                 "llm_model_name": "model-graph",
             }
         )
@@ -2500,7 +2501,7 @@ class TestListAidpModelsImpl:
         assert result["total_count"] == 0
 
     def test_non_dict_response_raises(self, aidp_service_module):
-        mock_resp = _make_success_response(["not-dict"])
+        mock_resp = _make_success_response("not-an-object-or-array")
         _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
 
         with pytest.raises(AppException) as exc_info:

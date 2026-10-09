@@ -553,7 +553,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
       creator: makeColumn("creator", {
         title: t("aidpKnowledge.columnCreator"),
         key: "creator",
-        render: (_value, kb) => renderText(formatAidpCreator(kb.user_name)),
+        render: (_value, kb) => renderText(formatAidpCreator(kb.creator_name)),
       }),
       created_at: makeColumn("created_at", {
         title: t("aidpKnowledge.columnCreatedAt"),

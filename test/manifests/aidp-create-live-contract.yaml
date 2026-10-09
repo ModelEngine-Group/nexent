@@ -1,0 +1,20 @@
+schema_version: '1.0'
+cases:
+- case_id: AKPR-D1-011
+  stage: D1
+  status: implemented
+  contract_hash: sha256:f2872957a3d2f7e49abdaf84e15a0bb4b0ac6bc46b8d5116ac7c58ced7988633
+  implementation_hash: sha256:0074537ecfe51f517f3d749371770d0d8b5e1f7a3b96bef2a13e16f63fc18cbd
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/AidpCreateKbPage.test.tsx
+    selector: AKPR-D1-011
+    profiles:
+    - mock
+  - framework: vitest
+    file: test/automation/d1/AidpCreateKbSections.test.tsx
+    selector: AKPR-D1-011
+    profiles:
+    - mock
+  notes: Run from frontend with vitest.aidp.config.ts. Mock component coverage; live
+    AIDP verification is still required.

@@ -20,7 +20,7 @@ features:
       - rule_id: AKPR-RULE-005
         description: Selecting a knowledge base opens a full-page file view for that base only; returning restores the previous search, page, view mode and column setting, and a delayed response from a previously opened base never overwrites the current one.
       - rule_id: AKPR-RULE-006
-        description: Displayed metadata uses only real response values; unknown values render as an em dash, the personal/enterprise type comes from the AIDP is_private field instead of Nexent group permission, and personal capacity uses only a valid current_cap value in the documented unit.
+        description: Displayed metadata uses real response values, except the creator name resolves the Nexent permission owner in the current tenant; unknown or missing owners render as an em dash. The personal/enterprise type comes from AIDP rather than Nexent group permission. Update time, file count and capacity remain unchanged in this integration fix.
       - rule_id: AKPR-RULE-007
         description: Existing EDIT and READ_ONLY permissions, unavailable resource states and the hidden modification entry points for them are preserved in both overview and file view.
       - rule_id: AKPR-RULE-008
@@ -32,9 +32,9 @@ features:
       - rule_id: AKPR-RULE-011
         description: Chunking submits chunk_mode 0 for smart splitting and 1 for legal clauses, converts the overlap percentage to floor(tokens * percent / 100) integer tokens bounded by 50 percent of the chunk size, and keeps the existing default chunking values.
       - rule_id: AKPR-RULE-012
-        description: The graph model is queried from the llm model category and the multimodal model from the vlm category, with independent fields and query caches; disabling either capability omits its hidden previous configuration instead of resubmitting it.
+        description: One KnowledgeBase ModelService query populates LLM, VLM and embedding controls by model_type; display_name is displayed and model_name is submitted. Graph defaults, choices, constraints and domain prompts come from GraphConfigTemplate, queried by language. Domain or language changes update an unchanged default prompt and preserve manually edited text, with an explicit restore action. Configuration errors block graph-enabled creation. Disabling a capability omits its hidden configuration.
       - rule_id: AKPR-RULE-013
-        description: Graph configuration serializes into the documented graph_config payload with documented defaults, maps the thinking switch inversely onto no_think_mode, keeps the graph Top K independent from the knowledge base Top K, and limits the editable prompt to 2048 UTF-8 bytes.
+        description: Graph configuration is a JSON string containing the seven live template keys plus llm_model_name; hop count is a string, switches are Chinese 是 or 否, language and domain use Chinese values, and prompt length is 1 to 4096 characters. Thinking maps inversely onto no_think_mode. No graph Top K is displayed or submitted; the outer knowledge-base topk remains supported. Tooltips use the recorded AIDP screenshots without renaming existing fields.
       - rule_id: AKPR-RULE-015
         description: The overview guide uses a rounded pale-blue gradient introduction area, a configuration-flow heading and three 156px-high step cards separated by 16px gaps; the knowledge-base cards keep a fixed Nexent icon, a full-width two-line description, and update time, document count and capacity on one aligned footer row, with stable card and right-aligned pagination geometry. Fonts and icons retain Nexent conventions.
       - rule_id: AKPR-RULE-016

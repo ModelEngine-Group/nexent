@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from http import HTTPStatus
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
@@ -46,6 +46,7 @@ from ext_components.aidp.services.aidp_access_service import (
     invalidate_aidp_kb_detail_cache,
     resolve_current_aidp_access,
 )
+from ext_components.aidp.services.aidp_creator_service import get_nexent_creator_names
 from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
 from ext_components.aidp.services.aidp_permission_service import (
     EDIT,
@@ -58,6 +59,7 @@ from ext_components.aidp.services.aidp_service import (
     count_aidp_docs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
+    get_aidp_graph_template_impl,
     get_aidp_kb_impl,
     list_aidp_channels_impl,
     list_aidp_doc_history_impl,
@@ -838,6 +840,20 @@ async def _load_ingested_documents(
 # ---------------------------------------------------------------------------
 
 
+@aidp_mgmt_router.get("/knowledge-bases/graph-template")
+async def get_graph_template(
+    request: Request,
+    language: Literal["chinese", "english"] = "chinese",
+) -> JSONResponse:
+    await _auth(request)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-graph-template", get_aidp_graph_template_impl, server_url, api_key, language,
+        lane="control-io", owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
 @aidp_mgmt_router.get("/knowledge-bases")
 async def list_knowledge_bases(
     request: Request,
@@ -883,6 +899,11 @@ async def list_knowledge_bases(
 
     start = (page - 1) * page_size
     page_rows = rows[start:start + page_size]
+    creator_names = await run_blocking(
+        "aidp-creator-names", get_nexent_creator_names,
+        [row.get("owner_user_id") for row in page_rows], tenant_id,
+        lane="control-io", owner="config",
+    )
 
     detail_semaphore = asyncio.Semaphore(5)
 
@@ -955,6 +976,7 @@ async def list_knowledge_bases(
             "ingroup_permission": row.get("ingroup_permission"),
             "group_ids": row.get("group_ids"),
             "created_by": row.get("owner_user_id"),
+            "creator_name": creator_names.get(row.get("owner_user_id")),
             "resource_status": resource_status,
             # --- Optional display metadata (AIDP knowledge base pages) ---
             # These stay absent when the upstream response does not carry
@@ -1159,6 +1181,11 @@ async def get_knowledge_base(
     detail["ingroup_permission"] = permission_record.get("ingroup_permission")
     detail["group_ids"] = permission_record.get("group_ids") or []
     detail["created_by"] = permission_record.get("owner_user_id")
+    creator_names = await run_blocking(
+        "aidp-creator-names", get_nexent_creator_names,
+        [detail["created_by"]], tenant_id, lane="control-io", owner="config",
+    )
+    detail["creator_name"] = creator_names.get(detail["created_by"])
     return JSONResponse(status_code=HTTPStatus.OK, content=detail)
 
 
@@ -1683,11 +1710,14 @@ async def set_permission(
 @aidp_mgmt_router.get("/models")
 async def list_models(
     request: Request,
-    service: Annotated[str, Query(description="Model service category (default: llm)")] = "llm",
+    service: Annotated[str, Query(description="Optional model category; omitted returns all categories")] = "",
     app: Annotated[str, Query(description="Application filter (default: KnowledgeBase)")] = "KnowledgeBase",
 ) -> JSONResponse:
     """List available models from AIDP ModelService. Auth required; no per-KB permission."""
     await _auth(request)
     server_url, api_key = _credentials()
-    result = list_aidp_models_impl(server_url, api_key, service=service, app=app)
+    result = await run_blocking(
+        "aidp-models", list_aidp_models_impl, server_url, api_key, service, app,
+        lane="control-io", owner="config",
+    )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)

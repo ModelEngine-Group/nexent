@@ -504,11 +504,10 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
     },
     {
       title: t("aidpKnowledge.detailImportMode"),
-      dataIndex: "import_mode",
       key: "import_mode",
       width: 120,
       ellipsis: true,
-      render: (value?: string) => value || UNKNOWN,
+      render: () => t("aidpKnowledge.detailLocalImport"),
     },
     {
       title: t("aidpKnowledge.detailFirstUploadTime"),
@@ -785,7 +784,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
           <div className="flex min-w-0 items-center gap-3">
             <UserOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
             <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
-              {detail.created_by || detail.user_name || UNKNOWN}
+              {detail.creator_name || UNKNOWN}
             </AidpDetailField>
           </div>
         </dl>

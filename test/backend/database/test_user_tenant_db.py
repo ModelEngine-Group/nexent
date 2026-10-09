@@ -175,6 +175,19 @@ def test_get_user_email_map_returns_only_non_empty_emails(monkeypatch, mock_sess
     }
     query.filter.assert_called_once()
 
+def test_get_user_email_map_applies_optional_tenant_filter(monkeypatch, mock_session):
+    session, query = mock_session
+    filtered = query.filter.return_value
+    scoped = filtered.filter.return_value
+    scoped.all.return_value = [("user-1", "creator@example.com")]
+    context = MagicMock()
+    context.__enter__.return_value = session
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: context)
+    assert get_user_email_map(["user-1"], tenant_id="tenant-a") == {"user-1": "creator@example.com"}
+    filtered.filter.assert_called_once()
+    scoped.all.assert_called_once()
+
+
 def test_get_user_tenant_by_user_id_not_found(monkeypatch, mock_session):
     """Test retrieval of user tenant relationship when record does not exist"""
     session, query = mock_session

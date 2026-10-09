@@ -9,6 +9,8 @@ import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import type { AidpKnowledgeBaseListResponse } from "@/types/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
+import { parseAidpGraphTemplate } from "@/lib/aidpGraphConfig";
+import type { AidpGraphTemplate } from "@/types/aidpGraph";
 import { handleSessionExpired } from "@/lib/session";
 
 // ---------- Additional types for AIDP management ----------
@@ -48,6 +50,7 @@ export interface AidpKbDetail {
   is_exist_graph?: boolean | null;
   graph_config?: string | Record<string, unknown> | null;
   created_by?: string | null;
+  creator_name?: string | null;
 }
 
 export interface AidpDocumentItem {
@@ -172,6 +175,8 @@ const normalizeAidpOperationResponse = <TSuccess, TFailure>(
 export interface AidpModelItem {
   /** Display / identifier used for the model (sent to AIDP as ``vlm_model``). */
   model_name: string;
+  display_name?: string;
+  model_type?: string;
   /** "llm", "embedding", etc. — informational only on the frontend. */
   service?: string;
   /**
@@ -208,21 +213,19 @@ export interface AidpGraphConfig {
   /** Optional graph extraction LLM model; nested in AIDP graph_config. */
   llm_model_name?: string;
   /** Extraction domain. */
-  domain?: "medical" | "finance" | "general";
-  /** Graph candidate Top K, independent from the knowledge base Top K. */
-  retrieve_default_topk?: number;
+  domain?: "医疗" | "金融" | "常规" | "法律法规";
   /** Sub-graph expansion hop count. */
-  retrieve_subgraph_hop?: number;
+  retrieve_subgraph_hop?: string;
   /** Inverse of the "enable model thinking" switch. */
-  no_think_mode?: boolean;
+  no_think_mode?: "是" | "否";
   /** Extraction prompt language. */
-  prompt_language?: "chinese" | "english";
-  /** Editable extraction prompt, limited to 2048 UTF-8 bytes. */
+  prompt_language?: "中文" | "英文";
+  /** Editable extraction prompt, limited to 4096 characters. */
   prompt_text?: string;
   /** Whether synonym merging is enabled. */
-  synonym_merge_enable?: boolean;
+  synonym_merge_enable?: "是" | "否";
   /** Whether semantic disambiguation is enabled. */
-  disambiguation_enable?: boolean;
+  disambiguation_enable?: "是" | "否";
 }
 
 export interface AidpCreateKbPayload {
@@ -626,6 +629,16 @@ class AidpKnowledgeService {
             ? result.models.length
             : 0,
     };
+  }
+
+  async graphTemplate(
+    language: "chinese" | "english"
+  ): Promise<AidpGraphTemplate> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.graphTemplate, { language }),
+      { method: "GET", headers: getAuthHeaders() }
+    );
+    return parseAidpGraphTemplate(await response.json());
   }
 
   /**

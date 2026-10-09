@@ -382,71 +382,71 @@ cases:
     priority: P0
     status: active
     automation: automated
-    objective: Verify graph configuration serialization, the inverse thinking mapping, the independent Top K values and the prompt byte limit.
+    objective: Verify live graph configuration serialization, the inverse Chinese thinking mapping, absence of graph Top K and the 1 to 4096 character prompt limit.
     preconditions:
-      - Prepare graph payloads with the switch on and off, both languages and prompt lengths around the byte limit.
-    test_data: {profile: mock, domains: [general, medical], prompt_bytes: [2048, 2049], languages: [chinese, english]}
+      - Prepare graph payloads with the switch on and off, both languages and Unicode prompt lengths around the character limit.
+    test_data: {profile: mock, domains: [常规, 医疗, 法律法规], prompt_characters: [0, 1, 4096, 4097], languages: [中文, 英文]}
     steps:
       - order: 1
         action: Submit a graph configuration with the thinking switch enabled.
-        expected: The thinking mode field is false and the graph keys use their documented names.
+        expected: The no_think_mode field is the Chinese string 否 and only the seven template keys plus llm_model_name are forwarded.
       - order: 2
-        action: Submit a knowledge base Top K together with a graph Top K.
-        expected: The two values are serialized independently without overwriting each other.
+        action: Submit a knowledge base Top K with an obsolete graph Top K key.
+        expected: The outer topk is preserved and the obsolete graph key is not forwarded.
       - order: 3
-        action: Submit prompts at and beyond the byte boundary together with a disabled graph.
+        action: Submit prompts at and beyond the character boundary together with a disabled graph.
         expected: The limit passes at the boundary, longer input is rejected and a disabled graph omits its configuration entirely.
     expected_results:
       - The thinking switch maps inversely onto the thinking mode field.
-      - Both Top K values survive independently.
-      - The prompt limit is enforced in UTF-8 bytes.
+      - Only the outer knowledge-base topk is submitted.
+      - The prompt limit is enforced as 1 to 4096 Unicode characters.
     forbidden_side_effects:
       - No hidden previous graph configuration is submitted when the graph is off.
-      - No graph Top K overwrites the knowledge base Top K.
+      - No graph Top K key reaches AIDP.
       - No invented JSON key names.
     unit_boundary: Graph configuration validation and serialization
     inputs:
       - graph switch
       - domain
-      - graph top k
+      - obsolete graph top k
       - hop count
       - thinking switch
       - prompt language
       - prompt text
     assertions:
-      - The thinking mode field is false when thinking is enabled.
-      - Graph and knowledge base Top K stay independent.
-      - Prompt length is measured in UTF-8 bytes.
+      - The thinking mode field is 否 when thinking is enabled.
+      - Only outer knowledge-base topk survives.
+      - Prompt length is measured in Unicode characters.
       - Disabled graph omits its configuration.
   - case_id: AKPR-D1-011
     feature_id: AKPR-001
     requirement_ids: [AKPR-001]
     business_rule_ids: [AKPR-RULE-012]
-    title: Graph and multimodal models are queried from separate categories with independent caches
+    title: One model query populates three categories and graph templates preserve edited prompts
     type: FE-COMP
     priority: P0
     status: active
     automation: automated
-    objective: Verify the model category split, the independent query caches and the omission of hidden model values.
+    objective: Verify one model query, category separation by model_type, label and identifier mapping, hidden value omission and graph template interaction.
     preconditions:
-      - Render the creation form with stubbed model queries per category and both capability switches toggled.
+      - Render the creation form with one model response, graph templates in both languages and both capability switches toggled.
     test_data: {profile: mock, categories: [llm, vlm, embedding]}
     steps:
       - order: 1
         action: Enable the graph section.
-        expected: The graph model query uses the llm category and fills the graph model field.
+        expected: One all-category query fills separate embedding, llm and vlm controls by model_type; graph activation reads the template endpoint.
       - order: 2
         action: Enable multimodal captioning.
-        expected: The multimodal model query uses the vlm category and fills the multimodal field independently.
+        expected: The multimodal field uses the vlm entries from the existing model result without another request.
       - order: 3
         action: Disable each capability after a selection.
         expected: The hidden model value is absent from the submitted payload.
     expected_results:
-      - Each model field is populated from its own category.
-      - Caches and selections never mix.
+      - Each field is populated from its model_type, displays display_name and submits model_name.
+      - A shared model cache never mixes category selections. Domain and language changes preserve manual prompts, and restore uses the current template. Template failures block graph-enabled creation.
       - Disabled capabilities submit no model value.
     forbidden_side_effects:
-      - No llm result used for the multimodal field.
+      - No llm result used for the multimodal or embedding field.
       - No hidden previous model resubmitted.
       - No unverified model name silently defaulted.
     unit_boundary: Creation form model queries, caches and hidden value handling
@@ -456,8 +456,8 @@ cases:
       - selected models
       - query cache keys
     assertions:
-      - Graph query uses llm and multimodal uses vlm.
-      - Caches are keyed independently.
+      - One query returns all categories and controls filter by model_type.
+      - Model data uses one shared query cache; templates are cached by language.
       - Disabled capability clears its submitted model.
   - case_id: AKPR-D1-012
     feature_id: AKPR-001
