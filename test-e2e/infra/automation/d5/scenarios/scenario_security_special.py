@@ -311,7 +311,7 @@ async def execute_d5_security_special(case, tenant_a_user, tenant_b_user, tenant
         # model while creating the KB; the cross-tenant caller stays unprivileged.
         await _idor_matrix(tenant_a_admin, tenant_b_user, tenant_b_admin)
     elif case_id == "SEC-02":
-        await _file_acl(tenant_a_user, tenant_b_user)
+        await _file_acl(tenant_a_user, tenant_b_user, tenant_a_admin)
     elif case_id == "SEC-03":
         await _share_isolation()
     elif case_id == "SEC-04":

@@ -54,7 +54,7 @@ case:
       及 user_id/agent_id/run_id；返回 event_id 后按 GET /v1/event/{event_id}/ 轮询直至 SUCCEEDED 或 FAILED 终态并解析。
     expected: 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
   - order: 8
-    action: 将测试桩分别返回 401/403/429/5xx，重复 test-search 与 test-ingest，断言 HTTP 响应为 400 且 detail 说明失败，last_error_code 被写为对应错误码（unauthorized/forbidden/rate_limited/provider_error），成功后再调用将
+    action: 将测试桩分别返回 401/403/429/5xx，重复 test-search 与 test-ingest；test-search 返回 HTTP 400 且 message 说明失败，test-ingest 返回 HTTP 200 且 status=error、accepted_count=0、rejected_count=1。last_error_code 被写为对应错误码（unauthorized/forbidden/rate_limited/provider_error），成功后再调用将
       last_error_code 清空；错误响应不泄露上游明文 body。
     expected: 日志、Trace、报告中不出现明文 API Key/Token；本地测试桩 wire log 证明协议请求、Header/参数真实到达而非由 UI 状态推断。
   - order: 9

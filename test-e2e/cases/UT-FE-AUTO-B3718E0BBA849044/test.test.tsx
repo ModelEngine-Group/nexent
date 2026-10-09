@@ -4,7 +4,7 @@
  */
 import type { ReactNode } from "react";
 import type { TFunction } from "i18next";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -185,9 +185,18 @@ const baseService: McpServiceItem = {
   permission: "EDIT",
 };
 
-afterEach(() => cleanup());
+afterEach(async () => {
+  await act(async () => {
+    cleanup();
+    await vi.runOnlyPendingTimersAsync();
+  });
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
 
 beforeEach(() => {
+  // Ant Design delays state updates; drain them before JSDOM is torn down.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.clearAllMocks();
   vi.mocked(tagManagementApi.listLibraries).mockResolvedValue([defaultLibrary]);
   vi.mocked(tagManagementApi.listDefinitions).mockResolvedValue(definitions);

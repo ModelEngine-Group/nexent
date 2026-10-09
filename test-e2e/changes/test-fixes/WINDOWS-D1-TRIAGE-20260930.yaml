@@ -27,6 +27,9 @@ change:
     group/invitation form, Memory version/configuration and Cookie-auth tests.
     Synchronize their steps/assertions and update the obsolete refresh contract
     against e98b84b2b. Component results do not imply full browser integration.
+    On 2026-10-09, the user explicitly requested deletion of retired Case
+    UT-SDK-AUTO-40B60A7E416881CF. Its earlier retirement remains documented here
+    and in historical reports; its live affected_cases reference is removed.
   affected_features:
     existing: []
     added: []
@@ -36,4 +39,4 @@ change:
     existing: []
     added: []
     modified: [UT-BE-015, UT-BE-AUTO-1B0108BB27372242, UT-BE-AUTO-BCADEBF043C5DE3C, UT-FE-002, UT-FE-005, UT-FE-006, UT-FE-011, UT-FE-033, UT-FE-037, UT-FE-AUTO-02FA904A1C3AD386, UT-FE-AUTO-0330CCC385F313B2, UT-FE-AUTO-0440200269363B14, UT-FE-AUTO-3D13A0DB24D58E7C, UT-FE-AUTO-4DE990B773C33378, UT-FE-AUTO-4971F03331327F7A, UT-FE-AUTO-583566BA85F098F1, UT-FE-AUTO-A2A0CB86E6D3E2F3, UT-FE-AUTO-A60EF4DAA250E60E, UT-FE-AUTO-BECEA5CE0869F353, UT-FE-AUTO-CC79D2BB8D78E346, UT-SDK-016, UT-SDK-AUTO-0B19AA67FBDC7E1E, UT-SDK-AUTO-E6DDFB4661E0D8B4]
-    retired: [UT-SDK-AUTO-40B60A7E416881CF]
+    retired: []

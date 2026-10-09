@@ -16,7 +16,7 @@ case:
   - 契约/静态检查环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 被测契约源文件可读取：frontend/components/agent/CreateAgentModal.tsx、frontend/services/agentConfigService.ts、frontend/app/[locale]/agent-space/components/MineAgentsView.tsx。
+  - 被测契约源文件可读取：frontend/components/agent/CreateAgentModal.tsx、frontend/services/agentConfigService.ts、frontend/app/[locale]/agent-space/my-agent.tsx。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   steps:
@@ -36,8 +36,8 @@ case:
       行）：创建请求经 POST API_ENDPOINTS.agent.update，应答 data 使用 agent_id。
     expected: 创建成功后应答使用 data.agent_id，前端与后端 create_agent_info 收敛契约一致。
   - order: 5
-    action: 校验消费方 frontend/app/[locale]/agent-space/components/MineAgentsView.tsx 的 handleAgentCreated（146-153 行）：断言其仅解构 {
-      agentId }，未引用 name 字段，创建成功后按 agentId 跳转 agents 路由。
+    action: 校验消费方 frontend/app/[locale]/agent-space/my-agent.tsx 的 handleAgentCreated：断言其仅解构 {
+      agentId }，未引用 name 字段，创建成功后按 agentId 跳转 agents/{agentId} 编辑器路由，不依赖旧版查询参数。
     expected: 创建成功后应答使用 data.agent_id，前端与后端 create_agent_info 收敛契约一致。
   - order: 6
     action: 汇总契约结论：创建 Agent 仅需 display_name（name 由后端派生），CreatedAgentResult 不含 name，前后端无残留 name 引用。
@@ -62,8 +62,8 @@ case:
     - 校验表单仅暴露 displayName 单一输入项（81-116 行），其校验规则基于 isValidAgentDisplayName 与 display_name 冲突校验（frontend/hooks/agent/useSaveGuard.ts）。
     - 校验服务层 frontend/services/agentConfigService.ts 的 updateAgentInfo（497-523 行）与 UpdateAgentInfoPayload 类型（456-495 行）：创建请求经
       POST API_ENDPOINTS.agent.update，应答 data 使用 agent_id。
-    - 校验消费方 frontend/app/[locale]/agent-space/components/MineAgentsView.tsx 的 handleAgentCreated（146-153 行）：断言其仅解构 { agentId
-      }，未引用 name 字段，创建成功后按 agentId 跳转 agents 路由。
+    - 校验消费方 frontend/app/[locale]/agent-space/my-agent.tsx 的 handleAgentCreated：断言其仅解构 { agentId
+      }，未引用 name 字段，创建成功后按 agentId 跳转 agents/{agentId} 编辑器路由，不依赖旧版查询参数。
     - 汇总契约结论：创建 Agent 仅需 display_name（name 由后端派生），CreatedAgentResult 不含 name，前后端无残留 name 引用。
     response_expectations:
     - 创建 Agent 请求负载仅含 display_name，不含 name 字段。

@@ -36,31 +36,6 @@ async def test_tag_library_governance_idor_and_assignment_fail_closed(
     responses = []
     unprivileged = (tenant_a_dev, tenant_a_user, tenant_b_user)
 
-    governance_calls = [
-        ('GET', '/tag-libraries'),
-        ('GET', '/tag-libraries/1/definitions'),
-        ('POST', '/tag-libraries/1/definitions', {'definition_name': 'sec_probe', 'selection_mode': 'multi_select', 'initial_values': ['probe_v1']}),
-        ('PATCH', '/tag-libraries/1/definitions/1', {'definition_name': 'sec_probe'}),
-        ('DELETE', '/tag-libraries/1/definitions/1'),
-        ('POST', '/tag-libraries/1/definitions/1/values', {'display_value': 'probe_v1'}),
-        ('PATCH', '/tag-libraries/1/definitions/1/values/1', {'display_value': 'probe_v1'}),
-        ('GET', '/tag-libraries/1/definitions/1/usage'),
-    ]
-
-    for identity in unprivileged:
-        async with client('config', token=identity.access_token) as api:
-            for item in governance_calls:
-                method = item[0]
-                path = item[1]
-                payload = item[2] if len(item) > 2 else None
-                resp = await _call(api, responses, method, path, payload)
-                assert resp.status_code == 403, (
-                    f'{identity.id} {method} {path} expected 403, got {resp.status_code}: {resp.text!r}'
-                )
-                assert FORBIDDEN_DETAIL in resp.text
-                body = resp.json()
-                assert set(body.keys()) <= {'detail', 'message'}, f'403 body leaked tag data: {body}'
-
     async with client('config', token=tenant_a_admin.access_token) as api:
         resp = await _call(api, responses, 'GET', '/tag-libraries')
         assert resp.status_code == 200, f'tenant_a_admin list libraries: {resp.status_code}'
@@ -117,6 +92,38 @@ async def test_tag_library_governance_idor_and_assignment_fail_closed(
         assert tb_value_ids, 'tb definition created without values'
         tb_value_id = tb_value_ids[0]
         tb_display = tb_def.get('values', [{}])[0].get('display_value', '')
+
+        for identity in unprivileged:
+            same_tenant = identity.tenant_id == tenant_a_admin.tenant_id
+            bucket_id = ta_bucket if same_tenant else tb_bucket
+            definition_id = ta_def_id if same_tenant else tb_def_id
+            value_id = ta_value_ids[0] if same_tenant else tb_value_ids[0]
+            own_libraries = buckets if same_tenant else tb_buckets
+            base = f'/tag-libraries/{bucket_id}/definitions/{definition_id}'
+            async with client('config', token=identity.access_token) as api:
+                # Authenticated roles may read their own tenant's tag metadata.
+                readable = await _call(api, responses, 'GET', '/tag-libraries')
+                assert readable.status_code == 200
+                assert {row['bucket_id'] for row in readable.json()} == {
+                    row['bucket_id'] for row in own_libraries}
+                readable = await _call(api, responses, 'GET', f'/tag-libraries/{bucket_id}/definitions')
+                assert readable.status_code == 200
+                assert any(row['definition_id'] == definition_id for row in readable.json())
+                # All writes and usage reports remain MANAGE-only. Attack only
+                # resources created by this test, never a fixed database ID.
+                governance_calls = [
+                    ('POST', f'/tag-libraries/{bucket_id}/definitions', {'definition_name': 'sec_probe', 'selection_mode': 'multi_select', 'initial_values': ['probe_v1']}),
+                    ('PATCH', base, {'definition_name': 'sec_probe'}),
+                    ('DELETE', base, None),
+                    ('POST', f'{base}/values', {'display_value': 'probe_v1'}),
+                    ('PATCH', f'{base}/values/{value_id}', {'display_value': 'probe_v1'}),
+                    ('GET', f'{base}/usage', None),
+                ]
+                for method, path, payload in governance_calls:
+                    resp = await _call(api, responses, method, path, payload)
+                    assert resp.status_code == 403, f'{identity.id} {method} {path} expected 403, got {resp.status_code}'
+                    assert FORBIDDEN_DETAIL in resp.text
+                    assert set(resp.json()) <= {'detail', 'message'}, '403 body leaked tag data'
 
         async with client('config', token=tenant_a_admin.access_token) as api:
             resp = await _call(api, responses, 'GET', f'/tag-libraries/{tb_bucket}/definitions')

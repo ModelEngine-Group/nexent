@@ -37,7 +37,12 @@ def _valid_payload() -> dict:
 def test_post_tasks_chain_enqueue_contract(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from consts import const
 
+    # This route contract stubs enqueue; it must never require a live broker.
+    # Patch canonical configuration before importing the Celery task package.
+    monkeypatch.setattr(const, 'REDIS_URL', 'memory://')
+    monkeypatch.setattr(const, 'REDIS_BACKEND_URL', 'cache+memory://')
     from apps.data_process_app import router
 
     app = FastAPI()

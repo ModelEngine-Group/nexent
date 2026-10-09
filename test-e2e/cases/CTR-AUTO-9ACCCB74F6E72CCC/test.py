@@ -343,7 +343,8 @@ async def test_memory_provider_wire_contract(tenant_a_admin):
                         stub.force_status = status_code
                         r = await api.post(f'/memory/providers/{provider_id}/test-search', json={'query': 'x', 'top_k': 2})
                         assert_status(r, 400)
-                        detail = str(r.json().get('detail') or '')
+                        # The product-wide HTTPException handler uses message.
+                        detail = str(r.json().get('message') or '')
                         assert 'failed' in detail.lower()
                         assert key not in detail
                         g = await api.get(f'/memory/providers/{provider_id}')

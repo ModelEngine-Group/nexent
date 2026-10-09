@@ -60,8 +60,11 @@ def _make_context_budget_snapshot(**overrides):
 
 def _patch_dependencies(monkeypatch, *, input_budget, capacity_monitoring, resolved_capacity_snapshot, context_budget_snapshot):
     from services import nl2agent_service
+    from consts import const
 
     monkeypatch.setattr(nl2agent_service, 'LOCAL_MCP_SERVER', 'http://localhost:9999')
+    # Runtime collaborators read the canonical constant, not this service alias.
+    monkeypatch.setattr(const, 'LOCAL_MCP_SERVER', 'http://localhost:9999')
     monkeypatch.setattr(nl2agent_service, 'get_current_user_id', lambda authorization: ('test-user', 'tenant-a'))
     monkeypatch.setattr(nl2agent_service, 'build_authorized_context_input', lambda run_info: None)
 

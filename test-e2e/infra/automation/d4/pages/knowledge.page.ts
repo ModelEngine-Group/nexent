@@ -14,7 +14,7 @@ export class KnowledgePage {
     await this.page.goto(appPath("/knowledges"), { waitUntil: "domcontentloaded" });
     if (requireConfiguredEmbedding) {
       await expect(this.page.getByRole("heading", { name: "知识库", exact: true })).toBeVisible();
-      await expect(this.page.getByRole("button", { name: /创\s*建/ })).toBeVisible();
+      await expect(this.createButton()).toBeVisible();
       return;
     }
     await expect(this.page.getByRole("heading", { name: "知识库", exact: true })
@@ -22,7 +22,7 @@ export class KnowledgePage {
   }
 
   async beginCreate(name: string, embeddingDisplayName: string): Promise<void> {
-    await this.page.getByRole("button", { name: /创\s*建/ }).click();
+    await this.createButton().click();
     const nameInput = this.page.getByPlaceholder("例如：产品知识中心", { exact: true });
     await expect(nameInput).toBeVisible();
     await nameInput.fill(name);
@@ -33,6 +33,12 @@ export class KnowledgePage {
     const option = this.page.getByText(embeddingDisplayName, { exact: true }).last();
     await expect(option).toBeVisible();
     await option.click();
+  }
+
+  private createButton(): Locator {
+    // Knowledge cards also have role=button and include a creation date.
+    // Only the native toolbar action can start the creation journey.
+    return this.page.locator("button").filter({ hasText: /^\s*创\s*建\s*$/ });
   }
 
   private uploadInput(): Locator {

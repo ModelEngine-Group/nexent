@@ -11,7 +11,7 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: 验证 /tag-libraries 治理接口（定义/值 CRUD、启停、排序、置顶、usage）仅 SU/ADMIN/SPEED/ASSET_OWNER 可访问，DEV/USER 越权返回 403；资源分配与读取接口（get/replace/bulk/filter、文档
+  objective: 登录用户可读取本租户标签库及定义列表；定义/值写操作、启停、排序、置顶和 usage 要求 TAG_LIBRARY/MANAGE，DEV/USER 越权返回 403。所有 ID 从本用例创建的资源或配置身份获取；资源分配与读取接口（get/replace/bulk/filter、文档
     batch-status/projection-status、flat-tags 兼容投影）通过 tag_resource_adapters 按调用者现有 read/edit 权限 fail-closed 解析六类资源，跨租户、不存在与无权限均返回
     404 且不与“不存在”区分；文档 provider（local/aidp）权限校验正确，日志不泄露密钥。
   preconditions:
@@ -32,11 +32,9 @@ case:
   - order: 1
     action: 前置：以 tenant-a 与 tenant-b 两租户隔离数据初始化标签库（桶/定义/值/资源分配），固定各账号到租户的角色映射；DEV/USER 无 TAG_LIBRARY/MANAGE，SU/ADMIN/SPEED/ASSET_OWNER
       有。
-    expected: DEV/USER 调用任一治理端点均返回 HTTP 403，且响应不带任何标签定义/值/usage 数据。
+    expected: DEV/USER 可读取本租户标签库及定义列表；写操作和 usage 返回 HTTP 403，不泄露其他租户数据。
   - order: 2
-    action: 治理越权：以 DEV 或 USER 账号携带 Authorization 调用 GET /tag-libraries、GET/POST/PATCH/DELETE /tag-libraries/{bucket_id}/definitions*
-      及 values* 治理端点，断言 _require_manage_context（backend/apps/tag_management_app.py:46-52）返回 403 且 detail 为 "Tag library management
-      permission is required"；以 SU/ADMIN/SPEED/ASSET_OWNER 调用同一端点断言非 403。
+    action: 区分读权限和治理权限：DEV/USER 对 GET /tag-libraries 和 GET /tag-libraries/{bucket_id}/definitions 返回 200，结果仅包含本租户。对本用例创建的定义/值执行 POST/PATCH/DELETE 以及 usage，断言 403 且 message 为 "Tag library management permission is required"；管理角色正常操作仍成功。禁止使用固定 bucket_id/definition_id/value_id。
     expected: tenant-a 使用 tenant-b 的 bucket_id/definition_id/value_id 均返回 404，响应体不含 tenant-b 任何标签内容。
   - order: 3
     action: 治理跨租户 IDOR：以 tenant-a 的 ADMIN 账号使用 tenant-b 的 bucket_id 调用 GET /tag-libraries/{bucket_id}/definitions，以及使用 tenant-b
@@ -63,7 +61,7 @@ case:
     action: 密钥泄露：遍历上述全部越权与合法请求后抓取服务日志，断言不出现 AIDP_API_KEY、Token、用户密码等明文密钥，密钥仅在内部调用使用，不出现在响应与日志。
     expected: 全部请求与日志中不出现明文 API Key/Token/Password/模型密钥。
   expected_results:
-  - DEV/USER 调用任一治理端点均返回 HTTP 403，且响应不带任何标签定义/值/usage 数据。
+  - DEV/USER 可读取本租户标签库及定义列表；写操作和 usage 返回 HTTP 403，不泄露其他租户数据。
   - tenant-a 使用 tenant-b 的 bucket_id/definition_id/value_id 均返回 404，响应体不含 tenant-b 任何标签内容。
   - 对无编辑权限资源 PUT replace 返回 404；对无读取权限资源 GET 返回 404；与资源不存在响应一致，无法据此枚举他租户资源。
   - 跨租户六类资源 get/replace/bulk/filter 与文档 batch-status/projection-status/flat-tags 均 fail-closed 返回 403/404，无 2xx 越权泄露。
@@ -86,21 +84,21 @@ case:
     - 两个独立测试租户 tenant-a/tenant-b，各自经 provision_unified_tag_management 预置 default_resource/knowledge_content 桶、六类资源绑定及 keywords/agent_category
     定义与值，并各有可标识的 agent/skill/tool/mcp_service/knowledge_base/knowledge_document 资源。'
   metrics:
-  - DEV/USER 调用任一治理端点均返回 HTTP 403，且响应不带任何标签定义/值/usage 数据。
+  - DEV/USER 可读取本租户标签库及定义列表；写操作和 usage 返回 HTTP 403，不泄露其他租户数据。
   - tenant-a 使用 tenant-b 的 bucket_id/definition_id/value_id 均返回 404，响应体不含 tenant-b 任何标签内容。
   - 对无编辑权限资源 PUT replace 返回 404；对无读取权限资源 GET 返回 404；与资源不存在响应一致，无法据此枚举他租户资源。
   - 跨租户六类资源 get/replace/bulk/filter 与文档 batch-status/projection-status/flat-tags 均 fail-closed 返回 403/404，无 2xx 越权泄露。
   - 合法角色与合法租户内的正常定义/值/分配操作仍成功，权限矩阵只收窄不放宽，无回归。
   - 全部请求与日志中不出现明文 API Key/Token/Password/模型密钥。
   thresholds:
-  - DEV/USER 调用任一治理端点均返回 HTTP 403，且响应不带任何标签定义/值/usage 数据。
+  - DEV/USER 可读取本租户标签库及定义列表；写操作和 usage 返回 HTTP 403，不泄露其他租户数据。
   - tenant-a 使用 tenant-b 的 bucket_id/definition_id/value_id 均返回 404，响应体不含 tenant-b 任何标签内容。
   - 对无编辑权限资源 PUT replace 返回 404；对无读取权限资源 GET 返回 404；与资源不存在响应一致，无法据此枚举他租户资源。
   - 跨租户六类资源 get/replace/bulk/filter 与文档 batch-status/projection-status/flat-tags 均 fail-closed 返回 403/404，无 2xx 越权泄露。
   - 合法角色与合法租户内的正常定义/值/分配操作仍成功，权限矩阵只收窄不放宽，无回归。
   - 全部请求与日志中不出现明文 API Key/Token/Password/模型密钥。
   recovery_expectations:
-  - DEV/USER 调用任一治理端点均返回 HTTP 403，且响应不带任何标签定义/值/usage 数据。
+  - DEV/USER 可读取本租户标签库及定义列表；写操作和 usage 返回 HTTP 403，不泄露其他租户数据。
   - tenant-a 使用 tenant-b 的 bucket_id/definition_id/value_id 均返回 404，响应体不含 tenant-b 任何标签内容。
   - 对无编辑权限资源 PUT replace 返回 404；对无读取权限资源 GET 返回 404；与资源不存在响应一致，无法据此枚举他租户资源。
   - 跨租户六类资源 get/replace/bulk/filter 与文档 batch-status/projection-status/flat-tags 均 fail-closed 返回 403/404，无 2xx 越权泄露。

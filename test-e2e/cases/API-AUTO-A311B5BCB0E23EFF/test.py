@@ -135,6 +135,7 @@ def test_create_agent_single_display_name_contract() -> None:
 
     body_start = view.index("{", sig_end)
     handle_block = _brace_block(view, body_start)
-    assert "agents?agent_id=${agentId}" in handle_block
+    # The editor is now a dynamic route; the callback still uses only agentId.
+    assert "agents/${agentId}" in handle_block
     assert "displayName" not in handle_block
     assert "result.data" not in handle_block

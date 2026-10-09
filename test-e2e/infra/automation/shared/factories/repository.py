@@ -1,13 +1,19 @@
 """Fresh Agent listing for import consumers, never borrow marketplace rows."""
-from shared.factories.agent import _draft_agent
+from shared.factories.agent import _draft_agent, _llm_id
 from shared.asset_registry import register_asset
 from shared.http import assert_status,client
 
 
 async def prepare_agent_listing(author,reviewer):
     owner='LOCAL-REPOSITORY-PREP'
+    if author.tenant_id != reviewer.tenant_id:
+        raise ValueError('Agent listing author and reviewer must belong to the same tenant')
+    # Model health requires model:update. Probe with the existing tenant
+    # administrator, but retain the developer for every author operation.
+    model_id = await _llm_id(reviewer)
     async with _draft_agent(author,name_prefix='local-market',retain_for_batch=True,
-                            owner_case_id=owner,registry_role='market_source',cleanup_identity=author.id) as (agent,_):
+                            owner_case_id=owner,registry_role='market_source',cleanup_identity=author.id,
+                            model_ids=[model_id]) as (agent,_):
         async with client('config',token=author.access_token) as api:
             published=await api.post(f'/agent/{agent}/publish',json={'version_name':'isolated-import','release_note':'isolated fixture'})
             assert_status(published,200)

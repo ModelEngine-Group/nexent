@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from shared.asset_registry import AssetDependencyError, mark_asset_state, register_asset
-from shared.http import assert_status, client
+from shared.http import MODEL_TIMEOUT, assert_status, client
 
 CASE_ID = 'API-AUTO-DDE7582FFE405D54'
 NO_MODEL_DETAIL = 'No available model for regeneration. Please configure an LLM model first.'
@@ -138,7 +138,7 @@ async def test_api_auto_dde7582ffe405d54(tenant_a_admin, tenant_b_admin):
             error_body = response.json()
             assert NO_MODEL_DETAIL in str(error_body.get('detail') or error_body.get('message') or '')
 
-        async with client('config', token=tenant_a_admin.access_token) as api:
+        async with client('config', token=tenant_a_admin.access_token, timeout=MODEL_TIMEOUT) as api:
             result = await _check_name(api, [{'name': b_name}])
             assert len(result) == 1
             assert result[0]['name_conflict'] is False

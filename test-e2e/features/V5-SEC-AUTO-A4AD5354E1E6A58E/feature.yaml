@@ -6,7 +6,7 @@ feature:
   feature_id: V5-SEC-AUTO-A4AD5354E1E6A58E
   name: 标签库治理与资源分配接口跨租户越权(IDOR)及权限矩阵防护
   status: active
-  description: 验证 /tag-libraries 治理接口（定义/值 CRUD、启停、排序、置顶、usage）仅 SU/ADMIN/SPEED/ASSET_OWNER 可访问，DEV/USER 越权返回 403；资源分配与读取接口（get/replace/bulk/filter、文档
+  description: 登录用户可读取本租户的标签库及定义列表；标签治理写操作和 usage 要求 TAG_LIBRARY/MANAGE，DEV/USER 越权返回 403。读取与治理均不得泄露其他租户数据；资源分配与读取接口（get/replace/bulk/filter、文档
     batch-status/projection-status、flat-tags 兼容投影）通过 tag_resource_adapters 按调用者现有 read/edit 权限 fail-closed 解析六类资源，跨租户、不存在与无权限均返回
     404 且不与“不存在”区分；文档 provider（local/aidp）权限校验正确，日志不泄露密钥。
   business_rules:
