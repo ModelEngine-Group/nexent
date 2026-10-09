@@ -15,7 +15,7 @@ from nexent.core.agents.agent_model import (
     GuardrailConfig,
     GuardrailRule,
 )
-from nexent.core.agents.core_agent import CoreAgent, NonterminalThoughtTurn, ToolInputBlockedError
+from nexent.core.agents.execution.code.legacy_agent import CoreAgent, NonterminalThoughtTurn, ToolInputBlockedError
 from nexent.consts.mcp_errors import MCPToolTimeoutError
 from nexent.core.agents.verification import VerificationController
 
@@ -550,7 +550,7 @@ def test_step_stream_checkpoint3_tool_input_blocked_error_isinstance_branch():
 def test_step_stream_generic_exec_error_raises_agent_execution_error():
     """Checkpoint ③: a non-block exec error (no pending_refusal, not ToolInputBlockedError)
     falls through the refusal guard and raises AgentExecutionError."""
-    from nexent.core.agents.core_agent import AgentExecutionError
+    from nexent.core.agents.execution.code.legacy_agent import AgentExecutionError
     rule = GuardrailRule(name="pii", pattern="机密信息", severity="block")
     agent = _make_step_agent(
         rule, messages=[_msg("user", "hello")], model_output="<code>print(1)</code>",
@@ -583,7 +583,7 @@ def test_step_stream_wrapped_mcp_timeout_bypasses_agent_retry():
 
 def test_step_stream_generic_timeout_remains_agent_execution_error():
     """A non-MCP executor timeout must not be reported as an MCP timeout."""
-    from nexent.core.agents.core_agent import AgentExecutionError
+    from nexent.core.agents.execution.code.legacy_agent import AgentExecutionError
 
     rule = GuardrailRule(name="pii", pattern="機密信息", severity="block")
     agent = _make_step_agent(
@@ -619,7 +619,7 @@ def test_step_stream_native_mcp_timeout_preserves_error_identity():
 def test_step_stream_precheck_action_scope_blocking_raises_before_exec():
     """Checkpoint precheck: code_action with a dangerous term (os.system) fails the
     action_scope check (blocking) → AgentExecutionError raised before the tool runs."""
-    from nexent.core.agents.core_agent import AgentExecutionError
+    from nexent.core.agents.execution.code.legacy_agent import AgentExecutionError
     rule = GuardrailRule(name="pii", pattern="机密信息", severity="block")
     agent = _make_step_agent(
         rule,

@@ -9,8 +9,8 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AsyncExitStack
 from typing import Any, Callable
 
-from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
-from ...consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
+from ...concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
+from ....consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
 
 
 logger = logging.getLogger("managed_mcp")

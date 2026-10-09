@@ -27,13 +27,13 @@ from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
-from .core_agent import CoreAgent, convert_code_format
 from .sandbox_workspace import SandboxWorkspace, probe_workspace
 from .clarification import choose_clarification_tool_name, clarification_policy
-from .core_agent import CoreAgent, convert_code_format
+from .core_agent import CoreAgent
+from .execution.code.legacy_agent import convert_code_format
 from ...consts.mcp_errors import is_mcp_timeout_error
 from .output_protocol import ModelOutputProtocolExhaustedError
-from .tool_user_context import (
+from .resources.tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,
     apply_user_context_to_mcp_tool,
 )

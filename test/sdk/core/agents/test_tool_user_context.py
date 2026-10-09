@@ -1,5 +1,5 @@
 """
-Unit tests for sdk.nexent.core.agents.tool_user_context module.
+Unit tests for sdk.nexent.core.agents.resources.tool_user_context module.
 
 Covers the user-info pass-through contract for tool-side authorization:
 - Conventional fields declared by a tool's input schema are injected from the
@@ -22,7 +22,7 @@ import pytest
 def _load_tool_user_context_module():
     module_path = os.path.normpath(os.path.join(
         os.path.dirname(__file__), "..", "..", "..", "..",
-        "sdk", "nexent", "core", "agents", "tool_user_context.py",
+        "sdk", "nexent", "core", "agents", "resources", "tool_user_context.py",
     ))
     spec = importlib.util.spec_from_file_location("tool_user_context", module_path)
     module = importlib.util.module_from_spec(spec)

@@ -13,7 +13,7 @@ from ...model_context import LLMContext
 from ...multimodal_adapter import ModelInfo
 from ...registry import register_adapter
 from ...transport import HttpTransportMixin
-from .llm_adapter import LLMAdapter, LLMRequest
+from ..adapter import LLMAdapter, LLMRequest
 
 
 @register_adapter("openai", "llm")

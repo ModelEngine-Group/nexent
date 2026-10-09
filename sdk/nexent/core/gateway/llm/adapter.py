@@ -6,8 +6,8 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List
 
-from ...model_context import LLMContext
-from ...multimodal_adapter import MultimodalAdapter
+from ..model_context import LLMContext
+from ..multimodal_adapter import MultimodalAdapter
 
 
 @dataclass

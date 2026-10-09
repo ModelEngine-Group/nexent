@@ -348,8 +348,8 @@ module_mocks = {
     # Mock the OpenAIModel import
     "sdk.nexent.core.models.openai_llm": MagicMock(OpenAIModel=mock_openai_model_class),
     # Mock CoreAgent import
-    "sdk.nexent.core.agents.core_agent": MagicMock(
-        CoreAgent=mock_core_agent_class,
+    "sdk.nexent.core.agents.core_agent": MagicMock(CoreAgent=mock_core_agent_class),
+    "sdk.nexent.core.agents.execution.code.legacy_agent": MagicMock(
         convert_code_format=lambda s: s if isinstance(s, str) else str(s),
     ),
 }
