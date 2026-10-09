@@ -2287,3 +2287,116 @@ class TestListDocumentsHistory:
 
         assert response.status_code == HTTPStatus.OK
         assert response.json()["value"] == [{"file_name": "done.txt"}]
+
+
+class TestAIDPServerSideKnowledgeFileQueries:
+    """File and task page queries are delegated to AIDP without local scans."""
+
+    @staticmethod
+    def _read_only():
+        return MagicMock(permission="READ_ONLY")
+
+    def test_ingested_file_search_forwards_page_and_keyword_once(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        page = {
+            "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf"}],
+            "total_count": 1,
+            "next_link": "/next-page",
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value=page) as list_docs, \
+             patch.object(aidp_mgmt_app, "_load_ingested_documents",
+                          side_effect=AssertionError("must not scan every page")):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/files?page=2&page_size=5&keyword=%E5%88%B6%E5%BA%A6",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["value"] == page["value"]
+        assert body["has_more"] is True
+        assert body["total_reliable"] is False
+        list_docs.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", 2, 5, "制度"
+        )
+
+    def test_upload_task_query_forwards_filters_and_uses_aidp_stats(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [{
+                "file_uuid": "f-2", "file_name": "制度手册.pdf", "status": 4,
+                # The upstream API owns the 30-day retention window; the proxy
+                # must not apply a second local timestamp filter.
+                "created_at": "2000-01-01T00:00:00Z",
+            }],
+            "total_count": 12,
+            "next_link": "/next-page",
+            "total_record_count": 31,
+            "processing_record_count": 3,
+            "failed_record_count": 2,
+            "success_record_count": 24,
+            "queued_record_count": 2,
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "_resolve_doc_history_channel",
+                          return_value={"fs_id": "fs-1", "src_dir": "/aidp/knowledge/kb-1"}), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history) as list_history:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks?page=2&page_size=7&keyword=%E5%88%B6%E5%BA%A6&status=4",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["value"] == history["value"]
+        assert body["total_count"] == 12
+        assert body["has_more"] is True
+        assert body["stats"] == {
+            "total": 31,
+            "extracting": 3,
+            "failed": 2,
+            "success": 24,
+            "queued": 2,
+        }
+        assert body["retention_days"] == 30
+        list_history.assert_called_once_with(
+            SERVER_URL, API_KEY, "fs-1", "/kb-1", "kb-1", None,
+            2, 7, 4, "制度",
+        )
+
+    def test_retry_delegates_selected_file_validation_to_aidp(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        file_uuid = "00000000-0000-4000-8000-000000000003"
+        upstream_result = {
+            "success_list": [{"file_uuid": file_uuid}],
+            "failed_list": [],
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          side_effect=AssertionError("retry must not scan history")), \
+             patch.object(aidp_mgmt_app, "retry_aidp_docs_impl",
+                          return_value=upstream_result) as retry_docs:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks/retry",
+                headers=_bearer(),
+                json={"file_uuids": [file_uuid]},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == upstream_result
+        retry_docs.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", [file_uuid])

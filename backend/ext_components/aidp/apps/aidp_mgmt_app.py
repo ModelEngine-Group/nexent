@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Annotated, List, Optional
 from uuid import UUID
@@ -599,102 +598,6 @@ async def _load_doc_history(
     except Exception as exc:  # noqa: BLE001 - history is an optional enhancement
         _log_history_fallback(kds_id, f"unexpected history error: {exc!r}")
         return None
-
-
-def _task_status_code(item: dict) -> int | None:
-    """Read the six AIDP upload-task statuses confirmed for the detail page."""
-    raw = item.get("status")
-    if isinstance(raw, int) and not isinstance(raw, bool):
-        return raw if 1 <= raw <= 5 else None
-    if isinstance(raw, str):
-        normalized = raw.strip().upper()
-        if normalized.isdigit():
-            code = int(normalized)
-            return code if 1 <= code <= 5 else None
-        return {
-            "COMPLETED": 1,
-            "SUCCESS": 1,
-            "PROCESSING": 2,
-            "EXTRACTING": 2,
-            "VECTOR_INGESTION_FAILED": 3,
-            "FAILED": 3,
-            "UPLOADING": 4,
-            "QUEUED": 4,
-            "GRAPH_INGESTION_FAILED": 5,
-        }.get(normalized)
-    return None
-
-
-def _task_timestamp(item: dict) -> float | None:
-    """Convert the history timestamp to epoch seconds for the 30-day window."""
-    value = item.get("created_at") or item.get("updated_at")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.timestamp()
-        except ValueError:
-            return None
-    return None
-
-
-async def _load_upload_task_history(
-    server_url: str,
-    api_key: str,
-    kds_id: str,
-) -> list[dict]:
-    """Read AIDP History using the confirmed ``/{kds_id}`` directory path."""
-    channel = await run_blocking(
-        "aidp-upload-task-channel",
-        _resolve_doc_history_channel,
-        server_url,
-        api_key,
-        kds_id,
-        lane="control-io",
-        owner="config",
-    )
-    if not channel:
-        return []
-
-    collected: list[dict] = []
-    seen: set[str] = set()
-    for page in range(1, _HISTORY_PAGE_LIMIT + 1):
-        payload = await run_blocking(
-            "aidp-upload-tasks",
-            list_aidp_doc_history_impl,
-            server_url,
-            api_key,
-            channel["fs_id"],
-            f"/{kds_id}",
-            kds_id,
-            None,
-            page,
-            None,
-            0,
-            lane="control-io",
-            owner="config",
-        )
-        raw_items = payload.get("value") if isinstance(payload, dict) else None
-        items = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
-        if not items:
-            break
-        added = 0
-        for item in items:
-            ids = _document_identities(item)
-            key = ids[0] if ids else f"page-{page}-row-{len(collected)}"
-            if key in seen:
-                continue
-            seen.add(key)
-            collected.append(item)
-            added += 1
-        if _history_reports_more(payload) is False or added == 0:
-            break
-        if _history_reports_more(payload) is None and len(items) < 10:
-            break
-    return collected
 
 
 def _is_processing_status(status: object) -> bool:
@@ -1493,21 +1396,13 @@ async def list_ingested_files(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
     server_url, api_key = _credentials()
-    normalized_keyword = (keyword or "").strip().casefold()
+    normalized_keyword = (keyword or "").strip()
 
+    # AIDP's list response exposes next_link as the authoritative paging signal;
+    # total_count can be page-local. The Count endpoint is unfiltered, so use it
+    # only for the unfiltered list and keep keyword results in simple paging mode.
     if normalized_keyword:
-        all_files = await _load_ingested_documents(server_url, api_key, kds_id)
-        matches = [
-            item for item in all_files
-            if normalized_keyword in str(item.get("file_name") or "").casefold()
-        ]
-        result = _paginate_history_documents({"value": matches}, page, page_size)
-        result["processing_count"] = 0
-        result["total_reliable"] = True
-        return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-    list_result, count_result = await asyncio.gather(
-        run_blocking(
+        list_result = await run_blocking(
             "aidp-list-ingested-files",
             list_aidp_docs_impl,
             server_url,
@@ -1515,29 +1410,52 @@ async def list_ingested_files(
             kds_id,
             page,
             page_size,
+            normalized_keyword,
             lane="control-io",
             owner="config",
-        ),
-        run_blocking(
-            "aidp-ingested-file-count",
-            _load_cached_doc_count,
-            server_url,
-            api_key,
-            kds_id,
-            lane="control-io",
-            owner="config",
-        ),
-        return_exceptions=True,
-    )
+        )
+        count_result: int | BaseException | None = None
+    else:
+        list_result, count_result = await asyncio.gather(
+            run_blocking(
+                "aidp-list-ingested-files",
+                list_aidp_docs_impl,
+                server_url,
+                api_key,
+                kds_id,
+                page,
+                page_size,
+                None,
+                lane="control-io",
+                owner="config",
+            ),
+            run_blocking(
+                "aidp-ingested-file-count",
+                _load_cached_doc_count,
+                server_url,
+                api_key,
+                kds_id,
+                lane="control-io",
+                owner="config",
+            ),
+            return_exceptions=True,
+        )
     if isinstance(list_result, BaseException):
         raise list_result
     result = dict(list_result or {})
     rows = result.get("value") if isinstance(result.get("value"), list) else []
-    total_reliable = not isinstance(count_result, BaseException)
-    total = int(count_result) if total_reliable else len(rows)
+    total_reliable = isinstance(count_result, int) and not isinstance(count_result, bool)
+    total = int(count_result) if total_reliable else (page - 1) * page_size + len(rows)
+    reported_more = _history_reports_more(result)
+    has_more = (
+        total > page * page_size
+        if total_reliable
+        else bool(reported_more) if reported_more is not None
+        else len(rows) >= page_size
+    )
     result.update({
         "total_count": total,
-        "has_more": total > page * page_size if total_reliable else bool(result.get("next_link")),
+        "has_more": has_more,
         "total_reliable": total_reliable,
         "processing_count": 0,
     })
@@ -1557,33 +1475,61 @@ async def list_upload_tasks(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
     server_url, api_key = _credentials()
-    history = await _load_upload_task_history(server_url, api_key, kds_id)
-    cutoff = time.time() - (30 * 24 * 60 * 60)
-    recent = [
-        item for item in history
-        if _task_timestamp(item) is None or _task_timestamp(item) >= cutoff
-    ]
+    channel = await run_blocking(
+        "aidp-upload-task-channel",
+        _resolve_doc_history_channel,
+        server_url,
+        api_key,
+        kds_id,
+        lane="control-io",
+        owner="config",
+    )
+    history = {}
+    if channel:
+        history = await run_blocking(
+            "aidp-upload-tasks",
+            list_aidp_doc_history_impl,
+            server_url,
+            api_key,
+            channel["fs_id"],
+            f"/{kds_id}",
+            kds_id,
+            None,
+            page,
+            page_size,
+            status,
+            (keyword or "").strip() or None,
+            lane="control-io",
+            owner="config",
+        )
+    raw_items = history.get("value") if isinstance(history, dict) else None
+    rows = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+    raw_total = history.get("total_count") if isinstance(history, dict) else None
+    total_reliable = isinstance(raw_total, int) and not isinstance(raw_total, bool)
+    total = int(raw_total) if total_reliable else (page - 1) * page_size + len(rows)
+    reported_more = _history_reports_more(history) if isinstance(history, dict) else None
+    has_more = (
+        bool(reported_more)
+        if reported_more is not None
+        else total > page * page_size
+    )
+
+    def _history_count(field: str, fallback: int = 0) -> int:
+        value = history.get(field) if isinstance(history, dict) else None
+        return value if isinstance(value, int) and not isinstance(value, bool) else fallback
+
     stats = {
-        "total": len(recent),
-        "extracting": sum(1 for item in recent if _task_status_code(item) == 2),
-        "failed": sum(1 for item in recent if _task_status_code(item) in (3, 5)),
-        "success": sum(1 for item in recent if _task_status_code(item) == 1),
-        "queued": sum(1 for item in recent if _task_status_code(item) == 4),
+        "total": _history_count("total_record_count", total),
+        "extracting": _history_count("processing_record_count"),
+        "failed": _history_count("failed_record_count"),
+        "success": _history_count("success_record_count"),
+        "queued": _history_count("queued_record_count"),
     }
-    normalized_keyword = (keyword or "").strip().casefold()
-    filtered = [
-        item for item in recent
-        if (status == 0 or _task_status_code(item) == status)
-        and (not normalized_keyword or normalized_keyword in str(item.get("file_name") or "").casefold())
-    ]
-    filtered.sort(key=lambda item: _task_timestamp(item) or 0, reverse=True)
-    start = (page - 1) * page_size
-    end = start + page_size
     return JSONResponse(status_code=HTTPStatus.OK, content={
-        "value": filtered[start:end],
-        "total_count": len(filtered),
-        "has_more": end < len(filtered),
-        "total_reliable": True,
+        "value": rows,
+        "total_count": total,
+        "has_more": has_more,
+        "total_reliable": total_reliable,
         "stats": stats,
         "retention_days": 30,
     })
@@ -1599,18 +1545,6 @@ async def retry_upload_tasks(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
     file_uuids = list(dict.fromkeys(str(file_uuid) for file_uuid in body.file_uuids))
-    history = await _load_upload_task_history(*_credentials(), kds_id)
-    failed_ids = {
-        str(item.get("file_uuid"))
-        for item in history
-        if _task_status_code(item) in (3, 5) and item.get("file_uuid")
-    }
-    invalid_ids = [file_uuid for file_uuid in file_uuids if file_uuid not in failed_ids]
-    if invalid_ids:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail="Only vector-ingestion or graph-ingestion failed files can be retried",
-        )
     server_url, api_key = _credentials()
     result = await run_blocking(
         "aidp-retry-upload-tasks",

@@ -1979,6 +1979,7 @@ def list_aidp_doc_history_impl(
     page: int = 1,
     page_size: int | None = None,
     status: int | None = None,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
     """List a page of a channel directory regardless of processing status.
 
@@ -1990,10 +1991,9 @@ def list_aidp_doc_history_impl(
     chunked/embedded (``PROCESSING``) or that failed (``FAILED``), which is what
     lets the UI show an upload immediately instead of only after ingestion.
 
-    The endpoint is paginated (``page`` is one-based) and sorts files that are
-    still being processed to the front, so a burst of simultaneous uploads can
-    spill past the first page: callers must walk the pages instead of reading
-    only the first one.
+    The endpoint is paginated (``page`` is one-based) and supports filtering by
+    status and file-name keyword, allowing callers to request only the page the
+    user is viewing.
     """
     normalized_url = _validate_params(server_url, api_key)
     normalized_page = page if isinstance(page, int) and page > 0 else 1
@@ -2041,6 +2041,7 @@ def list_aidp_doc_history_impl(
                     "page": normalized_page,
                     **({"page_size": page_size} if isinstance(page_size, int) and page_size > 0 else {}),
                     **({"status": status} if isinstance(status, int) and not isinstance(status, bool) else {}),
+                    **({"keyword": keyword.strip()} if isinstance(keyword, str) and keyword.strip() else {}),
                 },
             ),
             context=f"list-doc-history:{normalized_fs_id}",

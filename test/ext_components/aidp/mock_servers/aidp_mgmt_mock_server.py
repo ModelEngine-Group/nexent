@@ -25,10 +25,9 @@ Document status simulation (drives the "processing status" UI):
     non-terminal ``UPLOADING`` / ``EXTRACTING`` stages.
   * ``GET .../KnowledgeFiles`` keeps returning COMPLETED documents only (mirrors
     real AIDP), while ``POST .../KnowledgeFiles/History`` returns every status.
-  * ``POST .../KnowledgeFiles/History`` is paginated (body ``page``, ten entries
-    per page) and lists files that are still being processed first, so a burst of
-    simultaneous uploads spills onto the next page and the caller has to walk the
-    pages. Tune the page size with ``POST /_mock/history-page-size?size=N``.
+  * ``POST .../KnowledgeFiles/History`` returns records from the last 30 days
+    and supports page, page_size, file-name keyword, and numeric status filters.
+    Tune the default page size with ``POST /_mock/history-page-size?size=N``.
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 (next to this file). On restart the mock loads the file, so KBs created by
@@ -48,6 +47,7 @@ import mimetypes
 import os
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import quote
@@ -98,8 +98,7 @@ _CHANNEL_ROOT = "/aidp/knowledge"
 # Overridable at runtime through POST /_mock/processing-seconds.
 _PROCESSING_SECONDS = 8.0
 
-# Entries one history page returns. Real AIDP pages the channel directory, so the
-# backend has to walk the pages; keep this small to exercise that locally.
+# Default number of history records returned by each AIDP page.
 _HISTORY_PAGE_SIZE = 10
 
 # Directory for persisted runtime state. Lives next to this file so the mock
@@ -695,6 +694,28 @@ def _visible_in_completed_listing(doc: Dict[str, Any]) -> bool:
     return _doc_effective_status(doc) == 1
 
 
+def _document_timestamp(document: Dict[str, Any]) -> float | None:
+    """Return the best available upload timestamp in epoch seconds."""
+    value = (
+        document.get("first_upload_time")
+        or document.get("create_time")
+        or document.get("created_at")
+        or document.get("update_time")
+        or document.get("updated_at")
+    )
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except ValueError:
+            return None
+    return None
+
+
 # =============================================================================
 # Request Models
 # =============================================================================
@@ -721,6 +742,7 @@ class DocHistoryBody(BaseModel):
     page: int = 1
     page_size: Optional[int] = Field(default=None, ge=1, le=100)
     status: Optional[int] = Field(default=None, ge=0, le=5)
+    keyword: Optional[str] = Field(default=None, max_length=200)
 
 
 class RetryDocumentsBody(BaseModel):
@@ -1179,7 +1201,8 @@ async def upload_documents(
 def list_documents(
     kds_id: str,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(10, ge=1, le=100),
+    keyword: Optional[str] = Query(default=None, max_length=200),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
     """List documents in a knowledge base with pagination.
@@ -1197,16 +1220,24 @@ def list_documents(
         doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
         if _visible_in_completed_listing(doc)
     ]
+    normalized_keyword = keyword.strip().casefold() if isinstance(keyword, str) else ""
+    if normalized_keyword:
+        all_docs = [
+            doc for doc in all_docs
+            if normalized_keyword in str(doc.get("file_name") or "").casefold()
+        ]
     start = (page - 1) * page_size
     end = start + page_size
     items = [_public_document(doc) for doc in all_docs[start:end]]
 
     # Real AIDP returns `next_link` as the authoritative "more pages exist"
     # signal. When there are no more docs, next_link is simply absent.
-    # `total_count` is the current page count, not the true total.
+    # `total_count` mirrors AIDP's page count; next_link signals another page.
     next_link = None
     if end < len(all_docs):
         next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
+        if normalized_keyword:
+            next_link += f"&keyword={quote(keyword.strip(), safe='')}"
 
     logger.info("LIST DOCS  kds_id=%s page=%d returned=%d total=%d", kds_id, page, len(items), len(all_docs))
     return JSONResponse(content={
@@ -1343,12 +1374,12 @@ def knowledge_file_history(
     body: DocHistoryBody,
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """List every file in a channel directory, whatever its processing status.
+    """Return one filtered page of this channel's recent file history.
 
     The endpoint is knowledge-base scoped, like the channel catalog and the
     document list; the body still addresses the request to one channel directory
-    of that KB. Documents that are still PROCESSING are included with their live
-    status, and a directory pointing outside the KB answers with an empty list.
+    of that KB. AIDP retains the last 30 days of history, supports status and
+    file-name filtering, and includes summary counts independent of the filters.
     """
     _check_auth(authorization)
 
@@ -1367,20 +1398,26 @@ def knowledge_file_history(
         )
         return JSONResponse(content={"value": []})
 
-    items = [
+    cutoff = time.time() - 30 * 24 * 60 * 60
+    all_recent_items = [
         {
             **doc,
             "dir_path": _channel_src_dir(kds_id),
             "status": _doc_effective_status(doc),
         }
         for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if (_document_timestamp(doc) is not None
+            and _document_timestamp(doc) >= cutoff)
     ]
-    # Real AIDP lists files that are still being processed first and pages the
-    # directory, which is what lets more simultaneous uploads than fit in one
-    # page spill onto the next. Mirrored here, so a caller that reads only the
-    # first page is caught locally instead of in production. The sort is stable,
-    # so documents keep their insertion order inside each group.
-    items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
+    all_recent_items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
+    stats = {
+        "total_record_count": len(all_recent_items),
+        "success_record_count": sum(1 for item in all_recent_items if item["status"] == 1),
+        "processing_record_count": sum(1 for item in all_recent_items if item["status"] == 2),
+        "failed_record_count": sum(1 for item in all_recent_items if item["status"] in (3, 5)),
+        "queued_record_count": sum(1 for item in all_recent_items if item["status"] == 4),
+    }
+    items = list(all_recent_items)
     if body.status not in (None, 0):
         status_aliases = {
             1: {1, "1", STATUS_COMPLETED, "SUCCESS"},
@@ -1391,6 +1428,12 @@ def knowledge_file_history(
         }
         accepted = status_aliases.get(body.status, set())
         items = [item for item in items if item["status"] in accepted]
+    normalized_keyword = body.keyword.strip().casefold() if isinstance(body.keyword, str) else ""
+    if normalized_keyword:
+        items = [
+            item for item in items
+            if normalized_keyword in str(item.get("file_name") or "").casefold()
+        ]
     page = body.page if isinstance(body.page, int) and body.page > 0 else 1
     page_size = body.page_size or _HISTORY_PAGE_SIZE
     start = (page - 1) * page_size
@@ -1398,9 +1441,14 @@ def knowledge_file_history(
     page_items = items[start:end]
     next_link = (
         f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles/History?page={page + 1}"
+        f"&page_size={page_size}"
         if end < len(items)
         else None
     )
+    if next_link and body.status not in (None, 0):
+        next_link += f"&status={body.status}"
+    if next_link and normalized_keyword:
+        next_link += f"&keyword={quote(body.keyword.strip(), safe='')}"
     logger.info(
         "FILE HISTORY  kds_id=%s fs_id=%s dir_path=%s page=%d returned=%d total=%d",
         kds_id, body.fs_id, body.dir_path, page, len(page_items), len(items),
@@ -1409,6 +1457,7 @@ def knowledge_file_history(
         "value": page_items,
         "total_count": len(items),
         "next_link": next_link,
+        **stats,
     })
 
 

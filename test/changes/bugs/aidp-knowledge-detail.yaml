@@ -14,3 +14,17 @@ changes:
     feature_contract_changed: false
     affected_features: {existing: [], added: [], modified: [], retired: []}
     affected_cases: {existing: [], added: [], modified: [AKDT-D4-001], retired: []}
+  - change_id: AKDT-BUG-002
+    change_type: bugfix
+    bug_id: AKDT-BUG-002
+    title: AIDP file and upload-task pages avoid local full-history scans
+    description: Forward the requested page and supported filters to AIDP for ingested files and upload-task history, and use AIDP's own 30-day history and summary counts.
+    observed_behavior: File-name search reads all ingested-file pages before filtering. Upload-task listing reads multiple History pages and filters, sorts, and paginates locally, including a duplicate 30-day cutoff.
+    expected_behavior: Each page request reads only the requested AIDP page, forwards keyword and status filters, and uses AIDP history summary counts. Retry delegates retry eligibility to AIDP without pre-reading history.
+    escaped_stage: D3
+    coverage_gap:
+      type: missing_assertion
+      description: Direct route tests did not assert single-page upstream forwarding, History filter forwarding, use of AIDP summary counts, or the absence of pre-retry history scans.
+    feature_contract_changed: false
+    affected_features: {existing: [AKDT-001], added: [], modified: [], retired: []}
+    affected_cases: {existing: [AKDT-D2-001, AKDT-D2-002, AKDT-D2-003], added: [], modified: [], retired: []}

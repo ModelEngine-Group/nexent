@@ -2217,6 +2217,25 @@ class TestListAidpDocsImpl:
         assert result["value"][0]["file_uuid"] == "uuid-1"
         assert result["value"][1]["updated_at"] is not None
 
+    def test_keyword_is_forwarded_to_aidp_file_listing(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": [], "next_link": None})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="get", response=mock_resp
+        )
+
+        aidp_service_module.list_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            page=2,
+            page_size=5,
+            keyword="制度手册",
+        )
+
+        request_url = mock_client.get.call_args.args[0]
+        assert "page=2&page_size=5" in request_url
+        assert "keyword=%E5%88%B6%E5%BA%A6%E6%89%8B%E5%86%8C" in request_url
+
     def test_success_non_list_value_not_normalized(self, aidp_service_module):
         mock_resp = _make_success_response({"value": "not-a-list", "total_count": 0})
         _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
@@ -3111,6 +3130,7 @@ class TestListAidpDocHistoryImpl:
             page=2,
             page_size=50,
             status=0,
+            keyword="制度手册",
         )
         assert mock_client.post.call_args.kwargs["json"] == {
             "fs_id": "fs-1",
@@ -3118,6 +3138,7 @@ class TestListAidpDocHistoryImpl:
             "page": 2,
             "page_size": 50,
             "status": 0,
+            "keyword": "制度手册",
         }
 
 
