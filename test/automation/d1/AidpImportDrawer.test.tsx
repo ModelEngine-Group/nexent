@@ -145,6 +145,18 @@ describe("AKPR-D1-015 AIDP batch import drawer", () => {
       screen.queryByRole("button", { name: /aidpKnowledge.delete/ }),
     ).toBeNull();
   });
+  it("opens the file picker from the whole dropzone without a nested button", async () => {
+    const clickInput = vi.spyOn(HTMLInputElement.prototype, "click");
+    renderDrawer();
+
+    expect(
+      screen.queryByRole("button", { name: "aidpKnowledge.importSelectFiles" }),
+    ).toBeNull();
+    await userEvent.setup().click(screen.getByText("aidpKnowledge.uploadHint"));
+
+    expect(clickInput).toHaveBeenCalledOnce();
+    clickInput.mockRestore();
+  });
   it("retains mixed results, deletes failures locally and sends only the next selection", async () => {
     upload.mockImplementation(async (_id, files) => {
       const good = files.filter((f) => f.name !== "bad.txt");

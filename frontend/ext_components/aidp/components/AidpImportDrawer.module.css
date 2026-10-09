@@ -249,18 +249,6 @@
   letter-spacing: 0;
 }
 
-.fileChooseButton {
-  width: 116px;
-  height: 32px;
-  margin-top: 8px;
-  padding: 4px 16px;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 22px;
-  letter-spacing: 0;
-}
-
 @media (max-width: 600px) {
   .drawer :global(.ant-drawer-header) {
     padding-right: 16px;

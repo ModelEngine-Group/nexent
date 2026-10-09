@@ -474,12 +474,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
             <div className={styles.dropzoneTitle}>
               {t("aidpKnowledge.uploadHint")}
             </div>
-            <Button
-              className={styles.fileChooseButton}
-              disabled={uploading || rows.length >= AIDP_MAX_UPLOAD_FILE_COUNT}
-            >
-              {t("aidpKnowledge.importSelectFiles")}
-            </Button>
             <div className={styles.dropzoneDescription}>
               {t("aidpKnowledge.importDescription")}
             </div>

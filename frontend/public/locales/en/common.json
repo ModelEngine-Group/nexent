@@ -4615,7 +4615,6 @@
   "aidpKnowledge.importFileTitle": "Import files to {{name}}",
   "aidpKnowledge.importDrawerTitle": "Import files",
   "aidpKnowledge.importDescription": "Files uploaded here are processed using this knowledge base's configured settings and stored in its vector database.",
-  "aidpKnowledge.importSelectFiles": "Select local files",
   "aidpKnowledge.importEmpty": "Select files to upload",
   "aidpKnowledge.importPending": "Waiting to upload",
   "aidpKnowledge.importUploadComplete": "Upload complete",

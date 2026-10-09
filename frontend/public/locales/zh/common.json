@@ -4626,7 +4626,6 @@
   "aidpKnowledge.importFileTitle": "导入文件至 {{name}}",
   "aidpKnowledge.importDrawerTitle": "导入文件",
   "aidpKnowledge.importDescription": "上传本地文件，上传后的文件会按照参数配置的规则进行解析并储存在向量库。",
-  "aidpKnowledge.importSelectFiles": "选择本地文件",
   "aidpKnowledge.importEmpty": "请选择要上传的文件",
   "aidpKnowledge.importPending": "待上传",
   "aidpKnowledge.importUploadComplete": "上传成功",
