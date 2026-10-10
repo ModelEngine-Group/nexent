@@ -11522,6 +11522,7 @@ async def test_update_agent_info_impl_skill_update_exception(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = [1, 2]
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
@@ -12145,6 +12146,7 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = [2, 3]
+    mock_request.related_agents = None
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
@@ -12153,9 +12155,9 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.greeting_message = None
 
     # Make query_sub_agents_id_list raise exception during circular check
-    mock_query_sub.side_effect = Exception("Query error")
+    mock_query_sub.side_effect = RuntimeError("Query error")
 
-    with pytest.raises(ValueError, match="Failed to update related agents"):
+    with pytest.raises(RuntimeError, match="Query error"):
         await update_agent_info_impl(mock_request, authorization="Bearer token")
 
 
@@ -12195,6 +12197,7 @@ async def test_update_agent_info_impl_related_external_agents(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100, 200]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12253,6 +12256,7 @@ async def test_update_agent_info_impl_external_agent_remove_relation(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = []  # Remove existing relation
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12313,6 +12317,7 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12440,6 +12445,7 @@ async def test_update_agent_info_impl_skill_unselected(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = [2]  # Only want skill 2
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = None  # Add this field
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12504,6 +12510,7 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
         )
     ]
     request.related_agent_ids = None
+    request.related_agents = None
     request.related_external_agent_ids = None
     request.group_ids = None
     request.ingroup_permission = None
@@ -12884,6 +12891,7 @@ async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None

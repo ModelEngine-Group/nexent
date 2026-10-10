@@ -32,6 +32,7 @@ from consts.model import (
 )
 from consts.exceptions import (
     AgentNotFoundError,
+    AgentRelationValidationError,
     ForbiddenError,
     SkillDuplicateError,
     AppException,
@@ -510,6 +511,14 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
     try:
         result = await update_agent_info_impl(request, authorization)
         return result or {}
+    except AgentRelationValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except AgentNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Agent not found."
+        ) from exc
     except ForbiddenError as exc:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,

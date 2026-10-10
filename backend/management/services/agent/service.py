@@ -15,6 +15,7 @@ from management.services.agent.naming import (
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     AgentNotFoundError,
+    AgentRelationValidationError,
     AppException,
     ForbiddenError,
     TenantResourceLimitError,
@@ -649,6 +650,63 @@ def _validate_requested_output_tokens_for_agent(
             )
 
 
+def _validate_agent_relationships(request: AgentInfoRequest, tenant_id: str):
+    """Validate and normalize relationship selections before any update writes."""
+    if isinstance(request.related_agents, list):
+        relations = [
+            {"agent_id": relation.agent_id, "version_no": relation.version_no}
+            for relation in request.related_agents
+        ]
+        if request.related_agent_ids is not None and set(request.related_agent_ids) != {
+            relation["agent_id"] for relation in relations
+        }:
+            raise AgentRelationValidationError(
+                "related_agent_ids and related_agents must select the same Agents"
+            )
+    elif request.related_agent_ids is not None:
+        relations = [
+            {"agent_id": agent_id, "version_no": None}
+            for agent_id in request.related_agent_ids
+        ]
+    else:
+        return None
+
+    selected_ids = [relation["agent_id"] for relation in relations]
+    if request.agent_id is not None and request.agent_id in selected_ids:
+        raise AgentRelationValidationError(
+            "Circular dependency detected: Agent cannot be related to itself"
+        )
+    if len(selected_ids) != len(set(selected_ids)) or (
+        request.related_agent_ids is not None
+        and len(request.related_agent_ids) != len(set(request.related_agent_ids))
+    ):
+        raise AgentRelationValidationError("Related Agent IDs must not contain duplicates")
+
+    for relation in relations:
+        search_agent_info_by_agent_id(
+            relation["agent_id"], tenant_id, version_no=relation["version_no"] or 0
+        )
+
+    search_list = deque(
+        (relation["agent_id"], relation["version_no"] or 0) for relation in relations
+    )
+    visited = set()
+    while search_list:
+        current_id, version_no = search_list.popleft()
+        if request.agent_id is not None and current_id == request.agent_id:
+            raise AgentRelationValidationError(
+                "Circular dependency detected: Agent cannot create circular calls"
+            )
+        if (current_id, version_no) in visited:
+            continue
+        visited.add((current_id, version_no))
+        sub_ids = query_sub_agents_id_list(
+            main_agent_id=current_id, tenant_id=tenant_id, version_no=version_no
+        )
+        search_list.extend((sub_id, 0) for sub_id in sub_ids)
+    return relations
+
+
 async def update_agent_info_impl(
     request: AgentInfoRequest, authorization: str = Header(None)
 ):
@@ -659,6 +717,8 @@ async def update_agent_info_impl(
         and is_system_agent(request.agent_id, tenant_id) is True
     ):
         raise ForbiddenError("System Agent is managed by the platform")
+
+    related_agents_dicts = _validate_agent_relationships(request, tenant_id)
 
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(
@@ -922,38 +982,7 @@ async def update_agent_info_impl(
 
     # Handle related agents saving when provided
     try:
-        if request.related_agent_ids is not None and agent_id is not None:
-            related_agent_ids = request.related_agent_ids
-            # Check for circular dependencies using BFS
-            search_list = deque(related_agent_ids)
-            agent_id_set = set()
-
-            while len(search_list):
-                left_ele = search_list.popleft()
-                if left_ele == agent_id:
-                    raise ValueError(
-                        "Circular dependency detected: Agent cannot be related to itself or create circular calls"
-                    )
-                if left_ele in agent_id_set:
-                    continue
-                else:
-                    agent_id_set.add(left_ele)
-                sub_ids = query_sub_agents_id_list(
-                    main_agent_id=left_ele, tenant_id=tenant_id
-                )
-                search_list.extend(sub_ids)
-
-            # Update related agents - use related_agents if provided, otherwise build from IDs
-            if request.related_agents:
-                related_agents_dicts = [
-                    {"agent_id": ra.agent_id, "version_no": ra.version_no}
-                    for ra in request.related_agents
-                ]
-            else:
-                related_agents_dicts = [
-                    {"agent_id": aid, "version_no": None} for aid in related_agent_ids
-                ]
-
+        if related_agents_dicts is not None and agent_id is not None:
             update_related_agents(
                 parent_agent_id=agent_id,
                 tenant_id=tenant_id,
@@ -961,7 +990,7 @@ async def update_agent_info_impl(
                 related_agents=related_agents_dicts,
             )
     except ValueError:
-        # Re-raise ValueError (circular dependency) as-is
+        # Preserve explicitly classified persistence errors.
         raise
     except Exception as e:
         logger.error(f"Failed to update related agents: {str(e)}")

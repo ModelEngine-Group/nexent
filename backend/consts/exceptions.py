@@ -305,6 +305,12 @@ class NotFoundException(Exception):
     pass
 
 
+class AgentRelationValidationError(ValueError):
+    """Raised when submitted Agent relationships violate the graph contract."""
+
+    pass
+
+
 class AgentNotFoundError(NotFoundException, ValueError):
     """Raised when an Agent is absent from the caller's visible query scope."""
 
