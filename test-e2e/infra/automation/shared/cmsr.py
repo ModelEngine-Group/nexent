@@ -81,16 +81,38 @@ async def setup(case_id, *, publish=False):
     return {'nonce': nonce, 'agent_id': agent_id, 'display': display}
 
 
-def verify_history(body, nonce):
-    # Inspect persisted assistant units only; user prompt echoes are not proof.
+class HistoryVerificationError(AssertionError):
+    """Expose only controller-authored diagnostics, never history text."""
+
+
+def history_diagnostics(body, nonce):
+    """Summarize persisted output without disclosing prompts or credentials."""
     histories = body.get('data') or []
     assistants = [message for history in histories for message in history.get('message', [])
                   if message.get('role') == 'assistant']
     parts = [part for message in assistants for part in message.get('message', []) if isinstance(part, dict)]
     content = ''.join(str(part.get('content') or '') for part in parts)
-    assert 'CMSR_FAILED_' + nonce not in content
-    assert '<code></code>' not in content
-    assert 'CMSR_OK_' + nonce in content
-    assert 'CMSR_FINAL_' + nonce in content
-    assert sum(part.get('type') == 'parse' for part in parts) == 1, 'Expected exactly one executed code action'
-    assert sum(part.get('type') == 'step_count' for part in parts) == 1
+    final = ''.join(str(part.get('content') or '') for part in parts if part.get('type') == 'final_answer')
+    return {
+        'assistant_count': len(assistants),
+        'failed_fragment_present': 'CMSR_FAILED_' + nonce in content,
+        'empty_code_present': '<code></code>' in content,
+        'committed_marker_present': 'CMSR_OK_' + nonce in content,
+        'final_marker_present': 'CMSR_FINAL_' + nonce in final,
+        'parse_count': sum(part.get('type') == 'parse' for part in parts),
+        'step_count': sum(part.get('type') == 'step_count' for part in parts),
+    }
+
+
+def verify_history(body, nonce):
+    # Inspect persisted assistant units only; user prompt echoes are not proof.
+    diagnostics = history_diagnostics(body, nonce)
+    checks = {
+        'failed_fragment_present': False, 'empty_code_present': False,
+        'committed_marker_present': True, 'final_marker_present': True,
+        # One code action at Step 1, followed by the explicit final-answer turn.
+        'parse_count': 1, 'step_count': 2,
+    }
+    for key, expected in checks.items():
+        if diagnostics[key] != expected:
+            raise HistoryVerificationError(f'{key}: expected {expected}, observed {diagnostics[key]}')

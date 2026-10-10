@@ -5,12 +5,14 @@ implementations:
   file: test.py
   selector: AGT-025
 - framework: pytest
-  file: test-e2e/infra/automation/d3/scenarios/scenario_agent_runtime_scenarios.py
+  file: test-e2e/infra/automation/shared/case_evidence.py
   selector: AGT-025
-notes: V5 source binding migrated; runtime parity is not yet certified.
+notes: Owned real-model Planning with observable deterministic MCP failure, repeated twice; transport timeout coverage is not claimed.
+timeout_seconds: 900
+acceptance_bindings:
+  AC-01: [test_agt_025]
 preparation:
-  families:
-  - basic_agent
+  families: []
   anchors: true
   special_assets: false
   d4_groups: []

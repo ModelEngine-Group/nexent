@@ -14,11 +14,13 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 import uvicorn
 from cmsr_provider import router as cmsr_router
 from runtime_fault_provider import router as runtime_fault_router
+from prompt_fault_provider import router as prompt_fault_router
 
 
 app = FastAPI(title="nexent-controlled-test-assets")
 app.include_router(cmsr_router)
 app.include_router(runtime_fault_router)
+app.include_router(prompt_fault_router)
 TEST_ROOT = Path(
     os.environ.get("NEXENT_TEST_HOME", str(Path(__file__).resolve().parents[2]))
 ).resolve()

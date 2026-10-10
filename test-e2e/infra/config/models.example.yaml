@@ -15,3 +15,15 @@ models:
     model: replace-me
     dimension: 1024
     secret_env_key: NEXENT_DAILY_EMBEDDING_API_KEY
+  - id: daily-stt
+    capability: stt
+    provider: replace-me
+    base_url: replace-me
+    model: replace-me
+    secret_env_key: NEXENT_DAILY_VOICE_API_KEY
+  - id: daily-tts
+    capability: tts
+    provider: replace-me
+    base_url: replace-me
+    model: replace-me
+    secret_env_key: NEXENT_DAILY_VOICE_API_KEY

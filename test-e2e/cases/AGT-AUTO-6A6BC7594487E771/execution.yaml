@@ -4,7 +4,13 @@ implementations:
 - framework: pytest
   file: test.py
   selector: AGT-AUTO-6A6BC7594487E771
-notes: V5 source binding migrated; runtime parity is not yet certified.
+- framework: pytest
+  file: test-e2e/infra/automation/shared/case_evidence.py
+  selector: AGT-AUTO-6A6BC7594487E771
+notes: Real complete-draft partial tasks and related-field no-sync confirmation; resource search is explicitly scoped, and whitelist rejection currently exercises display_name only. Separate name/model rejection and draft_incomplete variants remain acceptance gaps; no full semantic certification is claimed.
+timeout_seconds: 1200
+acceptance_bindings:
+  AC-01: [test_local_tasks_do_not_enter_full_generation]
 preparation:
   families: []
   anchors: true

@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -29,7 +29,30 @@ journey("PW-FILE-01", async (context) => {
       async () => { return `entered /newchat with ${agent}`; },
       async () => { await chat.uploadAttachment(sample); await expect(page.getByText("sample.pdf", { exact: true })).toBeVisible({ timeout: 120000 }); return "sample.pdf upload reached its completed card"; },
       async () => { await page.getByRole("button", { name: "移除 sample.pdf", exact: true }).click(); await expect(page.getByText("sample.pdf", { exact: true })).toHaveCount(0); return "removed the first upload through the attachment card's real accessible control and Composer recovered"; },
-      async () => { await chat.uploadAttachment(sample); const response = await chat.sendAndWait("读取附件并只回复其中的固定标记。"); conversationId = chat.currentConversationId(); await expect(response).toContainText("NEXENT_FILE_TEST_92831", { timeout: 300000 }); return `re-uploaded and sent the real attachment in conversation ${conversationId}`; },
+      async () => {
+        await chat.uploadAttachment(sample);
+        const response = await chat.startMessage("读取附件并只回复其中的固定标记。");
+        // Capture ownership before waiting; a failed completion must still
+        // clean up its conversation and retain persisted-state diagnostics.
+        conversationId = chat.currentConversationId();
+        let executionFailed = false;
+        try {
+          await chat.waitForCompletion();
+          await expect(response).toContainText("NEXENT_FILE_TEST_92831", { timeout: 300000 });
+        } catch (error) {
+          executionFailed = true;
+          throw error;
+        } finally {
+          try {
+            await chat.captureConversationState(join(contract.caseDir, "attachment-conversation.json"), "NEXENT_FILE_TEST_92831");
+          } catch (error) {
+            writeFileSync(join(contract.caseDir, "attachment-evidence-error.json"),
+              JSON.stringify({ capture_failed: true, execution_failed: executionFailed }));
+            if (!executionFailed) throw error;
+          }
+        }
+        return `re-uploaded and sent the real attachment in conversation ${conversationId}`;
+      },
       async () => "assistant answer contains NEXENT_FILE_TEST_92831 from the PDF payload",
       async () => { await page.getByRole("button", { name: "预览 sample.pdf", exact: true }).last().click(); await expect(page.getByRole("dialog").or(page.locator("embed,iframe")).first()).toBeVisible(); await page.keyboard.press("Escape"); return "opened the message attachment preview"; },
       async () => { const event = page.waitForEvent("download"); await page.getByRole("button", { name: /下载/ }).last().click(); const download = await event; downloadPath = await download.path() || ""; expect(downloadPath).not.toBe(""); expect(statSync(downloadPath).size).toBeGreaterThan(0); return "captured a non-empty browser download"; },

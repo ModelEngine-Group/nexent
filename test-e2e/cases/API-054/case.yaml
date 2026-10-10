@@ -4,79 +4,73 @@ module: V5-BASELINE
 case:
   case_id: API-054
   feature_id: F-040
-  business_rule_ids:
-  - F-040-RULE-01
-  title: STT/TTS connectivity 检查与配置错误映射｜核心流程
+  business_rule_ids: [F-040-RULE-01]
+  title: STT/TTS configured model connectivity and configuration error mapping
   type: INTEGRATION
   priority: P2
   status: active
   automation: automated
-  objective: STT/TTS connectivity 检查与配置错误映射｜核心流程
+  objective: Verify actual STT and TTS provider connectivity through the model-management entry points used by the current product.
   preconditions:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/images/；${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json；${NEXENT_TEST_HOME}/assets/audio/；${NEXENT_TEST_HOME}/assets/expected/stt_expected.json
-  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - The config service is healthy and tenant_a_admin can create, inspect, check and delete models.
+  - NEXENT_TEST_HOME provides models.yaml and secrets.env with real STT and TTS credentials; no secret is stored in Git.
+  - The runner provides a run-local asset journal for case-owned model cleanup.
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/assets/images/
-
-      - ${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json
-
-      - ${NEXENT_TEST_HOME}/assets/audio/
-
-      - ${NEXENT_TEST_HOME}/assets/expected/stt_expected.json'
+    capabilities: [stt, tts]
+    configuration_source: Machine-local models.yaml and secrets.env via the existing model_request helper.
+    negative_credentials: Unique invalid non-secret fixture values; never reuse a valid credential or a persisted probe_model_id.
   steps:
   - order: 1
-    action: 从 ${NEXENT_TEST_HOME}/config/models.yaml 读取本用例要求的真实 Provider/模型配置；密钥仅从 secrets.env/系统环境变量注入。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: Read the existing model catalog and default model selection; resolve each configured STT/TTS model through the maintained helper.
+    expected: Provider, model name and service URL come from machine-local configuration, not hardcoded IDs or developer paths.
   - order: 2
-    action: 调用 Nexent 实际模型配置 API 创建或选取测试模型，确认数据库中的 provider、model、model_type、dimension/capacity 等字段与本地配置一致。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: POST the valid model configuration to /model/temporary_healthcheck for both STT and TTS.
+    expected: HTTP 200 returns data.connectivity=true and the exact configured model_name after a real provider connection.
   - order: 3
-    action: 执行 Nexent 自带的模型连通性/健康检查，真实请求外部 Provider；保存实际 HTTP 状态、响应耗时和脱敏后的错误信息。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    action: Probe the same configurations with unique invalid credentials, and submit a request missing model_type.
+    expected: Invalid credentials return HTTP 200 with data.connectivity=false and a nonempty error; the malformed request returns 422. Neither request returns credentials or persists a model.
   - order: 4
-    action: 按“STT/TTS connectivity 检查与配置错误映射｜核心流程”执行目标操作；若涉及 LLM/Embedding/Rerank/VLM/STT/TTS，必须触发一次真实推理/向量化/重排/识别/合成，而不是只检查配置保存成功。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: Re-read the catalog and defaults, then create a uniquely named case-owned model with skip_default_backfill=true; verify its provider, name, type and URL.
+    expected: Temporary probes caused no catalog or default-selection mutation. The owned model is correctly persisted and list responses omit credentials.
   - order: 5
-    action: 对 LLM 检查 stream 正常结束、回答非空、model_id/model_name 正确；对 Embedding 检查向量维度；对 Rerank 检查目标文档进入期望 Top-N。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+    action: POST /model/healthcheck with only the owned display_name and model_type, then independently read the catalog.
+    expected: The product reads the saved credential, returns connectivity=true for the exact model, and persists connect_status=available without changing tenant defaults.
   - order: 6
-    action: 对 VLM 使用固定图片并检查唯一标记（如 7429）；对 STT 使用固定音频并检查关键词/CER 阈值；对 TTS 检查生成音频可解码、duration>0，必要时再用 STT 做闭环验证。
-    expected: STT 关键词/CER 达到 expected oracle；TTS 输出可解码且时长>0。
-  - order: 7
-    action: 检查 Telemetry/服务日志中模型名、TTFT/token 或错误信息合理，且 API Key 不得明文出现。
-    expected: STT 关键词/CER 达到 expected oracle；TTS 输出可解码且时长>0。
-  - order: 8
-    action: '删除本用例创建的临时模型/Provider记录或恢复原主模型，避免污染后续每日用例。
-
-      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
-    expected: STT 关键词/CER 达到 expected oracle；TTS 输出可解码且时长>0。
+    action: Delete only the case-owned model, verify its absence and unchanged defaults, and retain sanitized receipts and cleanup state locally.
+    expected: All owned resources are removed; failures remain failures and cleanup errors are recorded separately. No credential appears in response evidence.
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - STT 关键词/CER 达到 expected oracle；TTS 输出可解码且时长>0。
-  forbidden_side_effects: []
+  - Both configured real STT and TTS models pass temporary and saved-model connectivity through current model-management routes.
+  - Invalid credentials produce explicit failed connectivity with diagnostics, while missing required request fields are rejected with 422.
+  - Temporary probes do not persist models; saved records and their available status match the exact configured model and provider.
+  - Tenant default models and preexisting resources remain unchanged; owned resources are deleted and response evidence is sanitized.
+  forbidden_side_effects:
+  - Do not overwrite existing model credentials, select a new tenant default or mutate another model.
+  - Do not expose API keys or access tokens in responses, test logs or evidence.
+  acceptance:
+  - id: AC-01
+    description: Correct real STT/TTS configurations pass both current connectivity entry points, including persisted health status.
+    steps: [1, 2, 4, 5]
+    expected_results: [1, 3]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Invalid credentials and missing required fields cannot appear as successful connectivity or persist a model.
+    steps: [3, 4]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1, 2]
+  - id: AC-03
+    description: Case-owned resources are cleaned and default selection remains unchanged with sanitized local evidence.
+    steps: [1, 4, 5, 6]
+    expected_results: [4]
+    forbidden_side_effects: [1, 2]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 75
   integration_boundary:
-  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  - Real config HTTP API and configured external STT/TTS providers. No mocked positive connectivity results.
+  - This Case proves connectivity and configuration error mapping, not speech transcription or generated audio quality; those remain CTR-012 and CTR-014 obligations.
+  - The legacy /voice/connectivity route does not resolve configured model credentials and is not the current model-management UI entry point. Its configuration-wiring defect remains separately recorded, not relabeled PASS.
   observations:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - STT 关键词/CER 达到 expected oracle；TTS 输出可解码且时长>0。
+  - Exact model names, HTTP status, connectivity booleans, saved available state, unchanged defaults and cleanup receipts.
   cleanup:
-  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。
+  - Delete only journaled case-owned models by their unique display names and confirm their absence in the catalog.

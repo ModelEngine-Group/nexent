@@ -104,7 +104,7 @@ class SuiteTests(unittest.TestCase):
     def test_case_local_timeout_overrides_machine_default(self):
         with tempfile.TemporaryDirectory() as root:
             home = Path(root)
-            records = [{"case_id": "DEP-003", "stage": "D5", "status": "active",
+            records = [{"case_id": "SYNTHETIC-D5-TIMEOUT", "stage": "D5", "status": "active",
                         "execution": {"test": True, "timeout_seconds": 4800}}]
             observed = []
 
@@ -112,8 +112,8 @@ class SuiteTests(unittest.TestCase):
                 if "--batch-dir" in command:
                     observed.append(timeout)
                     batch = Path(command[command.index("--batch-dir") + 1])
-                    save(batch / "cases/DEP-003/receipt.json", {
-                        "case_id": "DEP-003", "stage": "D5", "result": "PASS", "cleanup_exit_code": 0})
+                    save(batch / "cases/SYNTHETIC-D5-TIMEOUT/receipt.json", {
+                        "case_id": "SYNTHETIC-D5-TIMEOUT", "stage": "D5", "result": "PASS", "cleanup_exit_code": 0})
                 return 0
 
             with patch.object(suite, "machine_environment", return_value=dict(os.environ)), \

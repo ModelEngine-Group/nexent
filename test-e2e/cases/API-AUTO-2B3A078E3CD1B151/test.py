@@ -161,6 +161,8 @@ async def test_delete_fence_cancels_process_forward_cleanup_chain(tenant_a_admin
         assert redis_service.backend_client.get(f'dp:{task_id}:chunks') is None
 
         forward_result = forward_meta.get('result') or {}
+        assert forward_result.get('cancelled') is True, 'Forward lost cancellation; verify the deployed worker revision'
+        assert forward_result.get('file_id') == file_id, 'Forward lost the owned document identity'
         assert forward_result.get('chunks_stored') == 0
         es_result = forward_result.get('es_result') or {}
         assert es_result.get('success') is False
@@ -172,23 +174,26 @@ async def test_delete_fence_cancels_process_forward_cleanup_chain(tenant_a_admin
         assert source_cleanup.get('attempted') is False
         assert source_cleanup.get('skipped_reason') == 'document_delete_requested'
 
-        import data_process.tasks as dp_tasks
+        from data_process.utils import is_document_delete_requested
         import database.knowledge_file_lifecycle_db as lifecycle_db
+        import services.redis_service as redis_module
 
         class _RedisUnavailable:
             def is_document_delete_requested(self, **kwargs):
                 raise RuntimeError('redis unavailable')
 
-        monkeypatch.setattr(dp_tasks, 'get_redis_service', lambda: _RedisUnavailable())
+        # The shared helper imports Redis at the collaboration boundary. Patch
+        # that supplier, not the obsolete private function in tasks.py.
+        monkeypatch.setattr(redis_module, 'get_redis_service', lambda: _RedisUnavailable())
 
-        assert dp_tasks._is_document_delete_requested(
+        assert is_document_delete_requested(
             index_name=index_name,
             source=source,
             file_id=deleted_file_id,
             tenant_id=tenant_id,
         ) is True
 
-        assert dp_tasks._is_document_delete_requested(
+        assert is_document_delete_requested(
             index_name=index_name,
             source=source,
             file_id=uuid.uuid4().hex,
@@ -199,7 +204,7 @@ async def test_delete_fence_cancels_process_forward_cleanup_chain(tenant_a_admin
             raise RuntimeError('lifecycle query failed')
 
         monkeypatch.setattr(lifecycle_db, 'get_file_record', _raise_lifecycle)
-        assert dp_tasks._is_document_delete_requested(
+        assert is_document_delete_requested(
             index_name=index_name,
             source=source,
             file_id=deleted_file_id,

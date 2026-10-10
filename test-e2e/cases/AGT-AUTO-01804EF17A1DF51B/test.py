@@ -84,7 +84,8 @@ def _patch_dependencies(monkeypatch, *, input_budget, capacity_monitoring, resol
 
     monkeypatch.setattr(nl2agent_service, '_build_verified_bound_resources_context', _fake_binding_context)
 
-    async def _fake_join_query(minio_files, query, history):
+    async def _fake_join_query(minio_files, query, history, language):
+        assert language == 'en'
         return query
 
     monkeypatch.setattr(nl2agent_service, 'join_minio_file_description_to_query', _fake_join_query)

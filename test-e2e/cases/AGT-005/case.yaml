@@ -4,74 +4,51 @@ module: V5-BASELINE
 case:
   case_id: AGT-005
   feature_id: F-045
-  business_rule_ids:
-  - F-045-RULE-01
-  title: 需求澄清对话、proposal 解析、安装资源绑定｜外部依赖异常与超时
+  business_rule_ids: [F-045-RULE-01]
+  title: "未知外部能力的结构化澄清、资源选择或安全降级，不虚构绑定"
   type: AGENT-IT
   priority: P1
   status: active
   automation: automated
-  objective: 需求澄清对话、proposal 解析、安装资源绑定｜外部依赖异常与超时
+  objective: "未知外部能力的结构化澄清、资源选择或安全降级，不虚构绑定"
   preconditions:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/
-  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - Nexent 本地全栈及配置中真实 LLM 可用，当前提交及模型快照由执行器记录。
+  - 使用已有配置 helper、资产注册表、隔离资产工厂和本地 test-home，不固定资源 ID 或密钥。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/assets/documents/'
+    logical_assets: [configured_llm, owned_agent_or_conversation]
+  observations:
+  - 记录当前产品提交、脱敏协议事件及独占资源前后状态。
+  cleanup:
+  - 使用已有资产工厂和资产登记清理独占资源，清理失败保留单独证据。
   steps:
   - order: 1
-    action: 准备真实测试用户以及 models.yaml 中可用 LLM；若功能涉及 Tool/Skill/子Agent，准备对应本地测试资产。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: "通过配置 helper 选择已配置真实 LLM，并创建独占临时 Agent；读取名称、Prompt、模型及工具/技能/子 Agent 绑定快照。"
+    expected: "前置模型可用，临时 Agent 可读取且所有资源归本用例所有。"
   - order: 2
-    action: 通过实际 API 创建一个带唯一 RunID 后缀的临时 Agent，记录 agent_id。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: "通过真实 NL2Agent 接口提交含 d3-missing-tool 未知能力的需求，完整消费本轮 SSE 至 EOF。"
+    expected: "澄清卡片须有合法问题；资源选择卡片须属于同一草稿、候选为实际可访问工具且 is_bound=false；安全降级完成须有结构化完成事件及正常终态。"
   - order: 3
-    action: 按“需求澄清对话、proposal 解析、安装资源绑定｜外部依赖异常与超时”调用对应配置/生成/导入导出接口，提交与 UI 相同的数据结构。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    action: "解析 nl2a / nl2a_state / error 协议事件，回读同一草稿并比较快照。"
+    expected: "不要求逐字回显未知能力名；澄清或资源选择暂停分支无 error 或保存事件且草稿不变；完成降级分支保存非空职责、欢迎语和推荐问题，模型及资源绑定均不变。"
   - order: 4
-    action: 读取 Agent 详情再次核对字段：名称、描述、Prompt、模型、max_steps、tools、skills、sub-agents 等与提交值一致。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - order: 5
-    action: 对需要模型生成的 NL2Agent/Prompt 功能调用真实 LLM，断言返回结构可解析、关键字段非空且能保存为 Agent 配置。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 6
-    action: 导入导出类检查导出文件可重新导入、冲突策略生效、资源引用不会指向其他租户。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 7
-    action: 最少执行一次 Agent Chat Smoke，确认保存后的配置真正进入 Runtime，而不是只验证数据库。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 8
-    action: 异常场景提交缺字段、重复名称、非法资源ID或无权限资源，确认明确 4xx 且原配置不被部分覆盖。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 9
-    action: '删除临时 Agent 和导出文件。
-
-      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+    action: "保留脱敏卡片与前后快照证据，通过已有工厂清理独占 Agent。"
+    expected: "临时 Agent 被清理，未修改共享 Agent 或配置。"
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  forbidden_side_effects: []
+  - "真实 NL2Agent 返回可操作澄清或待用户确认的资源卡片，或以结构化完成事件安全降级；候选工具 ID 必须在当前用户实际可访问目录中，只返回自然语言成功不算通过。"
+  - "未知资源未被虚构绑定；暂停分支草稿不变，降级完成后的必需字段已实际保存，模型及资源配置保持不变。"
+  - "独占 Agent 清理，证据只保存在本地且脱敏。"
+  forbidden_side_effects:
+  - 不修改共享产品配置、其他用户资源或 Redis 状态；不得将未完成的运行视为通过。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 86
+    notes: "本用例验证未知外部能力的安全澄清，不宣称已经注入或覆盖 Provider 超时/断连。旧标题将未知能力输入等同外部故障，原实现并未注入故障；该覆盖缺口保留在变更记录中。"
   integration_boundary:
-  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
-  observations:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  cleanup:
-  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。
+  - 通过实际配置和运行 API 以及真实模型验证；只读观测不替代产品执行。
+  acceptance:
+  - id: AC-01
+    description: "澄清、等待用户确认的真实资源选择或受控降级须有结构化协议、实际回读及无虚构绑定证据；所有前置、操作、终态及独占资源清理按上述定义验证。"
+    steps: [1, 2, 3, 4]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]

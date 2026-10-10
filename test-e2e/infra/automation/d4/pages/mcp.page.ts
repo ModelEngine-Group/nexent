@@ -138,8 +138,17 @@ export class McpPage {
     const dialog = this.page.getByRole("dialog");
     await dialog.getByRole("button", { name: /查看工具|工具/ }).click();
     await expect(this.page.getByText(toolName, { exact: true })).toBeVisible();
-    await this.page.keyboard.press("Escape");
-    await this.page.keyboard.press("Escape");
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const toolsDialog = this.page.getByRole("dialog", { name: new RegExp(`^${escapedName} - `) });
+    await expect(toolsDialog).toHaveCount(1);
+    await toolsDialog.locator(".ant-modal-footer").getByRole("button", { name: /^关\s*闭$|^Close$/ }).click();
+    await expect(toolsDialog).toBeHidden();
+    // Two rapid Escape events can target the same fading modal and leave its
+    // parent blocking subsequent lifecycle operations.
+    if (await dialog.isVisible()) {
+      await dialog.getByRole("button", { name: /^取\s*消$|^Cancel$/ }).click();
+      await expect(dialog).toBeHidden();
+    }
   }
 
   async delete(name: string): Promise<void> {

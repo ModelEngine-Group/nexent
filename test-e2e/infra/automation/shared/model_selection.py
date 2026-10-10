@@ -10,6 +10,13 @@ def select_configured_model(config: dict, model_type: str, rows: list, *, select
         raise AssetDependencyError('models', model_type, detail=reason)
     if not expected:
         fail('configured model/model_name is required; aliases are not provider model names')
+    preferred = str(config.get('preferred_model') or '').strip().casefold()
+    if preferred:
+        if preferred not in expected:
+            fail('preferred_model must be one of the configured provider model names')
+        # An explicit preference is a contract, not a hint to silently fall
+        # back to a different provider model or vector dimension.
+        expected = [preferred]
     explicit = config.get('model_id')
     if explicit not in (None, ''):
         try:

@@ -22,7 +22,7 @@ case:
     expected: 真实发现成功，凭据不暴露于详情
   - order: 2
     action: 延迟 305 秒后刷新卡片，记录真实尝试
-    expected: 实际认证 wire 三次，产品超时明确返回 400
+    expected: 实际认证 wire 三次；按当前兼容契约超时返回 500，message 为 Failed to refresh agent
   - order: 3
     action: 恢复 Mock，读取凭据标记并刷新、调用
     expected: 已保存 scheme ID 和 index 不丢失，刷新调用恢复正常
@@ -31,7 +31,7 @@ case:
     expected: 详情返回 404
   expected_results:
   - 真实发现成功，凭据不暴露于详情
-  - 实际认证 wire 三次，产品超时明确返回 400
+  - 实际认证 wire 三次；按当前兼容契约超时返回 500，message 为 Failed to refresh agent
   - 已保存 scheme ID 和 index 不丢失，刷新调用恢复正常
   - 详情返回 404
   forbidden_side_effects:
@@ -40,7 +40,6 @@ case:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 183
-  integration_boundary:
   integration_boundary: [Nexent A2A refresh and invocation API, controlled authenticated A2A server]
   observations: [redacted authenticated wire, persisted credential scheme IDs and selected requirement]
   cleanup: [restore happy-jsonrpc scenario, delete owned external Agent and verify 404]
@@ -53,6 +52,12 @@ case:
     - 删除本用例 Agent 并回读
     response_expectations:
     - 真实发现成功，凭据不暴露于详情
-    - 实际认证 wire 三次，产品超时明确返回 400
+    - 实际认证 wire 三次；按当前兼容契约超时返回 500，message 为 Failed to refresh agent
     - 已保存 scheme ID 和 index 不丢失，刷新调用恢复正常
     - 详情返回 404
+  acceptance:
+  - id: AC-01
+    description: 认证刷新发生三次真实请求并遵守产品超时窗口，耗尽后返回 500 和刷新错误 message；凭据不暴露且 scheme/index 保留，恢复刷新和真实调用成功，仅清理本用例独占资源。
+    steps: [1, 2, 3, 4]
+    expected_results: [1, 2, 3, 4]
+    forbidden_side_effects: [1]

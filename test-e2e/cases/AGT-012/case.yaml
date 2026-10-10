@@ -13,64 +13,56 @@ case:
   automation: automated
   objective: badcase 优化与 debug history 优化｜外部依赖异常与超时
   preconditions:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/auth-providers.yaml
+  - Target config service and Jiuwen Prompt optimization capability are available.
+  - Machine-local models.yaml and secrets.env provide a healthy real LLM for recovery; no credential is embedded in this Case.
+  - The runner owns the controlled HTTP asset service; its URL is reachable from the config container.
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/config/auth-providers.yaml'
+    fault_modes: [unavailable, timeout]
+    provider_timeout_seconds: 1
+    provider_error_status: 503
   steps:
   - order: 1
-    action: 准备真实测试用户以及 models.yaml 中可用 LLM；若功能涉及 Tool/Skill/子Agent，准备对应本地测试资产。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: Register a unique controlled Provider scenario and a valid, case-owned model; create an owned Agent and read its complete field snapshot.
+    expected: The model ID exists and belongs to the test tenant; no tenant default model is replaced.
   - order: 2
-    action: 通过实际 API 创建一个带唯一 RunID 后缀的临时 Agent，记录 agent_id。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: Call the real Debug optimization endpoint with that model for both Provider 503 and response-timeout variants.
+    expected: The controlled Provider receives the request, bounded retries terminate, and the current exact application error is returned without optimization data.
   - order: 3
-    action: 按“badcase 优化与 debug history 优化｜外部依赖异常与超时”调用对应配置/生成/导入导出接口，提交与 UI 相同的数据结构。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    action: Read the owned Agent again and compare Prompt, identity, models and resource bindings with the initial snapshot.
+    expected: Failed optimization performs no partial save.
   - order: 4
-    action: 读取 Agent 详情再次核对字段：名称、描述、Prompt、模型、max_steps、tools、skills、sub-agents 等与提交值一致。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: Invoke the same optimization endpoint for the owned Agent using the machine-configured healthy real LLM.
+    expected: The response is HTTP 200 from Jiuwen with nonempty optimized_full_prompt; suggestions do not auto-save the Agent.
   - order: 5
-    action: 对需要模型生成的 NL2Agent/Prompt 功能调用真实 LLM，断言返回结构可解析、关键字段非空且能保存为 Agent 配置。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 6
-    action: 导入导出类检查导出文件可重新导入、冲突策略生效、资源引用不会指向其他租户。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 7
-    action: 最少执行一次 Agent Chat Smoke，确认保存后的配置真正进入 Runtime，而不是只验证数据库。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 8
-    action: 异常场景提交缺字段、重复名称、非法资源ID或无权限资源，确认明确 4xx 且原配置不被部分覆盖。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 9
-    action: '删除临时 Agent 和导出文件。
-
-      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+    action: Delete only the owned Agent, model and controlled fault scenario; retain sanitized request counts, elapsed time and draft comparison evidence locally.
+    expected: Cleanup is verified and no raw Provider credential, prompt request body or global service mutation is recorded.
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  forbidden_side_effects: []
+  - Both real Provider failure and timeout reach the declared fault endpoint; nonexistent model IDs are not used to simulate an outage.
+  - Retries terminate within the declared budget; current HTTP 500 carries the exact application error and no successful optimization payload.
+  - Failed and successful optimization suggestions do not modify the stored Agent.
+  - A machine-configured real LLM successfully optimizes after the fault; no shared service or default model is stopped or replaced.
+  - All owned resources are cleaned and sanitized evidence is retained outside Git.
+  forbidden_side_effects:
+  - Do not partially save Prompt fields, modify another Agent, replace tenant defaults or stop a shared service.
+  acceptance:
+  - id: AC-01
+    description: Real Provider 503 and timeout are observed, bounded and rejected without partial draft mutation.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Real-model recovery succeeds without automatic draft saving; exclusive resources are cleaned with sanitized evidence.
+    steps: [4, 5]
+    expected_results: [3, 4, 5]
+    forbidden_side_effects: [1]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 93
   integration_boundary:
-  - LOCAL_REAL_PROTOCOL：使用本地/测试环境 OAuth/CAS Provider 完成真实重定向与回调；不使用生产账号。
+  - Real Nexent config API and Jiuwen adapter; run-scoped OpenAI-compatible faults only for deterministic 503/timeout injection.
+  - Recovery uses the real LLM in machine-local configuration.
   observations:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - Provider request counts, elapsed time, HTTP status and unchanged draft state.
   cleanup:
-  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。
+  - Delete the owned Agent, model and fault scenario; preserve evidence only in test home.

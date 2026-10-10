@@ -86,8 +86,8 @@ async def delete(nonce: str, request: Request):
 async def chunks(item, nonce):
     item.calls += 1
     attempt = item.calls
-    if attempt > 2:
-        raise RuntimeError('Unexpected third provider request')
+    if attempt > 3:
+        raise RuntimeError('Unexpected fourth provider request')
 
     def chunk(content=None, finish=None):
         delta = {'content': content} if content is not None else {}
@@ -107,7 +107,7 @@ async def chunks(item, nonce):
         if item.mode == 'transport':
             # Missing terminal chunk is an actual broken provider transport.
             raise ConnectionResetError('Controlled incomplete provider stream')
-    else:
+    elif attempt == 2:
         yield chunk("<code>print('CMSR_OK_" + nonce + "');\n")
         item.paused = 'success'
         try:
@@ -116,7 +116,12 @@ async def chunks(item, nonce):
             item.expired = True
             raise
         item.paused = ''
-        yield chunk("final_answer('CMSR_FINAL_" + nonce + "')</code>")
+        # The current runtime removes the legacy final_answer callable from
+        # the code interpreter. Execute one real action, then finish through
+        # the next model turn's explicit final-answer protocol.
+        yield chunk("</code>")
+    else:
+        yield chunk("<final_answer>CMSR_FINAL_" + nonce + "</final_answer>")
         item.completed = True
     yield chunk(finish='stop')
     yield 'data: [DONE]\n\n'

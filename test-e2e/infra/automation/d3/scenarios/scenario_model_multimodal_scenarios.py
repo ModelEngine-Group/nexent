@@ -22,7 +22,7 @@ from shared.factories.tenant import isolated_accounts
 MODEL_CASES = [
     "API-048", "API-049", "API-050", "API-051", "API-052", "API-053",
     "CTR-006", "CTR-007", "CTR-008", "CTR-009", "CTR-010", "CTR-011",
-    "CTR-012", "CTR-013", "CTR-014", "CTR-015", "API-054", "CTR-016", "CTR-017",
+    "CTR-012", "CTR-013", "CTR-014", "CTR-015", "CTR-016", "CTR-017",
 ]
 
 
@@ -371,28 +371,6 @@ async def _tts_error() -> None:
     assert any("error" in str(item).lower() for item in events)
 
 
-async def _voice_connectivity() -> None:
-    # API-054 must validate the model selected by this test suite, not an old
-    # STT selection left in the tenant by a previous Daily batch. This is the
-    # same idempotent asset preparation used by the D4 voice journeys.
-    from prepare_d4_shared_assets import _ensure_stt_config, _ensure_tts_config
-    from shared.auth import sign_in
-
-    identity = await sign_in("tenant_a_admin")
-    await _ensure_stt_config(identity)
-    await _ensure_tts_config(identity)
-    async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-        for kind in ("stt", "tts"):
-            response = await api.post("/voice/connectivity", json={"model_type": kind})
-            assert_status(response, 200)
-            assert response.json()["model_type"] == kind
-            assert response.json()["connected"] is True, (
-                f"configured {kind} model did not pass voice connectivity: {response.text}"
-            )
-        invalid = await api.post("/voice/connectivity", json={"model_type": "invalid"})
-    assert invalid.status_code in {400, 422}
-
-
 async def _image_proxy(valid: bool) -> None:
     url = controlled_asset_url(str(get_test_asset("images", "remote_path"))) if valid else "http://127.0.0.1:9/unavailable.png"
     async with client("config", timeout=MODEL_TIMEOUT) as api:
@@ -429,7 +407,6 @@ async def execute_model_and_multimodal_scenario(case: dict, tenant_a_admin, tena
         "CTR-013": _stt_error,
         "CTR-014": _tts_core,
         "CTR-015": _tts_error,
-        "API-054": _voice_connectivity,
         "CTR-016": lambda: _image_proxy(True),
         "CTR-017": lambda: _image_proxy(False),
     }

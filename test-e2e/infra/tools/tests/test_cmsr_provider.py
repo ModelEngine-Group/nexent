@@ -39,11 +39,16 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(item.completed)
             self.assertFalse(tail.done())
             item.success_release.set()
-            self.assertIn('CMSR_FINAL_', await tail)
+            self.assertIn('</code>', await tail)
             rest = [chunk async for chunk in second]
-            self.assertTrue(item.completed)
+            self.assertFalse(item.completed)
             self.assertEqual(item.calls, 2)
             self.assertIn('[DONE]', rest[-1])
+            final = [chunk async for chunk in module.chunks(item, nonce)]
+            self.assertIn('<final_answer>CMSR_FINAL_', final[0])
+            self.assertTrue(item.completed)
+            self.assertEqual(item.calls, 3)
+            self.assertFalse(any("final_answer('" in chunk for chunk in rest + final))
             with self.assertRaises(RuntimeError):
                 await anext(module.chunks(item, nonce))
 

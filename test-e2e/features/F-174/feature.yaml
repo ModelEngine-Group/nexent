@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: F-174-RULE-01
     description: offline packaging/镜像/依赖完整性
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
-    notes: Migrated from V5 01_代码功能清单 without changing the functional description.
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description. Offline packaging coverage was removed by user request on 2026-10-10; this catalog entry does not claim automated coverage.

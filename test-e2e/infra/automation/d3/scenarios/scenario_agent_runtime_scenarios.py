@@ -153,6 +153,7 @@ async def _resume(identity, valid: bool) -> None:
 
 async def _stop_stream_then_stop(
     identity, *, payload: dict, stop_target: str | None,
+    before_stop=None,
 ) -> tuple[list[dict], dict, dict]:
     """Consume a live /agent/run stream, stop the run mid-flight, drain.
 
@@ -190,14 +191,26 @@ async def _stop_stream_then_stop(
                             parsed = {"type": "raw", "content": data}
                         events.append(parsed if isinstance(parsed, dict) else {"type": "raw", "content": parsed})
                         if first_stop is None and len(events) >= 3:
+                            if before_stop is not None:
+                                await before_stop(stop_target)
                             async with client("runtime", token=identity.access_token) as stopper:
                                 stop_response = await stopper.get(f"/agent/stop/{stop_target}")
                             assert_status(stop_response, 200)
                             first_stop = stop_response.json()
-            except TimeoutError as exc:
-                raise AssertionError(
-                    "agent run stream did not converge within 240s after /agent/stop"
-                ) from exc
+            except BaseException as exc:
+                # Closing a persisted SSE subscriber need not stop its producer.
+                # On observation/transport failure, cancel only this owned target.
+                try:
+                    async with client("runtime", token=identity.access_token) as stopper:
+                        cleanup = await stopper.get(f"/agent/stop/{stop_target}")
+                    assert_status(cleanup, 200)
+                except Exception as cleanup_error:
+                    exc.add_note(f"Owned stop cleanup failed: {type(cleanup_error).__name__}")
+                if isinstance(exc, TimeoutError):
+                    raise AssertionError(
+                        "agent run stream did not converge within 240s after /agent/stop"
+                    ) from exc
+                raise
     assert first_stop is not None, "run produced fewer than three events; cannot stop it mid-flight"
     return events, first_stop, headers
 

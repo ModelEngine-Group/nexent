@@ -20,7 +20,6 @@ from d5.scenarios.scenario_security_reliability_deployment import (
     _merged_migration_equivalence,
     _v260_merged_migration_equivalence,
     _migration_idempotency,
-    _offline_package,
 )
 from shared.asset_registry import runtime_dir
 from shared.factories.compose import product_compose_args
@@ -33,7 +32,7 @@ from shared.sse import read_sse
 
 CASES = [
     "REL-01", "REL-02", "REL-03", "REL-04", "REL-05",
-    "DEP-01", "DEP-02", "DEP-03", "DEP-04", "DEP-05", "DEP-06",
+    "DEP-01", "DEP-02", "DEP-03", "DEP-04", "DEP-06",
 ]
 
 
@@ -577,7 +576,6 @@ async def execute_d5_reliability_deployment_special(case, tenant_a_admin, tenant
         "DEP-02": lambda: _docker_persistence(tenant_a_user),
         "DEP-03": _kubernetes_deployment,
         "DEP-04": lambda: _migration_upgrade_compatibility(tenant_a_user),
-        "DEP-05": _offline_package,
         "DEP-06": _backup_upgrade_rollback_contracts,
     }
     await handlers[case["id"]]()

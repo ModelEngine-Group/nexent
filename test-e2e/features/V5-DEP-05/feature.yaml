@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: V5-DEP-05-RULE-01
     description: 离线包完整性
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
-    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID. Offline packaging coverage was removed by user request on 2026-10-10; this catalog entry does not claim automated coverage.'

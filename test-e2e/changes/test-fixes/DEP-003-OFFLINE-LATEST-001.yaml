@@ -8,6 +8,8 @@ change:
     then asserted a tar.gz path that the packaging command does not produce. The Case
     now pins local-latest, checks the complete local image set before packaging,
     validates the actual manifest and checksums, and records its long-running output.
+    Historical record only: DEP-003 was deleted by user request on 2026-10-10;
+    its former live Case reference has been removed. Historical run results remain unchanged.
   affected_features:
     existing:
     - F-174
@@ -17,6 +19,6 @@ change:
   affected_cases:
     existing: []
     added: []
-    modified:
-    - DEP-003
+    modified: []
     retired: []
+  no_case_change_reason: Historical record; DEP-003 was deleted at user request, so no surviving Case ID can be referenced.

@@ -4,49 +4,51 @@ module: V5-BASELINE
 case:
   case_id: AGT-019
   feature_id: F-057
-  business_rule_ids:
-  - F-057-RULE-01
-  title: /agent/stop/{conversation_id} 幂等取消、资源释放｜异常/边界/越权
+  business_rule_ids: [F-057-RULE-01]
+  title: "不存在运行 ID 的重复 Stop 不创建运行或业务数据"
   type: AGENT-IT
   priority: P0
   status: active
   automation: automated
-  objective: /agent/stop/{conversation_id} 幂等取消、资源释放｜异常/边界/越权
+  objective: "不存在运行 ID 的重复 Stop 不创建运行或业务数据"
   preconditions:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 473b65268ba8cda3db53be735f97678e214c583b；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
-  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - Nexent 本地全栈及配置中真实 LLM 可用，当前提交及模型快照由执行器记录。
+  - 使用已有配置 helper、资产注册表、隔离资产工厂和本地 test-home，不固定资源 ID 或密钥。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env'
+    logical_assets: [configured_llm, owned_agent_or_conversation]
+  observations:
+  - 记录当前产品提交、脱敏协议事件及独占资源前后状态。
+  cleanup:
+  - 使用已有资产工厂和资产登记清理独占资源，清理失败保留单独证据。
   steps:
   - order: 1
-    action: 生成一个确定不存在的 run_id/conversation_id。
-    expected: stop 遵循幂等取消契约：不存在或已停止目标返回 200 success 与 already_stopped=true。
+    action: "通过已有 absent_numeric_id helper 生成并验证数据库不存在的目标；只读核对该用户目标的运行状态和流为空，建立独占 canary。"
+    expected: "目标在数据库、运行记录及持久流中均不存在。"
   - order: 2
-    action: 调用 GET /agent/stop/{run_id} 两次。
-    expected: 不误报“已停止一个活动任务”，不创建状态，不影响其他运行。
+    action: "以当前用户调用目标 Stop 两次，逐次保存确认响应并观察相同目标的运行及流状态。"
+    expected: "两次均返回 200 success 和非空 message；already_stopped 可选，允许仅产生有 TTL 的取消信号，不允许创建运行或持久流。"
   - order: 3
-    action: 两次均断言 HTTP 200、status=success、already_stopped=true，message 明确说明没有运行中的任务。
-    expected: 不误报“已停止一个活动任务”，不创建状态，不影响其他运行。
+    action: "重新读取 canary 并重新验证数据库中目标 ID 不存在。"
+    expected: "没有创建会话、运行、消息或业务资源，独占 canary 保持不变。"
   - order: 4
-    action: 查询会话/运行状态，确认未创建新状态、未影响其他用户或会话。
-    expected: 不误报“已停止一个活动任务”，不创建状态，不影响其他运行。
+    action: "通过已有工厂清理 canary，保留脱敏确认和只读状态证据。"
+    expected: "仅清理本用例资产，不删除共享 Redis 键，不扫描或修改其他运行。"
   expected_results:
-  - stop 遵循幂等取消契约：不存在或已停止目标返回 200 success 与 already_stopped=true。
-  - 不误报“已停止一个活动任务”，不创建状态，不影响其他运行。
-  forbidden_side_effects: []
+  - "重复取消不存在目标返回当前产品成功确认契约。"
+  - "目标始终没有运行记录、持久流和数据库资源；允许正常 TTL 的取消信号。"
+  - "独占 canary 保持不变并清理，本地证据脱敏，无共享状态修改。"
+  forbidden_side_effects:
+  - 不修改共享产品配置、其他用户资源或 Redis 状态；不得将未完成的运行视为通过。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 109
+    notes: "取消信号的成功登记不代表存在活动运行；不得通过强制 already_stopped 标记推断幂等性。此用例不替代独立的跨租户取消授权测试。"
   integration_boundary:
-  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
-  observations:
-  - stop 遵循幂等取消契约：不存在或已停止目标返回 200 success 与 already_stopped=true。
-  - 不误报“已停止一个活动任务”，不创建状态，不影响其他运行。
-  cleanup:
-  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。
+  - 通过实际配置和运行 API 以及真实模型验证；只读观测不替代产品执行。
+  acceptance:
+  - id: AC-01
+    description: "不存在运行 ID 的重复 Stop 不创建运行或业务数据；所有前置、操作、终态及独占资源清理均按上述定义验证。"
+    steps: [1, 2, 3, 4]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]

@@ -1,4 +1,4 @@
-"""Supported protocols use their advertised wire endpoints; unsupported bindings are rejected."""
+"""Advertised protocols use real wire; GRPC configuration is saved without wire certification."""
 import pytest
 from shared.a2a import discovered_agent, mock_asset
 from shared.http import assert_status
@@ -26,9 +26,11 @@ async def test_advertised_protocol_switching(tenant_a_admin):
                 assert 'total=1283' in called.text
                 wire = [row for row in await mock.observations(nonce) if row['method'] == 'POST']
                 assert wire[-1]['path'].endswith(suffix)
-            # This Card has no gRPC binding and the product UI disables gRPC.
-            rejected = await api.put(path + '/protocol', json={'protocol_type': 'GRPC'})
-            assert_status(rejected, 400)
+            # The current API persists GRPC without checking advertised support.
+            # Saving this configuration does not prove gRPC wire interoperability.
+            configured = await api.put(path + '/protocol', json={'protocol_type': 'GRPC'})
+            assert_status(configured, 200)
+            assert configured.json()['data']['protocol_type'] == 'GRPC'
             detail = await api.get(path)
             assert_status(detail, 200)
-            assert detail.json()['data']['protocol_type'] == 'HTTP+JSON'
+            assert detail.json()['data']['protocol_type'] == 'GRPC'

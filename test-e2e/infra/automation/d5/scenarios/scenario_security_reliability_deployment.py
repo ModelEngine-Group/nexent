@@ -27,7 +27,7 @@ from shared.factories.files import _remove_object as _delete_attachment, _upload
 from shared.factories.tenant import isolated_accounts
 
 
-CASES = ["SEC-001", "SEC-002", "SEC-003", "REL-001", "REL-002", "REL-003", "DEP-001", "DEP-003"]
+CASES = ["SEC-001", "SEC-002", "SEC-003", "REL-001", "REL-002", "REL-003", "DEP-001"]
 
 
 async def _file_acl(owner, attacker, kb_owner) -> None:
@@ -590,8 +590,6 @@ async def execute_d5_main(case, tenant_a_admin, tenant_a_user, tenant_b_user):
         await _docker_deployment()
     elif case_id == "DEP-002":
         await _kubernetes_deployment()
-    elif case_id == "DEP-003":
-        await _offline_package()
     elif case_id == "DEP-004":
         await _migration_idempotency()
         await _merged_migration_equivalence()

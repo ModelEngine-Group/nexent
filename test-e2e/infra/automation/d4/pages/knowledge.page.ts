@@ -1,5 +1,6 @@
 import { expect, Locator, Page } from "playwright/test";
 import { appPath } from "../runner/runtime-config";
+import { knowledgeRetrievalFailure } from "../runner/knowledge-diagnostics";
 
 export type CreatedKnowledge = {
   id: string;
@@ -134,7 +135,7 @@ export class KnowledgePage {
     await input.fill(query);
     await input.press("Enter");
     const response = await responsePromise;
-    if (!response.ok()) throw new Error(`knowledge hybrid search returned ${response.status()}`);
+    if (!response.ok()) throw knowledgeRetrievalFailure(response.status(), await response.text());
     const body = await response.json();
     const serialized = JSON.stringify(body);
     if (!serialized.includes(expectedMarker)) throw new Error(`hybrid search response omitted marker ${expectedMarker}`);

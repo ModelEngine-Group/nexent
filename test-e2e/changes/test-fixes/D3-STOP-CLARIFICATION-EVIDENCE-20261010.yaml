@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: D3-STOP-CLARIFICATION-EVIDENCE-20261010
+  change_type: test-fix
+  title: Replace unsupported text and Stop-flag oracles with observable contracts
+  description: >-
+    AGT-005 validates documented clarification, resource-choice user pauses and
+    completion branches: paused cards must leave the draft unchanged; resource
+    candidates must exist in the actual accessible tool catalog and remain
+    unbound. Completed safe
+    degradation must persist required fields without changing resource bindings.
+    Neither requires exact LLM wording or accepts natural-language success alone.
+    The former timeout
+    title never had controlled outage injection; this coverage gap is explicit,
+    not counted as verified external timeout coverage. AGT-018 and AGT-019
+    accept current success acknowledgment without requiring already_stopped:
+    Redis cancellation signaling succeeds even for missing or repeated IDs.
+    Live cancellation still must drain the stream, reach stopped, remain stable
+    and preserve persistence boundaries. Redis observation is read-only and
+    requires the existing resolver to match the deployed Runtime endpoint.
+    AGT-025 and AGT-AUTO-6A6BC7594487E771 only gain sanitized protocol/readback
+    evidence; their expectations and historical failing results are unchanged.
+    No product code, configuration, remote deployment or running batch changes.
+  affected_features:
+    existing: [F-045, F-057, F-059]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGT-005, AGT-018, AGT-019, AGT-025, AGT-AUTO-6A6BC7594487E771]
+    retired: []

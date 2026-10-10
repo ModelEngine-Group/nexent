@@ -4,12 +4,14 @@ implementations:
 - framework: pytest
   file: test.py
   selector: API-054
-- framework: pytest
-  file: test-e2e/infra/automation/d3/scenarios/scenario_model_multimodal_scenarios.py
-  selector: API-054
-notes: V5 source binding migrated; runtime parity is not yet certified.
+notes: Current model-management connectivity contract; legacy voice-route defect remains separately recorded.
+timeout_seconds: 900
+acceptance_bindings:
+  AC-01: [test_configured_voice_model_connectivity]
+  AC-02: [test_configured_voice_model_connectivity]
+  AC-03: [test_configured_voice_model_connectivity]
 preparation:
   families: []
-  anchors: true
+  anchors: false
   special_assets: false
   d4_groups: []

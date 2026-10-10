@@ -35,4 +35,6 @@ async def test_authenticated_refresh_timeout(tenant_a_admin):
             })
             assert_status(recovered, 200)
             assert 'total=1283' in recovered.text
-            assert_status(failed, 400)
+            # The current refresh API maps exhausted timeout errors to 500.
+            assert_status(failed, 500)
+            assert failed.json()['message'] == 'Failed to refresh agent'

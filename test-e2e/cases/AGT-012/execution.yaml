@@ -4,10 +4,11 @@ implementations:
 - framework: pytest
   file: test.py
   selector: AGT-012
-- framework: pytest
-  file: test-e2e/infra/automation/d3/scenarios/scenario_agent_configuration_scenarios.py
-  selector: AGT-012
 notes: V5 source binding migrated; runtime parity is not yet certified.
+timeout_seconds: 900
+acceptance_bindings:
+  AC-01: [test_prompt_provider_failure_preserves_draft]
+  AC-02: [test_prompt_provider_failure_preserves_draft]
 preparation:
   families: []
   anchors: true

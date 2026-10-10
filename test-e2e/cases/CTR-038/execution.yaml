@@ -5,6 +5,9 @@ implementations:
 - framework: pytest
   file: test.py
   selector: CTR-038
+acceptance_bindings:
+  AC-01:
+  - test_authenticated_refresh_timeout
 preparation:
   families: []
   anchors: false

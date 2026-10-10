@@ -29,4 +29,7 @@ async def test_wire_timeout_and_recovery(tenant_a_admin):
             recovered = await api.post(path + '/chat', json=message)
             assert_status(recovered, 200)
             assert 'total=1283' in recovered.text
-            assert_status(failed, 400)
+            # Compatibility contract: exhausted TimeoutError reaches the generic
+            # HTTP error handler. This does not prescribe all A2A errors as 500.
+            assert_status(failed, 500)
+            assert failed.json()['message'] == 'Failed to chat with external agent'

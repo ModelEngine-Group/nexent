@@ -34,3 +34,26 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_direct_agent_message_passes(self):
         verify(self.response({'message': {'parts': [{'text': 'MARKER'}]}}), 'MARKER')
+
+    def test_http_200_error_text_with_marker_is_not_an_answer(self):
+        with self.assertRaisesRegex(AssertionError, 'error text'):
+            verify(self.response({'message': {'parts': [{'text': 'Error: request MARKER failed'}]}}), 'MARKER')
+
+    def test_product_data_parts_and_split_final_answer_pass(self):
+        verify(self.response({'message': {'role': 'ROLE_AGENT', 'parts': [
+            {'data': {'type': 'final_answer', 'content': 'MAR'}, 'mediaType': 'application/json'},
+            {'data': {'type': 'final_answer', 'content': 'KER'}, 'mediaType': 'application/json'},
+        ]}}), 'MARKER')
+
+    def test_reasoning_and_tool_echo_are_not_answers(self):
+        for event_type in ['thinking', 'tool', 'deep_thinking', 'user']:
+            with self.assertRaisesRegex(AssertionError, 'omitted'):
+                verify(self.response({'message': {'parts': [
+                    {'data': {'type': event_type, 'content': 'MARKER'}}]}}), 'MARKER')
+
+    def test_runtime_error_is_not_hidden_by_marker(self):
+        with self.assertRaisesRegex(AssertionError, 'runtime error'):
+            verify(self.response({'message': {'parts': [
+                {'data': {'type': 'final_answer', 'content': 'MARKER'}},
+                {'data': {'type': 'error', 'content': 'private failure'}},
+            ]}}), 'MARKER')

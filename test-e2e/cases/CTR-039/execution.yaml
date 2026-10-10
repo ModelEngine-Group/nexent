@@ -5,6 +5,9 @@ implementations:
 - framework: pytest
   file: test.py
   selector: CTR-039
+acceptance_bindings:
+  AC-01:
+  - test_advertised_protocol_switching
 preparation:
   families: []
   anchors: false

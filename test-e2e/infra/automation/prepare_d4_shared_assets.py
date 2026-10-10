@@ -8,6 +8,7 @@ to a local shell environment file.  Product credentials remain in secrets.env.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import shlex
@@ -28,6 +29,27 @@ def _data(response):
 
 def _runtime_agent_name(display_name: str) -> str:
     return display_name.lower().replace(" ", "_")
+
+
+def _voice_display_name(rows, preferred, expected_name, model_type, payload):
+    """Keep matching records; never overwrite an occupied model display name."""
+    def compatible(row):
+        return (str(row.get("model_type") or "").lower() == model_type
+                and str(row.get("model_name") or row.get("name") or "") == expected_name)
+
+    occupied = [row for row in rows if str(row.get("display_name") or "") == preferred]
+    if not occupied or (len(occupied) == 1 and compatible(occupied[0])):
+        return preferred
+    # A stable, non-secret namespace permits reuse across runs after a model
+    # configuration change, without deleting another model or editing config.
+    identity = json.dumps([model_type, expected_name, payload.get("model_factory"),
+                           payload.get("base_url")], ensure_ascii=True)
+    suffix = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:10]
+    alternate = f"{preferred}-{suffix}"
+    collisions = [row for row in rows if str(row.get("display_name") or "") == alternate]
+    if collisions and (len(collisions) != 1 or not compatible(collisions[0])):
+        raise AssertionError("voice fixture namespace is occupied by an incompatible model")
+    return alternate
 
 
 async def _create_agent(
@@ -264,18 +286,22 @@ async def _ensure_voice_config(identity, model_type: str) -> None:
         listed = await api.get("/model/list")
         assert_status(listed, 200)
         rows = listed.json().get("data") or []
+        display_name = _voice_display_name(rows, display_name, expected_name, model_type, payload)
+        payload["display_name"] = display_name
         matches = [
             row for row in rows
             if str(row.get("model_type") or "").lower() == model_type
             and str(row.get("model_name") or row.get("name") or "") == expected_name
             and str(row.get("display_name") or "") == display_name
         ]
+        # Probe the current local credential even when the saved model exists.
+        # Otherwise a rotated secrets.env key would never reach the product.
+        health = await api.post("/model/temporary_healthcheck", json=payload)
+        if health.status_code != 200 or not (health.json().get("data") or {}).get("connectivity"):
+            from shared.asset_registry import AssetDependencyError
+            raise AssetDependencyError('models', model_type,
+                detail=f'configured voice prerequisite failed: temporary probe HTTP {health.status_code}')
         if not matches:
-            health = await api.post("/model/temporary_healthcheck", json=payload)
-            assert_status(health, 200)
-            health_data = health.json().get("data") or {}
-            if not health_data.get("connectivity"):
-                raise AssertionError(f"configured {model_type} model {expected_name!r} failed connectivity")
             created = await api.post("/model/create", json=payload)
             assert_status(created, 200)
             listed = await api.get("/model/list")
@@ -290,12 +316,20 @@ async def _ensure_voice_config(identity, model_type: str) -> None:
         if len(matches) != 1:
             raise AssertionError(f"expected one exact {model_type} model {expected_name!r}, found {len(matches)}")
         model_row = matches[0]
+        # Rotate credentials only for the exact configured voice record. Never
+        # overwrite a conflicting display name or another model capability.
+        updated = await api.post('/model/update', params={'display_name': display_name}, json={
+            'api_key': payload['api_key'], 'base_url': payload['base_url'],
+            'model_appid': payload.get('model_appid'), 'access_token': payload.get('access_token')})
+        assert_status(updated, 200)
         health = await api.post(
             f"/model/healthcheck?display_name={display_name}&model_type={model_type}"
         )
         assert_status(health, 200)
         if not (health.json().get("data") or {}).get("connectivity"):
-            raise AssertionError(f"configured {model_type} model {expected_name!r} failed saved-model healthcheck")
+            from shared.asset_registry import AssetDependencyError
+            raise AssetDependencyError('models', model_type,
+                detail='configured voice prerequisite failed: saved-model healthcheck')
         loaded = await api.get("/config/load_config")
         assert_status(loaded, 200)
         backend_config = loaded.json().get("config") or {}
@@ -346,6 +380,13 @@ async def _ensure_voice_config(identity, model_type: str) -> None:
         }
         saved = await api.post("/config/save_config", json=product_config)
         assert_status(saved, 200)
+        from shared.case_evidence import write_case_evidence
+        write_case_evidence(f'voice-{model_type}-configured-health', {
+            'model_type': model_type, 'model_name': expected_name,
+            'display_name': display_name, 'provider': payload['model_factory'],
+            'base_url': payload['base_url'], 'temporary_health_connected': True,
+            'saved_health_connected': True, 'selection_saved': True,
+        })
 
 
 async def _ensure_stt_config(identity) -> None:
@@ -603,7 +644,33 @@ async def prepare_llm_model(identity):
 
 
 async def prepare_embedding_model(identity):
+    await _ensure_embedding_anchor(identity)
     return await _prepare_model_anchor(identity,'embedding',['d4_embedding_display_name'])
+
+
+async def _ensure_embedding_anchor(identity):
+    """Create only a missing configured anchor; retain all existing models."""
+    payload = model_request('embedding')
+    expected_name = payload['model_name']
+    # Use the provider name, not a potentially occupied machine-local alias.
+    payload['display_name'] = expected_name
+    async with client('config', token=identity.access_token) as api:
+        listed = await api.get('/model/list')
+        assert_status(listed, 200)
+        body = listed.json()
+        rows = body if isinstance(body, list) else body.get('data') or body.get('models') or []
+        matches = [row for row in rows if str(row.get('model_type') or '').lower() == 'embedding'
+                   and str(row.get('model_name') or row.get('name') or '').casefold() == expected_name.casefold()]
+        if not matches:
+            health = await api.post('/model/temporary_healthcheck', json=payload)
+            assert_status(health, 200)
+            if not (health.json().get('data') or {}).get('connectivity'):
+                raise AssertionError('configured embedding anchor failed connectivity; no fallback permitted')
+            created = await api.post('/model/create', json=payload)
+            assert_status(created, 200)
+    # Exact tenant-scoped selection and health checking remain mandatory, also
+    # on reuse. Do not return a guessed ID or select the previous BGE anchor.
+    return await model_id('embedding', identity)
 
 
 async def prepare_mcp(identity) -> dict:
@@ -618,6 +685,7 @@ async def prepare_knowledge(identity) -> dict:
     path=test_root()/'assets/knowledge/alpha-nx-92831.txt'
     content=path.read_text(encoding='utf-8-sig')
     if 'NX-92831' not in content: raise AssertionError('canonical alpha asset has no expected marker')
+    await _ensure_embedding_anchor(identity)
     kb=await create_registered_knowledge_base(identity,owner_case_id='LOCAL-D4-KB',role='d4_local',prefix='d4-local-prerequisite')
     index=kb['index_name']
     register_asset('files','d4_alpha_source',str(path),owner_case_id='LOCAL-D4-KB',source='static')

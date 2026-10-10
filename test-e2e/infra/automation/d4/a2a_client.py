@@ -16,6 +16,7 @@ from shared.asset_registry import register_asset, mark_asset_state  # noqa: E402
 from shared.auth import sign_in  # noqa: E402
 from shared.config import service_url  # noqa: E402
 from shared.http import assert_status, client  # noqa: E402
+from shared.case_evidence import write_case_evidence  # noqa: E402
 
 
 class ProbeFailure(AssertionError):
@@ -37,8 +38,18 @@ def verify_invocation(response, marker):
         messages.extend(task.get('artifacts') or [])
     else:
         messages = [payload.get('message') or {}]
-    answer = '\n'.join(str(part.get('text', '')) for message in messages
-                       for part in (message.get('parts') or []) if isinstance(part, dict))
+    parts = [part for message in messages for part in (message.get('parts') or [])
+             if isinstance(part, dict)]
+    # Nexent preserves agent/run events in A2A JSON data parts. Only completed
+    # output is proof: reasoning, tool input and echoed history are not answers.
+    events = [part['data'] for part in parts if isinstance(part.get('data'), dict)]
+    if any(event.get('type') == 'error' for event in events):
+        raise ProbeFailure('published invocation returned a runtime error event')
+    if any(str(part.get('text') or '').lstrip().startswith('Error:') for part in parts):
+        raise ProbeFailure('published invocation returned an error text despite HTTP 200')
+    answer = ''.join(str(part.get('text') or '') for part in parts)
+    answer += ''.join(str(event.get('content') or '') for event in events
+                      if event.get('type') == 'final_answer')
     if marker not in answer:
         raise ProbeFailure('published invocation omitted the required response marker')
 
@@ -95,6 +106,25 @@ async def run(args):
                     'Authorization': f'Bearer {secret}', 'A2A-Version': '1.0',
                 }, json={'message': {'messageId': args.nonce, 'role': 'ROLE_USER',
                                     'parts': [{'text': f'只回复 {args.marker}'}]}})
+                payload = response.json() if response.status_code == 200 else {}
+                task = payload.get('task') or {}
+                messages = [(task.get('status') or {}).get('message') or payload.get('message') or {}]
+                messages.extend(task.get('artifacts') or [])
+                parts = [part for message in messages for part in (message.get('parts') or [])
+                         if isinstance(part, dict)]
+                write_case_evidence('a2a-published-response', {
+                    'http_status': response.status_code,
+                    'task_state': (task.get('status') or {}).get('state'),
+                    'part_count': len(parts),
+                    'text_part_count': sum('text' in part for part in parts),
+                    'text_error_part_count': sum(str(part.get('text') or '').lstrip().startswith('Error:') for part in parts),
+                    'text_contains_marker': any(args.marker in str(part.get('text') or '') for part in parts),
+                    'event_types': [part['data'].get('type') for part in parts
+                                    if isinstance(part.get('data'), dict)],
+                    'final_contains_marker': any(args.marker in str(part['data'].get('content') or '')
+                        for part in parts if isinstance(part.get('data'), dict)
+                        and part['data'].get('type') == 'final_answer'),
+                })
                 verify_invocation(response, args.marker)
                 return {'status': response.status_code, 'marker_verified': True, 'version': body['version']}
             finally:

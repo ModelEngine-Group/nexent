@@ -51,11 +51,11 @@ case:
       发起源文件删除。
     expected: PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
   - order: 8
-    action: Redis 故障回退 PG：模拟 redis_service.is_document_delete_requested 抛异常（Redis 不可用），确认 _is_document_delete_requested 回退读取
+    action: Redis 故障回退 PG：模拟 redis_service.is_document_delete_requested 抛异常（Redis 不可用），确认 data_process.utils.is_document_delete_requested 回退读取
       PG file record status=DELETE_REQUESTED 并仍判定删除请求，链继续取消。
     expected: PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
   - order: 9
-    action: PG 失败保留旧行为：使 PG 生命周期查询异常或查不到记录，确认 _is_document_delete_requested 返回 False，处理链不被错误取消（保留旧有处理行为）。
+    action: PG 失败保留旧行为：使 PG 生命周期查询异常或查不到记录，确认 data_process.utils.is_document_delete_requested 返回 False，处理链不被错误取消（保留旧有处理行为）。
     expected: PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
   - order: 10
     action: 清理隔离测试资源（删除临时 file 记录、Redis 键、索引测试数据），确保可重复执行。

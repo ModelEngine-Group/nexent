@@ -5,9 +5,14 @@ implementations:
   file: test.py
   selector: AGT-019
 - framework: pytest
-  file: test-e2e/infra/automation/d3/scenarios/scenario_agent_runtime_scenarios.py
+  file: test-e2e/infra/automation/shared/stop_observation.py
   selector: AGT-019
-notes: V5 source binding migrated; runtime parity is not yet certified.
+- framework: pytest
+  file: test-e2e/infra/automation/shared/case_evidence.py
+  selector: AGT-019
+notes: Unknown targets may receive expiring cancellation signals, but not execution or business records.
+acceptance_bindings:
+  AC-01: [test_agt_019]
 preparation:
   families: []
   anchors: true

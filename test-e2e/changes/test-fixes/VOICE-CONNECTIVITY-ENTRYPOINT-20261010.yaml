@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: VOICE-CONNECTIVITY-ENTRYPOINT-20261010
+  change_type: test-fix
+  title: Bind API-054 to configured model-management voice connectivity
+  description: >-
+    The user approved testing the current frontend model-management entry point
+    /model/temporary_healthcheck and saved-model /model/healthcheck, rather than
+    /voice/connectivity, whose request accepts only model_type and whose handler
+    never resolves saved tenant credentials. The latter remains a legacy route
+    configuration-wiring defect; historical HTTP 503 outcomes are not relabeled.
+    Real STT and TTS credentials use the existing machine-local model_request
+    helper. Both healthy configurations and invalid-credential error mappings
+    are checked, along with 422 required-field validation, non-persistence of
+    probes, exact saved model identity, stored available status, unchanged tenant
+    defaults, credential non-disclosure and verified case-owned resource cleanup.
+    Transcription and synthesis are explicitly retained in CTR-012 and CTR-014,
+    not claimed from a connectivity-only result. No product code, dependency,
+    credential value or global deployment configuration is changed.
+  affected_features:
+    existing: [F-040]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [API-054]
+    retired: []

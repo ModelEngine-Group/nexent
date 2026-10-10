@@ -33,19 +33,19 @@ case:
     expected: The SSE consumer receives it before provider completion.
   - order: 3
     action: Complete execution and load history.
-    expected: Only successful content and one action remain.
+    expected: Only successful content, one executed code action and a genuine final-answer unit remain; the final-answer turn is separate from the repaired action.
   - order: 4
     action: Repeat with semantic repair and inspect database units.
     expected: Only corrected raw model output is stored; its fragments appeared before completion.
   expected_results:
-  - Step 1 precedes all model chunks and is stored once.
+  - Step 1 precedes its model chunks and is stored once despite retry; the explicit final-answer turn may emit Step 2 without another code action.
   - Successful text is incremental.
   - Stored units contain no failed text.
   - History matches committed SSE.
   forbidden_side_effects:
   - No failed-fragment persistence.
   - No duplicate tool execution.
-  - No extra model request.
+  - No unexpected model request beyond the failed attempt, repaired action and separate final-answer turn.
   integration_boundary:
   - Agent runtime to provider fixture
   - Observer to SSE

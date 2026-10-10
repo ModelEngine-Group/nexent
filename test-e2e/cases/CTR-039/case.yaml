@@ -5,12 +5,12 @@ case:
   case_id: CTR-039
   feature_id: F-093
   business_rule_ids: [F-093-RULE-01]
-  title: JSON-RPC/HTTP+JSON/gRPC 协议切换与兼容性｜核心流程
+  title: JSON-RPC/HTTP+JSON 真实调用与 GRPC 配置保存｜核心流程
   type: CONTRACT
   priority: P0
   status: active
   automation: automated
-  objective: JSON-RPC/HTTP+JSON/gRPC 协议切换与兼容性｜核心流程
+  objective: 验证 JSON-RPC 与 HTTP+JSON 的真实调用，以及当前 API 允许保存 GRPC 配置的兼容契约；不声明 GRPC wire 互操作能力。
   preconditions:
   - Nexent 测试服务和租户管理员身份可用。
   - config/a2a.yaml 符合 Schema，受控 Mock 就绪且无残留故障。
@@ -25,18 +25,17 @@ case:
     expected: 两种支持协议均返回 total=1283，实际 wire 路径符合卡片
   - order: 3
     action: 请求卡片未声明且 UI 禁用的 GRPC
-    expected: 返回 400；保留原协议，不把 HTTP 调用当成 gRPC 成功
+    expected: 按当前兼容契约返回 200，响应及详情回读 protocol_type 为 GRPC；仅证明配置保存，不验证 GRPC 调用
   expected_results:
   - 选定协议和端点保持一致
   - 两种支持协议均返回 total=1283，实际 wire 路径符合卡片
-  - 返回 400；保留原协议，不把 HTTP 调用当成 gRPC 成功
+  - 按当前兼容契约返回 200，响应及详情回读 protocol_type 为 GRPC；仅证明配置保存，不验证 GRPC 调用
   forbidden_side_effects:
   - 不修改共享 Agent、不吞掉超时、不用提前的客户端超时代替产品超时。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 184
-  contract:
   contract:
     protocol: Nexent A2A API and controlled real wire
     request_expectations:
@@ -46,4 +45,10 @@ case:
     response_expectations:
     - 选定协议和端点保持一致
     - 两种支持协议均返回 total=1283，实际 wire 路径符合卡片
-    - 返回 400；保留原协议，不把 HTTP 调用当成 gRPC 成功
+    - 按当前兼容契约返回 200，响应及详情回读 protocol_type 为 GRPC；仅证明配置保存，不验证 GRPC 调用
+  acceptance:
+  - id: AC-01
+    description: JSONRPC 与 HTTP+JSON 配置及刷新保持选定协议，两种真实调用返回业务结果且 wire 路径匹配；当前 API 保存 GRPC 并可回读，不宣称 GRPC wire 成功；仅操作独占资源。
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]

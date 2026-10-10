@@ -15,9 +15,18 @@ async function fixture(operation: string, args: string[] = []) {
     const result = await execute(python, [join(repo, "test-e2e/infra/automation/d4/cmsr_client.py"), operation, ...args],
       { timeout: 60000, env: process.env });
     return JSON.parse(result.stdout);
-  } catch {
+  } catch (error) {
     // Python exceptions can contain auth request bodies; retain only safe diagnostics.
-    throw new Error(`CMSR fixture operation failed: ${operation}`);
+    let detail = "";
+    try {
+      const diagnostic = JSON.parse(String((error as { stderr?: string }).stderr || ""));
+      if (/^[A-Za-z]+Error$/.test(diagnostic.error_type || "")) detail = diagnostic.error_type;
+      if (diagnostic.error_type === "HistoryVerificationError" &&
+          /^(failed_fragment_present|empty_code_present|committed_marker_present|final_marker_present|parse_count|step_count): expected (True|False|1|2), observed (True|False|\d+)$/.test(diagnostic.check || "")) {
+        detail += `: ${diagnostic.check}`;
+      }
+    } catch { /* Unknown child output must not expose auth request bodies. */ }
+    throw new Error(`CMSR fixture operation failed: ${operation}${detail ? ` (${detail})` : ""}; see runtime/cmsr-history.json`);
   }
 }
 
@@ -50,7 +59,14 @@ journey("CMSR-D4-001", async (context) => {
   };
   const paused = async () => {
     await expand();
-    await expect(message()).toContainText(`CMSR_OK_${current.nonce}`);
+    try {
+      await expect(message()).toContainText(`CMSR_OK_${current.nonce}`);
+    } catch {
+      const observed = await state();
+      const failure = new Error(`CMSR successful fragment missing in browser: mode fixture paused=${observed.paused}, calls=${observed.calls}, completed=${observed.completed}, expired=${observed.expired}; see runtime/cmsr-provider-state.json and failure.png`);
+      if (observed.paused === 'success' && observed.calls === 2 && !observed.expired) failure.name = 'ProductFailure';
+      throw failure;
+    }
     await expect(message()).not.toContainText(`CMSR_FAILED_${current.nonce}`);
     await expect(message()).not.toContainText("<code></code>");
     await expect(message().locator(".aui-reasoning-root")).toHaveCount(1);
@@ -80,7 +96,7 @@ journey("CMSR-D4-001", async (context) => {
     await expect(message().getByRole("button", { name: /Executed code/ })).toHaveCount(1);
     await expect(message()).not.toContainText(`CMSR_FAILED_${current.nonce}`);
     await expect(message()).not.toContainText(/Connecting/);
-    expect((await state()).calls).toBe(2);
+    expect((await state()).calls).toBe(3);
   };
   contract.deferCleanup(async () => {
     const errors: string[] = [];

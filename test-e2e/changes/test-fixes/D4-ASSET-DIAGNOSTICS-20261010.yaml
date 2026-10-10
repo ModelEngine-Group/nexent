@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: D4-ASSET-DIAGNOSTICS-20261010
+  change_type: test-fix
+  title: Strict embedding selection, safe CMSR diagnostics and isolated memory cleanup
+  description: >-
+    Honor preferred_model without silent fallback; machine-local embedding
+    configuration selects Qwen/Qwen3-Embedding-4B with verified 2560 dimensions.
+    Use the current explicit final-answer turn in the controlled CMSR Provider
+    instead of the removed final_answer callable; verify the final marker only
+    in persisted final-answer units and retain one committed code action.
+    Preserve CMSR persisted-history assertions and expose only fixed check names,
+    counts and booleans in local evidence and the browser bridge. Register owned
+    memory Provider cleanup by allocated ID and verify absence after UI deletion;
+    cleanup recognizes both original and updated run-scoped names. The attachment
+    journey captures conversation ownership before waiting and retains sanitized
+    persisted-state metadata without masking its original failure. No arbitrary
+    Provider deletion and no product modifications. Targeted Ubuntu verification
+    passed PW-AGENT-02, PW-CHAT-05 and PW-FILE-01. The repaired CMSR transport
+    sequence now passes SSE, real execution, persisted final answer and browser
+    refresh. Semantic repair still withholds live content in both D3 SSE and D4;
+    product suppress_repair_generation_stream conflicts with CMSR-RULE-016.
+    Preserve failure and bounded event/state diagnostics, not release the gate
+    early or weaken the incremental visibility requirement to count it as PASS.
+  affected_features:
+    existing: [CMSR-005, V5-PW-AGENT-02, V5-PW-CHAT-05, V5-PW-MEMORY-PROVIDER-01, V5-PW-FILE-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-AGENT-02, PW-CHAT-05]
+    added: []
+    modified: [CMSR-D3-001, CMSR-D4-001, PW-MEMORY-PROVIDER-01, PW-FILE-01]
+    retired: []

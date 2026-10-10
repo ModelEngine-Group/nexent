@@ -74,6 +74,12 @@ def isolated_migration_database(request, monkeypatch):
         general, backend = deployed_redis_urls()
         monkeypatch.setattr(redis_service, 'REDIS_URL', general)
         monkeypatch.setattr(redis_service, 'REDIS_BACKEND_URL', backend)
+        if 'API-AUTO-2B3A078E3CD1B151' in ids:
+            # The fallback assertion imports the real Celery task module, which
+            # reads canonical constants rather than redis_service's aliases.
+            from consts import const
+            monkeypatch.setattr(const, 'REDIS_URL', general)
+            monkeypatch.setattr(const, 'REDIS_BACKEND_URL', backend)
         # Single-case processes have no pre-existing service. Refuse to
         # redirect another test's already connected singleton.
         if redis_service._redis_service is not None:

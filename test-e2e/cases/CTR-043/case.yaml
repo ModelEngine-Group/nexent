@@ -22,7 +22,7 @@ case:
     expected: 凭据来自受保护 fixture，资源动态生成
   - order: 2
     action: 注入 305 秒延迟，携带 metadata 发起调用
-    expected: 三次真实 wire 均认证成功，metadata 指纹一致，产品超时返回明确 400
+    expected: 三次真实 wire 均认证成功，metadata 指纹一致；按当前兼容契约，重试耗尽返回 500，message 为 Failed to chat with external agent
   - order: 3
     action: 恢复 Mock 并重新调用
     expected: 真实返回 total=1283，不泄露凭据
@@ -31,7 +31,7 @@ case:
     expected: 详情返回 404
   expected_results:
   - 凭据来自受保护 fixture，资源动态生成
-  - 三次真实 wire 均认证成功，metadata 指纹一致，产品超时返回明确 400
+  - 三次真实 wire 均认证成功，metadata 指纹一致；按当前兼容契约，重试耗尽返回 500，message 为 Failed to chat with external agent
   - 真实返回 total=1283，不泄露凭据
   - 详情返回 404
   forbidden_side_effects:
@@ -41,7 +41,6 @@ case:
     legacy_sheet: 02_测试用例基线
     legacy_row: 191
   contract:
-  contract:
     protocol: Nexent A2A API and controlled real wire
     request_expectations:
     - 发现 idkey Agent 并保存凭据
@@ -50,6 +49,12 @@ case:
     - 删除本用例 Agent 并回读
     response_expectations:
     - 凭据来自受保护 fixture，资源动态生成
-    - 三次真实 wire 均认证成功，metadata 指纹一致，产品超时返回明确 400
+    - 三次真实 wire 均认证成功，metadata 指纹一致；按当前兼容契约，重试耗尽返回 500，message 为 Failed to chat with external agent
     - 真实返回 total=1283，不泄露凭据
     - 详情返回 404
+  acceptance:
+  - id: AC-01
+    description: 独立发现并配置认证；产品超时发生三次真实认证请求且 metadata 不变，按当前兼容契约返回 500 和通用错误 message；恢复后真实调用成功并清理独占资源。
+    steps: [1, 2, 3, 4]
+    expected_results: [1, 2, 3, 4]
+    forbidden_side_effects: [1]

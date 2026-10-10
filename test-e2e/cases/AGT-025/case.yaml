@@ -4,75 +4,59 @@ module: V5-BASELINE
 case:
   case_id: AGT-025
   feature_id: F-059
-  business_rule_ids:
-  - F-059-RULE-01
-  title: 规划步骤创建/执行/跳过/调整/失败/停止/恢复｜外部依赖异常与超时
+  business_rule_ids: [F-059-RULE-01]
+  title: 真实 Planning 受控外部工具故障、跳过与有界收口
   type: AGENT-IT
   priority: P0
   status: active
   automation: automated
-  objective: 规划步骤创建/执行/跳过/调整/失败/停止/恢复｜外部依赖异常与超时
+  objective: 验证真实模型生成计划后调用受控失败工具，显式跳过失败步骤并有界收口，重复运行不复用历史资产。
   preconditions:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
-  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - 本地 Nexent 服务和配置中的真实 LLM 可用。
+  - 由仓库运行器启动受控 MCP 服务，提供 always_fail 及独占 wire 日志；不修改用户已有 MCP 配置。
+  - 所有临时资源、运行和故障标记由本用例独占，配置和结果位于本地 test-home。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env'
+    logical_assets: [configured_llm, owned_agent, owned_failure_mcp, controlled_mcp_wire]
   steps:
   - order: 1
-    action: 从本地 models.yaml 读取真实 LLM 配置，并准备固定测试 Agent、Prompt、Tool/KB/子Agent 依赖；记录当前 git commit 和 model snapshot。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: 通过实际 API 注册独占 MCP 服务，刷新并查询 always_fail 工具，创建绑定该工具和配置中真实 LLM 的独占 Agent。
+    expected: 服务健康，工具 ID 来自实际目录，Agent 可正常运行，不借用历史 plan_id。
   - order: 2
-    action: 通过 Nexent 实际 Agent API 创建/选择测试 Agent，保证配置已保存并可在运行接口中解析到正确 agent_id/model_id。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: 开启 enable_plan，通过真实运行接口要求创建三个步骤的计划、实际调用带唯一故障标记的 always_fail、跳过失败步骤并输出有界报告。
+    expected: 返回当前独占 Debug run_id；实际 MCP wire 记录一次调用及相同故障码。
   - order: 3
-    action: 向真实运行入口发送针对“规划步骤创建/执行/跳过/调整/失败/停止/恢复｜外部依赖异常与超时”设计的固定问题；监听完整 streaming/SSE 事件直到 completed/stopped/failed。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    action: 完整消费 SSE，保存计划和步骤状态事件、故障 wire、运行 ID 及中断时已收到的协议事件。
+    expected: 一次真实计划创建、有效且唯一的步骤 ID、引用当前步骤的状态更新及明确 skipped 事件；不是自然语言模拟计划。
   - order: 4
-    action: 保存 run_id、step 序列、tool call、retrieval、子Agent调用和最终回答；不要只以最终文本判断通过。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 检查正常失败报告或根级错误终态；正常报告必须包含实际故障码，不得声称依赖成功。
+    expected: 流完整结束且存在有界终态；超时、中断、嵌套错误或没有真实工具调用不能算通过。
   - order: 5
-    action: ReAct/Plan/串并行场景检查步骤顺序、状态机、工具名和输入输出；并行场景额外比较子任务时间区间是否真正重叠。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+    action: 使用新故障标记再次执行同一故障场景，独立核验计划、wire、状态及终态。
+    expected: 两次运行分别产生一次真实故障调用，不混入旧运行证据或重试重复调用。
   - order: 6
-    action: tool_params/metadata/附件上下文场景检查其在实际 Agent runtime、Tool/MCP/A2A 请求中的最终值和作用域。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 7
-    action: 停止/恢复场景真实触发 cancel/stop，并再次查询会话/运行状态，确认不会继续产生后续 token/step。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 8
-    action: 最终回答只做稳定语义断言：非空、指定 marker/工具结果/引用存在；不得断言整段自然语言逐字一致。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 9
-    action: 检查 Telemetry 中 agent/model/tool/retriever span 与执行过程一致，日志不泄露 secret。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 10
-    action: '删除临时 Agent/会话/附件，保留 run_id 与脱敏 trace 到当次结果目录。
-
-      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+    action: 失败或中断时停止当前独占运行；删除独占 Agent 和 MCP 服务，通过资产日志记录清理状态，保留脱敏本地证据。
+    expected: 不停止共享服务；清理失败单独保留，不吞掉异常。
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  forbidden_side_effects: []
+  - 真实模型与真实 Planning 运行调用实际绑定的受控外部失败工具，wire 证明故障发生。
+  - 实际计划及步骤事件可解析且引用一致，失败依赖被跳过，不用关键词替代状态机验证。
+  - 两次故障运行均有界收口；未完成、无调用或掩盖故障不得通过。
+  - 独占资源清理且本地证据脱敏，不修改产品配置、其他用户资源或共享服务。
+  forbidden_side_effects:
+  - 不写入共享 Redis、不修改默认模型或共享 MCP 服务、不把中断计为通过。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 115
+    notes: 原实现只要求模型让工具超时，没有故障工具或调用证据。本次验证真实 MCP 异常及 Planning 跳过收口；不宣称覆盖真实网络超时、全部调整/停止/恢复路径，这些覆盖仍需对应专用用例验证。
   integration_boundary:
-  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  - 真实配置 LLM 和产品运行接口；Mock 仅提供不可稳定制造的确定性外部工具异常。
   observations:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 计划和步骤状态事件、独占 run_id、MCP wire、终态与清理日志均保存本地并脱敏。
   cleanup:
-  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。
+  - 通过实际 API 停止失败的独占运行并删除本用例 Agent/MCP；清理失败不得吞掉。
+  acceptance:
+  - id: AC-01
+    description: 真实 Planning 与受控 MCP 故障的重复执行、步骤状态、终态和清理按上述完整流程验证。
+    steps: [1, 2, 3, 4, 5, 6]
+    expected_results: [1, 2, 3, 4]
+    forbidden_side_effects: [1]
