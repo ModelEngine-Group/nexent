@@ -1,0 +1,23 @@
+# Agent configuration resource drawer reuse — 2026-10-10
+
+The five association entries (model, knowledge, skill, tool, child Agent) now reuse frontend/components/resource-picker. Model selection uses controlled AddModelDrawer; the richer existing knowledge/skill/tool/child-Agent controllers reuse AddResourceDrawer with duplicate shell sections hidden. This preserves required skill parameters and instances, tool capability checks/MCP permissions, knowledge compatibility/AIDP constraints, local/external child-Agent IDs and version snapshots. Parameter/detail/tag dialogs remain under the original controllers.
+
+Shared right-drawer values are unchanged: 760px width, 24px padding, 16px gaps, masked background, scrollable content, and close/confirm actions. Added optional content/visibility props retain standalone defaults. The existing selectedTrailing slot now actually renders, preserving model priority/parameter shortcuts. Controlled model selection and chips preserve configured ordering. Knowledge drawer presentation is opt-in, so other selector callers retain their modal.
+
+Verification before deployment: 26 Agent-config component tests passed (six files), followed by focused prompt/drawer reruns after refinements; latest drawer rerun passed 3 tests. Creation-guide component regression passed 4 tests. Configuration Playwright Mock passed 2 journeys (22.9s), including all five drawer placements/open/close without writes, model selection/autosave, existing validation/workflows and read-only protections. Creation-guide Playwright Mock passed 1 journey (26.5s). Type check and local Next production build passed. Scoped Prettier passed. Scoped ESLint compared to the pre-task backup introduces 0 diagnostics; baseline remains 57 errors/6 warnings across the eight touched files.
+
+The fixed browser test waits for drawer animations before measuring or entering the next dialog and uses the current debug pane test ID instead of the old heading. Source tests used localhost:4010 (the existing dev server blocks 127.0.0.1 cross-origin resources); no server code change was needed. The task-owned development server was stopped before build.
+
+Formal design validation passes. The affected Agent-config manifest and deterministic Excel view are refreshed. The whole-repository implementation gate remains blocked solely by the pre-existing unrelated CMSR-D2-001 implementation hash; its script/manifest is untouched. Mock browser fixtures do not prove live provider/resource execution. Existing Ant Design Drawer width/useForm warnings remain.
+
+The user subsequently authorized local frontend container replacement. Deployment verification is recorded below after execution. Previous local edits remain intact and nothing is committed or pushed.
+
+## Authorized frontend deployment
+
+Built the official web Dockerfile for Linux amd64 on the verified Docker Engine 29.7.2/API1.55. Image tags: `nexent/nexent-web:resource-drawers-20261010` and `latest`; image ID `sha256:103bda6bbf956a4318e0fa4a6ffc4a30354fef2a7bba4d13e99ed70d1e71503f`. Recreated only `nexent-web` via the original Compose file and both original environment files (`up -d --no-deps --force-recreate --pull never nexent-web`). New container `fc602e52c220`, port3000, running with zero restarts.
+
+Environment values, mounts, port bindings, network membership, and restart policy match the pre-replacement snapshot. All19 other containers retained their IDs. `/zh/agents`, `/zh/workbench`, `/zh/newchat` return HTTP200. Mock browser regression against the deployed production container: AGENT-CONFIG-D4-001 PASS (2 tests,17.0s); AGENT-GUIDE-D4-001 PASS (1 test,14.4s). These results cover the final image, including controlled model order/chip/priority refinements. No real resource/provider execution or publication is claimed.
+
+Rollback image: `nexent/nexent-web:before-resource-drawers-20261010` (`sha256:56201d195c126451999cb6542417c0ad1da8dac2050144ff44f3460216419a47`). Build/deploy/browser logs: `test/artifacts/agent-config-drawers-{docker-build,docker-replace,container-config-e2e,container-guide-e2e}.log`. Scoped lint comparison: `test/artifacts/agent-config-drawers-eslint-baseline.json`. Sensitive full container snapshots are retained only in `.git/codex-backups/20261010-resource-drawers-container`; do not publish them. No backend or database container was replaced, and code remains uncommitted/unpushed.
+
+References consulted: Nexent frontend skill and architecture/components-ui/hooks/API-services/types/drawer references; SPEC coding skill and maintenance/proposal/design/task/verification guides; formal test-assets skill and lifecycle/case-design/manifest/implementation references. The existing resource-picker implementation supplies the reused visual values.

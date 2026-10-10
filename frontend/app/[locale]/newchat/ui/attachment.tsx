@@ -403,11 +403,17 @@ const AttachmentPreview: FC<{
   );
 };
 
-export const ComposerAddAttachment: FC<{
+interface ComposerAddAttachmentProps {
   label?: string;
   icon?: ReactNode;
   className?: string;
-}> = ({ label, icon, className }) => {
+}
+
+export const ComposerAddAttachment: FC<ComposerAddAttachmentProps> = ({
+  label,
+  icon,
+  className,
+}) => {
   const { t } = useTranslation();
 
   return (
@@ -426,7 +432,10 @@ export const ComposerAddAttachment: FC<{
           {label}
         </Button>
       ) : (
-        <TooltipIconButton tooltip={t("chat.composer.addAttachment")}>
+        <TooltipIconButton
+          tooltip={t("chat.composer.addAttachment")}
+          className={className}
+        >
           <PlusIcon className="size-4" />
         </TooltipIconButton>
       )}

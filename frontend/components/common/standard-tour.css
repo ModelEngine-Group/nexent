@@ -1,0 +1,98 @@
+.standard-tour.ant-tour {
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  letter-spacing: 0;
+}
+
+.standard-tour .ant-tour-actions .ant-btn {
+  height: 28px;
+  min-width: 72px;
+  max-width: 160px;
+  margin-inline: 0 !important;
+  padding: 3px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0;
+  box-shadow: none;
+}
+
+.standard-tour .ant-tour-actions .ant-btn-primary {
+  border: 0;
+  padding-block: 4px;
+}
+
+.standard-tour.ant-tour-placement-right .ant-tour-arrow {
+  top: 16px !important;
+}
+
+.standard-tour.guide-resources .ant-tour-arrow {
+  left: auto !important;
+  right: 16px !important;
+}
+
+.standard-tour .ant-tour-panel,
+.standard-tour .ant-tour-arrow {
+  translate: calc(var(--tour-offset-x, 0px) + var(--tour-clamp-x, 0px))
+    calc(var(--tour-offset-y, 0px) + var(--tour-clamp-y, 0px));
+}
+
+.agent-creation-guide.guide-step-1.ant-tour-placement-right {
+  --tour-offset-x: 13px;
+}
+
+.agent-creation-guide.guide-step-1.ant-tour-placement-left {
+  --tour-offset-x: -13px;
+}
+
+.agent-creation-guide.guide-step-2 {
+  --tour-offset-x: 1px;
+}
+
+.agent-creation-guide.guide-step-2.ant-tour-placement-bottomLeft {
+  --tour-offset-y: 7px;
+}
+
+.agent-creation-guide.guide-step-2.ant-tour-placement-topLeft {
+  --tour-offset-y: -7px;
+}
+
+.agent-creation-guide.guide-step-3 {
+  --tour-offset-x: 1px;
+}
+
+.agent-creation-guide.guide-step-3.ant-tour-placement-topLeft {
+  --tour-offset-y: -6px;
+}
+
+.agent-creation-guide.guide-step-3.ant-tour-placement-bottomLeft {
+  --tour-offset-y: 6px;
+}
+
+.agent-creation-guide.guide-step-4 {
+  --tour-offset-x: -22px;
+}
+
+.agent-creation-guide.guide-step-4.ant-tour-placement-bottomRight {
+  --tour-offset-y: 4px;
+}
+
+.agent-creation-guide.guide-step-4.ant-tour-placement-topRight {
+  --tour-offset-y: -4px;
+}
+
+.agent-creation-guide.guide-step-2 .ant-tour-arrow {
+  left: 16px !important;
+}
+
+.agent-creation-guide.guide-step-4 .ant-tour-arrow {
+  left: auto !important;
+  right: 16px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .standard-tour .ant-tour-placeholder-animated {
+    transition: none;
+  }
+}

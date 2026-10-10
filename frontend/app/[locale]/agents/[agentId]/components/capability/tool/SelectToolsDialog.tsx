@@ -2,19 +2,12 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Modal,
-  Tabs,
-  Input,
-  Checkbox,
-  Button,
-  Select,
-  Tooltip,
-} from "antd";
+import { Tabs, Input, Checkbox, Button, Select, Tooltip } from "antd";
 import type { TabsProps } from "antd";
 import { Search, Settings, Wrench, Tag } from "lucide-react";
 import i18n from "i18next";
 
+import { AddResourceDrawer } from "@/components/resource-picker/AddResourceDrawer";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -496,7 +489,7 @@ export default function SelectToolsDialog({
 
   return (
     <>
-      <Modal
+      <AddResourceDrawer
         title={
           <div className="flex items-center gap-2 pr-8">
             <Wrench className="size-4" />
@@ -513,12 +506,16 @@ export default function SelectToolsDialog({
           </div>
         }
         open={open}
-        onCancel={onCloseDialog}
-        footer={null}
-        width={1100}
-        zIndex={1000}
-        mask={{ closable: true }}
-        destroyOnHidden
+        searchPlaceholder=""
+        listTitle=""
+        selected={[]}
+        total={0}
+        searchContent={null}
+        showSelection={false}
+        showListHeader={false}
+        showPagination={false}
+        showConfirm={false}
+        onClose={onCloseDialog}
       >
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
 
@@ -727,7 +724,7 @@ export default function SelectToolsDialog({
               )}
           </div>
         </div>
-      </Modal>
+      </AddResourceDrawer>
 
       <ToolConfigModal
         isOpen={configModalOpen}

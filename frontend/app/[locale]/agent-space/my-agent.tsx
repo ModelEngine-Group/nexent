@@ -387,7 +387,7 @@ export function MyAgent({
       invalidateAgentRepositoryCaches(queryClient),
       queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
     ]);
-    router.push(`/${locale}/agents?agent_id=${agentId}`);
+    router.push(`/${locale}/agents/${agentId}?onboarding=1`);
   };
 
   const handleEdit = (

@@ -246,7 +246,7 @@ export default function AgentsPage() {
   const handleCreate = ({ agentId }: { agentId: number }) => {
     setIsCreateOpen(false);
     void refetch();
-    updateUrl(agentId);
+    router.push(`${pathname}/${agentId}?onboarding=1`);
   };
 
   const handleImport = async () => {

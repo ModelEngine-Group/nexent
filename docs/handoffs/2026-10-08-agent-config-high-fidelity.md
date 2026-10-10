@@ -1,87 +1,85 @@
-# 智能体配置页高保真分析基准（2026-10-08）
+# Agent Configuration High-Fidelity Design Record (2026-10-08)
 
-## 目的与范围
+## Scope
 
-本文先固化共享设计稿中「智能体创建」配置界面的可确认信息，并梳理现有前端能力与设计模块的对应关系，作为后续实现、视觉核对和功能回归的基准。当前阶段仅整理文档，不修改应用代码，不改后端，也不替换容器。
+This record captures the confirmed values from the shared Huawei Design canvas and maps them to the existing Agent editor. The reference stayed on the **Agent Creation** page; no other design page was opened. The shared canvas is the visual source of truth. This document is an implementation handoff, not a replacement for the separate Nexent SPEC repository.
 
-- 参考来源：共享软件中 Huawei Design 的「智能体创建」页面及右侧标注检查器；查看过程中没有切换到其他设计页面。
-- 本次范围：智能体配置界面主体。左侧生成式对话面板、右侧配置面板的现有路由与业务行为作为页面骨架保留。
-- 非本次范围：重做创建智能体弹窗、列表页、后端接口或页面之外的全局导航。
-- 字体沿用应用原字体，不新增 `font-family`。未在设计稿或项目 UI 规范中明确的样式不自行发散。
+- In scope: the Agent configuration panel and its section navigation, scrolling, and fixed actions.
+- Preserved: the Agent generation conversation, agent data contracts, form validation, draft autosave, read-only/unlock behavior, availability refresh, debug, version management, publishing, and NL2Agent section focus.
+- Excluded: backend changes, new endpoints, data model changes, and unrelated Agent list or creation-modal changes.
+- Typography keeps the browser's existing font stack; do not add `font-family`.
+- Unspecified values remain unasserted. Do not derive exact sizes from the scaled screenshot.
 
-## 已核对的画布与页面骨架
+## Confirmed Canvas Measurements
 
-下表为检查器中读取的原始设计像素，不是共享窗口缩放后的目测值。
+The values below come from the design inspector and are source pixels, not the 44% canvas preview scale.
 
-| 区域 | 标注尺寸/位置 | 已确认的布局信息 |
-| --- | --- | --- |
-| 设计画板 | 1920 × 1080 | 桌面稿 |
-| 应用导航 | 宽 64px，高 1080px | 左侧固定导航 |
-| 左侧生成对话区 | 561 × 1080px | 与配置区并排 |
-| 右侧配置区 | 1296 × 1008px，顶部偏移 0px | 配置区占主内容右侧 |
-| 配置区顶部导航栏 | 1296 × 64px | 下边框 1px `#DFDFDF`；左内边距 16px、右内边距 18px、上下内边距 12px |
-| 配置内容滚动容器 | 宽 1295px，高度自适应（检查器值 2358px） | 顶部位于导航栏下；左内边距 16px、右内边距 18px；配置主体在此区域滚动 |
-| 顶部智能体信息行 | 宽 1261px，高度自适应（检查器值 74px） | 上下内边距 10px；沿主轴均匀分布 |
-| 配置模块列表容器 | 宽 1261px，高度自适应（检查器值 2284px） | 顶部信息行之后；模块间距 12px |
-| 模块卡片示例（容器 226513） | 宽 1261px，高度自适应（检查器值 224px） | 圆角 8px；左右内边距 24px、上下内边距 18px |
-| 当前选中的模块标题/描述容器（容器 226458） | 宽 132px、高 50px | 距卡片顶部 18px、左侧 24px；标题与描述间距 4px |
-| 描述文字「定义智能体的描述和头像」 | 宽 132px、高 22px | 12px、Regular/400、行高 22px、字距 0、左对齐、`#808080` |
+| Region                                                   | Measured value                                         | Confirmed layout                                                                                             | Tailwind mapping                                                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Design artboard                                          | `1920 × 1080px`                                        | Desktop composition                                                                                          | —                                                                                                  |
+| App navigation                                           | `64 × 1080px`                                          | Fixed left navigation                                                                                        | `w-16 h-[1080px]`                                                                                  |
+| Generation conversation                                  | `561 × 1080px`                                         | Beside the configuration panel                                                                               | `w-[561px] h-[1080px]`                                                                             |
+| Configuration panel                                      | `1296 × 1008px`, top `0px`                             | Right-side panel                                                                                             | `w-[1296px] h-[1008px]`                                                                            |
+| Wide-screen split ratio                                  | `561:1296`                                             | Apply the artboard proportion on `2xl` viewports; retain a roomier `1:2` split on narrower screens           | `flex-1` / `flex-[2] 2xl:flex-[2.31]`                                                              |
+| Configuration header                                     | `1296 × 64px`                                          | Bottom divider `1px #DFDFDF`; left padding `16px`, right `18px`, vertical `12px`                             | `h-16 border-b border-[#dfdfdf] pl-4 pr-[18px] py-3`                                               |
+| Configuration scroll area                                | width `1295px`; inspector height `2358px`              | Content scrolls inside the panel below its header                                                            | `min-h-0 flex-1 overflow-y-auto`                                                                   |
+| Top information row                                      | width `1261px`; inspector height `74px`                | Vertical padding `10px`; distributed across the row                                                          | `w-full py-[10px]`                                                                                 |
+| Main configuration group (layer `226523`)                | `1261 × 1438px`, top `236px`                           | Vertical stack with `12px` inter-item gap                                                                    | `w-full flex flex-col gap-3`                                                                       |
+| First section card (layer `226513`)                      | width `1261px`; inspector height `224px`               | Radius `8px`; horizontal padding `24px`; vertical padding `18px`; white fill; inner gap `8px`                | `w-full rounded-[8px] bg-white px-6 py-[18px] flex flex-col gap-2`                                 |
+| First section heading/description group (layer `226458`) | `132 × 50px`                                           | At top `18px`, left `24px`; title line `24px`, then `4px` gap and a `22px` description line                  | `h-6` + `gap-1` + `h-[22px]`                                                                       |
+| Description text                                         | `132 × 22px`                                           | `12px`, weight `400`, line-height `22px`, letter spacing `0`, left aligned, `#808080`                        | `text-xs font-normal leading-[22px] tracking-[0px] text-[#808080]`                                 |
+| First card content row (layer `226520`)                  | `1213 × 130px`                                         | At top `76px`, left `24px`; gap `16px`; centered distribution                                                | `w-full flex items-center gap-4`                                                                   |
+| Lower configuration card (layer `226522`)                | width `1261px`; inspector height `598px`; top `1686px` | Radius `8px`; padding left/right `24px`, top/bottom `16px`; gap `16px`; white fill; default border `#C9C9C9` | `w-full rounded-[8px] border border-solid border-[#c9c9c9] bg-white px-6 py-4 flex flex-col gap-4` |
 
-设计稿可见的主要分栏为左侧生成对话、右侧配置；配置内容在右侧面板内纵向排列。应用导航和页面骨架已有实现，不应因整理配置内容而改变原有对话、调试、版本或发布流程。
+The measured first card's vertical rhythm is internally consistent: `18 + 50 + 8 + 130 + 18 = 224px`. The screenshot's preview scale is not used as an additional source of measurements.
 
-## 已核对的视觉规则
+## Visual Decisions
 
-- 设计稿中主要文字颜色可见 `#191919`/`#1A1A1A`；次级说明文字包括 `#777777` 与 `#808080`。具体模块按对应标注使用，不把两者合并为未经确认的新色值。
-- 配置主体的模块间距为 12px；模块卡片圆角为 8px，左右内边距 24px、上下内边距 18px。
-- 配置面板内容有独立滚动容器。避免出现整页滚动和配置内容二次嵌套滚动；底部既有操作区应保持可见并继续工作。
-- 组件基础字体、边框与按钮约束遵循项目 `docs/前端ui.md`；本设计稿没有明确标注的状态色、阴影、动效、字体族等，不增加推断值。
-- 描述文案的精确字号/行高/字色以上方已选中图层检查器为准；其他模块的文字值须以该模块检查器或 `docs/前端ui.md` 中明确规范为依据。
+1. Replace the outer **Basic / Tools & Skills / Advanced** tab switcher with one vertically ordered configuration area, because the high-fidelity canvas presents the modules in a continuous panel.
+2. Keep the configuration content in one internal scroll area; keep the existing bottom action area outside that scroll area.
+3. Present each section title and its description on separate lines. Use the measured `24px` title line, `4px` gap, and `22px` description line in the first card as the section-header rhythm.
+4. Use the documented default border `#C9C9C9`, white fill, and `8px` radius for section cards. Use the confirmed `12px` spacing between stacked modules.
+5. Render the existing sections expanded initially to match the visible reference composition. Keep the ability to collapse each section.
+6. Keep nested prompt tabs inside the model/prompt module; the reference change removes only the outer category tabs.
+7. Do not introduce placeholder icons or custom font families. Keep icons from the existing feature components until a measured asset-specific replacement is available.
 
-## 配置模块与现有前端能力映射
+Values inside individual fields, lower modules, and narrow viewports that were not individually selected in the inspector remain unverified; reuse existing field behavior and avoid claiming exact pixel parity for those details.
 
-现有配置代码位于 `frontend/app/[locale]/agents/[agentId]/agent-config.tsx`，页面壳位于 `frontend/app/[locale]/agents/[agentId]/page.tsx`。目前编辑器按「基础 / 工具与技能 / 高级」三组标签展示配置；设计稿的配置主体则表现为一个连续的纵向配置区域。后续如按稿调整展示结构，应保留下列模块的数据、校验、操作与定位行为。
+## Existing Capability Map
 
-| 配置模块 | 现有实现 | 当前能力判断 | 后续约束 |
-| --- | --- | --- | --- |
-| 展示信息（名称、头像、描述） | `AgentInfo` | 已有组件与配置状态 | 复用现有字段和保存机制；不另造数据字段 |
-| 角色、模型与提示词 | `AgentPrmopt` | 已有组件与配置状态 | 保留原模型选择、提示词编辑、校验与保存行为 |
-| 知识库 | `KnowledgeBaseConfig` 及 `KnowledgeBaseConfigActions` | 已有配置组件及相关操作入口 | 沿用现有知识库关联逻辑；不新增后端接口 |
-| 开场白/对话引导 | `AgentGuide` | 已有配置组件 | 沿用原配置数据与编辑行为 |
-| 工具 | `AgentToolCapability` | 已有能力配置 | 保留工具选择和能力校验 |
-| 技能 | `AgentSkillCapability` | 已有能力配置 | 保留技能选择和能力校验 |
-| 协同智能体 | `CollaborativeAgent` 及操作组件 | 已有配置组件及操作入口 | 沿用现有协同配置逻辑 |
-| 运行策略 | `AgentRunPolicy` | 已有配置组件 | 保留原策略字段、保存及只读规则 |
-| 发布属性 | `AgentDeployment` | 已有配置组件 | 保留原发布配置及发布校验 |
-| 安全护栏 | `GuardrailConfigContent` 及 `GuardrailConfigActions` | 已有配置组件及操作入口 | 复用现有规则编辑与校验；不改变后端契约 |
-| 底部操作 | 当前配置页操作区 | 已有解锁、调试、发布等操作 | 不移除、不改语义；视觉调整不得遮挡操作和只读状态提示 |
+| Section              | Existing implementation                                | Compatibility requirement                                                                             |
+| -------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Display information  | `AgentInfo`                                            | Preserve name/description validation, icon upload, tag management, and draft updates.                 |
+| Model and prompts    | `AgentPrmopt`                                          | Preserve model selection, model priority/settings, nested prompt tabs, validation, and draft updates. |
+| Knowledge base       | `KnowledgeBaseConfig` and `KnowledgeBaseConfigActions` | Preserve associations and all current actions.                                                        |
+| Conversation guide   | `AgentGuide`                                           | Preserve greeting and example-question editing.                                                       |
+| Tools                | `AgentToolCapability`                                  | Preserve tool selection and management.                                                               |
+| Skills               | `AgentSkillCapability`                                 | Preserve skill selection, editing, and management.                                                    |
+| Collaborative agents | `CollaborativeAgent` and its actions                   | Preserve current collaboration configuration.                                                         |
+| Run strategy         | `AgentRunPolicy`                                       | Preserve strategy settings and validation.                                                            |
+| Publish attributes   | `AgentDeployment`                                      | Preserve publication settings and existing publish validation.                                        |
+| Guardrail            | `GuardrailConfigContent` and `GuardrailConfigActions`  | Preserve rules and their existing actions.                                                            |
+| Bottom actions       | `AgentConfig` action area                              | Preserve unlock, debug, and publish callbacks and permission/disabled conditions.                     |
 
-现有能力通过 `useAgentInfo`、`searchAgentInfo`、Agent Store/配置服务及保存保护逻辑工作。默认先使用这些真实前端服务和现有表单状态；只有设计明确要求、而当前前端既无接口也无可复用本地状态的展示项，才考虑隔离的 mock，并且不得伪装成已持久化数据。当前初步盘点未发现必须新增后端接口才能呈现的上述配置模块。
+All listed capabilities use existing frontend state/services. No new backend interface or fabricated persistent data is needed for this layout change.
 
-## 页面行为与兼容约束
+## Interaction and Verification Contract
 
-- 保留创建成功后进入智能体配置页的现有流程及 agent id/locale 路由。
-- 保留自动保存、保存保护、表单校验、只读/解锁、可用性刷新、调试、发布弹窗和发布后刷新行为。
-- 保留通过 NL2Agent 对话请求定位配置模块的能力：定位到的模块应能展开并滚动到可见区域；重排或统一滚动容器时不得让定位请求失效。
-- 模块折叠状态可以按设计稿要求初始化，但折叠/展开不能丢失已编辑值；后续 UI 变更应覆盖全部现有配置模块。
-- 保留现有知识库、工具、技能、协同智能体等操作入口；按钮位置变化不应改变调用目标或权限判断。
-- 不新增或更改 HTTP 路由、请求/响应结构、后端数据模型或持久化行为。
+- A request from the generation conversation opens and scrolls to its target configuration section. Tool/skill sub-targets remain supported.
+- Collapsing a section does not clear its draft or change server state.
+- The scrollable module list does not scroll the whole page or hide the fixed bottom actions.
+- Read-only and unlock state, save guard, validation, debug, publish modal, version navigation, and post-publish refresh remain functional.
+- Component coverage checks the unified section layout and expand/collapse behavior. Browser-level verification should cover opening an Agent editor, scrolling to a lower section, editing an existing field, using the bottom actions, and focusing a section from NL2Agent.
+- No API request, payload, response, database, or backend change is introduced.
 
-## 尚待在实现前补充核对
+## Implementation Evidence
 
-当前共享画布处于大幅平移后的视角，右侧检查器仍显示已选中的「定义智能体的描述和头像」图层。当前能确认该图层及页面主体尺寸，但不能据此声称已经逐项读取所有配置模块的精确样式。实现前应继续停留在同一「智能体创建」设计页，按模块检查器补全：
+- `agentConfigLayout.test.tsx`: 3 component tests passed, covering the single scroll region, default-expanded/collapse/focus behavior, action callbacks, publish validation flow, and absence of new backend effects.
+- Frontend type-check, targeted ESLint, and Prettier checks passed. The production Next.js build in the web image completed successfully.
+- Replaced only the `nexent-web` container using the rebuilt `nexent/nexent-web:latest` image; the container is running and `http://localhost:3000/zh/agents` returned HTTP 200. Other application containers remained running.
+- Browser verification on an existing draft confirmed all ten sections are expanded after reload, section collapse/reopen works, the content scrolls inside the configuration pane, and the bottom actions remain visible. No fields were edited and no save or publish action was triggered.
+- Test-asset design validation and generated Excel drift check passed. The full implementation-phase asset gate remains blocked by the pre-existing stale implementation hash for unrelated case `CMSR-D2-001`; the new Agent configuration case hashes validate.
 
-1. 顶部信息行内的名称、版本/状态等项目及各自尺寸、文字规格。
-2. 模型、提示词、知识库、开场白、技能、工具、协同智能体、运行策略、发布属性、安全护栏各卡片的完整顺序、标题/说明样式、表单控件尺寸、卡片内部间距。
-3. 内容区可视高度、滚动边界、底部操作栏的尺寸和固定方式。
-4. 窄屏或内容较长时的设计稿行为（如果设计稿有对应状态）；没有稿件依据时沿用现有响应式行为。
+## Repository Note
 
-未从检查器确认的值保持为「待核对」，不从共享截图按比例估算，也不因现有代码样式而直接视为设计标准。
-
-## 后续实现与验收清单
-
-- 实现前更新本文中待核对项，并明确每个模块设计值到现有组件的对应关系。
-- 优先复用已有组件、Ant Design 控件、Store、服务和验证；不改后端。确需临时 mock 时说明边界、数据来源及替换条件。
-- 视觉验收以共享设计检查器原始值为准；逐项核对分栏、尺寸、位置、字体大小/行高/字距/字色、模块间距、边框和圆角。不设置 `font-family`。
-- 功能回归覆盖名称/描述、模型与提示词、知识库、开场白、技能、工具、协同智能体、运行策略、发布属性、安全护栏、自动保存/校验、只读与解锁、调试/发布、NL2Agent 定位。
-- 只运行与变更相关的前端测试、类型检查和构建；交付时报告实际执行结果。
-- 用户此前要求前端完成后替换前端容器；到实现阶段再检查项目现有前端部署流程，并只操作前端容器，不触碰后端容器。
+The separate `nexent-doc` checkout referenced by repository workflow guidance was not present in the current workspace. This record stays under the existing product `docs/handoffs/` path and must not be represented as a formal SPEC proposal/design/task set.

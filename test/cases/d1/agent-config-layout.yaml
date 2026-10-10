@@ -1,0 +1,433 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-EDITOR
+cases:
+- case_id: AGENT-CONFIG-D1-001
+  feature_id: AGENT-CONFIG-LAYOUT
+  requirement_ids:
+  - AGENT-CONFIG-REQ-001
+  - AGENT-CONFIG-REQ-002
+  business_rule_ids:
+  - AGENT-CONFIG-RULE-001
+  - AGENT-CONFIG-RULE-002
+  - AGENT-CONFIG-RULE-003
+  - AGENT-CONFIG-RULE-004
+  - AGENT-CONFIG-RULE-005
+  title: Regroup the empty draft into four cards without breaking section focus or
+    action gates
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify four-card composition, preserved section state/focus, guardrail
+    reachability, action validation/permission gates, and absence of writes from render/collapse
+    using the AgentConfig component boundary.
+  preconditions:
+  - Render AgentConfig with an initialized Agent draft and mocked existing section
+    components.
+  - Control mocked save outcomes and read-only state; expose localized keys as visible
+    text.
+  test_data:
+    profile: mock
+    draft:
+      asset_ref: empty_agent_draft
+    card_count: 4
+    resource_order:
+    - knowledge_base
+    - conversation_guide
+    - skills
+    - tools
+    - collaborative_agents
+  steps:
+  - order: 1
+    action: Render AgentConfig with an initialized Agent draft.
+    expected: Basic, model/prompt, shared-resource, and permission/advanced cards
+      appear in one scroll region; all existing field groups including guardrail remain
+      reachable, resources follow the design order, outer category tabs are absent,
+      and workflow actions remain outside that region.
+  - order: 2
+    action: Collapse a collapsible resource section, then issue matching NL2Agent
+      resource and nested prompt focus requests.
+    expected: The requested section reopens and scrolls into view, nested prompt targeting
+      remains supported, and each request clears without losing draft values.
+  - order: 3
+    action: Invoke unlock, debug, and publish actions.
+    expected: Unlock and debug call their existing callbacks; publish validates and
+      awaits save before opening the existing modal.
+  - order: 4
+    action: Repeat debug/publish with rejected validation, failed save, and a read-only
+      draft.
+    expected: Failed validation/save prevents downstream actions; read-only disables
+      editing/publication, while existing allowed read-only inspection remains reachable.
+  expected_results:
+  - Exactly four outer card groups exist in one scroll region, including all existing
+    field groups and guardrail.
+  - Shared resources follow knowledge/welcome/skills/tools/child-Agent order and start
+    expanded.
+  - Section collapse and NL2Agent focus preserve draft values, reopen and scroll to
+    the exact target.
+  - Successful actions retain callbacks; invalid or unsaved drafts do not invoke downstream
+    debug/publication.
+  - Rendering, collapsing and focusing do not request backend updates; read-only prevents
+    mutation/publication.
+  forbidden_side_effects:
+  - Do not omit or duplicate any existing configuration section.
+  - Do not invoke backend services or mutate persisted Agent data as a result of rendering
+    or collapsing sections.
+  - Do not bypass save/validation/permission checks or move workflow actions into
+    the scrolling module list.
+  unit_boundary: AgentConfig React component rendered inside Ant Design App and Form
+    providers, with existing section components, Agent store, route query, translations,
+    and save guard mocked.
+  inputs:
+  - initialized Agent draft
+  - localized strings
+  - focus request
+  - section interactions
+  - action callbacks
+  - save failure
+  - read-only state
+  assertions:
+  - Exactly four outer cards group existing field components; no outer category tabs
+    appear.
+  - Resources are in the specified order and guardrail remains available.
+  - Collapse/focus reopens the targeted resource without dropping state and calls
+    scrollIntoView.
+  - Unlock/debug callbacks and publish modal occur only after applicable successful
+    validation/save/permission gates.
+  - Render/collapse/focus do not persist changes.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+- case_id: AGENT-CONFIG-D1-004
+  feature_id: AGENT-CONFIG-LAYOUT
+  requirement_ids:
+  - AGENT-CONFIG-REQ-002
+  business_rule_ids:
+  - AGENT-CONFIG-RULE-005
+  - AGENT-CONFIG-RULE-009
+  title: Enforce measured text-entry limits without truncating stored drafts
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise real AgentInfo, AgentGuide, and AgentPrompt inputs to verify
+    measured high-fidelity limits, exact boundary entry, preserved legacy overlong
+    values, and default-mode compatibility.
+  preconditions:
+  - Render real field components with Ant Design providers and controlled Agent-store
+    callbacks.
+  - Provide separate empty, exact-boundary, and overlong legacy values without replacing
+    the inputs with mocks.
+  test_data:
+    description_limit: 200
+    greeting_limit: 200
+    duty_limit: 1000
+    legacy_description_length: 201
+    legacy_greeting_length: 201
+    legacy_duty_length: 1001
+  steps:
+  - order: 1
+    action: Render high-fidelity inputs and enter exactly 200 description/greeting
+      characters and 1000 duty characters.
+    expected: Entry limits expose the measured boundaries and existing callbacks retain
+      complete boundary values.
+  - order: 2
+    action: Render legacy overlong stored values without interaction, then shorten
+      them below their measured limits.
+    expected: Complete stored values remain visible without a load-time update; shortening
+      produces the exact reduced value through the existing callback.
+  - order: 3
+    action: Render default component mode with its preexisting field limits.
+    expected: Default limits and legacy editing behavior remain compatible; the new
+      high-fidelity limit is not applied globally.
+  expected_results:
+  - High-fidelity description and greeting entry use a 200-character limit; duty uses
+    1000.
+  - Exact boundary values remain complete, and legacy overlong values are never sliced
+    or silently persisted on load.
+  - Shortening stored overlong content remains possible and preserves expected callback
+    payloads.
+  - Default-mode field constraints remain unchanged.
+  forbidden_side_effects:
+  - Do not truncate persisted content, write on render, or change backend request/response
+    contracts.
+  unit_boundary: Real AgentInfo, AgentGuide, and AgentPrompt controls with store/query/resource
+    dependencies controlled at their existing hook boundaries.
+  inputs:
+  - empty values
+  - boundary text
+  - overlong legacy values
+  - shortened text
+  - default component mode
+  assertions:
+  - Actual input limits match 200, 200, and 1000 in high-fidelity mode.
+  - Callback values preserve the full exact-boundary or shortened text.
+  - Legacy values render intact without automatic callbacks.
+  - Default-mode limits match the existing component contract.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+- case_id: AGENT-CONFIG-D1-002
+  feature_id: AGENT-CONFIG-LAYOUT
+  requirement_ids:
+  - AGENT-CONFIG-REQ-002
+  business_rule_ids:
+  - AGENT-CONFIG-RULE-005
+  - AGENT-CONFIG-RULE-007
+  title: Limit new preset questions to five without truncating legacy drafts
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute the real AgentGuide component against controlled draft state
+    to prove five-item additions, value-preserving edits/removal, and legacy six-item
+    load compatibility.
+  preconditions:
+  - Render the real AgentGuide inside Ant Design Form/App with a mocked Agent store
+    update callback and translations.
+  - Provide separate logical drafts with zero, four, five, and six stored questions.
+  test_data:
+    question_counts:
+    - 0
+    - 4
+    - 5
+    - 6
+    legacy_draft:
+      asset_ref: agent_draft_six_questions
+  steps:
+  - order: 1
+    action: Render zero questions and add one; edit its value and the greeting.
+    expected: The localized counter uses maximum five and update callbacks retain
+      the entered question/greeting values.
+  - order: 2
+    action: Render four questions and add the fifth, then render the updated five-question
+      state.
+    expected: The callback appends exactly one empty question and add becomes disabled
+      at5/5.
+  - order: 3
+    action: Remove one of five questions and render the four-question result.
+    expected: The correct item is removed, other values remain intact, and add re-enables.
+  - order: 4
+    action: Render a legacy six-question draft without interacting.
+    expected: All six question values remain rendered, add is disabled, and no update
+      callback occurs from load.
+  expected_results:
+  - The effective maximum for additions and localized count/tooltip is five.
+  - Add is enabled below five and disabled at five or above.
+  - Greeting/question edits and removal retain the existing update contract and unaffected
+    values.
+  - Legacy six-item drafts are not truncated or automatically saved.
+  forbidden_side_effects:
+  - Do not discard legacy questions, make a write during render, or introduce a backend
+    schema/API change.
+  unit_boundary: Real AgentGuide component with controlled Agent-store state; UI behavior
+    is not replaced by a mocked child.
+  inputs:
+  - zero-question draft
+  - four-question draft
+  - five-question draft
+  - legacy six-question draft
+  - edit and remove interactions
+  assertions:
+  - The fifth addition appends one item and the add control disables at the boundary.
+  - Removal from five retains the other values and permits a new addition.
+  - Six question values render unchanged without a load-time update.
+  - Counter translation receives maximum5 and edits preserve expected payload values.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+- case_id: AGENT-CONFIG-D1-003
+  feature_id: AGENT-CONFIG-LAYOUT
+  requirement_ids:
+  - AGENT-CONFIG-REQ-002
+  business_rule_ids:
+  - AGENT-CONFIG-RULE-001
+  - AGENT-CONFIG-RULE-005
+  - AGENT-CONFIG-RULE-008
+  - AGENT-CONFIG-RULE-011
+  title: Render ordered selected tool and child-Agent rows with actionable resource
+    entries and preserved configuration/removal
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute the real resource-add control, ToolManagement and CollaborativeAgent
+    to prove empty-entry compatibility, ordered compact selected rows, real metadata,
+    configuration/removal callbacks and read-only behavior without render-time writes.
+  preconditions:
+  - Render the actual new or existing resource-add presentation with empty resources
+    and explicit association/create callbacks.
+  - Mock existing resource services/state without replacing the add control or owning
+    resource component.
+  - Render real populated ToolManagement and CollaborativeAgent in high-fidelity
+    mode with logical catalog, saved child-version, internal/external relation and
+    read-only fixtures; keep store/service hooks controlled.
+  test_data:
+    association_count: 0
+    reference_row_width: 1213
+    reference_entry_width: 602.5
+    entry_height: 48
+    grid_gap: 8
+    selected_tools:
+      asset_ref: selected_tools_with_managed_knowledge_tool
+    selected_child_agents:
+      asset_ref: selected_internal_external_agents_with_saved_versions
+    selected_row:
+      height: 48
+      radius: 4
+      border_color: "#DFDFDF"
+      horizontal_padding: 12
+      vertical_padding: 8
+      name_font_size: 14
+      name_line_height: 22
+      name_font_weight: 400
+      name_color: "#191919"
+      tag_font_size: 12
+      tag_line_height: 18
+      tag_color: "#777777"
+      content_gap: 8
+      tool_icon_size: 24
+      child_avatar_size: 32
+      action_target_size: 24
+      action_glyph_size: 14
+  steps:
+  - order: 1
+    action: Render the empty resource module without interacting.
+    expected: A two-column row contains a first-column add entry with48px height,
+      radius8, padding8/12 and3%
+  - order: 2
+    action: Activate the add entry.
+    expected: The association-selection path opens exactly once, with creation/manage
+      callback untouched.
+  - order: 3
+    action: Activate the separate new/manage action.
+    expected: The creation/management path opens with association callback untouched.
+  - order: 4
+    action: Repeat with a read-only resource module.
+    expected: Mutation actions are disabled and do not invoke association/create callbacks.
+  - order: 5
+    action: Render populated tool and child-Agent modules, including missing optional
+      labels, a managed knowledge tool and a saved child version differing from the
+      latest catalog version.
+    expected: Visible resources keep their selection order in a two-column grid;
+      names and real neutral tags share compact48px rows, full names and saved child
+      versions remain available in tooltips, the add entry follows selected rows,
+      managed knowledge tools remain hidden without removal from state, and rendering
+      makes no mutation or relation request.
+  - order: 6
+    action: Open settings on a configurable selected tool, remove one selected tool,
+      then remove an internal and an external child Agent through their existing
+      actions.
+    expected: Tool configuration retains canonical parameters and prerequisites;
+      tool removal preserves other tools including managed knowledge tools; internal
+      removal updates matching ID/relation entries without changing other snapshots;
+      external removal uses the existing relation-service callback and only updates
+      selection on its successful result.
+  - order: 7
+    action: Render populated read-only and default-mode modules and attempt disabled
+      selected-row actions.
+    expected: Read-only tool settings/removal and child removal do not mutate state;
+      default mode retains its grouped tool and internal/external child presentation,
+      and missing optional catalog labels produce no invented tag values.
+  expected_results:
+  - Add remains in the left column and does not become a full-width dashed placeholder.
+  - Measured48px height,8px gap/radius and3% background are represented by the actual
+    control.
+  - Association and creation callbacks are separate and permission gated.
+  - Real selected tool and child-Agent rows use the frozen common shell, names/tags,
+    icon/avatar sizes and always-visible24px action targets, followed by the add entry.
+  - Real labels, full names and saved child versions remain available without invented
+    screenshot data; managed knowledge tools stay in state but are not displayed.
+  - Configuration and internal/external removals retain existing callbacks, unaffected
+    selections and read-only gates; default presentation remains compatible.
+  forbidden_side_effects:
+  - Do not persist a resource, duplicate associations, or call a creation API merely
+    by rendering or opening selection.
+  - Do not remove managed knowledge tools, overwrite retained child versions, fabricate
+    optional metadata, or restyle knowledge rows/association drawers.
+  unit_boundary: Actual resource-add control, ToolManagement and CollaborativeAgent
+    rendered with Ant Design providers and existing query/store/service hooks controlled;
+    selected-row components and actions are not replaced by mocks.
+  inputs:
+  - empty resources
+  - association callback
+  - creation callback
+  - read-only state
+  - ordered populated tool and child-Agent selections
+  - managed knowledge tool
+  - canonical tool parameters and missing optional labels
+  - saved child version and internal/external removal results
+  - default presentation mode
+  assertions:
+  - Two-column layout and first-column add entry retain measured styling.
+  - Add and create interactions each call only their own workflow.
+  - Render and disabled controls issue no mutation callback.
+  - Selected rows represent the frozen shell/name/tag/icon/action contract and preserve
+    selected order with the add entry last.
+  - Settings opens the actual existing tool configuration path; removals change only
+    intended selections/relations and preserve managed knowledge tools and other snapshots.
+  - Read-only prevents selected-row mutations; missing optional metadata stays absent;
+    saved-version/full-name tooltips and default presentation remain available.
+  source:
+    bug_ids: [AGENT-CONFIG-BUG-001]
+    handoff: docs/handoffs/2026-10-10-selected-tools-child-agents.md
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+- case_id: AGENT-CONFIG-D1-005
+  feature_id: AGENT-CONFIG-LAYOUT
+  requirement_ids:
+  - AGENT-CONFIG-REQ-003
+  business_rule_ids:
+  - AGENT-CONFIG-RULE-010
+  title: Reuse the resource drawer and preserve controlled model membership and order
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify actual common drawer controls, scroll/mask, controlled model add/remove
+    and no render-time selection callback.
+  preconditions:
+  - Render real AddResourceDrawer and AddModelDrawer with existing model query controlled
+    at its hook boundary.
+  test_data:
+    profile: mock
+    model_ids:
+    - 2
+    - 1
+  steps:
+  - order: 1
+    action: Open shared drawer and inspect right placement,mask,header and close/confirm
+      controls.
+    expected: Existing shared drawer design renders; close and confirm invoke only
+      their supplied callbacks.
+  - order: 2
+    action: Render model drawer with ordered configured IDs, remove a configured model
+      and select a new model.
+    expected: Callbacks retain remaining order and append new IDs without replacing
+      priority or mutating on render.
+  expected_results:
+  - Shared right drawer is reused with original close/confirm callbacks.
+  - Controlled model add/remove preserves order and no callback occurs on render.
+  - Standalone drawer defaults remain compatible.
+  forbidden_side_effects:
+  - Do not save on render/open/close or discard retained model IDs/overrides.
+  unit_boundary: Real shared drawer and model selector components with model query
+    mocked.
+  inputs:
+  - ordered model IDs
+  - catalog
+  - close/confirm interactions
+  assertions:
+  - Right masked drawer and scroll region render.
+  - Model callbacks preserve remaining IDs and append newly selected ID.
+  - Rendering does not change selection.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []

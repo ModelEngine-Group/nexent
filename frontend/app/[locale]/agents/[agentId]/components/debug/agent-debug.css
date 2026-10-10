@@ -1,0 +1,126 @@
+.agent-debug-panel {
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 24px;
+  border-radius: 8px;
+  color: #191919;
+  font-family: "HarmonyOS Sans SC", "Huawei Sans", sans-serif;
+  background:
+    radial-gradient(ellipse at 0% 100%, #66ebff1a, transparent 48%),
+    radial-gradient(ellipse at 100% 100%, #7a66ff12, transparent 48%),
+    radial-gradient(ellipse at 80% 85%, #669fff0f, transparent 48%), #fff;
+}
+.agent-debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  flex-shrink: 0;
+}
+.agent-debug-header-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+  cursor: pointer;
+}
+.agent-debug-header-actions {
+  display: flex;
+  gap: 16px;
+}
+.agent-debug-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: clamp(24px, calc(100cqh - 690px), 192px) 0 24px;
+  min-height: 168px;
+}
+.agent-debug-welcome-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  max-width: 100%;
+  padding: 0 8px;
+}
+.agent-debug-welcome-title h1 {
+  margin: 0;
+  min-width: 0;
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 54px;
+  letter-spacing: 0;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.agent-debug-greeting {
+  margin: 0;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 8px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.agent-debug-suggestions h2 {
+  margin: 0;
+  padding: 16px 16px 12px;
+  font-family: "HarmonyHeiTi", sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 22px;
+  color: #000;
+}
+.agent-debug-question-scroll {
+  min-height: 0;
+  /* Reserve header28, welcome168, composer/footer214 and their16px gap. */
+  max-height: max(46px, calc(100cqh - 426px));
+  overflow-y: auto;
+}
+.agent-debug-question-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-debug-question-list button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 46px;
+  padding: 12px;
+  border: 0;
+  outline: 1px solid transparent;
+  outline-offset: -1px;
+  border-radius: 16px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-debug-question-list button:hover {
+  background: #19191908;
+}
+.agent-debug-question-list button:focus-visible {
+  outline: 2px solid #2673e5;
+}
+.agent-debug-disclaimer {
+  margin: 0;
+  padding-bottom: 16px;
+  font-family: "HarmonyHeiTi", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-align: center;
+  color: #1919194d;
+}

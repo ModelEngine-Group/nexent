@@ -1,0 +1,190 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-EDITOR
+cases:
+- case_id: AGENT-CONFIG-D4-001
+  feature_id: AGENT-CONFIG-LAYOUT
+  requirement_ids:
+  - AGENT-CONFIG-REQ-002
+  - AGENT-CONFIG-REQ-003
+  business_rule_ids:
+  - AGENT-CONFIG-RULE-001
+  - AGENT-CONFIG-RULE-002
+  - AGENT-CONFIG-RULE-003
+  - AGENT-CONFIG-RULE-004
+  - AGENT-CONFIG-RULE-005
+  - AGENT-CONFIG-RULE-006
+  - AGENT-CONFIG-RULE-007
+  - AGENT-CONFIG-RULE-008
+  - AGENT-CONFIG-RULE-009
+  - AGENT-CONFIG-RULE-010
+  - AGENT-CONFIG-RULE-011
+  title: Configure an empty draft through the measured editor without losing save
+    or permission gates
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove actual desktop geometry, internal scrolling, actionable resources,
+    question boundary, autosaved edits and validation/read-only outcomes in one deterministic
+    browser journey.
+  preconditions:
+  - A local frontend is running and all backend/provider HTTP requests are routed
+    to deterministic logical fixtures.
+  - Logical fixtures expose an editable draft, an empty draft, resource/model choices,
+    and a read-only draft; updates are captured only in fixture state.
+  - A populated fixture exposes selected tools plus a managed knowledge tool and
+    selected internal/external child Agents with real catalog labels and saved version
+    snapshots; knowledge-base rows use the current fixture presentation.
+  test_data:
+    profile: mock
+    viewport:
+      width: 1920
+      height: 1080
+    constrained_viewport:
+      width: 1280
+      height: 800
+    editable_draft:
+      asset_ref: empty_agent_draft
+    read_only_draft:
+      asset_ref: read_only_agent_draft
+    geometry_tolerance_px: 1
+    selected_tools:
+      asset_ref: selected_tools_with_managed_knowledge_tool
+    selected_child_agents:
+      asset_ref: selected_internal_external_agents_with_saved_versions
+    selected_row:
+      height: 48
+      radius: 4
+      border_color: "#DFDFDF"
+      horizontal_padding: 12
+      vertical_padding: 8
+      name_font_size: 14
+      name_line_height: 22
+      name_font_weight: 400
+      name_color: "#191919"
+      tag_font_size: 12
+      tag_line_height: 18
+      tag_color: "#777777"
+      gap: 8
+      tool_icon_size: 24
+      child_avatar_size: 32
+      action_target_size: 24
+      action_glyph_size: 14
+  steps:
+  - order: 1
+    action: Open the initialized editable empty draft at the desktop reference viewport.
+    expected: Navigation64px, conversation561px, remaining configuration1295px fit
+      the1920px viewport without horizontal overflow; tab64px and identity74px precede
+      four white radius8 cards with gap12 and no universal outer stroke/shadow.
+  - order: 2
+    action: Inspect the empty card/resource geometry and selected title/description
+      styles.
+    expected: Basic/model empty reference heights are224/268px where reference children
+      apply; avatar preview is100px, basic columns share width equally with16px gap
+      and description textarea is100px; resources share one card in knowledge/welcome/skills/tools/child
+      order, add row is two columns gap8 with a left48px entry and3% dark background,
+      titles16px/24px weight500
+  - order: 3
+    action: Scroll to lower resources/advanced controls, collapse and reopen a resource,
+      and open add-resource selection separately from create/manage.
+    expected: Scrolling stays inside the configuration pane and identity/action controls
+      remain reachable; no association update occurs before selection confirmation,
+      and model/prompt/guardrail capabilities remain reachable.
+  - order: 4
+    action: Edit a greeting and add/edit five preset questions, then attempt another
+      addition and remove one.
+    expected: Existing update payloads retain edited values; addition disables at
+      five and re-enables below five without writes from initial render.
+  - order: 5
+    action: Invoke debug/publication with missing required data, then provide valid
+      required fields and wait for autosave before invoking debug/publication entry
+      again.
+    expected: Validation prevents downstream actions for invalid data; valid debug/publication
+      entry follows existing validation/idle-save flow and publication modal, without
+      publishing to a real backend.
+  - order: 6
+    action: Reopen captured fixture draft, then load a read-only fixture and resize
+      to the constrained viewport.
+    expected: Saved edits remain visible, read-only prevents edits/publication, controls
+      stay usable without horizontal overflow or clipped populated content.
+  - order: 7
+    action: Open model, knowledge, skill, tool and child-Agent association entries,
+      inspect the right drawer and close each without edits.
+    expected: All five entries reuse the shared right drawer; association data and
+      existing save count remain unchanged.
+  - order: 8
+    action: Open the populated fixture and inspect selected tools, child Agents,
+      add-entry order and the existing knowledge-base row at desktop and constrained
+      widths, then resize below the small-screen breakpoint.
+    expected: Tools/child Agents use two equal columns with8px gaps and48px white
+      rows with4px radius,1px#DFDFDF border,12px/8px padding and the current knowledge
+      shell shadow; names are14px/22px regular400#191919 with ellipsis/full-name
+      tooltips, real neutral tags are12px/18px#777777 and8px from the name, marks/avatars
+      are24px/32px, and14px action glyphs stay visible in24px targets. The add entry
+      follows all selected rows; below sm the grid uses one column without horizontal
+      overflow. Knowledge rows and selector drawers retain their existing presentation.
+  - order: 9
+    action: Open a selected tool configuration, inspect a saved child-version tooltip,
+      remove one selected tool and one internal child Agent, wait for fixture autosave,
+      then reopen the captured draft and repeat mutation attempts with a read-only
+      populated fixture.
+    expected: Existing configuration prerequisites and saved version metadata remain
+      reachable; only the intended tool/child selection is removed and persisted
+      through existing fixture payloads, the managed knowledge tool and other child
+      snapshots remain intact, and read-only controls prevent mutation. Initial
+      rendering and tooltip inspection generate no association writes.
+  expected_results:
+  - Desktop measured layout fits the available box model with at most1px geometry
+    tolerance rather than hardcoding overflowing source widths.
+  - Four cards/resources use the measured geometry and numeric typography; unavailable
+    font glyph parity is not claimed.
+  - Question addition uses maximum five and edited data persists only through existing
+    fixture update contracts.
+  - Validation/save/permission gates and model/resource/guardrail reachability survive
+    regrouping.
+  - Lower content scrolls internally and workflow actions remain reachable across
+    viewport sizes.
+  - All five association drawers open and close without association writes; existing
+    configuration/selection controllers remain reachable.
+  - Populated tools/child Agents match the frozen selected-row numerical contract,
+    resource/add ordering and responsive layout while current knowledge rows/drawers
+    retain their presentation.
+  - Existing selected-resource configuration/removal and saved-version tooltips work;
+    captured/reopened fixture state retains managed knowledge tools and unaffected
+    selections, and read-only disables mutations.
+  forbidden_side_effects:
+  - Do not call a real backend/provider, publish a real version, create real resources,
+    or introduce a new endpoint.
+  - Do not write from render/collapse, silently truncate legacy data, or bypass read-only/validation/save
+    gates.
+  - Do not fabricate optional metadata, discard managed knowledge tools or retained
+    child versions, or change current knowledge/drawer presentation.
+  actor: Agent editor user
+  journey:
+  - Open an existing empty draft and inspect desktop composition.
+  - Associate resources through the existing selection path and edit conversation
+    guidance.
+  - Wait for fixture autosave and invoke permission/validation guarded workflows.
+  - Reopen fixture data and inspect a read-only/narrow-screen state.
+  - Inspect populated tool/child rows, configure/remove selected resources, and reopen
+    the saved fixture state while preserving knowledge associations and child versions.
+  final_business_result:
+  - The user can configure an empty draft in the measured layout while keeping saved
+    edits and existing workflow gates.
+  - All mutations remain inside deterministic fixture state.
+  - Populated selected tools and child Agents use consistent compact rows and retain
+    their configuration/removal permissions and saved association data.
+  failure_evidence:
+  - Failure screenshot/trace plus violated geometry or control assertion.
+  - Sanitized captured update payloads and unexpected request paths.
+  - Missing controls, clipped content, or mismatched saved fixture values.
+  source:
+    bug_ids: [AGENT-CONFIG-BUG-001]
+    handoff: docs/handoffs/2026-10-10-selected-tools-child-agents.md
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+    timeout_seconds: 120

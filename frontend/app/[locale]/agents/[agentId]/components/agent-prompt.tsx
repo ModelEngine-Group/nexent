@@ -12,7 +12,14 @@ import {
   Select,
   Tooltip,
 } from "antd";
-import { GripVertical, ListOrdered, Maximize2, Settings2 } from "lucide-react";
+import {
+  GripVertical,
+  ListOrdered,
+  Maximize2,
+  Settings2,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import {
   DndContext,
   KeyboardSensor,
@@ -23,16 +30,21 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import {
+  rectSortingStrategy,
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import Image from "next/image";
 
 import { useAgentStore } from "@/stores/agentStore";
+import { AddModelDrawer } from "@/components/resource-picker/AddModelDrawer";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import type { ModelOption } from "@/types/modelConfig";
+import { ResourceAddButton } from "@/components/common/ResourceAddButton";
 import {
   ModelAdvancedSettings,
   ModelAdvancedSettingsValue,
@@ -46,6 +58,7 @@ import { canManageModels } from "@/lib/auth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExpandEditModal from "@/components/common/ExpandEditModal";
@@ -53,6 +66,8 @@ import {
   reorderModelIds,
   resolveModelSelection,
 } from "@/lib/agent/modelPriority";
+import HighFidelityTextArea from "./HighFidelityTextArea";
+import HighFidelityPromptEditModal from "./HighFidelityPromptEditModal";
 
 const { TextArea } = Input;
 
@@ -115,12 +130,266 @@ function SortableModelItem({
   );
 }
 
-export default function AgentPrompt() {
+const MODEL_PROVIDER_LOGOS: Record<string, string> = {
+  deepseek: "/deepseek.png",
+  openai: "/openai.png",
+  qwen: "/qwen.png",
+  silicon: "/siliconflow.png",
+  siliconflow: "/siliconflow.png",
+  modelengine: "/modelengine.png",
+};
+
+interface SelectedModelCardProps {
+  model: ModelOption;
+  disabled: boolean;
+  onConfigure: () => void;
+  onRemove: () => void;
+  reorderLabel: string;
+  settingsLabel: string;
+  removeLabel: string;
+  textInferenceLabel: string;
+  deepThinkingLabel: string;
+  toolCallsLabel: string;
+  contextLabel?: string;
+}
+
+function SelectedModelCard({
+  model,
+  disabled,
+  onConfigure,
+  onRemove,
+  reorderLabel,
+  settingsLabel,
+  removeLabel,
+  textInferenceLabel,
+  deepThinkingLabel,
+  toolCallsLabel,
+  contextLabel,
+}: SelectedModelCardProps) {
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: model.id, disabled });
+  const provider = String(
+    model.modelFactory || model.source || ""
+  ).toLowerCase();
+  const logo = MODEL_PROVIDER_LOGOS[provider];
+  const contextTokens = model.contextWindowTokens ?? model.maxInputTokens;
+  const contextSize =
+    contextTokens && contextTokens > 0
+      ? `${Math.round(contextTokens / 1000)}k`
+      : null;
+  const capabilities = [
+    model.type === "llm" ? textInferenceLabel : null,
+    model.reasoningCapability?.status === "supported"
+      ? deepThinkingLabel
+      : null,
+    model.supportToolCalls === true ? toolCallsLabel : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid={`agent-selected-model-${model.id}`}
+      className={`flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2 transition-shadow ${
+        isDragging ? "z-10 opacity-60 shadow-md" : ""
+      }`}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <button
+        type="button"
+        className="flex size-4 shrink-0 cursor-grab touch-none items-center justify-center text-[#8c8c8c] disabled:cursor-default"
+        aria-label={reorderLabel}
+        disabled={disabled}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} />
+      </button>
+      <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden">
+        {logo ? (
+          <Image
+            src={logo}
+            alt=""
+            aria-hidden="true"
+            width={20}
+            height={20}
+            className="size-5 object-contain"
+          />
+        ) : (
+          <Sparkles size={17} className="text-[#2673e5]" aria-hidden="true" />
+        )}
+      </span>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+        <Tooltip title={model.displayName || model.name}>
+          <span className="min-w-0 shrink truncate text-sm leading-[22px] text-[#191919]">
+            {model.displayName || model.name}
+          </span>
+        </Tooltip>
+        {contextSize ? (
+          <span className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]">
+            {contextLabel?.replace("{{count}}", contextSize) ?? contextSize}
+          </span>
+        ) : null}
+        {capabilities.map((capability) => (
+          <span
+            key={capability}
+            className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]"
+          >
+            {capability}
+          </span>
+        ))}
+      </div>
+      <Tooltip title={settingsLabel}>
+        <Button
+          type="text"
+          size="small"
+          icon={<Settings2 size={14} />}
+          aria-label={settingsLabel}
+          disabled={disabled}
+          onClick={onConfigure}
+          className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+        />
+      </Tooltip>
+      <Tooltip title={removeLabel}>
+        <Button
+          type="text"
+          size="small"
+          icon={<Trash2 size={14} />}
+          aria-label={removeLabel}
+          disabled={disabled}
+          onClick={onRemove}
+          className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
+        />
+      </Tooltip>
+    </div>
+  );
+}
+
+interface HighFidelityModelGridProps {
+  value?: number[];
+  onChange?: (modelIds: number[]) => void;
+  selectedIds: number[];
+  models: ModelOption[];
+  disabled: boolean;
+  onAddModel: () => void;
+  onSelectionChange: (modelIds: number[]) => void;
+  onConfigureModel: (modelId: number) => void;
+  reorderLabel: string;
+  settingsLabel: string;
+  removeLabel: string;
+  textInferenceLabel: string;
+  deepThinkingLabel: string;
+  toolCallsLabel: string;
+  addModelLabel: string;
+  contextLabel?: string;
+  sensors: ReturnType<typeof useSensors>;
+}
+
+function HighFidelityModelGrid({
+  value,
+  onChange,
+  selectedIds,
+  models,
+  disabled,
+  onAddModel,
+  onSelectionChange,
+  onConfigureModel,
+  reorderLabel,
+  settingsLabel,
+  removeLabel,
+  textInferenceLabel,
+  deepThinkingLabel,
+  toolCallsLabel,
+  addModelLabel,
+  contextLabel,
+  sensors,
+}: HighFidelityModelGridProps) {
+  const modelIds = value ?? selectedIds;
+  const selectedModels = modelIds
+    .map((id) => models.find((model) => model.id === Number(id)))
+    .filter((model): model is ModelOption => Boolean(model));
+
+  const updateSelection = (nextIds: number[]) => {
+    onSelectionChange(nextIds);
+    onChange?.(nextIds);
+  };
+
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const oldIndex = modelIds.indexOf(Number(active.id));
+    const newIndex = modelIds.indexOf(Number(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    const nextIds = [...modelIds];
+    const [movedId] = nextIds.splice(oldIndex, 1);
+    nextIds.splice(newIndex, 0, movedId);
+    updateSelection(nextIds);
+  };
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleDragEnd}
+    >
+      <SortableContext items={modelIds} strategy={rectSortingStrategy}>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {selectedModels.map((model) => (
+            <SelectedModelCard
+              key={model.id}
+              model={model}
+              disabled={disabled}
+              reorderLabel={reorderLabel}
+              settingsLabel={settingsLabel}
+              removeLabel={removeLabel}
+              textInferenceLabel={textInferenceLabel}
+              deepThinkingLabel={deepThinkingLabel}
+              toolCallsLabel={toolCallsLabel}
+              contextLabel={contextLabel}
+              onConfigure={() => onConfigureModel(model.id)}
+              onRemove={() =>
+                updateSelection(
+                  modelIds.filter((modelId) => Number(modelId) !== model.id)
+                )
+              }
+            />
+          ))}
+          <ResourceAddButton
+            data-testid="agent-model-add-entry"
+            aria-label={addModelLabel}
+            disabled={disabled}
+            onClick={onAddModel}
+          >
+            {addModelLabel}
+          </ResourceAddButton>
+        </div>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+interface AgentPromptProps {
+  highFidelity?: boolean;
+  onOptimizePrompt?: () => void;
+}
+
+export default function AgentPrompt({
+  highFidelity = false,
+  onOptimizePrompt,
+}: AgentPromptProps) {
   const { t } = useTranslation("common");
   const form = Form.useFormInstance();
   const { user } = useAuthorizationContext();
   const { availableLlmModels, isSuccess: modelListLoaded } = useModelList();
   const { isSpeedMode } = useDeployment();
+  const isReadOnly = useAgentReadOnly();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
   const flushDraft = useAgentStore((state) => state.flushDraft);
@@ -135,6 +404,8 @@ export default function AgentPrompt() {
   const [expandedPrompt, setExpandedPrompt] = useState<PromptTab | null>(null);
   const [activePromptTab, setActivePromptTab] = useState<PromptTab>("duty");
   const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
+  const [isModelSelectionOpen, setIsModelSelectionOpen] = useState(false);
+  const [additionalPromptsOpen, setAdditionalPromptsOpen] = useState(false);
   const requestedPromptTab =
     configFocusRequest?.agentId === agentId &&
     configFocusRequest.target.section === "role_model"
@@ -143,10 +414,15 @@ export default function AgentPrompt() {
 
   useEffect(() => {
     setActivePromptTab("duty");
+    setIsModelSelectionOpen(false);
+    setAdditionalPromptsOpen(false);
   }, [agentId]);
 
   useEffect(() => {
-    if (requestedPromptTab) setActivePromptTab(requestedPromptTab);
+    if (requestedPromptTab) {
+      setActivePromptTab(requestedPromptTab);
+      if (requestedPromptTab !== "duty") setAdditionalPromptsOpen(true);
+    }
   }, [requestedPromptTab]);
 
   const handlePromptTabChange = useCallback(
@@ -327,7 +603,7 @@ export default function AgentPrompt() {
   };
 
   const canManage = canManageModels(user?.role ?? "");
-  const isModelSelectionDisabled = !canManage && !isSpeedMode;
+  const isModelSelectionDisabled = isReadOnly || (!canManage && !isSpeedMode);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -387,6 +663,7 @@ export default function AgentPrompt() {
         size="small"
         icon={<Maximize2 size={15} />}
         aria-label={t("systemPrompt.button.expand")}
+        disabled={isReadOnly}
         onClick={() => setExpandedPrompt(prompt)}
       />
     </Tooltip>
@@ -442,103 +719,131 @@ export default function AgentPrompt() {
     </Tooltip>
   );
 
-  return (
-    <div className="w-full">
-      {/* Model Selection */}
-      <Row gutter={[12, 0]}>
-        <Col xs={24} sm={24}>
-          <Form.Item
-            label={t("agent.field.model")}
-            className="mb-3"
-            layout="horizontal"
-          >
-            <div className="flex w-full items-start gap-2">
-              <Form.Item
-                noStyle
-                name="model_ids"
-                rules={[
-                  {
-                    required: true,
-                    message: t("agent.validation.modelRequired"),
-                  },
-                ]}
-              >
-                <Select
-                  className="min-w-0 flex-1"
-                  mode="multiple"
-                  placeholder={t("agent.field.modelPlaceholder")}
-                  options={modelOptions}
-                  value={selectedModelIds}
-                  onChange={updateModelSelection}
-                  maxTagCount={3}
-                  showSearch={{
-                    filterOption: (input, option) =>
-                      (option?.label ?? "")
-                        .toLowerCase()
-                        .includes(input.toLowerCase()),
-                  }}
-                  disabled={isModelSelectionDisabled}
-                />
-              </Form.Item>
-              {selectedModels.length > 1 && !isModelSelectionDisabled ? (
-                <Popover
-                  content={modelPriorityContent}
-                  trigger="click"
-                  placement="bottomRight"
-                  open={isModelPriorityOpen}
-                  onOpenChange={setIsModelPriorityOpen}
-                >
-                  {modelPriorityTrigger}
-                </Popover>
-              ) : (
-                modelPriorityTrigger
-              )}
-              <Tooltip
-                title={t("agent.modelParamsOverride.button", {
-                  defaultValue: "模型参数覆盖",
-                })}
-              >
-                <span className="inline-flex">
-                  <Button
-                    type="default"
-                    icon={<Settings2 size={16} />}
-                    aria-label={t("agent.modelParamsOverride.button", {
-                      defaultValue: "模型参数覆盖",
-                    })}
-                    disabled={
-                      isModelSelectionDisabled || !editedAgent.model_ids?.length
-                    }
-                    onClick={() =>
-                      setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)
-                    }
-                  />
-                </span>
-              </Tooltip>
-            </div>
-          </Form.Item>
-        </Col>
-      </Row>
-
-      <Tabs
-        value={activePromptTab}
-        onValueChange={handlePromptTabChange}
-        className="relative z-0 w-full"
+  const modelSelectionActions = (
+    <div className="flex shrink-0 items-center gap-2">
+      {selectedModels.length > 1 && !isModelSelectionDisabled ? (
+        <Popover
+          content={modelPriorityContent}
+          trigger="click"
+          placement="bottomRight"
+          open={isModelPriorityOpen}
+          onOpenChange={setIsModelPriorityOpen}
+        >
+          {modelPriorityTrigger}
+        </Popover>
+      ) : (
+        modelPriorityTrigger
+      )}
+      <Tooltip
+        title={t("agent.modelParamsOverride.button", {
+          defaultValue: "模型参数覆盖",
+        })}
       >
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="duty">{t("agent.field.dutyPrompt")}</TabsTrigger>
-          <TabsTrigger value="constraint">
-            {t("agent.field.constraintPrompt")}
-          </TabsTrigger>
-          <TabsTrigger value="few-shots">
-            {t("agent.field.fewShotsPrompt")}
-          </TabsTrigger>
-        </TabsList>
+        <span className="inline-flex">
+          <Button
+            type="default"
+            icon={<Settings2 size={16} />}
+            aria-label={t("agent.modelParamsOverride.button", {
+              defaultValue: "模型参数覆盖",
+            })}
+            disabled={
+              isModelSelectionDisabled || !editedAgent.model_ids?.length
+            }
+            onClick={() =>
+              setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)
+            }
+          />
+        </span>
+      </Tooltip>
+    </div>
+  );
 
-        <TabsContent value="duty" className="mt-3">
-          <Form.Item className="mb-0">
-            <div className="relative">
+  const modelSelection = (
+    <Row gutter={[12, 0]}>
+      <Col xs={24} sm={24}>
+        <Form.Item
+          label={t("agent.field.model")}
+          className="mb-3"
+          layout="horizontal"
+        >
+          <div className="flex w-full items-start gap-2">
+            <Form.Item
+              noStyle
+              name={highFidelity ? undefined : "model_ids"}
+              rules={
+                highFidelity
+                  ? undefined
+                  : [
+                      {
+                        required: true,
+                        message: t("agent.validation.modelRequired"),
+                      },
+                    ]
+              }
+            >
+              <Select
+                className="min-w-0 flex-1"
+                mode="multiple"
+                placeholder={t("agent.field.modelPlaceholder")}
+                options={modelOptions}
+                value={selectedModelIds}
+                onChange={updateModelSelection}
+                maxTagCount={3}
+                showSearch={{
+                  filterOption: (input, option) =>
+                    (option?.label ?? "")
+                      .toLowerCase()
+                      .includes(input.toLowerCase()),
+                }}
+                disabled={isModelSelectionDisabled}
+              />
+            </Form.Item>
+            {modelSelectionActions}
+          </div>
+        </Form.Item>
+      </Col>
+    </Row>
+  );
+
+  const promptTabs = (
+    <Tabs
+      value={activePromptTab}
+      onValueChange={handlePromptTabChange}
+      className="relative z-0 w-full"
+    >
+      <TabsList className="grid w-full grid-cols-3">
+        <TabsTrigger value="duty">{t("agent.field.dutyPrompt")}</TabsTrigger>
+        <TabsTrigger value="constraint">
+          {t("agent.field.constraintPrompt")}
+        </TabsTrigger>
+        <TabsTrigger value="few-shots">
+          {t("agent.field.fewShotsPrompt")}
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="duty" className="mt-3">
+        <Form.Item className="mb-0">
+          <div className="relative">
+            {highFidelity ? (
+              <HighFidelityTextArea
+                limit={1000}
+                placeholder={t("agent.field.dutyPromptPlaceholder")}
+                rows={6}
+                value={editedAgent.duty_prompt ?? ""}
+                disabled={isReadOnly}
+                classNames={{
+                  textarea: "!py-2 !pl-3 !pr-5",
+                  count:
+                    "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
+                }}
+                onChange={(event) =>
+                  updateDraft({ duty_prompt: event.target.value })
+                }
+              />
+            ) : (
               <TextArea
                 placeholder={t("agent.field.dutyPromptPlaceholder")}
+                disabled={isReadOnly}
                 rows={6}
                 value={editedAgent.duty_prompt}
                 style={{
@@ -551,73 +856,207 @@ export default function AgentPrompt() {
                   updateDraft({ duty_prompt: event.target.value })
                 }
               />
-              <div className="absolute right-1 top-2 z-10">
-                {renderExpandButton("duty")}
-              </div>
+            )}
+            <div className="absolute right-1 top-2 z-10">
+              {renderExpandButton("duty")}
             </div>
-          </Form.Item>
-        </TabsContent>
+          </div>
+        </Form.Item>
+      </TabsContent>
 
-        <TabsContent value="constraint" className="mt-3">
-          <Form.Item className="mb-0">
-            <div className="relative">
-              <TextArea
-                placeholder={t("agent.field.constraintPromptPlaceholder")}
-                rows={6}
-                value={editedAgent.constraint_prompt}
-                style={{
-                  paddingTop: 8,
-                  paddingBottom: 8,
-                  paddingLeft: 12,
-                  paddingRight: 20,
-                }}
-                onChange={(event) =>
-                  updateDraft({ constraint_prompt: event.target.value })
-                }
-              />
-              <div className="absolute right-1 top-2 z-10">
-                {renderExpandButton("constraint")}
-              </div>
+      <TabsContent value="constraint" className="mt-3">
+        <Form.Item className="mb-0">
+          <div className="relative">
+            <TextArea
+              placeholder={t("agent.field.constraintPromptPlaceholder")}
+              disabled={isReadOnly}
+              rows={6}
+              value={editedAgent.constraint_prompt}
+              style={{
+                paddingTop: 8,
+                paddingBottom: 8,
+                paddingLeft: 12,
+                paddingRight: 20,
+              }}
+              onChange={(event) =>
+                updateDraft({ constraint_prompt: event.target.value })
+              }
+            />
+            <div className="absolute right-1 top-2 z-10">
+              {renderExpandButton("constraint")}
             </div>
-          </Form.Item>
-        </TabsContent>
+          </div>
+        </Form.Item>
+      </TabsContent>
 
-        <TabsContent value="few-shots" className="mt-3">
-          <Form.Item className="mb-0">
-            <div className="relative">
-              <TextArea
-                placeholder={t("agent.field.fewShotsPromptPlaceholder")}
-                rows={6}
-                value={editedAgent.few_shots_prompt}
-                style={{
-                  paddingTop: 8,
-                  paddingBottom: 8,
-                  paddingLeft: 12,
-                  paddingRight: 20,
-                }}
-                onChange={(event) =>
-                  updateDraft({ few_shots_prompt: event.target.value })
-                }
-              />
-              <div className="absolute right-1 top-2 z-10">
-                {renderExpandButton("few-shots")}
-              </div>
+      <TabsContent value="few-shots" className="mt-3">
+        <Form.Item className="mb-0">
+          <div className="relative">
+            <TextArea
+              placeholder={t("agent.field.fewShotsPromptPlaceholder")}
+              disabled={isReadOnly}
+              rows={6}
+              value={editedAgent.few_shots_prompt}
+              style={{
+                paddingTop: 8,
+                paddingBottom: 8,
+                paddingLeft: 12,
+                paddingRight: 20,
+              }}
+              onChange={(event) =>
+                updateDraft({ few_shots_prompt: event.target.value })
+              }
+            />
+            <div className="absolute right-1 top-2 z-10">
+              {renderExpandButton("few-shots")}
             </div>
-          </Form.Item>
-        </TabsContent>
-      </Tabs>
+          </div>
+        </Form.Item>
+      </TabsContent>
+    </Tabs>
+  );
 
-      {expandedPrompt && (
-        <ExpandEditModal
-          open
-          title={expandedPromptConfig[expandedPrompt].title}
-          content={expandedPromptConfig[expandedPrompt].content}
-          onClose={() => setExpandedPrompt(null)}
-          onSave={(content) =>
-            expandedPromptConfig[expandedPrompt].save(content)
-          }
-        />
+  return (
+    <div className="w-full">
+      {highFidelity ? (
+        <div className="flex flex-col gap-4">
+          <Form.Item
+            name="model_ids"
+            label={t("agent.highFidelity.modelSelection")}
+            className="!mb-0"
+            rules={[
+              {
+                required: true,
+                message: t("agent.validation.modelRequired"),
+              },
+            ]}
+          >
+            <HighFidelityModelGrid
+              selectedIds={selectedModelIds}
+              models={availableLlmModels ?? []}
+              disabled={isModelSelectionDisabled}
+              onAddModel={() => setIsModelSelectionOpen(true)}
+              onSelectionChange={updateModelSelection}
+              onConfigureModel={setConfiguringModelId}
+              reorderLabel={t("agent.field.reorderModel")}
+              settingsLabel={t("agent.modelParamsOverride.button", {
+                defaultValue: "模型参数覆盖",
+              })}
+              removeLabel={t("agent.highFidelity.removeModel")}
+              textInferenceLabel={t("agent.highFidelity.modelCapability.text")}
+              deepThinkingLabel={t(
+                "agent.highFidelity.modelCapability.reasoning"
+              )}
+              toolCallsLabel={t("agent.highFidelity.modelCapability.tools")}
+              addModelLabel={t("agent.highFidelity.addModel")}
+              sensors={sensors}
+            />
+          </Form.Item>
+          <div className="-mb-2 flex items-center gap-2 text-sm leading-[22px] tracking-[0px]">
+            <label htmlFor="agent-primary-prompt" className="text-[#191919]">
+              <span className="mr-1 text-[#f5222d]">*</span>
+              {t("agent.highFidelity.prompt")}
+            </label>
+            <div className="flex items-center gap-2">
+              <Tooltip title={t("agent.highFidelity.additionalPrompts")}>
+                <Button
+                  type="text"
+                  className="!h-[22px] !w-[22px] !p-0"
+                  icon={<Settings2 size={14} />}
+                  aria-label={t("agent.highFidelity.additionalPrompts")}
+                  disabled={false}
+                  onClick={() => setAdditionalPromptsOpen(true)}
+                />
+              </Tooltip>
+              <Button
+                type="link"
+                autoInsertSpace={false}
+                className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
+                icon={<Sparkles size={14} />}
+                disabled={isReadOnly || !onOptimizePrompt}
+                onClick={onOptimizePrompt}
+              >
+                {t("agent.highFidelity.optimizePrompt")}
+              </Button>
+            </div>
+          </div>
+          <div className="relative">
+            <HighFidelityTextArea
+              limit={1000}
+              id="agent-primary-prompt"
+              value={editedAgent.duty_prompt ?? ""}
+              placeholder={t("agent.highFidelity.promptPlaceholder")}
+              disabled={isReadOnly}
+              classNames={{
+                textarea:
+                  "!h-[52px] !min-h-[52px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
+                count:
+                  "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
+              }}
+              onChange={(event) =>
+                updateDraft({ duty_prompt: event.target.value })
+              }
+            />
+            <div className="absolute right-1 top-2">
+              {renderExpandButton("duty")}
+            </div>
+          </div>
+          <Modal
+            open={additionalPromptsOpen}
+            title={t("agent.highFidelity.additionalPrompts")}
+            onCancel={() => setAdditionalPromptsOpen(false)}
+            footer={null}
+            centered
+            forceRender
+          >
+            {promptTabs}
+          </Modal>
+          <AddModelDrawer
+            open={isModelSelectionOpen}
+            onClose={() => setIsModelSelectionOpen(false)}
+            models={availableLlmModels ?? []}
+            selectedModelIds={selectedModelIds}
+            selectedTrailing={modelSelectionActions}
+            disabled={isModelSelectionDisabled}
+            onSelectionChange={(ids) => {
+              if (isModelSelectionDisabled) return;
+              form.setFieldValue("model_ids", ids);
+              updateModelSelection(ids);
+            }}
+          />
+        </div>
+      ) : (
+        <>
+          {modelSelection}
+          {promptTabs}
+        </>
       )}
+
+      {expandedPrompt &&
+        (highFidelity && expandedPrompt === "duty" ? (
+          <HighFidelityPromptEditModal
+            key={`${agentId}-${expandedPrompt}`}
+            title={expandedPromptConfig[expandedPrompt].title}
+            content={expandedPromptConfig[expandedPrompt].content}
+            readOnly={isReadOnly}
+            onClose={() => setExpandedPrompt(null)}
+            onSave={(content) => {
+              if (!isReadOnly)
+                expandedPromptConfig[expandedPrompt].save(content);
+            }}
+          />
+        ) : (
+          <ExpandEditModal
+            open
+            title={expandedPromptConfig[expandedPrompt].title}
+            content={expandedPromptConfig[expandedPrompt].content}
+            onClose={() => setExpandedPrompt(null)}
+            onSave={(content) => {
+              if (!isReadOnly)
+                expandedPromptConfig[expandedPrompt].save(content);
+            }}
+          />
+        ))}
 
       {/* v2.6.0: per-model parameter override popup */}
       <Modal
@@ -677,7 +1116,7 @@ export default function AgentPrompt() {
         }
         okText={t("common.confirm", { defaultValue: "确定" })}
         cancelText={t("common.cancel", { defaultValue: "取消" })}
-        okButtonProps={{ disabled: !canManage && !isSpeedMode }}
+        okButtonProps={{ disabled: isModelSelectionDisabled }}
         width={600}
         centered
         destroyOnHidden={false}
@@ -690,7 +1129,7 @@ export default function AgentPrompt() {
               value={configuringModelId}
               options={modelOptions}
               onChange={(v: number) => setConfiguringModelId(v)}
-              disabled={!canManage && !isSpeedMode}
+              disabled={isModelSelectionDisabled}
             />
             <ModelAdvancedSettings
               modelType={(configuringModel as any).type ?? "llm"}
@@ -711,7 +1150,7 @@ export default function AgentPrompt() {
               }
               onChange={(next) => setEditingOverrideValue(next)}
               mode="override"
-              disabled={!canManage && !isSpeedMode}
+              disabled={isModelSelectionDisabled}
               reasoningCapability={
                 (configuringModel as any).reasoningCapability
               }

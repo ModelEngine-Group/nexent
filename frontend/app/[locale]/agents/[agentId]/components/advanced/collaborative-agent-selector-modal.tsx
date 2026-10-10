@@ -6,10 +6,11 @@ import { useTranslation } from "react-i18next";
 
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
-import { Button, Empty, Input, Modal, Pagination, Spin, Tabs } from "antd";
+import { Empty, Input, Pagination, Spin, Tabs } from "antd";
 import { Bot, Check, Globe, Search } from "lucide-react";
 
 import type { A2AExternalAgent } from "@/services/a2aService";
+import { AddResourceDrawer } from "@/components/resource-picker/AddResourceDrawer";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
 
@@ -211,26 +212,21 @@ export default function CollaborativeAgentSelectorModal({
   };
 
   return (
-    <Modal
+    <AddResourceDrawer
       title={t("agent.collaborative.selector.title")}
       open={open}
-      width={720}
-      destroyOnHidden
-      onCancel={onCancel}
-      footer={[
-        <Button key="cancel" onClick={onCancel}>
-          {t("common.cancel")}
-        </Button>,
-        <Button
-          key="confirm"
-          type="primary"
-          onClick={() =>
-            onConfirm(draftInternalIds, draftExternalIds, internalAgents)
-          }
-        >
-          {t("common.confirm")}
-        </Button>,
-      ]}
+      onClose={onCancel}
+      onConfirm={() =>
+        onConfirm(draftInternalIds, draftExternalIds, internalAgents)
+      }
+      searchPlaceholder=""
+      listTitle=""
+      selected={[]}
+      total={0}
+      searchContent={null}
+      showSelection={false}
+      showListHeader={false}
+      showPagination={false}
     >
       <Tabs
         activeKey={activeSource}
@@ -286,6 +282,6 @@ export default function CollaborativeAgentSelectorModal({
           />
         </div>
       )}
-    </Modal>
+    </AddResourceDrawer>
   );
 }

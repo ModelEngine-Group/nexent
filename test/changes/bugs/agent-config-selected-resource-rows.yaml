@@ -1,0 +1,25 @@
+schema_version: "1.0"
+changes:
+  - change_id: AGENT-CONFIG-BUG-001
+    change_type: bugfix
+    bug_id: AGENT-CONFIG-BUG-001
+    title: Selected tool and child-Agent rows differ from the configuration reference
+    description: Align populated tool and child-Agent rows in the high-fidelity configuration page with the existing knowledge-row shell and user-provided composition while preserving all current selection controllers.
+    observed_behavior: Selected tools still use grouped source/category cards; selected child Agents still use colored internal/external chips and bordered grouped lists. Neither populated state follows the cropped high-fidelity two-column selected-row composition.
+    expected_behavior: Tools and child Agents use ordered compact selected rows with an add entry last, frozen shared shell and name/tag/action styling, real metadata, preserved managed-tool filtering, configuration/removal and saved child versions. Knowledge rows and association drawers keep their current presentation; read-only prevents mutations.
+    escaped_stage: production
+    coverage_gap:
+      type: missing_assertion
+      description: Existing D1-003 only proves empty tool add entries and distinct association/create callbacks; existing D4-001 proves empty geometry and drawer placement without populated tool/child row styling or preserved selected-resource removal assertions.
+    feature_contract_changed: true
+    affected_features:
+      existing: []
+      added: []
+      modified: [AGENT-CONFIG-LAYOUT]
+      retired: []
+    affected_cases:
+      existing: []
+      added: []
+      modified: [AGENT-CONFIG-D1-003, AGENT-CONFIG-D4-001]
+      retired: []
+    notes: Direct update of the existing editor SPEC and REQ-002; stable Feature/Case IDs and historical evidence are preserved. The selected shell reuses previously inspector-confirmed knowledge-row geometry; descendant values are screenshot-based choices recorded in docs/handoffs/2026-10-10-selected-tools-child-agents.md, not new inspector measurements. Exact artwork and font parity remains unverified without original assets.

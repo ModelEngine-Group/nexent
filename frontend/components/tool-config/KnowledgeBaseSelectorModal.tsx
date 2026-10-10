@@ -33,9 +33,11 @@ import { useModelList } from "@/hooks/model/useModelList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
 import EmbeddingModelConfigDialog from "./EmbeddingModelConfigDialog";
+import { AddResourceDrawer } from "@/components/resource-picker/AddResourceDrawer";
 import { formatDateOrFallback } from "@/lib/date";
 
 interface KnowledgeBaseSelectorProps {
+  presentation?: "modal" | "drawer";
   isOpen: boolean;
   onClose: () => void;
   onConfirm: (selectedKnowledgeBases: KnowledgeBase[]) => void;
@@ -82,7 +84,42 @@ interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   };
 }
 
+function KnowledgeSelectorContainer({
+  presentation,
+  children,
+  onDrawerClose,
+  onDrawerConfirm,
+  ...props
+}: React.ComponentProps<typeof Modal> & {
+  presentation: "modal" | "drawer";
+  onDrawerClose: () => void;
+  onDrawerConfirm: () => void | Promise<void>;
+}) {
+  if (presentation === "modal") return <Modal {...props}>{children}</Modal>;
+  return (
+    <AddResourceDrawer
+      open={Boolean(props.open)}
+      title={props.title}
+      onClose={onDrawerClose}
+      onConfirm={() => {
+        void onDrawerConfirm();
+      }}
+      searchPlaceholder=""
+      listTitle=""
+      selected={[]}
+      total={0}
+      searchContent={null}
+      showSelection={false}
+      showListHeader={false}
+      showPagination={false}
+    >
+      {children}
+    </AddResourceDrawer>
+  );
+}
+
 export default function KnowledgeBaseSelectorModal({
+  presentation = "modal",
   isOpen,
   onClose,
   onConfirm,
@@ -671,7 +708,10 @@ export default function KnowledgeBaseSelectorModal({
   }, [toolType, t]);
 
   return (
-    <Modal
+    <KnowledgeSelectorContainer
+      presentation={presentation}
+      onDrawerClose={handleCancel}
+      onDrawerConfirm={handleConfirm}
       title={title || defaultTitle}
       open={isOpen}
       onCancel={handleCancel}
@@ -1307,6 +1347,6 @@ export default function KnowledgeBaseSelectorModal({
         }}
         onConfigComplete={handleEmbeddingModelConfigComplete}
       />
-    </Modal>
+    </KnowledgeSelectorContainer>
   );
 }

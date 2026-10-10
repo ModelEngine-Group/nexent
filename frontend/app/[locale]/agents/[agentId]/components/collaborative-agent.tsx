@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { App, Button, Col } from "antd";
-import { Plus, Search, X } from "lucide-react";
+import { App, Avatar, Button, Col } from "antd";
+import { ChevronRight, Plus, Search, Trash2, X } from "lucide-react";
 
 import CollaborativeAgentSelectorModal from "./advanced/collaborative-agent-selector-modal";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
@@ -13,6 +19,14 @@ import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { Agent } from "@/types/agentConfig";
+import { ResourceAddButton } from "@/components/common/ResourceAddButton";
+import {
+  SelectedResourceRow,
+  SelectedResourceTag,
+} from "@/components/common/SelectedResourceRow";
+import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import AgentAvatar from "../../components/agent-avatar";
+import type { ResourceSectionProps } from "./resource-section.types";
 
 type CollaborativeAgentListItem = {
   id: number | string;
@@ -89,7 +103,11 @@ export function CollaborativeAgentList({
   );
 }
 
-export function CollaborativeAgentActions() {
+export function CollaborativeAgentActions({
+  highFidelity = false,
+  renderSection,
+  children,
+}: ResourceSectionProps & { children?: ReactNode } = {}) {
   const { t } = useTranslation("common");
   const { message: messageApi } = App.useApp();
   const [selectorOpen, setSelectorOpen] = useState(false);
@@ -170,24 +188,65 @@ export function CollaborativeAgentActions() {
     invalidateExternalAgents();
   };
 
-  return (
-    <>
-      <Button
-        size="middle"
-        icon={<Search size={14} />}
-        disabled={isReadOnly}
-        onClick={() => setDiscoveryOpen(true)}
-      >
-        {t("a2a.discovery.button")}
-      </Button>
-      <Button
-        size="middle"
-        icon={<Plus size={14} />}
+  const content = (
+    <div
+      className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+      data-testid="agent-selected-child-grid"
+    >
+      {children}
+      <ResourceAddButton
         disabled={isReadOnly}
         onClick={() => setSelectorOpen(true)}
       >
-        {t("agent.collaborative.button.selectAgent")}
-      </Button>
+        {t("agentConfig.layout.addAgent")}
+      </ResourceAddButton>
+    </div>
+  );
+  const actions = (
+    <Button
+      type="link"
+      disabled={isReadOnly}
+      onClick={() => setDiscoveryOpen(true)}
+      className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
+    >
+      <span className="inline-flex items-center gap-1">
+        {t("agentConfig.layout.thirdPartyAgent")}
+        <ChevronRight size={14} />
+      </span>
+    </Button>
+  );
+
+  return (
+    <>
+      {highFidelity ? (
+        renderSection ? (
+          renderSection(content, actions)
+        ) : (
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-end">{actions}</div>
+            {content}
+          </div>
+        )
+      ) : (
+        <>
+          <Button
+            size="middle"
+            icon={<Search size={14} />}
+            disabled={isReadOnly}
+            onClick={() => setDiscoveryOpen(true)}
+          >
+            {t("a2a.discovery.button")}
+          </Button>
+          <Button
+            size="middle"
+            icon={<Plus size={14} />}
+            disabled={isReadOnly}
+            onClick={() => setSelectorOpen(true)}
+          >
+            {t("agent.collaborative.button.selectAgent")}
+          </Button>
+        </>
+      )}
       <A2AAgentDiscoveryModal
         open={discoveryOpen}
         onClose={() => setDiscoveryOpen(false)}
@@ -204,7 +263,10 @@ export function CollaborativeAgentActions() {
   );
 }
 
-export default function CollaborativeAgent() {
+export default function CollaborativeAgent({
+  highFidelity = false,
+  renderSection,
+}: ResourceSectionProps = {}) {
   const { t } = useTranslation("common");
   const { message: messageApi } = App.useApp();
 
@@ -223,9 +285,14 @@ export default function CollaborativeAgent() {
   const { availableAgents: externalAgents } = useExternalAgents();
 
   // Local state for edit mode (when currentAgentId exists)
-  const [externalRelatedAgents, setExternalRelatedAgents] = useState<
-    A2AExternalAgent[]
-  >([]);
+  const [externalRelationSnapshot, setExternalRelationSnapshot] = useState<{
+    agentId: number | null;
+    agents: A2AExternalAgent[];
+  }>({ agentId: currentAgentId, agents: [] });
+  const externalRelatedAgents =
+    externalRelationSnapshot.agentId === currentAgentId
+      ? externalRelationSnapshot.agents
+      : [];
 
   // External agent IDs from store (for creation mode)
   const externalSubAgentIdList = editedAgent?.external_sub_agent_id_list || [];
@@ -286,7 +353,7 @@ export default function CollaborativeAgent() {
         const version_no =
           (hasSavedVersion
             ? savedVersion?.version_no
-            : (publishedAgent as any).current_version_no) ?? undefined;
+            : publishedAgent.current_version_no) ?? undefined;
         return {
           ...publishedAgent,
           version_name,
@@ -321,20 +388,51 @@ export default function CollaborativeAgent() {
       ]
     : externalRelatedAgentsFromStore;
 
-  // Load external related agents
-  useEffect(() => {
-    if (currentAgentId) {
-      loadExternalRelatedAgents();
+  const externalAgentMap = new Map(
+    displayExternalAgents.map((agent) => [agent.id, agent])
+  );
+  const selectedExternalAgents = highFidelity
+    ? [
+        ...externalSubAgentIdList.flatMap((agentId) => {
+          const agent = externalAgentMap.get(agentId);
+          return agent ? [agent] : [];
+        }),
+        ...displayExternalAgents.filter(
+          (agent) => !externalSubAgentIdList.includes(agent.id)
+        ),
+      ]
+    : displayExternalAgents;
+
+  const loadExternalRelatedAgents = useCallback(async () => {
+    if (!currentAgentId) return;
+    const result = await a2aClientService.getSubAgents(Number(currentAgentId));
+    if (useAgentStore.getState().agentId !== currentAgentId) return;
+    if (result.success && result.data) {
+      setExternalRelationSnapshot({
+        agentId: currentAgentId,
+        agents: result.data,
+      });
     }
   }, [currentAgentId]);
 
-  const loadExternalRelatedAgents = async () => {
+  // Load external related agents.
+  useEffect(() => {
     if (!currentAgentId) return;
-    const result = await a2aClientService.getSubAgents(Number(currentAgentId));
-    if (result.success && result.data) {
-      setExternalRelatedAgents(result.data);
-    }
-  };
+    let active = true;
+    void a2aClientService
+      .getSubAgents(Number(currentAgentId))
+      .then((result) => {
+        if (active && result.success && result.data) {
+          setExternalRelationSnapshot({
+            agentId: currentAgentId,
+            agents: result.data,
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentAgentId]);
 
   // Remove internal agent
   const handleRemoveInternalAgent = (agentId: number) => {
@@ -381,43 +479,138 @@ export default function CollaborativeAgent() {
   const hasCollaborativeAgents =
     relatedInternalAgents.length > 0 || displayExternalAgents.length > 0;
 
-  return (
+  const selectedRows = (
     <>
-      <Col xs={24}>
-        {hasCollaborativeAgents ? (
-          <div className="min-w-0 flex-1 divide-y divide-border rounded-lg border border-border">
-            <CollaborativeAgentList
-              agents={relatedInternalAgents.map((agent) => ({
-                id: agent.id,
-                name: agent.display_name || agent.name,
-                versionNo: agent.version_no,
-              }))}
-              label={t("agent.collaborative.label.internal")}
-              tone="primary"
-              readOnly={isReadOnly}
-              onRemove={handleRemoveInternalAgent}
+      {relatedInternalAgents.map((agent) => {
+        const name = agent.display_name || agent.name;
+        const tags = agent.tags ?? [];
+        return (
+          <SelectedResourceRow
+            key={`internal-${agent.id}`}
+            data-testid={`agent-selected-child-internal-${agent.id}`}
+            icon={
+              <AgentAvatar
+                agent={agent}
+                size={32}
+                iconSize={20}
+                className="!rounded-[4px]"
+              />
+            }
+            name={name}
+            nameTooltip={
+              <span className="inline-flex flex-col">
+                <span>{name}</span>
+                {agent.version_no != null && <span>V{agent.version_no}</span>}
+                {agent.version_name && (
+                  <span>
+                    {t("agent.collaborative.selector.versionName", {
+                      name: agent.version_name,
+                    })}
+                  </span>
+                )}
+              </span>
+            }
+            metadata={
+              tags.length ? (
+                <>
+                  {tags.slice(0, 2).map((tag, index) => (
+                    <SelectedResourceTag key={`${tag}-${index}`} title={tag}>
+                      {tag}
+                    </SelectedResourceTag>
+                  ))}
+                  {tags.length > 2 && (
+                    <SelectedResourceTag title={tags.slice(2).join(", ")}>
+                      +{tags.length - 2}
+                    </SelectedResourceTag>
+                  )}
+                </>
+              ) : undefined
+            }
+            actions={
+              <Button
+                type="text"
+                disabled={isReadOnly}
+                aria-label={t("agent.collaborative.removeAria", { name })}
+                icon={<Trash2 size={14} />}
+                onClick={() => handleRemoveInternalAgent(Number(agent.id))}
+                className="!h-6 !w-6 !min-w-6 !p-0 !text-[#777777]"
+              />
+            }
+          />
+        );
+      })}
+      {selectedExternalAgents.map((agent) => (
+        <SelectedResourceRow
+          key={`external-${agent.id}`}
+          data-testid={`agent-selected-child-external-${agent.id}`}
+          icon={
+            <Avatar
+              shape="square"
+              size={32}
+              icon={createElement(getAgentIcon({ agent_id: agent.id }), {
+                size: 20,
+                "aria-hidden": true,
+              })}
+              className="!rounded-[4px] !bg-primary/10 !text-primary"
             />
-            <CollaborativeAgentList
-              agents={displayExternalAgents}
-              label={t("agent.collaborative.label.external")}
-              tone="external"
-              readOnly={isReadOnly}
-              onRemove={handleRemoveExternalAgent}
+          }
+          name={agent.name}
+          actions={
+            <Button
+              type="text"
+              disabled={isReadOnly}
+              aria-label={t("agent.collaborative.removeAria", {
+                name: agent.name,
+              })}
+              icon={<Trash2 size={14} />}
+              onClick={() => handleRemoveExternalAgent(agent.id)}
+              className="!h-6 !w-6 !min-w-6 !p-0 !text-[#777777]"
             />
-          </div>
-        ) : (
-          <div className="flex min-h-20 items-center justify-center gap-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
-            <div className="flex items-center gap-3">
-              <div>
-                <p className="text-sm font-medium text-gray-700"></p>
-                <p className="mt-0.5 text-xs text-gray-400">
-                  {t("agent.collaborative.emptyHint")}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </Col>
+          }
+        />
+      ))}
     </>
+  );
+
+  const content = hasCollaborativeAgents ? (
+    <div className="min-w-0 flex-1 divide-y divide-border rounded-lg border border-border">
+      <CollaborativeAgentList
+        agents={relatedInternalAgents.map((agent) => ({
+          id: agent.id,
+          name: agent.display_name || agent.name,
+          versionNo: agent.version_no,
+        }))}
+        label={t("agent.collaborative.label.internal")}
+        tone="primary"
+        readOnly={isReadOnly}
+        onRemove={handleRemoveInternalAgent}
+      />
+      <CollaborativeAgentList
+        agents={displayExternalAgents}
+        label={t("agent.collaborative.label.external")}
+        tone="external"
+        readOnly={isReadOnly}
+        onRemove={handleRemoveExternalAgent}
+      />
+    </div>
+  ) : highFidelity ? null : (
+    <div className="flex min-h-20 items-center justify-center gap-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div>
+          <p className="text-sm font-medium text-gray-700"></p>
+          <p className="mt-0.5 text-xs text-gray-400">
+            {t("agent.collaborative.emptyHint")}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  return highFidelity ? (
+    <CollaborativeAgentActions highFidelity renderSection={renderSection}>
+      {selectedRows}
+    </CollaborativeAgentActions>
+  ) : (
+    <Col xs={24}>{content}</Col>
   );
 }

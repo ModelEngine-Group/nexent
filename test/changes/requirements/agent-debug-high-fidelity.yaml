@@ -1,0 +1,10 @@
+schema_version: "1.0"
+changes:
+  - change_id: AGENT-DEBUG-REQ-001
+    change_type: requirement
+    requirement_id: AGENT-DEBUG-REQ-001
+    title: Align Agent debug with inspected high-fidelity layout
+    description: Move debug below common editor headers and apply measured welcome/question/composer styling with preserved runtime controls and isolated default presentation.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [AGENT-DEBUG-LAYOUT], modified: [], retired: []}
+    affected_cases: {existing: [], added: [AGENT-DEBUG-D1-001, AGENT-DEBUG-D4-001], modified: [], retired: []}

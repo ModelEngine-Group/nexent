@@ -26,6 +26,7 @@ import {
   Database,
   Bot,
   Plus,
+  Sparkles,
   Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -111,6 +112,8 @@ export interface ComposerProps {
   allowRuntimeMetadata?: boolean;
   disabled?: boolean;
   disabledReason?: string;
+  configurationLayout?: boolean;
+  debugLayout?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
@@ -322,6 +325,8 @@ export const Composer: FC<ComposerProps> = ({
   allowRuntimeMetadata = false,
   disabled = false,
   disabledReason,
+  configurationLayout = false,
+  debugLayout = false,
   workbenchPresentation,
   workbenchResources,
   onRemoveWorkbenchSkill,
@@ -358,6 +363,9 @@ export const Composer: FC<ComposerProps> = ({
   };
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const hasAttachments = useAuiState(
+    (state) => state.composer.attachments.length > 0
+  );
   const creationMode =
     workbenchPresentation?.mode === "skill_create" ||
     workbenchPresentation?.mode === "agent_create"
@@ -466,7 +474,11 @@ export const Composer: FC<ComposerProps> = ({
           "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
           workbenchPresentation &&
             "rounded-3xl shadow-[0_12px_36px_-14px_rgba(0,0,0,0.18)]",
-          disabled && !disabledReason && "cursor-not-allowed opacity-60"
+          disabled && !disabledReason && "cursor-not-allowed opacity-60",
+          configurationLayout &&
+            "min-h-[164px] rounded-[20px] border-[0.5px] border-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]",
+          debugLayout &&
+            "min-h-[164px] rounded-[20px] border-0 outline-[0.5px] outline-[#191919]/[0.08] bg-white p-4 shadow-[0_1px_6px_rgba(0,0,0,0.16)]"
         )}
       >
         {disabled && disabledReason ? (
@@ -474,7 +486,17 @@ export const Composer: FC<ComposerProps> = ({
             {disabledReason}
           </p>
         ) : null}
-        {!compact && !creationMode && <PlanView />}
+        {!compact && !creationMode && !configurationLayout && !debugLayout && (
+          <PlanView />
+        )}
+        {configurationLayout && (
+          <div className="flex px-4 pt-4">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#669fff]/[0.15] px-2 text-xs leading-[22px] text-[#477bd5]">
+              <Sparkles size={14} />
+              {t("nl2agent.configuration.badge")}
+            </span>
+          </div>
+        )}
         {creationMode && (
           <div className="flex items-center border-b border-border px-3 py-2">
             <button
@@ -491,50 +513,57 @@ export const Composer: FC<ComposerProps> = ({
         )}
 
         {/* Mode switcher above input */}
-        {!compact && !creationMode && !workbenchPresentation && (
-          <div className="flex items-center border-b border-border px-3 py-2">
-            {/* Mode switcher */}
-            <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-                  chatMode === "planning" &&
-                    "bg-blue-50 text-blue-600 hover:bg-blue-50"
-                )}
-                onClick={() => onChatModeChange("planning")}
-              >
-                <Lightbulb
+        {!compact &&
+          !creationMode &&
+          !workbenchPresentation &&
+          !configurationLayout &&
+          !debugLayout && (
+            <div className="flex items-center border-b border-border px-3 py-2">
+              {/* Mode switcher */}
+              <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className={cn(
-                    "size-3",
-                    chatMode === "planning" ? "text-blue-600" : ""
+                    "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
+                    chatMode === "planning" &&
+                      "bg-blue-50 text-blue-600 hover:bg-blue-50"
                   )}
-                />
-                {t("chat.composer.planning")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-                  chatMode === "execution" &&
-                    "bg-blue-50 text-blue-600 hover:bg-blue-50"
-                )}
-                onClick={() => onChatModeChange("execution")}
-              >
-                <Play className="size-3" />
-                {t("chat.composer.execution")}
-              </Button>
+                  onClick={() => onChatModeChange("planning")}
+                >
+                  <Lightbulb
+                    className={cn(
+                      "size-3",
+                      chatMode === "planning" ? "text-blue-600" : ""
+                    )}
+                  />
+                  {t("chat.composer.planning")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
+                    chatMode === "execution" &&
+                      "bg-blue-50 text-blue-600 hover:bg-blue-50"
+                  )}
+                  onClick={() => onChatModeChange("execution")}
+                >
+                  <Play className="size-3" />
+                  {t("chat.composer.execution")}
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {/* Composer Primitive Root */}
         <ComposerPrimitive.Unstable_TriggerPopoverRoot>
           {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
           <ComposerPrimitive.Root
-            className="flex w-full flex-col px-1 py-1 outline-none"
+            className={cn(
+              "flex w-full flex-col px-1 py-1 outline-none",
+              debugLayout && "!p-0"
+            )}
             onSubmit={(event) => {
               if (isRunning) event.preventDefault();
               else prepareSend();
@@ -550,7 +579,9 @@ export const Composer: FC<ComposerProps> = ({
               }
             }}
           >
-            {!compact && <ComposerAttachments />}
+            {!compact && (!debugLayout || hasAttachments) && (
+              <ComposerAttachments />
+            )}
             {skillFiles ? (
               <LexicalComposerInput
                 placeholder={
@@ -569,15 +600,21 @@ export const Composer: FC<ComposerProps> = ({
                 {workbenchPresentation && <WorkbenchComposerTagPrefix />}
                 <ComposerPrimitive.Input
                   data-workbench-composer
+                  aria-label={t("chat.composer.placeholder")}
                   placeholder={
-                    workbenchPresentation
-                      ? t("chat.composer.workbenchPlaceholder")
-                      : t("chat.composer.placeholder")
+                    configurationLayout
+                      ? ""
+                      : workbenchPresentation
+                        ? t("chat.composer.workbenchPlaceholder")
+                        : t("chat.composer.placeholder")
                   }
                   className={cn(
                     "mb-1 max-h-48 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground",
                     workbenchPresentation && "min-h-[88px] px-4 py-2",
-                    workbenchPresentation && "w-auto min-w-0 flex-1"
+                    workbenchPresentation && "w-auto min-w-0 flex-1",
+                    configurationLayout && "!min-h-[56px] !px-4",
+                    debugLayout &&
+                      "!mb-0 !min-h-[88px] !px-0 !py-0 !text-base !font-normal !leading-6 !text-[#191919] placeholder:!text-[#191919]/40"
                   )}
                   rows={1}
                   submitMode="enter"
@@ -621,7 +658,8 @@ export const Composer: FC<ComposerProps> = ({
             <div
               className={cn(
                 "relative mx-2 mb-2 flex items-center justify-between gap-2",
-                workbenchPresentation && "mx-4 flex-wrap pt-2 sm:flex-nowrap"
+                workbenchPresentation && "mx-4 flex-wrap pt-2 sm:flex-nowrap",
+                debugLayout && "!mx-0 !mb-0 !mt-1 !h-10"
               )}
             >
               <div
@@ -630,27 +668,39 @@ export const Composer: FC<ComposerProps> = ({
                   workbenchPresentation && "flex-wrap sm:flex-nowrap"
                 )}
               >
-                {!compact && !workbenchPresentation && showModelSelector && (
-                  <ModelSelector
-                    models={models}
-                    value={selectedModelId}
-                    onValueChange={onModelChange}
-                    deepThinking={deepThinking}
-                    onDeepThinkingChange={onDeepThinkingChange}
-                    effort={thinkingEffort}
-                    onEffortChange={(value) => {
-                      if (
-                        value === "low" ||
-                        value === "medium" ||
-                        value === "high"
-                      )
-                        onThinkingEffortChange?.(value);
-                    }}
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground"
+                {(configurationLayout || debugLayout) && (
+                  <ComposerAddAttachment
+                    className={
+                      debugLayout
+                        ? "!size-10 !p-0 !text-[#191919] [&_svg]:!size-6"
+                        : undefined
+                    }
                   />
                 )}
+                {!compact &&
+                  !workbenchPresentation &&
+                  showModelSelector &&
+                  !debugLayout && (
+                    <ModelSelector
+                      models={models}
+                      value={selectedModelId}
+                      onValueChange={onModelChange}
+                      deepThinking={deepThinking}
+                      onDeepThinkingChange={onDeepThinkingChange}
+                      effort={thinkingEffort}
+                      onEffortChange={(value) => {
+                        if (
+                          value === "low" ||
+                          value === "medium" ||
+                          value === "high"
+                        )
+                          onThinkingEffortChange?.(value);
+                      }}
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground"
+                    />
+                  )}
                 {!compact && workbenchResources && workbenchPresentation && (
                   <TooltipWrapper tooltip={t("chat.composer.addAgent")}>
                     <Button
@@ -793,31 +843,37 @@ export const Composer: FC<ComposerProps> = ({
                 )}
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-1">
-                {!compact && workbenchPresentation && showModelSelector && (
-                  <ModelSelector
-                    models={models}
-                    value={selectedModelId}
-                    onValueChange={onModelChange}
-                    deepThinking={deepThinking}
-                    onDeepThinkingChange={onDeepThinkingChange}
-                    effort={thinkingEffort}
-                    showEffort={Boolean(workbenchPresentation)}
-                    onEffortChange={(value) => {
-                      if (
-                        value === "low" ||
-                        value === "medium" ||
-                        value === "high"
-                      )
-                        onThinkingEffortChange?.(value);
-                    }}
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 text-base leading-6 text-foreground [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:leading-6"
-                  />
-                )}
-                {!compact && !workbenchPresentation && (
-                  <ComposerAddAttachment />
-                )}
+                {(debugLayout || (!compact && workbenchPresentation)) &&
+                  showModelSelector && (
+                    <ModelSelector
+                      models={models}
+                      value={selectedModelId}
+                      onValueChange={onModelChange}
+                      deepThinking={deepThinking}
+                      onDeepThinkingChange={onDeepThinkingChange}
+                      effort={thinkingEffort}
+                      showEffort={Boolean(workbenchPresentation)}
+                      onEffortChange={(value) => {
+                        if (
+                          value === "low" ||
+                          value === "medium" ||
+                          value === "high"
+                        )
+                          onThinkingEffortChange?.(value);
+                      }}
+                      variant="ghost"
+                      size="sm"
+                      className={
+                        debugLayout
+                          ? "min-w-0 max-w-[180px] text-base text-[#191919]"
+                          : "shrink-0 text-base leading-6 text-foreground [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:leading-6"
+                      }
+                    />
+                  )}
+                {!compact &&
+                  !workbenchPresentation &&
+                  !configurationLayout &&
+                  !debugLayout && <ComposerAddAttachment />}
                 {!compact && (
                   <AuiIf condition={(s) => !s.composer.dictation}>
                     <Tooltip>
@@ -829,10 +885,14 @@ export const Composer: FC<ComposerProps> = ({
                               variant="ghost"
                               size="icon"
                               disabled={!isDictationConfigured}
-                              className={cn(
-                                "size-8 text-muted-foreground",
-                                workbenchPresentation && "size-9"
-                              )}
+                              className={
+                                configurationLayout || debugLayout
+                                  ? "size-10 text-[#191919]"
+                                  : cn(
+                                      "size-8 text-muted-foreground",
+                                      workbenchPresentation && "size-9"
+                                    )
+                              }
                             >
                               <Mic
                                 className={cn(
@@ -885,6 +945,8 @@ export const Composer: FC<ComposerProps> = ({
                   onSend={prepareSend}
                   disabled={disabled}
                   workbench={Boolean(workbenchPresentation)}
+                  configurationLayout={configurationLayout}
+                  debugLayout={debugLayout}
                 />
               </div>
             </div>
@@ -929,7 +991,15 @@ const ComposerSendOrCancel: FC<{
   onSend: () => void;
   disabled?: boolean;
   workbench?: boolean;
-}> = ({ onSend, disabled, workbench = false }) => {
+  configurationLayout?: boolean;
+  debugLayout?: boolean;
+}> = ({
+  onSend,
+  disabled,
+  workbench = false,
+  configurationLayout = false,
+  debugLayout = false,
+}) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -945,7 +1015,11 @@ const ComposerSendOrCancel: FC<{
               size="icon"
               variant="outline"
               aria-label={t("chat.composer.stopGenerating")}
-              className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
+              className={cn(
+                "size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted",
+                debugLayout &&
+                  "!size-10 !ml-0 !border-0 !bg-[#191919] !text-white"
+              )}
             >
               <Square className="size-4 fill-current" />
             </Button>
@@ -957,15 +1031,21 @@ const ComposerSendOrCancel: FC<{
           <ComposerPrimitive.Send asChild onClick={onSend}>
             <Button
               size="icon"
-              className={cn(
-                "size-8 rounded-full ml-2",
-                workbench &&
-                  "size-[30px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-70"
-              )}
+              className={
+                configurationLayout || debugLayout
+                  ? "ml-2 size-10 rounded-[26px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-30"
+                  : cn(
+                      "size-8 rounded-full ml-2",
+                      workbench &&
+                        "size-[30px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-70"
+                    )
+              }
               disabled={disabled || !hasText}
               aria-label={t("chat.composer.send")}
             >
-              {workbench ? (
+              {configurationLayout || debugLayout ? (
+                <Send className="size-6" />
+              ) : workbench ? (
                 <Send className="size-5" />
               ) : (
                 <ArrowUp className="size-5" />

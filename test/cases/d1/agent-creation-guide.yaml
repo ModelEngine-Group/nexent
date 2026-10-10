@@ -1,0 +1,30 @@
+schema_version: "1.0"
+stage: D1
+module: AGENT-EDITOR
+cases:
+  - case_id: AGENT-GUIDE-D1-001
+    feature_id: AGENT-CREATION-GUIDE
+    requirement_ids: [AGENT-GUIDE-REQ-001]
+    business_rule_ids: [AGENT-GUIDE-RULE-002, AGENT-GUIDE-RULE-003]
+    title: Guide eligibility and completion remain scoped explanatory state
+    type: FE-COMP
+    priority: P1
+    status: active
+    automation: automated
+    objective: Prove creation-only eligibility, identity isolation, denied-storage fallback and navigation/dismissal without business effects.
+    preconditions: [Render real guide with controlled identity/draft readiness and deterministic Tour boundary; use isolated browser storage.]
+    test_data: {draft: {asset_ref: newly_created_agent}, profile: mock}
+    steps:
+      - order: 1
+        action: Render creation entry and change loading/read-only/identity/completed conditions.
+        expected: Only ready editable uncompleted creation context opens; ordinary entry, missing identity and completed identity remain closed.
+      - order: 2
+        action: Navigate all steps, finish and skip, then change tenant/user and deny storage access.
+        expected: Ordered targets and labels remain correct; completion is scoped; denied storage permits dismissal and suppresses same-session replay.
+    expected_results: [Creation-only eligibility; per-user/tenant isolation; working navigation and dismissal with storage failure.]
+    forbidden_side_effects: [No Agent update, debug action, publication or provider request caused by guide.]
+    unit_boundary: Real guide component and local preference functions with controlled Tour and editor anchors
+    inputs: [entry flag, identity, draft readiness, permission, completion state, denied storage, navigation callbacks]
+    assertions: [Ready creation opens only once; stale/loading/read-only excluded; previous/next bounded; skip and finish recorded; other identities unaffected; storage failure contained; no business callbacks.]
+    execution:
+      profiles: [{name: mock, required_services: []}]

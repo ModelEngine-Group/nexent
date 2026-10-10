@@ -13,6 +13,9 @@ const register = vi.hoisted(() =>
 const modelApi = vi.hoisted(() => ({
   modelContext: () => ({ register }),
 }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
 vi.mock("@assistant-ui/react", () => ({
   useAui: () => modelApi,
 }));
@@ -139,9 +142,11 @@ it("passes capability metadata without forcing reasoning when deep thinking is o
       deepThinking={false}
     />
   );
-  const config = (register.mock.lastCall?.[0].getModelContext() as {
-    config: Record<string, unknown>;
-  }).config;
+  const config = (
+    register.mock.lastCall?.[0].getModelContext() as {
+      config: Record<string, unknown>;
+    }
+  ).config;
   expect(config).toMatchObject({
     modelName: "12",
     deepThinking: false,

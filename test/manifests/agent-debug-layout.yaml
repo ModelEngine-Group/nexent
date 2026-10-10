@@ -1,0 +1,24 @@
+schema_version: '1.0'
+cases:
+- case_id: AGENT-DEBUG-D1-001
+  stage: D1
+  status: implemented
+  contract_hash: sha256:fcc7927d11dea62a1dca00601a71032de78c6c3e21b4892668141efe56716e55
+  implementation_hash: sha256:8ad5aeaa20600915a969d2c6f9fdf9c8a2415d87618086a9ddff3aad2115208c
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/agent-debug-layout.test.tsx
+    selector: AGENT-DEBUG-D1-001
+    profiles:
+    - mock
+- case_id: AGENT-DEBUG-D4-001
+  stage: D4
+  status: implemented
+  contract_hash: sha256:de5e7b33a4bed63c56e6b36a2549125842c1b44e30dbf0ccca5d7945479067d2
+  implementation_hash: sha256:af5ff413a111fd51e3603dc72918f0677aec883a21cb38802a9aba321197dd6e
+  implementation:
+  - framework: playwright
+    file: test/automation/d4/agent-debug-layout.spec.mjs
+    selector: AGENT-DEBUG-D4-001
+    profiles:
+    - mock

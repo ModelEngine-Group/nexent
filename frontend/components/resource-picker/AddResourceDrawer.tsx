@@ -69,11 +69,7 @@ export function SearchRow({
         styles={{
           root: { width: "100%" },
         }}
-        style={
-          !tagOptions
-            ? undefined
-            : { flex: 1 }
-        }
+        style={!tagOptions ? undefined : { flex: 1 }}
         variant="outlined"
       />
       {tagOptions && (
@@ -123,6 +119,7 @@ export function SelectedChips({
           </button>
         </span>
       ))}
+      {trailing}
     </div>
   );
 }
@@ -371,7 +368,7 @@ export function ResourcePagination({
 
 export interface AddResourceDrawerProps {
   open: boolean;
-  title: string;
+  title: ReactNode;
   searchPlaceholder: string;
   selected: SelectedItem[];
   tagOptions?: TagOption[];
@@ -393,6 +390,11 @@ export interface AddResourceDrawerProps {
   allSelected?: boolean;
   selectedTrailing?: ReactNode;
   children: ReactNode;
+  /** Use the same drawer shell with an existing resource controller's filters. */
+  searchContent?: ReactNode;
+  showSelection?: boolean;
+  showListHeader?: boolean;
+  showPagination?: boolean;
 }
 
 /**
@@ -424,6 +426,10 @@ export function AddResourceDrawer({
   allSelected,
   selectedTrailing,
   children,
+  searchContent,
+  showSelection = true,
+  showListHeader = true,
+  showPagination = true,
 }: AddResourceDrawerProps) {
   const { t } = useTranslation("common");
 
@@ -447,46 +453,70 @@ export function AddResourceDrawer({
       }}
     >
       <div className="flex h-[28px] shrink-0 items-center justify-between">
-        <span className="max-w-[300px] overflow-hidden whitespace-nowrap text-[20px] font-medium leading-[28px] text-[#191919]">
+        <span
+          className={cn(
+            "overflow-hidden whitespace-nowrap text-[20px] font-medium leading-[28px] text-[#191919]",
+            typeof title === "string" ? "max-w-[300px]" : "min-w-0 flex-1 pr-4"
+          )}
+        >
           {title}
         </span>
-        <StandardCloseButton ariaLabel={t("resourcePicker.close", "关闭")} onClick={onClose} />
+        <StandardCloseButton
+          ariaLabel={t("resourcePicker.close", "关闭")}
+          onClick={onClose}
+        />
       </div>
 
-      <SearchRow
-        placeholder={searchPlaceholder}
-        tagOptions={tagOptions}
-        onSearch={onSearch}
-        onTagChange={onTagChange}
-      />
+      {searchContent !== undefined ? (
+        searchContent
+      ) : (
+        <SearchRow
+          placeholder={searchPlaceholder}
+          tagOptions={tagOptions}
+          onSearch={onSearch}
+          onTagChange={onTagChange}
+        />
+      )}
 
-      <div className="shrink-0 text-[14px] leading-[20px] text-[#191919]">
-        {t("resourcePicker.selected", "已选")}
-      </div>
-      <SelectedChips
-        items={selected}
-        onRemove={onRemoveSelected}
-        trailing={selectedTrailing}
-      />
+      {showSelection && (
+        <>
+          <div className="shrink-0 text-[14px] leading-[20px] text-[#191919]">
+            {t("resourcePicker.selected", "已选")}
+          </div>
+          <SelectedChips
+            items={selected}
+            onRemove={onRemoveSelected}
+            trailing={selectedTrailing}
+          />
+        </>
+      )}
 
-      <ListHeader
-        title={listTitle}
-        onSelectAll={onSelectAll}
-        allSelected={allSelected}
-        onRefresh={onRefresh}
-      />
+      {showListHeader && (
+        <ListHeader
+          title={listTitle}
+          onSelectAll={onSelectAll}
+          allSelected={allSelected}
+          onRefresh={onRefresh}
+        />
+      )}
 
       {tabs && activeTab !== undefined && (
-        <ResourceTabs tabs={tabs} activeKey={activeTab} onChange={onTabChange} />
+        <ResourceTabs
+          tabs={tabs}
+          activeKey={activeTab}
+          onChange={onTabChange}
+        />
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
 
-      <ResourcePagination
-        total={total}
-        current={page}
-        onPageChange={onPageChange ?? (() => {})}
-      />
+      {showPagination && (
+        <ResourcePagination
+          total={total}
+          current={page}
+          onPageChange={onPageChange ?? (() => {})}
+        />
+      )}
 
       <div className="flex shrink-0 justify-end gap-3">
         <button

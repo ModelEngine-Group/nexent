@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal, Select, Tabs } from "antd";
+import { Button, Input, Select, Tabs } from "antd";
 import { BlocksIcon, Eye, Pencil, Search, Settings, Tag } from "lucide-react";
 
+import { AddResourceDrawer } from "@/components/resource-picker/AddResourceDrawer";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import log from "@/lib/logger";
 import { fetchSkillInstances } from "@/services/agentConfigService";
@@ -320,7 +321,7 @@ export default function SelectSkillsDialog({
   }, [onClose]);
 
   return (
-    <Modal
+    <AddResourceDrawer
       title={
         <div className="flex items-center gap-2 pr-8">
           <BlocksIcon className="size-4" />
@@ -350,12 +351,16 @@ export default function SelectSkillsDialog({
         </div>
       }
       open={open}
-      onCancel={onCloseDialog}
-      footer={null}
-      width={1100}
-      zIndex={1000}
-      mask={{ closable: true }}
-      destroyOnHidden
+      searchPlaceholder=""
+      listTitle=""
+      selected={[]}
+      total={0}
+      searchContent={null}
+      showSelection={false}
+      showListHeader={false}
+      showPagination={false}
+      showConfirm={false}
+      onClose={onCloseDialog}
     >
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
 
@@ -511,6 +516,6 @@ export default function SelectSkillsDialog({
           maskClosable
         />
       ) : null}
-    </Modal>
+    </AddResourceDrawer>
   );
 }

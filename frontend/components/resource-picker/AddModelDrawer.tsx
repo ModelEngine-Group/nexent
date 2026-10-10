@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Cpu } from "lucide-react";
 import { Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
@@ -13,13 +13,7 @@ import type { ModelGroup, ModelItem, SelectedItem } from "./types";
 
 const PAGE_SIZE = 10;
 
-const ICON_BG_PALETTE = [
-  "#4D6BFE",
-  "#7B5BF2",
-  "#2E5BFF",
-  "#3B82F6",
-  "#1F2329",
-];
+const ICON_BG_PALETTE = ["#4D6BFE", "#7B5BF2", "#2E5BFF", "#3B82F6", "#1F2329"];
 
 function iconColorFor(seed: string): string {
   let hash = 0;
@@ -46,14 +40,43 @@ export interface AddModelDrawerProps {
   open: boolean;
   onClose: () => void;
   onConfirm?: (selected: ModelItem[]) => void;
+  models?: ModelOption[];
+  selectedModelIds?: readonly number[];
+  onSelectionChange?: (modelIds: number[]) => void;
+  disabled?: boolean;
+  selectedTrailing?: ReactNode;
 }
 
-export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps) {
+export function AddModelDrawer({
+  open,
+  onClose,
+  onConfirm,
+  models,
+  selectedModelIds,
+  onSelectionChange,
+  disabled = false,
+  selectedTrailing,
+}: AddModelDrawerProps) {
   const { t } = useTranslation("common");
-  const { llmModels, isLoading, refetch } = useModelList({ enabled: open });
+  const {
+    llmModels: queriedModels,
+    isLoading: queryLoading,
+    refetch,
+  } = useModelList({ enabled: open && !models });
+  const llmModels = models ?? queriedModels;
+  const isLoading = !models && queryLoading;
 
   const [activeGroup, setActiveGroup] = useState("");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [uncontrolledIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const selectedIds = useMemo(
+    () =>
+      selectedModelIds === undefined
+        ? uncontrolledIds
+        : new Set(selectedModelIds.map(String)),
+    [selectedModelIds, uncontrolledIds]
+  );
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
 
@@ -77,7 +100,10 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
 
   // Default to the first available source group.
   useEffect(() => {
-    if (groups.length > 0 && !groups.some((group) => group.key === activeGroup)) {
+    if (
+      groups.length > 0 &&
+      !groups.some((group) => group.key === activeGroup)
+    ) {
       setActiveGroup(groups[0].key);
     }
   }, [groups, activeGroup]);
@@ -102,17 +128,36 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
     setPage(1);
   }, [keyword, activeGroup]);
 
-  const pagedModels = activeModels.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pagedModels = activeModels.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE
+  );
 
   const selected: SelectedItem[] = useMemo(
     () =>
-      allModels
+      (selectedModelIds === undefined
+        ? allModels
+        : selectedModelIds.flatMap((id) => {
+            const item = allModels.find((model) => model.id === String(id));
+            return item ? [item] : [];
+          })
+      )
         .filter((item) => selectedIds.has(item.id))
         .map((item) => ({ id: item.id, label: item.name })),
-    [allModels, selectedIds]
+    [allModels, selectedIds, selectedModelIds]
   );
 
   const toggleModel = (id: string) => {
+    if (disabled) return;
+    if (selectedModelIds !== undefined) {
+      const modelId = Number(id);
+      onSelectionChange?.(
+        selectedModelIds.includes(modelId)
+          ? selectedModelIds.filter((value) => value !== modelId)
+          : [...selectedModelIds, modelId]
+      );
+      return;
+    }
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -129,6 +174,7 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
       title={t("resourcePicker.addModel", "添加模型")}
       searchPlaceholder={t("resourcePicker.search.model", "按名称、描述检索")}
       selected={selected}
+      selectedTrailing={selectedTrailing}
       listTitle={t("resourcePicker.list.model", "模型列表")}
       total={activeModels.length}
       page={page}
@@ -138,7 +184,9 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
       onConfirm={() => onConfirm?.([])}
       onRemoveSelected={(id) => toggleModel(id)}
       onSearch={setKeyword}
-      onRefresh={() => { void refetch(); }}
+      onRefresh={() => {
+        void refetch();
+      }}
     >
       {isLoading ? (
         <div className="flex justify-center py-12">
@@ -187,7 +235,9 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
                     <div className="flex items-center gap-3">
                       <span
                         className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white"
-                        style={{ background: activeGroupConf?.iconBg ?? "#2E5BFF" }}
+                        style={{
+                          background: activeGroupConf?.iconBg ?? "#2E5BFF",
+                        }}
                       >
                         <Cpu size={13} />
                       </span>
@@ -216,6 +266,7 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
                     </div>
                     <CheckMark
                       checked={isSelected}
+                      ariaLabel={item.name}
                       onToggle={() => toggleModel(item.id)}
                     />
                   </div>

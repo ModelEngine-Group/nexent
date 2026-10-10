@@ -40,14 +40,7 @@ export type ModelType =
   | "multi_embedding";
 
 export type ReasoningEffort =
-  | "auto"
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max";
+  "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ReasoningCapability {
   status: "supported" | "unsupported" | "unknown";
@@ -63,7 +56,8 @@ export interface ReasoningCapability {
   >;
   provider_id?: string | null;
   budget_wire_format?: "thinking_object" | "thinking_budget" | null;
-  toggle_wire_format?: "thinking_object" | "enable_thinking" | "chat_template" | null;
+  toggle_wire_format?:
+    "thinking_object" | "enable_thinking" | "chat_template" | null;
   matched_api?: string | null;
   matched_model_id?: string | null;
   source: "catalog" | "models_dev" | "operator" | "unknown";
@@ -105,6 +99,8 @@ export interface ModelOption {
   enableThinking?: boolean;
   /** Persisted model-level default, stored in extra_params.reasoning_effort. */
   defaultReasoningEffort?: ReasoningEffort;
+  /** Whether the provider/model profile supports tool calls when supplied by the API. */
+  supportToolCalls?: boolean | null;
 }
 
 // Application configuration interface

@@ -1,0 +1,24 @@
+schema_version: '1.0'
+cases:
+- case_id: AGENT-GUIDE-D1-001
+  stage: D1
+  status: implemented
+  contract_hash: sha256:9bed58aed86f9578a3896b70744479064c37aeac79986c31c271160363c86fa0
+  implementation_hash: sha256:bd0d36fa1d6ac309b24cb9a36355fdae5aaffe2307d5d4d7fd0d8a91e61d3e43
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/agent-creation-guide.test.tsx
+    selector: AGENT-GUIDE-D1-001
+    profiles:
+    - mock
+- case_id: AGENT-GUIDE-D4-001
+  stage: D4
+  status: implemented
+  contract_hash: sha256:b90762e85a71ff0d88345201247c01a559a1aff624324338c8b80a9604de96eb
+  implementation_hash: sha256:270648d673d9a74ec8aaa588c8415414cc5e8020ba7b84d7b04567344d43b723
+  implementation:
+  - framework: playwright
+    file: test/automation/d4/agent-creation-guide.spec.mjs
+    selector: AGENT-GUIDE-D4-001
+    profiles:
+    - mock

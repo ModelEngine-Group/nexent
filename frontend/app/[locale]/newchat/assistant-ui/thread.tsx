@@ -213,6 +213,10 @@ export interface ThreadProps {
   readOnly?: boolean;
   readOnlyReason?: string;
   showComposer?: boolean;
+  configurationLayout?: boolean;
+  debugLayout?: boolean;
+  emptyFooterContent?: ReactNode;
+  footerContent?: ReactNode;
   interactionContent?: ReactNode;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
@@ -270,6 +274,10 @@ export const Thread: FC<ThreadProps> = ({
   readOnly = false,
   readOnlyReason,
   showComposer = true,
+  configurationLayout = false,
+  debugLayout = false,
+  emptyFooterContent,
+  footerContent,
   interactionContent,
   workbenchPresentation,
   workbenchResources,
@@ -528,6 +536,10 @@ export const Thread: FC<ThreadProps> = ({
         readOnly={readOnly}
         readOnlyReason={readOnlyReason}
         showComposer={showComposer}
+        configurationLayout={configurationLayout}
+        debugLayout={debugLayout}
+        emptyFooterContent={emptyFooterContent}
+        footerContent={footerContent}
         interactionContent={interactionContent}
         workbenchPresentation={workbenchPresentation}
         workbenchResources={workbenchResources}
@@ -657,6 +669,10 @@ interface ThreadViewProps {
   readOnly: boolean;
   readOnlyReason?: string;
   showComposer: boolean;
+  configurationLayout: boolean;
+  debugLayout: boolean;
+  emptyFooterContent?: ReactNode;
+  footerContent?: ReactNode;
   interactionContent?: ReactNode;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
@@ -712,6 +728,10 @@ const ThreadView: FC<ThreadViewProps> = ({
   readOnly,
   readOnlyReason,
   showComposer,
+  configurationLayout,
+  debugLayout,
+  emptyFooterContent,
+  footerContent,
   interactionContent,
   workbenchPresentation,
   workbenchResources,
@@ -729,6 +749,8 @@ const ThreadView: FC<ThreadViewProps> = ({
     <ThreadPrimitive.Root
       className={cn(
         "flex h-full flex-row bg-background",
+        configurationLayout && "!bg-transparent",
+        debugLayout && "!bg-transparent",
         variant === "embedded" &&
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
@@ -846,6 +868,10 @@ const ThreadView: FC<ThreadViewProps> = ({
           className={cn(
             "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
             variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
+            debugLayout && "!max-w-none !p-0",
+            configurationLayout &&
+              !hasMessages &&
+              "!max-w-none !overflow-hidden !p-0",
             workbenchLanding &&
               "relative mt-auto flex-none max-w-[1123px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
@@ -889,12 +915,23 @@ const ThreadView: FC<ThreadViewProps> = ({
             className={cn(
               "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
               variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8",
+              debugLayout && "!max-w-none !shrink-0 !gap-4 !px-0 !pb-0",
               workbenchLanding &&
                 "static mb-auto max-w-[1123px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
-            <ThreadScrollToBottom />
+            {(!debugLayout || hasMessages) && <ThreadScrollToBottom />}
+            {!hasMessages &&
+              emptyFooterContent &&
+              (debugLayout ? (
+                <div className="agent-debug-question-scroll">
+                  {emptyFooterContent}
+                </div>
+              ) : (
+                emptyFooterContent
+              ))}
             <Composer
+              debugLayout={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
@@ -928,6 +965,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               workbenchPresentation?.mode === "generic_chat" && (
                 <WorkbenchLandingExamples />
               )}
+            {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}
       </div>

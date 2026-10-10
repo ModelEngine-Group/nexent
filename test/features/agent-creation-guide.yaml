@@ -1,0 +1,19 @@
+schema_version: "1.0"
+module: {id: AGENT-EDITOR, name: Agent editor, description: Agent configuration and debug workflow}
+features:
+  - feature_id: AGENT-CREATION-GUIDE
+    name: Agent first-creation guide
+    status: active
+    description: Explain four measured configuration workflow regions after new Agent creation.
+    business_rules:
+      - rule_id: AGENT-GUIDE-RULE-001
+        description: Four ordered steps use inspected copy, body292 or300, radius6, padding16, title16/24, description14/22, buttons28 with12/20 text, gap8 and shadow0/8/24/16percent; highlight radius8 and viewport-safe alignment.
+      - rule_id: AGENT-GUIDE-RULE-002
+        description: Only new creation entry with a loaded editable draft and uncompleted user/tenant preference starts; finish/skip persist local scoped completion, denied storage falls back to memory, normal edits and read-only/stale drafts remain unguided.
+      - rule_id: AGENT-GUIDE-RULE-003
+        description: Previous/next/skip/finish only change explanatory UI and local preference; no configuration write, model run, debug or publication; final action returns to the existing composer.
+    required_test_stages: [D1, D4]
+    source:
+      requirement_ids: [AGENT-GUIDE-REQ-001]
+      spec_path: ../nexent-doc/docs/Developing/agt-editor-first-creation-guide/proposal.md
+      notes: Same-page inspector analysis precedes code. D2/D3/D5 excluded for unchanged protocol/provider/deployment. Browser preference has no server synchronization; proprietary font glyph parity unverified.
