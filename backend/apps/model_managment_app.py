@@ -414,6 +414,12 @@ async def create_provider_model(
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        # Surface provider failures (e.g. 502 connection_failed) with the
+        # status the service layer classified, instead of flattening every
+        # error to 500. HTTPException is an Exception subclass, so it must be
+        # caught before the generic handler below.
+        raise
     except Exception as e:
         logging.error(f"Failed to create provider model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -1119,6 +1125,10 @@ async def manage_create_provider_models(
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        # Same contract as /provider/create: keep the classified provider
+        # status (e.g. 502) instead of flattening it to 500.
+        raise
     except Exception as e:
         logging.error(f"Failed to create provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
