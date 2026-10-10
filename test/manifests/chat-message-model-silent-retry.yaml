@@ -34,7 +34,7 @@ cases:
     stage: D3
     status: implemented
     contract_hash: sha256:f6ba2ceeb76ca6051b3f305afac2f932ad4f1148a2201ea8471d0cbaae207b6e
-    implementation_hash: sha256:ae252be0da5024d144ae862cddaa9a71102050f2b43ed244fc8b29d1425bb901
+    implementation_hash: sha256:8df5fe6baf3e04640581648de5e07f08d6113e32bd47f8a1eeecc827faae2796
     implementation:
       - framework: pytest
         file: test/automation/d3/test_semantic_repair_runtime.py

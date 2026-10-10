@@ -48,14 +48,15 @@ def test_cmsr_d3_001_deployed_retry_streams_and_persists(scenario, tmp_path):
                 'history': [], 'agent_id': config['agent_id'], 'is_debug': False,
             }, headers={'Authorization': 'Bearer ' + config['token'], 'Accept-Language': 'en'},
                 stream=True, timeout=(30, 120))
-            assert response.status_code == 200, f'Agent HTTP {response.status_code}'
+            if response.status_code != 200:
+                raise RuntimeError(f'Agent HTTP {response.status_code}')
             for line in response.iter_lines(chunk_size=1, decode_unicode=True):
                 if line and line.startswith('data:'):
                     payload = line[5:].strip()
                     if payload != '[DONE]':
                         events.append(json.loads(payload))
             outcome['completed'] = True
-        except BaseException as error:
+        except Exception as error:
             outcome['error'] = error
 
     thread = threading.Thread(target=run, daemon=True)
@@ -92,7 +93,11 @@ def test_cmsr_d3_001_deployed_retry_streams_and_persists(scenario, tmp_path):
         assert [e['phase'] for e in controls] == ['begin', 'rollback', 'begin', 'commit', 'begin', 'rollback']
         assert sum(e.get('type') == 'parse' for e in events) == 1
         answers = [e for e in events if e.get('type') == 'final_answer']
-        assert len(answers) == 1 and answers[0]['content'] == marker
+        assert len(answers) == 1
+        assert answers[0]['content'] == marker
+        executions = [e for e in events if e.get('type') == 'execution_logs' and marker in str(e.get('content', ''))]
+        assert len(executions) == 1
+        assert not any(e.get('type') == 'warning' for e in events)
         assert sum(e.get('type') == 'step_count' for e in events) == 2
         stats = _request(config, 'GET', '/__stats', provider=True)
         # Third request is the normal final envelope after one executable action.
@@ -100,8 +105,10 @@ def test_cmsr_d3_001_deployed_retry_streams_and_persists(scenario, tmp_path):
         history = _request(config, 'GET', f'/conversation/{conversation_id}')
         units = _units(history)
         raw = ''.join(str(u.get('content', '')) for u in units)
-        assert '<code>print(' in raw and marker in raw
-        assert 'CMSR_LEAK_' not in raw and 'INVALID_SEMANTIC_FIRST' not in raw
+        assert '<code>print(' in raw
+        assert marker in raw
+        assert 'CMSR_LEAK_' not in raw
+        assert 'INVALID_SEMANTIC_FIRST' not in raw
         assert sum(u.get('type') == 'parse' for u in units) == 1
         assert sum(u.get('type') == 'final_answer' for u in units) == 1
         assert sum(u.get('type') == 'step_count' for u in units) == 2
