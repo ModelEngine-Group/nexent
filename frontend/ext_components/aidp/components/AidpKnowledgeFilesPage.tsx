@@ -1,0 +1,556 @@
+"use client";
+
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import {
+  App,
+  Breadcrumb,
+  Button,
+  Empty,
+  Input,
+  Modal,
+  Table,
+  Tabs,
+  Tooltip,
+} from "antd";
+import type { ColumnsType } from "antd/es/table";
+import {
+  ClockCircleOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  FileTextOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  TeamOutlined,
+  UserOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
+
+import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
+import aidpKnowledgeService, {
+  type AidpDocumentItem,
+  type AidpKbDetail,
+} from "@/ext_components/aidp/services/aidpKnowledgeService";
+import {
+  AIDP_UNKNOWN_VALUE,
+  formatAidpDocumentCount,
+} from "@/lib/aidpKnowledgeDisplay";
+import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
+import AidpPagination from "./AidpPagination";
+import AidpImportDrawer from "./AidpImportDrawer";
+import AidpUpdateKbModal from "./AidpUpdateKbModal";
+import AidpGroupNamesDisplay from "./AidpGroupNamesDisplay";
+
+interface AidpKnowledgeFilesPageProps {
+  knowledgeBase: AidpKnowledgeBaseItem;
+  onBack: () => void;
+  onDelete: (knowledgeBase: AidpKnowledgeBaseItem) => void;
+  onUpdated: (knowledgeBase: AidpKnowledgeBaseItem) => void;
+}
+
+const AidpDetailField = ({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) => (
+  <div className={`min-w-0 ${className}`}>
+    <dt className="mb-1 min-h-5 text-xs leading-5 text-gray-500">{label}</dt>
+    <dd className="m-0 min-h-6 break-words text-sm leading-6 text-gray-800">
+      {children}
+    </dd>
+  </div>
+);
+
+const PAGE_SIZE = 10;
+const UNKNOWN = AIDP_UNKNOWN_VALUE;
+
+const formatDetailDateTime = (value: unknown): string => {
+  let date: Date;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    date = new Date(value < 1e12 ? value * 1000 : value);
+  } else if (typeof value === "string" && value.trim()) {
+    const normalized = value.trim();
+    const numeric = /^\d+(?:\.\d+)?$/.test(normalized)
+      ? Number(normalized)
+      : null;
+    date =
+      numeric === null
+        ? new Date(normalized)
+        : new Date(numeric < 1e12 ? numeric * 1000 : numeric);
+  } else {
+    return UNKNOWN;
+  }
+  if (Number.isNaN(date.getTime())) return UNKNOWN;
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+};
+
+const formatFileSize = (bytes?: number): string => {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+    return UNKNOWN;
+  }
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+};
+
+const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
+  knowledgeBase,
+  onBack,
+  onDelete,
+  onUpdated,
+}) => {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const { groupOptions } = useAidpGroupOptions();
+  const [detail, setDetail] = useState<AidpKbDetail>(knowledgeBase);
+  const [editingKbMode, setEditingKbMode] = useState<
+    "metadata" | "permissions" | null
+  >(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [fileKeyword, setFileKeyword] = useState("");
+  const [files, setFiles] = useState<AidpDocumentItem[]>([]);
+  const [fileTotal, setFileTotal] = useState(0);
+  const [fileHasMore, setFileHasMore] = useState(false);
+  const [fileTotalReliable, setFileTotalReliable] = useState(true);
+  const [filePage, setFilePage] = useState(1);
+  const [filePageSize, setFilePageSize] = useState(PAGE_SIZE);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const groupNames = useMemo(() => {
+    const names = new Map(
+      groupOptions.map((option) => [option.value, option.label])
+    );
+    return (detail.group_ids || [])
+      .map((id) => names.get(id))
+      .filter((name): name is string => Boolean(name));
+  }, [detail.group_ids, groupOptions]);
+  const canEdit = detail.permission === "EDIT";
+  const isAvailable =
+    detail.resource_status !== "UNAVAILABLE" &&
+    detail.resource_status !== "ORPHANED";
+
+  const refreshDetail = useCallback(async () => {
+    try {
+      const result = await aidpKnowledgeService.getKb(knowledgeBase.kds_id);
+      const merged = { ...knowledgeBase, ...result } as AidpKbDetail;
+      setDetail(merged);
+      onUpdated(merged as AidpKnowledgeBaseItem);
+    } catch {
+      message.error(t("aidpKnowledge.detailLoadFailed"));
+    }
+  }, [knowledgeBase, message, onUpdated, t]);
+
+  const fetchFiles = useCallback(
+    async (page = 1, keyword = fileKeyword, pageSize = filePageSize) => {
+      setLoadingFiles(true);
+      try {
+        const result = await aidpKnowledgeService.listIngestedFiles(
+          knowledgeBase.kds_id,
+          page,
+          pageSize,
+          keyword
+        );
+        setFiles(result.value);
+        setFileTotal(result.total_count ?? result.value.length);
+        setFileHasMore(result.has_more ?? false);
+        setFileTotalReliable(result.total_reliable !== false);
+        setFilePage(page);
+      } catch {
+        message.error(t("aidpKnowledge.detailFilesLoadFailed"));
+        setFiles([]);
+        setFileTotal(0);
+        setFileHasMore(false);
+        setFileTotalReliable(false);
+      } finally {
+        setLoadingFiles(false);
+      }
+    },
+    [fileKeyword, filePageSize, knowledgeBase.kds_id, message, t]
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshDetail();
+      void fetchFiles(1, "", PAGE_SIZE);
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // The parent remounts this component when the selected KB id changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [knowledgeBase.kds_id]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchFiles(1, fileKeyword.trim(), filePageSize);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [fileKeyword, filePageSize, fetchFiles]);
+
+  const uploadComplete = useCallback(() => {
+    void fetchFiles(1, fileKeyword, filePageSize);
+    void refreshDetail();
+  }, [fetchFiles, fileKeyword, filePageSize, refreshDetail]);
+
+  const handleDownload = useCallback(
+    async (file: AidpDocumentItem) => {
+      try {
+        const response = await aidpKnowledgeService.downloadDoc(
+          knowledgeBase.kds_id,
+          file.file_uuid
+        );
+        const blobUrl = URL.createObjectURL(await response.blob());
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = file.file_name || "download";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        message.error(t("aidpKnowledge.downloadFailed"));
+      }
+    },
+    [knowledgeBase.kds_id, message, t]
+  );
+
+  const handleDeleteFile = useCallback(
+    (file: AidpDocumentItem) => {
+      Modal.confirm({
+        title: t("aidpKnowledge.deleteDocTitle"),
+        content: file.file_name,
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try {
+            await aidpKnowledgeService.removeDoc(
+              knowledgeBase.kds_id,
+              file.file_uuid
+            );
+            message.success(t("aidpKnowledge.deleteDocSuccess"));
+            void fetchFiles(filePage, fileKeyword, filePageSize);
+            void refreshDetail();
+          } catch {
+            message.error(t("aidpKnowledge.deleteDocFailed"));
+          }
+        },
+      });
+    },
+    [
+      fetchFiles,
+      fileKeyword,
+      filePage,
+      filePageSize,
+      knowledgeBase.kds_id,
+      message,
+      refreshDetail,
+      t,
+    ]
+  );
+
+  const fileColumns: ColumnsType<AidpDocumentItem> = [
+    {
+      title: t("aidpKnowledge.detailFileName"),
+      dataIndex: "file_name",
+      key: "file_name",
+      fixed: "left",
+      width: 220,
+      ellipsis: true,
+      render: (value: string) => (
+        <span className="text-blue-600">{value || UNKNOWN}</span>
+      ),
+    },
+    {
+      title: t("aidpKnowledge.detailFileType"),
+      dataIndex: "file_type",
+      key: "file_type",
+      width: 75,
+      render: (value?: string) => value || UNKNOWN,
+    },
+    {
+      title: t("aidpKnowledge.detailFileSize"),
+      dataIndex: "file_size",
+      key: "file_size",
+      width: 85,
+      render: (value?: number) => formatFileSize(value),
+    },
+    {
+      title: t("aidpKnowledge.detailImportMode"),
+      key: "import_mode",
+      width: 120,
+      ellipsis: true,
+      render: () => t("aidpKnowledge.detailLocalImport"),
+    },
+    {
+      title: t("aidpKnowledge.detailFirstUploadTime"),
+      dataIndex: "created_at",
+      key: "created_at",
+      width: 150,
+      ellipsis: true,
+      render: (value?: string) => formatDetailDateTime(value),
+    },
+    {
+      title: t("aidpKnowledge.detailUpdateTime"),
+      dataIndex: "updated_at",
+      key: "updated_at",
+      width: 150,
+      ellipsis: true,
+      render: (value?: string) => formatDetailDateTime(value),
+    },
+    {
+      title: t("aidpKnowledge.detailOperation"),
+      key: "actions",
+      fixed: "right",
+      width: 120,
+      render: (_value, record) => (
+        <div className="flex items-center gap-3 whitespace-nowrap">
+          <Button
+            type="link"
+            size="small"
+            className="px-0"
+            onClick={() => void handleDownload(record)}
+          >
+            {t("aidpKnowledge.download")}
+          </Button>
+          {canEdit && (
+            <Button
+              type="link"
+              danger
+              size="small"
+              className="px-0"
+              onClick={() => handleDeleteFile(record)}
+            >
+              {t("common.delete")}
+            </Button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  const privateScope = detail.ingroup_permission === "PRIVATE";
+
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto pb-4">
+      <Breadcrumb
+        className="shrink-0"
+        items={[
+          {
+            title: (
+              <button
+                type="button"
+                onClick={onBack}
+                className="!text-lg !leading-7 text-gray-500 hover:text-blue-600"
+              >
+                {t("aidpKnowledge.breadcrumbKnowledgeBase")}
+              </button>
+            ),
+          },
+          {
+            title: (
+              <span className="!text-lg !font-semibold !leading-7 text-gray-800">
+                {t("aidpKnowledge.detailBreadcrumb")}
+              </span>
+            ),
+          },
+        ]}
+      />
+
+      <section className="@container shrink-0 rounded-xl border border-violet-100 bg-gradient-to-r from-violet-50 via-white to-blue-50 px-6 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-2xl text-violet-600">
+              <DatabaseOutlined />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <h1 className="truncate text-lg font-semibold text-gray-800">
+                  {detail.kds_name}
+                </h1>
+                {canEdit && (
+                  <Tooltip title={t("aidpKnowledge.detailEditNameDescription")}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={() => setEditingKbMode("metadata")}
+                    />
+                  </Tooltip>
+                )}
+              </div>
+              <p className="mt-1 truncate text-sm leading-6 text-gray-600">
+                {detail.description || t("aidpKnowledge.noDescription")}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {canEdit && (
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => onDelete(knowledgeBase)}
+              >
+                {t("common.delete")}
+              </Button>
+            )}
+          </div>
+        </div>
+        <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-3 @min-[600px]:grid-cols-2 @min-[850px]:grid-cols-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <FileTextOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
+            <AidpDetailField label={t("aidpKnowledge.detailTabFiles")}>
+              {formatAidpDocumentCount(
+                detail.document_count,
+                detail.document_count_reliable
+              )}
+            </AidpDetailField>
+          </div>
+          <div className="flex min-w-0 items-center gap-3">
+            <DatabaseOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
+            <AidpDetailField label={t("aidpKnowledge.detailPermissions")}>
+              {privateScope
+                ? t("aidpKnowledge.scopePrivate")
+                : t("aidpKnowledge.scopeShared")}
+            </AidpDetailField>
+          </div>
+          <div className="flex min-w-0 items-center gap-3">
+            <TeamOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
+            <AidpDetailField label={t("aidpKnowledge.detailAllowedGroups")}>
+              {privateScope ? (
+                t("aidpKnowledge.detailOwnerOnly")
+              ) : groupNames.length > 0 ||
+                (detail.group_ids || []).length > 0 ? (
+                <AidpGroupNamesDisplay
+                  groupNames={
+                    groupNames.length > 0
+                      ? groupNames
+                      : (detail.group_ids || []).map(String)
+                  }
+                />
+              ) : (
+                UNKNOWN
+              )}
+            </AidpDetailField>
+          </div>
+          <div className="flex min-w-0 items-center gap-3">
+            <ClockCircleOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
+            <AidpDetailField label={t("aidpKnowledge.detailCreatedAt")}>
+              {formatDetailDateTime(detail.created_at)}
+            </AidpDetailField>
+          </div>
+          <div className="flex min-w-0 items-center gap-3">
+            <UserOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
+            <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
+              {detail.creator_name || UNKNOWN}
+            </AidpDetailField>
+          </div>
+        </dl>
+      </section>
+
+      <Tabs
+        activeKey="files"
+        className="shrink-0 [&>.ant-tabs-nav]:mb-0 [&>.ant-tabs-content-holder]:hidden"
+        tabBarStyle={{ marginBottom: 0 }}
+        items={[{ key: "files", label: t("aidpKnowledge.detailTabFiles") }]}
+      />
+
+      <section className="flex min-h-[360px] flex-1 shrink-0 flex-col bg-white">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <Input
+            allowClear
+            prefix={<SearchOutlined className="text-gray-400" />}
+            value={fileKeyword}
+            onChange={(event) => setFileKeyword(event.target.value)}
+            placeholder={t("aidpKnowledge.detailFileSearch")}
+            style={{ width: 280, maxWidth: "100%" }}
+          />
+          <div className="flex items-center gap-2">
+            <Tooltip title={t("aidpKnowledge.refresh")}>
+              <Button
+                aria-label={t("aidpKnowledge.refresh")}
+                icon={<ReloadOutlined spin={loadingFiles} />}
+                onClick={() =>
+                  void fetchFiles(filePage, fileKeyword, filePageSize)
+                }
+              />
+            </Tooltip>
+            {canEdit && isAvailable && (
+              <Button
+                type="primary"
+                icon={<UploadOutlined />}
+                onClick={() => setImportOpen(true)}
+              >
+                {t("aidpKnowledge.importFile")}
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="flex-1">
+          <Table<AidpDocumentItem>
+            rowKey={(record) => record.file_uuid || record.file_ino_no}
+            columns={fileColumns}
+            dataSource={files}
+            loading={loadingFiles}
+            pagination={false}
+            scroll={{ x: 930 }}
+            locale={{
+              emptyText: (
+                <Empty description={t("aidpKnowledge.detailFilesEmpty")} />
+              ),
+            }}
+            size="middle"
+          />
+        </div>
+        <div className="mt-4 shrink-0 border-t border-gray-200 py-3">
+          <AidpPagination
+            currentPage={filePage}
+            pageSize={filePageSize}
+            total={fileTotal}
+            totalReliable={fileTotalReliable}
+            hasMore={fileHasMore}
+            onPageChange={(page) =>
+              void fetchFiles(page, fileKeyword, filePageSize)
+            }
+            onPageSizeChange={(size) => setFilePageSize(size)}
+          />
+        </div>
+      </section>
+
+      <AidpUpdateKbModal
+        open={editingKbMode !== null}
+        mode={editingKbMode || "metadata"}
+        knowledgeBase={detail as AidpKnowledgeBaseItem}
+        onCancel={() => setEditingKbMode(null)}
+        onSuccess={(updated) => {
+          setEditingKbMode(null);
+          setDetail((current) => ({ ...current, ...updated }));
+          onUpdated(updated);
+          void refreshDetail();
+        }}
+      />
+
+      <AidpImportDrawer
+        title={t("aidpKnowledge.importDrawerTitle")}
+        open={importOpen}
+        knowledgeBase={knowledgeBase}
+        onClose={() => setImportOpen(false)}
+        onDocsUploaded={uploadComplete}
+        onRefresh={() => void fetchFiles(filePage, fileKeyword, filePageSize)}
+      />
+    </div>
+  );
+};
+
+export default AidpKnowledgeFilesPage;

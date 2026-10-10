@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from http import HTTPStatus
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
@@ -46,6 +46,7 @@ from ext_components.aidp.services.aidp_access_service import (
     invalidate_aidp_kb_detail_cache,
     resolve_current_aidp_access,
 )
+from ext_components.aidp.services.aidp_creator_service import get_nexent_creator_names
 from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
 from ext_components.aidp.services.aidp_permission_service import (
     EDIT,
@@ -58,6 +59,7 @@ from ext_components.aidp.services.aidp_service import (
     count_aidp_docs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
+    get_aidp_graph_template_impl,
     get_aidp_kb_impl,
     list_aidp_channels_impl,
     list_aidp_doc_history_impl,
@@ -173,6 +175,22 @@ class CreateKbRequest(BaseModel):
     similarity: Optional[float] = Field(None, description="Similarity score threshold")
     smartsplit: Optional[int] = Field(None, ge=0, le=1, description="Smart chunking mode, int 0 or 1")
     caption_enable: Optional[int] = Field(None, ge=0, le=1, description="Caption generation toggle, int 0 or 1")
+    chunk_mode: Optional[int] = Field(
+        None, ge=0, le=1, description="Chunking mode: 0 smart splitting, 1 legal clauses"
+    )
+    is_exist_graph: Optional[bool] = Field(
+        None, description="Whether knowledge graph extraction is enabled for this KB"
+    )
+    graph_config: Optional[dict] = Field(
+        None,
+        description=(
+            "Structured graph configuration. The service validates it and serializes it into the "
+            "AIDP graph_config string; it is omitted entirely when the graph is disabled."
+        ),
+    )
+    llm_model_name: Optional[str] = Field(
+        None, description="Graph extraction model taken from the llm category"
+    )
     # Nexent-side permission payload. Never forwarded to AIDP.
     ingroup_permission: Optional[str] = Field(
         "READ_ONLY",
@@ -212,6 +230,8 @@ class DownloadAidpDocumentRequest(BaseModel):
     """AIDP file selected for download."""
 
     file_uuid: UUID = Field(..., description="AIDP file UUID")
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -804,6 +824,20 @@ async def _load_ingested_documents(
 # ---------------------------------------------------------------------------
 
 
+@aidp_mgmt_router.get("/knowledge-bases/graph-template")
+async def get_graph_template(
+    request: Request,
+    language: Literal["chinese", "english"] = "chinese",
+) -> JSONResponse:
+    await _auth(request)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-graph-template", get_aidp_graph_template_impl, server_url, api_key, language,
+        lane="control-io", owner="config",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
 @aidp_mgmt_router.get("/knowledge-bases")
 async def list_knowledge_bases(
     request: Request,
@@ -849,6 +883,22 @@ async def list_knowledge_bases(
 
     start = (page - 1) * page_size
     page_rows = rows[start:start + page_size]
+    creator_names = await run_blocking(
+        "aidp-creator-names", get_nexent_creator_names,
+        [row.get("owner_user_id") for row in page_rows], tenant_id,
+        lane="control-io", owner="config",
+    )
+    # Older local permission fixtures used the literal ``user_id`` as an
+    # owner placeholder before Nexent user IDs were persisted. Resolve that
+    # legacy value to the authenticated Nexent account while keeping real
+    # owner IDs strictly tenant-scoped through the user table above.
+    if any(row.get("owner_user_id") == "user_id" for row in page_rows):
+        current_user_name = await run_blocking(
+            "aidp-current-creator-name", get_nexent_creator_names,
+            [user_id], tenant_id, lane="control-io", owner="config",
+        )
+        if current_user_name.get(user_id):
+            creator_names["user_id"] = current_user_name[user_id]
 
     detail_semaphore = asyncio.Semaphore(5)
 
@@ -879,6 +929,11 @@ async def list_knowledge_bases(
     items: list[dict] = []
     for row, (detail, resource_status) in zip(page_rows, detail_results):
         kb_id = row["kb_id"]
+        document_count = (
+            detail.get("document_count")
+            if detail.get("document_count") is not None
+            else row.get("document_count")
+        )
         items.append({
             "kds_id": kb_id,
             "kds_name": (
@@ -889,7 +944,7 @@ async def list_knowledge_bases(
                 or ""
             ),
             "description": detail.get("description") or row.get("description") or "",
-            "document_count": detail.get("document_count", row.get("document_count", 0)),
+            "document_count": document_count if document_count is not None else 0,
             "chunk_count": detail.get("chunk_count", row.get("chunk_count", 0)),
             "embedding_model": detail.get("embedding_model") or row.get("embedding_model") or "",
             # ``is_multimodal`` is a Nexent-side concept (frontend sends it
@@ -906,11 +961,30 @@ async def list_knowledge_bases(
                 or row.get("created_at")
                 or _timestamp_to_iso(row.get("create_time"))
             ),
+            "updated_at": (
+                detail.get("updated_at")
+                or _timestamp_to_iso(detail.get("update_time"))
+                or row.get("updated_at")
+                or _timestamp_to_iso(row.get("update_time"))
+            ),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),
             "group_ids": row.get("group_ids"),
             "created_by": row.get("owner_user_id"),
+            "creator_name": creator_names.get(row.get("owner_user_id")),
             "resource_status": resource_status,
+            # --- Optional display metadata (AIDP knowledge base pages) ---
+            # These stay absent when the upstream response does not carry
+            # them, so the UI renders an unknown value instead of a fabricated
+            # one. ``user_name`` is only ever a display name AIDP reported —
+            # the Nexent user id is never presented as a name.
+            "is_private": detail.get("is_private", row.get("is_private")),
+            "current_cap": detail.get("current_cap", row.get("current_cap")),
+            "user_name": detail.get("user_name", row.get("user_name")),
+            # A count from either the AIDP detail response or its catalog row
+            # is confirmed data. The compatibility default above remains
+            # marked unreliable when neither response includes a count.
+            "document_count_reliable": document_count is not None,
         })
 
     total_ms = (time.perf_counter() - started_at) * 1000
@@ -1098,6 +1172,18 @@ async def get_knowledge_base(
     detail["kds_id"] = kds_id
     detail["permission"] = decision.permission
     detail["resource_status"] = resource_status
+    permission_record = await run_blocking(
+        "aidp-detail-permission", aidp_permission_db.get_permission_by_kb_id,
+        kds_id, tenant_id, lane="control-io", owner="config",
+    ) or {}
+    detail["ingroup_permission"] = permission_record.get("ingroup_permission")
+    detail["group_ids"] = permission_record.get("group_ids") or []
+    detail["created_by"] = permission_record.get("owner_user_id")
+    creator_names = await run_blocking(
+        "aidp-creator-names", get_nexent_creator_names,
+        [detail["created_by"]], tenant_id, lane="control-io", owner="config",
+    )
+    detail["creator_name"] = creator_names.get(detail["created_by"])
     return JSONResponse(status_code=HTTPStatus.OK, content=detail)
 
 
@@ -1323,6 +1409,88 @@ async def list_documents(
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/files")
+async def list_ingested_files(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
+) -> JSONResponse:
+    """List only files AIDP confirms as ingested; upload history stays separate."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    server_url, api_key = _credentials()
+    normalized_keyword = (keyword or "").strip()
+
+    # AIDP's list response exposes next_link as the authoritative paging signal;
+    # total_count can be page-local. The Count endpoint is unfiltered, so use it
+    # only for the unfiltered list and keep keyword results in simple paging mode.
+    if normalized_keyword:
+        list_result = await run_blocking(
+            "aidp-list-ingested-files",
+            list_aidp_docs_impl,
+            server_url,
+            api_key,
+            kds_id,
+            page,
+            page_size,
+            normalized_keyword,
+            lane="control-io",
+            owner="config",
+        )
+        count_result: int | BaseException | None = None
+    else:
+        list_result, count_result = await asyncio.gather(
+            run_blocking(
+                "aidp-list-ingested-files",
+                list_aidp_docs_impl,
+                server_url,
+                api_key,
+                kds_id,
+                page,
+                page_size,
+                None,
+                lane="control-io",
+                owner="config",
+            ),
+            run_blocking(
+                "aidp-ingested-file-count",
+                _load_cached_doc_count,
+                server_url,
+                api_key,
+                kds_id,
+                lane="control-io",
+                owner="config",
+            ),
+            return_exceptions=True,
+        )
+    if isinstance(list_result, BaseException):
+        raise list_result
+    result = dict(list_result or {})
+    rows = result.get("value") if isinstance(result.get("value"), list) else []
+    total_reliable = isinstance(count_result, int) and not isinstance(count_result, bool)
+    total = int(count_result) if total_reliable else (page - 1) * page_size + len(rows)
+    reported_more = _history_reports_more(result)
+    has_more = (
+        total > page * page_size
+        if total_reliable
+        else bool(reported_more) if reported_more is not None
+        else len(rows) >= page_size
+    )
+    result.update({
+        "total_count": total,
+        "has_more": has_more,
+        "total_reliable": total_reliable,
+        "processing_count": 0,
+    })
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+
+
+
+
 @aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/remove")
 async def remove_documents(
     request: Request,
@@ -1420,7 +1588,10 @@ async def set_permission(
                 detail=str(exc),
             )
 
-    metadata = body.model_dump(include={"name", "description"}, exclude_none=True)
+    metadata = body.model_dump(
+        include={"name", "description"},
+        exclude_none=True,
+    )
     if "name" in metadata:
         metadata["name"] = metadata["name"].strip()
         if not metadata["name"]:
@@ -1442,11 +1613,14 @@ async def set_permission(
 @aidp_mgmt_router.get("/models")
 async def list_models(
     request: Request,
-    service: Annotated[str, Query(description="Model service category (default: llm)")] = "llm",
+    service: Annotated[str, Query(description="Optional model category; omitted returns all categories")] = "",
     app: Annotated[str, Query(description="Application filter (default: KnowledgeBase)")] = "KnowledgeBase",
 ) -> JSONResponse:
     """List available models from AIDP ModelService. Auth required; no per-KB permission."""
     await _auth(request)
     server_url, api_key = _credentials()
-    result = list_aidp_models_impl(server_url, api_key, service=service, app=app)
+    result = await run_blocking(
+        "aidp-models", list_aidp_models_impl, server_url, api_key, service, app,
+        lane="control-io", owner="config",
+    )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)

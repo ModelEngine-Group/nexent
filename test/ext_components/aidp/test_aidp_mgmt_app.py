@@ -81,6 +81,9 @@ for mod in (_db_pkg, _db_client):
 
 # Production modules under test
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
+    CreateKbRequest,
+    SetPermissionRequest,
+    UpdateKbRequest,
     aidp_mgmt_router,
 )
 from apps.app_factory import register_exception_handlers  # noqa: E402
@@ -89,6 +92,11 @@ SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"
 USER_ID = "user-test"
 TENANT_ID = "tenant-test"
+
+
+def test_knowledge_base_api_models_do_not_expose_safety_guard():
+    for model in (CreateKbRequest, UpdateKbRequest, SetPermissionRequest):
+        assert "sensitive_intercept_enalbe" not in model.model_fields
 
 
 @pytest.mark.parametrize("metadata,remote_fails", [
@@ -192,6 +200,39 @@ def _client():
 
 def _bearer() -> dict:
     return {"Authorization": "Bearer fake-token"}
+
+
+def test_detail_creator_comes_from_nexent_owner_in_current_tenant(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    lookup = MagicMock(return_value={"local-owner": "admin@example.test"})
+    monkeypatch.setattr(module.perms, "require_permission", lambda *a, **kw: MagicMock(permission="EDIT"))
+    monkeypatch.setattr(module, "get_aidp_kb_impl", lambda *a: {"kds_name": "资料库", "user_name": "remote-user"})
+    monkeypatch.setattr(module.aidp_permission_db, "get_permission_by_kb_id",
+                        lambda *a: {"owner_user_id": "local-owner", "group_ids": []})
+    monkeypatch.setattr(module, "get_nexent_creator_names", lookup)
+    result = _client().get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()).json()
+    assert result["creator_name"] == "admin@example.test"
+    assert result["created_by"] == "local-owner"
+    lookup.assert_called_once_with(["local-owner"], TENANT_ID)
+
+
+def test_models_without_service_query_requests_all_categories(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    lookup = MagicMock(return_value={"models": [], "service": ""})
+    monkeypatch.setattr(module, "list_aidp_models_impl", lookup)
+    response = _client().get("/aidp-mgmt/models?app=KnowledgeBase", headers=_bearer())
+    assert response.status_code == 200
+    assert lookup.call_args.args[2:] == ("", "KnowledgeBase")
+
+
+def test_graph_template_route_is_authenticated_and_not_a_knowledge_base_id(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    lookup = MagicMock(return_value={"value": [{"param_key": "domain"}]})
+    monkeypatch.setattr(module, "get_aidp_graph_template_impl", lookup)
+    result = _client().get("/aidp-mgmt/knowledge-bases/graph-template?language=english", headers=_bearer())
+    assert result.status_code == 200 and result.json()["value"][0]["param_key"] == "domain"
+    lookup.assert_called_once_with(SERVER_URL, API_KEY, "english")
+    assert _client().get("/aidp-mgmt/knowledge-bases/graph-template").status_code == 401
 
 
 # --- Auth (401) -----------------------------------------------------------
@@ -511,6 +552,37 @@ class TestListKnowledgeBases:
         assert body["total_count"] == 0
         assert body["has_more"] is False
 
+    def test_list_resolves_legacy_owner_placeholder_to_current_nexent_user(self, monkeypatch):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from types import SimpleNamespace
+
+        def creator_lookup(user_ids, _tenant_id):
+            return {USER_ID: "admin@nexent.com"} if USER_ID in user_ids else {}
+
+        monkeypatch.setattr(aidp_mgmt_app, "get_nexent_creator_names", creator_lookup)
+        with patch.object(
+            aidp_mgmt_app,
+            "_current_accessible_rows",
+            return_value=[
+                {
+                    "kb_id": "kb-legacy",
+                    "owner_user_id": "user_id",
+                    "permission": "EDIT",
+                    "ingroup_permission": "PRIVATE",
+                    "group_ids": [],
+                }
+            ],
+        ), patch.object(
+            aidp_mgmt_app,
+            "get_aidp_kb_impl",
+            return_value={"kds_name": "Legacy KB", "description": "desc"},
+        ):
+            response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["value"][0]["creator_name"] == "admin@nexent.com"
+
     def test_list_marks_kb_unavailable_when_aidp_detail_fails(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
@@ -630,7 +702,9 @@ class TestListKnowledgeBases:
             "kds_name": "Catalog KB",
             "description": "From catalog",
             "created_at": "2026-01-01T00:00:00Z",
+            "update_time": 1767225600,
             "caption_enable": 0,
+            "document_count": 8,
             "permission": "EDIT",
         }
         with patch.object(
@@ -641,8 +715,13 @@ class TestListKnowledgeBases:
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
 
         assert response.status_code == HTTPStatus.OK
-        assert response.json()["value"][0]["description"] == "From catalog"
+        item = response.json()["value"][0]
+        assert item["description"] == "From catalog"
+        assert item["updated_at"] == "2026-01-01T00:00:00Z"
+        assert item["document_count"] == 8
+        assert item["document_count_reliable"] is True
         mock_detail.assert_not_called()
+
 
 
 # Use a lazy import for AppException at module load to avoid breaking the
@@ -2242,3 +2321,41 @@ class TestListDocumentsHistory:
 
         assert response.status_code == HTTPStatus.OK
         assert response.json()["value"] == [{"file_name": "done.txt"}]
+
+
+class TestAIDPServerSideKnowledgeFileQueries:
+    """File and task page queries are delegated to AIDP without local scans."""
+
+    @staticmethod
+    def _read_only():
+        return MagicMock(permission="READ_ONLY")
+
+    def test_ingested_file_search_forwards_page_and_keyword_once(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        page = {
+            "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf"}],
+            "total_count": 1,
+            "next_link": "/next-page",
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value=page) as list_docs, \
+             patch.object(aidp_mgmt_app, "_load_ingested_documents",
+                          side_effect=AssertionError("must not scan every page")):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/files?page=2&page_size=5&keyword=%E5%88%B6%E5%BA%A6",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["value"] == page["value"]
+        assert body["has_more"] is True
+        assert body["total_reliable"] is False
+        list_docs.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", 2, 5, "制度"
+        )

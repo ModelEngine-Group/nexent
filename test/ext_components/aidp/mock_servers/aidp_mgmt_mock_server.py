@@ -1,6 +1,9 @@
 """
 Standalone mock AIDP server for Nexent AIDP management endpoint testing.
 
+CLI upload responses are delayed by 10 seconds; use --upload-seconds 0 or
+POST /_mock/upload-seconds?seconds=0 for fast uploads.
+
 Simulates the AIDP native API endpoints consumed by backend/services/aidp_service.py:
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases          (list)
   - PUT    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases          (create)
@@ -38,10 +41,12 @@ rebuilds the seed data. Run with:
     python aidp_mgmt_mock_server.py --port 30081
 """
 import argparse
+import asyncio
 import json
 import logging
 import mimetypes
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -93,6 +98,7 @@ _CHANNEL_ROOT = "/aidp/knowledge"
 # Seconds an uploaded document stays PROCESSING before turning COMPLETED.
 # Overridable at runtime through POST /_mock/processing-seconds.
 _PROCESSING_SECONDS = 8.0
+_UPLOAD_SECONDS = 0.0
 
 # Entries one history page returns. Real AIDP pages the channel directory, so the
 # backend has to walk the pages; keep this small to exercise that locally.
@@ -103,8 +109,9 @@ _HISTORY_PAGE_SIZE = 10
 # ``.gitignore``. Only KB + document state is persisted; failure-injection
 # counters deliberately stay in-memory so each restart starts with a clean
 # failure plan.
-_STATE_DIR = Path(__file__).with_suffix("").with_name("_state")
-_STATE_FILE = _STATE_DIR / "knowledge_bases.json"
+_DEFAULT_STATE_FILE = Path(__file__).with_suffix("").with_name("_state") / "knowledge_bases.json"
+_STATE_FILE = Path(os.environ.get("AIDP_MOCK_STATE_FILE", str(_DEFAULT_STATE_FILE))).expanduser()
+_STATE_DIR = _STATE_FILE.parent
 
 # =============================================================================
 # In-memory state
@@ -250,6 +257,42 @@ def _ensure_document_uuids() -> None:
 
 
 _load_state()
+
+
+def _ensure_chinese_file_demo() -> None:
+    """Backfill one Chinese catalog/file sample without task or detail fixtures."""
+    kb_id = "aidp-kb-faq"
+    kb = _KNOWLEDGE_BASES.get(kb_id)
+    if kb is None:
+        return
+    if kb.get("kds_name") in (None, "", "AIDP FAQ"):
+        kb["kds_name"] = "政务服务与城市治理知识库"
+    if kb.get("description") in (None, "", "Frequently asked questions and troubleshooting notes."):
+        kb["description"] = "汇集政务办事指南、公共服务事项和城市运行制度，供工作人员快速检索与答疑。"
+    docs = _DOCUMENTS_BY_KB.setdefault(kb_id, [])
+    known = {str(doc.get("file_uuid")) for doc in docs}
+    now = int(time.time())
+    for number, (name, extension, size) in enumerate([
+        ("政务办事指南.pdf", "pdf", 1048576),
+        ("城市运行管理制度.docx", "docx", 3276800),
+        ("公共服务事项清单.xlsx", "xlsx", 917504),
+        ("热线常见问题.md", "md", 58368),
+        ("基层治理工作周报.csv", "csv", 393216),
+        ("应急预案与值班流程.pptx", "pptx", 6815744),
+        ("市民服务大厅导览.png", "png", 2752512),
+        ("城市运行平台使用说明.txt", "txt", 44032),
+    ], 1):
+        fixture_number = (1, 2, 7, 8, 9, 10, 11, 12)[number - 1]
+        file_uuid = f"00000000-0000-4000-8000-{fixture_number:012d}"
+        if file_uuid not in known:
+            docs.append({"file_uuid": file_uuid, "file_ino_no": 1000 + fixture_number,
+                         "file_name": name, "file_type": extension, "file_size": size,
+                         "create_time": now - number * 3600, "update_time": now - number * 1800,
+                         "status": STATUS_COMPLETED})
+    _save_state()
+
+
+_ensure_chinese_file_demo()
 _ensure_document_uuids()
 _save_state()
 
@@ -304,21 +347,39 @@ def _kds_id_from_dir_path(dir_path: Optional[str]) -> Optional[str]:
     return dir_path[len(prefix):].strip("/") or None
 
 
-def _doc_effective_status(doc: Dict[str, Any]) -> str:
+def _doc_effective_status(doc: Dict[str, Any]) -> int | str:
     """Return the document's current status, advancing the processing timer.
 
-    Documents persisted before status simulation existed (and the seed data)
-    carry no status at all and are treated as already ingested.
+    AIDP's recent status contract uses numeric strings: 1 success, 2 extracting,
+    3 vector-ingestion failure, 4 queued, and 5 graph-ingestion failure.
+    Documents persisted before status simulation existed are treated as success.
     """
     status = doc.get("status")
     if status is None or status == "":
-        return STATUS_COMPLETED
+        return 1
     if status == STATUS_PROCESSING:
         deadline = doc.get("processing_until")
         if isinstance(deadline, (int, float)) and time.time() < deadline:
-            return STATUS_PROCESSING
-        return STATUS_COMPLETED
-    return str(status)
+            return 2
+        return 1
+
+    normalized = str(status).strip().upper()
+    aliases = {
+        "COMPLETED": 1,
+        "SUCCESS": 1,
+        "PROCESSING": 2,
+        "EXTRACTING": 2,
+        "FAILED": 3,
+        "VECTOR_INGESTION_FAILED": 3,
+        "UPLOADING": 4,
+        "QUEUED": 4,
+        "GRAPH_INGESTION_FAILED": 5,
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if normalized.isdigit():
+        return int(normalized)
+    return normalized
 
 
 def _visible_in_completed_listing(doc: Dict[str, Any]) -> bool:
@@ -327,7 +388,7 @@ def _visible_in_completed_listing(doc: Dict[str, Any]) -> bool:
     Real AIDP only exposes ingested files there; files still being processed are
     invisible, which is exactly the behaviour the history endpoint replaces.
     """
-    return _doc_effective_status(doc) == STATUS_COMPLETED
+    return _doc_effective_status(doc) == 1
 
 
 # =============================================================================
@@ -339,6 +400,16 @@ class CreateKbBody(BaseModel):
     embedding_model: Optional[str] = None
     is_multimodal: Optional[bool] = None
     vision_model: Optional[str] = None
+    chunk_token_num: int = 1024
+    chunk_overlap_num: int = 128
+    chunk_mode: int = 0
+    is_personal: int = 0
+    topk: int = 10
+    similarity: float = 0.6
+    caption_enable: int = 0
+    vlm_model: str = ""
+    is_exist_graph: bool = False
+    graph_config: Optional[str] = None
 
 
 class UpdateKbBody(BaseModel):
@@ -568,7 +639,13 @@ def list_knowledge_bases(
     start = (page - 1) * page_size
     end = start + page_size
     # Enrich each item with document_count (same as detail endpoint does)
-    enriched = [{**kb, "document_count": len(_DOCUMENTS_BY_KB.get(kb["kds_id"], []))} for kb in all_items]
+    enriched = [{
+        **kb,
+        "document_count": sum(
+            1 for doc in _DOCUMENTS_BY_KB.get(kb["kds_id"], [])
+            if _visible_in_completed_listing(doc)
+        ),
+    } for kb in all_items]
     items = enriched[start:end]
 
     next_link = None
@@ -617,6 +694,72 @@ def count_documents(
     return JSONResponse(content={"count": count})
 
 
+def _graph_template(language: str) -> Dict[str, Any]:
+    """Use the captured Chinese response; English templates remain synthetic fixtures."""
+    if language == "chinese":
+        fixture = Path(__file__).with_name("graph_config_template_chinese.json")
+        return json.loads(fixture.read_text(encoding="utf-8"))
+    english = True
+    prompts = {
+        domain: (f"Extract entity relationship triples for the {domain} domain."
+                 if english else f"你是{domain}领域的信息抽取专家，请抽取明确的实体及其关系三元组。")
+        for domain in ("医疗", "金融", "常规", "法律法规")
+    }
+    entries = [
+        ("retrieve_subgraph_hop", "子图扩展跳数", "2", "^[1-3]$", True),
+        ("no_think_mode", "禁用LLM思考过程", "是", "^(是|否)$", True),
+        ("prompt_language", "提示词语言", "英文" if english else "中文", "^(中文|英文)$", False),
+        ("domain", "领域类型", "常规", "^(医疗|金融|常规|法律法规)$", False),
+        ("prompt_text", "知识抽取提示词", prompts["常规"], r"^[\s\S]{1,4096}$", False),
+        ("synonym_merge_enable", "同义词检测开关", "否", "^(是|否)$", True),
+        ("disambiguation_enable", "实体消歧开关", "否", "^(是|否)$", True),
+    ]
+    value = [dict(param_key=key, param_name=name, param_value=default,
+                  regexp=regexp, is_modifiable=modifiable, param_desc=name)
+             for key, name, default, regexp, modifiable in entries]
+    value[4]["template"] = prompts
+    return {"value": value}
+
+
+def _validate_graph_request(body: CreateKbBody) -> None:
+    if not body.is_exist_graph:
+        return
+    try:
+        config = json.loads(body.graph_config or "")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "graph_config must be a JSON string") from exc
+    parameters = _graph_template("chinese")["value"]
+    allowed = {p["param_key"] for p in parameters} | {"llm_model_name"}
+    if not isinstance(config, dict) or set(config) - allowed:
+        raise HTTPException(400, "Unrecognized graph configuration parameter")
+    for parameter in parameters:
+        value = config.get(parameter["param_key"])
+        if not isinstance(value, str) or re.fullmatch(parameter["regexp"], value) is None:
+            raise HTTPException(400, f"Invalid graph parameter: {parameter['param_key']}")
+    if "llm_model_name" in config and not isinstance(config["llm_model_name"], str):
+        raise HTTPException(400, "Invalid llm_model_name")
+
+
+@app.get(f"{_KB_PREFIX}/GraphConfigTemplate")
+def graph_config_template(
+    language: str = Query("chinese", pattern="^(chinese|english)$"),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    return JSONResponse(content=_graph_template(language))
+
+
+@app.post("/_mock/upload-seconds")
+def set_upload_seconds(
+    seconds: float = Query(10.0, ge=0.0, le=600.0, description="Upload response delay in seconds"),
+) -> JSONResponse:
+    """Delay each batch once without blocking other mock requests."""
+    global _UPLOAD_SECONDS
+    _UPLOAD_SECONDS = seconds
+    logger.info("MOCK CONFIG  upload response delay = %s", seconds)
+    return JSONResponse(content={"upload_seconds": _UPLOAD_SECONDS})
+
+
 @app.put(_KB_PREFIX)
 def create_knowledge_base(
     body: CreateKbBody,
@@ -624,10 +767,12 @@ def create_knowledge_base(
 ) -> JSONResponse:
     """Create a new knowledge base. AIDP uses PUT on the collection endpoint."""
     _check_auth(authorization)
+    _validate_graph_request(body)
 
     kds_id = f"aidp-kb-{uuid.uuid4().hex[:8]}"
     now = int(time.time())
     new_kb = {
+        **body.model_dump(exclude_none=True),
         "kds_id": kds_id,
         "kds_name": body.name,
         "description": body.description or "",
@@ -664,7 +809,10 @@ def get_knowledge_base(
 
     # Augment with document count for richer responses
     docs = _DOCUMENTS_BY_KB.get(kds_id, [])
-    result = {**kb, "document_count": len(docs)}
+    result = {
+        **kb,
+        "document_count": sum(1 for doc in docs if _visible_in_completed_listing(doc)),
+    }
 
     logger.info("GET  kds_id=%s", kds_id)
     return JSONResponse(content=result)
@@ -730,6 +878,9 @@ async def upload_documents(
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
+    if _UPLOAD_SECONDS > 0:
+        await asyncio.sleep(_UPLOAD_SECONDS)
+
     success_docs: List[Dict[str, Any]] = []
     failed: List[Dict[str, str]] = []
     for f in files:
@@ -793,7 +944,8 @@ async def upload_documents(
 def list_documents(
     kds_id: str,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(10, ge=1, le=100),
+    keyword: Optional[str] = Query(default=None, max_length=200),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
     """List documents in a knowledge base with pagination.
@@ -811,16 +963,24 @@ def list_documents(
         doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
         if _visible_in_completed_listing(doc)
     ]
+    normalized_keyword = keyword.strip().casefold() if isinstance(keyword, str) else ""
+    if normalized_keyword:
+        all_docs = [
+            doc for doc in all_docs
+            if normalized_keyword in str(doc.get("file_name") or "").casefold()
+        ]
     start = (page - 1) * page_size
     end = start + page_size
     items = [_public_document(doc) for doc in all_docs[start:end]]
 
     # Real AIDP returns `next_link` as the authoritative "more pages exist"
     # signal. When there are no more docs, next_link is simply absent.
-    # `total_count` is the current page count, not the true total.
+    # `total_count` mirrors AIDP's page count; next_link signals another page.
     next_link = None
     if end < len(all_docs):
         next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
+        if normalized_keyword:
+            next_link += f"&keyword={quote(keyword.strip(), safe='')}"
 
     logger.info("LIST DOCS  kds_id=%s page=%d returned=%d total=%d", kds_id, page, len(items), len(all_docs))
     return JSONResponse(content={
@@ -1147,11 +1307,17 @@ def fusion_search(
 # backend's ``_is_kb_applicable`` post-filters by "All" or the requested app).
 _MOCK_MODELS: List[Dict[str, Any]] = [
     {
+        "model_name": "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
+        "display_name": "bge-m3", "model_type": "embedding",
+        "application": ["KnowledgeBase", "MemoryBase"], "service": "embedding",
+    },
+    {
         "api_key": "",
         "application": "All",
         "created_at": 1782716626,
         "max_tokens": 32768,
         "model_name": "model_1",
+        "display_name": "Qwen3-8B", "model_type": "llm",
         "properties": {"description": "General purpose LLM.", "model_type": "external"},
         "service": "llm",
         "temperature": 0.6,
@@ -1162,6 +1328,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
     {
         "application": ["KnowledgeBase"],
         "model_name": "Qwen3-VL-8B-Instruct",
+        "display_name": "Qwen3-VL-8B-Instruct", "model_type": "vlm",
         "properties": {"description": "Vision-language model served internally for caption generation.", "model_type": "internal"},
         "service": "llm",
         "url": "http://caption-service.model-service.svc.cluster.local:8111/v1/chat/completions",
@@ -1172,6 +1339,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "created_at": 1783070801,
         "max_tokens": 32768,
         "model_name": "Qwen3-VL-32B-Instruct",
+        "display_name": "Qwen3-VL-32B-Instruct", "model_type": "vlm",
         "properties": {"description": "Larger vision-language model for high-quality captioning.", "model_type": "external"},
         "service": "llm",
         "temperature": 0.6,
@@ -1185,6 +1353,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "created_at": 1783474808,
         "max_tokens": 32780,
         "model_name": "InternVL2-26B",
+        "display_name": "InternVL2-26B", "model_type": "vlm",
         "properties": {"description": "Open-source multimodal model.", "model_type": "external"},
         "service": "llm",
         "temperature": 1.5,
@@ -1199,6 +1368,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "application": ["DocumentParsing"],
         "created_at": 1783062626,
         "model_name": "doc-parser-only",
+        "display_name": "Document parser", "model_type": "llm",
         "properties": {"description": "Should NOT appear for KnowledgeBase.", "model_type": "external"},
         "service": "llm",
     },
@@ -1207,7 +1377,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
 
 @app.get(_MODELS_PREFIX)
 def list_models(
-    service: str = Query("llm"),
+    service: str = Query(""),
     app: str = Query("KnowledgeBase"),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
@@ -1217,10 +1387,11 @@ def list_models(
     raw seed data here.
     """
     _check_auth(authorization)
-    logger.info("LIST MODELS  service=%s app=%s returned=%d", service, app, len(_MOCK_MODELS))
+    models = [m for m in _MOCK_MODELS if not service or m["model_type"] == service]
+    logger.info("LIST MODELS  service=%s app=%s returned=%d", service, app, len(models))
     return JSONResponse(content={
         "service": service,
-        "models": _MOCK_MODELS,
+        "models": models,
     })
 
 
@@ -1237,6 +1408,7 @@ def health() -> Dict[str, Any]:
         "platform": "aidp-mock",
         "version": "1.0.0",
         "knowledge_bases_count": len(_KNOWLEDGE_BASES),
+        "upload_seconds": _UPLOAD_SECONDS,
     }
 
 
@@ -1264,7 +1436,11 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=30081, help="Bind port (default: 30081)")
     parser.add_argument("--api-key", default=EXPECTED_API_KEY, help="Expected Bearer API key")
+    parser.add_argument("--upload-seconds", type=float, default=10.0, help="Upload response delay (default: 10 seconds)")
     args = parser.parse_args()
+    if not 0 <= args.upload_seconds <= 600:
+        parser.error("--upload-seconds must be between 0 and 600")
+    _UPLOAD_SECONDS = args.upload_seconds
 
     EXPECTED_API_KEY = args.api_key
 

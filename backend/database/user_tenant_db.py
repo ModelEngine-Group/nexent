@@ -2,7 +2,9 @@
 Database operations for user tenant relationship management
 """
 import logging
-from typing import Any, List, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func, text
 
 from consts.const import (
     DEFAULT_TENANT_ID,
@@ -10,10 +12,10 @@ from consts.const import (
     MAX_SUPER_ADMIN_COUNT,
     MAX_USERS_PER_TENANT,
 )
+from consts.exceptions import TenantResourceLimitError
 from database.client import as_dict, get_db_session
 from database.db_models import TenantGroupInfo, TenantGroupUser, UserTenant
-from consts.exceptions import TenantResourceLimitError
-from sqlalchemy import func, text
+
 
 logger = logging.getLogger(__name__)
 
@@ -131,17 +133,20 @@ def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_user_email_map(user_ids: List[str]) -> Dict[str, str]:
+def get_user_email_map(user_ids: List[str], tenant_id: Optional[str] = None) -> Dict[str, str]:
     """Return active user email addresses keyed by user ID."""
     unique_user_ids = list({user_id for user_id in user_ids if user_id})
     if not unique_user_ids:
         return {}
 
     with get_db_session() as session:
-        rows = session.query(UserTenant.user_id, UserTenant.user_email).filter(
+        query = session.query(UserTenant.user_id, UserTenant.user_email).filter(
             UserTenant.user_id.in_(unique_user_ids),
             UserTenant.delete_flag == "N",
-        ).all()
+        )
+        if tenant_id is not None:
+            query = query.filter(UserTenant.tenant_id == tenant_id)
+        rows = query.all()
 
     return {
         user_id: user_email

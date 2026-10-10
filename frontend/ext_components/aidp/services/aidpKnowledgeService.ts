@@ -6,12 +6,14 @@
  */
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
-import type {
-  AidpKnowledgeBaseItem,
-  AidpKnowledgeBaseListResponse,
-} from "@/types/agentConfig";
+import type { AidpKnowledgeBaseListResponse } from "@/types/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
+import { parseAidpGraphTemplate } from "@/lib/aidpGraphConfig";
+import type { AidpGraphTemplate } from "@/types/aidpGraph";
+import { handleSessionExpired } from "@/lib/session";
+import { isSessionExpired } from "@/const/errorCode";
+import { parseAidpUploadError } from "./aidpUploadUtils";
 
 // ---------- Additional types for AIDP management ----------
 
@@ -23,6 +25,7 @@ export interface AidpKbDetail {
   chunk_count?: number;
   embedding_model?: string;
   is_multimodal?: boolean;
+  caption_enable?: number | null;
   created_at?: string;
   updated_at?: string;
   permission?: "EDIT" | "READ_ONLY" | null;
@@ -30,6 +33,26 @@ export interface AidpKbDetail {
   group_ids?: number[];
   resource_status?:
     "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  /** AIDP personal/enterprise flag in its raw response form. */
+  is_private?: boolean | number | string | null;
+  /** Personal knowledge base capacity in GB as reported by AIDP. */
+  current_cap?: number | null;
+  /** Creator display name from AIDP when the response provides one. */
+  user_name?: string | null;
+  /** False when the reported document count is not a confirmed statistic. */
+  document_count_reliable?: boolean;
+  chunk_mode?: number | null;
+  chunk_token_num?: number | null;
+  chunk_overlap_num?: number | null;
+  topk?: number | null;
+  similarity?: number | null;
+  rerank_model?: string | null;
+  vlm_model?: string | null;
+  llm_model_name?: string | null;
+  is_exist_graph?: boolean | null;
+  graph_config?: string | Record<string, unknown> | null;
+  created_by?: string | null;
+  creator_name?: string | null;
 }
 
 export interface AidpDocumentItem {
@@ -45,9 +68,13 @@ export interface AidpDocumentItem {
    * Absent when the backend falls back to the completed-files listing, which
    * only ever reports ingested files.
    */
-  status?: string;
+  status?: string | number;
   /** Channel directory the file was ingested from. */
   dir_path?: string;
+  error_code?: string | number | null;
+  reason?: string | null;
+  extraction_failure_reason?: string | null;
+  [key: string]: unknown;
 }
 
 export interface AidpDocumentListResponse {
@@ -79,6 +106,7 @@ export interface AidpUploadFailedItem {
   file_name: string;
   reason_zh: string;
   reason_en: string;
+  code?: string | number;
 }
 
 export interface AidpUploadResponse {
@@ -150,6 +178,8 @@ const normalizeAidpOperationResponse = <TSuccess, TFailure>(
 export interface AidpModelItem {
   /** Display / identifier used for the model (sent to AIDP as ``vlm_model``). */
   model_name: string;
+  display_name?: string;
+  model_type?: string;
   /** "llm", "embedding", etc. — informational only on the frontend. */
   service?: string;
   /**
@@ -177,6 +207,30 @@ export interface AidpModelListResponse {
   total_count: number;
 }
 
+/**
+ * Structured knowledge graph configuration. The backend validates these
+ * fields and serializes them into the documented AIDP `graph_config` string,
+ * so the frontend never hand-builds the JSON payload.
+ */
+export interface AidpGraphConfig {
+  /** Optional graph extraction LLM model; nested in AIDP graph_config. */
+  llm_model_name?: string;
+  /** Extraction domain. */
+  domain?: "医疗" | "金融" | "常规" | "法律法规";
+  /** Sub-graph expansion hop count. */
+  retrieve_subgraph_hop?: string;
+  /** Inverse of the "enable model thinking" switch. */
+  no_think_mode?: "是" | "否";
+  /** Extraction prompt language. */
+  prompt_language?: "中文" | "英文";
+  /** Editable extraction prompt, limited to 4096 characters. */
+  prompt_text?: string;
+  /** Whether synonym merging is enabled. */
+  synonym_merge_enable?: "是" | "否";
+  /** Whether semantic disambiguation is enabled. */
+  disambiguation_enable?: "是" | "否";
+}
+
 export interface AidpCreateKbPayload {
   name: string;
   description?: string;
@@ -192,6 +246,18 @@ export interface AidpCreateKbPayload {
   similarity?: number;
   smartsplit?: number;
   caption_enable?: number;
+  /**
+   * Chunking mode: 0 = smart splitting, 1 = legal clauses. Distinct from
+   * ``smartsplit``, which stays in place for existing callers.
+   */
+  chunk_mode?: number;
+  /** Whether knowledge graph extraction is enabled for this knowledge base. */
+  is_exist_graph?: boolean;
+  /**
+   * Graph configuration as a structured object. The backend validates it and
+   * serializes it into the documented AIDP `graph_config` string.
+   */
+  graph_config?: AidpGraphConfig;
   /**
    * Nexent-side in-group permission. ``PRIVATE`` forces an empty
    * ``group_ids``; ``READ_ONLY`` / ``EDIT`` require a non-empty group list.
@@ -222,9 +288,9 @@ export interface AidpSaveSettingsResult {
 export interface AidpUpdateKbPayload {
   name?: string;
   description?: string;
+  chunk_mode?: number;
+  topk?: number;
 }
-
-// ---------- Helper: build URL with query params ----------
 
 function buildUrl(
   base: string,
@@ -372,7 +438,7 @@ class AidpKnowledgeService {
 
   /**
    * Upload documents to a knowledge base (multipart).
-   * Bypasses fetchWithErrorHandling since it expects JSON.
+   * Keeps multipart encoding and shares error parsing with the XHR transport.
    */
   async uploadDocs(id: string, files: File[]): Promise<AidpUploadResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {});
@@ -385,39 +451,33 @@ class AidpKnowledgeService {
     // Strip Content-Type from getAuthHeaders(): when body is FormData,
     // the browser must set "multipart/form-data; boundary=..." itself.
     // getAuthHeaders() hardcodes "application/json" which breaks multipart parsing.
-    const { "Content-Type": _ignored, ...restHeaders } =
-      getAuthHeaders() as Record<string, string>;
+    const requestHeaders = {
+      ...(getAuthHeaders() as Record<string, string>),
+    };
+    delete requestHeaders["Content-Type"];
 
     const response = await fetch(url, {
       method: "POST",
-      headers: restHeaders,
+      headers: requestHeaders,
       body: formData,
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       log.error("AIDP document upload failed:", errorText);
-      let errorMessage = response.statusText || `HTTP ${response.status}`;
-      if (errorText) {
-        try {
-          const payload = JSON.parse(errorText) as {
-            message?: unknown;
-            details?: { upstream_reason?: unknown } | null;
-          };
-          const upstreamReason = payload.details?.upstream_reason;
-          if (typeof upstreamReason === "string" && upstreamReason.trim()) {
-            errorMessage = upstreamReason.trim();
-          } else if (
-            typeof payload.message === "string" &&
-            payload.message.trim()
-          ) {
-            errorMessage = payload.message.trim();
-          }
-        } catch {
-          errorMessage = errorText;
-        }
+      const error = parseAidpUploadError(
+        response.status,
+        response.statusText,
+        errorText
+      );
+      if (
+        response.status === 401 ||
+        response.status === 499 ||
+        isSessionExpired(error.code)
+      ) {
+        handleSessionExpired();
       }
-      throw new Error(errorMessage);
+      throw error;
     }
 
     const result = (await response.json()) as Partial<AidpUploadResponse>;
@@ -425,6 +485,89 @@ class AidpKnowledgeService {
       AidpUploadSuccessItem,
       AidpUploadFailedItem
     >(result);
+  }
+
+  /** Upload one selection as a multipart batch; progress covers the whole body. */
+  async uploadDocsWithProgress(
+    id: string,
+    files: File[],
+    onProgress: (loaded: number, total: number) => void,
+    signal: AbortSignal
+  ): Promise<AidpUploadResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {});
+    const formData = new FormData();
+    for (const file of files) formData.append("files", file);
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const abort = () => xhr.abort();
+      const cleanUp = () => signal.removeEventListener("abort", abort);
+
+      if (signal.aborted) {
+        reject(new DOMException("Upload aborted", "AbortError"));
+        return;
+      }
+
+      xhr.open("POST", url);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader(
+        "X-User-Timezone",
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+      );
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress(event.loaded, event.total);
+      };
+      xhr.upload.onload = () => onProgress(1, 1);
+      xhr.onload = () => {
+        cleanUp();
+        if (xhr.status < 200 || xhr.status >= 300) {
+          const errorText = xhr.responseText || "";
+          log.error("AIDP document upload failed:", errorText);
+          const error = parseAidpUploadError(
+            xhr.status,
+            xhr.statusText,
+            errorText
+          );
+          if (
+            xhr.status === 401 ||
+            xhr.status === 499 ||
+            isSessionExpired(error.code)
+          ) {
+            handleSessionExpired();
+          }
+          reject(error);
+          return;
+        }
+
+        try {
+          const result = JSON.parse(
+            xhr.responseText
+          ) as Partial<AidpUploadResponse>;
+          resolve(
+            normalizeAidpOperationResponse<
+              AidpUploadSuccessItem,
+              AidpUploadFailedItem
+            >(result)
+          );
+        } catch (error) {
+          reject(
+            error instanceof Error
+              ? error
+              : new Error("Invalid upload response")
+          );
+        }
+      };
+      xhr.onerror = () => {
+        cleanUp();
+        reject(new Error("Network error while uploading document"));
+      };
+      xhr.onabort = () => {
+        cleanUp();
+        reject(new DOMException("Upload aborted", "AbortError"));
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      xhr.send(formData);
+    });
   }
 
   /**
@@ -454,6 +597,16 @@ class AidpKnowledgeService {
             ? result.models.length
             : 0,
     };
+  }
+
+  async graphTemplate(
+    language: "chinese" | "english"
+  ): Promise<AidpGraphTemplate> {
+    const response = await fetchWithErrorHandling(
+      buildUrl(API_ENDPOINTS.aidpMgmt.graphTemplate, { language }),
+      { method: "GET", headers: getAuthHeaders() }
+    );
+    return parseAidpGraphTemplate(await response.json());
   }
 
   /**
@@ -509,6 +662,33 @@ class AidpKnowledgeService {
         typeof result.processing_count === "number"
           ? result.processing_count
           : undefined,
+    };
+  }
+
+  async listIngestedFiles(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = ""
+  ): Promise<AidpDocumentListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count:
+        typeof result.total_count === "number" ? result.total_count : undefined,
+      has_more:
+        typeof result.has_more === "boolean" ? result.has_more : undefined,
+      total_reliable: result.total_reliable !== false,
+      processing_count: 0,
     };
   }
 

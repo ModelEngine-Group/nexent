@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import logging
 import os
 import sys
@@ -627,7 +628,7 @@ class TestApplyCreateDefaults:
         assert result["is_personal"] == 0
         assert result["topk"] == 10
         assert result["similarity"] == 0.0
-        assert result["smartsplit"] == 1
+        assert "smartsplit" not in result
         assert result["caption_enable"] == 0
 
     def test_preserves_client_supplied_values(self, aidp_mod):
@@ -678,6 +679,36 @@ class TestApplyCreateDefaults:
         )
         assert result["chunk_token_num"] == 0
         assert result["vlm_model"] == "my-vlm"
+
+    def test_graph_llm_model_is_serialized_inside_aidp_graph_config(self, aidp_mod):
+        result = aidp_mod._apply_create_defaults(
+            {
+                "name": "kb-graph",
+                "is_exist_graph": True,
+                "graph_config": {
+                    "domain": "general",
+                    "llm_model_name": "model-graph",
+                    "prompt_text": "Extract entity relationships.",
+                },
+            }
+        )
+
+        graph_config = json.loads(result["graph_config"])
+        assert graph_config["llm_model_name"] == "model-graph"
+
+    def test_legacy_top_level_graph_llm_model_is_moved_into_graph_config(self, aidp_mod):
+        result = aidp_mod._apply_create_defaults(
+            {
+                "name": "kb-graph",
+                "is_exist_graph": True,
+                "graph_config": {"domain": "general", "prompt_text": "Extract entity relationships."},
+                "llm_model_name": "model-graph",
+            }
+        )
+
+        graph_config = json.loads(result["graph_config"])
+        assert graph_config["llm_model_name"] == "model-graph"
+        assert "llm_model_name" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -2187,6 +2218,25 @@ class TestListAidpDocsImpl:
         assert result["value"][0]["file_uuid"] == "uuid-1"
         assert result["value"][1]["updated_at"] is not None
 
+    def test_keyword_is_forwarded_to_aidp_file_listing(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": [], "next_link": None})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="get", response=mock_resp
+        )
+
+        aidp_service_module.list_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            page=2,
+            page_size=5,
+            keyword="制度手册",
+        )
+
+        request_url = mock_client.get.call_args.args[0]
+        assert "page=2&page_size=5" in request_url
+        assert "keyword=%E5%88%B6%E5%BA%A6%E6%89%8B%E5%86%8C" in request_url
+
     def test_success_non_list_value_not_normalized(self, aidp_service_module):
         mock_resp = _make_success_response({"value": "not-a-list", "total_count": 0})
         _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
@@ -2451,7 +2501,7 @@ class TestListAidpModelsImpl:
         assert result["total_count"] == 0
 
     def test_non_dict_response_raises(self, aidp_service_module):
-        mock_resp = _make_success_response(["not-dict"])
+        mock_resp = _make_success_response("not-an-object-or-array")
         _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
 
         with pytest.raises(AppException) as exc_info:
@@ -2996,6 +3046,7 @@ class TestListAidpDocHistoryImpl:
 
         assert "status" not in result["value"][0]
 
+
     def test_unreadable_status_payload_is_reported(
         self, aidp_service_module, caplog
     ):
@@ -3050,6 +3101,9 @@ class TestListAidpDocHistoryImpl:
                 kds_id=self._KB,
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+
 
     def test_response_without_list_carries_empty_value(self, aidp_service_module):
         """An empty directory is a valid answer, not a payload error."""
