@@ -5,6 +5,7 @@ All external services and dependencies are mocked to isolate the tests.
 """
 import os
 import sys
+import logging
 import pytest
 import types
 import importlib.machinery
@@ -361,6 +362,7 @@ async def test_create_new_index_propagates_app_exception(vdb_core_mock, auth_dat
     ):
         with pytest.raises(AppException) as exc_info:
             create_new_index(
+                http_request=None,
                 index_name=auth_data["index_name"],
                 embedding_dim=768,
                 request={"embedding_model_id": 101},
@@ -3734,3 +3736,107 @@ def test_vdb_endpoints_return_401_on_token_expired(method, url, kwargs, auth_fn)
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]
+
+
+# ============================================================================
+# Security audit entries
+# ============================================================================
+
+class TestVectordatabaseAuditEntries:
+    """Security audit entries emitted by knowledge-base structure endpoints."""
+
+    def test_create_index_emits_audit_entry(self, vdb_core_mock, auth_data, caplog):
+        """Successful index creation records name, model and quota setting."""
+        with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+                patch("backend.apps.vectordatabase_app.get_current_user_context",
+                      return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
+                patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
+            mock_create.return_value = {"status": "success"}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    f"/indices/{auth_data['index_name']}",
+                    json={"embedding_model_id": 3, "quota_limit_bytes": 1024},
+                    headers=auth_data["auth_header"],
+                )
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=kb_index_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=test_user" in messages[0]
+        assert '"knowledge_name":"test_index"' in messages[0]
+        assert '"embedding_model_id":3' in messages[0]
+        assert '"quota_limit_bytes":1024' in messages[0]
+
+    def test_delete_index_emits_audit_entry(self, vdb_core_mock, auth_data, caplog):
+        """Successful index deletion records the removed index name."""
+        with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+                patch("backend.apps.vectordatabase_app.get_current_user_id",
+                      return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+                patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base",
+                      new_callable=AsyncMock, return_value={"message": "deleted"}), \
+                patch("services.tag_management_service.TagManagementService.cleanup_resource_assignments"), \
+                patch("services.tag_management_service.TagManagementService.cleanup_document_assignments_for_knowledge_base"):
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.delete(
+                    f"/indices/{auth_data['index_name']}",
+                    headers=auth_data["auth_header"],
+                )
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=kb_index_delete" in messages[0]
+        assert "user_id=test_user" in messages[0]
+        assert '"index_name":"test_index"' in messages[0]
+
+    def test_embedding_model_change_emits_audit_entry(self, auth_data, caplog):
+        """Successful embedding-model change records the index and new model."""
+        with patch("backend.apps.vectordatabase_app.get_current_user_id",
+                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+                patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model") as mock_update:
+            mock_update.return_value = {"message": "updated"}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    f"/indices/{auth_data['index_name']}/embedding-model",
+                    json={"model_id": 5},
+                    headers=auth_data["auth_header"],
+                )
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=kb_embedding_model_change" in messages[0]
+        assert '"index_name":"test_index"' in messages[0]
+        assert '"model_id":5' in messages[0]
+
+    def test_document_delete_emits_audit_entry(self, vdb_core_mock, redis_service_mock, auth_data, caplog):
+        """Successful document deletion records the index, path and scope."""
+        with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+                patch("backend.apps.vectordatabase_app.get_current_user_id",
+                      return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+                patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
+                patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
+                      new_callable=AsyncMock, return_value={"message": "Documents deleted successfully"}), \
+                patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.delete(
+                    f"/indices/{auth_data['index_name']}/documents",
+                    params={"path_or_url": "docs/a.txt", "scope": "full"},
+                    headers=auth_data["auth_header"],
+                )
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=kb_document_delete" in messages[0]
+        assert '"index_name":"test_index"' in messages[0]
+        assert '"path_or_url":"docs/a.txt"' in messages[0]
+        assert '"scope":"full"' in messages[0]

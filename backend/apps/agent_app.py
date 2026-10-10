@@ -46,6 +46,7 @@ from consts.exceptions import (
 from permissions.depends import require
 from permissions.models import CurrentUser
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
+from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
 from management.services.agent.service import (
     get_agent_info_impl,
@@ -494,12 +495,32 @@ async def get_agent_by_name_api(
 
 
 @agent_config_router.post("/update")
-async def update_agent_info_api(request: AgentInfoRequest, authorization: Optional[str] = Header(None)):
+async def update_agent_info_api(
+    request: AgentInfoRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     Update an existing agent
     """
+    # Best-effort identity resolution for audit only; the service resolves
+    # identity itself, so a failure here must not change endpoint behavior.
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+    except Exception:
+        user_id, tenant_id = None, None
+    # exclude_unset is what makes this the patch: fields the caller omitted
+    # are not changes. Free-form content (prompts, description) never reaches
+    # the log - patch_keys carries field names only.
+    audit_details = {"agent_id": request.agent_id,
+                     "display_name": request.display_name,
+                     "model_ids": request.model_ids[:AUDIT_DETAIL_LIST_LIMIT] if request.model_ids else None,
+                     "patch_keys": sorted(request.model_dump(exclude_unset=True, exclude_none=True))[:AUDIT_DETAIL_LIST_LIMIT]}
     try:
         result = await update_agent_info_impl(request, authorization)
+        record_security_event("agent_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details=audit_details)
         return result or {}
     except ForbiddenError as exc:
         raise HTTPException(
@@ -521,18 +542,25 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
 @agent_config_router.post("/{agent_id}/icon")
 async def upload_agent_icon_api(
     agent_id: int,
+    http_request: Request,
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(None),
 ):
     """Upload and attach an image icon to an editable agent."""
+    audit_details = {"agent_id": agent_id, "filename": file.filename}
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        content = await file.read()
+        audit_details["size"] = len(content)
         result = await upload_agent_icon_impl(
             agent_id=agent_id,
-            content=await file.read(),
+            content=content,
             tenant_id=tenant_id,
             user_id=user_id,
         )
+        record_security_event("agent_icon_upload", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details=audit_details)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ForbiddenError as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
@@ -642,6 +670,9 @@ async def delete_agent_api(
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         await delete_agent_impl(request.agent_id, effective_tenant_id, user_id)
+        record_security_event("agent_delete", request=http_request,
+                              user_id=user_id, tenant_id=auth_tenant_id,
+                              details={"agent_id": request.agent_id})
         return {}
     except ForbiddenError as exc:
         raise HTTPException(
@@ -655,15 +686,28 @@ async def delete_agent_api(
 
 
 @agent_config_router.post("/export")
-async def export_agent_api(request: AgentIDRequest, authorization: Optional[str] = Header(None)):
+async def export_agent_api(
+    request: AgentIDRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     export an agent.
 
     Returns a ZIP file if the agent has skill instances, otherwise returns plain JSON.
     The response Content-Type and body differ based on the agent's skill configuration.
     """
+    # Best-effort identity resolution for audit only; the service resolves
+    # identity itself, so a failure here must not change endpoint behavior.
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+    except Exception:
+        user_id, tenant_id = None, None
     try:
         result = await export_agent_with_skills_impl(request.agent_id, authorization)
+        record_security_event("agent_export", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": request.agent_id})
         if isinstance(result, dict) and result.get("_zip"):
             return Response(
                 content=result["data"],
@@ -685,7 +729,11 @@ async def export_agent_api(request: AgentIDRequest, authorization: Optional[str]
 
 
 @agent_config_router.post("/import")
-async def import_agent_api(request: AgentImportRequest, authorization: Optional[str] = Header(None)):
+async def import_agent_api(
+    request: AgentImportRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     import an agent.
 
@@ -693,6 +741,16 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
     (agent with skills). The skills field, if present, should contain base64-encoded
     ZIP packages for each skill.
     """
+    # Best-effort identity resolution for audit only; the service resolves
+    # identity itself, so a failure here must not change endpoint behavior.
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+    except Exception:
+        user_id, tenant_id = None, None
+    # Audit records identifiers and counts only; ZIP/skill payloads never reach the log.
+    audit_details = {"source_agent_id": request.agent_info.agent_id,
+                     "force_import": request.force_import,
+                     "skills_count": len(request.skills) if request.skills else 0}
     try:
         if request.skills:
             agent_id_mapping = await import_agent_with_skills_impl(
@@ -708,6 +766,9 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
                 authorization,
                 force_import=request.force_import
             )
+        record_security_event("agent_import", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details=audit_details)
         return {
             "agent_id": agent_id_mapping.get(request.agent_info.agent_id),
             "agent_id_mapping": agent_id_mapping,
@@ -912,6 +973,7 @@ async def get_agent_call_relationship_api(agent_id: int, authorization: Optional
 async def publish_version_api(
     agent_id: int,
     request: VersionPublishRequest,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -926,6 +988,9 @@ async def publish_version_api(
             version_name=request.version_name,
             release_note=request.release_note,
         )
+        record_security_event("agent_version_publish", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_name": request.version_name})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -1043,6 +1108,7 @@ async def get_version_detail_api(
 async def rollback_version_api(
     agent_id: int,
     version_no: int,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -1052,12 +1118,15 @@ async def rollback_version_api(
     The user can then edit or re-publish from the restored state.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         result = rollback_version_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
             target_version_no=version_no,
         )
+        record_security_event("agent_version_rollback", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -1072,6 +1141,7 @@ async def update_version_status_api(
     agent_id: int,
     version_no: int,
     request: VersionStatusRequest,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -1086,6 +1156,10 @@ async def update_version_status_api(
             version_no=version_no,
             status=request.status,
         )
+        record_security_event("agent_version_status_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no,
+                                       "status": request.status})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -1100,6 +1174,7 @@ async def update_version_api(
     agent_id: int,
     version_no: int,
     request: VersionUpdateRequest,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -1115,6 +1190,10 @@ async def update_version_api(
             version_name=request.version_name,
             release_note=request.release_note,
         )
+        record_security_event("agent_version_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no,
+                                       "version_name": request.version_name})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -1128,6 +1207,7 @@ async def update_version_api(
 async def delete_version_api(
     agent_id: int,
     version_no: int,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -1141,6 +1221,9 @@ async def delete_version_api(
             user_id=user_id,
             version_no=version_no,
         )
+        record_security_event("agent_version_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))

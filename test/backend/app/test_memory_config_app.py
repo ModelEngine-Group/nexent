@@ -371,3 +371,49 @@ class TestDisableUserAgentEndpoints:
 # ``/memory/add``, ``/memory/search``, ``/memory/list``, ``/memory/delete/{id}``
 # and ``/memory/clear`` endpoints. New tests for the ``MemoryService`` facade
 # will land once Phase 2 of the memory refactor ships.
+
+
+# ===== Security Audit Entries =====
+class TestMemoryConfigAuditEntries:
+    """Security audit entries emitted by memory config endpoints."""
+
+    def test_set_config_emits_audit_entry(self, caplog):
+        """Successful config set records the key and the value it got."""
+        import logging
+        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
+            with patch("apps.memory_config_app.set_memory_switch", return_value=True):
+                with caplog.at_level(logging.INFO, logger="audit.security"):
+                    resp = client.post(
+                        "/memory/config/set",
+                        json={"key": "MEMORY_SWITCH", "value": True},
+                        headers=_auth_headers(),
+                    )
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=memory_config_set" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=u" in messages[0]
+        assert '"key":"MEMORY_SWITCH"' in messages[0]
+        assert '"value":true' in messages[0]
+
+    def test_disable_agent_add_emits_audit_entry(self, caplog):
+        """Successful agent disable records the removed agent id."""
+        import logging
+        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
+            with patch("apps.memory_config_app.add_disabled_agent_id", return_value=True):
+                with caplog.at_level(logging.INFO, logger="audit.security"):
+                    resp = client.post(
+                        "/memory/config/disable_agent",
+                        json={"agent_id": "7"},
+                        headers=_auth_headers(),
+                    )
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=memory_disable_agent_add" in messages[0]
+        assert '"agent_id":"7"' in messages[0]
