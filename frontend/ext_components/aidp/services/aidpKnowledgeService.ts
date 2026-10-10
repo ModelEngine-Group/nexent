@@ -6,11 +6,11 @@
  */
 
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
-import type { AidpKnowledgeBaseListResponse } from "@/types/agentConfig";
+import type { AidpKnowledgeBaseListResponse } from "@/ext_components/aidp/types/knowledge";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
-import { parseAidpGraphTemplate } from "@/lib/aidpGraphConfig";
-import type { AidpGraphTemplate } from "@/types/aidpGraph";
+import { parseAidpGraphTemplate } from "@/ext_components/aidp/utils/aidpGraphConfig";
+import type { AidpGraphTemplate } from "@/ext_components/aidp/types/graph";
 import { handleSessionExpired } from "@/lib/session";
 import { isSessionExpired } from "@/const/errorCode";
 import { parseAidpUploadError } from "./aidpUploadUtils";
@@ -33,12 +33,6 @@ export interface AidpKbDetail {
   group_ids?: number[];
   resource_status?:
     "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
-  /** AIDP personal/enterprise flag in its raw response form. */
-  is_private?: boolean | number | string | null;
-  /** Personal knowledge base capacity in GB as reported by AIDP. */
-  current_cap?: number | null;
-  /** Creator display name from AIDP when the response provides one. */
-  user_name?: string | null;
   /** False when the reported document count is not a confirmed statistic. */
   document_count_reliable?: boolean;
   chunk_mode?: number | null;

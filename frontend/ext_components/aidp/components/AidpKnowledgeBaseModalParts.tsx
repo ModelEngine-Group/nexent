@@ -3,7 +3,7 @@ import { QuestionCircleOutlined } from "@ant-design/icons";
 import { Button, Form, Input, Select, Tooltip } from "antd";
 import type { TFunction } from "i18next";
 
-import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/const/knowledgeBase";
+import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/ext_components/aidp/const/knowledge";
 import type { AidpGroupOption } from "../hooks/useAidpGroupOptions";
 
 export const AIDP_MODAL_STYLES = {

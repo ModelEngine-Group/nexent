@@ -1,4 +1,7 @@
-import type { AidpGraphTemplate, AidpModelOption } from "@/types/aidpGraph";
+import type {
+  AidpGraphTemplate,
+  AidpModelOption,
+} from "@/ext_components/aidp/types/graph";
 
 const parameterKeys = [
   "retrieve_subgraph_hop",
@@ -64,13 +67,4 @@ export function modelOptions(
       value: m.model_name,
       label: m.display_name || m.model_name,
     }));
-}
-
-/** Normalize both the verified Chinese values and older detail responses. */
-export function graphBoolean(value: unknown): boolean | undefined {
-  if (value === true || value === "是" || value === "true" || value === "yes")
-    return true;
-  if (value === false || value === "否" || value === "false" || value === "no")
-    return false;
-  return undefined;
 }

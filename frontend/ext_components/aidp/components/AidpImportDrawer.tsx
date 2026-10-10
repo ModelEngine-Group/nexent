@@ -12,11 +12,11 @@ import {
 import {
   AIDP_ACCEPT_STRING,
   AIDP_MAX_UPLOAD_FILE_COUNT,
-} from "@/const/knowledgeBase";
-import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
+} from "@/ext_components/aidp/const/upload";
+import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/types/knowledge";
 import type { AidpUploadFailedItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
-import { validateAidpFiles } from "@/services/uploadService";
+import { validateAidpFiles } from "@/ext_components/aidp/utils/uploadValidation";
 import { ApiError } from "@/services/api";
 import { getAidpUploadErrorMessage } from "../services/aidpUploadUtils";
 

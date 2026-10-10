@@ -27,7 +27,7 @@ import {
   graphParameter,
   graphPrompt,
   modelOptions,
-} from "@/lib/aidpGraphConfig";
+} from "@/ext_components/aidp/utils/aidpGraphConfig";
 
 import AidpCreateKbSections from "./AidpCreateKbSections";
 import styles from "./AidpCreateKbSections.module.css";

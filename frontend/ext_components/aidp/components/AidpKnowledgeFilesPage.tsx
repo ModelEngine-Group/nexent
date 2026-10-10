@@ -29,7 +29,7 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 
-import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
+import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/types/knowledge";
 import aidpKnowledgeService, {
   type AidpDocumentItem,
   type AidpKbDetail,
@@ -38,7 +38,7 @@ import {
   AIDP_UNKNOWN_VALUE,
   formatAidpCreator,
   formatAidpDocumentCount,
-} from "@/lib/aidpKnowledgeDisplay";
+} from "@/ext_components/aidp/utils/aidpKnowledgeDisplay";
 import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
 import { useAidpKnowledgeFiles } from "../hooks/useAidpKnowledgeQueries";
 import { getAidpErrorMessage } from "../services/aidpErrorUtils";

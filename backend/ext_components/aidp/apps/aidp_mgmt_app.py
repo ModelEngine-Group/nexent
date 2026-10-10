@@ -47,7 +47,6 @@ from ext_components.aidp.services.aidp_access_service import (
     invalidate_aidp_kb_detail_cache,
     resolve_current_aidp_access,
 )
-from ext_components.aidp.services.aidp_creator_service import get_nexent_creator_names
 from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
 from ext_components.aidp.services.aidp_permission_service import (
     EDIT,
@@ -884,11 +883,6 @@ async def list_knowledge_bases(
 
     start = (page - 1) * page_size
     page_rows = rows[start:start + page_size]
-    creator_names = await run_blocking(
-        "aidp-creator-names", get_nexent_creator_names,
-        [row.get("owner_user_id") for row in page_rows], tenant_id,
-        lane="control-io", owner="config",
-    )
     detail_semaphore = asyncio.Semaphore(5)
 
     async def resolve_detail(row: dict) -> tuple[dict, str]:
@@ -957,16 +951,8 @@ async def list_knowledge_bases(
             "ingroup_permission": row.get("ingroup_permission"),
             "group_ids": row.get("group_ids"),
             "created_by": row.get("owner_user_id"),
-            "creator_name": creator_names.get(row.get("owner_user_id")),
+            "creator_name": row.get("creator_name"),
             "resource_status": resource_status,
-            # --- Optional display metadata (AIDP knowledge base pages) ---
-            # These stay absent when the upstream response does not carry
-            # them, so the UI renders an unknown value instead of a fabricated
-            # one. ``user_name`` is only ever a display name AIDP reported —
-            # the Nexent user id is never presented as a name.
-            "is_private": detail.get("is_private", row.get("is_private")),
-            "current_cap": detail.get("current_cap", row.get("current_cap")),
-            "user_name": detail.get("user_name", row.get("user_name")),
             "document_count_reliable": False,
         })
 
@@ -1186,11 +1172,7 @@ async def get_knowledge_base(
     detail["ingroup_permission"] = permission_record.get("ingroup_permission")
     detail["group_ids"] = permission_record.get("group_ids") or []
     detail["created_by"] = permission_record.get("owner_user_id")
-    creator_names = await run_blocking(
-        "aidp-creator-names", get_nexent_creator_names,
-        [detail["created_by"]], tenant_id, lane="control-io", owner="config",
-    )
-    detail["creator_name"] = creator_names.get(detail["created_by"])
+    detail["creator_name"] = permission_record.get("creator_name")
     return JSONResponse(status_code=HTTPStatus.OK, content=detail)
 
 

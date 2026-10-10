@@ -32,13 +32,12 @@ import {
 } from "@ant-design/icons";
 import { Trash2 } from "lucide-react";
 
-import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
+import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/types/knowledge";
 import {
   AIDP_UNKNOWN_VALUE,
   formatAidpCreator,
   formatAidpDateTime,
-  normalizeAidpKbType,
-} from "@/lib/aidpKnowledgeDisplay";
+} from "@/ext_components/aidp/utils/aidpKnowledgeDisplay";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
@@ -46,7 +45,7 @@ import {
   AIDP_MIN_COLUMN_WIDTH,
   fitAidpColumnWidths,
   resizeAidpColumnPair,
-} from "@/lib/aidpKnowledgeColumnWidths";
+} from "@/ext_components/aidp/utils/aidpKnowledgeColumnWidths";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
 } from "./AidpResizableTitle";
@@ -209,7 +208,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     const isPrivate = kb.ingroup_permission === "PRIVATE";
     const isShared =
       kb.ingroup_permission === "EDIT" || kb.ingroup_permission === "READ_ONLY";
-    const type = normalizeAidpKbType(kb.is_private);
     const groupNames = isShared ? getGroupNames(kb.group_ids) : [];
 
     return (
@@ -229,14 +227,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                 : t("aidpKnowledge.scopeGroupRead")}
             </Tag>
           </>
-        ) : type ? (
-          <Tag className="mr-0">
-            {t(
-              type === "personal"
-                ? "aidpKnowledge.kbTypePersonal"
-                : "aidpKnowledge.kbTypeEnterprise"
-            )}
-          </Tag>
         ) : (
           <Tag className="mr-0">{AIDP_UNKNOWN_VALUE}</Tag>
         )}
@@ -403,20 +393,13 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
       const shared =
         kb.ingroup_permission === "EDIT" ||
         kb.ingroup_permission === "READ_ONLY";
-      const type = normalizeAidpKbType(kb.is_private);
       return (
         <>
           {kb.ingroup_permission === "PRIVATE"
             ? t("aidpKnowledge.scopePrivate")
             : shared
               ? `${t("aidpKnowledge.scopeShared")} · ${t(kb.ingroup_permission === "EDIT" ? "aidpKnowledge.scopeGroupEdit" : "aidpKnowledge.scopeGroupRead")}`
-              : type
-                ? t(
-                    type === "personal"
-                      ? "aidpKnowledge.kbTypePersonal"
-                      : "aidpKnowledge.kbTypeEnterprise"
-                  )
-                : AIDP_UNKNOWN_VALUE}
+              : AIDP_UNKNOWN_VALUE}
           <Can permission="group:read">
             {shared && getGroupNames(kb.group_ids).length > 0
               ? ` · ${getGroupNames(kb.group_ids).join("、")}`

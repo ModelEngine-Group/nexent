@@ -27,18 +27,7 @@ Set `ENABLE_AIDP_KNOWLEDGE=true`, configure `AIDP_SERVER_URL`, `AIDP_API_KEY` an
 1. Select multiple supported files together; verify one browser multipart request with repeated `files` parts and the same percentage in each uploading ring.
 2. Verify Confirm remains disabled after transfer completes while the response is pending.
 3. Check success and failure rows, including a partially successful batch. Confirm becomes available after the response; failed-row Delete sends no request.
-4. Confirm closes without uploading again; the upload-task tab reports subsequent AIDP processing. Add a second selection before confirming and check it does not resend previous files.
+4. Confirm closes without uploading again; extraction and indexing may continue in AIDP after upload acceptance. Add a second selection before confirming and check it does not resend previous files.
 5. Check a 50-file selection, a long filename/reason and short viewport height: only the list should scroll; footer actions stay visible.
 
 Local component and service tests use mocked responses. They do not establish actual AIDP compatibility, which must be verified against a reachable AIDP environment.
-
-## Local verification record (2026-10-09)
-
-- `cd frontend && npx vitest run --config vitest.aidp.config.ts`: 11 component/transport assertions passed (mock); bound to AKPR-D1-015 under `test/automation/d1`.
-- `cd frontend && npx tsc --noEmit`: passed. The two existing Vitest configurations now use the current OXC JSX option instead of the removed esbuild option.
-- Targeted ESLint and Prettier: passed.
-- `cd frontend && npx next build --webpack`: passed; TypeScript was also checked independently above.
-- WSL pytest for `test_aidp_mgmt_app.py`, `test_aidp_service.py`, `test_aidp_mgmt_mock_server.py`: 382 passed.
-- Backend Ruff (from backend, project pre-commit rules): passed.
-- Formal design-phase validator and generated Excel drift check: passed. The whole implementation-phase gate still reports 23 existing missing case bindings and one unrelated CMSR implementation-hash mismatch. The newly added AKPR-D1-015 binding validates; the whole gate is not claimed as passed.
-- Live AIDP acceptance and browser integration against the real provider remain unverified locally. Use the checklist above on the target computer.

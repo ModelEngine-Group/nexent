@@ -6,7 +6,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import type {
   AidpKnowledgeBaseItem,
   AidpKnowledgeBaseListResponse,
-} from "@/types/agentConfig";
+} from "@/ext_components/aidp/types/knowledge";
 import aidpKnowledgeService from "../services/aidpKnowledgeService";
 import type { AidpCreateKbPayload } from "../services/aidpKnowledgeService";
 

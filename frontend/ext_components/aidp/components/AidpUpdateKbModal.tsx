@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { Modal, Form, Input, message } from "antd";
 
-import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
+import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/types/knowledge";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import { getAidpErrorMessage } from "../services/aidpErrorUtils";
 import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";

@@ -6,8 +6,8 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import { App, Modal } from "antd";
 
-import { KB_SEARCH_DEBOUNCE_MS } from "@/const/knowledgeBase";
-import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
+import { KB_SEARCH_DEBOUNCE_MS } from "@/ext_components/aidp/const/knowledge";
+import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/types/knowledge";
 import log from "@/lib/logger";
 import { useErrorHandler } from "@/hooks/useErrorHandler";
 import { getAidpErrorMessage } from "../services/aidpErrorUtils";

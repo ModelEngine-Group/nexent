@@ -209,19 +209,17 @@ def _bearer() -> dict:
 
 def test_detail_creator_comes_from_nexent_owner_in_current_tenant(monkeypatch):
     from ext_components.aidp.apps import aidp_mgmt_app as module
-    lookup = MagicMock(return_value={"local-owner": "admin@example.test"})
     monkeypatch.setattr(module.perms, "require_permission", lambda *a, **kw: MagicMock(permission="EDIT"))
     monkeypatch.setattr(module, "get_aidp_kb_impl", lambda *a: {"kds_name": "资料库", "user_name": "remote-user"})
     monkeypatch.setattr(module, "_load_cached_doc_count", lambda *a: 7)
     monkeypatch.setattr(module.aidp_permission_db, "get_permission_by_kb_id",
-                        lambda *a: {"owner_user_id": "local-owner", "group_ids": []})
-    monkeypatch.setattr(module, "get_nexent_creator_names", lookup)
+                        lambda *a: {"owner_user_id": "local-owner", "group_ids": [],
+                                    "creator_name": "admin@example.test"})
     result = _client().get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()).json()
     assert result["creator_name"] == "admin@example.test"
     assert result["created_by"] == "local-owner"
     assert result["document_count"] == 7
     assert result["document_count_reliable"] is True
-    lookup.assert_called_once_with(["local-owner"], TENANT_ID)
 
 
 def test_models_without_service_query_requests_all_categories(monkeypatch):
@@ -319,6 +317,7 @@ class TestPermissionEnforcement:
         aidp_permission_service.require_permission = MagicMock(return_value=decision)
 
         with patch.object(aidp_mgmt_app, "get_aidp_kb_impl") as mock_get, \
+             patch.object(aidp_mgmt_app.aidp_permission_db, "get_permission_by_kb_id", return_value=None), \
              patch.object(aidp_mgmt_app, "_load_cached_doc_count", return_value=12):
             mock_get.return_value = {"kds_name": "name", "description": "desc"}
             try:
@@ -605,13 +604,6 @@ class TestListKnowledgeBases:
     def test_list_creator_uses_only_persisted_owner(self, monkeypatch, owner_id, expected_name):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        queried_ids = []
-
-        def creator_lookup(user_ids, _tenant_id):
-            queried_ids.extend(user_ids)
-            return {USER_ID: "admin@nexent.com"} if USER_ID in user_ids else {}
-
-        monkeypatch.setattr(aidp_mgmt_app, "get_nexent_creator_names", creator_lookup)
         with patch.object(
             aidp_mgmt_app,
             "_current_accessible_rows",
@@ -619,6 +611,7 @@ class TestListKnowledgeBases:
                 {
                     "kb_id": "kb-legacy",
                     "owner_user_id": owner_id,
+                    "creator_name": expected_name,
                     "permission": "EDIT",
                     "ingroup_permission": "PRIVATE",
                     "group_ids": [],
@@ -634,7 +627,6 @@ class TestListKnowledgeBases:
         assert response.status_code == HTTPStatus.OK
         assert response.json()["value"][0]["creator_name"] == expected_name
         assert response.json()["value"][0]["created_by"] == owner_id
-        assert queried_ids == [owner_id]
 
     def test_list_marks_kb_unavailable_when_aidp_detail_fails(self):
         client = _client()
@@ -1544,6 +1536,7 @@ class TestGetKbFetchFailure:
                           side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "down")), \
              patch.object(aidp_mgmt_app, "_load_cached_doc_count",
                           side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "count down")), \
+             patch.object(aidp_mgmt_app.aidp_permission_db, "get_permission_by_kb_id", return_value=None), \
              patch.object(aidp_permission_service, "update_resource_status") as mock_status:
             response = client.get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer())
         assert response.status_code == HTTPStatus.OK

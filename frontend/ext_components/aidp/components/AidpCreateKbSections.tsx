@@ -15,13 +15,19 @@ import {
 import type { FormInstance } from "antd";
 import { DownOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 
-import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/const/knowledgeBase";
+import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/ext_components/aidp/const/knowledge";
 import { AidpKnowledgeBasePermissionFields } from "./AidpKnowledgeBaseModalParts";
 import AidpSliderNumberField from "./AidpSliderNumberField";
 import styles from "./AidpCreateKbSections.module.css";
 import type { AidpGroupOption } from "../hooks/useAidpGroupOptions";
-import type { AidpGraphTemplate, AidpModelOption } from "@/types/aidpGraph";
-import { graphChoices, graphParameter } from "@/lib/aidpGraphConfig";
+import type {
+  AidpGraphTemplate,
+  AidpModelOption,
+} from "@/ext_components/aidp/types/graph";
+import {
+  graphChoices,
+  graphParameter,
+} from "@/ext_components/aidp/utils/aidpGraphConfig";
 
 const GRAPH_PROMPT_MAX_CHARS = 4096;
 const CHUNK_TOKEN_MIN = 256;

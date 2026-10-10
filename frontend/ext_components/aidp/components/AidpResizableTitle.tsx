@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { AIDP_MIN_COLUMN_WIDTH } from "@/lib/aidpKnowledgeColumnWidths";
+import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/utils/aidpKnowledgeColumnWidths";
 import styles from "./AidpKnowledgeVisuals.module.css";
 
 export interface AidpResizableTitleProps extends Omit<

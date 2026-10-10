@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "next/navigation";
 import { Menu, ConfigProvider } from "antd";
@@ -183,7 +183,7 @@ const ROUTE_PATHS = ROUTE_CONFIG.map((route) => route.path);
  * Displays main navigation items for the application based on user's accessible routes
  */
 export function SideNavigation({ collapsed }: SideNavigationProps) {
-  const { t, i18n } = useTranslation("common");
+  const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
@@ -196,15 +196,6 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
     string | null
   >(null);
   const isCollapsed = typeof collapsed === "boolean" ? collapsed : false;
-
-  // Menu paths omit the locale; include it for direct development routing.
-  const localized = useCallback(
-    (path: string) => {
-      const locale = i18n.language?.split("-")[0] === "en" ? "en" : "zh";
-      return /^\/(zh|en)(\/|$)/.test(path) ? path : `/${locale}${path}`;
-    },
-    [i18n.language]
-  );
 
   // Find parent key for a given path
   const findParentKey = (path: string): string | null => {
@@ -237,7 +228,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       if (pendingNavigationPath && isAuthenticated) {
         // Small delay to ensure authentication state is fully updated
         setTimeout(() => {
-          router.push(localized(pendingNavigationPath));
+          router.push(pendingNavigationPath);
           setPendingNavigationPath(null);
         }, 200);
       }
@@ -248,7 +239,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
       handleLoginSuccess
     );
     return cleanup;
-  }, [pendingNavigationPath, isAuthenticated, router, localized]);
+  }, [pendingNavigationPath, isAuthenticated, router]);
 
   // Listen for back-to-home event and reset selected key
   useEffect(() => {
@@ -322,7 +313,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
           return; // Prevent navigation
         }
 
-        router.push(localized(navigationPath));
+        router.push(navigationPath);
       },
     };
   };
@@ -347,7 +338,7 @@ export function SideNavigation({ collapsed }: SideNavigationProps) {
                 openAuthPromptModal(child.path);
                 return;
               }
-              router.push(localized(child.path));
+              router.push(child.path);
             },
           })),
         };
