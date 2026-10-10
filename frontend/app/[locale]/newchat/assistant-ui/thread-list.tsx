@@ -16,18 +16,17 @@ import {
   useAuiState,
 } from "@assistant-ui/react";
 import {
+  Clock,
   MoreHorizontalIcon,
   PencilIcon,
   TrashIcon,
-  Clock,
+  PinIcon,
+  PinOffIcon,
   ArrowDownIcon,
   CheckIcon,
   XIcon,
-  Repeat2Icon,
-  PinIcon,
-  PinOffIcon,
-  Loader2Icon,
-  CircleAlertIcon,
+  ChevronRight,
+  LayoutGrid,
 } from "lucide-react";
 import {
   Fragment,
@@ -41,30 +40,37 @@ import {
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { useThreadAgentOverrides } from "../adapter/thread-agent-registry";
+import type { PublishedAgent } from "@/types/agentConfig";
 import type { FC } from "react";
 import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
 
-// End-of-row status icon per the design: running shows an inline spinner,
-// an error status (when surfaced by the runtime) shows an orange alert.
-const ThreadRowEndStatus: FC = () => {
-  const aui = useAui();
-  const status = aui.threadListItem().getState().status as string;
-  const isRunning = status === "running" || status === "streaming";
-  const isError = status === "error";
+// Conversation status indicator component
+const ConversationStatusIndicator: FC<{
+  isStreaming: boolean;
+  isCompleted: boolean;
+}> = ({ isStreaming, isCompleted }) => {
+  const { t } = useTranslation();
 
-  if (isRunning) {
+  if (isStreaming) {
     return (
-      <Loader2Icon
-        className="size-4 shrink-0 animate-spin text-muted-foreground"
-        aria-hidden
+      <div
+        className="flex-shrink-0 w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"
+        title={t("chat.threadList.running")}
       />
     );
   }
-  if (isError) {
+
+  if (isCompleted) {
     return (
-      <CircleAlertIcon className="size-4 shrink-0 text-amber-500" aria-hidden />
+      <div
+        className="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full mr-2"
+        title={t("chat.threadList.completed")}
+      />
     );
   }
+
   return null;
 };
 
@@ -81,25 +87,25 @@ interface BatchSelectionValue {
 
 const BatchSelectionContext = createContext<BatchSelectionValue | null>(null);
 
-// Local (demo) pin state for the sidebar thread list. The backend does not
-// expose a pinned flag yet, so pinned ids persist in localStorage only.
 interface PinnedThreadsValue {
   pinnedIds: ReadonlySet<string>;
   togglePin: (id: string) => void;
 }
 
 const PinnedThreadsContext = createContext<PinnedThreadsValue | null>(null);
-
 const PINNED_THREADS_STORAGE_KEY = "chat.pinnedThreadIds";
 
 const loadPinnedThreadIds = (): ReadonlySet<string> => {
   if (typeof window === "undefined") return new Set();
   try {
-    const raw = window.localStorage.getItem(PINNED_THREADS_STORAGE_KEY);
-    if (!raw) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((v): v is string => typeof v === "string"));
+    const parsed: unknown = JSON.parse(
+      window.localStorage.getItem(PINNED_THREADS_STORAGE_KEY) || "[]"
+    );
+    return Array.isArray(parsed)
+      ? new Set(
+          parsed.filter((value): value is string => typeof value === "string")
+        )
+      : new Set();
   } catch {
     return new Set();
   }
@@ -110,10 +116,9 @@ export const PinnedThreadsProvider: FC<{ children: ReactNode }> = ({
 }) => {
   const [pinnedIds, setPinnedIds] =
     useState<ReadonlySet<string>>(loadPinnedThreadIds);
-
   const togglePin = useCallback((id: string) => {
-    setPinnedIds((prev) => {
-      const next = new Set(prev);
+    setPinnedIds((previous) => {
+      const next = new Set(previous);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       try {
@@ -122,12 +127,11 @@ export const PinnedThreadsProvider: FC<{ children: ReactNode }> = ({
           JSON.stringify([...next])
         );
       } catch {
-        // Storage failures (private mode, quota) are non-fatal for demo state.
+        // Storage failures are non-fatal for local pin state.
       }
       return next;
     });
   }, []);
-
   const value = useMemo(
     () => ({ pinnedIds, togglePin }),
     [pinnedIds, togglePin]
@@ -140,8 +144,6 @@ export const PinnedThreadsProvider: FC<{ children: ReactNode }> = ({
   );
 };
 
-// Safe hook: returns null outside a provider so list items render normally
-// (no pin UI) when the sidebar is not wrapped in PinnedThreadsProvider.
 const usePinnedThreads = (): PinnedThreadsValue | null =>
   useContext(PinnedThreadsContext);
 
@@ -284,87 +286,16 @@ export const BatchSelectionProvider: FC<{
   );
 };
 
-export const BatchSidebarFooter: FC<{ onSwitchToLegacy?: () => void }> = ({
-  onSwitchToLegacy,
-}) => {
-  const { t } = useTranslation();
-  const {
-    batchMode,
-    selectedIds,
-    enter,
-    exit,
-    selectAllVisible,
-    deleteSelected,
-  } = useBatchSelection()!;
-
-  if (batchMode) {
-    return (
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
-          <span>
-            {t("chat.threadList.selectedCount", { count: selectedIds.size })}
-          </span>
-          <button
-            type="button"
-            className="text-xs text-muted-foreground hover:text-foreground"
-            onClick={exit}
-          >
-            {t("chat.threadList.cancel")}
-          </button>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="flex h-9 flex-1 items-center justify-center rounded-lg border px-3 text-sm hover:bg-muted"
-            onClick={selectAllVisible}
-          >
-            {t("chat.threadList.selectAll")}
-          </button>
-          <button
-            type="button"
-            className="flex h-9 flex-1 items-center justify-center rounded-lg border border-destructive/30 px-3 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
-            disabled={selectedIds.size === 0}
-            onClick={deleteSelected}
-          >
-            {t("chat.threadList.delete")}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <button
-        type="button"
-        className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
-        onClick={enter}
-      >
-        <CheckIcon className="size-4 shrink-0" />
-        <span>{t("chat.threadList.batchManage")}</span>
-      </button>
-      {onSwitchToLegacy && (
-        <button
-          type="button"
-          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
-          onClick={onSwitchToLegacy}
-        >
-          <Repeat2Icon className="size-4 shrink-0" />
-          <span>{t("chat.sidebar.switchToLegacy")}</span>
-        </button>
-      )}
-    </div>
-  );
-};
-
 interface ThreadListProps {
   generatedTitles?: ReadonlyMap<string, string>;
   searchQuery?: string;
+  newChatDesign?: boolean;
 }
 
 export const ThreadList: FC<ThreadListProps> = ({
   generatedTitles,
   searchQuery = "",
+  newChatDesign = false,
 }) => {
   const { t } = useTranslation();
   const completedConversations = useMemo(() => new Set<string>(), []);
@@ -373,44 +304,43 @@ export const ThreadList: FC<ThreadListProps> = ({
   const hasMore = useAuiState((s) => s.threads.hasMore);
 
   return (
-    <PinnedThreadsProvider>
-      <div className="flex flex-col p-2">
-        <AuiIf condition={(s) => s.threads.isLoading}>
-          <ThreadListSkeleton />
-        </AuiIf>
-        <AuiIf
-          condition={(s) =>
-            !s.threads.isLoading && s.threads.threadIds.length === 0
-          }
-        >
-          <ThreadListEmpty />
-        </AuiIf>
-        <AuiIf
-          condition={(s) =>
-            !s.threads.isLoading && s.threads.threadIds.length > 0
-          }
-        >
-          <ThreadListItems
-            completedConversations={completedConversations}
-            generatedTitles={generatedTitles}
-            searchQuery={searchQuery}
-          />
-        </AuiIf>
+    <div className="flex flex-col p-2">
+      <AuiIf condition={(s) => s.threads.isLoading}>
+        <ThreadListSkeleton />
+      </AuiIf>
+      <AuiIf
+        condition={(s) =>
+          !s.threads.isLoading && s.threads.threadIds.length === 0
+        }
+      >
+        <ThreadListEmpty />
+      </AuiIf>
+      <AuiIf
+        condition={(s) =>
+          !s.threads.isLoading && s.threads.threadIds.length > 0
+        }
+      >
+        <ThreadListItems
+          completedConversations={completedConversations}
+          generatedTitles={generatedTitles}
+          searchQuery={searchQuery}
+          newChatDesign={newChatDesign}
+        />
+      </AuiIf>
+      {hasMore && !isLoading && (
         <ThreadListPrimitive.LoadMore
-          disabled={!hasMore || isLoading || isLoadingMore}
+          disabled={isLoadingMore}
           className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {hasMore ? <ArrowDownIcon className="size-3.5" /> : null}
+          {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}
           <span>
-            {isLoading || isLoadingMore
+            {isLoadingMore
               ? t("chat.threadList.loadingMore")
-              : hasMore
-                ? t("chat.threadList.loadMore")
-                : t("chat.threadList.allLoaded")}
+              : t("chat.threadList.loadMore")}
           </span>
         </ThreadListPrimitive.LoadMore>
-      </div>
-    </PinnedThreadsProvider>
+      )}
+    </div>
   );
 };
 
@@ -433,16 +363,31 @@ interface ThreadListItemsProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
   searchQuery?: string;
+  newChatDesign: boolean;
 }
 
 const ThreadListItems: FC<ThreadListItemsProps> = ({
   completedConversations,
   generatedTitles,
   searchQuery = "",
+  newChatDesign,
 }) => {
   const { t } = useTranslation();
 
-  const groups = useThreadListGroups(generatedTitles, searchQuery);
+  const groups = useThreadListAgentGroups(searchQuery, newChatDesign);
+  const pinned = usePinnedThreads();
+  const [expandedAgentKeys, setExpandedAgentKeys] = useState<Set<string>>(
+    () => new Set()
+  );
+
+  const toggleAgentExpanded = useCallback((key: string) => {
+    setExpandedAgentKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const GroupedThreadListItem = useMemo<FC>(
     () => () => (
@@ -467,150 +412,181 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     );
   }
 
-  // Render each thread by index so we can interleave group labels between
-  // recency buckets without giving up the runtime's per-item context.
+  if (groups.length === 0) {
+    return (
+      <div className="flex items-center px-3 py-4 text-sm text-muted-foreground">
+        {t("chat.threadList.noSearchResults")}
+      </div>
+    );
+  }
+
+  // Render each thread by index so we can interleave agent group headers
+  // between items without giving up the runtime's per-item context.
+  // Each agent group is collapsed by default and only shows its most recent
+  // conversation; expanding the group reveals every conversation.
   return (
     <div className="flex flex-col">
-      {groups.map((group) => (
-        <Fragment key={group.label}>
-          <div
-            data-slot="aui_thread-list-group-label"
-            className="px-3 pt-3 pb-1 text-sm font-medium text-foreground/80"
-          >
-            {t(group.label)}
-          </div>
-          {group.entries.map(({ id, index }) => (
-            <ThreadListPrimitive.ItemByIndex
-              key={id}
-              index={index}
-              components={{ ThreadListItem: GroupedThreadListItem }}
-            />
-          ))}
-        </Fragment>
-      ))}
+      <div className="px-3 pb-1 pt-2 text-[14px] text-[#808080]">
+        {t("chat.threadList.recentConversations")}
+      </div>
+      {groups.map((group) => {
+        const groupKey = String(group.agentId ?? "none");
+        const entries = pinned
+          ? [...group.entries].sort(
+              (left, right) =>
+                Number(pinned.pinnedIds.has(right.id)) -
+                Number(pinned.pinnedIds.has(left.id))
+            )
+          : group.entries;
+        const isExpanded = expandedAgentKeys.has(groupKey);
+        const visibleEntries = isExpanded
+          ? entries
+          : (newChatDesign
+              ? entries.filter((entry) => entry.hasRemoteId)
+              : entries
+            ).slice(0, 1);
+        return (
+          <Fragment key={groupKey}>
+            <button
+              type="button"
+              data-slot="aui_thread-list-group-label"
+              className="flex h-10 items-center gap-3 px-3 text-left text-[14px] text-[#191919] hover:bg-white/70"
+              onClick={() => toggleAgentExpanded(groupKey)}
+              aria-expanded={isExpanded}
+            >
+              <LayoutGrid
+                className="size-5 shrink-0 text-[#191919]"
+                aria-hidden
+              />
+              <span className="min-w-0 truncate">{group.agentName}</span>
+              {!isExpanded && (
+                <ChevronRight
+                  className="size-3.5 shrink-0 text-[#808080]"
+                  aria-hidden
+                />
+              )}
+            </button>
+            {visibleEntries.map(({ id, index }) => (
+              <ThreadListPrimitive.ItemByIndex
+                key={id}
+                index={index}
+                components={{ ThreadListItem: GroupedThreadListItem }}
+              />
+            ))}
+          </Fragment>
+        );
+      })}
     </div>
   );
 };
 
-const DAY_IN_MS = 86_400_000;
+type ThreadListGroupEntry = { id: string; index: number; hasRemoteId: boolean };
 
-type ThreadListGroupEntry = { id: string; index: number };
-
-type ThreadListGroup = {
-  label: string;
+type AgentThreadGroup = {
+  agentId: number | null;
+  agentName: string;
   entries: ThreadListGroupEntry[];
 };
 
-// Bucket a date into one of three recency groups (Today / Last 7 Days / Older)
-// using the day boundaries of the user's local timezone.
-const dateGroupLabel = (
-  date: Date | undefined,
-  startOfToday: number
-): string => {
-  if (!date || date.getTime() >= startOfToday) return "chat.threadList.today";
-  if (date.getTime() >= startOfToday - 7 * DAY_IN_MS) {
-    return "chat.threadList.last7Days";
-  }
-  return "chat.threadList.older";
-};
-
-// Build ordered recency groups for the current thread list. Returns null when
-// no thread has a usable timestamp so the caller can render a flat list.
-// When a search query is present, entries are filtered by title first; an
-// empty result yields an empty group list so the caller renders nothing.
-const useThreadListGroups = (
-  generatedTitles: ReadonlyMap<string, string> | undefined,
-  searchQuery: string
-): ThreadListGroup[] | null => {
+// Group the current thread list by agent (conversation history), ordered by
+// each agent's most recent conversation. Threads without an agent fall into a
+// trailing generic bucket. When searchQuery is set, only conversations whose
+// title matches (or agents whose name matches) are kept. Returns null when no
+// thread has a usable timestamp so the caller can render a flat list.
+const useThreadListAgentGroups = (
+  searchQuery: string,
+  newChatDesign: boolean
+): AgentThreadGroup[] | null => {
+  const { t } = useTranslation();
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
-  const pinned = usePinnedThreads();
-  const pinnedIds = pinned?.pinnedIds;
+  const { availableMainAgents } = usePublishedAgentList({
+    enabled: newChatDesign,
+  });
+  // Brand-new conversations bind their agent via this registry until the
+  // backend conversation list carries the agent_id after the first run.
+  const threadAgentOverrides = useThreadAgentOverrides();
 
-  return useMemo<ThreadListGroup[] | null>(() => {
+  const groups = useMemo<AgentThreadGroup[] | null>(() => {
     const itemsById = new Map(
       (
         threadItems as ReadonlyArray<{
           id: string;
           title?: string;
-          custom?: { lastMessageAt?: string };
+          remoteId?: string;
+          custom?: { lastMessageAt?: string; agentId?: number };
         }>
       ).map((item) => [item.id, item])
     );
-    const query = searchQuery.trim().toLowerCase();
-    const titles = threadIds.map((id) =>
-      (generatedTitles?.get(id) ?? itemsById.get(id)?.title ?? "").toLowerCase()
-    );
-    const matches = threadIds.map(
-      (_, index) => !query || titles[index].includes(query)
-    );
-    if (query && !matches.some(Boolean)) return [];
-
     const dates: (Date | undefined)[] = threadIds.map((id) => {
       const raw = itemsById.get(id)?.custom?.lastMessageAt;
       return raw ? new Date(raw) : undefined;
     });
-    if (!dates.some(Boolean)) {
-      // No usable timestamps: keep the flat-list fallback for the unfiltered
-      // view, and bucket search matches under a single label when filtering.
-      if (!query) return null;
-      return [
-        {
-          label: "chat.threadList.recentConversations",
-          entries: threadIds
-            .map((id, index) => ({ id, index }))
-            .filter((_, index) => matches[index]),
-        },
-      ];
-    }
+    if (!dates.some(Boolean)) return null;
 
-    const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    ).getTime();
+    const agentNameById = new Map<number, string>();
+    for (const agent of availableMainAgents) {
+      const published = agent as unknown as PublishedAgent;
+      agentNameById.set(
+        published.agent_id,
+        published.display_name || published.name
+      );
+    }
 
     const time = (index: number) =>
       dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const indices = threadIds
       .map((_, index) => index)
-      .filter((_, index) => matches[index])
       .sort((a, b) => time(b) - time(a));
 
-    const result: ThreadListGroup[] = [];
+    const query = searchQuery.trim().toLowerCase();
+    const groups: AgentThreadGroup[] = [];
+    const groupByAgent = new Map<number | null, AgentThreadGroup>();
     for (const index of indices) {
-      const label = dateGroupLabel(dates[index], startOfToday);
-      const entry: ThreadListGroupEntry = { id: threadIds[index], index };
-      const lastGroup = result[result.length - 1];
-      if (lastGroup?.label === label) {
-        lastGroup.entries.push(entry);
-      } else {
-        result.push({ label, entries: [entry] });
+      const item = itemsById.get(threadIds[index]);
+      const agentId =
+        typeof item?.custom?.agentId === "number"
+          ? item.custom.agentId
+          : (threadAgentOverrides[threadIds[index]] ?? null);
+      let group = groupByAgent.get(agentId);
+      if (!group) {
+        group = {
+          agentId,
+          agentName:
+            agentId !== null
+              ? (agentNameById.get(agentId) ?? `#${agentId}`)
+              : t("chat.threadList.recentConversations"),
+          entries: [],
+        };
+        groupByAgent.set(agentId, group);
+        groups.push(group);
       }
+      if (query) {
+        const agentNameMatch = group.agentName.toLowerCase().includes(query);
+        const threadTitle = item?.title?.toLowerCase() ?? "";
+        if (!agentNameMatch && !threadTitle.includes(query)) {
+          continue;
+        }
+      }
+      group.entries.push({
+        id: threadIds[index],
+        index,
+        hasRemoteId: Boolean(itemsById.get(threadIds[index])?.remoteId),
+      });
     }
-
-    // Hoist locally pinned conversations into a dedicated top group.
-    if (pinnedIds && pinnedIds.size > 0) {
-      const pinnedGroup: ThreadListGroup = {
-        label: "chat.threadList.pinned",
-        entries: [],
-      };
-      const remaining: ThreadListGroup[] = [];
-      for (const group of result) {
-        const kept = group.entries.filter((entry) => pinnedIds.has(entry.id));
-        const others = group.entries.filter(
-          (entry) => !pinnedIds.has(entry.id)
-        );
-        pinnedGroup.entries.push(...kept);
-        if (others.length > 0) remaining.push({ ...group, entries: others });
-      }
-      if (pinnedGroup.entries.length > 0) {
-        return [pinnedGroup, ...remaining];
-      }
+    if (query) {
+      return groups.filter((group) => group.entries.length > 0);
     }
-    return result;
-  }, [threadIds, threadItems, generatedTitles, searchQuery, pinnedIds]);
+    return groups;
+  }, [
+    threadIds,
+    threadItems,
+    availableMainAgents,
+    t,
+    searchQuery,
+    newChatDesign,
+  ]);
+  return newChatDesign ? groups : null;
 };
 
 const ThreadListSkeleton: FC = () => {
@@ -641,27 +617,21 @@ interface ThreadListItemProps {
   generatedTitles?: ReadonlyMap<string, string>;
 }
 
-// Right-aligned relative timestamp for sidebar entries, matching the design's
-// "20分钟前 / 2小时前 / 1天前 / 9月10日" labels.
+// Relative time for conversation rows, e.g. "20分钟前" / "20m ago".
 const formatRelativeTime = (
-  iso: string | undefined,
-  justNowLabel: string
+  lastMessageAt: string | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string
 ): string => {
-  if (!iso) return "";
-  const time = new Date(iso).getTime();
-  if (Number.isNaN(time)) return "";
-  const diffMinutes = Math.floor((Date.now() - time) / 60_000);
-  if (diffMinutes < 1) return justNowLabel;
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "always" });
-  if (diffMinutes < 60) return rtf.format(-diffMinutes, "minute");
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return rtf.format(-diffHours, "hour");
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return rtf.format(-diffDays, "day");
-  return new Date(time).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
+  if (!lastMessageAt) return "";
+  const elapsedMs = Date.now() - new Date(lastMessageAt).getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return "";
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 1) return t("chat.threadList.justNow");
+  if (minutes < 60) return t("chat.threadList.minutesAgo", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return t("chat.threadList.hoursAgo", { count: hours });
+  const days = Math.floor(hours / 24);
+  return t("chat.threadList.daysAgo", { count: days });
 };
 
 const ThreadListItem: FC<ThreadListItemProps> = ({
@@ -669,7 +639,7 @@ const ThreadListItem: FC<ThreadListItemProps> = ({
   generatedTitles,
 }) => {
   return (
-    <ThreadListItemPrimitive.Root className="group/item flex h-10 items-center gap-2 rounded-lg bg-[rgba(25,25,25,0.03)] px-2 py-2 hover:bg-[rgba(25,25,25,0.06)] data-[active=true]:bg-[#E8F1FF]">
+    <ThreadListItemPrimitive.Root className="group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white">
       <ThreadListItemContent
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
@@ -684,57 +654,41 @@ interface ThreadListItemContentProps {
 }
 
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
+  completedConversations,
   generatedTitles,
 }) => {
-  const aui = useAui();
   const { t } = useTranslation();
+  const aui = useAui();
   const { confirm } = useConfirmModal();
   const [isEditing, setIsEditing] = useState(false);
   const batch = useBatchSelection();
   const batchMode = batch?.batchMode ?? false;
   const selectedIds = batch?.selectedIds;
   const toggle = batch?.toggle;
+  const thread = useAui().threadListItem.getState();
   const threadListItem = aui.threadListItem;
-  const thread = threadListItem.getState();
-  const threadItems = useAuiState((s) => s.threads.threadItems);
-  const lastMessageAt = useMemo(() => {
-    const item = (
-      threadItems as ReadonlyArray<{
-        id: string;
-        custom?: { lastMessageAt?: string };
-      }>
-    ).find((entry) => entry.id === thread.id);
-    return item?.custom?.lastMessageAt;
-  }, [threadItems, thread.id]);
   const title =
     generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
 
-  const handleRename = useCallback(
-    async (newTitle: string) => {
-      setPendingThreadOperationId(thread.id);
-      try {
-        await threadListItem.rename(newTitle);
-        log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
-        setIsEditing(false);
-      } catch (error) {
-        log.error("[ThreadList] Failed to rename thread:", error);
-        message.error(t("chat.threadList.renameFailed"));
-      } finally {
-        setPendingThreadOperationId(undefined);
-      }
-    },
-    [thread.id, threadListItem, t]
-  );
+  const pinned = usePinnedThreads();
+  const isPinned = pinned?.pinnedIds.has(thread.id) ?? false;
 
-  const handleRenameClick = useCallback(() => {
-    setIsEditing(true);
-  }, []);
+  const handleRename = async (newTitle: string) => {
+    const normalized = newTitle.trim();
+    if (!normalized) return;
+    setPendingThreadOperationId(thread.id);
+    try {
+      await threadListItem.rename(normalized);
+      setIsEditing(false);
+    } catch (error) {
+      log.error("[ThreadList] Failed to rename thread:", error);
+      message.error(t("chat.threadList.renameFailed"));
+    } finally {
+      setPendingThreadOperationId(undefined);
+    }
+  };
 
-  const handleCancelRename = useCallback(() => {
-    setIsEditing(false);
-  }, []);
-
-  const handleDelete = useCallback(() => {
+  const handleDelete = () => {
     confirm({
       title: t("chat.threadList.delete"),
       content: t("chat.threadList.confirmDeletionDescription"),
@@ -752,16 +706,42 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
         }
       },
     });
-  }, [aui, confirm, t, threadListItem]);
+  };
+
+  const togglePinned = () => pinned?.togglePin(thread.id);
 
   const renderMainContent = () => {
     if (isEditing) {
       return (
-        <InlineRenameEditor
-          currentTitle={title}
-          onRename={handleRename}
-          onCancel={handleCancelRename}
-        />
+        <form
+          className="flex min-w-0 flex-1 items-center gap-1 px-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = new FormData(event.currentTarget).get("title");
+            if (typeof value === "string") void handleRename(value);
+          }}
+        >
+          <input
+            autoFocus
+            name="title"
+            defaultValue={title}
+            aria-label={t("chat.threadList.rename")}
+            className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-sm"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setIsEditing(false);
+            }}
+          />
+          <button type="submit" className="text-xs text-primary">
+            {t("common.save", { defaultValue: "Save" })}
+          </button>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground"
+            onClick={() => setIsEditing(false)}
+          >
+            {t("common.cancel", { defaultValue: "Cancel" })}
+          </button>
+        </form>
       );
     }
     if (batchMode) {
@@ -779,7 +759,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       );
     }
     return (
-      <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-1 text-left text-base leading-6 text-[#191919]">
+      <ThreadListItemPrimitive.Trigger className="flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]">
         <div className="flex min-w-0 flex-1 items-center text-left">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -789,23 +769,24 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               {title}
             </TooltipContent>
           </Tooltip>
+          <ConversationStatusIndicatorWrapper
+            completedConversations={completedConversations}
+          />
         </div>
+        <span className="shrink-0 text-[14px] leading-[22px] text-[#808080]">
+          {formatRelativeTime(
+            (thread as { custom?: { lastMessageAt?: string } }).custom
+              ?.lastMessageAt,
+            t
+          )}
+        </span>
       </ThreadListItemPrimitive.Trigger>
     );
   };
 
-  const pinned = usePinnedThreads();
-  const isPinned = pinned?.pinnedIds.has(thread.id) ?? false;
-
   return (
     <>
       {renderMainContent()}
-      {!isEditing && !batchMode && <ThreadRowEndStatus />}
-      {!isEditing && !batchMode && lastMessageAt && (
-        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground group-hover/item:hidden">
-          {formatRelativeTime(lastMessageAt, t("chat.threadList.justNow"))}
-        </span>
-      )}
       {!isEditing && !batchMode && (
         <ThreadListItemMorePrimitive.Root>
           <ThreadListItemMorePrimitive.Trigger className="size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100">
@@ -813,9 +794,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           </ThreadListItemMorePrimitive.Trigger>
           <ThreadListItemMorePrimitive.Content className="z-50 rounded-md border bg-popover p-1 shadow-md">
             <ThreadListItemMorePrimitive.Item
-              onSelect={() => {
-                pinned?.togglePin(thread.id);
-              }}
+              onSelect={togglePinned}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
             >
               {isPinned ? (
@@ -826,18 +805,14 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               {isPinned ? t("chat.threadList.unpin") : t("chat.threadList.pin")}
             </ThreadListItemMorePrimitive.Item>
             <ThreadListItemMorePrimitive.Item
-              onSelect={() => {
-                handleRenameClick();
-              }}
+              onSelect={() => setIsEditing(true)}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
             >
               <PencilIcon className="size-4" />
               {t("chat.threadList.rename")}
             </ThreadListItemMorePrimitive.Item>
             <ThreadListItemMorePrimitive.Item
-              onSelect={() => {
-                setTimeout(handleDelete, 0);
-              }}
+              onSelect={() => setTimeout(handleDelete, 0)}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
             >
               <TrashIcon className="size-4" />
@@ -850,67 +825,15 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   );
 };
 
-// Inline rename editor component
-const InlineRenameEditor: FC<{
-  currentTitle: string;
-  onRename: (newTitle: string) => void;
-  onCancel: () => void;
-}> = ({ currentTitle, onRename, onCancel }) => {
-  const [title, setTitle] = useState(currentTitle);
-
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      if (title.trim() && title.trim() !== currentTitle) {
-        onRename(title.trim());
-      } else {
-        onCancel();
-      }
-    },
-    [title, currentTitle, onRename, onCancel]
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onCancel();
-      }
-    },
-    [onCancel]
-  );
+// Wrapper to get thread status from adapter and pass to status indicator
+const ConversationStatusIndicatorWrapper: FC<{
+  completedConversations: Set<string>;
+}> = ({ completedConversations }) => {
+  const aui = useAui();
+  const status = aui.threadListItem().getState().status as string;
+  const isRunning = status === "running" || status === "streaming";
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="flex min-w-0 flex-1 items-center gap-1 px-3 overflow-hidden"
-    >
-      <input
-        type="text"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onBlur={() => {
-          if (title.trim() && title.trim() !== currentTitle) {
-            onRename(title.trim());
-          } else {
-            onCancel();
-          }
-        }}
-        autoFocus
-        className="shrink min-w-0 flex-1 rounded border border-input px-2 py-1 text-sm outline-none focus:border-ring"
-      />
-      <div className="flex shrink-0 gap-1">
-        <button type="submit" className="p-1 hover:bg-accent rounded">
-          <CheckIcon className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="p-1 hover:bg-accent rounded"
-        >
-          <XIcon className="size-4" />
-        </button>
-      </div>
-    </form>
+    <ConversationStatusIndicator isStreaming={isRunning} isCompleted={false} />
   );
 };

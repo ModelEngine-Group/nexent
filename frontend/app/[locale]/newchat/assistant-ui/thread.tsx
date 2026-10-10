@@ -47,7 +47,6 @@ import {
   type SourcesPanelSelection,
 } from "../ui/sources-panel-context";
 import {
-  ArrowDownIcon,
   CheckIcon,
   CopyIcon,
   DownloadIcon,
@@ -59,6 +58,7 @@ import {
   ArrowLeft,
   AlertTriangleIcon,
   SparklesIcon,
+  Lightbulb,
   type LucideIcon,
   PencilIcon,
   Share2Icon,
@@ -185,6 +185,7 @@ export interface ThreadProps {
   welcomeSuggestions?: readonly WelcomeSuggestion[];
   welcomeContent?: ReactNode;
   conversationId?: number;
+  newChatDesign?: boolean;
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
@@ -245,6 +246,7 @@ export const Thread: FC<ThreadProps> = ({
   welcomeSuggestions,
   welcomeContent,
   conversationId,
+  newChatDesign = false,
   onBack,
   selectedModelId,
   onModelChange,
@@ -539,6 +541,7 @@ export const Thread: FC<ThreadProps> = ({
         displayName={displayName}
         conversationTitle={conversationTitle}
         conversationId={conversationId}
+        newChatDesign={newChatDesign}
         isRunning={isRunning}
         isShareMode={isShareMode}
         selectedShareMessageIds={selectedShareMessageIds}
@@ -637,6 +640,7 @@ interface ThreadViewProps {
   displayName: string;
   conversationTitle: string;
   conversationId?: number;
+  newChatDesign?: boolean;
   isRunning: boolean;
   isShareMode: boolean;
   selectedShareMessageIds: Set<number>;
@@ -692,6 +696,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   displayName,
   conversationTitle,
   conversationId,
+  newChatDesign = false,
   isRunning,
   isShareMode,
   selectedShareMessageIds,
@@ -739,66 +744,67 @@ const ThreadView: FC<ThreadViewProps> = ({
           workbenchLanding && "overflow-y-auto pb-[10vh]"
         )}
       >
-        {showConversationTitle && (
-          <header className="flex items-center gap-2 border-b px-3 py-2">
-            {isShareMode ? (
-              <>
-                <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
-                  {conversationTitle}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onLeaveShareMode}
-                  aria-label={t("common.close", "关闭")}
-                >
-                  <XIcon className="size-4" />
-                </Button>
-              </>
-            ) : (
-              <>
-                {onBack && (
-                  <Button variant="ghost" size="icon" onClick={onBack}>
-                    <ArrowLeft className="size-4" />
+        {showConversationTitle &&
+          (isShareMode || (!newChatDesign && workbenchPresentation)) && (
+            <header className="flex items-center gap-2 border-b px-3 py-2">
+              {isShareMode ? (
+                <>
+                  <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
+                    {conversationTitle}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onLeaveShareMode}
+                    aria-label={t("common.close", "关闭")}
+                  >
+                    <XIcon className="size-4" />
                   </Button>
-                )}
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-sm font-medium text-foreground">
-                    {workbenchPresentation || hasMessages
-                      ? conversationTitle
-                      : displayName}
-                  </span>
-                  {hasMessages && variant !== "embedded" && (
-                    <span className="text-xs text-muted-foreground">
-                      {displayName}
-                    </span>
+                </>
+              ) : (
+                <>
+                  {onBack && (
+                    <Button variant="ghost" size="icon" onClick={onBack}>
+                      <ArrowLeft className="size-4" />
+                    </Button>
                   )}
-                  {!hasMessages &&
-                    workbenchPresentation &&
-                    variant !== "embedded" && (
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-sm font-medium text-foreground">
+                      {workbenchPresentation || hasMessages
+                        ? conversationTitle
+                        : displayName}
+                    </span>
+                    {hasMessages && variant !== "embedded" && (
                       <span className="text-xs text-muted-foreground">
                         {displayName}
                       </span>
                     )}
-                </div>
-                {hasMessages && conversationId && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t(
-                      "chatInterface.shareConversation",
-                      "分享对话"
-                    )}
-                    disabled={isRunning}
-                    onClick={onEnterShareMode}
-                  >
-                    <Share2Icon className="size-4" />
-                  </Button>
-                )}
-              </>
-            )}
-          </header>
-        )}
+                    {!hasMessages &&
+                      workbenchPresentation &&
+                      variant !== "embedded" && (
+                        <span className="text-xs text-muted-foreground">
+                          {displayName}
+                        </span>
+                      )}
+                  </div>
+                  {hasMessages && conversationId && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t(
+                        "chatInterface.shareConversation",
+                        "分享对话"
+                      )}
+                      disabled={isRunning}
+                      onClick={onEnterShareMode}
+                    >
+                      <Share2Icon className="size-4" />
+                    </Button>
+                  )}
+                </>
+              )}
+            </header>
+          )}
 
         {isShareMode && (
           <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
@@ -893,8 +899,8 @@ const ThreadView: FC<ThreadViewProps> = ({
                 "static mb-auto max-w-[1123px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
-            <ThreadScrollToBottom />
             <Composer
+              newChatDesign={newChatDesign}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
@@ -1006,7 +1012,6 @@ interface ThreadWelcomeContentProps {
 
 const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
   agent,
-  title,
   suggestions = [],
 }) => {
   const aui = useAui();
@@ -1023,71 +1028,68 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
     [aui]
   );
 
+  const suggestionRows =
+    displayedSuggestions.length > 0
+      ? displayedSuggestions.map((suggestion) => ({
+          id: suggestion.id,
+          text: suggestion.title,
+          prompt: suggestion.prompt,
+        }))
+      : sampleQuestions.map((question, index) => ({
+          id: `question-${index}`,
+          text: question,
+          prompt: question,
+        }));
+
   return (
-    <div className="flex h-full flex-col overflow-y-auto px-8 py-8">
-      <div className="flex flex-1 items-center justify-center">
-        <div className="flex w-full max-w-2xl flex-col items-center gap-6">
-          <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/10">
-            <Icon className="size-8 text-primary" />
-          </div>
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto px-8 py-6">
+      {/* elastic space above the welcome block, per design */}
+      <div className="min-h-6 flex-[3]" aria-hidden />
 
-          <div className="text-center">
-            <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              {title ?? t("chat.thread.helloAgent", { agent: displayName })}
-            </h1>
-            <p className="mx-auto mt-3 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
-              {agent.greeting_message || agent.description}
-            </p>
-          </div>
-
-          {displayedSuggestions.length > 0 ? (
-            <div className="grid w-full auto-rows-fr grid-cols-1 gap-2 sm:grid-cols-2">
-              {displayedSuggestions.map((suggestion) => {
-                const SuggestionIcon = suggestion.icon;
-                return (
-                  <button
-                    key={suggestion.id}
-                    type="button"
-                    onClick={() => handleSampleQuestionClick(suggestion.prompt)}
-                    className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
-                  >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <SuggestionIcon className="size-5" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium leading-5 text-foreground">
-                        {suggestion.title}
-                      </span>
-                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                        {suggestion.description}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : sampleQuestions.length > 0 ? (
-            <div className="w-full">
-              <p className="mb-4 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <SparklesIcon className="size-3.5 text-primary" />
-                {t("chat.thread.tryQuestions")}
-              </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {sampleQuestions.map((q, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => handleSampleQuestionClick(q)}
-                    className="truncate rounded-xl border border-border bg-card px-4 py-3 text-left text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-accent/50"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+      {/* 欢迎语: avatar + name row, then greeting; 890px column, 24px gaps */}
+      <div className="mx-auto flex w-full max-w-[890px] shrink-0 flex-col items-center gap-6 pb-6">
+        <div className="flex items-center justify-center gap-4">
+          <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
+            <Icon className="size-7 text-white" aria-hidden />
+          </span>
+          <h1 className="text-[36px] font-bold leading-[54px] text-[#191919]">
+            {displayName}
+          </h1>
         </div>
+        <p className="text-center text-[14px] leading-[22px] text-[#191919]">
+          {agent.greeting_message || agent.description}
+        </p>
       </div>
+
+      <div className="min-h-6 flex-1" aria-hidden />
+
+      {suggestionRows.length > 0 && (
+        <div className="mx-auto w-full max-w-[890px] shrink-0">
+          <p className="text-[14px] font-bold leading-[22px] text-[#191919]">
+            {t("chat.thread.tryQuestions")}
+          </p>
+          <div className="mt-2 flex flex-col">
+            {suggestionRows.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                onClick={() => handleSampleQuestionClick(row.prompt)}
+                className="flex h-12 items-center gap-3 rounded-[4px] px-1 text-left transition-colors hover:bg-white/70"
+              >
+                <Lightbulb
+                  className="size-4 shrink-0 text-[#191919]"
+                  aria-hidden
+                />
+                <span className="min-w-0 truncate text-[14px] text-[#191919]">
+                  {row.text}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="min-h-10 flex-[2]" aria-hidden />
     </div>
   );
 };
@@ -1226,21 +1228,6 @@ export const ThreadMessages: FC<{
         );
       }}
     </ThreadPrimitive.Messages>
-  );
-};
-
-const ThreadScrollToBottom: FC = () => {
-  const { t } = useTranslation();
-
-  return (
-    <ThreadPrimitive.ScrollToBottom asChild>
-      <TooltipIconButton
-        tooltip={t("chat.thread.scrollToBottom")}
-        className="absolute -top-12 self-center rounded-full p-4"
-      >
-        <ArrowDownIcon />
-      </TooltipIconButton>
-    </ThreadPrimitive.ScrollToBottom>
   );
 };
 

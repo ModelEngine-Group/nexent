@@ -379,6 +379,7 @@ export const fetchPublishedAgentList = async () => {
       model_params_override: agent.model_params_override ?? null,
       enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
       icon_url: agent.icon_url,
+      tags: agent.tags || [],
     }));
 
     return {

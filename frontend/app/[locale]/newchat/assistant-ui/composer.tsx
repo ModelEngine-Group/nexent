@@ -12,11 +12,11 @@ import { useTranslation } from "react-i18next";
 import { SelectedResourceChips } from "@/features/workbench/components/SelectedResourceChips";
 import { CreationExamples } from "@/features/workbench/components/CreationExamples";
 import {
+  Send,
   ArrowUp,
   Mic,
   MicOff,
   Square,
-  Lightbulb,
   Play,
   Check,
   Circle,
@@ -24,13 +24,76 @@ import {
   ChevronDown,
   MessageCircleMore,
   Paperclip,
+  ChevronRight,
+  Database,
   Bot,
-  Plus,
-  Send,
+  Layers,
+  Link2,
+  MessagesSquare,
+  SearchIcon,
+  Settings,
+  PlusIcon,
 } from "lucide-react";
+import { StandardInput } from "@/components/common/StandardInput";
+import {
+  useComposerKnowledgeBases,
+  useComposerSkills,
+} from "@/hooks/chat/useComposerResources";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  AuiIf,
+  ComposerPrimitive,
+  useAui,
+  useAuiState,
+} from "@assistant-ui/react";
+import {
+  LexicalComposerInput,
+  type DirectiveChipProps as LexicalDirectiveChipProps,
+} from "@assistant-ui/react-lexical";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ModelSelector, type ModelOption } from "../ui/model-selector";
+import { ComposerAttachments, ComposerAddAttachment } from "../ui/attachment";
+import {
+  useWorkbenchComposerTag,
+  setWorkbenchComposerTag,
+} from "@/features/workbench/lib/workbench-composer-tag";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  planRegistry,
+  type PlanData,
+} from "../adapter/remote-chat-model-adapter";
+import type {
+  ConversationKnowledgeScope,
+  KnowledgeCapabilities,
+  KnowledgeScopeEffectivePreview,
+} from "@/types/knowledgeScope";
+import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import type { SkillFileContent } from "@/types/skill";
+import { SkillFileMentionPopover } from "../ui/skill-file-mention";
+import { DirectiveChip } from "../ui/directive-text";
+import {
+  combinedSkillDirectiveFormatter,
+  skillDirectiveIconMap,
+} from "../ui/skill-directives";
+import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
+import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
+import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 
-// Design toolbar icons: stacked layers with a sparkle (skills) and an open
-// book with a sparkle (knowledge base), traced from the design mockups.
 const SkillStackIcon: FC<{ className?: string }> = ({ className }) => (
   <svg
     viewBox="0 0 24 24"
@@ -43,8 +106,8 @@ const SkillStackIcon: FC<{ className?: string }> = ({ className }) => (
     aria-hidden
   >
     <path d="M12 3.8 20 7 12 10.2 4 7 12 3.8Z" />
-    <path d="M20.3 12.2c-2.3 1.8-5.2 2.7-8.3 2.7s-6-0.9-8.3-2.7" />
-    <path d="M20.3 16.4c-2.3 1.8-5.2 2.7-8.3 2.7s-6-0.9-8.3-2.7" />
+    <path d="M20.3 12.2c-2.3 1.8-5.2 2.7-8.3 2.7s-6-.9-8.3-2.7" />
+    <path d="M20.3 16.4c-2.3 1.8-5.2 2.7-8.3 2.7s-6-.9-8.3-2.7" />
     <path
       d="M18.7 1.7q.7 2 2.75 2.75-2.05.75-2.75 2.8-.7-2.05-2.75-2.8 2.05-.75 2.75-2.75Z"
       fill="currentColor"
@@ -73,64 +136,11 @@ const KnowledgeBookIcon: FC<{ className?: string }> = ({ className }) => (
     />
   </svg>
 );
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import {
-  AuiIf,
-  ComposerPrimitive,
-  useAui,
-  useAuiState,
-} from "@assistant-ui/react";
-import {
-  LexicalComposerInput,
-  type DirectiveChipProps as LexicalDirectiveChipProps,
-} from "@assistant-ui/react-lexical";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { ModelSelector, type ModelOption } from "../ui/model-selector";
-import { ComposerAttachments, ComposerAddAttachment } from "../ui/attachment";
-import {
-  useWorkbenchComposerTag,
-  setWorkbenchComposerTag,
-} from "@/features/workbench/lib/workbench-composer-tag";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
-  planRegistry,
-  type PlanData,
-} from "../adapter/remote-chat-model-adapter";
-import type {
-  ConversationKnowledgeScope,
-  KnowledgeCapabilities,
-  KnowledgeScopeEffectivePreview,
-} from "@/types/knowledgeScope";
-import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
-import { useDeployment } from "@/components/providers/deploymentProvider";
-import type { SkillFileContent } from "@/types/skill";
-import { SkillFileMentionPopover } from "../ui/skill-file-mention";
-import { DirectiveChip } from "../ui/directive-text";
-import {
-  combinedSkillDirectiveFormatter,
-  skillDirectiveIconMap,
-} from "../ui/skill-directives";
-import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
-import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
-import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export type ChatMode = "planning" | "execution";
 
 export interface ComposerProps {
+  newChatDesign?: boolean;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
@@ -273,11 +283,9 @@ const SkillComposerDirectiveChip: FC<LexicalDirectiveChipProps> = ({
   />
 );
 
-// Blue category tag rendered inline before the composer text after clicking
-// a landing example; auto-clears when the composer text is emptied.
 const WorkbenchComposerTagPrefix: FC = () => {
   const tag = useWorkbenchComposerTag();
-  const text = useAuiState((s) => s.composer.text);
+  const text = useAuiState((state) => state.composer.text);
 
   useEffect(() => {
     if (!text?.trim()) setWorkbenchComposerTag(null);
@@ -291,64 +299,27 @@ const WorkbenchComposerTagPrefix: FC = () => {
   );
 };
 
-// Workbench toolbar dropdown that replaces the standalone planning/execution
-// switcher row, matching the design's "规划模式" entry in the composer toolbar.
-const WorkbenchPlanningMenu: FC<{
-  chatMode: ChatMode;
-  onChatModeChange: (mode: ChatMode) => void;
-  disabled?: boolean;
-}> = ({ chatMode, onChatModeChange, disabled }) => {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const options: { value: ChatMode; label: string }[] = [
-    { value: "planning", label: t("chat.composer.planningMode") },
-    { value: "execution", label: t("chat.composer.executionMode") },
-  ];
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          className="h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
-        >
-          {chatMode === "planning" ? (
-            <MessageCircleMore className="size-4" />
-          ) : (
-            <Play className="size-4" />
-          )}
-          {chatMode === "planning"
-            ? t("chat.composer.planningMode")
-            : t("chat.composer.executionMode")}
-          <ChevronDown className="size-4 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-56 p-1">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            className={cn(
-              "flex h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 hover:bg-accent",
-              chatMode === option.value ? "text-foreground" : "text-foreground"
-            )}
-            onClick={() => {
-              onChatModeChange(option.value);
-              setOpen(false);
-            }}
-          >
-            {option.label}
-            {chatMode === option.value && <Check className="size-4" />}
-          </button>
-        ))}
-      </PopoverContent>
-    </Popover>
-  );
-};
+// Dot colors for the skill quick panel rows (stable per skill name).
+const SKILL_DOT_COLORS = [
+  "#14b8a6",
+  "#ec4899",
+  "#ef4444",
+  "#f59e0b",
+  "#22c55e",
+  "#3b82f6",
+  "#a855f7",
+];
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
 
 export const Composer: FC<ComposerProps> = ({
+  newChatDesign = false,
   models,
   selectedModelId,
   onModelChange,
@@ -406,6 +377,42 @@ export const Composer: FC<ComposerProps> = ({
     });
   };
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+  const { data: knowledgeBases = [], isLoading: kbLoading } =
+    useComposerKnowledgeBases(newChatDesign);
+  const { data: skills = [], isLoading: skillsLoading } =
+    useComposerSkills(newChatDesign);
+  // Category tabs derive from the configured skills' tags (design: 全部 + tags).
+  const skillTagTabs = useMemo(() => {
+    const tags: string[] = [];
+    for (const skill of skills) {
+      for (const tag of skill.tags) {
+        if (tag && !tags.includes(tag)) tags.push(tag);
+      }
+    }
+    return tags.slice(0, 5);
+  }, [skills]);
+  const [skillTab, setSkillTab] = useState("");
+  const [kbSearch, setKbSearch] = useState("");
+  const [skillSearch, setSkillSearch] = useState("");
+
+  const filteredSkills = useMemo(() => {
+    const query = skillSearch.trim().toLowerCase();
+    return skills
+      .filter((skill) => skillTab === "" || skill.tags.includes(skillTab))
+      .filter(
+        (skill) =>
+          !query ||
+          (skill.name + (skill.description || "")).toLowerCase().includes(query)
+      );
+  }, [skills, skillTab, skillSearch]);
+
+  const [actionPanel, setActionPanel] = useState<
+    "plus" | "kb" | "skill" | null
+  >(null);
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+  // TODO(mock): knowledge-base / skill selection is visual only until the
+  // conversation scope APIs are wired into the quick panels.
+  const [selectedSkillNames, setSelectedSkillNames] = useState<string[]>([]);
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const creationMode =
     workbenchPresentation?.mode === "skill_create" ||
@@ -502,9 +509,16 @@ export const Composer: FC<ComposerProps> = ({
   ]);
 
   return (
-    <div className="relative w-full min-w-0">
-      {/* Creation mode entry buttons ("Skill 创建 / Agent创建") are hidden per
-          the workbench design; creation flows remain reachable elsewhere. */}
+    <div
+      className={cn(
+        "relative w-full min-w-0",
+        newChatDesign && "mx-auto max-w-[890px]"
+      )}
+    >
+      {workbenchPresentation &&
+        !compact &&
+        !creationMode &&
+        workbenchPresentation.actions}
       {workbenchPresentation && !compact && creationMode && (
         <div className="mb-2 h-7" aria-hidden="true" />
       )}
@@ -512,8 +526,11 @@ export const Composer: FC<ComposerProps> = ({
         disabled={disabled && !disabledReason}
         aria-disabled={disabled && !disabledReason}
         className={cn(
-          "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
-          workbenchPresentation &&
+          newChatDesign
+            ? "relative m-0 flex min-w-0 w-full flex-col gap-2 overflow-visible rounded-[20px] border-[0.5px] border-solid border-[#191919] bg-card p-4 shadow-[0_2px_12px_rgba(0,0,0,0.08)]"
+            : "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
+          !newChatDesign &&
+            workbenchPresentation &&
             "rounded-3xl shadow-[0_12px_36px_-14px_rgba(0,0,0,0.18)]",
           disabled && !disabledReason && "cursor-not-allowed opacity-60"
         )}
@@ -539,51 +556,11 @@ export const Composer: FC<ComposerProps> = ({
           </div>
         )}
 
-        {/* Mode switcher above input */}
-        {!compact && !creationMode && !workbenchPresentation && (
-          <div className="flex items-center border-b border-border px-3 py-2">
-            {/* Mode switcher */}
-            <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-                  chatMode === "planning" &&
-                    "bg-blue-50 text-blue-600 hover:bg-blue-50"
-                )}
-                onClick={() => onChatModeChange("planning")}
-              >
-                <Lightbulb
-                  className={cn(
-                    "size-3",
-                    chatMode === "planning" ? "text-blue-600" : ""
-                  )}
-                />
-                {t("chat.composer.planning")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-                  chatMode === "execution" &&
-                    "bg-blue-50 text-blue-600 hover:bg-blue-50"
-                )}
-                onClick={() => onChatModeChange("execution")}
-              >
-                <Play className="size-3" />
-                {t("chat.composer.execution")}
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Composer Primitive Root */}
         <ComposerPrimitive.Unstable_TriggerPopoverRoot>
           {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
           <ComposerPrimitive.Root
-            className="flex w-full flex-col px-1 py-1 outline-none"
+            className="flex w-full flex-col outline-none"
             onSubmit={(event) => {
               if (isRunning) event.preventDefault();
               else prepareSend();
@@ -603,9 +580,11 @@ export const Composer: FC<ComposerProps> = ({
             {skillFiles ? (
               <LexicalComposerInput
                 placeholder={
-                  workbenchPresentation
-                    ? t("chat.composer.workbenchPlaceholder")
-                    : t("chat.composer.placeholder")
+                  newChatDesign
+                    ? t("chat.composer.placeholder")
+                    : workbenchPresentation
+                      ? t("chat.composer.workbenchPlaceholder")
+                      : t("chat.composer.placeholder")
                 }
                 className="relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
                 submitMode="enter"
@@ -614,19 +593,29 @@ export const Composer: FC<ComposerProps> = ({
                 directiveChip={SkillComposerDirectiveChip}
               />
             ) : (
-              <div className="flex items-start">
-                {workbenchPresentation && <WorkbenchComposerTagPrefix />}
+              <div
+                className={cn(
+                  workbenchPresentation && !newChatDesign && "flex items-start"
+                )}
+              >
+                {workbenchPresentation && !newChatDesign && (
+                  <WorkbenchComposerTagPrefix />
+                )}
                 <ComposerPrimitive.Input
                   data-workbench-composer
                   placeholder={
-                    workbenchPresentation
-                      ? t("chat.composer.workbenchPlaceholder")
-                      : t("chat.composer.placeholder")
+                    newChatDesign
+                      ? t("chat.composer.placeholder")
+                      : workbenchPresentation
+                        ? t("chat.composer.workbenchPlaceholder")
+                        : t("chat.composer.placeholder")
                   }
                   className={cn(
-                    "mb-1 max-h-48 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground",
+                    "max-h-48 min-h-14 w-full resize-none bg-transparent px-0 py-1 text-sm outline-none placeholder:text-muted-foreground",
                     workbenchPresentation && "min-h-[88px] px-4 py-2",
-                    workbenchPresentation && "w-auto min-w-0 flex-1"
+                    workbenchPresentation &&
+                      !newChatDesign &&
+                      "w-auto min-w-0 flex-1"
                   )}
                   rows={1}
                   submitMode="enter"
@@ -669,112 +658,336 @@ export const Composer: FC<ComposerProps> = ({
             )}
             <div
               className={cn(
-                "relative mx-2 mb-2 flex items-center justify-between gap-2",
-                workbenchPresentation && "mx-4 flex-wrap pt-2 sm:flex-nowrap"
+                "relative flex items-center justify-between gap-2",
+                workbenchPresentation &&
+                  (newChatDesign
+                    ? "flex-wrap pt-2 sm:flex-nowrap"
+                    : "mx-4 flex-wrap pt-2 sm:flex-nowrap")
               )}
             >
-              <div
-                className={cn(
-                  "flex min-w-0 items-center gap-1",
-                  workbenchPresentation && "flex-wrap sm:flex-nowrap"
-                )}
-              >
-                {!compact && !workbenchPresentation && showModelSelector && (
-                  <ModelSelector
-                    models={models}
-                    value={selectedModelId}
-                    onValueChange={onModelChange}
-                    deepThinking={deepThinking}
-                    onDeepThinkingChange={onDeepThinkingChange}
-                    effort={thinkingEffort}
-                    onEffortChange={(value) => {
-                      if (
-                        value === "low" ||
-                        value === "medium" ||
-                        value === "high"
-                      )
-                        onThinkingEffortChange?.(value);
-                    }}
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground"
-                  />
-                )}
-                {!compact && workbenchResources && workbenchPresentation && (
-                  <TooltipWrapper tooltip={t("chat.composer.addAgent")}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="size-8 shrink-0 p-0"
-                      disabled={isRunning}
-                      onClick={workbenchResources.onSelectAgent}
-                    >
-                      <Plus className="size-4" />
-                    </Button>
-                  </TooltipWrapper>
-                )}
-                {!compact && !creationMode && workbenchPresentation && (
-                  <WorkbenchPlanningMenu
-                    chatMode={chatMode}
-                    onChatModeChange={onChatModeChange}
-                    disabled={isRunning}
-                  />
-                )}
-                {!compact && workbenchResources && !workbenchPresentation && (
-                  <Button
+              {newChatDesign && actionPanel ? (
+                <button
+                  type="button"
+                  aria-hidden
+                  tabIndex={-1}
+                  className="fixed inset-0 z-10 cursor-default"
+                  onClick={() => setActionPanel(null)}
+                />
+              ) : null}
+
+              {newChatDesign && actionPanel === "plus" ? (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-56 rounded-xl border border-[#e5e5e5] bg-white p-2 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 shrink-0 gap-1.5 px-2 text-xs"
-                    disabled={isRunning}
-                    onClick={workbenchResources.onSelectAgent}
+                    className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                    onClick={() => setActionPanel("skill")}
                   >
-                    <Bot className="size-3.5" />
-                    Agent
-                  </Button>
-                )}
-                {!compact && workbenchResources && (
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className={cn(
-                          "h-8 shrink-0 gap-1.5 px-2 text-xs",
-                          workbenchPresentation &&
-                            "text-base leading-6 text-foreground"
-                        )}
-                        disabled={isRunning}
-                        onClick={
-                          workbenchSkillPopover
-                            ? undefined
-                            : onOpenWorkbenchSkillPicker
-                        }
-                      >
-                        <SkillStackIcon
-                          className={cn(
-                            "size-3.5",
-                            workbenchPresentation && "size-4"
-                          )}
-                        />
-                        {workbenchPresentation
-                          ? t("chat.composer.skills")
-                          : "Skills"}
-                        {workbenchPresentation && (
-                          <ChevronDown className="size-4 opacity-50" />
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    {workbenchSkillPopover ? (
-                      <PopoverContent align="start" className="w-80 p-0">
-                        {workbenchSkillPopover}
-                      </PopoverContent>
+                    <Layers className="size-4 shrink-0" aria-hidden />
+                    <span>{t("chat.composer.skills")}</span>
+                    <ChevronRight
+                      className="ml-auto size-3.5 shrink-0 text-[#808080]"
+                      aria-hidden
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                    onClick={() => setActionPanel("kb")}
+                  >
+                    <Database className="size-4 shrink-0" aria-hidden />
+                    <span>{t("chat.composer.knowledge")}</span>
+                    <ChevronRight
+                      className="ml-auto size-3.5 shrink-0 text-[#808080]"
+                      aria-hidden
+                    />
+                  </button>
+                  <ComposerPrimitive.AddAttachment asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                    >
+                      <Link2 className="size-4 shrink-0" aria-hidden />
+                      <span>{t("chat.composer.uploadFile")}</span>
+                    </button>
+                  </ComposerPrimitive.AddAttachment>
+                  <button
+                    type="button"
+                    className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                    onClick={() => {
+                      onChatModeChange("planning");
+                      setActionPanel(null);
+                    }}
+                  >
+                    <MessagesSquare className="size-4 shrink-0" aria-hidden />
+                    <span>{t("chat.composer.planningMode")}</span>
+                    {chatMode === "planning" ? (
+                      <Check
+                        className="ml-auto size-4 text-[#191919]"
+                        aria-hidden
+                      />
                     ) : null}
-                  </Popover>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                    onClick={() => {
+                      onChatModeChange("execution");
+                      setActionPanel(null);
+                    }}
+                  >
+                    <Play className="size-4 shrink-0" aria-hidden />
+                    <span>{t("chat.composer.executionMode")}</span>
+                    {chatMode === "execution" ? (
+                      <Check
+                        className="ml-auto size-4 text-[#191919]"
+                        aria-hidden
+                      />
+                    ) : null}
+                  </button>
+                </div>
+              ) : null}
+
+              {newChatDesign && actionPanel === "kb" ? (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-[320px] rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+                  <div className="flex items-center gap-2 text-[14px] text-[#191919]">
+                    <Database className="size-4" aria-hidden />
+                    <span>{t("chat.composer.knowledge")}</span>
+                  </div>
+                  <StandardInput
+                    value={kbSearch}
+                    onChange={(event) => setKbSearch(event.target.value)}
+                    placeholder={t("chat.composer.searchKnowledge")}
+                    prefix={
+                      <SearchIcon
+                        className="size-3.5 text-[#808080]"
+                        aria-hidden
+                      />
+                    }
+                    className="mt-2"
+                  />
+                  <div className="mt-2 max-h-64 overflow-y-auto">
+                    {kbLoading ? (
+                      <p className="px-2 py-3 text-[12px] text-[#808080]">
+                        {t("chat.composer.loading")}
+                      </p>
+                    ) : knowledgeBases.length === 0 ? (
+                      <p className="px-2 py-3 text-[12px] text-[#808080]">
+                        {t("chat.composer.emptyKnowledge")}
+                      </p>
+                    ) : (
+                      knowledgeBases
+                        .filter((kb) =>
+                          (kb.name + (kb.description || ""))
+                            .toLowerCase()
+                            .includes(kbSearch.trim().toLowerCase())
+                        )
+                        .map((kb) => {
+                          const selected = selectedKbIds.includes(kb.id);
+                          return (
+                            <button
+                              key={kb.id}
+                              type="button"
+                              onClick={() =>
+                                setSelectedKbIds((prev) =>
+                                  prev.includes(kb.id)
+                                    ? prev.filter((id) => id !== kb.id)
+                                    : [...prev, kb.id]
+                                )
+                              }
+                              className={cn(
+                                "flex w-full flex-col items-start gap-0.5 rounded-[6px] px-2 py-2 text-left hover:bg-[#f5f5f5]",
+                                selected && "bg-[#f5f5f5]"
+                              )}
+                            >
+                              <span className="text-[14px] leading-[22px] text-[#191919]">
+                                {kb.name}
+                              </span>
+                              {kb.description ? (
+                                <span className="text-[12px] leading-[20px] text-[#808080]">
+                                  {kb.description}
+                                </span>
+                              ) : null}
+                            </button>
+                          );
+                        })
+                    )}
+                  </div>
+                  <div className="mt-2 border-t border-[#f0f0f0] pt-2">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                      onClick={() => {
+                        setActionPanel(null);
+                        setKnowledgeModalOpen(true);
+                      }}
+                    >
+                      <Settings className="size-4" aria-hidden />
+                      <span>{t("chat.composer.manageKnowledge")}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {newChatDesign && actionPanel === "skill" ? (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-[340px] rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+                  <div className="flex items-center gap-2 text-[14px] text-[#191919]">
+                    <Layers className="size-4" aria-hidden />
+                    <span>{t("chat.composer.skills")}</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-4 overflow-x-auto border-b border-[#f0f0f0] px-1 text-[14px]">
+                    <button
+                      type="button"
+                      onClick={() => setSkillTab("")}
+                      className={cn(
+                        "relative shrink-0 pb-1.5 pt-1",
+                        skillTab === "" ? "text-[#2673e5]" : "text-[#191919]"
+                      )}
+                    >
+                      {t("chat.composer.skillCategoryAll")}
+                      {skillTab === "" ? (
+                        <span className="absolute inset-x-0 bottom-0 h-0.5 rounded bg-[#2673e5]" />
+                      ) : null}
+                    </button>
+                    {skillTagTabs.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => setSkillTab(tag)}
+                        className={cn(
+                          "relative shrink-0 pb-1.5 pt-1",
+                          skillTab === tag ? "text-[#2673e5]" : "text-[#191919]"
+                        )}
+                      >
+                        {tag}
+                        {skillTab === tag ? (
+                          <span className="absolute inset-x-0 bottom-0 h-0.5 rounded bg-[#2673e5]" />
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                  <StandardInput
+                    value={skillSearch}
+                    onChange={(event) => setSkillSearch(event.target.value)}
+                    placeholder={t("chat.composer.searchSkills")}
+                    prefix={
+                      <SearchIcon
+                        className="size-3.5 text-[#808080]"
+                        aria-hidden
+                      />
+                    }
+                    className="mt-2"
+                  />
+                  <div className="mt-2 max-h-64 overflow-y-auto">
+                    {skillsLoading ? (
+                      <p className="px-2 py-3 text-[12px] text-[#808080]">
+                        {t("chat.composer.loading")}
+                      </p>
+                    ) : filteredSkills.length === 0 ? (
+                      <p className="px-2 py-3 text-[12px] text-[#808080]">
+                        {t("chat.composer.emptySkills")}
+                      </p>
+                    ) : (
+                      filteredSkills.map((skill) => {
+                        const selected = selectedSkillNames.includes(
+                          skill.name
+                        );
+                        const dotColor =
+                          SKILL_DOT_COLORS[
+                            Math.abs(hashString(skill.name)) %
+                              SKILL_DOT_COLORS.length
+                          ];
+                        return (
+                          <button
+                            key={skill.id}
+                            type="button"
+                            onClick={() =>
+                              setSelectedSkillNames((prev) =>
+                                prev.includes(skill.name)
+                                  ? prev.filter((name) => name !== skill.name)
+                                  : [...prev, skill.name]
+                              )
+                            }
+                            className={cn(
+                              "flex w-full items-center gap-2 rounded-[6px] px-2 py-2 text-left hover:bg-[#f5f5f5]",
+                              selected && "bg-[#f5f5f5]"
+                            )}
+                          >
+                            <span
+                              className="size-2 shrink-0 rounded-full"
+                              style={{ backgroundColor: dotColor }}
+                              aria-hidden
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[14px] leading-[22px] text-[#191919]">
+                                {skill.name}
+                              </span>
+                              {skill.description ? (
+                                <span className="block truncate text-[12px] leading-[20px] text-[#808080]">
+                                  {skill.description}
+                                </span>
+                              ) : null}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-col border-t border-[#f0f0f0] pt-2">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                      onClick={() => setActionPanel(null)}
+                    >
+                      <Link2 className="size-4" aria-hidden />
+                      <span>{t("chat.composer.addLocalSkill")}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                      onClick={() => {
+                        setActionPanel(null);
+                        onOpenWorkbenchSkillPicker?.();
+                      }}
+                    >
+                      <Settings className="size-4" aria-hidden />
+                      <span>{t("chat.composer.manageSkills")}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="flex min-w-0 items-center gap-1">
+                {newChatDesign && (
+                  <button
+                    type="button"
+                    aria-label={t("chat.composer.plus")}
+                    className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-[#191919] hover:bg-[#f5f5f5]"
+                    onClick={() =>
+                      setActionPanel((panel) =>
+                        panel === "plus" ? null : "plus"
+                      )
+                    }
+                  >
+                    <PlusIcon className="size-4" aria-hidden />
+                  </button>
                 )}
-                {!compact &&
+                {newChatDesign ? (
+                  <button
+                    type="button"
+                    className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[4px] px-2 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                    onClick={() =>
+                      setActionPanel((panel) => (panel === "kb" ? null : "kb"))
+                    }
+                  >
+                    <Database className="size-4" aria-hidden />
+                    <span>{t("chat.composer.knowledge")}</span>
+                    <ChevronDown
+                      className="size-3.5 text-[#808080]"
+                      aria-hidden
+                    />
+                  </button>
+                ) : (
+                  !compact &&
                   !creationMode &&
                   (workbenchPresentation ||
                     knowledgeCapabilities?.sources.local.enabled ||
@@ -788,8 +1001,7 @@ export const Composer: FC<ComposerProps> = ({
                           size="sm"
                           className={cn(
                             "h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-foreground",
-                            workbenchPresentation &&
-                              "text-base leading-6 text-foreground"
+                            workbenchPresentation && "text-base leading-6"
                           )}
                           onClick={
                             workbenchKnowledgePopover
@@ -815,7 +1027,10 @@ export const Composer: FC<ComposerProps> = ({
                               : knowledgeSummary}
                           </span>
                           {workbenchPresentation && (
-                            <ChevronDown className="size-4 shrink-0 opacity-50" />
+                            <ChevronDown
+                              className="size-4 shrink-0 opacity-50"
+                              aria-hidden
+                            />
                           )}
                         </Button>
                       </PopoverTrigger>
@@ -825,7 +1040,104 @@ export const Composer: FC<ComposerProps> = ({
                         </PopoverContent>
                       ) : null}
                     </Popover>
-                  )}
+                  )
+                )}
+                {newChatDesign && (
+                  <ComposerPrimitive.AddAttachment asChild>
+                    <button
+                      type="button"
+                      className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[4px] px-2 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                    >
+                      <Link2 className="size-4" aria-hidden />
+                      <span>{t("chat.composer.uploadFile")}</span>
+                    </button>
+                  </ComposerPrimitive.AddAttachment>
+                )}
+                {!compact && workbenchPresentation && (
+                  <ComposerAddAttachment
+                    label={t("chat.composer.uploadFile")}
+                    icon={<Paperclip className="size-4" />}
+                  />
+                )}
+                {!compact && !newChatDesign && !workbenchPresentation && (
+                  <ComposerAddAttachment />
+                )}
+                {!compact && !creationMode && workbenchPresentation && (
+                  <WorkbenchPlanningMenu
+                    chatMode={chatMode}
+                    onChatModeChange={onChatModeChange}
+                    disabled={isRunning}
+                  />
+                )}
+                {!compact && workbenchResources && workbenchPresentation && (
+                  <TooltipWrapper tooltip={t("chat.composer.addAgent")}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="size-8 shrink-0 p-0"
+                      disabled={isRunning}
+                      onClick={workbenchResources.onSelectAgent}
+                    >
+                      <PlusIcon className="size-4" />
+                    </Button>
+                  </TooltipWrapper>
+                )}
+                {!compact && workbenchResources && !workbenchPresentation && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+                    disabled={isRunning}
+                    onClick={workbenchResources.onSelectAgent}
+                  >
+                    <Bot className="size-3.5" />
+                    Agent
+                  </Button>
+                )}
+                {!compact && workbenchResources && (
+                  <>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className={cn(
+                            "h-8 shrink-0 gap-1.5 px-2 text-xs",
+                            workbenchPresentation &&
+                              "text-base leading-6 text-foreground"
+                          )}
+                          disabled={isRunning}
+                          onClick={
+                            workbenchSkillPopover
+                              ? undefined
+                              : onOpenWorkbenchSkillPicker
+                          }
+                        >
+                          <SkillStackIcon
+                            className={cn(
+                              "size-3.5",
+                              workbenchPresentation && "size-4"
+                            )}
+                          />
+                          {workbenchPresentation
+                            ? t("chat.composer.skills")
+                            : "Skills"}
+                          {workbenchPresentation && (
+                            <ChevronDown className="size-4 opacity-50" />
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      {workbenchSkillPopover ? (
+                        <PopoverContent align="start" className="w-80 p-0">
+                          {workbenchSkillPopover}
+                        </PopoverContent>
+                      ) : null}
+                    </Popover>
+                  </>
+                )}
                 {!compact &&
                   allowRuntimeMetadata &&
                   onRuntimeMetadataChange && (
@@ -835,23 +1147,21 @@ export const Composer: FC<ComposerProps> = ({
                       disabled={isRunning}
                     />
                   )}
-                {!compact && workbenchPresentation && (
-                  <ComposerAddAttachment
-                    label={t("chat.composer.uploadFile")}
-                    icon={<Paperclip className="size-4" />}
-                  />
-                )}
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-1">
-                {!compact && workbenchPresentation && showModelSelector && (
+                {showModelSelector && (
                   <ModelSelector
                     models={models}
+                    showEffort={newChatDesign || Boolean(workbenchPresentation)}
                     value={selectedModelId}
                     onValueChange={onModelChange}
                     deepThinking={deepThinking}
                     onDeepThinkingChange={onDeepThinkingChange}
-                    effort={thinkingEffort}
-                    showEffort={Boolean(workbenchPresentation)}
+                    effort={
+                      newChatDesign
+                        ? (thinkingEffort ?? "high")
+                        : thinkingEffort
+                    }
                     onEffortChange={(value) => {
                       if (
                         value === "low" ||
@@ -862,11 +1172,12 @@ export const Composer: FC<ComposerProps> = ({
                     }}
                     variant="ghost"
                     size="sm"
-                    className="shrink-0 text-base leading-6 text-foreground [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:leading-6"
+                    className={cn(
+                      "shrink-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground",
+                      workbenchPresentation &&
+                        "text-base leading-6 [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:leading-6"
+                    )}
                   />
-                )}
-                {!compact && !workbenchPresentation && (
-                  <ComposerAddAttachment />
                 )}
                 {!compact && (
                   <AuiIf condition={(s) => !s.composer.dictation}>
@@ -879,17 +1190,9 @@ export const Composer: FC<ComposerProps> = ({
                               variant="ghost"
                               size="icon"
                               disabled={!isDictationConfigured}
-                              className={cn(
-                                "size-8 text-muted-foreground",
-                                workbenchPresentation && "size-9"
-                              )}
+                              className="size-8 text-muted-foreground"
                             >
-                              <Mic
-                                className={cn(
-                                  "size-4",
-                                  workbenchPresentation && "size-6"
-                                )}
-                              />
+                              <Mic className="size-4" />
                             </Button>
                           </ComposerPrimitive.Dictate>
                         </span>
@@ -911,17 +1214,9 @@ export const Composer: FC<ComposerProps> = ({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className={cn(
-                              "size-8 text-destructive hover:text-destructive",
-                              workbenchPresentation && "size-9"
-                            )}
+                            className="size-8 text-destructive hover:text-destructive"
                           >
-                            <MicOff
-                              className={cn(
-                                "size-4",
-                                workbenchPresentation && "size-6"
-                              )}
-                            />
+                            <MicOff className="size-4" />
                           </Button>
                         </ComposerPrimitive.StopDictation>
                       </TooltipTrigger>
@@ -935,6 +1230,7 @@ export const Composer: FC<ComposerProps> = ({
                   onSend={prepareSend}
                   disabled={disabled}
                   workbench={Boolean(workbenchPresentation)}
+                  newChatDesign={newChatDesign}
                 />
               </div>
             </div>
@@ -970,6 +1266,59 @@ export const Composer: FC<ComposerProps> = ({
   );
 };
 
+const WorkbenchPlanningMenu: FC<{
+  chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
+  disabled?: boolean;
+}> = ({ chatMode, onChatModeChange, disabled }) => {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const options: { value: ChatMode; label: string }[] = [
+    { value: "planning", label: t("chat.composer.planningMode") },
+    { value: "execution", label: t("chat.composer.executionMode") },
+  ];
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          className="h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
+        >
+          {chatMode === "planning" ? (
+            <MessageCircleMore className="size-4" />
+          ) : (
+            <Play className="size-4" />
+          )}
+          {chatMode === "planning"
+            ? t("chat.composer.planningMode")
+            : t("chat.composer.executionMode")}
+          <ChevronDown className="size-4 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-56 p-1">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className="flex h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 hover:bg-accent"
+            onClick={() => {
+              onChatModeChange(option.value);
+              setOpen(false);
+            }}
+          >
+            {option.label}
+            {chatMode === option.value && <Check className="size-4" />}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+};
+
 // `ComposerPrimitive.Cancel` / `Send` forward their internal `onClick` to the
 // direct child via Radix Slot, so the Button MUST be the immediate child for
 // the click handler to actually fire. The tooltip wrapper sits outside so its
@@ -979,7 +1328,8 @@ const ComposerSendOrCancel: FC<{
   onSend: () => void;
   disabled?: boolean;
   workbench?: boolean;
-}> = ({ onSend, disabled, workbench = false }) => {
+  newChatDesign?: boolean;
+}> = ({ onSend, disabled, workbench = false, newChatDesign = false }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -1009,13 +1359,17 @@ const ComposerSendOrCancel: FC<{
               size="icon"
               className={cn(
                 "size-8 rounded-full ml-2",
+                newChatDesign &&
+                  "border-0 bg-[#d9d9d9] text-white hover:bg-[#d9d9d9] disabled:bg-[#d9d9d9] disabled:text-white aria-disabled:bg-[#d9d9d9] aria-disabled:text-white [&_svg]:size-4",
                 workbench &&
                   "size-[30px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-70"
               )}
               disabled={disabled || !hasText}
               aria-label={t("chat.composer.send")}
             >
-              {workbench ? (
+              {newChatDesign ? (
+                <Send className="-rotate-12" />
+              ) : workbench ? (
                 <Send className="size-5" />
               ) : (
                 <ArrowUp className="size-5" />
