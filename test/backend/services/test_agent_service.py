@@ -16750,8 +16750,9 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("version_no", [None, 1])
 async def test_stream_agent_chunks_debug_run_skips_conversation_persistence(
-    monkeypatch,
+    monkeypatch, version_no,
 ):
     """Debug runs stream normally without creating or finalizing chat rows."""
     from management.services.agent import service as agent_service
@@ -16760,6 +16761,7 @@ async def test_stream_agent_chunks_debug_run_skips_conversation_persistence(
         agent_id=1,
         conversation_id=999,
         query="debug",
+        version_no=version_no,
         history=[],
         minio_files=[],
         is_debug=True,

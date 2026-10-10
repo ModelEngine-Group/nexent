@@ -450,6 +450,17 @@ class A2AServerService:
             raise AgentNotEnabledError(f"A2A Server not enabled for endpoint {endpoint_id}")
         return server_agent
 
+    @staticmethod
+    def _published_version_no(server_agent: Dict[str, Any]) -> int:
+        """Read the version recorded by publication, never fall back to a draft."""
+        version = server_agent.get("version")
+        if not isinstance(version, str) or not version.isascii() or not version.isdecimal():
+            raise EndpointNotFoundError("A2A endpoint has no valid published version; publish it as A2A first")
+        version_no = int(version)
+        if version_no <= 0:
+            raise EndpointNotFoundError("A2A endpoint has no valid published version; publish it as A2A first")
+        return version_no
+
     def _resolve_task_id(
         self,
         parsed_message: Dict[str, Any],
@@ -686,6 +697,7 @@ class A2AServerService:
             AgentNotEnabledError: If agent is not enabled.
         """
         server_agent = self._validate_endpoint(endpoint_id)
+        version_no = self._published_version_no(server_agent)
         effective_tenant_id = tenant_id or server_agent.get("tenant_id")
         parsed_message = self.adapter.parse_a2a_message(message)
         message_obj = parsed_message.get("message", {})
@@ -717,6 +729,7 @@ class A2AServerService:
             agent_request = AgentRequest(
                 conversation_id=None,
                 agent_id=internal_request["agent_id"],
+                version_no=version_no,
                 query=internal_request["query"],
                 history=internal_request.get("history", []),
                 minio_files=None,
@@ -794,6 +807,7 @@ class A2AServerService:
             AgentNotEnabledError: If agent is not enabled.
         """
         server_agent = self._validate_endpoint(endpoint_id)
+        version_no = self._published_version_no(server_agent)
         effective_tenant_id = tenant_id or server_agent.get("tenant_id")
         parsed_message = self.adapter.parse_a2a_message(message)
         message_obj = parsed_message.get("message", {})
@@ -833,6 +847,7 @@ class A2AServerService:
             agent_request = AgentRequest(
                 conversation_id=None,
                 agent_id=internal_request["agent_id"],
+                version_no=version_no,
                 query=internal_request["query"],
                 history=internal_request.get("history", []),
                 minio_files=None,
