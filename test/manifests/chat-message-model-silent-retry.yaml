@@ -32,20 +32,28 @@ cases:
         profiles: [mock]
   - case_id: CMSR-D3-001
     stage: D3
-    status: blocked
+    status: implemented
     contract_hash: sha256:f6ba2ceeb76ca6051b3f305afac2f932ad4f1148a2201ea8471d0cbaae207b6e
-    implementation_hash: sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
-    implementation: []
+    implementation_hash: sha256:ae252be0da5024d144ae862cddaa9a71102050f2b43ed244fc8b29d1425bb901
+    implementation:
+      - framework: pytest
+        file: test/automation/d3/test_semantic_repair_runtime.py
+        selector: test_cmsr_d3_001
+        profiles: [mock]
     required_mock_services: [model-provider]
-    notes: Requires a disposable Nexent instance running this worktree; deployment is outside this change request.
+    notes: Fixed mock runtime coverage requires a disposable deployed Nexent instance; real_smoke remains unverified.
   - case_id: CMSR-D4-001
     stage: D4
-    status: blocked
+    status: implemented
     contract_hash: sha256:f110f582fe091286fdaa5301f8bdc22703bf583fc7c6c95214ae8c8187a612a1
-    implementation_hash: sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
-    implementation: []
+    implementation_hash: sha256:9c83a2f64a371eae2149c016d79e511b8ef0d9171af65018c508fc676fe6d085
+    implementation:
+      - framework: playwright
+        file: test/automation/d4/semantic_repair_browser.mjs
+        selector: test_cmsr_d4_001
+        profiles: [mock]
     required_mock_services: [model-provider]
-    notes: Requires browser verification against a freshly deployed instance and a controlled paused provider.
+    notes: Run with the Codex built-in tab after test-user login; provider callbacks separate auxiliary title calls by their configured reserve.
   - case_id: CMSR-D5-001
     stage: D5
     status: blocked

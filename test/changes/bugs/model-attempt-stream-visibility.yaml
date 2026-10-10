@@ -69,4 +69,4 @@ changes:
       description: Formal coverage omitted the effective repair flag and suppression capability; envelope-only legacy assertions did not protect accepted code actions.
     feature_contract_changed: false
     affected_features: {existing: [CMSR-005], added: [], modified: [], retired: []}
-    affected_cases: {existing: [CMSR-D1-001, CMSR-D2-001, CMSR-D3-001, CMSR-D4-001, CMSR-D5-001], added: [], modified: [CMSR-D1-003], retired: []}
+    affected_cases: {existing: [CMSR-D1-001, CMSR-D2-001, CMSR-D5-001], added: [], modified: [CMSR-D1-003, CMSR-D3-001, CMSR-D4-001], retired: []}
