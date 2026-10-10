@@ -15,7 +15,9 @@ from pydantic import BaseModel, Field
 
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.exceptions import (
+    AgentNotFoundError,
     AppException,
+    ForbiddenError,
     RuntimeMetadataValidationError,
 )
 
@@ -26,6 +28,7 @@ from services.a2a_client_service import (
 )
 from services.a2a_server_service import a2a_server_service
 from database import a2a_agent_db
+from services.a2a_relation_service import require_external_relation_edit
 from utils.auth_utils import get_current_user_info
 from utils.runtime_metadata_utils import (
     validate_runtime_metadata,
@@ -456,6 +459,7 @@ async def add_external_agent_relation(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
+        require_external_relation_edit(request_body.local_agent_id, tenant_id, user_id)
         result = a2a_agent_db.add_external_agent_relation(
             local_agent_id=request_body.local_agent_id,
             external_agent_id=request_body.external_agent_id,
@@ -468,6 +472,10 @@ async def add_external_agent_relation(
             content={"status": "success", "data": result}
         )
 
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent not found") from e
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except ValueError as e:
         logger.error(f"Add relation failed: {e}")
         raise HTTPException(
@@ -491,8 +499,9 @@ async def remove_external_agent_relation(
 ):
     """Remove a relation between a local agent and an external A2A agent."""
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
+        require_external_relation_edit(local_agent_id, tenant_id, user_id)
         result = a2a_agent_db.remove_external_agent_relation(
             local_agent_id=local_agent_id,
             external_agent_id=external_agent_id,
@@ -510,6 +519,10 @@ async def remove_external_agent_relation(
             content={"status": "success", "message": "Relation removed"}
         )
 
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent not found") from e
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:

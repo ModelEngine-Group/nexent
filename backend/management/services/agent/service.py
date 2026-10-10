@@ -720,6 +720,11 @@ async def update_agent_info_impl(
 
     related_agents_dicts = _validate_agent_relationships(request, tenant_id)
 
+    # Validate external selections before any Agent or relationship mutation.
+    for external_agent_id in getattr(request, "related_external_agent_ids", None) or []:
+        if a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id) is None:
+            raise AgentNotFoundError("External agent not found")
+
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(
             ErrorCode.COMMON_PARAMETER_INVALID,
@@ -761,7 +766,7 @@ async def update_agent_info_impl(
 
     # If agent_id is None, create a new agent; otherwise, update existing
     agent_id: Optional[int] = request.agent_id
-    if agent_id is not None and isinstance(getattr(request, "enable_protocol_repair_retry", None), bool):
+    if agent_id is not None:
         agent_record = search_agent_info_by_agent_id(agent_id, tenant_id)
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
         user_role = str(user_tenant_record.get("user_role") or "").upper()
@@ -1033,9 +1038,13 @@ async def update_agent_info_impl(
                         tenant_id=tenant_id,
                         user_id=user_id,
                     )
+                except AgentNotFoundError:
+                    raise
                 except ValueError:
                     # Relation already exists, skip
                     pass
+    except AgentNotFoundError:
+        raise
     except Exception as e:
         logger.error(f"Failed to update related external agents: {str(e)}")
         raise ValueError(f"Failed to update related external agents: {str(e)}")
