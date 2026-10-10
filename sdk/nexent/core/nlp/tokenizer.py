@@ -36,24 +36,26 @@ def calculate_term_weights(text, use_idf=False, doc_freqs=None, total_docs=1):
     text = text.lower()
 
     # Tokenization with POS tagging
-    words = pseg.cut(text)
+    words = [
+        (word, flag)
+        for word, flag in pseg.cut(text)
+        if word not in analyse.default_tfidf.stop_words and word.strip()
+    ]
     term_stats = defaultdict(float)
     total_weight = 0.0
 
     # First pass: calculate term frequency + POS weight + position weight
     for idx, (word, flag) in enumerate(words):
-        # Filter out stop words and whitespace
-        if word not in analyse.default_tfidf.stop_words and word.strip():
-            # Get the first letter of POS tag (Chinese POS tagging convention)
-            pos = flag[0].lower()
-            # Get the base weight for the POS
-            pos_weight = POS_WEIGHTS.get(pos, 1.0)
-            # Position weight enhancement (words at the beginning and end of the sentence are more important)
-            position_factor = 1.2 if idx < 3 or idx > len(text) / 3 else 1.0
-            # Combined weight = POS weight * position factor
-            combined_weight = pos_weight * position_factor
-            term_stats[word] += combined_weight
-            total_weight += combined_weight
+        # Get the first letter of POS tag (Chinese POS tagging convention)
+        pos = flag[0].lower()
+        # Get the base weight for the POS
+        pos_weight = POS_WEIGHTS.get(pos, 1.0)
+        # Position weight enhancement (words at the beginning and end of the sentence are more important)
+        position_factor = 1.2 if idx < 3 or idx >= len(words) - 3 else 1.0
+        # Combined weight = POS weight * position factor
+        combined_weight = pos_weight * position_factor
+        term_stats[word] += combined_weight
+        total_weight += combined_weight
 
     # Calculate TF weight (term frequency weight)
     tf_weights = {term: weight / total_weight for term, weight in term_stats.items()}
