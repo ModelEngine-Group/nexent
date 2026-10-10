@@ -1153,6 +1153,150 @@ class TestApplyCreateDefaultsGaps:
         assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
 
 
+class TestGraphConfigValidation:
+    """Graph settings are validated against the values accepted by AIDP."""
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"chunk_token_num": "512", "chunk_overlap_num": 128},
+            {"chunk_token_num": True, "chunk_overlap_num": 128},
+            {"chunk_token_num": 0, "chunk_overlap_num": 128},
+            {"chunk_token_num": 512, "chunk_overlap_num": None},
+            {"chunk_token_num": 512, "chunk_overlap_num": False},
+            {"chunk_token_num": 512, "chunk_overlap_num": 128},
+        ],
+    )
+    def test_valid_or_unverifiable_chunk_pairs_are_left_to_aidp(self, aidp_service_module, payload):
+        aidp_service_module._validate_chunking(payload)
+
+    @pytest.mark.parametrize("overlap", [-1, 257])
+    def test_rejects_chunk_overlap_outside_half_the_chunk(self, aidp_service_module, overlap):
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._validate_chunking(
+                {"chunk_token_num": 512, "chunk_overlap_num": overlap}
+            )
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"domain": 7},
+            {"prompt_language": 7},
+            {"prompt_text": 7},
+            {"retrieve_subgraph_hop": 2},
+            {"llm_model_name": 7},
+            {"llm_model_name": "模型" * 129},
+        ],
+    )
+    def test_rejects_wrong_types_and_oversized_llm_names(self, aidp_service_module, override):
+        config = {
+            "domain": "常规",
+            "retrieve_subgraph_hop": "2",
+            "no_think_mode": "是",
+            "prompt_language": "中文",
+            "prompt_text": "提取实体关系。",
+            "synonym_merge_enable": "否",
+            "disambiguation_enable": "否",
+            "llm_model_name": "qwen3_8b",
+            **override,
+        }
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._serialize_graph_config(config)
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+    def test_omits_optional_llm_model_name_when_not_configured(self, aidp_service_module):
+        config = {
+            "domain": "常规",
+            "retrieve_subgraph_hop": "2",
+            "no_think_mode": "是",
+            "prompt_language": "中文",
+            "prompt_text": "提取实体关系。",
+            "synonym_merge_enable": "否",
+            "disambiguation_enable": "否",
+        }
+        serialized = json.loads(aidp_service_module._serialize_graph_config(config))
+        assert "llm_model_name" not in serialized
+
+
+class TestGetAidpGraphTemplateImpl:
+    """The graph-template client validates language and maps upstream failures."""
+
+    @staticmethod
+    def _configure_client(module, response):
+        client = MagicMock()
+        client.get.return_value = response
+        module.http_client_manager.get_sync_client.return_value = client
+        module._request_with_retry = lambda request_fn, context: request_fn()
+        return client
+
+    def test_rejects_unsupported_language_before_request(self, aidp_service_module):
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key", "klingon"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+        aidp_service_module.http_client_manager.get_sync_client.assert_not_called()
+
+    def test_rejects_unexpected_response_shape(self, aidp_service_module):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"value": None}
+        self._configure_client(aidp_service_module, response)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    def test_maps_connection_error(self, aidp_service_module):
+        request = httpx.Request("GET", "http://aidp.example.test")
+        client = MagicMock()
+        client.get.side_effect = httpx.ConnectError("offline", request=request)
+        aidp_service_module.http_client_manager.get_sync_client.return_value = client
+        aidp_service_module._request_with_retry = lambda request_fn, context: request_fn()
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    def test_maps_http_status_error(self, aidp_service_module, monkeypatch):
+        request = httpx.Request("GET", "http://aidp.example.test")
+        response = httpx.Response(500, request=request)
+        client = MagicMock()
+        client.get.return_value = response
+        aidp_service_module.http_client_manager.get_sync_client.return_value = client
+        aidp_service_module._request_with_retry = lambda request_fn, context: request_fn()
+        mapped_error = AppException(ErrorCode.AIDP_RESPONSE_ERROR, "upstream status")
+        mapper = MagicMock(side_effect=mapped_error)
+        monkeypatch.setattr(aidp_service_module, "_raise_aidp_http_error", mapper)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key"
+            )
+
+        assert exc_info.value is mapped_error
+        mapper.assert_called_once()
+
+    def test_maps_invalid_json(self, aidp_service_module):
+        response = MagicMock(status_code=200)
+        response.json.side_effect = ValueError("invalid JSON")
+        self._configure_client(aidp_service_module, response)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
 # ---------------------------------------------------------------------------
 # _normalize_response tests
 # ---------------------------------------------------------------------------
@@ -3055,6 +3199,12 @@ class TestListAidpDocHistoryImpl:
         )
 
         assert "status" not in result["value"][0]
+
+    @pytest.mark.parametrize("value, expected", [(4, "4"), (4.5, "4.5"), (True, None)])
+    def test_numeric_canonical_status_is_preserved_but_boolean_is_ignored(
+        self, aidp_service_module, value, expected
+    ):
+        assert aidp_service_module._extract_doc_status({"status": value}) == expected
 
 
     def test_unreadable_status_payload_is_reported(

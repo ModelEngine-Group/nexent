@@ -2470,3 +2470,60 @@ class TestAIDPServerSideKnowledgeFileQueries:
         list_docs.assert_called_once_with(
             SERVER_URL, API_KEY, "kb-1", 2, 5, "制度"
         )
+
+    def test_unfiltered_ingested_file_list_uses_count_endpoint(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app as module
+
+        monkeypatch.setattr(
+            module.perms, "require_permission", lambda *a, **kw: self._read_only()
+        )
+        calls = []
+
+        async def run_blocking(name, _function, *args, **kwargs):
+            calls.append((name, args, kwargs))
+            if name == "aidp-list-ingested-files":
+                return {"value": [{"file_uuid": "f-1", "file_name": "policy.pdf"}]}
+            if name == "aidp-ingested-file-count":
+                return 25
+            raise AssertionError(f"Unexpected blocking call: {name}")
+
+        monkeypatch.setattr(module, "run_blocking", run_blocking)
+        response = _client().get(
+            "/aidp-mgmt/knowledge-bases/kb-1/files?page=1&page_size=10",
+            headers=_bearer(),
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["total_count"] == 25
+        assert body["total_reliable"] is True
+        assert body["has_more"] is True
+        assert {call[0] for call in calls} == {
+            "aidp-list-ingested-files", "aidp-ingested-file-count"
+        }
+
+    def test_unfiltered_ingested_file_list_propagates_list_failure(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app as module
+
+        monkeypatch.setattr(
+            module.perms, "require_permission", lambda *a, **kw: self._read_only()
+        )
+        list_error = module.AppException(
+            module.ErrorCode.AIDP_CONNECTION_ERROR, "AIDP is unavailable"
+        )
+
+        async def run_blocking(name, _function, *args, **kwargs):
+            if name == "aidp-list-ingested-files":
+                raise list_error
+            if name == "aidp-ingested-file-count":
+                return 0
+            raise AssertionError(f"Unexpected blocking call: {name}")
+
+        monkeypatch.setattr(module, "run_blocking", run_blocking)
+        response = _client().get(
+            "/aidp-mgmt/knowledge-bases/kb-1/files",
+            headers=_bearer(),
+        )
+
+        assert response.status_code == list_error.http_status
+        assert response.json()["code"] == module.ErrorCode.AIDP_CONNECTION_ERROR.value
