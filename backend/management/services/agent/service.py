@@ -14,6 +14,7 @@ from management.services.agent.naming import (
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
+    AgentNotFoundError,
     AppException,
     ForbiddenError,
     TenantResourceLimitError,
@@ -382,7 +383,7 @@ async def get_agent_info_impl(
         record_tenant_id = agent_info.get("tenant_id")
         if record_tenant_id:
             tenant_id = record_tenant_id
-    except ForbiddenError:
+    except (AgentNotFoundError, ForbiddenError):
         raise
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")

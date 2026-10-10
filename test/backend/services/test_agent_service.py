@@ -11374,11 +11374,14 @@ def test_get_agent_by_name_impl_success(mock_search, mock_query_versions):
 @patch("management.services.agent.management.query_version_list")
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
-    """Test that agent not found raises Exception."""
-    mock_search.side_effect = Exception("Agent not found")
+    """An expected Agent lookup miss retains its domain exception."""
+    from consts.exceptions import AgentNotFoundError
 
-    with pytest.raises(Exception, match="agent not found"):
+    mock_search.side_effect = AgentNotFoundError("agent not found")
+
+    with pytest.raises(AgentNotFoundError, match="agent not found"):
         get_agent_by_name_impl("nonexistent_agent", "tenant_1")
+    mock_query_versions.assert_not_called()
 
 
 @patch("management.services.agent.management.query_version_list")
