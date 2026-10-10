@@ -27,6 +27,7 @@ import {
   setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
+import { setThreadAgentOverride } from "./adapter/thread-agent-registry";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
 import { createNewChatAttachmentAdapter } from "./adapter/attachment-adapter";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -745,11 +746,16 @@ const HomeContent: FC<{
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
       await runtime.threads.switchToNewThread();
-      const thread = runtime.threads.getItemById(
-        runtime.threads.getState().mainThreadId
-      );
+      const mainThreadId = runtime.threads.getState().mainThreadId;
+      const thread = runtime.threads.getItemById(mainThreadId);
       await thread.initialize();
       await thread.updateCustom({ agentId: agent.id });
+      // New threads have no server conversation yet, so the sidebar grouping
+      // cannot read the agent from the conversation list — register it here.
+      const numericAgentId = Number(agent.id);
+      if (Number.isInteger(numericAgentId) && numericAgentId > 0) {
+        setThreadAgentOverride(mainThreadId, numericAgentId);
+      }
       onAgentSelected(agent);
     },
     [onAgentSelected, runtime]
@@ -769,9 +775,11 @@ const HomeContent: FC<{
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar
+            newChatDesign
             generatedTitles={generatedTitles}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
+            onAgentSelected={handleAgentSelectedFromLanding}
           />
         </SidebarProvider>
       </div>
@@ -779,6 +787,7 @@ const HomeContent: FC<{
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">
         <div className="min-h-0 flex-1">
           <Chat
+            newChatDesign
             generatedTitle={
               activeThreadId ? generatedTitles.get(activeThreadId) : undefined
             }

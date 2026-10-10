@@ -52,6 +52,8 @@ export interface ChatProps {
   interactionContent?: ReactNode;
   readOnlyReason?: string;
   landingContent?: ReactNode;
+  /** Opt into the redesigned NewChat presentation. */
+  newChatDesign?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
@@ -110,6 +112,7 @@ export const Chat: FC<ChatProps> = ({
   interactionContent,
   readOnlyReason,
   landingContent,
+  newChatDesign = false,
   workbenchPresentation,
   workbenchResources,
   onRemoveWorkbenchSkill,
@@ -147,6 +150,7 @@ export const Chat: FC<ChatProps> = ({
           agent={workbenchPlaceholderAgent}
           generatedTitle={generatedTitle}
           conversationId={conversationId}
+          newChatDesign={newChatDesign}
           welcomeContent={landingContent}
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
@@ -191,6 +195,7 @@ export const Chat: FC<ChatProps> = ({
       welcomeTitle={welcomeTitle}
       welcomeSuggestions={welcomeSuggestions}
       conversationId={conversationId}
+      newChatDesign={newChatDesign}
       onBack={onBack}
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}

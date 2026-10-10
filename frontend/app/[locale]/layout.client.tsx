@@ -25,6 +25,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const isChatPage = pathname?.includes("/chat");
 
   const effectivePath = getEffectiveRoutePath(pathname);
+  const isNewChatPage = effectivePath?.startsWith("/newchat") ?? false;
   const isHomePage = effectivePath === "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
   const isSharePage = effectivePath.startsWith("/share/");
@@ -112,7 +113,9 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           marginLeft: `${SIDER_CONFIG.WIDTH}px`,
         }}
       >
-        {!isAgentConfigPage && <TopNavbar isChatPage={isChatPage} />}
+        {!isAgentConfigPage && !isNewChatPage && (
+          <TopNavbar isChatPage={isChatPage} />
+        )}
 
         <Content style={contentStyle}>
           {isHomePage || isOAuthCompletePage || isSharePage || isAuthorized ? (
@@ -124,7 +127,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           )}
         </Content>
 
-        {!isSetupPage && !isAgentConfigPage && (
+        {!isSetupPage && !isAgentConfigPage && !isNewChatPage && (
           <Footer style={footerStyle}>
             <FooterLayout />
           </Footer>
