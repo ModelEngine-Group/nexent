@@ -2,7 +2,9 @@
 Database operations for user tenant relationship management
 """
 import logging
-from typing import Any, List, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func, text
 
 from consts.const import (
     DEFAULT_TENANT_ID,
@@ -10,10 +12,10 @@ from consts.const import (
     MAX_SUPER_ADMIN_COUNT,
     MAX_USERS_PER_TENANT,
 )
+from consts.exceptions import TenantResourceLimitError
 from database.client import as_dict, get_db_session
 from database.db_models import TenantGroupInfo, TenantGroupUser, UserTenant
-from consts.exceptions import TenantResourceLimitError
-from sqlalchemy import func, text
+
 
 logger = logging.getLogger(__name__)
 

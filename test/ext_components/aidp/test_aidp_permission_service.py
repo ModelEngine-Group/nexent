@@ -797,6 +797,7 @@ class TestIntersectAccessibleKbs:
             {
                 "kb_id": "k1", "kds_name": "Local KB 1", "tenant_id": "t",
                 "owner_user_id": "owner", "ingroup_permission": "READ_ONLY",
+                "creator_name": None,
                 "group_ids": [1], "permission": "READ",
             },
             {
@@ -811,7 +812,7 @@ class TestIntersectAccessibleKbs:
             return_value=(local_rows, {}),
         ):
             remote = [
-                {"kds_id": "k1", "kds_name": "Remote KB 1"},
+                {"kds_id": "k1", "kds_name": "Remote KB 1", "creator_name": "remote-owner"},
                 {"kds_id": "k2", "kds_name": "Remote KB 2"},
             ]
             result = svc.intersect_accessible_kbs(remote, "u", "t")
@@ -820,6 +821,7 @@ class TestIntersectAccessibleKbs:
         assert result[0]["kds_name"] == "Remote KB 1"
         assert result[0]["tenant_id"] == "t"
         assert result[0]["owner_user_id"] == "owner"
+        assert result[0]["creator_name"] is None
         assert result[0]["kb_id"] == "k1"
         assert result[0]["kds_id"] == "k1"
 

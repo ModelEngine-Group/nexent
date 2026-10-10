@@ -341,6 +341,7 @@ def _intersect_accessible_rows(
     protected_local_fields = (
         "tenant_id",
         "owner_user_id",
+        "creator_name",
         "ingroup_permission",
         "group_ids",
         "permission",

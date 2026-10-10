@@ -1,14 +1,5 @@
 // Knowledge base related constants
 
-// Keep this pattern in sync with AIDP's knowledge-base name validation.
-export const AIDP_KNOWLEDGE_BASE_NAME_PATTERN =
-  /^[\u4e00-\u9fa5a-zA-Z][\u4e00-\u9fa5a-zA-Z0-9_]{0,255}$/;
-
-// Debounce for the AIDP knowledge-base search box. Keystrokes are coalesced
-// until the user pauses for this long, so typing "report" issues one request
-// instead of six.
-export const KB_SEARCH_DEBOUNCE_MS = 300;
-
 // Document status constants
 export const DOCUMENT_STATUS = {
   WAIT_FOR_PROCESSING: "WAIT_FOR_PROCESSING",
@@ -174,70 +165,10 @@ export const EXTENSION_TO_TYPE_MAP = {
   [FILE_EXTENSIONS.EPUB]: FILE_TYPES.EPUB,
 } as const;
 
-// AIDP supported file extensions, grouped by category
-export const AIDP_FILE_EXTENSIONS = {
-  TEXT: ["txt", "json", "md", "markdown"] as const,
-  WEB: ["html"] as const,
-  DOCUMENT: ["pdf", "docx", "doc", "ppt", "pptx"] as const,
-  SPREADSHEET: ["xlsx", "xls", "csv"] as const,
-  IMAGE: ["png", "jpeg", "jpg", "bmp"] as const,
-} as const;
-
-// Flat array of all allowed AIDP extensions (lowercase, no dot)
-export const AIDP_ALLOWED_EXTENSIONS = [
-  ...AIDP_FILE_EXTENSIONS.TEXT,
-  ...AIDP_FILE_EXTENSIONS.WEB,
-  ...AIDP_FILE_EXTENSIONS.DOCUMENT,
-  ...AIDP_FILE_EXTENSIONS.SPREADSHEET,
-  ...AIDP_FILE_EXTENSIONS.IMAGE,
-] as const;
-
-// MIME types accepted by AIDP
-export const AIDP_ALLOWED_MIME_TYPES = new Set<string>([
-  "text/plain",
-  "application/json",
-  "text/markdown",
-  "text/html",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-  "text/csv",
-  "application/csv",
-  "image/png",
-  "image/jpeg",
-  "image/bmp",
-]);
-
-// Dragger `accept` prop value (comma-separated dot-extensions)
-export const AIDP_ACCEPT_STRING = [
-  ...AIDP_FILE_EXTENSIONS.TEXT,
-  ...AIDP_FILE_EXTENSIONS.WEB,
-  ...AIDP_FILE_EXTENSIONS.DOCUMENT,
-  ...AIDP_FILE_EXTENSIONS.SPREADSHEET,
-  ...AIDP_FILE_EXTENSIONS.IMAGE,
-]
-  .map((ext) => `.${ext}`)
-  .join(",");
-
-export const AIDP_MAX_UPLOAD_FILE_COUNT = 50;
-export const AIDP_SMALL_FILE_MAX_SIZE_MB = 20;
-export const AIDP_OTHER_FILE_MAX_SIZE_MB = 1024;
-export const AIDP_SMALL_FILE_EXTENSIONS = [
-  "txt",
-  "xls",
-  "xlsx",
-  "csv",
-] as const;
-export const AIDP_SMALL_FILE_MAX_SIZE_BYTES =
-  AIDP_SMALL_FILE_MAX_SIZE_MB * 1024 * 1024;
-export const AIDP_OTHER_FILE_MAX_SIZE_BYTES =
-  AIDP_OTHER_FILE_MAX_SIZE_MB * 1024 * 1024;
-
-const parsePositiveIntegerEnv = (value: string | undefined, fallback: number) => {
+const parsePositiveIntegerEnv = (
+  value: string | undefined,
+  fallback: number
+) => {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
