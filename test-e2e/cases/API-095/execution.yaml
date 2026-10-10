@@ -1,5 +1,8 @@
 schema_version: '1.0'
 case_id: API-095
+acceptance_bindings:
+  AC-01: [test_external_relationship_tenant_boundary]
+  AC-02: [test_external_relationship_tenant_boundary]
 implementations:
 - framework: pytest
   file: test.py
