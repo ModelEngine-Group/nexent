@@ -15,20 +15,26 @@ vi.mock("@/ext_components/aidp/services/aidpKnowledgeService", () => ({
 }));
 vi.mock("@/ext_components/aidp/components/AidpImportDrawer", () => ({
   default: ({
+    onClose,
     onDocsUploaded,
     onRefresh,
   }: {
+    onClose: () => void;
     onDocsUploaded: (ids: string[]) => void;
     onRefresh: () => void;
   }) => (
-    <button
-      onClick={() => {
-        onRefresh();
-        onDocsUploaded(["uploaded-file"]);
-      }}
-    >
-      finish test upload
-    </button>
+    <>
+      <button
+        onClick={() => {
+          onRefresh();
+          onDocsUploaded(["uploaded-file"]);
+        }}
+      >
+        finish test upload
+      </button>
+      <button onClick={onClose}>close drawer with confirm</button>
+      <button onClick={onClose}>close drawer with X</button>
+    </>
   ),
 }));
 
@@ -104,7 +110,7 @@ describe("knowledge list view preference", () => {
     );
   });
 
-  it("refreshes the list once when an import finishes", async () => {
+  it("refreshes only when the import drawer closes after upload completion", async () => {
     makeTree();
     await screen.findByText("测试知识库");
     service.listKbs.mockClear();
@@ -115,6 +121,27 @@ describe("knowledge list view preference", () => {
     fireEvent.click(await screen.findByText("aidpKnowledge.importFile"));
     fireEvent.click(
       await screen.findByRole("button", { name: "finish test upload" })
+    );
+    expect(service.listKbs).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "close drawer with confirm" })
+    );
+
+    await waitFor(() => expect(service.listKbs).toHaveBeenCalledTimes(1));
+  });
+
+  it("refreshes the list when the import drawer closes with X", async () => {
+    makeTree();
+    await screen.findByText("测试知识库");
+    service.listKbs.mockClear();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "aidpKnowledge.moreOperations" })
+    );
+    fireEvent.click(await screen.findByText("aidpKnowledge.importFile"));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "close drawer with X" })
     );
 
     await waitFor(() => expect(service.listKbs).toHaveBeenCalledTimes(1));

@@ -283,9 +283,12 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           title={t("aidpKnowledge.importDrawerTitle")}
           open
           knowledgeBase={quickImportKb}
-          onClose={() => setQuickImportKb(null)}
+          onClose={() => {
+            setQuickImportKb(null);
+            void refreshLists();
+          }}
           onDocsUploaded={() => undefined}
-          onRefresh={() => void refreshLists()}
+          onRefresh={() => undefined}
         />
       )}
     </div>
