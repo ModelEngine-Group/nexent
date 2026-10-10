@@ -84,12 +84,20 @@ class TestGetModelNameFromConfig:
     @pytest.mark.parametrize(
         ("config", "expected"),
         [
+            (None, ""),
             ({}, ""),
             ({"model_name": "gpt-4"}, "gpt-4"),
+            ({"model_repo": None, "model_name": "gpt-4"}, "gpt-4"),
+            ({"model_repo": "openai"}, "openai/"),
+            ({"model_name": None}, ""),
+            ({"modelName": "gpt-4"}, "gpt-4"),
+            ({"model_repo": "openai", "modelName": "gpt-4"}, "openai/gpt-4"),
+            ({"model_name": "gpt-4", "modelName": "fallback"}, "gpt-4"),
+            ({"model_name": "", "modelName": "fallback"}, "fallback"),
         ],
     )
     def test_get_model_name_from_config_with_incomplete_config(self, config, expected):
-        """Test empty and partial model configurations."""
+        """Preserve empty, partial, and quick-config model name handling."""
         assert get_model_name_from_config(config) == expected
 
     def test_get_model_name_from_config_with_model_repo(self):
