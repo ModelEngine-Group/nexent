@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-OUTPUT
+cases:
+- case_id: TPC-D5-001
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-002
+  - TPC-RULE-003
+  title: Protocol exhaustion and truncation never authorize unsafe replay or final
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Protocol exhaustion and truncation never authorize unsafe replay or final
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run two rejected actions then a third malformed action or length-truncated
+      action.
+    expected: No executor call or raw final occurs.
+  - order: 2
+    action: Run a valid compatible skill action after two rejections.
+    expected: Exactly one execution commits, with no replay.
+  expected_results:
+  - Invalid third attempt never finalizes.
+  - Valid action executes exactly once.
+  forbidden_side_effects:
+  - No invalid execution.
+  - No tool replay.
+  risk_type: RELIABILITY
+  risk: Protocol repair can skip skills or publish unexecuted actions as final answers.
+  condition:
+  - Prior error count two
+  - Malformed/truncated third generation
+  - Valid third compatible action
+  metrics:
+  - Executor invocation count
+  - Invalid raw final count
+  - Accepted attempt count
+  thresholds:
+  - Zero executor invocations for invalid output
+  - Zero invalid raw final answers
+  - Exactly one invocation for valid action
+  recovery_expectations:
+  - Valid actions recover; invalid exhausted responses stay bounded failures.

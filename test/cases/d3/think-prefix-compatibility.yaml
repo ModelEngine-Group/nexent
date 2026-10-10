@@ -1,0 +1,57 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-OUTPUT
+cases:
+- case_id: TPC-D3-001
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  - TPC-RULE-003
+  title: Deployed skill read completes with explicit final and persisted evidence
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Deployed skill read completes with explicit final and persisted evidence
+  preconditions:
+  - Disposable Nexent deployment, authorized skill and controlled provider are available.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Drive controlled think prefix then skill-read action through deployed
+      Agent.
+    expected: Read executes once and returns skill text.
+  - order: 2
+    action: Return a separate explicit final and reload history.
+    expected: Exactly one final payload and one read result are persisted.
+  - order: 3
+    action: Exhaust three malformed marked responses without an executable action.
+    expected: No skill effect or raw protocol final is emitted or stored.
+  expected_results:
+  - Runtime executes the skill read.
+  - History matches committed stream.
+  - Malformed marked exhaustion does not execute or become a raw final.
+  forbidden_side_effects:
+  - No unexecuted action final.
+  - No duplicate tool effects.
+  integration_boundary:
+  - Provider to classifier
+  - Executor to skill tool
+  - Observer to SSE/history
+  observations:
+  - Raw content and parser classification
+  - Skill tool effect
+  - Final source and stored units
+  cleanup:
+  - Remove test conversation and provider fixture.
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - model-provider
+    - name: real_smoke
+      required_services:
+      - model-provider

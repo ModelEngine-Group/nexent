@@ -60,14 +60,6 @@ def test_ac_001_visible_content_is_meaningful(value):
             ProtocolErrorReason.MALFORMED_ACTION,
         ),
         (
-            "<think>reason<code>print(1)</code>",
-            ProtocolErrorReason.MALFORMED_ACTION,
-        ),
-        (
-            "<think>outer<think>inner</think></think><code>print(1)</code>",
-            ProtocolErrorReason.MALFORMED_ACTION,
-        ),
-        (
             "<|channel|>analysis<code>print(1)</code>",
             ProtocolErrorReason.MALFORMED_ACTION,
         ),
@@ -268,7 +260,6 @@ def test_ac_010_invalid_final_envelopes_are_rejected(output):
     "output",
     [
         "<final_answer></final_answer>",
-        "outside<final_answer>inside</final_answer>",
         "<final_answer>one</final_answer><final_answer>two</final_answer>",
         "<final_answer><final_answer>nested</final_answer></final_answer>",
         "<final_answer>unfinished",
@@ -279,3 +270,21 @@ def test_cftp_001_invalid_final_envelopes_in_code_action_mode_are_rejected(outpu
         classify_model_output(output, protocol="code_action")
 
     assert exc_info.value.reason == ProtocolErrorReason.INVALID_FINAL_ENVELOPE
+
+
+@pytest.mark.parametrize("prefix", [
+    "<think>reason",
+    "reason</think>",
+    "<think>outer<think>inner</think></think>",
+    "<think>reason</think>Load the guide first.",
+])
+def test_thinking_prefix_does_not_require_a_complete_single_block(prefix):
+    assert classify_model_output(prefix + "<code>print(1)</code>", protocol="code_action") == ExecutableAction(
+        code="print(1)",
+    )
+
+
+def test_ordinary_final_envelope_accepts_descriptive_prefix():
+    assert classify_model_output("outside<final_answer>inside</final_answer>", protocol="code_action") == (
+        ExplicitFinalAnswer(answer="inside")
+    )

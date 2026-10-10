@@ -1,0 +1,115 @@
+schema_version: '1.0'
+cases:
+- case_id: TPC-D1-001
+  stage: D1
+  status: implemented
+  contract_hash: sha256:4f391cdcc5d8afa20a295a40d9739667d853c3099df0248d511947163488a722
+  implementation_hash: sha256:80150f5dbffa58305e628681d5dd93c39d59d2d701854cc6967112e494836fab
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_think_prefix_compatibility.py
+    selector: test_tpc_d1_001
+    profiles:
+    - mock
+- case_id: TPC-D1-002
+  stage: D1
+  status: implemented
+  contract_hash: sha256:bf3161e59bf8555b8eca4685fd76b62450ac76b189b1f54db8a6d943022475ed
+  implementation_hash: sha256:80150f5dbffa58305e628681d5dd93c39d59d2d701854cc6967112e494836fab
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_think_prefix_compatibility.py
+    selector: test_tpc_d1_002
+    profiles:
+    - mock
+- case_id: TPC-D1-003
+  stage: D1
+  status: implemented
+  contract_hash: sha256:100d35b68a2e856ce77afbea76a04f64cced55b7c6427ad4b682ff63a5512759
+  implementation_hash: sha256:80150f5dbffa58305e628681d5dd93c39d59d2d701854cc6967112e494836fab
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_think_prefix_compatibility.py
+    selector: test_tpc_d1_003
+    profiles:
+    - mock
+- case_id: TPC-D1-004
+  stage: D1
+  status: implemented
+  contract_hash: sha256:f2504ffd5633cd2255b5dbbd3f2265227f687a753a12a0145d193b141a18ef32
+  implementation_hash: sha256:80150f5dbffa58305e628681d5dd93c39d59d2d701854cc6967112e494836fab
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_think_prefix_compatibility.py
+    selector: test_tpc_d1_004
+    profiles:
+    - mock
+- case_id: TPC-D1-005
+  stage: D1
+  status: implemented
+  contract_hash: sha256:33d570993c8638b85cd01d13e5fde4178f0bae8302be5d3108471cb7fc0d257b
+  implementation_hash: sha256:80150f5dbffa58305e628681d5dd93c39d59d2d701854cc6967112e494836fab
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_think_prefix_compatibility.py
+    selector: test_tpc_d1_005
+    profiles:
+    - mock
+- case_id: TPC-D1-006
+  stage: D1
+  status: implemented
+  contract_hash: sha256:b76ef5ea9a602bd23ed01d075a888e34440cd8c9d6585726a2e366975f398087
+  implementation_hash: sha256:80150f5dbffa58305e628681d5dd93c39d59d2d701854cc6967112e494836fab
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_think_prefix_compatibility.py
+    selector: test_tpc_d1_006
+    profiles:
+    - mock
+- case_id: TPC-D3-001
+  stage: D3
+  status: implemented
+  contract_hash: sha256:2de8f6fa8b9e8b2e53318f71e08dccbb4cbe6e95935069f88ca84a3eebb66f0c
+  implementation_hash: sha256:aed01ec6f1542f3267c7c65eb7c60830b2150eb4fd123fa4c174e2b729753149
+  implementation:
+  - framework: pytest
+    file: test/automation/d3/test_think_prefix_runtime.py
+    selector: test_tpc_d3_001_skill_executes_once_and_history_matches
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d3/test_think_prefix_runtime.py
+    selector: test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d3/test_think_prefix_runtime.py
+    selector: test_tpc_d3_001_real_model_reads_skill
+    profiles:
+    - real_smoke
+  required_mock_services:
+  - model-provider
+- case_id: TPC-D4-001
+  stage: D4
+  status: implemented
+  contract_hash: sha256:a4396130631c96c17607bc377500d220995c93f701be28bdfbb7c96d2c66556c
+  implementation_hash: sha256:ed5c9e72e1af0ac98d23c22f314b32d163311a4e3bbca87dd9d77997576aedc8
+  implementation:
+  - framework: playwright
+    file: test/automation/d4/think_prefix_browser.mjs
+    selector: test_tpc_d4_001
+    profiles:
+    - mock
+  required_mock_services:
+  - model-provider
+- case_id: TPC-D5-001
+  stage: D5
+  status: implemented
+  contract_hash: sha256:a56e85d3e652c38805e425c416214927664a2155d0836a31251fb4a10531659d
+  implementation_hash: sha256:a04e4124b9b4a97aaae836e61e9ccf12512e97957c4c232e3d52c7a593565ed9
+  implementation:
+  - framework: pytest
+    file: test/automation/d5/test_think_prefix_reliability.py
+    selector: test_tpc_d5_001
+    profiles:
+    - mock
