@@ -118,12 +118,12 @@
 
 @container (min-width: 1200px) {
   .cardGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .searchGroup {
-    flex-basis: calc((100% - 32px) / 3 + 40px);
-    width: calc((100% - 32px) / 3 + 40px);
+    flex-basis: calc((100% - 48px) / 4 + 40px);
+    width: calc((100% - 48px) / 4 + 40px);
   }
 
   .searchInput {
