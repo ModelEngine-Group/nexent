@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInstance } from "i18next";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { App } from "antd";
 
 import { ApiError } from "@/services/api";
@@ -182,7 +188,7 @@ describe("AIDP upload failure information", () => {
   });
 });
 
-describe("upload failures remain inside file rows", () => {
+describe("upload file rows", () => {
   const knowledgeBase = {
     kds_id: "1",
     kds_name: "测试知识库",
@@ -215,6 +221,62 @@ describe("upload failures remain inside file rows", () => {
       expect(screen.getByText("测试.txt")).toBeInTheDocument()
     );
   };
+
+  it("keeps a transparent dark progress ring until the upload response arrives", async () => {
+    let reportProgress: (loaded: number, total: number) => void = () => {};
+    let finishUpload = () => {};
+    vi.spyOn(aidpKnowledgeService, "uploadDocsWithProgress").mockImplementation(
+      (_id, _files, onProgress) => {
+        reportProgress = onProgress;
+        return new Promise((resolve) => {
+          finishUpload = () =>
+            resolve({
+              summary: { total: 1, success: 1, failed: 0 },
+              success_list: [
+                {
+                  file_uuid: "uploaded-file",
+                  file_name: "测试.txt",
+                  file_type: "txt",
+                  file_size: 4,
+                  file_ino_no: "1",
+                  first_upload_time: 1,
+                },
+              ],
+              failed_list: [],
+            });
+        });
+      }
+    );
+    await selectFile();
+    await waitFor(() =>
+      expect(document.querySelector('svg[aria-label="0%"]')).not.toBeNull()
+    );
+    const confirm = screen.getByRole("button", { name: zh["common.confirm"] });
+    const circumference = 2 * Math.PI * 6.5;
+
+    for (const percent of [25, 75, 100]) {
+      act(() => reportProgress(percent, 100));
+      const ring = document.querySelector(`svg[aria-label="${percent}%"]`);
+      expect(ring).not.toBeNull();
+      const circles = ring!.querySelectorAll("circle");
+      expect(circles).toHaveLength(2);
+      expect(circles[0]).toHaveAttribute("fill", "none");
+      expect(circles[1]).toHaveAttribute("fill", "none");
+      expect(circles[1]).toHaveAttribute("stroke", "#191919");
+      expect(Number(circles[1].getAttribute("stroke-dashoffset"))).toBeCloseTo(
+        circumference * (1 - percent / 100)
+      );
+      expect(ring!.parentElement!.querySelector(".anticon-loading")).toBeNull();
+      expect(confirm).toBeDisabled();
+    }
+
+    await act(async () => finishUpload());
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(document.querySelector('svg[aria-label="100%"]')).toBeNull();
+    expect(
+      screen.getByText(zh["aidpKnowledge.importUploadComplete"])
+    ).toBeInTheDocument();
+  });
 
   it.each([
     [new ApiError("000403", "Raw size error"), "文件大小超出限制"],

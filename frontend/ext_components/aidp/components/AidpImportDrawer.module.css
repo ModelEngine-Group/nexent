@@ -154,16 +154,6 @@
   transform: translate(-50%, -50%);
 }
 
-.waitingSpinner {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(107 114 128 / 70%);
-  font-size: 18px;
-}
-
 .fileText {
   min-width: 0;
   flex: 1;

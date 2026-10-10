@@ -6,7 +6,6 @@ import type { UploadProps } from "antd";
 import {
   DeleteOutlined,
   FileTextOutlined,
-  LoadingOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 
@@ -96,7 +95,7 @@ const ProgressRing: React.FC<{ percent: number }> = ({ percent }) => {
         cy="9"
         r="6.5"
         fill="none"
-        stroke="white"
+        stroke="#191919"
         strokeWidth="3"
         strokeLinecap="round"
         strokeDasharray={circumference}
@@ -388,17 +387,20 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
 
     return (
       <div className={`${styles.fileRow} ${borderClass}`} key={row.id}>
-        <div className={styles.fileIcon} aria-hidden="true">
-          <FileTextOutlined />
-          {row.status === "uploading" &&
-            (row.progress >= 100 ? (
-              <Tooltip title={t("aidpKnowledge.importAwaitingResult")}>
-                <LoadingOutlined className={styles.waitingSpinner} />
-              </Tooltip>
-            ) : (
+        <Tooltip
+          title={
+            row.status === "uploading" && row.progress >= 100
+              ? t("aidpKnowledge.importAwaitingResult")
+              : undefined
+          }
+        >
+          <div className={styles.fileIcon} aria-hidden="true">
+            <FileTextOutlined />
+            {row.status === "uploading" && (
               <ProgressRing percent={row.progress} />
-            ))}
-        </div>
+            )}
+          </div>
+        </Tooltip>
         <div className={styles.fileText}>
           <Tooltip title={row.file.name}>
             <div className={styles.fileName}>{row.file.name}</div>

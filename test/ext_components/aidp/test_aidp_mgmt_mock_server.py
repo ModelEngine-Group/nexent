@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,6 +48,47 @@ def test_file_listing_filters_before_pagination(mock_aidp_server):
     assert [item["file_uuid"] for item in body["value"]] == ["f-1"]
     assert body["next_link"] is not None
     assert "keyword=%E5%88%B6%E5%BA%A6" in body["next_link"]
+
+
+def test_upload_delay_is_applied_once_per_batch(mock_aidp_server, monkeypatch):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    sleep = AsyncMock()
+    monkeypatch.setattr(server.asyncio, "sleep", sleep)
+    client = TestClient(server.app)
+
+    setting = client.post("/_mock/upload-seconds", params={"seconds": 10})
+    assert setting.status_code == 200
+    assert setting.json() == {"upload_seconds": 10}
+    assert client.get("/health").json()["upload_seconds"] == 10
+
+    response = client.post(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Upload",
+        headers={"Authorization": "Bearer mock-aidp-key"},
+        files=[
+            ("files", ("first.txt", b"first", "text/plain")),
+            ("files", ("second.txt", b"second", "text/plain")),
+        ],
+    )
+    assert response.status_code == 200
+    assert response.json()["summary"] == {"total": 2, "success": 2, "failed": 0}
+    sleep.assert_awaited_once_with(10)
+
+    assert client.post("/_mock/upload-seconds", params={"seconds": 0}).status_code == 200
+    sleep.reset_mock()
+    response = client.post(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Upload",
+        headers={"Authorization": "Bearer mock-aidp-key"},
+        files={"files": ("instant.txt", b"instant", "text/plain")},
+    )
+    assert response.status_code == 200
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.parametrize("seconds", [-1, 601])
+def test_upload_delay_rejects_out_of_range_values(mock_aidp_server, seconds):
+    client = TestClient(mock_aidp_server.app)
+    assert client.post("/_mock/upload-seconds", params={"seconds": seconds}).status_code == 422
 
 
 def test_history_filters_to_recent_records_and_returns_upstream_summary(mock_aidp_server):

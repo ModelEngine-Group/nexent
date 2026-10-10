@@ -17,6 +17,10 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
 
 Document status simulation (drives the "processing status" UI):
+  * The CLI delays upload responses by 10 seconds to expose the upload UI's
+    waiting state. Override with ``--upload-seconds 0`` or at runtime with
+    ``POST /_mock/upload-seconds?seconds=N``. This delays the AIDP response,
+    not the browser-to-Nexent request body transfer.
   * Uploaded documents start as ``PROCESSING`` and flip to ``COMPLETED`` once
     ``_PROCESSING_SECONDS`` have elapsed, so polling behaviour can be observed
     end to end. Tune it with ``POST /_mock/processing-seconds?seconds=N``.
@@ -41,6 +45,7 @@ and upload-task examples without clearing other persisted state. Run with:
     python aidp_mgmt_mock_server.py --port 30081
 """
 import argparse
+import asyncio
 import json
 import logging
 import mimetypes
@@ -98,6 +103,10 @@ _CHANNEL_ROOT = "/aidp/knowledge"
 # Seconds an uploaded document stays PROCESSING before turning COMPLETED.
 # Overridable at runtime through POST /_mock/processing-seconds.
 _PROCESSING_SECONDS = 8.0
+
+# Response latency per upload request; CLI defaults to 10 seconds for UI review.
+# Imported test apps start without latency and opt in through the mock endpoint.
+_UPLOAD_SECONDS = 0.0
 
 # Default number of history records returned by each AIDP page.
 _HISTORY_PAGE_SIZE = 10
@@ -935,6 +944,17 @@ def reset_failures() -> JSONResponse:
     })
 
 
+@app.post("/_mock/upload-seconds")
+def set_upload_seconds(
+    seconds: float = Query(10.0, ge=0.0, le=600.0, description="Upload response delay in seconds"),
+) -> JSONResponse:
+    """Delay each batch once without blocking other mock requests."""
+    global _UPLOAD_SECONDS
+    _UPLOAD_SECONDS = seconds
+    logger.info("MOCK CONFIG  upload response delay = %s", seconds)
+    return JSONResponse(content={"upload_seconds": _UPLOAD_SECONDS})
+
+
 @app.post("/_mock/processing-seconds")
 def set_processing_seconds(
     seconds: float = Query(8.0, ge=0.0, le=600.0, description="Seconds a new upload stays PROCESSING"),
@@ -1205,6 +1225,9 @@ async def upload_documents(
 
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+
+    if _UPLOAD_SECONDS > 0:
+        await asyncio.sleep(_UPLOAD_SECONDS)
 
     success_docs: List[Dict[str, Any]] = []
     failed: List[Dict[str, str]] = []
@@ -1800,6 +1823,7 @@ def health() -> Dict[str, Any]:
         "platform": "aidp-mock",
         "version": "1.0.0",
         "knowledge_bases_count": len(_KNOWLEDGE_BASES),
+        "upload_seconds": _UPLOAD_SECONDS,
     }
 
 
@@ -1830,9 +1854,13 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=30081, help="Bind port (default: 30081)")
     parser.add_argument("--api-key", default=EXPECTED_API_KEY, help="Expected Bearer API key")
+    parser.add_argument("--upload-seconds", type=float, default=10.0, help="Upload response delay (default: 10 seconds)")
     args = parser.parse_args()
+    if not 0 <= args.upload_seconds <= 600:
+        parser.error("--upload-seconds must be between 0 and 600")
 
     EXPECTED_API_KEY = args.api_key
+    _UPLOAD_SECONDS = args.upload_seconds
 
     import uvicorn
 
