@@ -33,6 +33,8 @@ import { useTranslation } from "react-i18next";
 import type { Agent } from "@/types/agentConfig";
 
 interface ThreadListSidebarProps extends SidebarProps {
+  selectedAgent?: Agent | null;
+  activeThreadId?: string;
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
   onPrepareNewConversation?: () => void;
@@ -58,6 +60,8 @@ function DiscoverAgentsIcon({ className }: { className?: string }) {
 }
 
 export function ThreadListSidebar({
+  selectedAgent,
+  activeThreadId,
   generatedTitles,
   onPrepareNewConversation,
   onNewConversation,
@@ -72,7 +76,9 @@ export function ThreadListSidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [conversationSearch, setConversationSearch] = useState("");
   const [legacySearchQuery, setLegacySearchQuery] = useState("");
-  const sidebarBackground = newChatDesign ? "#f0f0f0" : "#FFFFFF";
+  // Sidebar frame follows the new-chat page; the workbench mirrors it so the
+  // left panel stays aligned when switching pages.
+  const sidebarBackground = "#f0f0f0";
 
   if (isCollapsed) {
     return (
@@ -121,8 +127,8 @@ export function ThreadListSidebar({
         className={cn(
           "h-full",
           newChatDesign
-            ? "w-[360px] min-w-[360px] max-w-[360px] p-2"
-            : "w-64 min-w-64 max-w-64"
+            ? "w-[296px] min-w-[296px] max-w-[296px] p-2"
+            : "w-[360px] min-w-[360px] max-w-[360px] p-2"
         )}
         style={{ backgroundColor: sidebarBackground }}
       >
@@ -142,6 +148,7 @@ export function ThreadListSidebar({
                       {onAgentSelected && (
                         <div className="min-w-0 flex-1">
                           <AgentSelectorDropdown
+                            selectedAgent={selectedAgent}
                             onAgentSelected={onAgentSelected}
                           />
                         </div>
@@ -219,6 +226,7 @@ export function ThreadListSidebar({
               </SidebarHeader>
               <SidebarContent className="focus:outline-none">
                 <ThreadList
+                  activeThreadId={activeThreadId}
                   generatedTitles={generatedTitles}
                   searchQuery={
                     newChatDesign ? conversationSearch : legacySearchQuery

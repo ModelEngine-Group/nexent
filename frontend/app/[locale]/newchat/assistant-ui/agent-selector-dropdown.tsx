@@ -12,6 +12,7 @@ import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 
 export interface AgentSelectorDropdownProps {
+  selectedAgent?: Agent | null;
   onAgentSelected: (agent: Agent) => void;
 }
 
@@ -21,6 +22,7 @@ export interface AgentSelectorDropdownProps {
  * Renders nothing until there is conversation history.
  */
 export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
+  selectedAgent,
   onAgentSelected,
 }) => {
   const { availableMainAgents, isLoading } = usePublishedAgentList();
@@ -112,7 +114,10 @@ export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
         className="flex w-full cursor-pointer items-center gap-1.5 rounded-[4px] px-2 py-1 text-[16px] leading-[24px] text-[#191919] hover:bg-white"
       >
         <span className="min-w-0 flex-1 truncate text-left">
-          {lastUsedAgent.display_name || lastUsedAgent.name}
+          {selectedAgent?.display_name ||
+            selectedAgent?.name ||
+            lastUsedAgent.display_name ||
+            lastUsedAgent.name}
         </span>
         <ChevronDown className="size-4 shrink-0 text-[#808080]" aria-hidden />
       </button>

@@ -19,6 +19,8 @@ import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
+import { NewChatWelcomeBackdrop } from "./newchat-welcome-backdrop";
+import newChatStyles from "./newchat-design.module.css";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -755,6 +757,7 @@ const ThreadView: FC<ThreadViewProps> = ({
     <ThreadPrimitive.Root
       className={cn(
         "flex h-full flex-row bg-background",
+        newChatDesign && newChatStyles.font,
         configurationLayout && "!bg-transparent",
         debugLayout && "!bg-transparent",
         variant === "embedded" &&
@@ -764,9 +767,11 @@ const ThreadView: FC<ThreadViewProps> = ({
       <div
         className={cn(
           "flex h-full min-w-0 flex-1 flex-col",
+          newChatDesign && "relative [container-type:size]",
           workbenchLanding && "overflow-y-auto pb-[10vh]"
         )}
       >
+        {newChatDesign && !hasMessages && <NewChatWelcomeBackdrop />}
         {showConversationTitle &&
           (isShareMode || (!newChatDesign && workbenchPresentation)) && (
             <header className="flex items-center gap-2 border-b px-3 py-2">
@@ -875,6 +880,8 @@ const ThreadView: FC<ThreadViewProps> = ({
           className={cn(
             "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
             variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
+            newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
+            newChatDesign && !hasMessages && "!max-w-none",
             debugLayout && "!max-w-none !p-0",
             configurationLayout &&
               !hasMessages &&
@@ -909,6 +916,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             (welcomeContent ?? (
               <ThreadWelcomeContent
                 agent={agent}
+                newChatDesign={newChatDesign}
                 title={welcomeTitle}
                 suggestions={welcomeSuggestions}
               />
@@ -922,12 +930,15 @@ const ThreadView: FC<ThreadViewProps> = ({
             className={cn(
               "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
               variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8",
+              newChatDesign && "!max-w-[922px] shrink-0 !gap-0 !px-4 !pb-6",
               debugLayout && "!max-w-none !shrink-0 !gap-4 !px-0 !pb-0",
               workbenchLanding &&
                 "static mb-auto max-w-[1123px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
-            {(!debugLayout || hasMessages) && <ThreadScrollToBottom />}
+            {!newChatDesign && (!debugLayout || hasMessages) && (
+              <ThreadScrollToBottom />
+            )}
             {!hasMessages &&
               emptyFooterContent &&
               (debugLayout ? (
@@ -1046,12 +1057,14 @@ export const ReadOnlyConversation: FC<{
 
 interface ThreadWelcomeContentProps {
   agent: Agent | PublishedAgent;
+  newChatDesign?: boolean;
   title?: string;
   suggestions?: readonly WelcomeSuggestion[];
 }
 
 const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
   agent,
+  newChatDesign = false,
   suggestions = [],
 }) => {
   const aui = useAui();
@@ -1082,45 +1095,91 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
         }));
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto px-8 py-6">
+    <div
+      className={cn(
+        "flex h-full min-h-0 flex-col overflow-y-auto px-8 py-6",
+        newChatDesign &&
+          "!px-0 !pb-6 !pt-[min(30.5556cqh,max(32px,calc(100cqh-694px)))] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+      )}
+    >
       {/* elastic space above the welcome block, per design */}
-      <div className="min-h-6 flex-[3]" aria-hidden />
+      {!newChatDesign && <div className="min-h-6 flex-[3]" aria-hidden />}
 
-      {/* 欢迎语: avatar + name row, then greeting; 890px column, 24px gaps */}
-      <div className="mx-auto flex w-full max-w-[890px] shrink-0 flex-col items-center gap-6 pb-6">
-        <div className="flex items-center justify-center gap-4">
-          <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
-            <Icon className="size-7 text-white" aria-hidden />
+      {/* The design uses a 72px heading row and a 24px greeting gap. */}
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-[890px] shrink-0 flex-col items-center gap-6 pb-6",
+          newChatDesign && "!pb-0"
+        )}
+      >
+        <div
+          className={cn(
+            "flex items-center justify-center gap-4",
+            newChatDesign && "min-h-[72px] px-2"
+          )}
+        >
+          <span
+            className={cn(
+              "flex size-14 shrink-0 items-center justify-center",
+              newChatDesign && "size-[72px]"
+            )}
+          >
+            <span className="flex size-14 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
+              <Icon className="size-7 text-white" aria-hidden />
+            </span>
           </span>
           <h1 className="text-[36px] font-bold leading-[54px] text-[#191919]">
             {displayName}
           </h1>
         </div>
-        <p className="text-center text-[14px] leading-[22px] text-[#191919]">
+        <p
+          className={cn(
+            "text-center text-[14px] leading-[22px] text-[#191919]",
+            newChatDesign && "text-[16px] font-medium leading-6"
+          )}
+        >
           {agent.greeting_message || agent.description}
         </p>
       </div>
 
-      <div className="min-h-6 flex-1" aria-hidden />
+      {!newChatDesign && <div className="min-h-6 flex-1" aria-hidden />}
 
       {suggestionRows.length > 0 && (
-        <div className="mx-auto w-full max-w-[890px] shrink-0">
-          <p className="text-[14px] font-bold leading-[22px] text-[#191919]">
+        <div
+          className={cn(
+            "mx-auto w-full max-w-[890px] shrink-0",
+            newChatDesign && "mt-[120px] px-4"
+          )}
+        >
+          <p
+            className={cn(
+              "text-[14px] font-bold leading-[22px] text-[#191919]",
+              newChatDesign && "text-[16px] font-medium text-black"
+            )}
+          >
             {t("chat.thread.tryQuestions")}
           </p>
-          <div className="mt-2 flex flex-col">
+          <div
+            className={cn("mt-2 flex flex-col", newChatDesign && "mt-3 gap-2")}
+          >
             {suggestionRows.map((row) => (
               <button
                 key={row.id}
                 type="button"
                 onClick={() => handleSampleQuestionClick(row.prompt)}
-                className="flex h-12 items-center gap-3 rounded-[4px] px-1 text-left transition-colors hover:bg-white/70"
+                className={cn(
+                  "flex h-12 items-center gap-3 rounded-[4px] px-1 text-left transition-colors hover:bg-white/70",
+                  newChatDesign && "h-[46px] gap-1 px-0 py-3"
+                )}
               >
                 <Lightbulb
-                  className="size-4 shrink-0 text-[#191919]"
+                  className={cn(
+                    "size-4 shrink-0 text-[#191919]",
+                    newChatDesign && "size-[18px]"
+                  )}
                   aria-hidden
                 />
-                <span className="min-w-0 truncate text-[14px] text-[#191919]">
+                <span className="min-w-0 truncate text-[14px] leading-[22px] text-[#191919]">
                   {row.text}
                 </span>
               </button>
@@ -1129,7 +1188,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
         </div>
       )}
 
-      <div className="min-h-10 flex-[2]" aria-hidden />
+      {!newChatDesign && <div className="min-h-10 flex-[2]" aria-hidden />}
     </div>
   );
 };

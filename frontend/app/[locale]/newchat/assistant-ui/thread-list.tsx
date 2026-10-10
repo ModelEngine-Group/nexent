@@ -27,6 +27,9 @@ import {
   XIcon,
   ChevronRight,
   LayoutGrid,
+  Loader2Icon,
+  CircleAlertIcon,
+  LoaderCircle,
 } from "lucide-react";
 import {
   Fragment,
@@ -34,17 +37,23 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
-import { useThreadAgentOverrides } from "../adapter/thread-agent-registry";
+import {
+  resolveThreadAgentId,
+  useThreadAgentOverrides,
+} from "../adapter/thread-agent-registry";
 import type { PublishedAgent } from "@/types/agentConfig";
 import type { FC } from "react";
 import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
+import { getVisibleAgentThreads } from "./thread-list-visibility";
 
 // Conversation status indicator component
 const ConversationStatusIndicator: FC<{
@@ -287,12 +296,14 @@ export const BatchSelectionProvider: FC<{
 };
 
 interface ThreadListProps {
+  activeThreadId?: string;
   generatedTitles?: ReadonlyMap<string, string>;
   searchQuery?: string;
   newChatDesign?: boolean;
 }
 
 export const ThreadList: FC<ThreadListProps> = ({
+  activeThreadId,
   generatedTitles,
   searchQuery = "",
   newChatDesign = false,
@@ -302,6 +313,17 @@ export const ThreadList: FC<ThreadListProps> = ({
   const isLoading = useAuiState((s) => s.threads.isLoading);
   const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  const [expandedAgentKeys, setExpandedAgentKeys] = useState<Set<string>>(
+    () => new Set()
+  );
+  const toggleAgentExpanded = useCallback((key: string) => {
+    setExpandedAgentKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   return (
     <div className="flex flex-col p-2">
@@ -321,10 +343,13 @@ export const ThreadList: FC<ThreadListProps> = ({
         }
       >
         <ThreadListItems
+          activeThreadId={activeThreadId}
           completedConversations={completedConversations}
           generatedTitles={generatedTitles}
           searchQuery={searchQuery}
           newChatDesign={newChatDesign}
+          expandedAgentKeys={expandedAgentKeys}
+          onToggleAgentExpanded={toggleAgentExpanded}
         />
       </AuiIf>
       {hasMore && !isLoading && (
@@ -360,59 +385,122 @@ const ThreadListEmpty: FC = () => {
 };
 
 interface ThreadListItemsProps {
+  activeThreadId?: string;
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
   searchQuery?: string;
   newChatDesign: boolean;
+  expandedAgentKeys: ReadonlySet<string>;
+  onToggleAgentExpanded: (key: string) => void;
 }
 
 const ThreadListItems: FC<ThreadListItemsProps> = ({
+  activeThreadId,
   completedConversations,
   generatedTitles,
   searchQuery = "",
   newChatDesign,
+  expandedAgentKeys,
+  onToggleAgentExpanded,
 }) => {
   const { t } = useTranslation();
 
-  const groups = useThreadListAgentGroups(searchQuery, newChatDesign);
-  const pinned = usePinnedThreads();
-  const [expandedAgentKeys, setExpandedAgentKeys] = useState<Set<string>>(
-    () => new Set()
+  const agentGroups = useThreadListAgentGroups(
+    searchQuery,
+    newChatDesign,
+    generatedTitles
   );
-
-  const toggleAgentExpanded = useCallback((key: string) => {
-    setExpandedAgentKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
+  const timeGroups = useThreadListGroups(generatedTitles, searchQuery);
+  const pinned = usePinnedThreads();
 
   const GroupedThreadListItem = useMemo<FC>(
-    () => () => (
-      <ThreadListItem
-        completedConversations={completedConversations}
-        generatedTitles={generatedTitles}
-      />
-    ),
-    [completedConversations, generatedTitles]
+    () =>
+      function GroupedThreadListItem() {
+        return (
+          <ThreadListItem
+            completedConversations={completedConversations}
+            generatedTitles={generatedTitles}
+            newChatDesign={newChatDesign}
+          />
+        );
+      },
+    [completedConversations, generatedTitles, newChatDesign]
   );
 
-  if (!groups) {
+  const TimeGroupThreadListItem = useMemo<FC>(
+    () =>
+      function TimeGroupThreadListItem() {
+        return (
+          <ThreadListItem
+            completedConversations={completedConversations}
+            generatedTitles={generatedTitles}
+            variant="time"
+          />
+        );
+      },
+    [completedConversations, generatedTitles, newChatDesign]
+  );
+
+  // Workbench (and legacy) sidebar: recency buckets (Today / Last 7 Days /
+  // Older) with pinned conversations hoisted into a dedicated top group.
+  if (!newChatDesign) {
+    if (!timeGroups) {
+      return (
+        <ThreadListPrimitive.Items>
+          {() => (
+            <ThreadListItem
+              completedConversations={completedConversations}
+              generatedTitles={generatedTitles}
+            />
+          )}
+        </ThreadListPrimitive.Items>
+      );
+    }
+    if (timeGroups.length === 0) {
+      return (
+        <div className="flex items-center px-3 py-4 text-sm text-muted-foreground">
+          {t("chat.threadList.noSearchResults")}
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col">
+        {timeGroups.map((group) => (
+          <Fragment key={group.label}>
+            <div
+              data-slot="aui_thread-list-group-label"
+              className="px-3 pt-3 pb-1 text-sm text-muted-foreground"
+            >
+              {t(group.label)}
+            </div>
+            {group.entries.map(({ id, index }) => (
+              <ThreadListPrimitive.ItemByIndex
+                key={id}
+                index={index}
+                components={{ ThreadListItem: TimeGroupThreadListItem }}
+              />
+            ))}
+          </Fragment>
+        ))}
+      </div>
+    );
+  }
+
+  if (!agentGroups) {
     return (
       <ThreadListPrimitive.Items>
         {() => (
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            newChatDesign
           />
         )}
       </ThreadListPrimitive.Items>
     );
   }
 
-  if (groups.length === 0) {
+  if (agentGroups.length === 0) {
     return (
       <div className="flex items-center px-3 py-4 text-sm text-muted-foreground">
         {t("chat.threadList.noSearchResults")}
@@ -422,14 +510,14 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
 
   // Render each thread by index so we can interleave agent group headers
   // between items without giving up the runtime's per-item context.
-  // Each agent group is collapsed by default and only shows its most recent
-  // conversation; expanding the group reveals every conversation.
+  // Collapsed groups retain only the open conversation; inactive groups hide
+  // every conversation. Expanding a group reveals all of its conversations.
   return (
     <div className="flex flex-col">
       <div className="px-3 pb-1 pt-2 text-[14px] text-[#808080]">
         {t("chat.threadList.recentConversations")}
       </div>
-      {groups.map((group) => {
+      {agentGroups.map((group) => {
         const groupKey = String(group.agentId ?? "none");
         const entries = pinned
           ? [...group.entries].sort(
@@ -439,19 +527,19 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             )
           : group.entries;
         const isExpanded = expandedAgentKeys.has(groupKey);
-        const visibleEntries = isExpanded
-          ? entries
-          : (newChatDesign
-              ? entries.filter((entry) => entry.hasRemoteId)
-              : entries
-            ).slice(0, 1);
+        const visibleEntries = getVisibleAgentThreads(
+          entries,
+          isExpanded,
+          activeThreadId,
+          generatedTitles
+        );
         return (
           <Fragment key={groupKey}>
             <button
               type="button"
               data-slot="aui_thread-list-group-label"
               className="flex h-10 items-center gap-3 px-3 text-left text-[14px] text-[#191919] hover:bg-white/70"
-              onClick={() => toggleAgentExpanded(groupKey)}
+              onClick={() => onToggleAgentExpanded(groupKey)}
               aria-expanded={isExpanded}
             >
               <LayoutGrid
@@ -459,12 +547,10 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                 aria-hidden
               />
               <span className="min-w-0 truncate">{group.agentName}</span>
-              {!isExpanded && (
-                <ChevronRight
-                  className="size-3.5 shrink-0 text-[#808080]"
-                  aria-hidden
-                />
-              )}
+              <ChevronRight
+                className={`size-3.5 shrink-0 text-[#808080]${isExpanded ? " rotate-90" : ""}`}
+                aria-hidden
+              />
             </button>
             {visibleEntries.map(({ id, index }) => (
               <ThreadListPrimitive.ItemByIndex
@@ -480,7 +566,12 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   );
 };
 
-type ThreadListGroupEntry = { id: string; index: number; hasRemoteId: boolean };
+type ThreadListGroupEntry = {
+  id: string;
+  index: number;
+  hasRemoteId: boolean;
+  isRunning: boolean;
+};
 
 type AgentThreadGroup = {
   agentId: number | null;
@@ -489,13 +580,13 @@ type AgentThreadGroup = {
 };
 
 // Group the current thread list by agent (conversation history), ordered by
-// each agent's most recent conversation. Threads without an agent fall into a
+// initial conversation recency, preserving agent order thereafter. Threads without an agent fall into a
 // trailing generic bucket. When searchQuery is set, only conversations whose
-// title matches (or agents whose name matches) are kept. Returns null when no
-// thread has a usable timestamp so the caller can render a flat list.
+// title matches (or agents whose name matches) are kept.
 const useThreadListAgentGroups = (
   searchQuery: string,
-  newChatDesign: boolean
+  newChatDesign: boolean,
+  generatedTitles?: ReadonlyMap<string, string>
 ): AgentThreadGroup[] | null => {
   const { t } = useTranslation();
   const threadIds = useAuiState((s) => s.threads.threadIds);
@@ -506,6 +597,7 @@ const useThreadListAgentGroups = (
   // Brand-new conversations bind their agent via this registry until the
   // backend conversation list carries the agent_id after the first run.
   const threadAgentOverrides = useThreadAgentOverrides();
+  const agentOrderRef = useRef(new Map<number | null, number>());
 
   const groups = useMemo<AgentThreadGroup[] | null>(() => {
     const itemsById = new Map(
@@ -514,7 +606,8 @@ const useThreadListAgentGroups = (
           id: string;
           title?: string;
           remoteId?: string;
-          custom?: { lastMessageAt?: string; agentId?: number };
+          isRunning?: boolean;
+          custom?: { lastMessageAt?: string; agentId?: number | string };
         }>
       ).map((item) => [item.id, item])
     );
@@ -522,8 +615,6 @@ const useThreadListAgentGroups = (
       const raw = itemsById.get(id)?.custom?.lastMessageAt;
       return raw ? new Date(raw) : undefined;
     });
-    if (!dates.some(Boolean)) return null;
-
     const agentNameById = new Map<number, string>();
     for (const agent of availableMainAgents) {
       const published = agent as unknown as PublishedAgent;
@@ -544,10 +635,10 @@ const useThreadListAgentGroups = (
     const groupByAgent = new Map<number | null, AgentThreadGroup>();
     for (const index of indices) {
       const item = itemsById.get(threadIds[index]);
-      const agentId =
-        typeof item?.custom?.agentId === "number"
-          ? item.custom.agentId
-          : (threadAgentOverrides[threadIds[index]] ?? null);
+      const agentId = resolveThreadAgentId(
+        item?.custom?.agentId,
+        threadAgentOverrides[threadIds[index]]
+      );
       let group = groupByAgent.get(agentId);
       if (!group) {
         group = {
@@ -563,7 +654,10 @@ const useThreadListAgentGroups = (
       }
       if (query) {
         const agentNameMatch = group.agentName.toLowerCase().includes(query);
-        const threadTitle = item?.title?.toLowerCase() ?? "";
+        const threadTitle =
+          (
+            generatedTitles?.get(threadIds[index]) ?? item?.title
+          )?.toLowerCase() ?? "";
         if (!agentNameMatch && !threadTitle.includes(query)) {
           continue;
         }
@@ -572,8 +666,22 @@ const useThreadListAgentGroups = (
         id: threadIds[index],
         index,
         hasRemoteId: Boolean(itemsById.get(threadIds[index])?.remoteId),
+        isRunning: item?.isRunning === true,
       });
     }
+    for (const group of groups) {
+      if (!agentOrderRef.current.has(group.agentId)) {
+        agentOrderRef.current.set(group.agentId, agentOrderRef.current.size);
+      }
+    }
+    groups.sort((a, b) => {
+      if (a.agentId === null) return b.agentId === null ? 0 : 1;
+      if (b.agentId === null) return -1;
+      return (
+        agentOrderRef.current.get(a.agentId)! -
+        agentOrderRef.current.get(b.agentId)!
+      );
+    });
     if (query) {
       return groups.filter((group) => group.entries.length > 0);
     }
@@ -582,11 +690,134 @@ const useThreadListAgentGroups = (
     threadIds,
     threadItems,
     availableMainAgents,
+    threadAgentOverrides,
+    generatedTitles,
     t,
     searchQuery,
     newChatDesign,
   ]);
   return newChatDesign ? groups : null;
+};
+
+const DAY_IN_MS = 86_400_000;
+
+type ThreadTimeGroupEntry = { id: string; index: number };
+
+type ThreadTimeGroup = {
+  label: string;
+  entries: ThreadTimeGroupEntry[];
+};
+
+// Bucket a date into one of three recency groups (Today / Last 7 Days / Older)
+// using the day boundaries of the user's local timezone.
+const dateGroupLabel = (
+  date: Date | undefined,
+  startOfToday: number
+): string => {
+  if (!date || date.getTime() >= startOfToday) return "chat.threadList.today";
+  if (date.getTime() >= startOfToday - 7 * DAY_IN_MS) {
+    return "chat.threadList.last7Days";
+  }
+  return "chat.threadList.older";
+};
+
+// Build ordered recency groups for the workbench sidebar. Returns null when
+// no thread has a usable timestamp so the caller can render a flat list.
+// When a search query is present, entries are filtered by title first; an
+// empty result yields an empty group list so the caller renders nothing.
+const useThreadListGroups = (
+  generatedTitles: ReadonlyMap<string, string> | undefined,
+  searchQuery: string
+): ThreadTimeGroup[] | null => {
+  const threadIds = useAuiState((s) => s.threads.threadIds);
+  const threadItems = useAuiState((s) => s.threads.threadItems);
+  const pinned = usePinnedThreads();
+  const pinnedIds = pinned?.pinnedIds;
+
+  return useMemo<ThreadTimeGroup[] | null>(() => {
+    const itemsById = new Map(
+      (
+        threadItems as ReadonlyArray<{
+          id: string;
+          title?: string;
+          custom?: { lastMessageAt?: string };
+        }>
+      ).map((item) => [item.id, item])
+    );
+    const query = searchQuery.trim().toLowerCase();
+    const titles = threadIds.map((id) =>
+      (generatedTitles?.get(id) ?? itemsById.get(id)?.title ?? "").toLowerCase()
+    );
+    const matches = threadIds.map(
+      (_, index) => !query || titles[index].includes(query)
+    );
+    if (query && !matches.some(Boolean)) return [];
+
+    const dates: (Date | undefined)[] = threadIds.map((id) => {
+      const raw = itemsById.get(id)?.custom?.lastMessageAt;
+      return raw ? new Date(raw) : undefined;
+    });
+    if (!dates.some(Boolean)) {
+      // No usable timestamps: keep the flat-list fallback for the unfiltered
+      // view, and bucket search matches under a single label when filtering.
+      if (!query) return null;
+      return [
+        {
+          label: "chat.threadList.recentConversations",
+          entries: threadIds
+            .map((id, index) => ({ id, index }))
+            .filter((_, index) => matches[index]),
+        },
+      ];
+    }
+
+    const now = new Date();
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    ).getTime();
+
+    const time = (index: number) =>
+      dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const indices = threadIds
+      .map((_, index) => index)
+      .filter((_, index) => matches[index])
+      .sort((a, b) => time(b) - time(a));
+
+    const result: ThreadTimeGroup[] = [];
+    for (const index of indices) {
+      const label = dateGroupLabel(dates[index], startOfToday);
+      const entry: ThreadTimeGroupEntry = { id: threadIds[index], index };
+      const lastGroup = result[result.length - 1];
+      if (lastGroup?.label === label) {
+        lastGroup.entries.push(entry);
+      } else {
+        result.push({ label, entries: [entry] });
+      }
+    }
+
+    // Hoist locally pinned conversations into a dedicated top group.
+    if (pinnedIds && pinnedIds.size > 0) {
+      const pinnedGroup: ThreadTimeGroup = {
+        label: "chat.threadList.pinned",
+        entries: [],
+      };
+      const remaining: ThreadTimeGroup[] = [];
+      for (const group of result) {
+        const kept = group.entries.filter((entry) => pinnedIds.has(entry.id));
+        const others = group.entries.filter(
+          (entry) => !pinnedIds.has(entry.id)
+        );
+        pinnedGroup.entries.push(...kept);
+        if (others.length > 0) remaining.push({ ...group, entries: others });
+      }
+      if (pinnedGroup.entries.length > 0) {
+        return [pinnedGroup, ...remaining];
+      }
+    }
+    return result;
+  }, [threadIds, threadItems, generatedTitles, searchQuery, pinnedIds]);
 };
 
 const ThreadListSkeleton: FC = () => {
@@ -615,6 +846,7 @@ const ThreadListSkeleton: FC = () => {
 interface ThreadListItemProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  newChatDesign?: boolean;
 }
 
 // Relative time for conversation rows, e.g. "20分钟前" / "20m ago".
@@ -634,15 +866,27 @@ const formatRelativeTime = (
   return t("chat.threadList.daysAgo", { count: days });
 };
 
-const ThreadListItem: FC<ThreadListItemProps> = ({
+const ThreadListItem: FC<
+  ThreadListItemProps & { variant?: "agent" | "time" }
+> = ({
   completedConversations,
   generatedTitles,
+  newChatDesign = false,
+  variant = "agent",
 }) => {
   return (
-    <ThreadListItemPrimitive.Root className="group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white">
+    <ThreadListItemPrimitive.Root
+      className={
+        variant === "time"
+          ? "group/item flex h-10 items-center gap-2 rounded-lg px-2 py-2 hover:bg-white data-[active=true]:bg-white"
+          : "group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white"
+      }
+    >
       <ThreadListItemContent
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        variant={variant}
+        newChatDesign={newChatDesign}
       />
     </ThreadListItemPrimitive.Root>
   );
@@ -651,11 +895,15 @@ const ThreadListItem: FC<ThreadListItemProps> = ({
 interface ThreadListItemContentProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  variant?: "agent" | "time";
+  newChatDesign: boolean;
 }
 
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   completedConversations,
   generatedTitles,
+  variant = "agent",
+  newChatDesign,
 }) => {
   const { t } = useTranslation();
   const aui = useAui();
@@ -666,6 +914,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const selectedIds = batch?.selectedIds;
   const toggle = batch?.toggle;
   const thread = useAui().threadListItem.getState();
+  const isRunning = useAuiState((s) => s.threadListItem.isRunning);
   const threadListItem = aui.threadListItem;
   const title =
     generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
@@ -759,7 +1008,13 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       );
     }
     return (
-      <ThreadListItemPrimitive.Trigger className="flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]">
+      <ThreadListItemPrimitive.Trigger
+        className={
+          variant === "time"
+            ? "flex h-10 min-w-0 flex-1 items-center gap-2 text-left text-base leading-6 text-[#191919]"
+            : "flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]"
+        }
+      >
         <div className="flex min-w-0 flex-1 items-center text-left">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -769,17 +1024,36 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               {title}
             </TooltipContent>
           </Tooltip>
-          <ConversationStatusIndicatorWrapper
-            completedConversations={completedConversations}
-          />
+          {!newChatDesign &&
+            (variant === "time" ? (
+              <ThreadRowEndStatus />
+            ) : (
+              <ConversationStatusIndicatorWrapper
+                completedConversations={completedConversations}
+              />
+            ))}
         </div>
-        <span className="shrink-0 text-[14px] leading-[22px] text-[#808080]">
-          {formatRelativeTime(
-            (thread as { custom?: { lastMessageAt?: string } }).custom
-              ?.lastMessageAt,
-            t
-          )}
-        </span>
+        {newChatDesign && isRunning ? (
+          <LoaderCircle
+            role="status"
+            aria-label={t("chat.threadList.running")}
+            className="size-3 shrink-0 animate-spin text-[#808080]"
+          />
+        ) : (
+          <span
+            className={
+              variant === "time"
+                ? "shrink-0 whitespace-nowrap text-xs text-muted-foreground group-hover/item:hidden"
+                : "shrink-0 text-[14px] leading-[22px] text-[#808080]"
+            }
+          >
+            {formatRelativeTime(
+              (thread as { custom?: { lastMessageAt?: string } }).custom
+                ?.lastMessageAt,
+              t
+            )}
+          </span>
+        )}
       </ThreadListItemPrimitive.Trigger>
     );
   };
@@ -836,4 +1110,28 @@ const ConversationStatusIndicatorWrapper: FC<{
   return (
     <ConversationStatusIndicator isStreaming={isRunning} isCompleted={false} />
   );
+};
+
+// End-of-row status icon for the workbench time-group list: running shows an
+// inline spinner; an error status (when surfaced) shows an orange alert.
+const ThreadRowEndStatus: FC = () => {
+  const aui = useAui();
+  const status = aui.threadListItem().getState().status as string;
+  const isRunning = status === "running" || status === "streaming";
+  const isError = status === "error";
+
+  if (isRunning) {
+    return (
+      <Loader2Icon
+        className="size-4 shrink-0 animate-spin text-muted-foreground"
+        aria-hidden
+      />
+    );
+  }
+  if (isError) {
+    return (
+      <CircleAlertIcon className="size-4 shrink-0 text-amber-500" aria-hidden />
+    );
+  }
+  return null;
 };

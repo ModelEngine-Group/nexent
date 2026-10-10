@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
-import { usePathname, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Bell,
   BookOpen,
+  Blocks,
   Bot,
   Building2,
   CalendarClock,
@@ -55,7 +56,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
   {
     path: "/chat",
-    Icon: Bot,
+    Icon: Blocks,
     labelKey: "sidebar.startChat",
     order: 1,
     parentKey: null,
@@ -193,6 +194,8 @@ export function SideNavigation() {
   const { isSpeedMode, enableAgentWorkbench } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale === "en" ? "en" : "zh";
 
   const [pendingNavigationPath, setPendingNavigationPath] = useState<
     string | null
@@ -212,7 +215,11 @@ export function SideNavigation() {
       .sort((a, b) => b.path.length - a.path.length)
       .find(
         (route) =>
-          currentPath === route.path || currentPath.startsWith(`${route.path}/`)
+          currentPath === route.path ||
+          currentPath.startsWith(`${route.path}/`) ||
+          (route.navigationPath != null &&
+            (currentPath === route.navigationPath ||
+              currentPath.startsWith(`${route.navigationPath}/`)))
       );
 
     return matchedRoute?.isSection ? "" : matchedRoute?.path || "";
@@ -254,7 +261,8 @@ export function SideNavigation() {
       return;
     }
 
-    const navigationPath = route.navigationPath || route.path;
+    const routePath = route.navigationPath || route.path;
+    const navigationPath = `/${locale}${routePath === "/" ? "" : routePath}`;
 
     if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
       setPendingNavigationPath(navigationPath);
