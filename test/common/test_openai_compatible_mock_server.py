@@ -162,6 +162,7 @@ def test_cmsr_mock_can_pause_after_first_success_content(mock_server):
         {
             "scenario": "success",
             "response_text": "PAUSED_OK",
+            "response_protocol": "code_action",
             "pause_after_success_chunks": 3,
         },
     )
@@ -191,7 +192,7 @@ def test_cmsr_mock_can_emit_code_without_reasoning(mock_server):
     _post_json(
         port,
         "/__control",
-        {"scenario": "success", "response_text": "CODE_ONLY", "emit_reasoning": False},
+        {"scenario": "success", "response_text": "CODE_ONLY", "emit_reasoning": False, "response_protocol": "code_action"},
     )
     status, _headers, body = _post_json(
         port,
@@ -208,7 +209,7 @@ def test_cmsr_mock_invalid_protocol_then_valid_repair(mock_server):
     _post_json(
         port,
         "/__control",
-        {"scenario": "invalid_then_success", "response_text": "REPAIR_OK"},
+        {"scenario": "invalid_then_success", "response_text": "REPAIR_OK", "response_protocol": "code_action"},
     )
     request = {"model": "nexent-mock-model", "messages": [], "stream": True}
     first = _post_json(port, "/v1/chat/completions", request)
@@ -234,3 +235,58 @@ def test_cmsr_mock_non_stream_and_models_contract(mock_server):
     assert completion["object"] == "chat.completion"
     assert completion["choices"][0]["finish_reason"] == "stop"
     assert completion["usage"]["total_tokens"] > 100
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_cmsr_mock_code_action_protocol_is_opt_in(mock_server, stream):
+    """The deployment fixture can return executable code without changing envelope defaults."""
+    _server, port = mock_server
+    _post_json(port, "/__control", {"response_protocol": "code_action", "response_text": "CODE_OK"})
+    status, _headers, body = _post_json(
+        port, "/v1/chat/completions",
+        {"model": "nexent-mock-model", "messages": [], "stream": stream},
+    )
+    assert status == 200
+    content = _stream_content(body) if stream else json.loads(body)["choices"][0]["message"]["content"]
+    assert content == '<code>final_answer("CODE_OK")</code>'
+
+
+def test_cmsr_mock_rejects_unknown_response_protocol(mock_server):
+    _server, port = mock_server
+    with pytest.raises(urllib.error.HTTPError) as failed:
+        _post_json(port, "/__control", {"response_protocol": "unknown"})
+    assert failed.value.code == 400
+
+
+@pytest.mark.parametrize("scenario", ["success", "invalid_then_success"])
+def test_cmsr_mock_code_then_final_uses_one_executable_action(mock_server, scenario):
+    _server, port = mock_server
+    _post_json(port, "/__control", {"scenario": scenario, "response_protocol": "code_then_final", "response_text": "ACTION_OK"})
+    request = {"model": "nexent-mock-model", "messages": [], "stream": False}
+    if scenario == "invalid_then_success":
+        invalid = _post_json(port, "/v1/chat/completions", request)
+        assert b"<code></code>" in invalid[2]
+    action = json.loads(_post_json(port, "/v1/chat/completions", request)[2])
+    final = json.loads(_post_json(port, "/v1/chat/completions", request)[2])
+    assert action["choices"][0]["message"]["content"] == '<code>print("ACTION_OK")</code>'
+    assert final["choices"][0]["message"]["content"] == '<final_answer>ACTION_OK</final_answer>'
+
+
+def test_cmsr_mock_auxiliary_title_does_not_consume_failure_or_pause(mock_server):
+    _server, port = mock_server
+    _post_json(port, "/__control", {
+        "scenario": "invalid_then_success", "response_protocol": "code_then_final",
+        "response_text": "TITLE_OK", "auxiliary_max_tokens": 8192,
+        "pause_after_success_chunks": 4,
+    })
+    auxiliary = _post_json(port, "/v1/chat/completions", {
+        "model": "nexent-mock-model", "messages": [], "stream": True, "max_tokens": 8192,
+    })
+    assert _stream_content(auxiliary[2]) == '<final_answer>TITLE_OK</final_answer>'
+    request = {"model": "nexent-mock-model", "messages": [], "stream": True, "max_tokens": 4096}
+    invalid = _post_json(port, "/v1/chat/completions", request)
+    assert '<code></code>' in _stream_content(invalid[2])
+    stats = _server.mock_state.snapshot()
+    assert stats["request_count"] == 1
+    assert stats["auxiliary_request_count"] == 1
+    assert not stats["success_stream_paused"]
