@@ -139,14 +139,21 @@ _CATALOG_UNAVAILABLE_MESSAGE = "catalog unavailable"
 _LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
+# Credential-bearing columns that must never reach an HTTP client. STT/TTS
+# voice models authenticate with the (model_appid, access_token) pair instead
+# of (or in addition to) api_key, so all three are stripped together.
+_MODEL_CREDENTIAL_FIELDS = frozenset({"api_key", "model_appid", "access_token"})
+
+
 def _sanitize_model_credentials(payload: Any) -> Any:
-    """Remove model API keys before returning model data to HTTP clients.
+    """Remove model credentials before returning model data to HTTP clients.
 
     Model records are also consumed by internal services, so credential
     removal belongs at the HTTP response boundary rather than in the database
     or model-management service layer. The presence of a configured key is
     intentionally not returned; callers that need to update a model can omit
-    ``api_key`` to keep the existing value.
+    ``api_key`` / ``model_appid`` / ``access_token`` to keep the existing
+    value (the update service drops empty-string values for these fields).
     """
     if isinstance(payload, list):
         return [_sanitize_model_credentials(item) for item in payload]
@@ -155,7 +162,7 @@ def _sanitize_model_credentials(payload: Any) -> Any:
         return {
             key: _sanitize_model_credentials(value)
             for key, value in payload.items()
-            if key != "api_key"
+            if key not in _MODEL_CREDENTIAL_FIELDS
         }
 
     return payload
