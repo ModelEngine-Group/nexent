@@ -797,7 +797,7 @@ async def test_check_model_health_lookup_error(client, auth_header, user_credent
 @pytest.mark.asyncio
 async def test_verify_model_config_success(client, auth_header, sample_model_data, mocker):
     """Test successful model config verification."""
-    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
+    mocker.patch("backend.apps.model_management_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mock_verify = mocker.patch(
         'backend.apps.model_management_app.verify_model_config_connectivity',
         return_value={"connectivity": True, "model_name": "gpt-4"}
@@ -827,7 +827,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
 @pytest.mark.asyncio
 async def test_verify_model_config_failure_with_error(client, auth_header, sample_model_data, mocker):
     """Test model config verification failure with detailed error message."""
-    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
+    mocker.patch("backend.apps.model_management_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mock_verify = mocker.patch(
         'backend.apps.model_management_app.verify_model_config_connectivity',
         return_value={
@@ -857,7 +857,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
 @pytest.mark.asyncio
 async def test_verify_model_config_exception(client, auth_header, sample_model_data, mocker):
     """Test model config verification with exception."""
-    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
+    mocker.patch("backend.apps.model_management_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mocker.patch(
         'backend.apps.model_management_app.verify_model_config_connectivity',
         side_effect=Exception("err")
@@ -2046,7 +2046,7 @@ class TestModelAuditEntries:
         import logging
         from unittest.mock import AsyncMock, patch
 
-        with patch("backend.apps.model_managment_app.create_model_for_tenant",
+        with patch("backend.apps.model_management_app.create_model_for_tenant",
                    new_callable=AsyncMock) as mock_create:
             mock_create.return_value = {"auto_configured_defaults": []}
 
@@ -2074,7 +2074,7 @@ class TestModelAuditEntries:
         import logging
         from unittest.mock import AsyncMock, patch
 
-        with patch("backend.apps.model_managment_app.batch_create_models_for_tenant",
+        with patch("backend.apps.model_management_app.batch_create_models_for_tenant",
                    new_callable=AsyncMock) as mock_batch:
             mock_batch.return_value = {"auto_configured_defaults": []}
 
@@ -2107,8 +2107,8 @@ class TestModelAuditEntries:
         import logging
         from unittest.mock import patch
 
-        with patch("backend.apps.model_managment_app._ids_for_created_models") as mock_ids, \
-                patch("backend.apps.model_managment_app._backfill_default_model_slots") as mock_backfill:
+        with patch("backend.apps.model_management_app._ids_for_created_models") as mock_ids, \
+                patch("backend.apps.model_management_app._backfill_default_model_slots") as mock_backfill:
             mock_ids.return_value = [11, 12]
             mock_backfill.return_value = ["llm"]
 
