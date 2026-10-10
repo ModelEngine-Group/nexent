@@ -55,6 +55,8 @@ def verify_invocation(response, marker):
 
 
 async def run(args):
+    if args.command == 'northbound-config':
+        return {'northbound_url': service_url('northbound')}
     if args.command in ('config', 'wire'):
         mock = A2AMock()
         try:
@@ -135,7 +137,7 @@ async def run(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['config', 'wire', 'card', 'call'])
+    parser.add_argument('command', choices=['config', 'northbound-config', 'wire', 'card', 'call'])
     parser.add_argument('--nonce', default='')
     parser.add_argument('--after', default='')
     parser.add_argument('--endpoint', default='')

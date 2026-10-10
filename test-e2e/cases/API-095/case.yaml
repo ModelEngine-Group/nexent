@@ -21,13 +21,13 @@ case:
     mock_service: a2a-agent
   steps:
   - order: 1
-    action: 租户A创建本次本地Agent与外部Agent
+    action: 租户A、B各自创建本次本地Agent与外部Agent
     expected: 使用动态ID且属于租户A
   - order: 2
     action: 租户B查询关系及sub-agents
     expected: 无租户A数据
   - order: 3
-    action: 租户B尝试关联租户A的两个ID
+    action: 租户B尝试关联租户A的两个ID、自己的父Agent与租户A的子Agent、租户A的父Agent与自己的子Agent；通过独立绑定和Agent update入口提交
     expected: 400/403/404拒绝，不允许新增越权关系
   - order: 4
     action: 核对owner未变化并清理
@@ -37,7 +37,18 @@ case:
   - 无租户A数据
   - 400/403/404拒绝，不允许新增越权关系
   - 无新增关系或额外外部请求；即使错误接受也清理测试创建的关系
-  forbidden_side_effects: []
+  forbidden_side_effects:
+  - 拒绝请求不得修改父Agent名称或新增绑定，不得发起额外外部请求
+  acceptance:
+  - id: AC-01
+    description: 动态创建两个租户的父子资源并隔离查询
+    steps: [1, 2]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: 两个入口拒绝全部跨租户组合且保持资源不变
+    steps: [3, 4]
+    expected_results: [3, 4]
+    forbidden_side_effects: [1]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线

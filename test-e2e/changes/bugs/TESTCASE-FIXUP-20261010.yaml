@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: TESTCASE-FIXUP-20261010
+  change_type: bugfix
+  bug_id: TESTCASE-FIXUP-20261010
+  title: Correct conversation boundaries and request-scoped runtime behavior
+  description: Repair message not-found mapping, northbound ownership and title execution, MCP overrides, and stopped-turn continuation.
+  observed_behavior: Missing messages return 500; northbound reads foreign history and writes rejected messages; MCP overrides are ignored; title generation has no model lane; stopped planning can produce an empty follow-up stream.
+  expected_behavior: Missing messages return 404; history stays owner-scoped; inaccessible chats persist nothing; MCP calls honor request overrides; titles execute in a managed lane; a follow-up run produces its own response.
+  escaped_stage: unknown
+  coverage_gap:
+    type: no_gap
+    description: Existing API-114, API-154, API-155, AGT-035, AGT-065 and PW-CHAT-03 already detect the reported defects.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-114, F-150, F-151, F-063, F-146, V5-PW-CHAT-03]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [API-114, API-154, API-155, AGT-035, AGT-065, PW-CHAT-03]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Missing message domain errors map to 404 while unexpected failures retain 500.
+      - Northbound rejects inaccessible chats before persistence and scopes history by owner and tenant.
+      - MCP positional and keyword calls apply isolated request overrides without overriding trusted identity.
+      - Northbound model work has a bounded lane with lifecycle cleanup.
+      - An admitted new turn clears previous cancellation before preparation and retains stops requested during preparation.
+      - Execution follow-ups preserve the restored stopped plan while returning their own response.
+    reason: Add focused unit regressions and run the existing formal cases unchanged against the authorized environment.
+    test_selectors:
+      - test/backend/app/test_conversation_management_app.py
+      - test/backend/services/test_conversation_management_service.py
+      - test/backend/services/test_northbound_service.py
+      - test/backend/services/test_northbound_model_lane.py
+      - test/sdk/core/agents/test_tool_parameters.py
+      - test/sdk/core/agents/test_nexent_agent.py
+      - test/sdk/core/agents/test_nexent_agent_mcp_parameters.py
+      - test/backend/services/test_streaming_channel.py
+      - test/backend/services/test_runtime_state_service.py
+      - frontend/tests/workbench/StreamCancellation.test.ts
+  notes: 'Design: nexent-doc/nexent/testcase-fixup/design.md. Base origin/djb/test-baseline cfdbef5ab. Original failures are in the user-provided cases directories. PW-CHAT-03 covers stale cancellation during preparation and plan persistence across follow-up turns.'

@@ -208,6 +208,7 @@ conv_mgmt_mod.save_conversation_user = MagicMock()
 conv_mgmt_mod.create_new_conversation = MagicMock(return_value={"conversation_id": 123})
 conv_mgmt_mod.generate_conversation_title_service = AsyncMock(return_value="Generated title")
 conv_mgmt_mod.update_conversation_title = MagicMock()
+conv_mgmt_mod.get_conversation_service = MagicMock(return_value={"conversation_id": 123})
 sys.modules["services.conversation_management_service"] = conv_mgmt_mod
 
 # Mock model_management_service
@@ -294,6 +295,8 @@ def reset_test_isolation():
     """Reset test isolation state before each test."""
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
+    ns.get_conversation_service.reset_mock(side_effect=True)
+    ns.get_conversation_service.return_value = {"conversation_id": 123}
     token_db_mod.log_token_usage.reset_mock(side_effect=True)
     token_db_mod.log_token_usage.return_value = 1
     agent_version_mod.list_published_agents_impl.reset_mock(side_effect=True)
@@ -2306,3 +2309,38 @@ async def test_runtime_error_is_not_prefixed_with_conversation_created():
         )
     assert response.status_code == 409
     assert b"".join([chunk async for chunk in response.body_iterator]) == b'{"message":"Agent run already active"}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unavailable", [None])
+async def test_inaccessible_chat_rejected_before_persistence(unavailable):
+    ns.get_conversation_service.return_value = unavailable
+    conv_mgmt_mod.save_conversation_user.reset_mock()
+    with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
+            patch.object(ns, "idempotency_start", new_callable=AsyncMock) as idempotency:
+        with pytest.raises(PermissionError, match="not accessible"):
+            await ns.start_streaming_chat(
+                ctx=MockNorthboundContext(), conversation_id=987,
+                agent_name="test_agent", query="rejected message",
+            )
+    ns.get_conversation_service.assert_called_once_with(987, "user-1", "tenant-1")
+    conv_mgmt_mod.save_conversation_user.assert_not_called()
+    runtime_proxy_mod.forward_agent_run.assert_not_awaited()
+    idempotency.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("available", [False, True])
+async def test_northbound_history_is_owner_scoped(available):
+    ns.get_conversation_service.return_value = {"conversation_id": 987} if available else None
+    with patch.object(ns, "get_conversation_messages", return_value=[
+        {"message_role": "user", "message_content": "private"},
+    ]) as messages:
+        result = await ns.get_conversation_history_internal(MockNorthboundContext(), 987)
+    ns.get_conversation_service.assert_called_once_with(987, "user-1", "tenant-1")
+    if available:
+        assert result["data"]["history"][0]["content"] == "private"
+        messages.assert_called_once_with(987)
+    else:
+        assert result["data"] == {"conversation_id": 987, "history": []}
+        messages.assert_not_called()

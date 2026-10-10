@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-PUBLISH-SMOKE-SCOPE-20261010
+  change_type: test-fix
+  title: Verify published local A2A invocation without Mock or disable prerequisites
+  description: >-
+    Align the publication smoke with the confirmed product scope: publish a local
+    Agent, discover its real Northbound card and invoke it with authentication.
+    Published endpoints are replaced by later publication; endpoint disabling is
+    not an acceptance requirement. Remove disable actions, cleanup registrations
+    and undiscoverability assertions. Read Northbound configuration independently
+    of A2A Mock readiness, retaining the Mock-dependent command for discovery tests.
+    Keep deletion of only the case-owned Agent and probe-owned API keys as cleanup.
+    Acceptance AC-01 maps to UI enable/publish, management settings and card
+    endpoint/version assertions; AC-02 maps to authenticated invocation and
+    verify_invocation's completed-task/output-marker checks. Runtime execution
+    against the original test environment is still required; static validation
+    does not certify an end-to-end pass.
+  affected_features:
+    existing: [V5-PW-A2A-PUBLISH-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-A2A-PUBLISH-01]
+    retired: []

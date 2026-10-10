@@ -98,12 +98,14 @@ class RuntimeStateService:
             self.client.expire(key, ttl)
 
     def reset_stream(self, user_id: str, conversation_id: int) -> None:
+        """Initialize an admitted new turn before its cancellation polls start."""
         if not self.enabled:
             return
         try:
             self.client.delete(
                 self._stream_key(user_id, conversation_id),
                 self._stream_done_key(user_id, conversation_id),
+                self._cancel_key(user_id, conversation_id),
             )
         except Exception as exc:
             logger.warning("Failed to reset runtime stream state: %s", exc)
@@ -127,7 +129,8 @@ class RuntimeStateService:
             key = self._run_key(user_id, conversation_id)
             self.client.hset(key, mapping=payload)
             self.client.expire(key, RUNTIME_RUN_TTL_SECONDS)
-            self.client.delete(self._cancel_key(user_id, conversation_id))
+            # A stop arriving during preparation belongs to this admitted turn.
+            # Only reset_stream may clear cancellation from the previous turn.
         except Exception as exc:
             logger.warning("Failed to register runtime run state: %s", exc)
 

@@ -1178,20 +1178,16 @@ def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> b
     Returns:
         bool: Whether the update was successful
     """
-    try:
-        success = update_message_opinion(message_id, opinion)
-        if not success:
-            raise Exception("Message does not exist or has been deleted")
-        return True
-    except Exception as e:
-        logging.error(f"Failed to update message like/dislike: {str(e)}")
-        raise Exception(str(e))
+    success = update_message_opinion(message_id, opinion)
+    if not success:
+        raise ConversationNotFoundError("Message does not exist or has been deleted")
+    return True
 
 
 async def get_message_id_by_index_impl(conversation_id: int, message_index: int) -> Optional[int]:
     message_id = get_message_id_by_index(conversation_id, message_index)
     if message_id is None:
-        raise Exception("Message not found.")
+        raise ConversationNotFoundError("Message not found.")
     return message_id
 
 

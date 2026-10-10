@@ -10,3 +10,6 @@ preparation:
   anchors: true
   special_assets: false
   d4_groups: []
+acceptance_bindings:
+  AC-01: [PW-A2A-PUBLISH-01]
+  AC-02: [PW-A2A-PUBLISH-01]
