@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from http import HTTPStatus
 from typing import Annotated, List, Literal, Optional
@@ -76,6 +77,14 @@ from utils import auth_utils as auth_utils_module
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
+
+_LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_log_value(value: object) -> str:
+    """Remove control characters before logging externally sourced values."""
+    return _LOG_UNSAFE_CHARS.sub(" ", str(value))
+
 
 AIDP_MAX_UPLOAD_FILE_COUNT = 50
 AIDP_SMALL_FILE_MAX_SIZE_BYTES = 20 * 1024 * 1024
@@ -899,7 +908,11 @@ async def list_knowledge_bases(
                 )
                 return detail, "ACTIVE"
             except AppException as exc:
-                logger.warning("AIDP detail fetch failed for %s: %s", kb_id, exc)
+                logger.warning(
+                    "AIDP detail fetch failed for %s: %s",
+                    _sanitize_log_value(kb_id),
+                    _sanitize_log_value(exc),
+                )
                 return {}, "UNAVAILABLE"
 
     detail_started_at = time.perf_counter()
@@ -1130,7 +1143,11 @@ async def get_knowledge_base(
         )
         resource_status = "ACTIVE"
     except AppException as exc:
-        logger.warning("AIDP detail fetch failed for %s: %s", kds_id, exc)
+        logger.warning(
+            "AIDP detail fetch failed for %s: %s",
+            _sanitize_log_value(kds_id),
+            _sanitize_log_value(exc),
+        )
         perms.update_resource_status(
             kb_id=kds_id, tenant_id=tenant_id, status="UNAVAILABLE",
             updated_by=user_id,
@@ -1152,7 +1169,11 @@ async def get_knowledge_base(
         detail["document_count"] = document_count
         detail["document_count_reliable"] = True
     except Exception as exc:  # noqa: BLE001 - count failure must not hide KB details
-        logger.warning("AIDP document Count API failed for KB %s: %s", kds_id, exc)
+        logger.warning(
+            "AIDP document Count API failed for KB %s: %s",
+            _sanitize_log_value(kds_id),
+            _sanitize_log_value(exc),
+        )
         detail["document_count"] = None
         detail["document_count_reliable"] = False
     detail["kds_id"] = kds_id

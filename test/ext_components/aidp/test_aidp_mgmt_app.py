@@ -84,6 +84,7 @@ from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     CreateKbRequest,
     SetPermissionRequest,
     UpdateKbRequest,
+    _sanitize_log_value,
     aidp_mgmt_router,
 )
 from apps.app_factory import register_exception_handlers  # noqa: E402
@@ -97,6 +98,10 @@ TENANT_ID = "tenant-test"
 def test_knowledge_base_api_models_do_not_expose_safety_guard():
     for model in (CreateKbRequest, UpdateKbRequest, SetPermissionRequest):
         assert "sensitive_intercept_enalbe" not in model.model_fields
+
+
+def test_sanitize_log_value_removes_control_characters():
+    assert _sanitize_log_value("kb-1\r\nforged log\tentry") == "kb-1  forged log entry"
 
 
 @pytest.mark.parametrize("metadata,remote_fails", [
