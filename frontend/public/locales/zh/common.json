@@ -3,7 +3,7 @@
   "workbench.landingGreeting": "你好，我是 Nexent，需要我帮你做什么？",
   "workbench.landingGreetingHi": "你好，我是Nexent",
   "workbench.landingGreetingAsk": "需要我帮你做什么",
-  "workbench.askMeLikeThis": "你可以这样问我",
+  "workbench.askMeLikeThis": "推荐提示词",
   "workbench.recommendedPrompts": "推荐提示词",
   "workbench.landingExamples.agent.category": "智能体创建",
   "workbench.landingExamples.agent.template": "创建[智能体名称]：面向[目标用户]的[智能体名称]智能体，核心功能是[核心职责]。输出[输出形式]，必须[关键约束]。",
