@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "antd";
@@ -20,6 +20,36 @@ const AidpKnowledgeGuide: React.FC = () => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        if (
+          window.sessionStorage.getItem("aidpKnowledge.guideExpanded") ===
+          "false"
+        )
+          setExpanded(false);
+      } catch {
+        // Keep the guide expanded when browser storage is unavailable.
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  const toggleGuide = () => {
+    setExpanded((previous) => {
+      const next = !previous;
+      try {
+        window.sessionStorage.setItem(
+          "aidpKnowledge.guideExpanded",
+          String(next)
+        );
+      } catch {
+        // Keep the change in memory when browser storage is unavailable.
+      }
+      return next;
+    });
+  };
+
   return (
     <section className="w-full shrink-0">
       <div className={styles.guideHeader}>
@@ -30,7 +60,7 @@ const AidpKnowledgeGuide: React.FC = () => {
           className={styles.guideToggle}
           icon={expanded ? <UpOutlined /> : <DownOutlined />}
           iconPlacement="end"
-          onClick={() => setExpanded((previous) => !previous)}
+          onClick={toggleGuide}
           aria-expanded={expanded}
         >
           {expanded

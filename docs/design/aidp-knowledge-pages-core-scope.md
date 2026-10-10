@@ -12,12 +12,12 @@
 
 ## 页面范围和入口
 
-| 页面 | 前端主要文件 | 保留内容 |
-| --- | --- | --- |
-| 知识库列表 | `frontend/ext_components/aidp/components/AidpKnowledgeConfiguration.tsx`、`AidpKnowledgeList.tsx` | 卡片、表格、教程、搜索分页、创建时间、Nexent 创建人、权限和用户组、列宽拖动 |
-| 知识库详情中的文件页面 | `frontend/ext_components/aidp/components/AidpKnowledgeFilesPage.tsx` | 页头、文件列表、搜索分页、导入、下载、删除、页头名称描述与权限编辑 |
-| 导入文件 | `frontend/ext_components/aidp/components/AidpImportDrawer.tsx`、对应 CSS | 点击整个区域选文件、拖放、最多 50 个文件、批量请求进度、图标内透明环形进度、成功实线边框、失败条目的前端删除、确认按钮 |
-| 创建知识库 | `frontend/app/[locale]/knowledges/create/page.tsx`、`AidpCreateKbPage.tsx`、`AidpCreateKbSections.tsx` | 配置表单、三类模型、接口图谱模板、提示词联动、提示信息、样式与默认折叠 |
+| 页面                   | 前端主要文件                                                                                           | 保留内容                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| 知识库列表             | `frontend/ext_components/aidp/components/AidpKnowledgeConfiguration.tsx`、`AidpKnowledgeList.tsx`      | 卡片、表格、教程、搜索分页、创建时间、Nexent 创建人、权限和用户组、列宽拖动                                            |
+| 知识库详情中的文件页面 | `frontend/ext_components/aidp/components/AidpKnowledgeFilesPage.tsx`                                   | 页头、文件列表、搜索分页、导入、下载、删除、页头名称描述与权限编辑                                                     |
+| 导入文件               | `frontend/ext_components/aidp/components/AidpImportDrawer.tsx`、对应 CSS                               | 点击整个区域选文件、拖放、最多 50 个文件、批量请求进度、图标内透明环形进度、成功实线边框、失败条目的前端删除、确认按钮 |
+| 创建知识库             | `frontend/app/[locale]/knowledges/create/page.tsx`、`AidpCreateKbPage.tsx`、`AidpCreateKbSections.tsx` | 配置表单、三类模型、接口图谱模板、提示词联动、提示信息、样式与默认折叠                                                 |
 
 列表路由仍为 `/zh/knowledges`；选择知识库通过 `?kb=<id>` 展示文件页面。创建路由为 `/zh/knowledges/create`。旧的创建弹窗和旧文件列表组件已删除，避免两套实现并存。
 
@@ -45,6 +45,8 @@ Mock 仅迁入模型和完整中文图谱模板、创建配置校验与保存、
 本分支可以单独评审合入 develop。不要为了取得这四部分页面，再整体合并原功能分支，否则会把已交接部分一并带入。
 
 同事继续开发详情时，可在独立文件中实现上传任务和详细信息，再将入口接入详情页面。合代码时重点检查路由入口、`aidpKnowledgeService.ts`、`services/api.ts`、类型、翻译、后端管理路由和 mock，避免互相覆盖。文件页面已拆成独立组件，便于保留现有文件功能。
+
+知识库教程展开状态、卡片/表格视图以及表格列显示设置保存在当前标签页的 `sessionStorage` 中；从知识库配置离开再返回时恢复。表格只有知识库名称可进入详情，点击其余单元格不会导航。列表没有定时轮询；页面挂载、用户请求刷新，以及删除或上传完成会重新查询。列表查询缓存 30 秒表示其间数据仍视为新鲜，不代表每 30 秒自动请求一次。
 
 ## 验证与本地部署
 

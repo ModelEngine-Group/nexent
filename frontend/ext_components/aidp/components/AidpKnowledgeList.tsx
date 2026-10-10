@@ -575,10 +575,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
             header: { cell: AidpResizableTitle },
           }}
           scroll={{ x: totalWidth }}
-          onRow={(kb) => ({
-            onClick: () => onSelect(kb),
-            style: { cursor: "pointer" },
-          })}
         />
       </div>
     );

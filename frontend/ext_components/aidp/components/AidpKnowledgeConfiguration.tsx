@@ -20,6 +20,7 @@ import {
 import AidpKnowledgeFilesPage from "./AidpKnowledgeFilesPage";
 import AidpKnowledgeList, {
   AIDP_KB_DEFAULT_COLUMNS,
+  AIDP_KB_REQUIRED_COLUMNS,
   type AidpKbColumnKey,
   type AidpKbViewMode,
 } from "./AidpKnowledgeList";
@@ -43,6 +44,38 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(
     null
   );
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const savedView = window.sessionStorage.getItem(
+          "aidpKnowledge.viewMode"
+        );
+        if (savedView === "cards" || savedView === "table")
+          setViewMode(savedView);
+        const savedColumns = window.sessionStorage.getItem(
+          "aidpKnowledge.visibleColumns"
+        );
+        if (savedColumns) {
+          const parsed = JSON.parse(savedColumns) as string[];
+          const allowed = new Set<AidpKbColumnKey>([
+            ...AIDP_KB_DEFAULT_COLUMNS,
+          ]);
+          if (Array.isArray(parsed))
+            setVisibleColumns(
+              AIDP_KB_DEFAULT_COLUMNS.filter(
+                (key) =>
+                  AIDP_KB_REQUIRED_COLUMNS.includes(key) ||
+                  (allowed.has(key) && parsed.includes(key))
+              )
+            );
+        }
+      } catch {
+        // Keep the defaults when saved preferences are unavailable or invalid.
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
   const [listParams, setListParams] = useState({
     page: 1,
     pageSize: 10,
@@ -88,6 +121,30 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const handleSelectKb = useCallback((kb: AidpKnowledgeBaseItem) => {
     setSelectedKb(kb);
   }, []);
+
+  const handleViewModeChange = useCallback((mode: AidpKbViewMode) => {
+    setViewMode(mode);
+    try {
+      window.sessionStorage.setItem("aidpKnowledge.viewMode", mode);
+    } catch {
+      // Keep the in-memory preference when browser storage is unavailable.
+    }
+  }, []);
+
+  const handleVisibleColumnsChange = useCallback(
+    (columns: AidpKbColumnKey[]) => {
+      setVisibleColumns(columns);
+      try {
+        window.sessionStorage.setItem(
+          "aidpKnowledge.visibleColumns",
+          JSON.stringify(columns)
+        );
+      } catch {
+        // Keep the in-memory preference when browser storage is unavailable.
+      }
+    },
+    []
+  );
 
   const openKbById = useCallback(
     async (kbId: string) => {
@@ -214,8 +271,8 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           onPageSizeChange={(pageSize) =>
             setListParams((current) => ({ ...current, pageSize, page: 1 }))
           }
-          onViewModeChange={setViewMode}
-          onVisibleColumnsChange={setVisibleColumns}
+          onViewModeChange={handleViewModeChange}
+          onVisibleColumnsChange={handleVisibleColumnsChange}
           onSelect={handleSelectKb}
           onRefresh={() => void refreshLists()}
           onCreateNew={handleCreateNew}
