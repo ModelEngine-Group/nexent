@@ -863,8 +863,12 @@ async def update_agent_info_impl(
                 )
                 missing_skill_ids = enabled_set - valid_skill_ids
                 if missing_skill_ids:
-                    raise ValueError(
-                        f"Invalid or unavailable skill IDs: {sorted(missing_skill_ids)}"
+                    raise AppException(
+                        ErrorCode.COMMON_PARAMETER_INVALID,
+                        (
+                            "skill_instances contains invalid or unavailable "
+                            f"skill IDs: {sorted(missing_skill_ids)}"
+                        ),
                     )
 
             # Query existing skill instances for this agent
@@ -915,6 +919,8 @@ async def update_agent_info_impl(
                     user_id=user_id,
                     version_no=request_version_no,
                 )
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent skills: {str(e)}")
         raise ValueError(f"Failed to update agent skills: {str(e)}")

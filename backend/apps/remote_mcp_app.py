@@ -571,7 +571,8 @@ async def get_mcp_record(
 
         mcp_record = await get_mcp_record_by_id(
             mcp_id=mcp_id,
-            tenant_id=effective_tenant_id
+            tenant_id=effective_tenant_id,
+            user_id=user_id
         )
 
         if not mcp_record:

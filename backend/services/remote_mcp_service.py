@@ -1320,12 +1320,18 @@ def attach_mcp_container_permissions(
     return enriched
 
 
-async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
+async def get_mcp_record_by_id(
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str | None = None,
+) -> dict | None:
     """Get MCP record by ID.
 
     Args:
         mcp_id: MCP record ID
         tenant_id: Tenant ID
+        user_id: User ID for visibility checking; when provided, records that
+            the user cannot see in the list view are treated as not found
 
     Returns:
         Dictionary containing mcp_name, mcp_server, authorization_token, and custom_headers, or None if not found
@@ -1333,6 +1339,18 @@ async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
     mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not mcp_record:
         return None
+
+    if user_id is not None:
+        visible_records = await get_remote_mcp_server_list(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            is_need_auth=False,
+        )
+        visible_ids = {
+            record.get("mcp_id") for record in visible_records
+        }
+        if mcp_id not in visible_ids:
+            return None
 
     return {
         "mcp_name": mcp_record.get("mcp_name"),

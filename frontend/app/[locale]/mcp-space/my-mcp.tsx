@@ -60,6 +60,7 @@ export function MyMcp({
   onEditLocal,
   onEditCommunity,
   onToggled,
+  tagRefreshKeys,
 }: {
   localList: ReturnType<typeof useMcpServicesList>;
   myPublished: ReturnType<typeof useMyCommunityMcp>;
@@ -70,6 +71,7 @@ export function MyMcp({
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
   onToggled: (mcpId: number) => Promise<void>;
+  tagRefreshKeys?: Record<number, number>;
 }) {
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
@@ -721,6 +723,11 @@ export function MyMcp({
                   onHealthCheck={handleHealthCheck}
                   healthChecking={refreshingMineKey === getMineItemKey(item)}
                   connectionStatus={connectionStatuses[key] ?? "unchecked"}
+                  tagRefreshKey={
+                    item.kind === "local"
+                      ? tagRefreshKeys[item.service.mcpId]
+                      : undefined
+                  }
                 />
               );
             }}
