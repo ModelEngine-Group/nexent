@@ -80,9 +80,7 @@ export function formatAidpDocumentCount(
 
 /** Format the creator display name; a raw user id is not a name. */
 export function formatAidpCreator(name: unknown): string {
-  return typeof name === "string" && name.trim()
-    ? name.trim()
-    : AIDP_UNKNOWN_VALUE;
+  return typeof name === "string" && name.trim() ? name.trim() : "--";
 }
 
 /** Format an ISO timestamp, falling back to the unknown placeholder. */

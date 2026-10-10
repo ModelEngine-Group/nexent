@@ -36,6 +36,7 @@ import aidpKnowledgeService, {
 } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import {
   AIDP_UNKNOWN_VALUE,
+  formatAidpCreator,
   formatAidpDocumentCount,
 } from "@/lib/aidpKnowledgeDisplay";
 import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
@@ -494,7 +495,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           <div className="flex min-w-0 items-center gap-3">
             <UserOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
             <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
-              {detail.creator_name || UNKNOWN}
+              {formatAidpCreator(detail.creator_name)}
             </AidpDetailField>
           </div>
         </dl>

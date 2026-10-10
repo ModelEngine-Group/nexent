@@ -552,12 +552,18 @@ class TestListKnowledgeBases:
         assert body["total_count"] == 0
         assert body["has_more"] is False
 
-    def test_list_resolves_legacy_owner_placeholder_to_current_nexent_user(self, monkeypatch):
+    @pytest.mark.parametrize("owner_id,expected_name", [
+        ("user_id", None),
+        ("missing-owner", None),
+        (USER_ID, "admin@nexent.com"),
+    ])
+    def test_list_creator_uses_only_persisted_owner(self, monkeypatch, owner_id, expected_name):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
-        from types import SimpleNamespace
+        queried_ids = []
 
         def creator_lookup(user_ids, _tenant_id):
+            queried_ids.extend(user_ids)
             return {USER_ID: "admin@nexent.com"} if USER_ID in user_ids else {}
 
         monkeypatch.setattr(aidp_mgmt_app, "get_nexent_creator_names", creator_lookup)
@@ -567,7 +573,7 @@ class TestListKnowledgeBases:
             return_value=[
                 {
                     "kb_id": "kb-legacy",
-                    "owner_user_id": "user_id",
+                    "owner_user_id": owner_id,
                     "permission": "EDIT",
                     "ingroup_permission": "PRIVATE",
                     "group_ids": [],
@@ -581,7 +587,9 @@ class TestListKnowledgeBases:
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
 
         assert response.status_code == HTTPStatus.OK
-        assert response.json()["value"][0]["creator_name"] == "admin@nexent.com"
+        assert response.json()["value"][0]["creator_name"] == expected_name
+        assert response.json()["value"][0]["created_by"] == owner_id
+        assert queried_ids == [owner_id]
 
     def test_list_marks_kb_unavailable_when_aidp_detail_fails(self):
         client = _client()
