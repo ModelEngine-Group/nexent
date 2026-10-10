@@ -28,6 +28,7 @@ import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { storageService } from "@/services/storageService";
 import log from "@/lib/logger";
 import { type AttachmentType } from "../utils/attachment-type";
+import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
 const useFileSrc = (file: File | undefined) => {
@@ -443,9 +444,11 @@ export const ComposerAddAttachment: FC<ComposerAddAttachmentProps> = ({
   );
 };
 
-export const ComposerAttachments: FC = () => {
+export const ComposerAttachments: FC<{ className?: string }> = ({
+  className,
+}) => {
   return (
-    <div className="flex flex-wrap gap-2 px-2 py-1">
+    <div className={cn("flex flex-wrap gap-2 px-2 py-1", className)}>
       <ComposerPrimitive.Attachments>
         {({ attachment }) => {
           return <AttachmentPreview attachment={attachment} mode="composer" />;

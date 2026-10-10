@@ -310,7 +310,7 @@ const WorkbenchComposerTagPrefix: FC = () => {
 
   if (!tag || !text?.trim()) return null;
   return (
-    <span className="shrink-0 py-2 pl-4 text-xs font-normal leading-5 text-[#197BD5]">
+    <span className="shrink-0 text-xs font-normal leading-5 text-[#197BD5]">
       {tag}
     </span>
   );
@@ -601,7 +601,9 @@ export const Composer: FC<ComposerProps> = ({
             : "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
           !newChatDesign &&
             workbenchPresentation &&
-            "rounded-3xl shadow-[0_12px_36px_-14px_rgba(0,0,0,0.18)]",
+            !configurationLayout &&
+            !debugLayout &&
+            "gap-2 rounded-[20px] border-[0.5px] border-solid border-[#191919]/[0.08] bg-white px-4 pb-4 pt-2 shadow-[0_1px_6px_0_rgba(0,0,0,0.16)]",
           disabled && !disabledReason && "cursor-not-allowed opacity-60",
           configurationLayout &&
             "min-h-[164px] rounded-[20px] border-[0.5px] border-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]",
@@ -615,7 +617,11 @@ export const Composer: FC<ComposerProps> = ({
           </p>
         ) : null}
         {!compact && !creationMode && !configurationLayout && !debugLayout && (
-          <PlanView />
+          <div
+            className={cn(workbenchPresentation && !newChatDesign && "-mx-4")}
+          >
+            <PlanView />
+          </div>
         )}
         {configurationLayout && (
           <div className="flex px-4 pt-4">
@@ -646,7 +652,8 @@ export const Composer: FC<ComposerProps> = ({
           <ComposerPrimitive.Root
             className={cn(
               "flex w-full flex-col outline-none",
-              newChatDesign && "gap-2"
+              newChatDesign && "gap-2",
+              workbenchPresentation && !newChatDesign && "gap-2"
             )}
             onSubmit={(event) => {
               if (isRunning) event.preventDefault();
@@ -665,7 +672,11 @@ export const Composer: FC<ComposerProps> = ({
           >
             {!compact &&
               (!(debugLayout || newChatDesign) || hasAttachments) && (
-                <ComposerAttachments />
+                <ComposerAttachments
+                  className={
+                    workbenchPresentation && !newChatDesign ? "px-0" : undefined
+                  }
+                />
               )}
             {skillFiles ? (
               <LexicalComposerInput
@@ -711,7 +722,9 @@ export const Composer: FC<ComposerProps> = ({
                   }
                   className={cn(
                     "max-h-48 min-h-14 w-full resize-none bg-transparent px-0 py-1 text-sm outline-none placeholder:text-muted-foreground",
-                    workbenchPresentation && "min-h-[88px] px-4 py-2",
+                    workbenchPresentation &&
+                      !newChatDesign &&
+                      "min-h-[92px] px-0 py-0",
                     newChatDesign &&
                       "block !min-h-[88px] !px-0 !py-0 leading-[22px] text-[#191919] placeholder:text-[#191919]/40",
                     workbenchPresentation &&
@@ -767,7 +780,7 @@ export const Composer: FC<ComposerProps> = ({
                 workbenchPresentation &&
                   (newChatDesign
                     ? "flex-wrap sm:flex-nowrap"
-                    : "mx-4 flex-wrap pt-2 sm:flex-nowrap"),
+                    : "h-10 flex-wrap sm:flex-nowrap"),
                 debugLayout && "!mx-0 !mb-0 !mt-1 !h-10"
               )}
             >
@@ -1225,10 +1238,10 @@ export const Composer: FC<ComposerProps> = ({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="size-8 shrink-0 p-0"
+                          className="-ml-1.5 size-8 shrink-0 p-0"
                           disabled={isRunning}
                         >
-                          <PlusIcon className="size-4" />
+                          <PlusIcon className="size-5" />
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent align="start" className="w-56 p-1">
@@ -1338,7 +1351,7 @@ export const Composer: FC<ComposerProps> = ({
                           <SkillStackIcon
                             className={cn(
                               "size-3.5",
-                              workbenchPresentation && "size-4"
+                              workbenchPresentation && "size-5"
                             )}
                           />
                           {workbenchPresentation
@@ -1405,7 +1418,7 @@ export const Composer: FC<ComposerProps> = ({
                           <KnowledgeBookIcon
                             className={cn(
                               "size-3.5",
-                              workbenchPresentation && "size-4"
+                              workbenchPresentation && "size-5"
                             )}
                           />
                           <span className="truncate">
@@ -1443,7 +1456,7 @@ export const Composer: FC<ComposerProps> = ({
                 {!compact && workbenchPresentation && (
                   <ComposerAddAttachment
                     label={t("chat.composer.uploadFile")}
-                    icon={<Paperclip className="size-4" />}
+                    icon={<Paperclip className="size-5" />}
                   />
                 )}
                 {!compact &&
@@ -1527,7 +1540,9 @@ export const Composer: FC<ComposerProps> = ({
                             >
                               <Mic
                                 className={
-                                  configurationLayout || debugLayout
+                                  configurationLayout ||
+                                  debugLayout ||
+                                  workbenchPresentation
                                     ? "size-5"
                                     : "size-4"
                                 }
@@ -1641,9 +1656,9 @@ const WorkbenchPlanningMenu: FC<{
           className="h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
         >
           {chatMode === "planning" ? (
-            <MessageCircleMore className="size-4" />
+            <MessageCircleMore className="size-5" />
           ) : (
-            <Play className="size-4" />
+            <Play className="size-5" />
           )}
           {chatMode === "planning"
             ? t("chat.composer.planningMode")

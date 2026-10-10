@@ -887,7 +887,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               !hasMessages &&
               "!max-w-none !overflow-hidden !p-0",
             workbenchLanding &&
-              "relative mt-auto flex-none max-w-[1123px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
+              "relative mt-auto flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
           {workbenchLanding && (
@@ -933,7 +933,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               newChatDesign && "!max-w-[922px] shrink-0 !gap-0 !px-4 !pb-6",
               debugLayout && "!max-w-none !shrink-0 !gap-4 !px-0 !pb-0",
               workbenchLanding &&
-                "static mb-auto max-w-[1123px] gap-4 px-4 pb-6 pt-8 sm:px-8"
+                "static mb-auto max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
             {!newChatDesign && (!debugLayout || hasMessages) && (

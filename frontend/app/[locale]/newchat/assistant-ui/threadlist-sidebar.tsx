@@ -124,12 +124,7 @@ export function ThreadListSidebar({
   return (
     <ThreadListPrimitive.Root asChild>
       <div
-        className={cn(
-          "h-full",
-          newChatDesign
-            ? "w-[296px] min-w-[296px] max-w-[296px] p-2"
-            : "w-[360px] min-w-[360px] max-w-[360px] p-2"
-        )}
+        className={cn("h-full w-[296px] min-w-[296px] max-w-[296px] p-2")}
         style={{ backgroundColor: sidebarBackground }}
       >
         <PinnedThreadsProvider>
