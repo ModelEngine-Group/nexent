@@ -150,25 +150,32 @@ def test_each_managed_agent_runtime_owns_one_distinct_context_manager():
     )
     created_agents = []
 
-    def fake_core_agent(**kwargs):
-        agent = types.SimpleNamespace(
-            context_runtime=kwargs["context_runtime"],
-            stop_event=None,
-            enable_planning=False,
-        )
-        created_agents.append(agent)
-        return agent
+    class FakeCoreAgent:
+        def __init__(self, **kwargs):
+            self.context_runtime = kwargs["context_runtime"]
+            self.managed_agents = {a.name: a for a in kwargs["managed_agents"]}
+            self.state = {}
+            self.tools = {}
+            self.stop_event = None
+            self.enable_planning = False
+            self.python_executor = None
+            created_agents.append(self)
 
-    with patch.object(factory, "create_model", return_value=MagicMock()), \
-            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", side_effect=fake_core_agent):
+    with patch.object(NexentAgent, "create_model", return_value=MagicMock()), \
+            patch.object(NexentAgent, "_cleanup_sandbox"), \
+            patch("sdk.nexent.core.agents.nexent_agent.CoreAgent", FakeCoreAgent):
         main_agent = factory.create_single_agent(  # NOSONAR - trusted local test double.
             root
         )
+        assert len(created_agents) == 1
+        for child in main_agent.managed_agents.values():
+            with child._invocation_factory():
+                pass
 
     managers = [agent.context_runtime.context_manager for agent in created_agents]
     assert len(managers) == 3
     assert len({id(manager) for manager in managers}) == 3
-    assert main_agent is created_agents[-1]
+    assert main_agent is created_agents[0]
     assert all(not hasattr(agent, "context_manager") for agent in created_agents)
 
 

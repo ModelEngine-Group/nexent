@@ -2983,8 +2983,12 @@ class TestCreateSingleAgentExceptionHandling:
             managed_agents=[mock_sub_agent_config]
         )
 
-        with pytest.raises(ValueError, match=r"Error in creating managed agent:"):
+        with patch.object(nexent_agent, 'CoreAgent', return_value=MagicMock()) as core:
             nexent_agent_instance.create_single_agent(mock_agent_config)
+            child = core.call_args.kwargs['managed_agents'][0]
+            with pytest.raises(ValueError, match='nonexistent_model'):
+                with child._invocation_factory():
+                    pass
 
 
 class TestCreateLocalToolElseBranch:
@@ -4111,7 +4115,9 @@ class TestCreateSingleAgent:
                 core_agent_call_kwargs = mock_core_agent_fn.call_args[1]
                 managed = core_agent_call_kwargs["managed_agents"]
                 assert len(managed) == 2
-                assert isinstance(managed[0]._inner, mock_core_agent_class)
+                assert managed[0].name == sub_agent_config.name
+                assert callable(managed[0]._invocation_factory)
+                assert mock_core_agent_fn.call_count == 1
                 assert managed[1]._inner is mock_wrapper_instance
 
 
@@ -6894,7 +6900,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         child_executor._nexent_session_container_group = shared_group
         parent_executor = MagicMock(name="parent_executor")
         parent_executor._nexent_session_container_group = shared_group
-        mock_build = MagicMock(side_effect=[child_executor, parent_executor])
+        mock_build = MagicMock(side_effect=[parent_executor, child_executor])
         mock_sandbox_module = MagicMock()
         mock_sandbox_module.build_python_executor = mock_build
         mock_sandbox_module.SandboxLevel = SandboxLevel
@@ -6931,32 +6937,36 @@ class TestCreateSingleAgentSandboxAndPlanning:
         }), patch.object(
             nexent_agent,
             "CoreAgent",
-            side_effect=[child_agent, parent_agent],
-        ) as mock_core_agent_cls:
+            side_effect=[parent_agent, child_agent],
+        ) as mock_core_agent_cls, patch.object(type(nexent_agent_instance), '_set_runtime_metadata_for_agent_tree'), \
+                patch.object(type(nexent_agent_instance), 'set_agent', lambda owner, value: setattr(owner, 'agent', value)), \
+                patch.object(type(nexent_agent_instance), '_initialize_sandbox_workspaces'), \
+                patch.object(type(nexent_agent_instance), '_cleanup_sandbox'):
             result = nexent_agent_instance.create_single_agent(parent_config)
+            assert mock_build.call_count == 1
+            wrapper = mock_core_agent_cls.call_args.kwargs['managed_agents'][0]
+            with wrapper._invocation_factory() as invocation:
+                assert invocation is child_agent
 
         assert result is parent_agent
         assert mock_build.call_count == 2
-        assert mock_build.call_args_list[0].kwargs["managed_agents_exist"] is False
-        assert mock_build.call_args_list[0].kwargs["host_tools_exist"] is False
+        assert mock_build.call_args_list[0].kwargs["managed_agents_exist"] is True
+        assert mock_build.call_args_list[0].kwargs["host_tools_exist"] is True
         assert mock_build.call_args_list[0].kwargs["session_container_group"] is None
-        assert mock_build.call_args_list[1].kwargs["managed_agents_exist"] is True
-        assert mock_build.call_args_list[1].kwargs["host_tools_exist"] is True
+        assert mock_build.call_args_list[1].kwargs["managed_agents_exist"] is False
+        assert mock_build.call_args_list[1].kwargs["host_tools_exist"] is False
         assert (
             mock_build.call_args_list[1].kwargs["session_container_group"]
             is shared_group
         )
 
-        child_call, parent_call = mock_core_agent_cls.call_args_list
+        parent_call, child_call = mock_core_agent_cls.call_args_list
         assert child_call.kwargs["executor"] is child_executor
         assert parent_call.kwargs["executor"] is parent_executor
         managed_wrapper = parent_call.kwargs["managed_agents"][0]
         assert managed_wrapper._nexent_execute_on_host is True
-        assert managed_wrapper._inner is child_agent
-        assert nexent_agent_instance._sandbox_executors == [
-            child_executor,
-            parent_executor,
-        ]
+        assert managed_wrapper._inner is not child_agent
+        assert nexent_agent_instance._sandbox_executors == [parent_executor]
 
     def test_agent_tree_rejects_multiple_session_container_groups(
         self, nexent_agent_instance, mock_model_config
@@ -7000,8 +7010,11 @@ class TestCreateSingleAgentSandboxAndPlanning:
             "sys.modules",
             {"sdk.nexent.core.agents.sandbox": mock_sandbox_module},
         ), patch.object(nexent_agent, "CoreAgent", return_value=MagicMock()):
+            root = nexent_agent_instance.create_single_agent(parent_config)
+            wrapper = nexent_agent.CoreAgent.call_args.kwargs['managed_agents'][0]
             with pytest.raises(ValueError, match="multiple session sandbox containers"):
-                nexent_agent_instance.create_single_agent(parent_config)
+                with wrapper._invocation_factory():
+                    pass
 
     def test_plan_tool_wiring_when_planning_enabled(self, nexent_agent_instance, mock_model_config, mock_core_agent):
         """When enable_planning=True, plan tool deps are wired (lines 683-694)."""

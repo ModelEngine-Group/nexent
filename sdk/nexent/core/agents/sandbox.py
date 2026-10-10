@@ -1455,6 +1455,11 @@ def cleanup_executor(executor: Any, logger_: logging.Logger, timeout: float = 5.
     except Exception as exc:
         logger_.warning("Sandbox cleanup failed: %s", exc)
 
+    # A failed lease cleanup must never kill sibling kernels in its container.
+    if getattr(executor, "_nexent_kernel_lease", False) is True:
+        logger_.warning("Kernel lease cleanup did not finish; preserving shared container")
+        return
+
     # Layer 2: force-kill Docker container
     try:
         container_attr = getattr(executor, "container", None)
@@ -1713,6 +1718,15 @@ class _DockerKernelLease:
         self._cached_variables: Optional[dict[str, Any]] = None
         self._cached_tools: Optional[dict[str, Any]] = None
         self._kernel_bootstrap_code: list[str] = []
+        self._cancellation_scope: Optional[RunCancellationScope] = None
+
+    def _check_execution_cancelled(self) -> None:
+        """Cancellation is a lifecycle outcome, not an unhealthy kernel."""
+        from ..concurrency.cancellation import RunTerminated
+
+        scope = getattr(self, "_cancellation_scope", None)
+        if scope is not None and scope.cancelled:
+            raise RunTerminated("Sandbox invocation cancelled")
 
     def _build_channels_url(self, kernel_id: str) -> str:
         """Build a Kernel Gateway channel URL with a stable client session."""
@@ -1731,6 +1745,24 @@ class _DockerKernelLease:
         return self._container_executor.container
 
     def run_code_raise_errors(self, code: str) -> Any:
+        from websocket import create_connection
+
+        self._check_execution_cancelled()
+        if self._closed:
+            raise RuntimeError("Sandbox kernel lease is already closed")
+        if self._unhealthy:
+            self._replace_unhealthy_kernel()
+        with closing(create_connection(self.ws_url, timeout=self._receive_timeout_seconds)) as ws:
+            scope = getattr(self, "_cancellation_scope", None)
+            token = scope.register_closer(ws.shutdown) if scope is not None else None
+            try:
+                return self._execute_on_channel(code, ws)
+            finally:
+                if token is not None:
+                    scope.unregister_closer(token)
+
+    def _execute_on_channel(self, code: str, ws: Any) -> Any:
+        """Execute once on the invocation-owned socket and correlate results."""
         import base64
         import json
         import pickle
@@ -1741,100 +1773,89 @@ class _DockerKernelLease:
             RemotePythonExecutor,
             _websocket_send_execute_request,
         )
-        from websocket import (
-            ABNF,
-            WebSocketConnectionClosedException,
-            WebSocketTimeoutException,
-            create_connection,
-        )
+        from websocket import ABNF, WebSocketConnectionClosedException, WebSocketTimeoutException
 
-        if self._closed:
-            raise RuntimeError("Sandbox kernel lease is already closed")
-        if self._unhealthy:
-            self._replace_unhealthy_kernel()
+        self._check_execution_cancelled()
+        msg_id = _websocket_send_execute_request(code, ws)
+        outputs = []
+        result = None
+        is_final_answer = False
+        status_deadline = time.monotonic() + self._receive_timeout_seconds
 
-        with closing(
-            create_connection(self.ws_url, timeout=self._receive_timeout_seconds)
-        ) as ws:
-            msg_id = _websocket_send_execute_request(code, ws)
-            outputs = []
-            result = None
-            is_final_answer = False
-            status_deadline = time.monotonic() + self._receive_timeout_seconds
-
-            while True:
+        while True:
+            self._check_execution_cancelled()
+            now = time.monotonic()
+            if now >= status_deadline:
+                self._check_kernel_channel_health(
+                    "the terminal execution message was not received before the watchdog deadline"
+                )
+                status_deadline = time.monotonic() + self._receive_timeout_seconds
                 now = time.monotonic()
-                if now >= status_deadline:
-                    self._check_kernel_channel_health(
-                        "the terminal execution message was not received before the watchdog deadline"
-                    )
-                    status_deadline = time.monotonic() + self._receive_timeout_seconds
-                    now = time.monotonic()
 
-                ws.settimeout(max(status_deadline - now, 0.001))
-                raw_message = None
+            ws.settimeout(max(status_deadline - now, 0.001))
+            raw_message = None
+            try:
+                opcode, raw_message = ws.recv_data(control_frame=True)
+            except WebSocketTimeoutException as exc:
                 try:
-                    opcode, raw_message = ws.recv_data(control_frame=True)
-                except WebSocketTimeoutException as exc:
-                    try:
-                        self._check_kernel_channel_health(
-                            "no WebSocket messages were received before the watchdog deadline"
-                        )
-                    except RuntimeError as health_error:
-                        raise health_error from exc
-                    status_deadline = time.monotonic() + self._receive_timeout_seconds
-                    continue
-                except WebSocketConnectionClosedException as exc:
-                    try:
-                        self._check_kernel_channel_health(
-                            "the Jupyter WebSocket connection closed unexpectedly",
-                            allow_busy=False,
-                        )
-                    except RuntimeError as health_error:
-                        raise health_error from exc
-
-                if opcode in (ABNF.OPCODE_PING, ABNF.OPCODE_PONG):
-                    continue
-                if opcode == ABNF.OPCODE_CLOSE:
                     self._check_kernel_channel_health(
-                        "the Jupyter WebSocket connection sent a close frame",
+                        "no WebSocket messages were received before the watchdog deadline"
+                    )
+                except RuntimeError as health_error:
+                    raise health_error from exc
+                status_deadline = time.monotonic() + self._receive_timeout_seconds
+                continue
+            except WebSocketConnectionClosedException as exc:
+                try:
+                    self._check_kernel_channel_health(
+                        "the Jupyter WebSocket connection closed unexpectedly",
                         allow_busy=False,
                     )
-                if not raw_message:
-                    self._check_kernel_channel_health(
-                        "the Jupyter WebSocket connection returned an empty frame",
-                        allow_busy=False,
-                    )
-                if isinstance(raw_message, bytes):
-                    raw_message = raw_message.decode("utf-8")
+                except RuntimeError as health_error:
+                    raise health_error from exc
 
-                message = json.loads(raw_message)
-                parent_msg_id = message.get("parent_header", {}).get("msg_id")
-                if parent_msg_id != msg_id:
-                    continue
+            if opcode in (ABNF.OPCODE_PING, ABNF.OPCODE_PONG):
+                continue
+            if opcode == ABNF.OPCODE_CLOSE:
+                self._check_kernel_channel_health(
+                    "the Jupyter WebSocket connection sent a close frame",
+                    allow_busy=False,
+                )
+            if not raw_message:
+                self._check_kernel_channel_health(
+                    "the Jupyter WebSocket connection returned an empty frame",
+                    allow_busy=False,
+                )
+            if isinstance(raw_message, bytes):
+                raw_message = raw_message.decode("utf-8")
 
-                msg_type = message.get("msg_type", "")
-                content = message.get("content", {})
-                if msg_type == "stream":
-                    outputs.append(content["text"])
-                    status_deadline = time.monotonic() + self._receive_timeout_seconds
-                elif msg_type == "execute_result":
-                    result = content["data"].get("text/plain")
-                    status_deadline = time.monotonic() + self._receive_timeout_seconds
-                elif msg_type == "error":
-                    if content.get("ename", "") == RemotePythonExecutor.FINAL_ANSWER_EXCEPTION:
-                        result = pickle.loads(base64.b64decode(content.get("evalue", "")))
-                        is_final_answer = True
-                    else:
-                        raise AgentError("\n".join(content.get("traceback", [])), self.logger)
-                elif msg_type == "status" and content.get("execution_state") == "idle":
-                    break
+            message = json.loads(raw_message)
+            parent_msg_id = message.get("parent_header", {}).get("msg_id")
+            if parent_msg_id != msg_id:
+                continue
 
-            return CodeOutput(
-                output=result,
-                logs="".join(outputs),
-                is_final_answer=is_final_answer,
-            )
+            msg_type = message.get("msg_type", "")
+            content = message.get("content", {})
+            if msg_type == "stream":
+                outputs.append(content["text"])
+                status_deadline = time.monotonic() + self._receive_timeout_seconds
+            elif msg_type == "execute_result":
+                result = content["data"].get("text/plain")
+                status_deadline = time.monotonic() + self._receive_timeout_seconds
+            elif msg_type == "error":
+                if content.get("ename", "") == RemotePythonExecutor.FINAL_ANSWER_EXCEPTION:
+                    result = pickle.loads(base64.b64decode(content.get("evalue", "")))
+                    is_final_answer = True
+                else:
+                    raise AgentError("\n".join(content.get("traceback", [])), self.logger)
+            elif msg_type == "status" and content.get("execution_state") == "idle":
+                break
+
+        return CodeOutput(
+            output=result,
+            logs="".join(outputs),
+            is_final_answer=is_final_answer,
+        )
 
     def _check_kernel_channel_health(
         self,
@@ -1843,6 +1864,7 @@ class _DockerKernelLease:
         allow_busy: bool = True,
     ) -> None:
         """Fail a lost kernel channel while allowing a genuinely busy kernel to continue."""
+        self._check_execution_cancelled()
         state = self._get_kernel_execution_state()
         if allow_busy and state == "busy":
             self._logger.debug(
@@ -1886,6 +1908,7 @@ class _DockerKernelLease:
         )
 
         previous_kernel_id = self.kernel_id
+        self._check_execution_cancelled()
         try:
             response = self._requests.delete(
                 f"{self.base_url}/api/kernels/{previous_kernel_id}",
@@ -2335,6 +2358,7 @@ class SandboxPoolManager:
                     logger_,
                     receive_timeout_seconds=config.timeout_seconds,
                 )
+                lease._cancellation_scope = cancellation_scope
                 break
             except Exception as exc:
                 discard_owner(container_executor)
@@ -2973,6 +2997,8 @@ class SandboxPoolManager:
 
         if config.scope == SandboxScope.SYSTEM:
             return executor
+        if isinstance(executor, _DockerKernelLease):
+            executor._cancellation_scope = cancellation_scope
         if host_tools_exist:
             executor = _install_host_tool_bridge(
                 executor,

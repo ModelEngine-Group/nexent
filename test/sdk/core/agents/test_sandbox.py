@@ -43,6 +43,7 @@ def _load_sandbox_module():
         os.path.join(SDK_PATH, "nexent", "core", "agents", "sandbox.py"),
     )
     module = importlib.util.module_from_spec(spec)
+    module.__package__ = "nexent.core.agents"
     sys.modules["sandbox_under_test"] = module
     spec.loader.exec_module(module)
     return module

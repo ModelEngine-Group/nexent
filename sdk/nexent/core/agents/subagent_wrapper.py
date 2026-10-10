@@ -14,6 +14,8 @@ perspective.
 from __future__ import annotations
 
 import uuid
+from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any, Callable, Iterable
 
@@ -25,6 +27,25 @@ from ...monitor import (
     get_monitoring_manager,
 )
 from ..utils.observer import MessageObserver
+
+
+class SubAgentDefinition:
+    """Expose the managed-tool contract without allocating execution resources."""
+
+    def __init__(self, name: str, description: str):
+        self.name = name
+        self.description = description
+        self.inputs = {"task": {"type": "string", "description": "Task to execute."}}
+        self.output_type = "string"
+        self.managed_agents = {}
+        self.tools = {}
+        self.state = {}
+
+    def get_runtime_metadata(self) -> dict:
+        return deepcopy(self.state.get("metadata", {}))
+
+    def set_runtime_metadata(self, metadata: dict) -> None:
+        self.state["metadata"] = deepcopy(metadata)
 
 
 class SubAgentToolWrapper:
@@ -61,6 +82,7 @@ class SubAgentToolWrapper:
         "_invocation_name",
         "_runtime_identity",
         "_task_extractor",
+        "_invocation_factory",
     })
 
     def __init__(
@@ -72,11 +94,13 @@ class SubAgentToolWrapper:
         invocation_name: str | None = None,
         task_extractor: Callable[[Iterable[Any], dict], str | None] | None = None,
         runtime_identity: dict | None = None,
+        invocation_factory: Callable | None = None,
     ):
         # Set attributes through ``object.__setattr__`` so the new
         # ``__setattr__`` below (which forwards everything to the inner
         # agent) does not interfere with our own construction.
         object.__setattr__(self, "_inner", inner_agent)
+        object.__setattr__(self, "_invocation_factory", invocation_factory)
         object.__setattr__(self, "_observer", observer)
         object.__setattr__(self, "_agent_id", agent_id)
         object.__setattr__(self, "_runtime_identity", {
@@ -152,9 +176,9 @@ class SubAgentToolWrapper:
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         inner_forward = getattr(self._inner, "forward", None)
         target = inner_forward if callable(inner_forward) else self._inner
-        return self._invoke(target, args, kwargs)
+        return self._invoke(target, args, kwargs, forward_call=True)
 
-    def _invoke(self, target: Callable, args: tuple, kwargs: dict) -> Any:
+    def _invoke(self, target: Callable, args: tuple, kwargs: dict, *, forward_call: bool = False) -> Any:
         """Keep tracing and observer boundaries identical for both entry points."""
         task_text = self._task_extractor(args, kwargs)
         invocation_id = uuid.uuid4().hex
@@ -183,7 +207,15 @@ class SubAgentToolWrapper:
             with agent_monitoring_context(metadata), manager.trace_operation(
                 f"agent.subagent.{self._agent_name}", OPENINFERENCE_SPAN_KIND_AGENT, **attributes
             ):
-                result = target(*args, **kwargs)
+                invocation = (
+                    self._invocation_factory()
+                    if self._invocation_factory is not None
+                    else nullcontext(self._inner)
+                )
+                with invocation as agent:
+                    if self._invocation_factory is not None:
+                        target = getattr(agent, "forward", agent) if forward_call else agent
+                    result = target(*args, **kwargs)
                 manager.set_openinference_output(result)
                 return result
         finally:
