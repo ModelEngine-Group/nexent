@@ -349,6 +349,7 @@ get_third_party_images() {
     echo "$POSTGRESQL_IMAGE"
     echo "$REDIS_IMAGE"
     echo "$MINIO_IMAGE"
+    echo_image_ref "nginx:alpine"
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
     echo "$SUPABASE_KONG"

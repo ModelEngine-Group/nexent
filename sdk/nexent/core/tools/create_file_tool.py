@@ -13,14 +13,9 @@ logger = logging.getLogger("create_file_tool")
 class CreateFileTool(Tool):
     """File creation tool for creating files and writing content"""
     name = "create_file"
-    description = "Create a file at the specified path and write content to it. " \
-                  "Path should be relative to the workspace (e.g., 'documents/file.txt'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "If content is empty, creates an empty file. " \
-                  "Supports custom encoding, defaults to utf-8. " \
-                  "Will create parent directories if they don't exist."
+    description = "Create a workspace file and write content to it. Missing parent directories are created."
 
-    description_zh = "在指定路径创建文件并写入内容。路径需为工作区相对路径（例如，'documents/file.txt'），父目录不存在时将自动创建。出于安全考虑，不支持绝对路径。若内容为空则创建空文件，支持自定义编码，默认为 utf-8 。"
+    description_zh = "在工作区创建文件并写入内容；父目录不存在时自动创建。"
 
     inputs = {
         "file_path": {
@@ -71,6 +66,7 @@ class CreateFileTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
+        self.workspace_mapping = None
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
@@ -84,6 +80,8 @@ class CreateFileTool(Tool):
         Raises:
             Exception: If path is outside workspace or invalid
         """
+        if self.workspace_mapping is not None:
+            return str(self.workspace_mapping.resolve_file(file_path, self.init_path))
         # Check for absolute path
         if os.path.isabs(file_path):
             abs_path = os.path.abspath(file_path)
@@ -144,7 +142,9 @@ class CreateFileTool(Tool):
             success_msg = {
                 "status": "success",
                 "file_path": relative_path,
-                "absolute_path": abs_path,
+                "absolute_path": (
+                    str(self.workspace_mapping.to_container(abs_path)) if self.workspace_mapping else abs_path
+                ),
                 "content_length": len(content) if content else 0,
                 "file_size_bytes": file_size,
                 "encoding": encoding,

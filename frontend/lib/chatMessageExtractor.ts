@@ -11,6 +11,7 @@ import {
 } from "@/types/chat";
 import log from "@/lib/logger";
 import { toMessageCreatedAt } from "@/lib/messageDate";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import type { TFunction } from "i18next";
 
 // Replace <user_break> tag with the localized natural language string
@@ -144,7 +145,7 @@ export function extractAssistantMsgFromResponse(
     dialog_msg.message.forEach((msg: ApiMessageItem) => {
       switch (msg.type) {
         case chatConfig.messageTypes.FINAL_ANSWER: {
-          finalAnswer += processSpecialTag(msg.content, t);
+          finalAnswer += processSpecialTag(unwrapFinalAnswer(msg.content), t);
           break;
         }
 

@@ -22,7 +22,7 @@ from consts.model import HistoryItem, NL2SkillRunRequest
 from database.model_management_db import get_model_by_model_id
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.content_classifier_utils import ContentClassifier
-from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
+from utils.prompt_template_utils import get_nl2skill_prompt_template
 from services.thread_lifecycle_service import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
@@ -100,12 +100,12 @@ def _assemble_draft_content(draft_snapshot: dict[str, Any]) -> str:
         if path == "SKILL.md":
             skill_content = file_content
         elif path and file_content.strip():
-            parts.append(f'<FILE path="{path}">\n{file_content}\n</FILE>')
+            parts.append(f'<file path="{path}">\n{file_content}\n</file>')
 
     if not skill_content.strip() and not parts:
         return ""
 
-    return "\n\n".join([f"<SKILL>\n{skill_content}\n</SKILL>", *parts])
+    return "\n\n".join([f"<skill>\n{skill_content}\n</skill>", *parts])
 
 
 def _normalize_draft_snapshot(
@@ -190,11 +190,11 @@ async def build_nl2skill_run_info(
         minio_files=request.minio_files,
         query=request.query,
         history=request.history,
+        language=template_language,
     )
-    template = get_skill_creation_simple_prompt_template(
+    template = get_nl2skill_prompt_template(
         language=template_language,
         existing_skill=draft_snapshot,
-        complexity=request.complexity,
         user_request=final_query,
         target_files=target_files,
     )

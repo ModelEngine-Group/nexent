@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Any, List, Optional
 
 
@@ -5,6 +6,54 @@ _MULTIMODAL_BLOCK_TYPES = {
     "image_url", "audio_url", "video_url",
     "input_audio", "input_image", "input_video",
 }
+
+
+def merge_system_messages(messages: List[Any]) -> List[Any]:
+    """Join system text into one message before tracing or provider conversion."""
+    def field(message, key):
+        return message.get(key) if isinstance(message, dict) else getattr(message, key, None)
+
+    systems = [message for message in messages if field(message, "role") == "system"]
+    if not systems:
+        return messages
+    blocks = []
+    string_only = True
+    for message in systems:
+        content = field(message, "content")
+        string_only = string_only and isinstance(content, str)
+        if isinstance(content, str):
+            blocks.append({"type": "text", "text": content})
+        elif isinstance(content, list):
+            blocks.extend(deepcopy(content))
+        elif content is not None:
+            raise TypeError("System content must be text or a list of blocks")
+
+    # Cache annotations do not require separate text blocks. Retain the last
+    # text annotation on the combined text; preserve any media blocks intact.
+    text_blocks = [block for block in blocks if isinstance(block, dict) and block.get("type") == "text"]
+    if len(text_blocks) == len(blocks):
+        text = "\n\n".join(block["text"] for block in text_blocks)
+        combined = {"type": "text", "text": text}
+        for block in text_blocks:
+            combined.update({key: value for key, value in block.items() if key not in {"type", "text"}})
+        content = text if string_only else [combined]
+    else:
+        content = blocks
+    merged = deepcopy(systems[0])
+    if isinstance(merged, dict):
+        merged["content"] = content
+    else:
+        merged.content = content
+    result = []
+    emitted = False
+    for message in messages:
+        if field(message, "role") == "system":
+            if not emitted:
+                result.append(merged)
+                emitted = True
+        else:
+            result.append(message)
+    return result
 
 
 def content_has_multimodal_blocks(content: Any) -> bool:

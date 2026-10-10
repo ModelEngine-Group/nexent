@@ -253,6 +253,18 @@ const HomeContent: FC = () => {
     [chatMode, dispatchWorkbench, workbenchState.configVersion]
   );
 
+  const handleConversationRenamed = useCallback(
+    (threadId: string, remoteId: string | undefined, title: string) => {
+      setGeneratedTitles((titles) => {
+        const next = new Map(titles);
+        next.set(threadId, title);
+        if (remoteId) next.set(remoteId, title);
+        return next;
+      });
+    },
+    []
+  );
+
   const handleGenerationStopped = useCallback((conversationId: number) => {
     // A user-initiated stop transitions assistant-ui to idle before the
     // backend has persisted the terminal message. Do not mistake that short
@@ -1168,6 +1180,7 @@ const HomeContent: FC = () => {
             showLegacySwitch={false}
             generatedTitles={generatedTitles}
             serverConversationIds={serverConversationIds}
+            onRenameSuccess={handleConversationRenamed}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
           />

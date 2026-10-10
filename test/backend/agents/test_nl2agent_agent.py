@@ -331,14 +331,14 @@ def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
 
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
     prompt_loader = mocker.patch(
-        "agents.nl2agent_agent.get_prompt_template",
+        "nexent.core.agents.prompt.meta.load_prompt",
         return_value={"system_prompt": "{{ missing_value }}"},
     )
 
     with pytest.raises(UndefinedError, match="missing_value"):
         build_nl2agent_system_prompt("en")
 
-    prompt_loader.assert_called_once_with("nl2agent", "en")
+    prompt_loader.assert_called_once_with("en", "meta/nl2agent")
 
 
 def test_current_wrapper_models_require_existing_agent_id():
@@ -462,6 +462,7 @@ def test_requirement_clarification_accepts_at_most_five_questions():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en"])
 async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(language):
+    """UT-BE-DPR-011: ephemeral agents retain parallel tool localization."""
     config = create_nl2agent_agent_config(language)
     registered_tools = await local_mcp_service.get_tools()
 
@@ -481,6 +482,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
         registered_tools[NL2A_WRAPPER_NAME].description,
         ParallelExecutorTool.description,
     ]
+    assert config.tools[-1].description_zh == ParallelExecutorTool.description_zh
     assert json.loads(config.tools[0].inputs)["agent_id"] == "int"
     assert json.loads(config.tools[1].inputs)["agent_id"] == "int"
     assert json.loads(config.tools[2].inputs)["agent_id"] == "int"

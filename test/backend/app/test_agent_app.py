@@ -3132,3 +3132,144 @@ def test_get_agent_icon_api_internal_error(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Agent icon retrieval error."
+
+
+# ---------------------------------------------------------------------------
+# Security audit entries
+# ---------------------------------------------------------------------------
+
+
+def test_update_agent_info_api_emits_audit_entry(mocker, mock_auth_header, caplog):
+    """Successful agent update records an identifier-only audit line."""
+    import logging
+
+    mocker.patch("apps.agent_app.update_agent_info_impl", new_callable=AsyncMock,
+                 return_value={"updated": True})
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("test_user", "test_tenant"),
+    )
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = config_client.post(
+            "/agent/update",
+            json={"agent_id": 123, "display_name": "Bot",
+                  "duty_prompt": "secret prompt text"},
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_update" in messages[0]
+    assert "result=success" in messages[0]
+    assert "user_id=test_user" in messages[0]
+    assert '"agent_id":123' in messages[0]
+    assert '"patch_keys":["agent_id","display_name","duty_prompt"]' in messages[0]
+    assert "secret prompt text" not in messages[0]
+
+
+def test_upload_agent_icon_api_emits_audit_entry(mocker, mock_auth_header, caplog):
+    """Successful icon upload records filename and size, never the bytes."""
+    import logging
+
+    mocker.patch(
+        "apps.agent_app.upload_agent_icon_impl",
+        new_callable=AsyncMock,
+        return_value={"icon_url": "/agent/7/icon/x"},
+    )
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("test_user", "test_tenant"),
+    )
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = config_client.post(
+            "/agent/7/icon",
+            files={"file": ("avatar.png", b"binary-image", "image/png")},
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_icon_upload" in messages[0]
+    assert '"agent_id":7' in messages[0]
+    assert '"filename":"avatar.png"' in messages[0]
+    assert '"size":12' in messages[0]
+    assert "binary-image" not in messages[0]
+
+
+def test_import_agent_api_emits_audit_entry_without_payload(mocker, mock_auth_header, caplog):
+    """Successful import records identifiers and counts, not the agent payload."""
+    import logging
+
+    mocker.patch("apps.agent_app.import_agent_impl", new_callable=AsyncMock,
+                 return_value={123: 456})
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("test_user", "test_tenant"),
+    )
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = config_client.post(
+            "/agent/import",
+            json={
+                "agent_info": {
+                    "agent_id": 123,
+                    "agent_info": {
+                        "test_agent": {
+                            "agent_id": 123,
+                            "name": "ImportedAgent",
+                            "description": "Test description",
+                            "business_description": "Business desc",
+                            "max_steps": 10,
+                            "provide_run_summary": True,
+                            "enabled": True,
+                            "tools": [],
+                            "managed_agents": []
+                        }
+                    },
+                    "mcp_info": []
+                },
+                "force_import": True
+            },
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_import" in messages[0]
+    assert '"source_agent_id":123' in messages[0]
+    assert '"force_import":true' in messages[0]
+    assert '"skills_count":0' in messages[0]
+    assert "ImportedAgent" not in messages[0]
+    assert "Test description" not in messages[0]
+
+
+def test_publish_version_api_emits_audit_entry(mocker, mock_auth_header, caplog):
+    """Successful publish records agent_id and version name."""
+    import logging
+
+    mocker.patch("apps.agent_app.get_current_user_id",
+                 return_value=("test_user", "test_tenant"))
+    mocker.patch("apps.agent_app.publish_version_impl", return_value={"version_no": 1})
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = config_client.post(
+            "/agent/123/publish",
+            json={"version_name": "v1.0.0", "release_note": "Initial release"},
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_version_publish" in messages[0]
+    assert '"agent_id":123' in messages[0]
+    assert '"version_name":"v1.0.0"' in messages[0]

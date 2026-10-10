@@ -31,6 +31,7 @@ import {
 } from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
@@ -1124,7 +1125,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           ) {
             flushReasoning(part.invocation_id);
             if (part.content) {
-              const textPart: any = { type: "text", text: part.content };
+              const textPart: any = {
+                type: "text",
+                text: unwrapFinalAnswer(part.content),
+              };
               const meta = buildMetadata(part.invocation_id);
               if (meta) textPart.metadata = meta;
               content.push(textPart);

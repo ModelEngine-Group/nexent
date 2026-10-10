@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -92,7 +93,7 @@ async def test_disabled_monitoring_preserves_behavior(runtime):
     """BE-UT-012-04: telemetry never becomes a requirement for title generation."""
     runtime.manager._config.enable_telemetry = False
     runtime.prepare.side_effect = None
-    runtime.prepare.return_value = {"SYSTEM_PROMPT": "Title", "USER_PROMPT": "{{ question }}"}
+    runtime.prepare.return_value = SimpleNamespace(system="Title", user="hello")
     runtime.adapter.side_effect = None
     runtime.adapter.return_value.content = "A title"
     runtime.save.side_effect = None

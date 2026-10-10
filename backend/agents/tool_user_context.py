@@ -11,14 +11,14 @@ logger = logging.getLogger(__name__)
 
 def agent_tree_needs_user_context(agent_config: AgentConfig) -> bool:
     """Return whether an agent tree can forward caller identity externally."""
-    if not all(hasattr(agent_config, field) for field in ("tools", "external_a2a_agents", "managed_agents")):
+    if not all(hasattr(agent_config, field) for field in ("tools", "external_a2a_agents", "worker_agents")):
         return False
     return (
         any(tool.source == "mcp" for tool in agent_config.tools)
         or bool(agent_config.external_a2a_agents)
         or any(
             agent_tree_needs_user_context(sub_agent)
-            for sub_agent in agent_config.managed_agents
+            for sub_agent in agent_config.worker_agents
         )
     )
 

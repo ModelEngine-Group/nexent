@@ -1,0 +1,93 @@
+tools:
+  heading: '### 工具'
+  unavailable: '- 当前没有可用的工具'
+  intro: '以下工具可供当前任务使用：'
+  input_label: 接受输入
+  output_label: 返回输出类型
+  mcp_call_guidance: 'MCP 工具请直接调用 Python 函数名 `{{ name }}`，不要把 `[MCP]` 写入代码。'
+  file_url_guide_manager: |-
+    ### 文件链接使用指南
+    当处理用户上传的文件时，请根据工具类型选择正确的 URL：
+    1. **调用标记为 [MCP] 的工具**（外部工具，运行在 Nexent 之外）：
+       → 使用 **Download URL**（格式：`https://minio.example.com/...?token=xxx`）
+       原因：MCP 工具运行在外部服务，无法访问内部 S3 存储
+    2. **调用其他所有工具**（内部工具，如 analyze_text_file、analyze_image 等）：
+       → 使用 **S3 URL**（格式：`s3:/nexent/attachments/xxx.pdf`）
+       原因：内部工具运行在 Nexent 内部，可以直接访问 MinIO 存储
+  file_url_guide_worker: |-
+    ### 文件链接使用指南
+    当处理用户上传的文件时，请根据工具类型选择正确的 URL：
+    1. **调用标记为 [MCP] 的工具**（外部工具，运行在 Nexent 之外）：
+       → 使用 **presigned_url**（已包含代理前缀，格式：`http://.../api/nb/v1/file/fetch?presigned_url=...`）
+       直接使用用户上传文件信息中提供的 **presigned_url** 字段，无需拼接。
+    2. **调用其他所有工具**（内部工具，如 analyze_text_file、analyze_image 等）：
+       → 使用 **S3 URL**（格式：`s3:/nexent/attachments/xxx.pdf`）
+       原因：内部工具运行在 Nexent 内部，可以直接访问 MinIO 存储
+skills:
+  heading: '### 技能'
+  intro: 你拥有以下技能：
+  unavailable: '- 当前没有可用的技能'
+worker_agents:
+  heading: '### 内部子智能体'
+  intro: 你可以使用以下内部子智能体（通过函数调用方式协作）：
+  guidance: |-
+    内部子智能体调用规范：
+      1. 调用方式：
+         - 接受输入：{"task": {"type": "string", "description": "任务描述"}}
+         - 返回输出类型：{"type": "string", "description": "执行结果"}
+         - 示例（将 worker_name 换成可用资源中的实际名称）：
+           <code>
+           result = worker_name(task="核对代码逻辑")
+           print(result)
+           </code>
+      2. 使用策略：
+         - 任务分解：单次调用中不要让子智能体一次做过多的事情，任务拆分是你的工作，你需要将复杂任务分解为可管理的子任务
+         - 并行优化：互不依赖的子任务可在单步内并行调用；有依赖时须串行调用。
+         - 专业匹配：根据子智能体的专长分配任务
+         - 信息整合：整合不同子智能体的输出生成连贯解决方案
+         - 效率优化：避免重复工作
+      3. 协作要求：
+         - 评估子智能体返回的结果
+         - 必要时提供额外指导或重新分配任务
+         - 在子智能体结果基础上进行工作，避免重复工作
+         - 注意保留子智能体回答中的特殊符号，如索引溯源信息等
+external_agents:
+  heading: '### 外部子智能体'
+  intro: 你还可以使用以下外部子智能体（通过 A2A 协议远程调用）：
+  guidance: |-
+    外部子智能体调用规范：
+      1. 只传 task 参数，任务描述使用自然语言。示例（将 agent_name 换成实际名称）：
+         <code>
+         result = agent_name(task="查询北京天气")
+         print(result)
+         </code>
+      2. 外部子智能体自行识别并处理任务。
+  unavailable: '- 当前没有可用的子智能体'
+retrieved_context:
+  memory_heading: '## 检索记忆'
+  knowledge_summary_heading: '## 知识库摘要'
+history:
+  summary_prefix: '## 早前对话摘要'
+  compact_heading: '结构化摘要'
+  field_headings:
+    task_overview: 任务概览
+    completed_work: 已完成工作
+    key_decisions: 关键决定
+    unresolved_issues: 未解决问题
+    pending_items: 待办事项
+    next_steps: 后续步骤
+    context_to_preserve: 需保留的上下文
+  completed_action_notice: 这是一条已完成的操作记录，仅作为历史证据使用。
+  completed_action_format_notice: 不要将这条记录的格式复制到下一次回复中。
+builtin_tools:
+  run_skill_script: 在 Docker 沙箱中执行已启用技能的脚本或本轮生成的工作区脚本。普通智能体代码不得用 Shell 执行系统命令。
+  read_skill_md: 读取已启用技能的执行指南及按需附加文件。
+  read_skill_config: 读取技能配置并返回工作流变量。
+  download_from_s3: 将已授权的 S3/MinIO 对象下载到本轮隔离工作区。当前请求上传的文件会自动下载。
+  upload_to_s3: 将本轮隔离工作区生成的文件上传到 MinIO，并返回前端可用的下载元数据。运行结束时会自动上传剩余输出文件。
+  create_plan: 行动前为当前任务创建执行计划，返回计划 id 和步骤数量。
+  update_plan_step: 按执行进度更新单个计划步骤，返回其 id 和新状态。
+  s3_path: 已授权的 S3/MinIO 路径
+  local_filename: 相对于本轮工作区的可选路径
+  file_path: 本轮工作区内的文件路径
+  target_filename: 可选的输出文件名

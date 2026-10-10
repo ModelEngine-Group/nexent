@@ -34,10 +34,12 @@ def dependency(monkeypatch, name, **attributes):
     ("hello", None, "hello"),
     ("hello", "invalid/zone", "hello"),
     ("", "UTC", ""),
-    ("[Current time: existing] hello", "UTC", "[Current time: existing] hello"),
-    ("hello", "Asia/Shanghai", "[Current time: 2026-08-31 08:00:00]\n\nhello"),
+    ("hello", "Asia/Shanghai", "hello\n\n[Current time: 2026-08-31 08:00:00]"),
+    ("hello\n\n[Current time: existing]", "UTC", "hello\n\n[Current time: existing]"),
+    ("hello\n\nRun workspace: /run/1", "UTC",
+     "hello\n\n[Current time: 2026-08-31 00:00:00]\n\nRun workspace: /run/1"),
 ])
-def test_ac002_prepend_time_compatibility(monkeypatch, query, zone, expected):
+def test_ac002_append_runtime_time(monkeypatch, query, zone, expected):
     module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
     assert module.prepend_current_time(
         query, zone, now=datetime(2026, 8, 31, tzinfo=timezone.utc)
@@ -46,10 +48,10 @@ def test_ac002_prepend_time_compatibility(monkeypatch, query, zone, expected):
 
 @pytest.mark.parametrize("query,expected", [
     (None, None), ("", ""), ("  hello  ", "  hello  "),
-    ("[Current time: incomplete", "[Current time: incomplete"),
-    ("[Current time: now]\n\n hello  ", "hello"),
+    ("hello\n\n[Current time: now]", "hello"),
+    ("hello\n\n[当前时间: now]\n\nRun workspace: /run/1", "hello\n\nRun workspace: /run/1"),
 ])
-def test_ac002_strip_time_compatibility(monkeypatch, query, expected):
+def test_ac002_strip_runtime_time(monkeypatch, query, expected):
     module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
     assert module.strip_current_time_prefix(query) == expected
 

@@ -1,10 +1,10 @@
-import pytest
-from pytest_mock import MockFixture
-from unittest.mock import Mock, MagicMock
-from io import BytesIO
 import sys
 import types
+from io import BytesIO
+from unittest.mock import MagicMock, Mock
 
+import pytest
+from pytest_mock import MockFixture
 
 fake_unstructured = types.ModuleType("unstructured_inference")
 fake_models = types.ModuleType("unstructured_inference.models")
@@ -458,6 +458,45 @@ class TestDataProcessCore:
 
         assert len(parts) == 1
         assert parts[0].getvalue() == data
+
+    def test_lazy_processor_loading_and_model_registry_hooks(self, core, monkeypatch):
+        processor_classes = {
+            "unstructured_processor": ("UnstructuredProcessor",),
+            "openpyxl_processor": ("OpenPyxlProcessor",),
+            "extract_image": ("UniversalImageExtractor",),
+            "file_splitter": ("FileSplitter",),
+        }
+        for module_name, class_names in processor_classes.items():
+            module = types.ModuleType(f"sdk.nexent.data_process.{module_name}")
+            for class_name in class_names:
+                setattr(module, class_name, type(class_name, (), {}))
+            monkeypatch.setitem(sys.modules, f"sdk.nexent.data_process.{module_name}", module)
+
+        assert core._load_processor("Unstructured").__class__.__name__ == "UnstructuredProcessor"
+        assert core._load_processor("OpenPyxl").__class__.__name__ == "OpenPyxlProcessor"
+        assert core._load_processor("UniversalImageExtractor").__class__.__name__ == "UniversalImageExtractor"
+        assert core._load_processor("FileSplitter").__class__.__name__ == "FileSplitter"
+        with pytest.raises(ValueError, match="Unsupported processor"):
+            core._load_processor("unknown")
+
+        core.processors["FileSplitter"] = None
+        assert core._get_processor("FileSplitter").__class__.__name__ == "FileSplitter"
+        with pytest.raises(ValueError, match="Unsupported processor"):
+            core._get_processor("missing")
+        core.processors["Unstructured"] = None
+        assert core._get_processor("Unstructured").__class__.__name__ == "UnstructuredProcessor"
+
+        core.model_registry.model_paths = {"unstructured_default": "default", "table_transformer": "table"}
+        model_calls = []
+        monkeypatch.setattr(core, "ensure_model", lambda alias: model_calls.append(alias))
+        core.processors["Unstructured"] = Mock(process_file=Mock(return_value=[{"content": "ok"}]))
+        core.processors["UniversalImageExtractor"] = Mock(process_file=Mock(return_value=[]))
+        chunks, images = core.file_process(b"data", "sample.pdf", model_type="multi_embedding")
+        assert chunks == [{"content": "ok"}] and images == []
+        assert model_calls == ["unstructured_default", "unstructured_default", "table_transformer"]
+
+        monkeypatch.setattr(core.model_registry, "preload", lambda _aliases: {"loaded": object()})
+        assert "loaded" in core.preload_models(["unstructured_default"])
 
     def test_file_split_unknown_splitter_falls_back(self, core):
         """A requested splitter that is unavailable should retain the input bytes."""

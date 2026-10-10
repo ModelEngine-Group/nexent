@@ -10,11 +10,11 @@ import pytest
 from backend.agents import tool_user_context
 
 
-def _agent_config(*, tool_sources=(), has_external_a2a=False, managed_agents=()):
+def _agent_config(*, tool_sources=(), has_external_a2a=False, worker_agents=()):
     return SimpleNamespace(
         tools=[SimpleNamespace(source=source) for source in tool_sources],
         external_a2a_agents=[object()] if has_external_a2a else [],
-        managed_agents=list(managed_agents),
+        worker_agents=list(worker_agents),
     )
 
 
@@ -39,7 +39,7 @@ def _install_database_stubs(monkeypatch, *, tenant_record=None, user_record=None
         (_agent_config(has_external_a2a=True), True),
         (
             _agent_config(
-                managed_agents=[_agent_config(tool_sources=("mcp",))],
+                worker_agents=[_agent_config(tool_sources=("mcp",))],
             ),
             True,
         ),

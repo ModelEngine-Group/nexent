@@ -20,7 +20,7 @@ from database.evaluator_db import (
 )
 from utils.agent_profile_utils import fetch_agent_profile, format_agent_profile_context
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.agents.prompt.evaluation import compose_evaluator_generation
 
 
 logger = logging.getLogger(__name__)
@@ -148,26 +148,16 @@ def delete_evaluator_version_impl(version_id: int, tenant_id: str) -> bool:
 
 
 def _build_evaluator_gen_prompt(
-    description: str, agent_id: int | None, tenant_id: str
+    description: str, agent_id: int | None, tenant_id: str, language: str = "zh"
 ) -> str:
     """Build the user prompt for evaluator generation.
 
     When *agent_id* is provided and the agent profile is available, it is
     prepended so the LLM can generate a more targeted evaluator.
     """
-    if not agent_id:
-        return f"Generate an evaluator based on the following requirements:\n\n{description}"
-
-    profile = fetch_agent_profile(agent_id, tenant_id)
-    agent_profile = format_agent_profile_context(profile)
-    if not agent_profile:
-        return f"Generate an evaluator based on the following requirements:\n\n{description}"
-
-    return (
-        f"{agent_profile}\n\n"
-        f"## Evaluation Request\n"
-        f"Generate an evaluator for the above agent. Requirements:\n\n{description}"
-    )
+    profile = fetch_agent_profile(agent_id, tenant_id) if agent_id else None
+    agent_profile = format_agent_profile_context(profile) if profile else ""
+    return compose_evaluator_generation(language, description, agent_profile).user
 
 
 def _parse_llm_evaluator_response(response) -> dict[str, Any]:
@@ -233,14 +223,14 @@ def generate_evaluator_by_llm_impl(
         agent_id,
     )
 
-    template = get_prompt_template("evaluation_generate_evaluator", language)
-    user_prompt = _build_evaluator_gen_prompt(description, agent_id, tenant_id)
+    user_prompt = _build_evaluator_gen_prompt(description, agent_id, tenant_id, language)
+    prompt = compose_evaluator_generation(language, description)
 
     try:
         response = call_llm_for_system_prompt(
             model_id=model_id,
             user_prompt=user_prompt,
-            system_prompt=template["SYSTEM_PROMPT"],
+            system_prompt=prompt.system,
             tenant_id=tenant_id,
         )
     except Exception as exc:

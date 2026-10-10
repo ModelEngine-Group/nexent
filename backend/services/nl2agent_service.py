@@ -77,7 +77,6 @@ MAX_BINDING_CANDIDATES = 12
 
 _LOCAL_KNOWLEDGE_TOOL_NAMES = frozenset({
     "knowledge_base_search",
-    "ind_aidp_search",
 })
 _AIDP_KNOWLEDGE_TOOL_NAME = "aidp_search"
 
@@ -1345,6 +1344,7 @@ async def build_nl2agent_run_info(
         minio_files=request.minio_files,
         query=request.query,
         history=request.history,
+        language=language,
     )
     model_config_list = await create_model_config_list(tenant_id)
     agent_config = create_nl2agent_agent_config(language)
