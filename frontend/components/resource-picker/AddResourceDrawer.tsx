@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, useRef, type ReactNode } from "react";
 import { Drawer, Input, Select } from "antd";
 import { Check, ChevronDown, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -281,6 +281,12 @@ export function ResourcePagination({
     if (next !== safeCurrent) onPageChange(next);
   };
 
+  const jumpInputRef = useRef<HTMLInputElement>(null);
+  const jump = () => {
+    const value = Number(jumpInputRef.current?.value);
+    if (Number.isInteger(value)) goTo(value);
+  };
+
   return (
     <div className="flex h-8 shrink-0 items-center gap-4">
       <span className="text-[14px] leading-[22px] text-[#191919]">
@@ -339,22 +345,25 @@ export function ResourcePagination({
           ›
         </button>
       </div>
-      <div className="flex h-8 w-[96px] items-center rounded-[4px] border border-[#D9D9D9] bg-white px-2.5">
+      <div className="flex h-8 w-[96px] items-center rounded-[4px] border border-[#D9D9D9] bg-white">
         <input
+          ref={jumpInputRef}
           key={safeCurrent}
           type="text"
           defaultValue={safeCurrent}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              const value = Number((e.target as HTMLInputElement).value);
-              if (Number.isInteger(value)) goTo(value);
-            }
+            if (e.key === "Enter") jump();
           }}
-          className="w-0 min-w-0 flex-1 border-0 bg-transparent text-[14px] leading-[22px] text-[#191919] outline-none"
+          className="h-full min-w-0 flex-1 border-0 bg-transparent text-center text-[14px] leading-[22px] text-[#191919] outline-none"
         />
-        <span className="ml-auto text-[12px] leading-[22px] text-[#666]">
+        <span className="h-full w-px shrink-0 bg-[#D9D9D9]" />
+        <button
+          type="button"
+          onClick={jump}
+          className="flex h-full flex-1 cursor-pointer items-center justify-center border-0 bg-transparent p-0 text-[14px] leading-[22px] text-[#191919]"
+        >
           {t("resourcePicker.jump", "跳转")}
-        </span>
+        </button>
       </div>
     </div>
   );
