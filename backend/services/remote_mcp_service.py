@@ -1436,6 +1436,19 @@ async def check_mcp_service_health(
     if not server_url:
         raise McpValidationError("MCP server URL is empty")
 
+    # API-type MCPs are plain HTTP APIs described by OpenAPI JSON and have no
+    # MCP protocol endpoint, so skip the MCP protocol handshake and treat them
+    # as healthy (consistent with the enable/disable path).
+    config_json = record.get("config_json")
+    if isinstance(config_json, dict) and "openapi" in config_json:
+        update_mcp_record_status_by_id(
+            mcp_id=mcp_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            status=True,
+        )
+        return "healthy"
+
     authorization_token = record.get("authorization_token")
     custom_headers = record.get("custom_headers")
 
