@@ -86,6 +86,17 @@ vi.mock('@/app/[locale]/newchat/ui/sources-panel', () => ({
   SourcesPanel: () => null,
 }));
 
+// These cases exercise Thread model selection, not the Markdown runtime.
+vi.mock('@/app/[locale]/newchat/ui/markdown-text', () => ({
+  MarkdownText: () => null,
+}));
+
+vi.mock('@assistant-ui/react-markdown', () => ({
+  MarkdownTextPrimitive: () => null,
+  unstable_memoizeMarkdownComponents: (components: any) => components,
+  useIsMarkdownCodeBlock: () => false,
+}));
+
 vi.mock('@/app/[locale]/newchat/ui/shiki-highlighter', () => ({
   SyntaxHighlighter: () => null,
 }));

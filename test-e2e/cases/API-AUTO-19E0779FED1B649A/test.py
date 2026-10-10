@@ -13,20 +13,27 @@ _ORDINARY_LOCAL_TOOL = 'read_file'
 @pytest.mark.stage('D2')
 def test_tool_list_is_user_selectable_deployment_control(monkeypatch):
     import services.tool_configuration_service as svc
+    from consts import const
 
-    selectable = svc._get_deployment_user_selectability
+    selectable = svc._get_user_selectability
 
     for enabled in (False, True):
-        monkeypatch.setattr(svc, 'ENABLE_AIDP_KNOWLEDGE', enabled)
+        monkeypatch.setattr(const, 'ENABLE_AIDP_KNOWLEDGE', enabled)
         for name in _ALWAYS_HIDDEN:
             assert selectable(name, True) is False
             assert selectable(name, False) is False
 
-    monkeypatch.setattr(svc, 'ENABLE_AIDP_KNOWLEDGE', True)
-    assert selectable(_INDEPENDENT_AIDP, True) is False
-
-    monkeypatch.setattr(svc, 'ENABLE_AIDP_KNOWLEDGE', False)
-    assert selectable(_INDEPENDENT_AIDP, True) is True
+    for enabled in (False, True):
+        monkeypatch.setattr(const, 'ENABLE_AIDP_KNOWLEDGE', enabled)
+        assert selectable(_INDEPENDENT_AIDP, True) is True
+        assert selectable(_INDEPENDENT_AIDP, False) is False
+        # Validate the public serialized catalog, not just the private helper.
+        by_name = {tool.name: tool for tool in svc.get_local_tools()}
+        assert by_name[_INDEPENDENT_AIDP].is_user_selectable is True
+        for name in _ALWAYS_HIDDEN:
+            assert by_name[name].is_user_selectable is False
+        assert all(isinstance(tool.model_dump()['is_user_selectable'], bool)
+                   for tool in by_name.values())
 
     assert selectable(_ORDINARY_LOCAL_TOOL, True) is True
     assert selectable(_ORDINARY_LOCAL_TOOL, False) is False

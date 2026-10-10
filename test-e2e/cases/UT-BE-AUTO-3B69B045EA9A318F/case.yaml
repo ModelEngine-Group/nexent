@@ -4,72 +4,46 @@ module: V5-BASELINE
 case:
   case_id: UT-BE-AUTO-3B69B045EA9A318F
   feature_id: F-156
-  business_rule_ids:
-  - F-156-RULE-01
-  title: 系统提示 header 移除 tenant app 名称/描述与 user_id，改注入静态 Nexent 身份，authority 由 tenant 变 platform｜核心流程
+  business_rule_ids: [F-156-RULE-01]
+  title: 系统提示通过 SDK prompt bundle 注入静态 Nexent 身份及 platform authority
   type: BE-UT
   priority: P1
   status: active
   automation: automated
-  objective: 系统提示 header 移除 tenant app 名称/描述与 user_id，改注入静态 Nexent 身份，authority 由 tenant 变 platform｜核心流程
+  objective: 验证上下文构建重构后保留静态平台身份、租户身份隔离和安全日志契约。
   preconditions:
-  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
-  - backend/utils/context_utils.py 及其导入的 nexent.core.agents.context（ContextItemInput/ContextItemType/ContextInput）与 consts.const
-    可正常导入。
-  - 当次 run_id 已生成；测试基准为被测仓库 backend/utils/context_utils.py 当前源码，执行时记录实际被测 commit 与 repo 相对路径。
+  - 本地 backend/SDK 依赖可导入，不要求外部模型在线。
   test_data:
-    legacy_asset_declaration: '- 无额外本地资产；测试直接导入 backend/utils/context_utils.py 与 SDK 上下文类型定义（nexent.core.agents.context /
-      context_input）。'
+    prompt_bundle: SDK 自带 manager 的 zh/en 模板，不含租户身份或凭据。
   steps:
   - order: 1
-    action: 从 backend/utils/context_utils.py 直接导入 `_build_header_text` 与 `build_context_inputs`。
-    expected: '`_build_header_text` 签名仅含 language（默认 "zh"），不再接收 app_name/app_description/user_id。'
+    action: 检查 build_context_inputs 公共参数，不依赖已删除的私有 header 函数。
+    expected: 参数不含 app_name、app_description、user_id。
   - order: 2
-    action: 分别以 language="zh" 与 language="en" 调用 `_build_header_text(language)`，记录返回的 header 文本。
-    expected: 'zh header 文本为固定静态内容 "### 基本信息\n你是 Nexent，Nexent 是一个开源智能体平台，...（含 [Current time: ...] 时间提示）"，不含 tenant app 名称/描述或
-      user_id。'
+    action: 分别加载 zh/en 的 AgentPromptBundle，通过 backend build_context_inputs 生成上下文。
+    expected: 两种语言均包含静态 Nexent 身份、开源平台描述、平台身份标题和使用用户消息时间标记的指引。
   - order: 3
-    action: 断言 zh 文本以 "### 基本信息" 开头，包含静态身份 "你是 Nexent" 与静态描述 "Nexent 是一个开源智能体平台"。
-    expected: 'en header 文本为固定静态内容 "### Basic Information\nYou are Nexent. Nexent is an open-source agent platform...（含 [Current
-      time: ...] 时间提示）"。'
+    action: 检查 system:header 的唯一性、类型、优先级、来源及 authority。
+    expected: 唯一 SYSTEM header，priority=100、source=agent_prompt:header、authority=platform，不存在 tenant header。
   - order: 4
-    action: 断言 en 文本以 "### Basic Information" 开头，包含 "You are Nexent." 与 "Nexent is an open-source agent platform"。
-    expected: '`build_context_inputs` 输出中存在唯一 header 项：id=="system:header"、authority=="platform"、priority==100、source 为 agent_prompt:header。'
-  - order: 5
-    action: 断言 header 文本不包含 tenant 传入的 app 名称/描述或 user_id 注入位置；用 inspect.signature 校验函数签名不含 app_name/app_description/user_id
-      形参。
-    expected: '`build_context_inputs` 签名不含 app_name/app_description/user_id，无法再注入 tenant 身份信息。'
-  - order: 6
-    action: 调用 `build_context_inputs()`（不传 app_name/app_description/user_id），从返回值中找到 id=="system:header" 的 ContextItemInput。
-    expected: 无未处理异常；日志不输出 API Key/Token/Password。
-  - order: 7
-    action: 断言该 header item 的 metadata["authority"]=="platform"、priority==100、source==("agent_prompt:header",) 且 content["text"]
-      等于 `_build_header_text(language)` 的输出。
-    expected: 无未处理异常；日志不输出 API Key/Token/Password。
-  - order: 8
-    action: 断言返回值中不存在 authority 为 "tenant" 的 header 项；调用过程无未处理异常且日志不输出任何密钥。
-    expected: 无未处理异常；日志不输出 API Key/Token/Password。
+    action: 检查 header 不含租户身份注入参数，检查构建日志。
+    expected: header 不含 app_name、app_description、user_id，日志不出现凭据。
   expected_results:
-  - '`_build_header_text` 签名仅含 language（默认 "zh"），不再接收 app_name/app_description/user_id。'
-  - 'zh header 文本为固定静态内容 "### 基本信息\n你是 Nexent，Nexent 是一个开源智能体平台，...（含 [Current time: ...] 时间提示）"，不含 tenant app 名称/描述或 user_id。'
-  - 'en header 文本为固定静态内容 "### Basic Information\nYou are Nexent. Nexent is an open-source agent platform...（含 [Current time:
-    ...] 时间提示）"。'
-  - '`build_context_inputs` 输出中存在唯一 header 项：id=="system:header"、authority=="platform"、priority==100、source 为 agent_prompt:header。'
-  - '`build_context_inputs` 签名不含 app_name/app_description/user_id，无法再注入 tenant 身份信息。'
-  - 无未处理异常；日志不输出 API Key/Token/Password。
+  - 公共上下文构建入口不接受租户身份参数。
+  - zh/en 静态身份和用户消息时间指引存在，时间不依赖 header 中动态生成。
+  - system:header 唯一，平台 authority、类型、优先级及来源正确。
+  - header 无租户身份注入，日志不输出密钥。
   forbidden_side_effects: []
+  unit_boundary: Backend 上下文入口与 SDK prompt composer 的真实协作
+  inputs: [SDK 自带 zh/en manager prompt bundle]
+  assertions:
+  - 静态平台身份和上下文权限边界不因内部函数重构丢失。
+  acceptance:
+  - id: AC-01
+    description: SDK prompt bundle 经 backend 入口生成平台身份，拒绝租户身份注入并保留日志安全。
+    steps: [1, 2, 3, 4]
+    expected_results: [1, 2, 3, 4]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 394
-  unit_boundary: 系统提示上下文构建
-  inputs:
-  - '- 无额外本地资产；测试直接导入 backend/utils/context_utils.py 与 SDK 上下文类型定义（nexent.core.agents.context / context_input）。'
-  assertions:
-  - '`_build_header_text` 签名仅含 language（默认 "zh"），不再接收 app_name/app_description/user_id。'
-  - 'zh header 文本为固定静态内容 "### 基本信息\n你是 Nexent，Nexent 是一个开源智能体平台，...（含 [Current time: ...] 时间提示）"，不含 tenant app 名称/描述或 user_id。'
-  - 'en header 文本为固定静态内容 "### Basic Information\nYou are Nexent. Nexent is an open-source agent platform...（含 [Current time:
-    ...] 时间提示）"。'
-  - '`build_context_inputs` 输出中存在唯一 header 项：id=="system:header"、authority=="platform"、priority==100、source 为 agent_prompt:header。'
-  - '`build_context_inputs` 签名不含 app_name/app_description/user_id，无法再注入 tenant 身份信息。'
-  - 无未处理异常；日志不输出 API Key/Token/Password。

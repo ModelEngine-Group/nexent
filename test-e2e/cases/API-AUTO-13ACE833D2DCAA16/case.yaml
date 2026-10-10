@@ -20,6 +20,7 @@ case:
   - 存在至少两个隔离租户（TenantA/TenantB）可登录；TenantA 已创建多个状态为 shared 的 marketplace listing（标签覆盖大小写变体与重复标签），并存在非 shared（pending_review/rejected/not_shared）listing
     用于排除；TenantB 存在自己的 shared listing。
   test_data:
+    tag_namespace: 每次执行使用唯一 <run_token>- 前缀，标签不超过20字符；精确核对该命名空间内全部计数、大小写变体、草稿排除及跨租户隔离，不将共享租户既有标签误当作本次测试数据。
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
 
       - ${NEXENT_TEST_HOME}/config/secrets.env'

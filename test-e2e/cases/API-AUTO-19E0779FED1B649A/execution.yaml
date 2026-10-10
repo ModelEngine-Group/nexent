@@ -10,3 +10,5 @@ preparation:
   anchors: false
   special_assets: false
   d4_groups: []
+acceptance_bindings:
+  AC-01: [test_tool_list_is_user_selectable_deployment_control]

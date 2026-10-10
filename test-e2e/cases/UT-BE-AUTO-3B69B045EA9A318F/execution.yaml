@@ -5,3 +5,5 @@ implementations:
   file: test.py
   selector: UT-BE-AUTO-3B69B045EA9A318F
 notes: V5 source binding migrated; runtime parity is not yet certified.
+acceptance_bindings:
+  AC-01: [test_system_header_is_static_nexent_identity_with_platform_authority]

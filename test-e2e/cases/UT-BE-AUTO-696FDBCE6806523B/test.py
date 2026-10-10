@@ -63,7 +63,6 @@ def _install_catalog_dependencies(monkeypatch, tools: list) -> None:
 def _check_knowledge_tool_constants_are_defined() -> None:
     assert nl2agent_service._LOCAL_KNOWLEDGE_TOOL_NAMES == frozenset({
         "knowledge_base_search",
-        "ind_aidp_search",
     })
     assert nl2agent_service._AIDP_KNOWLEDGE_TOOL_NAME == "aidp_search"
 
@@ -73,7 +72,7 @@ def _check_aidp_deployment_filters_local_knowledge_tools(monkeypatch) -> None:
     monkeypatch.setattr(nl2agent_service, "ENABLE_AIDP_KNOWLEDGE", True)
 
     assert nl2agent_service._is_nl2agent_recommendable_tool("knowledge_base_search") is False
-    assert nl2agent_service._is_nl2agent_recommendable_tool("ind_aidp_search") is False
+    assert nl2agent_service._is_nl2agent_recommendable_tool("ind_aidp_search") is True
     assert nl2agent_service._is_nl2agent_recommendable_tool("aidp_search") is True
     assert nl2agent_service._is_nl2agent_recommendable_tool(_NORMAL_TOOL) is True
 
@@ -112,7 +111,7 @@ def _check_catalog_excludes_conflicting_knowledge_tools(monkeypatch) -> None:
         nl2agent_service._load_installed_resource_catalog(tenant_id="t", user_id="u")
     )
     aidp_names = {item["name"] for item in aidp_catalog}
-    assert aidp_names == {"aidp_search", _NORMAL_TOOL}
+    assert aidp_names == {"aidp_search", "ind_aidp_search", _NORMAL_TOOL}
 
     monkeypatch.setattr(nl2agent_service, "ENABLE_AIDP_KNOWLEDGE", False)
     local_catalog = asyncio.run(

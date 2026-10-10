@@ -4,71 +4,44 @@ module: V5-BASELINE
 case:
   case_id: API-AUTO-19E0779FED1B649A
   feature_id: F-131
-  business_rule_ids:
-  - F-131-RULE-01
-  title: 工具列表 is_user_selectable 部署控制：knowledge_base_search/aidp_search 恒不可选、ind_aidp_search 随 ENABLE_AIDP_KNOWLEDGE 联动｜核心流程
+  business_rule_ids: [F-131-RULE-01]
+  title: 工具列表托管知识工具隐藏及独立 AIDP 工具可选契约
   type: API-IT
   priority: P1
   status: active
   automation: automated
-  objective: 工具列表 is_user_selectable 部署控制：knowledge_base_search/aidp_search 恒不可选、ind_aidp_search 随 ENABLE_AIDP_KNOWLEDGE 联动｜核心流程
+  objective: 验证工具服务输出的本地工具元数据与序列化可选性，不引用已删除的部署控制函数。
   preconditions:
-  - 后端 API 服务可运行（本地依赖/组件环境），不要求外部模型服务在线。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；执行时记录实际被测 commit。
-  - 工具列表已完成初始化（本地工具已扫描入库），包含 knowledge_base_search、aidp_search、ind_aidp_search 及至少一个默认 is_user_selectable=true 的普通本地工具。
-  - 可切换 ENABLE_AIDP_KNOWLEDGE 部署开关（通过环境变量/配置）以验证 ind_aidp_search 联动。
+  - 后端与本地工具依赖可导入，不需要 AIDP 外部服务或修改部署开关。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（含 ENABLE_AIDP_KNOWLEDGE 等本地测试环境参数）'
+    mode_variants: 用 monkeypatch 临时切换 consts.const 中的部署开关，测试结束自动恢复。
   steps:
   - order: 1
-    action: 调用工具列表接口（对应 backend/services/tool_configuration_service.py 的 list_all_tools/get_local_tools）获取全量工具元数据，记录每个工具对象的
-      name 与 is_user_selectable。
-    expected: knowledge_base_search 与 aidp_search 的 is_user_selectable 恒为 false，与 ENABLE_AIDP_KNOWLEDGE 开关无关。
+    action: 在两种部署开关下检查托管知识工具可选性及 get_local_tools 的真实输出。
+    expected: knowledge_base_search 和 aidp_search 恒不可选。
   - order: 2
-    action: 在返回结果中定位 name=knowledge_base_search 的工具，检查其 is_user_selectable 字段值。
-    expected: ind_aidp_search 的 is_user_selectable 等于 (not ENABLE_AIDP_KNOWLEDGE)：AIDP 开启时为 false，关闭时为 true。
+    action: 检查 ind_aidp_search 的默认 true/false 与两种模式下本地目录的实际值。
+    expected: 独立 AIDP 工具遵循自身默认值，不被部署开关隐藏，本地目录保持可选。
   - order: 3
-    action: 定位 name=aidp_search 的工具，检查其 is_user_selectable 字段值。
-    expected: 普通本地工具的 is_user_selectable 保持其默认值，不被部署控制覆盖。
-  - order: 4
-    action: 在 ENABLE_AIDP_KNOWLEDGE=true 的部署环境下定位 name=ind_aidp_search，检查其 is_user_selectable；再在 ENABLE_AIDP_KNOWLEDGE=false
-      的部署环境下重复检查。
-    expected: 接口返回 200，每个工具对象的 is_user_selectable 为布尔类型，序列化字段与代码契约一致。
-  - order: 5
-    action: 定位一个默认 is_user_selectable=true 的普通本地工具，检查其 is_user_selectable 是否保持默认值不被覆盖。
-    expected: 测试过程无未处理异常，日志与响应中不出现明文 API Key/Token/模型密钥。
-  - order: 6
-    action: 校验返回字段契约：每个工具对象 is_user_selectable 字段存在且为布尔类型，name 字段存在，序列化结构与 ToolInfo/formatted_tool 契约一致。
-    expected: 测试过程无未处理异常，日志与响应中不出现明文 API Key/Token/模型密钥。
-  - order: 7
-    action: 校验正常请求返回 200，响应体可序列化且不包含明文密钥。
-    expected: 测试过程无未处理异常，日志与响应中不出现明文 API Key/Token/模型密钥。
+    action: 检查普通本地工具默认值、名称、布尔字段及 ToolInfo.model_dump。
+    expected: 普通工具默认值不被覆盖，序列化 is_user_selectable 为布尔值。
   expected_results:
-  - knowledge_base_search 与 aidp_search 的 is_user_selectable 恒为 false，与 ENABLE_AIDP_KNOWLEDGE 开关无关。
-  - ind_aidp_search 的 is_user_selectable 等于 (not ENABLE_AIDP_KNOWLEDGE)：AIDP 开启时为 false，关闭时为 true。
-  - 普通本地工具的 is_user_selectable 保持其默认值，不被部署控制覆盖。
-  - 接口返回 200，每个工具对象的 is_user_selectable 为布尔类型，序列化字段与代码契约一致。
-  - 测试过程无未处理异常，日志与响应中不出现明文 API Key/Token/模型密钥。
+  - 托管知识工具恒不可选。
+  - 独立 AIDP 工具不随部署开关被隐藏，普通工具保留默认值。
+  - 本地工具目录的名称与布尔可选字段及序列化正确。
   forbidden_side_effects: []
+  contract:
+    protocol: Tool service metadata serialization
+    request_expectations:
+    - 通过真实 get_local_tools 输出检查目录，临时模式变更自动恢复。
+    response_expectations:
+    - 托管工具隐藏，独立 AIDP 与普通工具遵循自身默认值。
+  acceptance:
+  - id: AC-01
+    description: 托管知识工具和独立工具在两种模式下输出正确且元数据可序列化。
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 490
-  contract:
-    protocol: HTTP API
-    request_expectations:
-    - 调用工具列表接口（对应 backend/services/tool_configuration_service.py 的 list_all_tools/get_local_tools）获取全量工具元数据，记录每个工具对象的 name
-      与 is_user_selectable。
-    - 在返回结果中定位 name=knowledge_base_search 的工具，检查其 is_user_selectable 字段值。
-    - 定位 name=aidp_search 的工具，检查其 is_user_selectable 字段值。
-    - 在 ENABLE_AIDP_KNOWLEDGE=true 的部署环境下定位 name=ind_aidp_search，检查其 is_user_selectable；再在 ENABLE_AIDP_KNOWLEDGE=false 的部署环境下重复检查。
-    - 定位一个默认 is_user_selectable=true 的普通本地工具，检查其 is_user_selectable 是否保持默认值不被覆盖。
-    - 校验返回字段契约：每个工具对象 is_user_selectable 字段存在且为布尔类型，name 字段存在，序列化结构与 ToolInfo/formatted_tool 契约一致。
-    - 校验正常请求返回 200，响应体可序列化且不包含明文密钥。
-    response_expectations:
-    - knowledge_base_search 与 aidp_search 的 is_user_selectable 恒为 false，与 ENABLE_AIDP_KNOWLEDGE 开关无关。
-    - ind_aidp_search 的 is_user_selectable 等于 (not ENABLE_AIDP_KNOWLEDGE)：AIDP 开启时为 false，关闭时为 true。
-    - 普通本地工具的 is_user_selectable 保持其默认值，不被部署控制覆盖。
-    - 接口返回 200，每个工具对象的 is_user_selectable 为布尔类型，序列化字段与代码契约一致。
-    - 测试过程无未处理异常，日志与响应中不出现明文 API Key/Token/模型密钥。

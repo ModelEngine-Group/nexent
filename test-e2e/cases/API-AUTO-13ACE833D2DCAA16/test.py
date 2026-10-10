@@ -151,17 +151,25 @@ async def _provision_listing(identity: TestIdentity, name: str, tags: list[str],
 @pytest_asyncio.fixture(scope="session")
 async def tag_stats_setup(tenant_a_admin: TestIdentity, tenant_b_admin: TestIdentity) -> dict[str, Any]:
     token = _run_token()
+    prefix = f"{token}-"
 
-    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-shared-1", ["NLP", "nlp", "RAG"], "shared")
-    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-shared-2", ["rag", "多模态"], "shared")
-    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-shared-3", ["RAG"], "shared")
-    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-pending", ["draft"], "pending_review")
-    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-notshared", ["draft"], "not_shared")
-    await _provision_listing(tenant_b_admin, f"apiit-tag-{token}-b-shared-1", ["tenantB-only"], "shared")
+    def tag(value: str) -> str:
+        result = prefix + value
+        assert len(result) <= 20
+        return result
+
+    assert tenant_a_admin.tenant_id != tenant_b_admin.tenant_id
+    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-shared-1", [tag("NLP"), tag("nlp"), tag("RAG")], "shared")
+    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-shared-2", [tag("rag"), tag("多模态")], "shared")
+    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-shared-3", [tag("RAG")], "shared")
+    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-pending", [tag("draft")], "pending_review")
+    await _provision_listing(tenant_a_admin, f"apiit-tag-{token}-a-notshared", [tag("draft")], "not_shared")
+    await _provision_listing(tenant_b_admin, f"apiit-tag-{token}-b-shared-1", [tag("B-only")], "shared")
 
     return {
-        "expected_a": {"NLP": 1, "nlp": 1, "RAG": 2, "rag": 1, "多模态": 1},
-        "expected_b": {"tenantB-only": 1},
+        "prefix": prefix,
+        "expected_a": {tag("NLP"): 1, tag("nlp"): 1, tag("RAG"): 2, tag("rag"): 1, tag("多模态"): 1},
+        "expected_b": {tag("B-only"): 1},
     }
 
 
@@ -171,6 +179,7 @@ async def tag_stats_setup(tenant_a_admin: TestIdentity, tenant_b_admin: TestIden
 async def test_agent_repository_tag_stats(tag_stats_setup, tenant_a_admin, tenant_b_admin):
     expected_a = tag_stats_setup["expected_a"]
     expected_b = tag_stats_setup["expected_b"]
+    prefix = tag_stats_setup["prefix"]
 
     async with client("config", token=tenant_a_admin.access_token) as api:
         response = await api.get("/repository/agent/tags")
@@ -189,19 +198,21 @@ async def test_agent_repository_tag_stats(tag_stats_setup, tenant_a_admin, tenan
     tags_order = [item["tag"] for item in items]
     counts = {item["tag"]: item["count"] for item in items}
 
-    assert counts == expected_a, counts
+    # Exact counts remain mandatory for this run; unrelated tenant tags are not fixtures.
+    assert len(counts) == len(items), "tag endpoint returned duplicate tag rows"
+    assert {tag: count for tag, count in counts.items() if tag.startswith(prefix)} == expected_a, counts
     assert tags_order == sorted(tags_order, key=lambda tag: tag.lower()), tags_order
-    assert "draft" not in counts, counts
-    assert "tenantB-only" not in counts, counts
+    assert prefix + "draft" not in counts, counts
+    assert prefix + "B-only" not in counts, counts
 
     async with client("config", token=tenant_b_admin.access_token) as api:
         tenant_b_response = await api.get("/repository/agent/tags")
     assert_status(tenant_b_response, 200)
     tenant_b_items = tenant_b_response.json().get("items") or []
     tenant_b_counts = {item["tag"]: item["count"] for item in tenant_b_items}
-    assert tenant_b_counts == expected_b, tenant_b_counts
+    assert {tag: count for tag, count in tenant_b_counts.items() if tag.startswith(prefix)} == expected_b, tenant_b_counts
     assert not (set(tenant_b_counts) & set(expected_a)), tenant_b_counts
-    assert "tenantB-only" in tenant_b_counts, tenant_b_counts
+    assert prefix + "B-only" in tenant_b_counts, tenant_b_counts
 
     async with client("config") as anon:
         missing_auth = await anon.get("/repository/agent/tags")

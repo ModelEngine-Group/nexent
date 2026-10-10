@@ -5,3 +5,5 @@ implementations:
   file: test.py
   selector: UT-BE-AUTO-696FDBCE6806523B
 notes: V5 source binding migrated; runtime parity is not yet certified.
+acceptance_bindings:
+  AC-01: [test_nl2agent_recommendable_tool_contract]
