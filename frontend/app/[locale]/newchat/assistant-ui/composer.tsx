@@ -128,10 +128,15 @@ const KnowledgeBookIcon: FC<{ className?: string }> = ({ className }) => (
     className={cn("shrink-0", className)}
     aria-hidden
   >
-    <path d="M3.5 6.1C6 4.8 8.9 4.9 11.4 6.4v11.8C8.9 16.7 6 16.6 3.5 17.9Z" />
-    <path d="M11.4 6.4c2.5-1.5 5.3-1.6 7.8-.4v7.3" />
+    {/* Open book: left edge, twin peaks across the top, partial right edge */}
+    <path d="M3 19.5V6.2c0-1.2 1-2.2 2.2-2.1 1.4.1 3.7 1.5 5.7 6.8 1.4-3.3 3.2-5.9 4.8-6.5 1.4-.5 2.9.2 3.8 1.5.3.4.5.9.5 1.4v7.3" />
+    {/* Wavy bottom edge of the left page */}
+    <path d="M3.2 19.4c2.4-.8 5.2-.7 7.8.2" />
+    {/* Center spine */}
+    <path d="M10.9 11.2v8.2" />
+    {/* Solid four-point sparkle */}
     <path
-      d="M18.7 14.1q.7 2 2.75 2.75-2.05.75-2.75 2.8-.7-2.05-2.75-2.8 2.05-.75 2.75-2.75Z"
+      d="M19.8 14.1q.85 2.2 3.05 3.05-2.2.85-3.05 3.05-.85-2.2-3.05-3.05 2.2-.85 3.05-3.05Z"
       fill="currentColor"
       stroke="none"
     />

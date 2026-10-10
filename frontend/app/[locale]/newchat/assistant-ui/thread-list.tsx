@@ -27,6 +27,8 @@ import {
   XIcon,
   ChevronRight,
   LayoutGrid,
+  Loader2Icon,
+  CircleAlertIcon,
 } from "lucide-react";
 import {
   Fragment,
@@ -38,6 +40,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
@@ -304,7 +307,7 @@ export const ThreadList: FC<ThreadListProps> = ({
   const hasMore = useAuiState((s) => s.threads.hasMore);
 
   return (
-    <div className="flex flex-col p-2">
+    <div className="flex flex-col px-4 py-2">
       <AuiIf condition={(s) => s.threads.isLoading}>
         <ThreadListSkeleton />
       </AuiIf>
@@ -391,12 +394,29 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   }, []);
 
   const GroupedThreadListItem = useMemo<FC>(
-    () => () => (
-      <ThreadListItem
-        completedConversations={completedConversations}
-        generatedTitles={generatedTitles}
-      />
-    ),
+    () =>
+      function GroupedThreadListItem() {
+        return (
+          <ThreadListItem
+            completedConversations={completedConversations}
+            generatedTitles={generatedTitles}
+          />
+        );
+      },
+    [completedConversations, generatedTitles]
+  );
+
+  const TimeGroupThreadListItem = useMemo<FC>(
+    () =>
+      function TimeGroupThreadListItem() {
+        return (
+          <ThreadListItem
+            completedConversations={completedConversations}
+            generatedTitles={generatedTitles}
+            variant="time"
+          />
+        );
+      },
     [completedConversations, generatedTitles]
   );
 
@@ -428,7 +448,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <Fragment key={group.label}>
             <div
               data-slot="aui_thread-list-group-label"
-              className="px-3 pt-3 pb-1 text-sm font-medium text-foreground/80"
+              className="px-3 pt-3 pb-1 text-sm text-muted-foreground"
             >
               {t(group.label)}
             </div>
@@ -436,7 +456,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
               <ThreadListPrimitive.ItemByIndex
                 key={id}
                 index={index}
-                components={{ ThreadListItem: GroupedThreadListItem }}
+                components={{ ThreadListItem: TimeGroupThreadListItem }}
               />
             ))}
           </Fragment>
@@ -801,15 +821,21 @@ const formatRelativeTime = (
   return t("chat.threadList.daysAgo", { count: days });
 };
 
-const ThreadListItem: FC<ThreadListItemProps> = ({
-  completedConversations,
-  generatedTitles,
-}) => {
+const ThreadListItem: FC<
+  ThreadListItemProps & { variant?: "agent" | "time" }
+> = ({ completedConversations, generatedTitles, variant = "agent" }) => {
   return (
-    <ThreadListItemPrimitive.Root className="group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white">
+    <ThreadListItemPrimitive.Root
+      className={
+        variant === "time"
+          ? "group/item flex h-10 items-center gap-2 rounded-lg px-2 py-2 hover:bg-white data-[active=true]:bg-white"
+          : "group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white"
+      }
+    >
       <ThreadListItemContent
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        variant={variant}
       />
     </ThreadListItemPrimitive.Root>
   );
@@ -818,11 +844,13 @@ const ThreadListItem: FC<ThreadListItemProps> = ({
 interface ThreadListItemContentProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  variant?: "agent" | "time";
 }
 
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   completedConversations,
   generatedTitles,
+  variant = "agent",
 }) => {
   const { t } = useTranslation();
   const aui = useAui();
@@ -926,7 +954,13 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       );
     }
     return (
-      <ThreadListItemPrimitive.Trigger className="flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]">
+      <ThreadListItemPrimitive.Trigger
+        className={
+          variant === "time"
+            ? "flex h-10 min-w-0 flex-1 items-center gap-2 text-left text-base leading-6 text-[#191919]"
+            : "flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]"
+        }
+      >
         <div className="flex min-w-0 flex-1 items-center text-left">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -936,11 +970,21 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               {title}
             </TooltipContent>
           </Tooltip>
-          <ConversationStatusIndicatorWrapper
-            completedConversations={completedConversations}
-          />
+          {variant === "time" ? (
+            <ThreadRowEndStatus />
+          ) : (
+            <ConversationStatusIndicatorWrapper
+              completedConversations={completedConversations}
+            />
+          )}
         </div>
-        <span className="shrink-0 text-[14px] leading-[22px] text-[#808080]">
+        <span
+          className={
+            variant === "time"
+              ? "shrink-0 whitespace-nowrap text-xs text-muted-foreground group-hover/item:hidden"
+              : "shrink-0 text-[14px] leading-[22px] text-[#808080]"
+          }
+        >
           {formatRelativeTime(
             (thread as { custom?: { lastMessageAt?: string } }).custom
               ?.lastMessageAt,
@@ -1003,4 +1047,28 @@ const ConversationStatusIndicatorWrapper: FC<{
   return (
     <ConversationStatusIndicator isStreaming={isRunning} isCompleted={false} />
   );
+};
+
+// End-of-row status icon for the workbench time-group list: running shows an
+// inline spinner; an error status (when surfaced) shows an orange alert.
+const ThreadRowEndStatus: FC = () => {
+  const aui = useAui();
+  const status = aui.threadListItem().getState().status as string;
+  const isRunning = status === "running" || status === "streaming";
+  const isError = status === "error";
+
+  if (isRunning) {
+    return (
+      <Loader2Icon
+        className="size-4 shrink-0 animate-spin text-muted-foreground"
+        aria-hidden
+      />
+    );
+  }
+  if (isError) {
+    return (
+      <CircleAlertIcon className="size-4 shrink-0 text-amber-500" aria-hidden />
+    );
+  }
+  return null;
 };
