@@ -1,0 +1,90 @@
+{
+  "datasets": [
+    {
+      "id": "dify-ds-handbook",
+      "name": "Nexent Product Handbook",
+      "document_count": 12,
+      "created_at": 1718000100,
+      "updated_at": 1718000200,
+      "embedding_model": "bge-m3",
+      "embedding_available": true
+    },
+    {
+      "id": "dify-ds-faq",
+      "name": "常见问题 FAQ",
+      "document_count": 5,
+      "created_at": 1718000300,
+      "updated_at": 1718000400,
+      "embedding_model": "text-embedding-3-small",
+      "embedding_available": true
+    },
+    {
+      "id": "dify-ds-empty",
+      "name": "Empty Dataset",
+      "document_count": 0,
+      "created_at": 1718000500,
+      "updated_at": 1718000500,
+      "embedding_model": "",
+      "embedding_available": false
+    },
+    {
+      "id": "dify-ds-archive",
+      "name": "Release Archive 2024",
+      "document_count": 120,
+      "created_at": 1718000600,
+      "updated_at": 1718000700,
+      "embedding_model": "bge-m3",
+      "embedding_available": true
+    },
+    {
+      "id": "dify-ds-legacy",
+      "name": "Legacy Dataset",
+      "document_count": 2,
+      "created_at": 1718000800,
+      "updated_at": 1718000800,
+      "embedding_available": false
+    },
+    {
+      "id": "dify-ds-unicode",
+      "name": "产品手册知识库",
+      "document_count": 3,
+      "created_at": 1718000900,
+      "updated_at": 1718001000,
+      "embedding_model": "bge-large-zh",
+      "embedding_available": true
+    }
+  ],
+  "documents_by_dataset": {
+    "dify-ds-handbook": [
+      {"id": "doc-handbook-001", "name": "retrieval-overview.md"},
+      {"id": "doc-handbook-002", "name": "架构设计说明.md"}
+    ],
+    "dify-ds-faq": [
+      {"id": "doc-faq-001", "name": "faq.txt"}
+    ]
+  },
+  "chunks_by_dataset": {
+    "dify-ds-handbook": [
+      {
+        "document_id": "doc-handbook-001",
+        "document_name": "retrieval-overview.md",
+        "content": "Dify datasets provide external knowledge retrieval with dataset-level API keys and per-dataset retrieve endpoints.",
+        "score": 0.92
+      },
+      {
+        "document_id": "doc-handbook-002",
+        "document_name": "架构设计说明.md",
+        "content": "知识库检索支持混合搜索与关键词搜索两种模式，可通过 retrieval_model 参数配置。",
+        "score": 0.88
+      }
+    ],
+    "dify-ds-faq": [
+      {
+        "document_id": "doc-faq-001",
+        "document_name": "faq.txt",
+        "content": "Dify FAQ: configure the dataset API base URL and key to connect an external Dify workspace.",
+        "score": 0.85
+      }
+    ]
+  }
+}
