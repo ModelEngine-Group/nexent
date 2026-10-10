@@ -5434,7 +5434,8 @@ class TestCreateMcpTool:
         nexent_agent_instance.mcp_tool_collection = mock_collection
 
         result = nexent_agent_instance.create_mcp_tool("test_tool")
-        assert result is mock_tool
+        assert result is not mock_tool
+        assert result.name == mock_tool.name
 
     def test_create_mcp_tool_collection_not_initialized(self, nexent_agent_instance):
         """Test create_mcp_tool raises when MCP collection is None."""

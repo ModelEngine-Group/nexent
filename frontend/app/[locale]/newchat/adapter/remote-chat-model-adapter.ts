@@ -1283,14 +1283,13 @@ export function pushStepTokenCount(step: StepTokenCount): void {
 }
 
 /**
- * Clears the global step token counts registry and resets the shared plan
- * state. Called from `remoteChatModelAdapter.run()` so a fresh assistant
- * turn never inherits the previous run's plan panel.
+ * Clear per-turn timing while retaining the conversation's latest plan.
+ * Conversation switches restore or clear the plan in the history adapter;
+ * a later plan event replaces it when a new planning turn creates a plan.
  */
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
   accumulatedDuration = 0;
-  planRegistry.set(null);
 }
 
 /**
