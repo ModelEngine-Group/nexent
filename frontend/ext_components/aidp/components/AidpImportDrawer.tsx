@@ -18,6 +18,8 @@ import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpUploadFailedItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import { validateAidpFiles } from "@/services/uploadService";
+import { ApiError } from "@/services/api";
+import { getAidpUploadErrorMessage } from "../services/aidpUploadUtils";
 
 import styles from "./AidpImportDrawer.module.css";
 
@@ -53,12 +55,20 @@ const formatBytes = (bytes: number): string => {
 const getFailureReason = (
   item: AidpUploadFailedItem | undefined,
   language: string,
+  translate: (key: string, options: { defaultValue: string }) => string,
   fallback: string
 ): string => {
   if (!item) return fallback;
-  return language.startsWith("zh")
+  const reason = language.startsWith("zh")
     ? item.reason_zh || item.reason_en || fallback
     : item.reason_en || item.reason_zh || fallback;
+  return item.code !== undefined && item.code !== ""
+    ? getAidpUploadErrorMessage(
+        new ApiError(item.code, reason),
+        translate,
+        fallback
+      )
+    : reason;
 };
 
 const ProgressRing: React.FC<{ percent: number }> = ({ percent }) => {
@@ -213,6 +223,7 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
           error: getFailureReason(
             failure,
             i18n.language,
+            t,
             t("aidpKnowledge.uploadFailed")
           ),
         };
@@ -222,10 +233,11 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
         updateBatch((row) => ({
           ...row,
           status: "failed",
-          error:
-            error instanceof Error && error.message
-              ? error.message
-              : t("aidpKnowledge.uploadFailed"),
+          error: getAidpUploadErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.uploadFailed")
+          ),
         }));
       }
     } finally {

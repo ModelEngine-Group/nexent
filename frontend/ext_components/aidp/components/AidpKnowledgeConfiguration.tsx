@@ -14,6 +14,13 @@ import {
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import log from "@/lib/logger";
+import { ApiError } from "@/services/api";
+import { useErrorHandler } from "@/hooks/useErrorHandler";
+import {
+  useAidpKnowledgeCache,
+  useAidpKnowledgeList,
+  useDeleteAidpKnowledgeBase,
+} from "../hooks/useAidpKnowledgeQueries";
 
 import AidpKnowledgeDetail from "./AidpKnowledgeDetail";
 import AidpKnowledgeList, {
@@ -30,12 +37,10 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const params = useParams();
   const searchParams = useSearchParams();
   const locale = (params?.locale as string) || "zh";
-  const [kbs, setKbs] = useState<AidpKnowledgeBaseItem[]>([]);
-  const [loadingKbs, setLoadingKbs] = useState(false);
-  const [kbsLoadFailed, setKbsLoadFailed] = useState(false);
-  const [kbTotal, setKbTotal] = useState(0);
-  const [kbHasMore, setKbHasMore] = useState(false);
-  const [kbTotalReliable, setKbTotalReliable] = useState(true);
+  const { getI18nErrorMessage, handleError } = useErrorHandler();
+  const { refreshLists, updateKnowledgeBase, fetchKnowledgeBase } =
+    useAidpKnowledgeCache();
+  const deleteMutation = useDeleteAidpKnowledgeBase();
   const [viewMode, setViewMode] = useState<AidpKbViewMode>("cards");
   const [visibleColumns, setVisibleColumns] = useState<AidpKbColumnKey[]>([
     ...AIDP_KB_DEFAULT_COLUMNS,
@@ -43,10 +48,13 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(
     null
   );
-  const [kbPage, setKbPage] = useState(1);
-  const [kbPageSize, setKbPageSize] = useState(10);
+  const [listParams, setListParams] = useState({
+    page: 1,
+    pageSize: 10,
+    keyword: "",
+  });
+  const { page: kbPage, pageSize: kbPageSize } = listParams;
   const [kbKeyword, setKbKeyword] = useState("");
-  const [debouncedKbKeyword, setDebouncedKbKeyword] = useState("");
   const [quickImportKb, setQuickImportKb] =
     useState<AidpKnowledgeBaseItem | null>(null);
   const [quickImportWatchKbId, setQuickImportWatchKbId] = useState<
@@ -55,49 +63,27 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const quickImportPendingIdsRef = useRef<string[]>([]);
   const quickImportWatchStartedAtRef = useRef(0);
   const openedRequestedKbRef = useRef<string | null>(null);
+  const listQuery = useAidpKnowledgeList(
+    kbPage,
+    kbPageSize,
+    listParams.keyword,
+    !selectedKb
+  );
+  const kbs = listQuery.isError ? [] : (listQuery.data?.value ?? []);
+  const listErrorMessage =
+    listQuery.error instanceof ApiError
+      ? getI18nErrorMessage(listQuery.error.code)
+      : listQuery.error?.message;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setDebouncedKbKeyword(kbKeyword.trim());
+      const keyword = kbKeyword.trim();
+      setListParams((current) =>
+        current.keyword === keyword ? current : { ...current, keyword, page: 1 }
+      );
     }, KB_SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [kbKeyword]);
-
-  const fetchKbs = useCallback(
-    async (page = 1, keyword = debouncedKbKeyword, pageSize = kbPageSize) => {
-      setLoadingKbs(true);
-      setKbsLoadFailed(false);
-      try {
-        const result = await aidpKnowledgeService.listKbs(
-          page,
-          pageSize,
-          keyword
-        );
-        setKbs(result.value);
-        setKbTotal(result.total_count ?? result.value.length);
-        setKbHasMore(result.has_more ?? false);
-        setKbTotalReliable(result.total_reliable !== false);
-        setKbPage(page);
-      } catch (error) {
-        log.error("Failed to fetch AIDP knowledge bases:", error);
-        message.error(t("aidpKnowledge.fetchKbsFailed"));
-        setKbs([]);
-        setKbTotal(0);
-        setKbHasMore(false);
-        setKbTotalReliable(false);
-        setKbsLoadFailed(true);
-      } finally {
-        setLoadingKbs(false);
-      }
-    },
-    [debouncedKbKeyword, kbPageSize, message, t]
-  );
-
-  useEffect(() => {
-    // Fetch the list when the debounced query or page size changes.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchKbs(1, debouncedKbKeyword, kbPageSize);
-  }, [fetchKbs, debouncedKbKeyword, kbPageSize]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -116,7 +102,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const openKbById = useCallback(
     async (kbId: string) => {
       try {
-        const detail = await aidpKnowledgeService.getKb(kbId);
+        const detail = await fetchKnowledgeBase(kbId);
         const item = {
           ...detail,
           kds_id: kbId,
@@ -125,10 +111,14 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         setSelectedKb(item);
       } catch (error) {
         log.error("Failed to open AIDP knowledge base from query:", error);
-        message.error(t("aidpKnowledge.detailLoadFailed"));
+        const result = handleError(error, {
+          showMessage: false,
+          handleSession: false,
+        });
+        message.error(result.message);
       }
     },
-    [message, t]
+    [fetchKnowledgeBase, handleError, message]
   );
 
   const requestedKbId = searchParams?.get("kb") || null;
@@ -158,27 +148,30 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         centered: true,
         onOk: async () => {
           try {
-            await aidpKnowledgeService.deleteKb(kb.kds_id);
+            await deleteMutation.mutateAsync(kb.kds_id);
             message.success(t("aidpKnowledge.deleteKbSuccess"));
             setSelectedKb(null);
-            void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
-          } catch {
-            message.error(t("aidpKnowledge.deleteKbFailed"));
+          } catch (error) {
+            const result = handleError(error, {
+              showMessage: false,
+              handleSession: false,
+            });
+            message.error(result.message);
+            throw error;
           }
         },
       });
     },
-    [debouncedKbKeyword, fetchKbs, kbPage, kbPageSize, message, t]
+    [deleteMutation, handleError, message, t]
   );
 
-  const handleUpdatedKb = useCallback((updatedKb: AidpKnowledgeBaseItem) => {
-    setSelectedKb(updatedKb);
-    setKbs((current) =>
-      current.map((kb) =>
-        kb.kds_id === updatedKb.kds_id ? { ...kb, ...updatedKb } : kb
-      )
-    );
-  }, []);
+  const handleUpdatedKb = useCallback(
+    (updatedKb: AidpKnowledgeBaseItem) => {
+      setSelectedKb(updatedKb);
+      updateKnowledgeBase(updatedKb);
+    },
+    [updateKnowledgeBase]
+  );
 
   const handleQuickDocsUploaded = useCallback(
     (uploadedFileIds: string[]) => {
@@ -186,9 +179,9 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       quickImportPendingIdsRef.current = uploadedFileIds;
       quickImportWatchStartedAtRef.current = Date.now();
       setQuickImportWatchKbId(quickImportKb.kds_id);
-      void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
+      void refreshLists();
     },
-    [debouncedKbKeyword, fetchKbs, kbPage, kbPageSize, quickImportKb]
+    [refreshLists, quickImportKb]
   );
 
   useEffect(() => {
@@ -200,7 +193,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       ) {
         quickImportPendingIdsRef.current = [];
         setQuickImportWatchKbId(null);
-        void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
+        void refreshLists();
         return;
       }
       void aidpKnowledgeService
@@ -226,7 +219,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           quickImportPendingIdsRef.current = stillPending;
           if (stillPending.length === 0) {
             setQuickImportWatchKbId(null);
-            void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
+            void refreshLists();
           }
         })
         .catch((error) =>
@@ -234,7 +227,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         );
     }, AIDP_DOC_STATUS_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [quickImportWatchKbId, fetchKbs, kbPage, kbPageSize, debouncedKbKeyword]);
+  }, [quickImportWatchKbId, refreshLists]);
 
   const handleCreateNew = useCallback(() => {
     router.push(`/${locale}/knowledges/create`);
@@ -261,11 +254,16 @@ const AidpKnowledgeConfiguration: React.FC = () => {
       <div className="mt-4 min-h-0 flex-1 overflow-hidden">
         <AidpKnowledgeList
           kbs={kbs}
-          isLoading={loadingKbs}
-          loadFailed={kbsLoadFailed}
-          total={kbTotal}
-          totalReliable={kbTotalReliable}
-          hasMore={kbHasMore}
+          isLoading={listQuery.isFetching}
+          loadFailed={listQuery.isError}
+          loadError={listErrorMessage}
+          total={
+            listQuery.isError ? 0 : (listQuery.data?.total_count ?? kbs.length)
+          }
+          totalReliable={
+            !listQuery.isError && listQuery.data?.total_reliable !== false
+          }
+          hasMore={!listQuery.isError && (listQuery.data?.has_more ?? false)}
           currentPage={kbPage}
           pageSize={kbPageSize}
           keyword={kbKeyword}
@@ -273,19 +271,19 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           visibleColumns={visibleColumns}
           onKeywordChange={setKbKeyword}
           onPageChange={(page) =>
-            void fetchKbs(page, debouncedKbKeyword, kbPageSize)
+            setListParams((current) => ({ ...current, page }))
           }
-          onPageSizeChange={setKbPageSize}
+          onPageSizeChange={(pageSize) =>
+            setListParams((current) => ({ ...current, pageSize, page: 1 }))
+          }
           onViewModeChange={setViewMode}
           onVisibleColumnsChange={setVisibleColumns}
           onSelect={handleSelectKb}
-          onRefresh={() =>
-            void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize)
-          }
+          onRefresh={() => void refreshLists()}
           onCreateNew={handleCreateNew}
           onImport={setQuickImportKb}
           onDelete={handleDeleteKb}
-          onRetry={() => void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize)}
+          onRetry={() => void listQuery.refetch()}
         />
       </div>
 
@@ -296,9 +294,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           knowledgeBase={quickImportKb}
           onClose={() => setQuickImportKb(null)}
           onDocsUploaded={handleQuickDocsUploaded}
-          onRefresh={() =>
-            void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize)
-          }
+          onRefresh={() => void refreshLists()}
         />
       )}
     </div>

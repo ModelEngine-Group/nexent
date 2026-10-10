@@ -94,6 +94,7 @@ interface AidpKnowledgeListProps {
   kbs: AidpKnowledgeBaseItem[];
   isLoading: boolean;
   loadFailed: boolean;
+  loadError?: string;
   total: number;
   totalReliable: boolean;
   hasMore: boolean;
@@ -128,6 +129,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   kbs,
   isLoading,
   loadFailed,
+  loadError,
   total,
   totalReliable,
   hasMore,
@@ -592,7 +594,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   const renderFailedState = () => (
     <div className="flex min-h-52 flex-col items-center justify-center p-8 text-center">
       <p className="text-sm text-gray-500">
-        {t("aidpKnowledge.listLoadFailed")}
+        {loadError || t("aidpKnowledge.listLoadFailed")}
       </p>
       <Button className="mt-3" size="small" onClick={onRetry}>
         {t("aidpKnowledge.retry")}

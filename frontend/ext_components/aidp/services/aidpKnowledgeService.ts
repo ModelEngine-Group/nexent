@@ -12,6 +12,8 @@ import log from "@/lib/logger";
 import { parseAidpGraphTemplate } from "@/lib/aidpGraphConfig";
 import type { AidpGraphTemplate } from "@/types/aidpGraph";
 import { handleSessionExpired } from "@/lib/session";
+import { isSessionExpired } from "@/const/errorCode";
+import { parseAidpUploadError } from "./aidpUploadUtils";
 
 // ---------- Additional types for AIDP management ----------
 
@@ -104,6 +106,7 @@ export interface AidpUploadFailedItem {
   file_name: string;
   reason_zh: string;
   reason_en: string;
+  code?: string | number;
 }
 
 export interface AidpUploadResponse {
@@ -453,7 +456,7 @@ class AidpKnowledgeService {
 
   /**
    * Upload documents to a knowledge base (multipart).
-   * Bypasses fetchWithErrorHandling since it expects JSON.
+   * Keeps multipart encoding and shares error parsing with the XHR transport.
    */
   async uploadDocs(id: string, files: File[]): Promise<AidpUploadResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {});
@@ -480,27 +483,19 @@ class AidpKnowledgeService {
     if (!response.ok) {
       const errorText = await response.text();
       log.error("AIDP document upload failed:", errorText);
-      let errorMessage = response.statusText || `HTTP ${response.status}`;
-      if (errorText) {
-        try {
-          const payload = JSON.parse(errorText) as {
-            message?: unknown;
-            details?: { upstream_reason?: unknown } | null;
-          };
-          const upstreamReason = payload.details?.upstream_reason;
-          if (typeof upstreamReason === "string" && upstreamReason.trim()) {
-            errorMessage = upstreamReason.trim();
-          } else if (
-            typeof payload.message === "string" &&
-            payload.message.trim()
-          ) {
-            errorMessage = payload.message.trim();
-          }
-        } catch {
-          errorMessage = errorText;
-        }
+      const error = parseAidpUploadError(
+        response.status,
+        response.statusText,
+        errorText
+      );
+      if (
+        response.status === 401 ||
+        response.status === 499 ||
+        isSessionExpired(error.code)
+      ) {
+        handleSessionExpired();
       }
-      throw new Error(errorMessage);
+      throw error;
     }
 
     const result = (await response.json()) as Partial<AidpUploadResponse>;
@@ -544,30 +539,21 @@ class AidpKnowledgeService {
       xhr.onload = () => {
         cleanUp();
         if (xhr.status < 200 || xhr.status >= 300) {
-          if (xhr.status === 401 || xhr.status === 499) handleSessionExpired();
           const errorText = xhr.responseText || "";
           log.error("AIDP document upload failed:", errorText);
-          let errorMessage = xhr.statusText || `HTTP ${xhr.status}`;
-          if (errorText) {
-            try {
-              const payload = JSON.parse(errorText) as {
-                message?: unknown;
-                details?: { upstream_reason?: unknown } | null;
-              };
-              const upstreamReason = payload.details?.upstream_reason;
-              if (typeof upstreamReason === "string" && upstreamReason.trim()) {
-                errorMessage = upstreamReason.trim();
-              } else if (
-                typeof payload.message === "string" &&
-                payload.message.trim()
-              ) {
-                errorMessage = payload.message.trim();
-              }
-            } catch {
-              errorMessage = errorText;
-            }
+          const error = parseAidpUploadError(
+            xhr.status,
+            xhr.statusText,
+            errorText
+          );
+          if (
+            xhr.status === 401 ||
+            xhr.status === 499 ||
+            isSessionExpired(error.code)
+          ) {
+            handleSessionExpired();
           }
-          reject(new Error(errorMessage));
+          reject(error);
           return;
         }
 

@@ -8,18 +8,20 @@ import React, {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 
-import { Alert, Button, Breadcrumb, Form, Space, message } from "antd";
+import { Alert, App, Button, Breadcrumb, Form, Space } from "antd";
 
 import type { AidpGraphConfig } from "@/ext_components/aidp/services/aidpKnowledgeService";
-import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
-import { USER_ROLES } from "@/const/auth";
-import { useGroupList } from "@/hooks/group/useGroupList";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import log from "@/lib/logger";
+import { ApiError } from "@/services/api";
+import { useErrorHandler } from "@/hooks/useErrorHandler";
+import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
+import {
+  useAidpModels,
+  useAidpGraphTemplate,
+  useCreateAidpKnowledgeBase,
+} from "../hooks/useAidpKnowledgeQueries";
 import {
   graphParameter,
   graphPrompt,
@@ -63,13 +65,17 @@ const AIDP_CREATE_DEFAULTS = {
  */
 const AidpCreateKbPage: React.FC = () => {
   const { t } = useTranslation();
+  const { message } = App.useApp();
+  const { handleError, getI18nErrorMessage } = useErrorHandler();
   const router = useRouter();
   const params = useParams();
   const locale = (params?.locale as string) || "zh";
   const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
 
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const createMutation = useCreateAidpKnowledgeBase();
+  const loading = validating || createMutation.isPending;
   /** Guards against a second create while one submission is in flight. */
   const submittingRef = useRef(false);
 
@@ -83,29 +89,11 @@ const AidpCreateKbPage: React.FC = () => {
   }, [enableAidpKnowledge, isDeploymentReady, locale, router]);
 
   // ---- Permissions and groups ----
-  const { user } = useAuthorizationContext();
-  const isUser = user?.role === USER_ROLES.USER;
-  const canConfigureGroupPermissions = !!user && !isUser;
-  const tenantId = user?.tenantId ?? null;
-  const { data: groupListData } = useGroupList(
-    canConfigureGroupPermissions ? tenantId : null
-  );
-  const groupOptions = useMemo(
-    () =>
-      (groupListData?.groups ?? []).map((g) => ({
-        value: g.group_id,
-        label: g.group_name,
-      })),
-    [groupListData]
-  );
+  const { isUser, canConfigureGroupPermissions, groupOptions } =
+    useAidpGroupOptions();
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
 
-  const modelsQuery = useQuery({
-    queryKey: ["aidp-models", "all", "KnowledgeBase"],
-    queryFn: () => aidpKnowledgeService.listModels("", "KnowledgeBase"),
-    enabled: isDeploymentReady && enableAidpKnowledge,
-    staleTime: 5 * 60 * 1000,
-  });
+  const modelsQuery = useAidpModels();
   const llmModelOptions = useMemo(
     () => modelOptions(modelsQuery.data?.models ?? [], "llm"),
     [modelsQuery.data]
@@ -121,15 +109,17 @@ const AidpCreateKbPage: React.FC = () => {
   const graphEnabled = Form.useWatch("is_exist_graph", form) === true;
   const promptLanguage = Form.useWatch("graph_prompt_language", form) || "中文";
   const graphDomain = Form.useWatch("graph_domain", form) || "常规";
-  const templateQuery = useQuery({
-    queryKey: ["aidp-graph-template", promptLanguage],
-    queryFn: () =>
-      aidpKnowledgeService.graphTemplate(
-        promptLanguage === "英文" ? "english" : "chinese"
-      ),
-    enabled: graphEnabled && isDeploymentReady && enableAidpKnowledge,
-    staleTime: 5 * 60 * 1000,
-  });
+  const templateQuery = useAidpGraphTemplate(
+    promptLanguage === "英文" ? "english" : "chinese",
+    graphEnabled
+  );
+  const configurationError =
+    modelsQuery.error || (graphEnabled ? templateQuery.error : null);
+  const configurationErrorMessage =
+    configurationError instanceof ApiError
+      ? getI18nErrorMessage(configurationError.code)
+      : configurationError?.message ||
+        t("aidpKnowledge.createConfigurationLoadFailed");
   const initializedGraph = useRef(false);
   const previousDefaultPrompt = useRef("");
   useEffect(() => {
@@ -215,7 +205,7 @@ const AidpCreateKbPage: React.FC = () => {
   const handleSubmit = async () => {
     if (submittingRef.current) return;
     submittingRef.current = true;
-    setLoading(true);
+    setValidating(true);
     try {
       const values = await form.validateFields();
       const permission = isUser
@@ -255,7 +245,8 @@ const AidpCreateKbPage: React.FC = () => {
           }
         : undefined;
 
-      const created = await aidpKnowledgeService.createKb({
+      setValidating(false);
+      const created = await createMutation.mutateAsync({
         name: values.name.trim(),
         description: values.description?.trim() || "",
         chunk_token_num: chunkTokens,
@@ -284,14 +275,13 @@ const AidpCreateKbPage: React.FC = () => {
       ) {
         return;
       }
-      log.error("Failed to submit AIDP knowledge base creation:", error);
-      const reason =
-        error instanceof Error && error.message.trim()
-          ? error.message
-          : t("aidpKnowledge.createKbFailed");
-      message.error(reason);
+      const result = handleError(error, {
+        showMessage: false,
+        handleSession: false,
+      });
+      message.error(result.message);
     } finally {
-      setLoading(false);
+      setValidating(false);
       submittingRef.current = false;
     }
   };
@@ -329,7 +319,7 @@ const AidpCreateKbPage: React.FC = () => {
           <Alert
             type="error"
             showIcon
-            title={t("aidpKnowledge.createConfigurationLoadFailed")}
+            title={configurationErrorMessage}
             action={
               <Button
                 onClick={() => {
@@ -369,7 +359,7 @@ const AidpCreateKbPage: React.FC = () => {
             type="primary"
             loading={loading}
             disabled={
-              modelsQuery.isLoading ||
+              modelsQuery.isPending ||
               modelsQuery.isError ||
               (graphEnabled &&
                 (templateQuery.isPending || templateQuery.isError))
