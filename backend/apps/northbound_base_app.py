@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from apps.app_factory import create_app
 from consts.task_recovery import NORTHBOUND_SERVICE_NAME
 from consts.const import NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
+from consts.streaming import SSE_STREAM_HEADERS
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
@@ -336,11 +337,7 @@ async def _handle_jsonrpc_stream(
     return StreamingResponse(
         generate_sse(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=SSE_STREAM_HEADERS,
     )
 
 
@@ -431,11 +428,7 @@ async def rest_message_stream(
         return StreamingResponse(
             generate_sse(),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+            headers=SSE_STREAM_HEADERS,
         )
 
     except EndpointNotFoundError as e:

@@ -9,6 +9,7 @@ from http import HTTPStatus
 
 from consts.const import ENABLE_UPLOAD_IMAGE
 from consts.error_code import ErrorCode
+from consts.streaming import SSE_STREAM_HEADERS
 from consts.exceptions import (
     AppException,
     MCPConnectionError,
@@ -390,7 +391,7 @@ async def add_container_mcp_service_stream_endpoint(
     return StreamingResponse(
         generate_deployment_stream(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers=SSE_STREAM_HEADERS,
     )
 
 
@@ -749,11 +750,7 @@ async def get_container_logs(
         return StreamingResponse(
             generate_log_stream(),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            }
+            headers=SSE_STREAM_HEADERS
         )
     except HTTPException:
         raise
@@ -1061,7 +1058,7 @@ if ENABLE_UPLOAD_IMAGE:
         return StreamingResponse(
             generate_deployment_stream(),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+            headers=SSE_STREAM_HEADERS,
         )
 
     @router.post("/upload-image")

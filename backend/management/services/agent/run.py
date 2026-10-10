@@ -52,6 +52,7 @@ from consts.exceptions import (
     WorkbenchError,
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
+from consts.streaming import SSE_STREAM_HEADERS
 from nexent.core.utils.observer import ProcessType
 from consts.model import (
     AgentRequest,
@@ -2063,8 +2064,7 @@ async def run_agent_stream(
                     redis_channel_stream(),
                     media_type="text/event-stream",
                     headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
+                        **SSE_STREAM_HEADERS,
                         "X-Stream-Status": "resumed",
                         "X-Last-Unit-Index": str(resume_info["resume_from_unit_index"]),
                     },
@@ -2102,8 +2102,7 @@ async def run_agent_stream(
             channel_stream(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
+                **SSE_STREAM_HEADERS,
                 "X-Stream-Status": "resumed",
                 "X-Last-Unit-Index": str(resume_info["resume_from_unit_index"]),
             },
@@ -2193,8 +2192,7 @@ async def run_agent_stream(
             active_run_error_stream(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
+                **SSE_STREAM_HEADERS,
                 "X-Stream-Status": "conflict",
             },
         )
@@ -2347,7 +2345,7 @@ async def run_agent_stream(
                 reservation_token,
             )
 
-    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    headers = {**SSE_STREAM_HEADERS}
     debug_run_id = getattr(agent_request, "_debug_run_id", None)
     if debug_run_id is not None:
         headers["run_id"] = debug_run_id
