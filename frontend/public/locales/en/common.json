@@ -30,6 +30,7 @@
   "chat.knowledgePopover.manageKnowledge": "Manage knowledge bases",
   "chat.modelSelector.viewModels": "View models",
   "chat.sidebar.settings": "Settings",
+  "chat.composer.more": "More",
   "chat.composer.addAgent": "Add agent",
   "chat.composer.skills": "Skills",
   "chat.composer.knowledgeBase": "Knowledge",

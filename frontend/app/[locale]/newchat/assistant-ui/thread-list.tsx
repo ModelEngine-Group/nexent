@@ -374,7 +374,8 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
 }) => {
   const { t } = useTranslation();
 
-  const groups = useThreadListAgentGroups(searchQuery, newChatDesign);
+  const agentGroups = useThreadListAgentGroups(searchQuery, newChatDesign);
+  const timeGroups = useThreadListGroups(generatedTitles, searchQuery);
   const pinned = usePinnedThreads();
   const [expandedAgentKeys, setExpandedAgentKeys] = useState<Set<string>>(
     () => new Set()
@@ -399,7 +400,52 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     [completedConversations, generatedTitles]
   );
 
-  if (!groups) {
+  // Workbench (and legacy) sidebar: recency buckets (Today / Last 7 Days /
+  // Older) with pinned conversations hoisted into a dedicated top group.
+  if (!newChatDesign) {
+    if (!timeGroups) {
+      return (
+        <ThreadListPrimitive.Items>
+          {() => (
+            <ThreadListItem
+              completedConversations={completedConversations}
+              generatedTitles={generatedTitles}
+            />
+          )}
+        </ThreadListPrimitive.Items>
+      );
+    }
+    if (timeGroups.length === 0) {
+      return (
+        <div className="flex items-center px-3 py-4 text-sm text-muted-foreground">
+          {t("chat.threadList.noSearchResults")}
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col">
+        {timeGroups.map((group) => (
+          <Fragment key={group.label}>
+            <div
+              data-slot="aui_thread-list-group-label"
+              className="px-3 pt-3 pb-1 text-sm font-medium text-foreground/80"
+            >
+              {t(group.label)}
+            </div>
+            {group.entries.map(({ id, index }) => (
+              <ThreadListPrimitive.ItemByIndex
+                key={id}
+                index={index}
+                components={{ ThreadListItem: GroupedThreadListItem }}
+              />
+            ))}
+          </Fragment>
+        ))}
+      </div>
+    );
+  }
+
+  if (!agentGroups) {
     return (
       <ThreadListPrimitive.Items>
         {() => (
@@ -412,7 +458,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     );
   }
 
-  if (groups.length === 0) {
+  if (agentGroups.length === 0) {
     return (
       <div className="flex items-center px-3 py-4 text-sm text-muted-foreground">
         {t("chat.threadList.noSearchResults")}
@@ -429,7 +475,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
       <div className="px-3 pb-1 pt-2 text-[14px] text-[#808080]">
         {t("chat.threadList.recentConversations")}
       </div>
-      {groups.map((group) => {
+      {agentGroups.map((group) => {
         const groupKey = String(group.agentId ?? "none");
         const entries = pinned
           ? [...group.entries].sort(
@@ -587,6 +633,127 @@ const useThreadListAgentGroups = (
     newChatDesign,
   ]);
   return newChatDesign ? groups : null;
+};
+
+const DAY_IN_MS = 86_400_000;
+
+type ThreadTimeGroupEntry = { id: string; index: number };
+
+type ThreadTimeGroup = {
+  label: string;
+  entries: ThreadTimeGroupEntry[];
+};
+
+// Bucket a date into one of three recency groups (Today / Last 7 Days / Older)
+// using the day boundaries of the user's local timezone.
+const dateGroupLabel = (
+  date: Date | undefined,
+  startOfToday: number
+): string => {
+  if (!date || date.getTime() >= startOfToday) return "chat.threadList.today";
+  if (date.getTime() >= startOfToday - 7 * DAY_IN_MS) {
+    return "chat.threadList.last7Days";
+  }
+  return "chat.threadList.older";
+};
+
+// Build ordered recency groups for the workbench sidebar. Returns null when
+// no thread has a usable timestamp so the caller can render a flat list.
+// When a search query is present, entries are filtered by title first; an
+// empty result yields an empty group list so the caller renders nothing.
+const useThreadListGroups = (
+  generatedTitles: ReadonlyMap<string, string> | undefined,
+  searchQuery: string
+): ThreadTimeGroup[] | null => {
+  const threadIds = useAuiState((s) => s.threads.threadIds);
+  const threadItems = useAuiState((s) => s.threads.threadItems);
+  const pinned = usePinnedThreads();
+  const pinnedIds = pinned?.pinnedIds;
+
+  return useMemo<ThreadTimeGroup[] | null>(() => {
+    const itemsById = new Map(
+      (
+        threadItems as ReadonlyArray<{
+          id: string;
+          title?: string;
+          custom?: { lastMessageAt?: string };
+        }>
+      ).map((item) => [item.id, item])
+    );
+    const query = searchQuery.trim().toLowerCase();
+    const titles = threadIds.map((id) =>
+      (generatedTitles?.get(id) ?? itemsById.get(id)?.title ?? "").toLowerCase()
+    );
+    const matches = threadIds.map(
+      (_, index) => !query || titles[index].includes(query)
+    );
+    if (query && !matches.some(Boolean)) return [];
+
+    const dates: (Date | undefined)[] = threadIds.map((id) => {
+      const raw = itemsById.get(id)?.custom?.lastMessageAt;
+      return raw ? new Date(raw) : undefined;
+    });
+    if (!dates.some(Boolean)) {
+      // No usable timestamps: keep the flat-list fallback for the unfiltered
+      // view, and bucket search matches under a single label when filtering.
+      if (!query) return null;
+      return [
+        {
+          label: "chat.threadList.recentConversations",
+          entries: threadIds
+            .map((id, index) => ({ id, index }))
+            .filter((_, index) => matches[index]),
+        },
+      ];
+    }
+
+    const now = new Date();
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    ).getTime();
+
+    const time = (index: number) =>
+      dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const indices = threadIds
+      .map((_, index) => index)
+      .filter((_, index) => matches[index])
+      .sort((a, b) => time(b) - time(a));
+
+    const result: ThreadTimeGroup[] = [];
+    for (const index of indices) {
+      const label = dateGroupLabel(dates[index], startOfToday);
+      const entry: ThreadTimeGroupEntry = { id: threadIds[index], index };
+      const lastGroup = result[result.length - 1];
+      if (lastGroup?.label === label) {
+        lastGroup.entries.push(entry);
+      } else {
+        result.push({ label, entries: [entry] });
+      }
+    }
+
+    // Hoist locally pinned conversations into a dedicated top group.
+    if (pinnedIds && pinnedIds.size > 0) {
+      const pinnedGroup: ThreadTimeGroup = {
+        label: "chat.threadList.pinned",
+        entries: [],
+      };
+      const remaining: ThreadTimeGroup[] = [];
+      for (const group of result) {
+        const kept = group.entries.filter((entry) => pinnedIds.has(entry.id));
+        const others = group.entries.filter(
+          (entry) => !pinnedIds.has(entry.id)
+        );
+        pinnedGroup.entries.push(...kept);
+        if (others.length > 0) remaining.push({ ...group, entries: others });
+      }
+      if (pinnedGroup.entries.length > 0) {
+        return [pinnedGroup, ...remaining];
+      }
+    }
+    return result;
+  }, [threadIds, threadItems, generatedTitles, searchQuery, pinnedIds]);
 };
 
 const ThreadListSkeleton: FC = () => {

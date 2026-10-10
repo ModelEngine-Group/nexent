@@ -30,6 +30,7 @@
   "chat.knowledgePopover.manageKnowledge": "管理知识库",
   "chat.modelSelector.viewModels": "查看模型",
   "chat.sidebar.settings": "设置",
+  "chat.composer.more": "更多",
   "chat.composer.addAgent": "添加智能体",
   "chat.composer.skills": "技能",
   "chat.composer.knowledgeBase": "知识库",
