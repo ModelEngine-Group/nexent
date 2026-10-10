@@ -86,6 +86,26 @@ _agent_consts_stub.SAFE_AGENT_STREAM_ERROR_MESSAGE = (
 )
 sys.modules.setdefault("consts.agent", _agent_consts_stub)
 
+# Same rationale as the ``consts.agent`` stub above, applied to
+# ``consts.streaming``: several test modules replace the whole ``consts``
+# package in ``sys.modules`` with a bare ``types.ModuleType("consts")`` that
+# has no ``__path__`` (e.g. ``test_northbound_service.py``).  Submodules that
+# are not already cached in ``sys.modules`` then fail to import with
+# "'consts' is not a package".  ``consts.streaming`` is new and holds only a
+# constants dict, so register the real module up front (falling back to a
+# stub only if it cannot be imported); later imports cache-hit and never
+# depend on the stubbed parent behaving like a package.
+try:
+    import consts.streaming  # noqa: F401,E402
+except ModuleNotFoundError:  # pragma: no cover - backend dir missing from path
+    _consts_streaming_stub = types.ModuleType("consts.streaming")
+    _consts_streaming_stub.SSE_STREAM_HEADERS = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    sys.modules.setdefault("consts.streaming", _consts_streaming_stub)
+
 # Stub xlrd — only required when tests exercise ``evaluation_set_excel_utils``
 # in environments where the optional SDK is not installed.  We register a
 # permissive module-like object that exposes ``open_workbook`` so the .xls
