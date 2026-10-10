@@ -22,12 +22,57 @@ import {
   Circle,
   ListChecks,
   ChevronDown,
-  Compass,
-  Database,
+  MessageCircleMore,
+  Paperclip,
   Bot,
   Plus,
   Send,
 } from "lucide-react";
+
+// Design toolbar icons: stacked layers with a sparkle (skills) and an open
+// book with a sparkle (knowledge base), traced from the design mockups.
+const SkillStackIcon: FC<{ className?: string }> = ({ className }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={cn("shrink-0", className)}
+    aria-hidden
+  >
+    <path d="M12 3.8 20 7 12 10.2 4 7 12 3.8Z" />
+    <path d="M20.3 12.2c-2.3 1.8-5.2 2.7-8.3 2.7s-6-0.9-8.3-2.7" />
+    <path d="M20.3 16.4c-2.3 1.8-5.2 2.7-8.3 2.7s-6-0.9-8.3-2.7" />
+    <path
+      d="M18.7 1.7q.7 2 2.75 2.75-2.05.75-2.75 2.8-.7-2.05-2.75-2.8 2.05-.75 2.75-2.75Z"
+      fill="currentColor"
+      stroke="none"
+    />
+  </svg>
+);
+
+const KnowledgeBookIcon: FC<{ className?: string }> = ({ className }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={cn("shrink-0", className)}
+    aria-hidden
+  >
+    <path d="M3.5 6.1C6 4.8 8.9 4.9 11.4 6.4v11.8C8.9 16.7 6 16.6 3.5 17.9Z" />
+    <path d="M11.4 6.4c2.5-1.5 5.3-1.6 7.8-.4v7.3" />
+    <path
+      d="M18.7 14.1q.7 2 2.75 2.75-2.05.75-2.75 2.8-.7-2.05-2.75-2.8 2.05-.75 2.75-2.75Z"
+      fill="currentColor"
+      stroke="none"
+    />
+  </svg>
+);
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -269,7 +314,11 @@ const WorkbenchPlanningMenu: FC<{
           disabled={disabled}
           className="h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
         >
-          <Compass className="size-4" />
+          {chatMode === "planning" ? (
+            <MessageCircleMore className="size-4" />
+          ) : (
+            <Play className="size-4" />
+          )}
           {chatMode === "planning"
             ? t("chat.composer.planningMode")
             : t("chat.composer.executionMode")}
@@ -704,7 +753,7 @@ export const Composer: FC<ComposerProps> = ({
                             : onOpenWorkbenchSkillPicker
                         }
                       >
-                        <Lightbulb
+                        <SkillStackIcon
                           className={cn(
                             "size-3.5",
                             workbenchPresentation && "size-4"
@@ -754,9 +803,9 @@ export const Composer: FC<ComposerProps> = ({
                               : knowledgeSummary
                           }
                         >
-                          <Database
+                          <KnowledgeBookIcon
                             className={cn(
-                              "size-3.5 shrink-0",
+                              "size-3.5",
                               workbenchPresentation && "size-4"
                             )}
                           />
@@ -789,6 +838,7 @@ export const Composer: FC<ComposerProps> = ({
                 {!compact && workbenchPresentation && (
                   <ComposerAddAttachment
                     label={t("chat.composer.uploadFile")}
+                    icon={<Paperclip className="size-4" />}
                   />
                 )}
               </div>
