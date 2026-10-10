@@ -1,15 +1,11 @@
 name: Nexent Daily Full Test
 
 on:
-  # Only workflow changes pushed/merged into develop trigger integration runs.
-  push:
-    branches: [develop]
-    paths:
-      - ".github/workflows/nexent-daily-full-test.yml"
+  # Product merges do not trigger Daily; manual execution remains available.
   workflow_dispatch:
-  # UTC 16:00 = Beijing 00:00 the following day.
+  # UTC 16:02 = Beijing 00:02 the following day.
   schedule:
-    - cron: "0 16 * * *"
+    - cron: "2 16 * * *"
 
 permissions:
   contents: read
@@ -30,19 +26,20 @@ jobs:
     env:
       TEST_ROOT: /home/jason/nexent-test-suite
       REPO_ROOT: /root/project/nexent
+      TEST_PYTHON: /home/jason/nexent-test-suite/runtime/test-venv/bin/python
 
     steps:
       - name: Verify local test environment
         run: |
           set -euo pipefail
-          test -d "$TEST_ROOT/auto_test"
-          test -x "$TEST_ROOT/scripts/run-daily-suite.sh"
-          test -x "$TEST_ROOT/scripts/doctor.sh"
-          for file in daily.env secrets.env opencode-daily.jsonc opencode-analysis.jsonc; do
+          test -x "$TEST_PYTHON"
+          test -f "$REPO_ROOT/test-e2e/infra/scripts/daily-launch.py"
+          test -f "$REPO_ROOT/test-e2e/infra/scripts/run-suite.py"
+          test -d "$REPO_ROOT/test-e2e/cases"
+          for file in daily.env secrets.env pipeline.yaml; do
             test -f "$TEST_ROOT/config/$file"
           done
           test -d "$REPO_ROOT/.git"
-          test -x /home/jason/.opencode/bin/opencode
           for tool in git docker flock grep mktemp; do
             command -v "$tool" >/dev/null
           done
@@ -52,7 +49,8 @@ jobs:
             exit 2
           fi
           docker info >/dev/null
-          "$TEST_ROOT/scripts/doctor.sh"
+          # The launcher runs asset validation and doctor under the Daily lock.
+          # Do not switch branches or synchronize outside that lock.
 
       - name: Run Nexent Daily D0-D6
         run: |
@@ -74,8 +72,10 @@ jobs:
             # Each invocation has its own log: old lock messages cannot match.
             attempt_log="$(mktemp "${workflow_log}.invocation.XXXXXX")"
             set +e
-            "$TEST_ROOT/scripts/run-daily-suite.sh" \
-              --repo "$REPO_ROOT" >"$attempt_log" 2>&1
+            "$TEST_PYTHON" "$REPO_ROOT/test-e2e/infra/scripts/daily-launch.py" \
+              --test-home "$TEST_ROOT" \
+              --branch develop \
+              --execute >"$attempt_log" 2>&1
             daily_status=$?
             set -e
             cat "$attempt_log" >>"$workflow_log"
@@ -104,6 +104,7 @@ jobs:
         if: always()
         run: |
           echo "No GitHub Artifact was uploaded."
-          echo "Daily runs: $TEST_ROOT/runs/daily/"
-          echo "Reports: $TEST_ROOT/reports/latest/"
+          echo "Launch logs: $TEST_ROOT/runs/daily-launch/"
+          echo "Daily runs: $TEST_ROOT/runs/repository-daily/"
+          echo "Latest report index: $TEST_ROOT/reports/repository-latest.json"
           echo "Workflow log: $TEST_ROOT/runs/github-actions/run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.log"
