@@ -16,13 +16,14 @@ case:
   - Nexent服务与仓库受控A2A Mock就绪，无其他故障注入批次。
   - config/a2a.yaml符合统一Schema，控制令牌由既有环境或secrets.env提供。
   - 使用本次动态ID、唯一source URL及受控测试身份，不借用历史资源。
+  - 从 models.yaml/secrets.env 为两个租户分别创建本用例独占的模型配置并预检；不要求租户B预装模型，不修改租户默认模型。
   test_data:
     configuration: config/a2a.yaml
     mock_service: a2a-agent
   steps:
   - order: 1
-    action: 租户A、B各自创建本次本地Agent与外部Agent
-    expected: 使用动态ID且属于租户A
+    action: 从已有模型配置为租户A、B各准备独占模型，再分别创建本次本地Agent与外部Agent
+    expected: 使用动态ID且各资源归属正确的创建租户
   - order: 2
     action: 租户B查询关系及sub-agents
     expected: 无租户A数据
@@ -33,7 +34,7 @@ case:
     action: 核对owner未变化并清理
     expected: 无新增关系或额外外部请求；即使错误接受也清理测试创建的关系
   expected_results:
-  - 使用动态ID且属于租户A
+  - 使用动态ID且各资源归属正确的创建租户
   - 无租户A数据
   - 400/403/404拒绝，不允许新增越权关系
   - 无新增关系或额外外部请求；即使错误接受也清理测试创建的关系
@@ -56,7 +57,7 @@ case:
   integration_boundary:
   - Nexent实际HTTP API与受控外部A2A服务及本地持久化，非Mock自测。
   observations:
-  - 使用动态ID且属于租户A
+  - 使用动态ID且各资源归属正确的创建租户
   - 无租户A数据
   - 400/403/404拒绝，不允许新增越权关系
   - 无新增关系或额外外部请求；即使错误接受也清理测试创建的关系

@@ -56,6 +56,23 @@ also requires actual browser CRUD, enablement, chat retrieval, secret masking,
 and cleanup. Chat evidence must establish an external-memory search result;
 echoing a marker already present in the user's question is insufficient proof.
 
+`AGT-071` is the D3 API/runtime acceptance counterpart. It now uses the
+explicit `mock` profile, not the retired unconditional real-provider policy
+skip. It creates its own tenant/user/model/Agent/Provider and `plugin.org_id`,
+uses the actual plugin keys `plugin.base_url` and `plugin.api_key`, then checks
+API ingestion/search, real-LLM Agent consumption, subsequent-run configuration
+updates, scoped 503/timeout degradation to local memory, recovery and cleanup.
+The current account-deletion product path does not purge long-term memory
+versions; isolated identity removal is not proof of physical history deletion.
+This limitation must remain visible in verification, not be reported as a
+validated erasure guarantee. No shared user's local memory is modified.
+
+Run this Case through the repository suite after loading the same three
+existing variables from the local Mock configuration. Neither the Case nor
+the deployment CLI rewrites shared secrets or invents configuration variables.
+The host-side control address comes from this service's deployment registry;
+the product-side address still comes from the existing endpoint configuration.
+
 ## Protocol and behavior
 
 All endpoints except `/healthz` and `/readyz` require

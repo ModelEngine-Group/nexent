@@ -126,7 +126,11 @@ async def run(args):
                     'final_contains_marker': any(args.marker in str(part['data'].get('content') or '')
                         for part in parts if isinstance(part.get('data'), dict)
                         and part['data'].get('type') == 'final_answer'),
-                })
+                    'error_texts': [str(part.get('text'))[:2000] for part in parts
+                                    if str(part.get('text') or '').lstrip().startswith('Error:')],
+                    'runtime_errors': [part['data'] for part in parts
+                                       if isinstance(part.get('data'), dict) and part['data'].get('type') == 'error'],
+                }, secrets=(secret, identity.access_token, identity.refresh_token))
                 verify_invocation(response, args.marker)
                 return {'status': response.status_code, 'marker_verified': True, 'version': body['version']}
             finally:

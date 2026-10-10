@@ -53,7 +53,10 @@ journey("PW-MCP-API-01", async (context) => {
           && String(tool.origin_name || tool.name).includes(name)
           && String(tool.origin_name || tool.name).includes("get_api_test_code"));
         expect(matches).toHaveLength(1);
-        convertedToolName = String(matches[0].origin_name || matches[0].name);
+        // The selectable UI and runtime expose normalized name; origin_name
+        // only identifies the OpenAPI mount and can contain hyphens.
+        convertedToolName = String(matches[0].name);
+        expect(convertedToolName).not.toBe("");
         await agents.open();
         agentId = await agents.create(`MCP API ${token}`, `mcp_api_${token}`);
         const modelName = configuredModel("llm").displayName;
@@ -65,7 +68,7 @@ journey("PW-MCP-API-01", async (context) => {
       },
       async () => { await page.reload({ waitUntil: "domcontentloaded" }); await agents.select(`MCP API ${token}`); await agents.openDebug(); await agents.sendDebug(`必须调用 ${convertedToolName}，并只回复工具结果。`, "API-NX-92831"); return "reloaded the exact Draft and completed real LLM→converted Tool→controlled API invocation"; },
       async () => { const delta = readFileSync(wire, "utf8").slice(offset); expect(delta).toContain("API-NX-92831"); return "Test API wire and result marker agree"; },
-      async () => { await mcp.delete(name); return "deleted the run-scoped API MCP"; },
+      async () => { await mcp.openMine(); await mcp.delete(name); return "returned to Mine and deleted the run-scoped API MCP through UI"; },
     ],
     assertions: [
       async () => "API type created a visible converted Tool",

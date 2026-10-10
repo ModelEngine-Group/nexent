@@ -4,9 +4,14 @@ implementations:
 - framework: pytest
   file: test.py
   selector: AGT-071
-notes: V5 source binding migrated; runtime parity is not yet certified.
+  profiles: [mock]
+timeout_seconds: 900
+required_mock_services: [memory-provider]
+acceptance_bindings:
+  AC-01: [test_external_memory_real_ingest_search_and_hot_update]
+  AC-02: [test_external_memory_real_ingest_search_and_hot_update]
 preparation:
   families: []
-  anchors: true
+  anchors: false
   special_assets: false
   d4_groups: []

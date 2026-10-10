@@ -4,57 +4,72 @@ module: V5-BASELINE
 case:
   case_id: AGT-071
   feature_id: F-178
-  business_rule_ids:
-  - F-178-RULE-01
-  title: 真实外部记忆写入→检索→Agent 上下文与配置热更新
+  business_rule_ids: [F-178-RULE-01]
+  title: 外部记忆写入→检索→真实 Agent 上下文、配置热更新与故障降级（Mem0 Mock）
   type: AGENT-IT
   priority: P0
   status: active
   automation: automated
-  objective: 真实外部记忆写入→检索→Agent 上下文与配置热更新
+  objective: 使用实际 Nexent API/插件/Agent 与真实 LLM，验证受控外部记忆协议、上下文注入、后续运行热更新、故障降级和恢复。
   preconditions:
-  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
-  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
-  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
-  - models.yaml 中所需真实 Provider 通过预检，名称与凭据不得硬编码。
+  - Nexent Runtime 与配置服务健康，仓库 memory-provider Mock 已通过注册的 readiness 校验。
+  - 使用既有 NEXENT_EXTERNAL_MEMORY_PLUGIN/ENDPOINT/API_KEY 配置；专用 Mock 密钥，不复用模型密钥。
+  - models.yaml/secrets.env 中真实 LLM 健康，测试 SU 身份可创建独占测试租户及用户。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/config/models.yaml'
+    plugin: mem0
+    mock_service: memory-provider
+    isolation: 独占租户、用户、Provider 与组织命名空间；动态查询标识与答案标记不同。
   steps:
   - order: 1
-    action: 使用配置中的真实 Provider 写入 run_id marker。
-    expected: 真实写入和检索成功。
+    action: 创建独占租户/身份、配置模型、Agent、Provider 和用户级本地记忆，发布独占Agent。确认外部查询初始为空。
+    expected: 不借用共享资源或历史记忆，不修改共享账户的 Provider 和记忆配置。
   - order: 2
-    action: 轮询直至可检索。
-    expected: Agent trace 显示外部记忆命中。
+    action: 通过 Nexent test-ingest 写入一个含查询标识和独立答案的真实 HTTP 单元，再通过 test-search 检索。
+    expected: accepted_count=1、rejected_count=0；检索项包含答案且 is_external=true。
   - order: 3
-    action: 运行启用外部记忆的真实 Agent 对话。
-    expected: 热更新只影响后续运行。
+    action: 使用正常对话（非Debug）创建新会话，只询问查询标识；比较 Mock 请求计数并读取真实 Agent 最终回答。
+    expected: Runtime 确实检索外部 Provider，最终回答包含仅存在于外部记忆中的答案；查询回显不能算命中。
   - order: 4
-    action: 校验检索 trace 和回答 marker。
-    expected: 故障有明确 provider 错误且本地记忆仍按契约工作。
+    action: 将独占 Provider 的组织参数热更新为空组织，读回参数；新会话再次查询，然后恢复原组织。
+    expected: 后续新会话不能取得旧组织答案且返回 NOT_FOUND；此前运行的脱敏证据保留，密钥不回传。此用例不宣称覆盖更新发生在运行中的并发快照语义。
   - order: 5
-    action: 更新 provider 参数后再次运行，最后清理。
-    expected: 故障有明确 provider 错误且本地记忆仍按契约工作。
+    action: 分别对本用例组织/用户注入 503、超时；验证 Nexent test-search 明确错误及 last_error_code，再运行查询本地记忆的真实 Agent。
+    expected: Provider 分别显示 provider_error/timeout；外部失败不阻止本地记忆进入回答，不伪装外部检索成功。
+  - order: 6
+    action: 撤销故障，开启新会话再次查询外部答案，保存脱敏 wire 和流式证据后清理。
+    expected: 外部检索恢复；清理独占 Agent、模型、Provider、Mock 数据/故障和身份，清理失败独立报告。
   expected_results:
-  - 真实写入和检索成功。
-  - Agent trace 显示外部记忆命中。
-  - 热更新只影响后续运行。
-  - 故障有明确 provider 错误且本地记忆仍按契约工作。
-  forbidden_side_effects: []
+  - 实际插件 HTTP 写入及检索成功，不伪造结果。
+  - 真实 Agent 检索并消费外部记忆，而非仅测试 Mock 自身。
+  - 热更新影响后续新会话，保留此前脱敏证据，凭据不回传。
+  - 外部异常和超时可诊断，本地记忆仍可用，撤销故障后外部记忆恢复。
+  - 独占资产被清理，证据保留在本地并脱敏。
+  forbidden_side_effects:
+  - 不修改共享用户记忆、租户默认模型、其他 Provider 或其他命名空间的故障/数据。
+  acceptance:
+  - id: AC-01
+    description: 独占准备、实际协议写入/检索和真实 Agent 消费外部记忆
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 配置热更新、故障降级、恢复与安全清理
+    steps: [4, 5, 6]
+    expected_results: [3, 4, 5]
+    forbidden_side_effects: [1]
+  execution:
+    profiles:
+    - name: mock
+      required_services: [memory-provider]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 385
   integration_boundary:
-  - REAL_REQUIRED：使用 secrets.env 配置的真实外部记忆 Provider 与 models.yaml 的真实 LLM。
+  - Mem0 外部服务使用受控 Mock；Nexent API、插件适配、Runtime 和配置模型为真实调用。
+  - Mock 通过不代表第三方 Mem0 生产服务或语义检索质量通过。
   observations:
-  - 真实写入和检索成功。
-  - Agent trace 显示外部记忆命中。
-  - 热更新只影响后续运行。
-  - 故障有明确 provider 错误且本地记忆仍按契约工作。
+  - test-ingest/search、Agent 最终回答、组织/用户隔离 wire 计数、故障码、清理记录。
   cleanup:
-  - JUnit、run_id、stream/tool/retrieval trace、脱敏模型快照。
+  - 上下文管理器清理独占资源；Mock 仅按本次组织/用户清理，不执行全局 reset。
+  - 独占身份删除不等于物理擦除长期记忆历史版本；当前产品身份删除未清除版本，需在验证报告保留此限制，不改变共享记忆或伪报物理清除。

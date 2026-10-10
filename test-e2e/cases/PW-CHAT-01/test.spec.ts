@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -18,6 +17,8 @@ journey("PW-CHAT-01", async (context) => {
   let agentDisplay = "";
   let stoppedText = "";
   let originalThreadTitle = "";
+  let stoppedHistory: Awaited<ReturnType<ChatPage["persistedMessages"]>> = [];
+  let completedHistory: Awaited<ReturnType<ChatPage["persistedMessages"]>> = [];
   const ownedConversationIds = new Set<number>();
   // Stop validates an in-progress stream, including visible reasoning. Other
   // journeys still require final-answer Markdown through ChatPage.messageText.
@@ -72,6 +73,10 @@ journey("PW-CHAT-01", async (context) => {
           return stable;
         }, { timeout: 15000, intervals: [1000] }).toBeGreaterThanOrEqual(4);
         expect(stoppedText.length).toBeGreaterThan(0);
+        stoppedHistory = await chat.persistedMessages();
+        const stoppedAssistant = stoppedHistory.filter((item) => item.role === "assistant");
+        expect(stoppedAssistant).toHaveLength(1);
+        expect(stoppedAssistant[0].status).toBe("stopped");
         return `Stop terminated the old stream at ${stoppedText.length} visible characters`;
       },
       async () => {
@@ -87,6 +92,11 @@ journey("PW-CHAT-01", async (context) => {
           error.name = "ProductFailure";
           throw error;
         }
+        completedHistory = await chat.persistedMessages();
+        const assistants = completedHistory.filter((item) => item.role === "assistant");
+        expect(assistants).toHaveLength(2);
+        expect(assistants[0]).toEqual(stoppedHistory.filter((item) => item.role === "assistant")[0]);
+        expect(assistants[1].status).toBe("completed");
         return "the stopped conversation accepted and completed a second message";
       },
       async () => {
@@ -94,8 +104,20 @@ journey("PW-CHAT-01", async (context) => {
         await page.reload({ waitUntil: "domcontentloaded" });
         await chat.openThread(originalThreadTitle);
         await expect(chat.userMessages().filter({ hasText: firstMarker })).toHaveCount(1);
-        await expect.poll(() => streamText(chat.assistantMessages().first()), { timeout: 30000 }).toBe(stoppedText);
-        return "refresh plus sidebar reopen restored both history and the exact stopped assistant text";
+        await expect(chat.userMessages()).toHaveCount(2);
+        await expect(chat.assistantMessages()).toHaveCount(2);
+        // Cancellation rolls back the uncommitted model attempt, including
+        // transient thinking. Refresh must preserve committed history/status,
+        // not reintroduce that abandoned attempt (OpenAIModel rollback hook).
+        expect(await chat.persistedMessages()).toEqual(completedHistory);
+        const parts = stoppedHistory.find((item) => item.role === "assistant")!.message;
+        const final = Array.isArray(parts)
+          ? parts.filter((part: any) => part.type === "final_answer").map((part: any) => String(part.content || "")).join("").trim()
+          : String(parts || "").trim();
+        await expect.poll(() => chat.messageText(chat.assistantMessages().first()), { timeout: 30000 }).toBe(final);
+        await expect.poll(() => chat.messageText(chat.assistantMessages().last()), { timeout: 30000 }).toContain(`CONTINUE-${token}`);
+        await expect(page.locator("button:has(svg.lucide-square)")).toHaveCount(0);
+        return "refresh restored both committed messages, exact persisted stopped output/status, and completed continuation without reviving the cancelled stream";
       },
       async () => {
         await chat.renameActiveThread(firstTitle);

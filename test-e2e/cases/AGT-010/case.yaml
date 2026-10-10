@@ -4,72 +4,62 @@ module: V5-BASELINE
 case:
   case_id: AGT-010
   feature_id: F-047
-  business_rule_ids:
-  - F-047-RULE-01
-  title: section optimize：选择范围、feedback、mode、资源上下文｜外部依赖异常与超时
+  business_rule_ids: [F-047-RULE-01]
+  title: section optimize：无效范围、外部 Provider 故障与超时、恢复后不自动保存
   type: AGENT-IT
   priority: P1
   status: active
   automation: automated
-  objective: section optimize：选择范围、feedback、mode、资源上下文｜外部依赖异常与超时
+  objective: 使用实际有效的负例验证范围拒绝；通过受控 Provider 验证异常与超时不会部分保存，恢复真实模型后功能仍可用。
   preconditions:
-  - Nexent 本地测试全栈已启动，health check 通过。
-  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
-  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - 本地 Nexent 配置服务健康且 Jiuwen SDK 已启用。
+  - 使用既有 models.yaml/secrets.env 配置及真实 LLM，健康预检通过。
+  - 批次受控 HTTP 资产服务已启动；资产 URL 由既有控制器注入。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
-
-      - ${NEXENT_TEST_HOME}/config/secrets.env'
+    configuration: config/models.yaml
+    controlled_service: http-fixture
+    invalid_ranges: insert 的 start_pos=-1、超过原文长度；select 的起点大于终点。
   steps:
   - order: 1
-    action: 准备真实测试用户以及 models.yaml 中可用 LLM；若功能涉及 Tool/Skill/子Agent，准备对应本地测试资产。
-    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+    action: 创建独占 Agent 草稿，读取名称、Prompt、模型与资源绑定快照。
+    expected: 动态 ID 属于本次用例，不修改租户默认模型。
   - order: 2
-    action: 通过实际 API 创建一个带唯一 RunID 后缀的临时 Agent，记录 agent_id。
-    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    action: 分别提交无效 insert 起点、无效 select 范围；每种负例重复两次并重新读取草稿。
+    expected: 返回明确 400/422、没有成功优化数据，草稿字段和绑定不变。insert 的 end_pos 不作为无效条件。
   - order: 3
-    action: 按“section optimize：选择范围、feedback、mode、资源上下文｜外部依赖异常与超时”调用对应配置/生成/导入导出接口，提交与 UI 相同的数据结构。
-    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    action: 创建独占受控 Provider 模型，分别注入 503 和请求超时，以合法 select 范围调用优化并读取 wire 计数及草稿。
+    expected: 故障确实到达 Provider，重试次数和耗时有界；当前 select 降级返回明确能力错误 400，没有成功数据，草稿不变。
   - order: 4
-    action: 读取 Agent 详情再次核对字段：名称、描述、Prompt、模型、max_steps、tools、skills、sub-agents 等与提交值一致。
-    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    action: 移除故障，使用原配置真实模型调用合法 select 优化并再次读取草稿。
+    expected: 200、Jiuwen 来源及非空优化结果；优化建议没有自动保存草稿。
   - order: 5
-    action: 对需要模型生成的 NL2Agent/Prompt 功能调用真实 LLM，断言返回结构可解析、关键字段非空且能保存为 Agent 配置。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 6
-    action: 导入导出类检查导出文件可重新导入、冲突策略生效、资源引用不会指向其他租户。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 7
-    action: 最少执行一次 Agent Chat Smoke，确认保存后的配置真正进入 Runtime，而不是只验证数据库。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 8
-    action: 异常场景提交缺字段、重复名称、非法资源ID或无权限资源，确认明确 4xx 且原配置不被部分覆盖。
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  - order: 9
-    action: '删除临时 Agent 和导出文件。
-
-      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
-    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+    action: 删除本用例 Agent、模型及故障控制状态，保存脱敏证据。
+    expected: 清理失败单独呈现；结果与日志不包含认证密钥。
   expected_results:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
-  forbidden_side_effects: []
+  - 无效范围被拒绝且重复调用不产生脏状态。
+  - 外部异常与超时被真实触发，不出现成功优化数据或部分保存。
+  - 真实模型恢复后能完成优化，建议不会自动保存。
+  - 独占资产全部清理且证据脱敏。
+  forbidden_side_effects:
+  - 不覆盖共享 Agent、模型、默认模型或其他用例的故障状态。
+  acceptance:
+  - id: AC-01
+    description: 有效负例、重复请求与草稿不变
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Provider 异常、超时、真实模型恢复和安全清理
+    steps: [3, 4, 5]
+    expected_results: [2, 3, 4]
+    forbidden_side_effects: [1]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 91
   integration_boundary:
-  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  - 实际 Nexent HTTP 接口与真实 LLM；Mock 仅提供独占 503/超时故障，不模拟正常优化结果。
   observations:
-  - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
-  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
-  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
-  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 负例 HTTP 状态、Provider wire 计数、耗时、草稿读回与恢复来源。
   cleanup:
-  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。
+  - 按资产注册表删除本用例模型与 Agent，并移除独占故障 nonce。

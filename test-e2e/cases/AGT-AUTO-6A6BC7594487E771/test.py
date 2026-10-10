@@ -241,6 +241,14 @@ def no_sync_answers(questions):
     return answers
 
 
+def confirmation_history(query, result):
+    # The web adapter uses extractTextContent for assistant history, not the
+    # structured nl2a data card. Replaying raw card JSON as assistant prose
+    # gave the model an invented transcript and could elicit a card echo.
+    return [{'role': 'user', 'content': query},
+            {'role': 'assistant', 'content': result['final_text']}]
+
+
 @pytest.mark.case_id(CASE_ID)
 @pytest.mark.stage('D3')
 @pytest.mark.asyncio
@@ -336,8 +344,7 @@ async def test_local_tasks_do_not_enter_full_generation(tenant_a_admin):
         action = {'type': 'nl2agent_card_action', 'subtype': 'requirement_clarification',
                   'agent_id': agent_id, 'action': 'submit', 'result': {'answers': no_sync_answers(questions)}}
         confirmed = await _run_turn(tenant_a_admin, agent_id, json.dumps(action, ensure_ascii=False),
-            phase='related-confirm', history=[{'role': 'user', 'content': related_query},
-                                             {'role': 'assistant', 'content': json.dumps(card, ensure_ascii=False)}])
+            phase='related-confirm', history=confirmation_history(related_query, related))
         after_related = _snapshot(await _read_agent(tenant_a_admin, agent_id))
         write_case_evidence(CASE_ID + '-related-readback', {
             'before': before_related, 'after': after_related, 'action': action,

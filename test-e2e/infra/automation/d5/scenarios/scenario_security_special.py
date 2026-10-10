@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from contextlib import AsyncExitStack
 from uuid import uuid4
 
 import pytest
@@ -195,8 +196,13 @@ async def _xss_contract() -> None:
 
 async def _prompt_injection(identity, other_tenant) -> None:
     from shared.factories.tenant import isolated_accounts
-    from d3.assets import model_request
-    from shared.asset_registry import AssetDependencyError
+    from shared.factories.model import owned_configured_model
+    from d3.assets import model_id
+
+    # Provider readiness is a prerequisite, not proof of injection safety.
+    # Fail before provisioning disposable tenants when it is unavailable.
+    for model_type in ("llm", "embedding"):
+        await model_id(model_type, identity)
 
     # Disposable tenants have neither the configured LLM nor Embedding model.
     # Provision both before constructing the retrieval agent; model_id()
@@ -204,27 +210,11 @@ async def _prompt_injection(identity, other_tenant) -> None:
     async with isolated_accounts(["tenant_a_admin", "tenant_b_admin"]) as accounts:
         identity = accounts["tenant_a_admin"]
         other_tenant = accounts["tenant_b_admin"]
-        model_names = []
-        try:
+        async with AsyncExitStack() as models:
             for tenant in (identity, other_tenant):
                 for model_type in ("llm", "embedding"):
-                    display = f"d5-sec-{model_type}-{uuid4().hex[:12]}"
-                    async with client("config", token=tenant.access_token, timeout=MODEL_TIMEOUT) as api:
-                        model_payload = model_request(model_type, display_name=display)
-                        created = await api.post("/model/create", json=model_payload)
-                    if created.status_code >= 500:
-                        raise AssetDependencyError(
-                            "models", model_type,
-                            detail=f"temporary {model_type} model could not be provisioned",
-                        )
-                    assert_status(created, 200)
-                    model_names.append((tenant, display))
+                    await models.enter_async_context(owned_configured_model(tenant, "SEC-09", model_type))
             await _prompt_injection_with_models(identity, other_tenant)
-        finally:
-            for tenant, display in reversed(model_names):
-                async with client("config", token=tenant.access_token) as api:
-                    deleted = await api.post("/model/delete", params={"display_name": display})
-                assert_status(deleted, (200, 404))
 
 
 async def _prompt_injection_with_models(identity, other_tenant) -> None:

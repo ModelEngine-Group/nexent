@@ -90,10 +90,26 @@ journey("PW-MCP-MARKET-01", async (context) => {
         }
         await expect(active).toHaveText(structuredTag);
         await selector.press("Enter");
-        await page.keyboard.press("Escape");
+        // Prove that the form holds the selected value before saving. An
+        // option merely being active/highlighted is not a selected tag.
+        await expect(dialog.locator(".ant-select-selection-item").filter({ hasText: structuredTag })).toHaveCount(1);
+        await selector.press("Tab");
+        try {
+          await expect(dialog.locator(".ant-select-selection-item").filter({ hasText: structuredTag })).toHaveCount(1);
+          await expect(dialog.getByText("1/100", { exact: true })).toBeVisible();
+        } catch {
+          const failure = new Error(`MCP structured tag ${structuredTag} was selected through the UI but disappeared after normal focus loss; no assignment was forced or substituted`);
+          failure.name = "ProductFailure";
+          throw failure;
+        }
         const saved = page.waitForResponse((response) => response.request().method() === "PUT" && /\/tag-libraries\/assignments\/mcp_service\//.test(response.url()));
         await dialog.getByRole("button", { name: /^保\s*存$/ }).click();
         const response = await saved;
+        if (!response.request().postDataJSON().value_ids?.includes(structuredTagId)) {
+          const failure = new Error(`MCP editor visibly held structured tag value_id=${structuredTagId}, but Save omitted that ID from the actual assignment request`);
+          failure.name = "ProductFailure";
+          throw failure;
+        }
         expect(response.ok()).toBe(true);
         const assignment = await response.json();
         expect(assignment.assignments.some((item: any) => Number(item.value_id) === structuredTagId)).toBe(true);

@@ -1,7 +1,7 @@
 """D3 conversation title, Memory and natural-language automation scenarios."""
 
 from __future__ import annotations
-from shared.factories.memory import _create_agent_memory
+from shared.factories.memory import _create_agent_memory, cleanup_owned_memory
 from shared.resource_ids import absent_numeric_id
 
 import asyncio
@@ -240,14 +240,19 @@ async def _memory_agent_context(identity, mode: str) -> None:
             )
         assert_status(response, (200, 409, 500, 502, 503, 504))
         return
+    # Record indexing alone does not prove that the vector Provider works.
+    # Classify an unavailable dependency before creating memory or blaming
+    # an empty context on the retrieval/prompt implementation.
+    await model_id("embedding", identity)
     marker = f"CTXMEM{uuid4().hex[:10]}"
-    memory_id_value = await _create_agent_memory(identity, marker, require_indexed=True)
+    lookup = f"CTXLOOKUP{uuid4().hex[:10]}"
+    memory_id_value = await _create_agent_memory(identity, f"{lookup} has unique answer {marker}", require_indexed=True)
     try:
         async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
             for attempt in range(10):
                 context = await api.get(
                     "/memory/context",
-                    params={"query": f"Remember exact marker {marker}", "agent_id": str(get_test_asset("agents", "basic_id")), "layers": "agent", "top_k": 10, "threshold": 0.0},
+                    params={"query": lookup, "agent_id": str(get_test_asset("agents", "basic_id")), "layers": "agent", "top_k": 10, "threshold": 0.0},
                 )
                 assert_status(context, 200)
                 if marker.lower() in context.json().get("prompt_text", "").lower():
@@ -259,15 +264,16 @@ async def _memory_agent_context(identity, mode: str) -> None:
             async with client("runtime", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
                 async with api.stream(
                     "POST", "/agent/run",
-                    json={"query": f"Repeat memory marker {marker}", "agent_id": int(get_test_asset("agents", "basic_id")), "conversation_id": conversation_id, "history": [], "is_debug": True},
+                    json={"query": f"Return the unique answer for {lookup} from stored memory.", "agent_id": int(get_test_asset("agents", "basic_id")), "conversation_id": conversation_id, "history": [], "is_debug": False},
                 ) as response:
                     assert_status(response, 200)
                     events = await read_sse(response, limit=2000)
             assert_terminal_event(events)
-            assert marker.lower() in json.dumps(events, ensure_ascii=False).lower()
+            answers = [item['data'].get('content', '') for item in events
+                       if isinstance(item.get('data'), dict) and item['data'].get('type') == 'final_answer']
+            assert marker.lower() in ''.join(part for part in answers if isinstance(part, str)).lower(), 'Final answer did not use retrieved memory'
     finally:
-        async with client("config", token=identity.access_token) as api:
-            await api.delete(f"/memory/records/{memory_id_value}")
+        await cleanup_owned_memory(identity, memory_id_value)
 
 
 async def _automation(identity, mode: str) -> None:

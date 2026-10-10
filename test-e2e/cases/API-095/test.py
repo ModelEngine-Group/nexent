@@ -4,6 +4,7 @@ from contextlib import AsyncExitStack
 import pytest
 from shared.a2a import discovered_agent, mock_asset
 from shared.factories.agent import _draft_agent
+from shared.factories.model import owned_configured_model
 from shared.http import assert_status
 
 
@@ -17,10 +18,14 @@ async def test_external_relationship_tenant_boundary(tenant_a_admin, tenant_b_ad
             discovered_agent(tenant_a_admin, mock, 'API-095-A'))
         owner_b, external_b, nonce_b = await stack.enter_async_context(
             discovered_agent(tenant_b_admin, mock, 'API-095-B'))
+        model_a = await stack.enter_async_context(owned_configured_model(tenant_a_admin, 'API-095'))
+        model_b = await stack.enter_async_context(owned_configured_model(tenant_b_admin, 'API-095'))
         local_a, payload_a = await stack.enter_async_context(
-            _draft_agent(tenant_a_admin, name_prefix='a2a-isolation-a'))
+            _draft_agent(tenant_a_admin, name_prefix='a2a-isolation-a',
+                         owner_case_id='API-095', model_ids=[model_a]))
         local_b, payload_b = await stack.enter_async_context(
-            _draft_agent(tenant_b_admin, name_prefix='a2a-isolation-b'))
+            _draft_agent(tenant_b_admin, name_prefix='a2a-isolation-b',
+                         owner_case_id='API-095', model_ids=[model_b]))
 
         for path in ('relations', 'sub-agents'):
             listed = await owner_b.get(f'/a2a/client/{path}/{local_a}')

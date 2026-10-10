@@ -218,13 +218,15 @@ export class ModelPage {
     return "updated";
   }
 
-  async verifyPersistedModel(displayName: string, capability: "llm" | "embedding"): Promise<number> {
+  async verifyPersistedModel(displayName: string, capability: "llm" | "embedding", dependencyCheck = false): Promise<number> {
     const response = await this.page.request.post(`/api/model/healthcheck?display_name=${encodeURIComponent(displayName)}&model_type=${capability}`);
     if (!response.ok()) throw new Error(`persisted model healthcheck returned ${response.status()}`);
     const payload = await response.json().catch(() => ({}));
     if (payload?.data?.connectivity !== true) {
       const error = new Error(`configured real model ${displayName} is unavailable`);
-      error.name = "ProductFailure";
+      // Positive fixture readiness is separate from a healthcheck acceptance
+      // assertion. Keep existing primary healthcheck tests classified as FAIL.
+      error.name = dependencyCheck ? "DependencyFailure" : "ProductFailure";
       throw error;
     }
     return response.status();

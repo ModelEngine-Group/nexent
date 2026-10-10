@@ -136,6 +136,18 @@ export class ChatPage {
     }, { timeout: 60000, intervals: [500, 1000, 2000] }).toMatch(/^(stopped|completed|failed)$/);
   }
 
+  async persistedMessages(): Promise<Array<{ role: string; status: string; message: unknown }>> {
+    const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
+    expect(response.ok()).toBe(true);
+    const payload = await response.json();
+    expect(payload.code).toBe(0);
+    const history = payload.data?.[0];
+    expect(history).toBeTruthy();
+    expect(history.streaming_message?.status).not.toBe("streaming");
+    expect(Array.isArray(history.message)).toBe(true);
+    return history.message.map((item: any) => ({ role: item.role, status: item.status, message: item.message }));
+  }
+
   async captureConversationState(path: string, marker: string): Promise<void> {
     const response = await this.page.request.get(`/api/conversation/${this.currentConversationId()}`);
     const payload = await response.json().catch(() => ({}));
@@ -212,7 +224,9 @@ export class ChatPage {
   }
 
   async openThread(title: string, occurrence?: "first" | "last"): Promise<void> {
-    const matches = this.page.getByRole("button", { name: title, exact: true });
+    // Scope to history roots: a persisted title can equal the New action.
+    const matches = this.page.locator('[class~="group/item"]')
+      .getByRole("button", { name: title, exact: true });
     const target = occurrence === "first" ? matches.first() : occurrence === "last" ? matches.last() : matches;
     await target.click();
     await expect(this.activeThread()).toContainText(title);

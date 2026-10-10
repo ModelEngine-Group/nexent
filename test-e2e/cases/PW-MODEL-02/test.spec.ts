@@ -66,7 +66,7 @@ journey("PW-MODEL-02", async (context) => {
           connectivityStatus = await models.verifyDraft(modal);
         } else {
           await models.alignPersistedModel(asset, modelName, "embedding");
-          connectivityStatus = await models.verifyPersistedModel(modelName, "embedding");
+          connectivityStatus = await models.verifyPersistedModel(modelName, "embedding", true);
         }
         expect(connectivityStatus).toBe(200);
         if (!modelAlreadyExists) expect(await models.submitDraft(modal, modelName)).toBe(200);

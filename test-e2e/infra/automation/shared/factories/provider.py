@@ -5,7 +5,7 @@ from shared.asset_registry import register_asset, mark_asset_state
 
 
 @asynccontextmanager
-async def owned_provider_client(identity):
+async def owned_provider_client(identity, *, owner_case_id='PROVIDER-FACTORY'):
     owned = []
     primary = None
     async with client('config', token=identity.access_token) as api:
@@ -24,7 +24,7 @@ async def owned_provider_client(identity):
                     if pid not in owned:
                         owned.append(pid)
                     register_asset('owned_providers',str(pid),pid,
-                        owner_case_id='PROVIDER-FACTORY',cleanup={
+                        owner_case_id=owner_case_id,cleanup={
                             'service':'config','identity':identity.id,'method':'DELETE',
                             'path':f'/memory/providers/{pid}','allowed_statuses':[200,404]})
                 return response

@@ -348,7 +348,9 @@ async def _prompt_section(identity, valid: bool) -> None:
             "task_description": "Answer safely", "agent_id": agent_id, "model_id": model_id,
             "section_type": "duty", "section_title": "Duty", "current_content": "Answer questions.",
             "feedback": "Make it concise.", "mode": "select" if valid else "insert",
-            "start_pos": 0, "end_pos": 6 if valid else -1,
+            # insert ignores end_pos; its negative fixture must invalidate
+            # start_pos, not an unused select-only argument.
+            "start_pos": 0 if valid else -1, "end_pos": 6 if valid else None,
             "tool_ids": [], "sub_agent_ids": [], "knowledge_base_display_names": [],
         }
         async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
