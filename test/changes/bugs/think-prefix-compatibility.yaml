@@ -1,0 +1,38 @@
+schema_version: '1.0'
+changes:
+- change_id: TPC-BUG-001
+  change_type: bugfix
+  bug_id: TPC-BUG-001
+  title: Thinking prefix validation rejects valid skill actions
+  description: Relax descriptive thinking prefixes and protect exhaustion against
+    unexecuted raw actions.
+  observed_behavior: Incomplete or narrated thinking prefixes reject valid actions;
+    exhaustion may publish them as final.
+  expected_behavior: Valid action executes; invalid marked output never becomes a
+    raw final.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_contract
+    description: Existing tests enforce paired-only thinking and lack third-generation
+      action-shaped raw-final exclusion.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added:
+    - TPC-001
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - TPC-D1-001
+    - TPC-D1-002
+    - TPC-D1-003
+    - TPC-D1-004
+    - TPC-D1-005
+    - TPC-D1-006
+    - TPC-D3-001
+    - TPC-D4-001
+    - TPC-D5-001
+    modified: []
+    retired: []

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-OUTPUT
+cases:
+- case_id: TPC-D4-001
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-003
+  title: Skill journey remains correct after browser reload
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Skill journey remains correct after browser reload
+  preconditions:
+  - Disposable Nexent deployment, authorized skill and controlled provider are available.
+  - Fresh test tenant has default memory enabled and no embedding model; dismiss its
+    warning without changing settings.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Open test Agent and request a skill-based check.
+    expected: Skill read and result are visible.
+  - order: 2
+    action: Wait for final, reload the workbench, then reopen the saved conversation
+      from its sidebar entry.
+    expected: Final contains the result, not the unexecuted action.
+  expected_results:
+  - Skill check business result is visible after refresh.
+  forbidden_side_effects:
+  - No raw action final.
+  actor: Tenant test user
+  journey:
+  - Open Agent
+  - Submit check
+  - Observe skill execution
+  - Reload saved conversation
+  final_business_result:
+  - Completed skill check with preserved tool result and validated final.
+  failure_evidence:
+  - Sanitized browser trace and failed assertion screenshot.
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - model-provider

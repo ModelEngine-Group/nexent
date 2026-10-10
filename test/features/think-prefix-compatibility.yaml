@@ -1,0 +1,29 @@
+schema_version: '1.0'
+module:
+  id: AGENT-OUTPUT
+  name: Agent output
+features:
+- feature_id: TPC-001
+  name: Thinking prefix compatibility
+  status: active
+  description: Reasoning markup does not block valid actions or authorize raw final
+    answers.
+  business_rules:
+  - rule_id: TPC-RULE-001
+    description: Valid actions tolerate incomplete, repeated and nested thinking prefixes
+      and narration; only the Python body executes.
+  - rule_id: TPC-RULE-002
+    description: Failed protocol-marked output cannot become a raw final at exhaustion;
+      valid explicit completion retains its envelope boundary.
+  - rule_id: TPC-RULE-003
+    description: Tool effects occur once and committed stream/history reflects actions
+      followed by explicit completion.
+  required_test_stages:
+  - D1
+  - D3
+  - D4
+  - D5
+  source:
+    requirement_ids:
+    - TPC-001
+    spec_path: nexent-doc/docs/Developing/codeagent-explicit-termination/changes/codeagent-think-prefix-compatibility/proposal.md

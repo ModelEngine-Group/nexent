@@ -1,0 +1,217 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-OUTPUT
+cases:
+- case_id: TPC-D1-001
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  title: Compatible thinking prefixes yield the exact executable action
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Compatible thinking prefixes yield the exact executable action
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Classify plain, paired-plus-narration, orphan, unclosed, repeated and
+      nested thinking prefixes before complete code and run actions.
+    expected: Every result is an executable action with the exact Python body.
+  expected_results:
+  - All compatible prefixes accepted.
+  forbidden_side_effects:
+  - Prefix text is never executed.
+  unit_boundary: classify_model_output
+  inputs:
+  - prefix matrix
+  - code/run envelopes
+  assertions:
+  - Exact executable body and legacy flag.
+- case_id: TPC-D1-002
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  - TPC-RULE-003
+  title: Skill reads execute rather than finalize at first and third generations
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Skill reads execute rather than finalize at first and third generations
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run complete skill read under every compatible prefix with prior error
+      counters zero and two.
+    expected: One read executes; its result is an observation; no final answer is
+      returned.
+  expected_results:
+  - Exactly one tool effect per action.
+  - Model attempt commits.
+  forbidden_side_effects:
+  - No raw final answer.
+  - No extra model request.
+  unit_boundary: CoreAgent._step_stream and Python executor boundary
+  inputs:
+  - prefix matrix
+  - prior errors zero/two
+  assertions:
+  - Skill call count one.
+  - ActionOutput.is_final_answer false.
+  - Accepted attempt commits without rollback.
+- case_id: TPC-D1-003
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  - TPC-RULE-002
+  title: Malformed actions retain structural rejection
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Malformed actions retain structural rejection
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Classify invalid Python, empty/unclosed action, inter-block text, trailing
+      text, unknown tags and truncated output.
+    expected: Protocol error occurs; no executor is called.
+  expected_results:
+  - Invalid action bodies and boundaries remain rejected.
+  forbidden_side_effects:
+  - No execution of invalid code.
+  unit_boundary: classify_model_output
+  inputs:
+  - invalid action/control matrix
+  - length finish reason
+  assertions:
+  - Expected stable protocol-error reason.
+- case_id: TPC-D1-004
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-002
+  title: Thinking-only and invalid marked output never use exhausted raw final
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Thinking-only and invalid marked output never use exhausted raw final
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run thinking-only and malformed action or final outputs with two prior
+      protocol errors.
+    expected: The attempt rolls back and no raw final is accepted.
+  - order: 2
+    action: Run eligible complete plain text at exhaustion.
+    expected: Existing raw candidate remains accepted.
+  expected_results:
+  - Marked failures cannot finalize.
+  - Eligible plain text keeps existing fallback.
+  forbidden_side_effects:
+  - No invalid action final.
+  - No reasoning final.
+  unit_boundary: CoreAgent._accept_exhausted_raw_output and _step_stream
+  inputs:
+  - marked output
+  - plain text
+  - error count two
+  assertions:
+  - Failed attempt rollback.
+  - No executor call on invalid output.
+  - Plain raw fallback preserved.
+- case_id: TPC-D1-005
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  - TPC-RULE-002
+  title: Ordinary explicit finals tolerate thinking prefix and keep boundaries
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Ordinary explicit finals tolerate thinking prefix and keep boundaries
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Classify compatible prefix before valid ordinary final envelope.
+    expected: Only the payload is ExplicitFinalAnswer.
+  - order: 2
+    action: Classify duplicates, incomplete envelopes, suffix text and specialized
+      prefixed envelopes.
+    expected: Protocol errors remain.
+  expected_results:
+  - Ordinary terminal prefix accepted.
+  - Specialized exact-envelope behavior retained.
+  forbidden_side_effects:
+  - No prefix in terminal payload.
+  - No malformed final accepted.
+  unit_boundary: classify_model_output terminal branch
+  inputs:
+  - prefix matrix
+  - final envelope matrix
+  - final_envelope protocol
+  assertions:
+  - Exact final payload.
+  - Malformed and specialized prefixed forms reject.
+- case_id: TPC-D1-006
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  title: Python data containing protocol-like tags is preserved
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Python data containing protocol-like tags is preserved
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Classify actions whose strings/comments contain think and code markers.
+    expected: Python data remains unchanged and executable.
+  expected_results:
+  - Only outer reasoning prefix is normalized.
+  forbidden_side_effects:
+  - No global tag replacement in action or final data.
+  unit_boundary: classify_model_output Python data boundaries
+  inputs:
+  - Python literal/comment protocol-like text
+  assertions:
+  - Exact code body retained.
