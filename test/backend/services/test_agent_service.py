@@ -12541,6 +12541,60 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
     assert enabled_call.kwargs["version_no"] == 4
 
 
+@pytest.mark.asyncio
+@patch("management.services.agent.service.skill_db.get_valid_skill_ids")
+@patch("management.services.agent.service.skill_db.query_skill_instances_by_agent_id")
+@patch("management.services.agent.service.get_current_user_info")
+async def test_update_agent_info_impl_rejects_unavailable_skill_id(
+    mock_get_user,
+    mock_query_skills,
+    mock_get_valid_skill_ids,
+):
+    """Updating with a skill id that does not exist must raise a domain error, not 500."""
+    from backend.consts.model import AgentInfoRequest, AgentSkillInstanceRequest
+    from consts.exceptions import AppException
+    from management.services.agent.service import update_agent_info_impl
+
+    mock_get_user.return_value = ("user_1", "tenant_1", "en")
+    mock_get_valid_skill_ids.return_value = set()
+    mock_query_skills.return_value = []
+
+    request = MagicMock(spec=AgentInfoRequest)
+    request.agent_id = 1
+    request.name = "Test"
+    request.display_name = "Test Display"
+    request.description = "Desc"
+    request.business_description = "Biz Desc"
+    request.author = "Author"
+    request.model_id = None
+    request.model_name = None
+    request.business_logic_model_id = None
+    request.business_logic_model_name = None
+    request.max_steps = 5
+    request.provide_run_summary = True
+    request.duty_prompt = "Duty"
+    request.constraint_prompt = "Constraint"
+    request.few_shots_prompt = "Few shots"
+    request.enabled = True
+    request.enabled_tool_ids = None
+    request.enabled_skill_ids = [9999]
+    request.skill_instances = [
+        AgentSkillInstanceRequest(skill_id=9999, enabled=True)
+    ]
+    request.related_agent_ids = None
+    request.related_external_agent_ids = None
+    request.group_ids = None
+    request.ingroup_permission = None
+    request.prompt_template_id = None
+    request.prompt_template_name = None
+    request.example_questions = None
+    request.greeting_message = None
+    request.version_no = 1
+
+    with pytest.raises(AppException):
+        await update_agent_info_impl(request, authorization="Bearer token")
+
+
 # Test for generate_stream unexpected exception (lines 1889-1896)
 @pytest.mark.asyncio
 async def test_generate_stream_unexpected_exception():

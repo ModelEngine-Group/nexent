@@ -530,6 +530,8 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
             content=tenant_resource_limit_error_payload(exc),
         )
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(
