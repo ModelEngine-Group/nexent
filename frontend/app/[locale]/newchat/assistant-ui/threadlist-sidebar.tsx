@@ -72,9 +72,9 @@ export function ThreadListSidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [conversationSearch, setConversationSearch] = useState("");
   const [legacySearchQuery, setLegacySearchQuery] = useState("");
-  // Unified sidebar frame across workbench and new-chat pages so the left
-  // panel aligns when switching between them.
-  const sidebarBackground = "#F5F5F5";
+  // Sidebar frame follows the new-chat page; the workbench mirrors it so the
+  // left panel stays aligned when switching pages.
+  const sidebarBackground = "#f0f0f0";
 
   if (isCollapsed) {
     return (
@@ -120,7 +120,7 @@ export function ThreadListSidebar({
   return (
     <ThreadListPrimitive.Root asChild>
       <div
-        className={cn("h-full w-[296px] min-w-[296px] max-w-[296px]")}
+        className={cn("h-full w-[360px] min-w-[360px] max-w-[360px] p-2")}
         style={{ backgroundColor: sidebarBackground }}
       >
         <PinnedThreadsProvider>
@@ -133,7 +133,7 @@ export function ThreadListSidebar({
               style={{ backgroundColor: sidebarBackground, ...props.style }}
             >
               <SidebarHeader>
-                <div className="flex flex-col gap-6 px-4">
+                <div className="flex flex-col gap-2 px-1">
                   {newChatDesign ? (
                     <div className="flex items-center gap-1">
                       {onAgentSelected && (

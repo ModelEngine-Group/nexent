@@ -307,7 +307,7 @@ export const ThreadList: FC<ThreadListProps> = ({
   const hasMore = useAuiState((s) => s.threads.hasMore);
 
   return (
-    <div className="flex flex-col px-4 py-2">
+    <div className="flex flex-col p-2">
       <AuiIf condition={(s) => s.threads.isLoading}>
         <ThreadListSkeleton />
       </AuiIf>
