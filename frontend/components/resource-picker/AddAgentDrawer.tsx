@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Bot } from "lucide-react";
+import { Bot, Clock } from "lucide-react";
 import { Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 
@@ -39,7 +39,7 @@ function toLocalCard(agent: Agent): AgentCardItem {
     name: agent.display_name || agent.name,
     description: agent.description ?? "",
     iconBg: iconColorFor(String(agent.id)),
-    publishedAt: formatDate(agent.create_time ?? agent.update_time),
+    updatedAt: formatDate(agent.update_time ?? agent.create_time),
     online: agent.is_available !== false,
     tags: agent.tags ?? [],
   };
@@ -51,7 +51,7 @@ function toExternalCard(agent: A2AExternalAgent): AgentCardItem {
     name: agent.name,
     description: agent.description ?? "",
     iconBg: iconColorFor(String(agent.id)),
-    publishedAt: formatDate(agent.create_time),
+    updatedAt: formatDate(agent.create_time),
     online: agent.is_available !== false,
     tags: [],
   };
@@ -90,9 +90,22 @@ function AgentCard({
       <p className="line-clamp-2 text-[14px] leading-[20px] text-[#737373]">
         {item.description}
       </p>
-      <div className="mt-auto flex gap-3.5 text-[12px] leading-[18px] text-[#999]">
-        {item.publishedAt && <span>🕑 发布于 {item.publishedAt}</span>}
-        <span>⊙ {item.online ? "已上线" : "未上线"}</span>
+      <div className="mt-auto flex items-center gap-3.5 text-[12px] leading-[18px] text-[#999]">
+        {item.updatedAt && (
+          <span className="flex items-center gap-1">
+            <Clock size={14} />
+            更新于 {item.updatedAt}
+          </span>
+        )}
+        <span className="flex items-center gap-1">
+          <span
+            className={cn(
+              "size-1.5 rounded-full",
+              item.online ? "bg-[#52C41A]" : "bg-[#D9D9D9]"
+            )}
+          />
+          {item.online ? "已上线" : "未上线"}
+        </span>
       </div>
     </div>
   );
@@ -106,10 +119,16 @@ export interface AddAgentDrawerProps {
 
 export function AddAgentDrawer({ open, onClose, onConfirm }: AddAgentDrawerProps) {
   const { t } = useTranslation("common");
-  const { availableAgents: localAgents, isLoading: isLocalLoading } =
-    usePublishedAgentList();
-  const { availableAgents: externalAgents, isLoading: isExternalLoading } =
-    useExternalAgents();
+  const {
+    availableAgents: localAgents,
+    isLoading: isLocalLoading,
+    refetch: refetchLocal,
+  } = usePublishedAgentList();
+  const {
+    availableAgents: externalAgents,
+    isLoading: isExternalLoading,
+    refetch: refetchExternal,
+  } = useExternalAgents();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [tab, setTab] = useState("local");
@@ -180,6 +199,11 @@ export function AddAgentDrawer({ open, onClose, onConfirm }: AddAgentDrawerProps
     });
   };
 
+  const handleRefresh = () => {
+    void refetchLocal();
+    void refetchExternal();
+  };
+
   return (
     <AddResourceDrawer
       open={open}
@@ -207,6 +231,7 @@ export function AddAgentDrawer({ open, onClose, onConfirm }: AddAgentDrawerProps
         setSelectedIds(new Set(checked ? filteredAgents.map((a) => a.id) : []))
       }
       allSelected={allSelected}
+      onRefresh={handleRefresh}
     >
       {isLoading ? (
         <div className="flex justify-center py-12">

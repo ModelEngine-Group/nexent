@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "@/types/modelConfig";
-import { AddResourceDrawer } from "./AddResourceDrawer";
+import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
 import type { ModelGroup, ModelItem, SelectedItem } from "./types";
 
 const PAGE_SIZE = 10;
@@ -50,7 +50,7 @@ export interface AddModelDrawerProps {
 
 export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps) {
   const { t } = useTranslation("common");
-  const { llmModels, isLoading } = useModelList({ enabled: open });
+  const { llmModels, isLoading, refetch } = useModelList({ enabled: open });
 
   const [activeGroup, setActiveGroup] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -138,6 +138,7 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
       onConfirm={() => onConfirm?.([])}
       onRemoveSelected={(id) => toggleModel(id)}
       onSearch={setKeyword}
+      onRefresh={() => { void refetch(); }}
     >
       {isLoading ? (
         <div className="flex justify-center py-12">
@@ -178,9 +179,8 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
                 return (
                   <div
                     key={item.id}
-                    onClick={() => toggleModel(item.id)}
                     className={cn(
-                      "flex h-[59px] shrink-0 cursor-pointer items-center justify-between rounded-[2px] py-[9px] pl-5 pr-7",
+                      "flex h-[59px] shrink-0 items-center justify-between rounded-[2px] py-[9px] pl-5 pr-7",
                       isSelected ? "bg-[#E6F2FD]" : "bg-white"
                     )}
                   >
@@ -214,6 +214,10 @@ export function AddModelDrawer({ open, onClose, onConfirm }: AddModelDrawerProps
                         </div>
                       </div>
                     </div>
+                    <CheckMark
+                      checked={isSelected}
+                      onToggle={() => toggleModel(item.id)}
+                    />
                   </div>
                 );
               })

@@ -34,8 +34,8 @@ function iconColorFor(seed: string): string {
 
 function toKnowledgeItem(kb: KnowledgeBase): KnowledgeItem {
   const meta: string[] = [];
-  const updated = formatDate(kb.updatedAt);
-  if (updated) meta.push(`${updated} 更新`);
+  const usedAt = formatDate(kb.updatedAt);
+  if (usedAt) meta.push(`${usedAt} 使用过`);
   meta.push(`${kb.documentCount}文档`);
   meta.push(`${kb.chunkCount}块`);
   return {

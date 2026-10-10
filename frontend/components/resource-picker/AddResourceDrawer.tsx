@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import { Drawer, Input, Select } from "antd";
 import { Check, ChevronDown, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -231,19 +231,21 @@ export function ResourceTabs({
   onChange?: (key: string) => void;
 }) {
   return (
-    <div className="flex shrink-0 gap-6">
-      {tabs.map((tab) => (
-        <button
-          key={tab.key}
-          type="button"
-          onClick={() => onChange?.(tab.key)}
-          className={cn(
-            "cursor-pointer border-0 bg-transparent p-0 text-[14px] leading-[20px]",
-            activeKey === tab.key ? "text-[#2D5BB3]" : "text-[#737373]"
-          )}
-        >
-          {tab.label}
-        </button>
+    <div className="flex shrink-0 items-center gap-3">
+      {tabs.map((tab, index) => (
+        <Fragment key={tab.key}>
+          {index > 0 && <span className="h-[14px] w-px bg-[#D9D9D9]" />}
+          <button
+            type="button"
+            onClick={() => onChange?.(tab.key)}
+            className={cn(
+              "cursor-pointer border-0 bg-transparent p-0 text-[14px] leading-[20px]",
+              activeKey === tab.key ? "text-[#2D5BB3]" : "text-[#737373]"
+            )}
+          >
+            {tab.label}
+          </button>
+        </Fragment>
       ))}
     </div>
   );
@@ -337,7 +339,7 @@ export function ResourcePagination({
           ›
         </button>
       </div>
-      <div className="flex h-8 w-[89px] items-center rounded-[2px] border border-[#D9D9D9] px-2.5">
+      <div className="flex h-8 w-[96px] items-center rounded-[4px] border border-[#D9D9D9] bg-white px-2.5">
         <input
           key={safeCurrent}
           type="text"

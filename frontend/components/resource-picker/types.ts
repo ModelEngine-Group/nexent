@@ -21,7 +21,7 @@ export interface AgentCardItem {
   name: string;
   description: string;
   iconBg: string;
-  publishedAt?: string;
+  updatedAt?: string;
   online?: boolean;
   tags?: string[];
 }

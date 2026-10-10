@@ -36,9 +36,14 @@ export function AddSkillDrawer({ open, onClose, onConfirm }: AddSkillDrawerProps
   const [page, setPage] = useState(1);
   const [tagFilter, setTagFilter] = useState("");
 
+  // Always render both official and custom tabs to match the design, even when
+  // the current tenant has no skills in one of the groups yet.
   const tabs = useMemo(
-    () => groupedSkills.map((group) => ({ key: group.key, label: group.label })),
-    [groupedSkills]
+    () => [
+      { key: "official", label: t("resourcePicker.tab.official", "官方") },
+      { key: "custom", label: t("resourcePicker.tab.custom", "自定义") },
+    ],
+    [t]
   );
 
   // Fall back to the first available group when the current tab no longer exists.
