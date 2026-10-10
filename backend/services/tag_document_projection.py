@@ -15,6 +15,7 @@ from services.tag_resource_adapters import (
     _encode_document_resource_id,
 )
 
+
 logger = logging.getLogger(__name__)
 
 PROJECTION_PROVIDERS = (LOCAL_DOCUMENT_PROVIDER, AIDP_DOCUMENT_PROVIDER)
@@ -268,7 +269,8 @@ def project_document_assignments(
         )
         return _status_dict(state)
     except Exception as error:  # noqa: BLE001 - provider boundary; preserve canonical assignments
-        retry_count = (current.get("retry_count") or 0) + 1
+        # First-ever projection attempt has no ledger row yet, so `current` is None.
+        retry_count = ((current or {}).get("retry_count") or 0) + 1
         state = document_tag_projection_db.upsert_projection_state(
             tenant_id=tenant_id,
             provider=normalized,
