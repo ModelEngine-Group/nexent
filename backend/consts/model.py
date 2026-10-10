@@ -1195,6 +1195,13 @@ class GeneratePromptRequest(BaseModel):
     has_selected_resources: bool = Field(
         True, description="Whether tools or sub-agents are selected; when False, skips generating constraint and few_shots sections")
 
+    @field_validator("task_description")
+    @classmethod
+    def validate_task_description(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("task_description must not be blank")
+        return value
+
 
 class PromptTemplateContentRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
