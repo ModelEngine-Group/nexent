@@ -9,6 +9,9 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import dynamic from "next/dynamic";
+import { useParams, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { SelectedResourceChips } from "@/features/workbench/components/SelectedResourceChips";
 import { CreationExamples } from "@/features/workbench/components/CreationExamples";
 import {
@@ -95,6 +98,11 @@ import {
 import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
+
+const SkillBuildModal = dynamic(
+  () => import("../../agents/components/capability/SkillBuildModal"),
+  { ssr: false }
+);
 
 const SkillStackIcon: FC<{ className?: string }> = ({ className }) => (
   <svg
@@ -407,6 +415,10 @@ export const Composer: FC<ComposerProps> = ({
     });
   };
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+  const [localSkillModalOpen, setLocalSkillModalOpen] = useState(false);
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const queryClient = useQueryClient();
   const { data: knowledgeBases = [], isLoading: kbLoading } =
     useComposerKnowledgeBases(newChatDesign);
   const { data: skills = [], isLoading: skillsLoading } =
@@ -912,7 +924,10 @@ export const Composer: FC<ComposerProps> = ({
                           <button
                             type="button"
                             className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                            onClick={() => setActionPanel("plus")}
+                            onClick={() => {
+                              setActionPanel(null);
+                              setLocalSkillModalOpen(true);
+                            }}
                           >
                             <Link2 className="size-4" aria-hidden />
                             <span>{t("chat.composer.addLocalSkill")}</span>
@@ -922,7 +937,9 @@ export const Composer: FC<ComposerProps> = ({
                             className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
                             onClick={() => {
                               setActionPanel(null);
-                              onOpenWorkbenchSkillPicker?.();
+                              router.push(
+                                `/${params.locale || "en"}/skill-space?tab=mine`
+                              );
                             }}
                           >
                             <Settings className="size-4" aria-hidden />
@@ -1035,7 +1052,7 @@ export const Composer: FC<ComposerProps> = ({
                             className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
                             onClick={() => {
                               setActionPanel(null);
-                              setKnowledgeModalOpen(true);
+                              router.push(`/${params.locale || "en"}/knowledges`);
                             }}
                           >
                             <Settings className="size-4" aria-hidden />
@@ -1165,7 +1182,7 @@ export const Composer: FC<ComposerProps> = ({
                       className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
                       onClick={() => {
                         setActionPanel(null);
-                        setKnowledgeModalOpen(true);
+                        router.push(`/${params.locale || "en"}/knowledges`);
                       }}
                     >
                       <Settings className="size-4" aria-hidden />
@@ -1573,6 +1590,17 @@ export const Composer: FC<ComposerProps> = ({
           )}
         </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       </fieldset>
+      {newChatDesign && localSkillModalOpen && (
+        <SkillBuildModal
+          isOpen={localSkillModalOpen}
+          initialTab="upload"
+          onCancel={() => setLocalSkillModalOpen(false)}
+          onSuccess={async () => {
+            setLocalSkillModalOpen(false);
+            await queryClient.invalidateQueries({ queryKey: ["composerSkills"] });
+          }}
+        />
+      )}
       {creationMode && !compact && workbenchPresentation && (
         <div className="absolute inset-x-0 top-full z-10">
           <CreationExamples

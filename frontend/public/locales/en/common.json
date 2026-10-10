@@ -2134,7 +2134,7 @@
   "space.detail.usage": "MCP Server",
   "space.detail.parameters": "Parameters",
   "sidebar.homePage": "Home Page",
-  "sidebar.startChat": "Start Chat",
+  "sidebar.startChat": "Agent Chat",
   "sidebar.agentWorkbench": "Agent Workbench",
   "sidebar.agentTasks": "Automation Tasks",
   "sidebar.openNewChat": "Open the new chat page",
