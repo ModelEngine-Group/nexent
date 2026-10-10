@@ -30,7 +30,7 @@ class OrdinaryExecutor:
     """Controlled ordinary executor with a real interpreter for safe test code."""
 
     def __init__(self, *, group=None, execute=True):
-        self.interpreter = LocalPythonExecutor([])
+        self.interpreter = LocalPythonExecutor(["json"])
         self._nexent_backend = "docker"
         self._nexent_session_container_group = group
         self.container = None

@@ -16,10 +16,12 @@ features:
     description: Only the exact approved official implementations and restricted syntax
       qualify; mixed steps execute once through the original executor. The default
       registry includes KnowledgeBaseSearchTool, ReadSkillMdTool, ReadSkillConfigTool
-      and AidpSearchTool.
+      and AidpSearchTool. JSON imports and the exact loads/dumps functions over admitted
+      data are allowed; arbitrary members, file operations and forged bindings are not.
   - rule_id: TFP-RULE-003
     description: The first ordinary step initializes the original executor once and
-      receives prior user variables; later steps use that executor.
+      receives prior user variables and recreates actual admitted JSON imports without
+      serializing module/function objects; later steps use that executor.
   - rule_id: TFP-RULE-004
     description: Cancellation and idempotent cleanup never initialize unused resources
       and reclaim initialized resources.

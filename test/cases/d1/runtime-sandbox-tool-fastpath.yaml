@@ -30,8 +30,13 @@ cases:
       request.
     expected: The existing AIDP authorization and complete-step routing contract is
       preserved.
+  - order: 3
+    action: Import json or loads/dumps using direct and aliased forms, parse an official
+      tool result, serialize it with nested JSON calls and reuse aliases in later steps.
+    expected: Values and logs match the real local interpreter with no ordinary executor.
   expected_results: &id001
   - Factory acquisition and warm-up counts are zero.
+  - JSON loads/dumps and their import aliases work across steps without Docker.
   - The wrapped tool is called once and final_answer returns the saved result.
   - Official aidp_search uses its existing allowed KDS scope and emits real tool events
     without Docker, including an empty permission scope with no provider request.
@@ -60,7 +65,7 @@ cases:
     profile: mock
   steps:
   - order: 1
-    action: Submit a tool call followed by an import, an unapproved call or a bare
+    action: Submit a tool call followed by an unapproved import, an unapproved call or a bare
       data expression outside assignment and call arguments.
     expected: The whole step is delegated before any local call.
   - order: 2
@@ -68,8 +73,13 @@ cases:
       before whole-step delegation.
     expected: The existing AIDP authorization and complete-step routing contract is
       preserved.
+  - order: 3
+    action: Submit JSON imports and tool calls mixed with file-oriented JSON operations,
+      unapproved members, wildcard/relative/dynamic imports or ordinary Python syntax.
+    expected: Delegate the entire source before executing any local import or tool.
   expected_results: &id002
   - Mixed code is passed once to the original executor.
+  - Admitted JSON statements do not cause partial execution of rejected mixed steps.
   - No approved tool is called by the fast path before delegation.
   - An aidp_search step followed by ordinary code makes no provider request before
     whole-step delegation.
@@ -104,9 +114,15 @@ cases:
   - order: 2
     action: Submit another approved step.
     expected: The initialized executor is reused.
+  - order: 3
+    action: Import json/loads/dumps with aliases, save parsed data and then activate
+      ordinary code that uses those aliases. Include prior data names replaced by imports.
+    expected: Recreate the actual imports once before ordinary code; migrate only user
+      data and preserve references without replaying prior tools.
   expected_results: &id003
   - Values and shared container references survive migration.
   - Internal interpreter state and tool objects are not migrated.
+  - JSON module/function objects are excluded; actual imported aliases are recreated.
   - The factory is called once.
   forbidden_side_effects:
   - No repeated prior tool invocation.
@@ -181,8 +197,15 @@ cases:
       Docker.
     expected: The existing AIDP authorization and complete-step routing contract is
       preserved.
+  - order: 3
+    action: Fail JSON parsing between admitted imports, then reuse completed imports
+      or activate ordinary code. Fail or cancel import restoration during activation.
+    expected: Do not replay errors, tools or unfinished imports; preserve actual bindings
+      and release acquired executors exactly once.
   expected_results: &id005
   - Local errors do not trigger remote replay.
+  - JSON errors retain only executed imports and never acquire an executor by themselves.
+  - Failed or cancelled import restoration releases the acquired executor without replay.
   - Cleanup is idempotent.
   - Cancellation before execution prevents tool calls and releases acquired resources.
   - AIDP provider errors propagate without acquiring or replaying through Docker.

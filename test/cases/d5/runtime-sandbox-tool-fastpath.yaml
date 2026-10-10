@@ -20,12 +20,18 @@ cases:
     profile: mock
   steps:
   - order: 1
-    action: Submit attributes, imports, alias calls, unpacking, loops and reserved-variable
+    action: Submit arbitrary attributes/imports, alias calls, unpacking, loops and reserved-variable
       assignments, including initial variables that shadow tool or framework call names.
     expected: All are rejected before execution.
+  - order: 2
+    action: Forge JSON modules/functions through initial variables or change an admitted
+      binding; use JSON file operations, dynamic callbacks, wildcard imports and reserved
+      alias names.
+    expected: Reject the entire step with no local import, callback or tool effects.
   expected_results:
   - Zero local tool calls for all rejected inputs.
   - The full source is delegated unchanged.
+  - Only exact admitted JSON loads/dumps bindings qualify; shadowed bindings never invoke locally.
   forbidden_side_effects:
   - No host file, shell or reflection operation is executed.
   risk_type: SECURITY

@@ -70,3 +70,31 @@ changes:
     modified:
     - TFP-D1-006
     retired: []
+- change_id: TFP-CHANGE-004
+  change_type: requirement
+  requirement_id: TFP-001
+  title: Admit restricted JSON imports and data operations locally
+  description: Support json loads/dumps and import aliases without Docker, preserve
+    their bindings on one-way promotion and reject unapproved or forged operations.
+  affected_features:
+    existing:
+    - TFP-001
+    added: []
+    modified:
+    - TFP-001
+    retired: []
+  affected_cases:
+    existing:
+    - TFP-D1-001
+    - TFP-D1-002
+    - TFP-D1-003
+    - TFP-D1-005
+    - TFP-D5-001
+    added: []
+    modified:
+    - TFP-D1-001
+    - TFP-D1-002
+    - TFP-D1-003
+    - TFP-D1-005
+    - TFP-D5-001
+    retired: []

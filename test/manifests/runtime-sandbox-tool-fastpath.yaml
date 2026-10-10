@@ -3,8 +3,8 @@ cases:
 - case_id: TFP-D1-001
   stage: D1
   status: implemented
-  contract_hash: sha256:f49d99ec8a0bad9223bdd15df090912a0a2c67816b5857d6add0a9fbd42f851c
-  implementation_hash: sha256:01d39055c92bd0c0fe6e4360ed1345a6eae93173d20da7f1fea830c15a61839e
+  contract_hash: sha256:7891191daf2e4c1801ad541da60c43d9185628c1903be8cc4fd92d5ed179b8c0
+  implementation_hash: sha256:440cb5a48b22ca2a72b2000ec4d0af860f20a59b80d96212595e5b6d5bf92837
   implementation:
   - framework: pytest
     file: test/automation/d1/test_tool_fastpath.py
@@ -16,11 +16,21 @@ cases:
     selector: test_tfp_d1_001_aidp
     profiles:
     - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_json.py
+    selector: test_tfp_d1_001_json
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_json.py
+    selector: test_tfp_d1_001_json_tool_results
+    profiles:
+    - mock
 - case_id: TFP-D1-002
   stage: D1
   status: implemented
-  contract_hash: sha256:45bd2b9559253a21e4b96e995b91daa065ff8f9ea28bf3c3908b9756b5791782
-  implementation_hash: sha256:01d39055c92bd0c0fe6e4360ed1345a6eae93173d20da7f1fea830c15a61839e
+  contract_hash: sha256:97f3565d985b576df5e9a23518cb625ca0d4796b4bf0378a8f1773d4f38073e7
+  implementation_hash: sha256:8fdbcb9d596383c8e5a55a84bc25f9f9033ad33cad2d2a91bc362ed09c3f4446
   implementation:
   - framework: pytest
     file: test/automation/d1/test_tool_fastpath.py
@@ -32,22 +42,37 @@ cases:
     selector: test_tfp_d1_002_aidp
     profiles:
     - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_json.py
+    selector: test_tfp_d1_002_json
+    profiles:
+    - mock
 - case_id: TFP-D1-003
   stage: D1
   status: implemented
-  contract_hash: sha256:78c3f112432755e552f23bdb788339f518f550d911228d013071fc2c932db42d
-  implementation_hash: sha256:fba0f34909d32b214bd0a02edc0f4c28eaf34e88e682b3977a2f5a6ea22a64cb
+  contract_hash: sha256:f1bc59890f25b5b66c1816e60700a0c3fd04f3b3c72f42e1538ed10f90eee37c
+  implementation_hash: sha256:0c084ac84eae8f370c9130fd6f12f32c7f66727ea8be97e748d131d09fc6a158
   implementation:
   - framework: pytest
     file: test/automation/d1/test_tool_fastpath.py
     selector: test_tfp_d1_003
     profiles:
     - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_json.py
+    selector: test_tfp_d1_003_json
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_json.py
+    selector: test_tfp_d1_003_json_replaced_binding
+    profiles:
+    - mock
 - case_id: TFP-D1-004
   stage: D1
   status: implemented
   contract_hash: sha256:2c10e437ccb446a0554d12e76188babbe4d97d0bffc4fd19f98498a86a05c17a
-  implementation_hash: sha256:01d39055c92bd0c0fe6e4360ed1345a6eae93173d20da7f1fea830c15a61839e
+  implementation_hash: sha256:d51fb991cae4fea09f646ea0e34dc9914cba84cd3a5834c2494eb30c77e5bc3c
   implementation:
   - framework: pytest
     file: test/automation/d1/test_tool_fastpath.py
@@ -62,8 +87,8 @@ cases:
 - case_id: TFP-D1-005
   stage: D1
   status: implemented
-  contract_hash: sha256:f9b9a844e326fc8cac16cb7fa2c69d2ea2f5604696c678c814dfa2ff0058d915
-  implementation_hash: sha256:e263aa60250b6329f8943aaa6a2f8f0be1b27c3a8dcdfc7364eff56c8ededcaa
+  contract_hash: sha256:e1415a3a6af4da41671b4363b8c4b4eba52a6dd47b4b4296227c3f43d660734d
+  implementation_hash: sha256:9fa401f941bf919e6f8136c5e4ba60fa481f2c824e7b1c2b54b555ff9746b4fd
   implementation:
   - framework: pytest
     file: test/automation/d1/test_tool_fastpath.py
@@ -80,11 +105,26 @@ cases:
     selector: test_tfp_d1_005_aidp
     profiles:
     - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_json.py
+    selector: test_tfp_d1_005_json_error
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_json.py
+    selector: test_tfp_d1_005_json_rebinding_error
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_json.py
+    selector: test_tfp_d1_005_json_restore_failure
+    profiles:
+    - mock
 - case_id: TFP-D1-006
   stage: D1
   status: implemented
   contract_hash: sha256:2bd5d2095842fbb8b4a21db9116ddf8f82a85adfd71351b5084d0d8005a387dc
-  implementation_hash: sha256:071883550d50b75dd6588a75d883d5af51a92b6edadbf1c02b30412179705beb
+  implementation_hash: sha256:56280e4bb05195c39eb91616119beadf4479255a48d8db2a5a23db734b9f2371
   implementation:
   - framework: pytest
     file: test/automation/d1/test_tool_fastpath.py
@@ -131,12 +171,22 @@ cases:
 - case_id: TFP-D5-001
   stage: D5
   status: implemented
-  contract_hash: sha256:cad74b7982db6a898f9267891d908d5e4a026fff456b4e16172e26fa1f499f08
-  implementation_hash: sha256:6af5717e8cd49952880712aeb98f89e5242c74430374ce491d472e1f80f687cc
+  contract_hash: sha256:a95f4672fd09d8d82014f5b21de9850d7cf8d4dd7eb6c5bea2f8062f675ed512
+  implementation_hash: sha256:4fd0bf1be9902c93374ec9c0e5145b2676d332ac3c2b7f8c70c62707af221a07
   implementation:
   - framework: pytest
     file: test/automation/d5/test_tool_fastpath_risks.py
     selector: test_tfp_d5_001
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d5/test_tool_fastpath_json_risks.py
+    selector: test_tfp_d5_001_json_syntax
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d5/test_tool_fastpath_json_risks.py
+    selector: test_tfp_d5_001_json_identity
     profiles:
     - mock
 - case_id: TFP-D5-002
