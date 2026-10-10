@@ -105,6 +105,23 @@ network; do not expose its ports or control endpoints to the public Internet.
 
 ## Register another Mock
 
+### External memory
+
+The registered `memory-provider` stack (aliases `memory` and `mem0`) implements
+the existing Mem0 plugin's HTTP protocol. See
+[memory-provider/README.md](memory-provider/README.md) for machine-local
+credentials, product-container endpoint configuration, scoped fault injection,
+and adapter verification. It uses the same `up/status/logs/stop` mechanism as
+A2A, without modifying A2A or product containers. For example:
+
+```bash
+python3 test-e2e/infra/mock-services/deploy.py up memory --env-file <test-home>/config/memory-mock.env
+```
+
+On Windows use the verified `python` interpreter instead of `python3`.
+
+### Extension registration
+
 Add `<service-directory>/deployment.json` under `test-e2e/infra/mock-services` and supply
 its Compose files. The CLI discovers registrations automatically; no dispatcher
 code changes are needed. All Compose paths are repository-relative.

@@ -1,0 +1,10 @@
+# Attach only the Mock to the already deployed product network.
+version: "3.7"
+services:
+  memory-provider:
+    networks:
+      - product
+networks:
+  product:
+    external: true
+    name: ${NEXENT_PRODUCT_NETWORK:-nexent_network}

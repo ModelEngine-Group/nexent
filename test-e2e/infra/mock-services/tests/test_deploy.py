@@ -20,6 +20,18 @@ class DeploymentTests(unittest.TestCase):
         registry = deploy.registrations()
         self.assertIs(registry["a2a"], registry["a2a-agent"])
 
+    def test_memory_registration_and_scoped_deployment(self):
+        registry = deploy.registrations()
+        self.assertIs(registry["memory"], registry["memory-provider"])
+        self.assertIs(registry["mem0"], registry["memory-provider"])
+        with patch.object(deploy, "run") as run, contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(deploy.main(["up", "memory", "--dry-run"]), 0)
+            run.assert_not_called()
+        command = json.loads(output.getvalue())["command"]
+        self.assertEqual(command[-1], "memory-provider")
+        self.assertTrue(any("compose.memory.product-network.yaml" in item for item in command))
+        self.assertFalse(any("a2a" in item for item in command))
+
     def test_dry_run_does_not_access_docker(self):
         with patch.object(deploy, "run") as run, contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(deploy.main(["up", "A2A", "--dry-run"]), 0)
