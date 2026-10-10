@@ -32,6 +32,7 @@ from consts.exceptions import (
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.model import AgentRequest, ToolParamsRequest
+from consts.streaming import SSE_STREAM_HEADERS
 from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_list, get_conversation_messages
 from database.token_db import get_latest_usage_metadata, log_token_usage
@@ -502,7 +503,8 @@ async def start_streaming_chat(
     # Attach northbound response headers used by streaming clients and proxies.
     response.headers["X-Request-Id"] = ctx.request_id
     response.headers["conversation_id"] = str(conversation_id)
-    response.headers["X-Accel-Buffering"] = "no"
+    for header_name, header_value in SSE_STREAM_HEADERS.items():
+        response.headers[header_name] = header_value
 
     if new_conversation_data is not None and response.status_code < 400:
         original_body_iterator = response.body_iterator
