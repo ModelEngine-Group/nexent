@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import { App, Avatar, Button, Col } from "antd";
 import { ChevronRight, Plus, Search, Trash2, X } from "lucide-react";
 
-import CollaborativeAgentSelectorModal from "./advanced/collaborative-agent-selector-modal";
+import { AddAgentDrawer } from "@/components/resource-picker/AddAgentDrawer";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
@@ -109,76 +109,16 @@ export function CollaborativeAgentActions({
   children,
 }: ResourceSectionProps & { children?: ReactNode } = {}) {
   const { t } = useTranslation("common");
-  const { message: messageApi } = App.useApp();
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const currentAgentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
-  const updateSubAgentIds = useAgentStore((state) => state.updateSubAgentIds);
-  const updateSubAgentRelations = useAgentStore(
-    (state) => state.updateSubAgentRelations
-  );
   const updateExternalSubAgentIds = useAgentStore(
     (state) => state.updateExternalSubAgentIds
   );
   const isReadOnly = useAgentReadOnly();
   const { invalidate: invalidateExternalAgents } = useExternalAgents();
-  const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list)
-    ? editedAgent.sub_agent_id_list
-    : [];
   const externalSubAgentIdList = editedAgent?.external_sub_agent_id_list || [];
-  const handleConfirmSelection = async (
-    internalAgentIds: number[],
-    externalAgentIds: number[],
-    internalAgents: Agent[]
-  ) => {
-    const addedInternalIds = internalAgentIds.filter(
-      (agentId) => !relatedAgentIds.includes(agentId)
-    );
-    const nextRelations = [
-      ...(editedAgent?.sub_agent_relations || []).filter((relation) =>
-        internalAgentIds.includes(relation.agent_id)
-      ),
-      ...addedInternalIds.map((agentId) => {
-        const agent = internalAgents.find(
-          (item: Agent) => Number(item.id) === agentId
-        );
-        return {
-          agent_id: agentId,
-          version_no: agent?.current_version_no ?? null,
-          version_name: agent?.version_name,
-        };
-      }),
-    ];
-
-    updateSubAgentIds(internalAgentIds);
-    updateSubAgentRelations(nextRelations);
-
-    const addedExternalIds = externalAgentIds.filter(
-      (agentId) => !externalSubAgentIdList.includes(agentId)
-    );
-    const removedExternalIds = externalSubAgentIdList.filter(
-      (agentId) => !externalAgentIds.includes(agentId)
-    );
-
-    if (currentAgentId) {
-      const results = await Promise.all([
-        ...addedExternalIds.map((agentId) =>
-          a2aClientService.addRelation(Number(currentAgentId), agentId)
-        ),
-        ...removedExternalIds.map((agentId) =>
-          a2aClientService.removeRelation(Number(currentAgentId), agentId)
-        ),
-      ]);
-      if (results.some((result) => !result.success)) {
-        messageApi.error(t("a2a.service.addRelationFailed"));
-        return;
-      }
-    }
-
-    updateExternalSubAgentIds(externalAgentIds);
-    setSelectorOpen(false);
-  };
 
   const handleAgentDiscovered = (agent: A2AExternalAgent) => {
     const agentId = Number(agent.id);
@@ -254,10 +194,9 @@ export function CollaborativeAgentActions({
         onAgentDiscovered={handleAgentDiscovered}
         localAgentId={currentAgentId ? Number(currentAgentId) : undefined}
       />
-      <CollaborativeAgentSelectorModal
+      <AddAgentDrawer
         open={selectorOpen}
-        onCancel={() => setSelectorOpen(false)}
-        onConfirm={handleConfirmSelection}
+        onClose={() => setSelectorOpen(false)}
       />
     </>
   );

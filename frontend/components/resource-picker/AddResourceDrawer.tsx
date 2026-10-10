@@ -437,7 +437,7 @@ export function AddResourceDrawer({
     <Drawer
       open={open}
       placement="right"
-      width={760}
+      size={760}
       onClose={onClose}
       closable={false}
       mask={{ closable: false }}

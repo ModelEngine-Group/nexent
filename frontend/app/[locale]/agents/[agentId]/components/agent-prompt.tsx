@@ -41,12 +41,12 @@ import Image from "next/image";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { AddModelDrawer } from "@/components/resource-picker/AddModelDrawer";
+import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
 import type { ModelOption } from "@/types/modelConfig";
 import { ResourceAddButton } from "@/components/common/ResourceAddButton";
 import {
-  ModelAdvancedSettings,
   ModelAdvancedSettingsValue,
   advancedSettingsValueFromRecord,
   buildModelOverrideEntry,
@@ -602,6 +602,53 @@ export default function AgentPrompt({
     });
   };
 
+  const handleConfirmOverride = () => {
+    if (!editingOverrideValue || !configuringModel) {
+      setConfiguringModelId(null);
+      return;
+    }
+    const modelDefaults = advancedSettingsValueFromRecord(
+      {
+        temperature: (configuringModel as any).temperature,
+        top_p: (configuringModel as any).topP,
+        extra_params: (configuringModel as any).extraParams,
+        reasoning_capability: (configuringModel as any).reasoningCapability,
+      },
+      inferenceSpecs,
+      (configuringModel as any).type ?? "llm",
+      (configuringModel as any).reasoningCapability
+    );
+    const diffValue: ModelAdvancedSettingsValue = {};
+    for (const [key, val] of Object.entries(editingOverrideValue)) {
+      // Custom params are diffed per-key below (deleting an inherited row
+      // must persist a removal, not drop the key).
+      if (key === "__custom__") continue;
+      // Reasoning is an agent-owned snapshot; do not compare with the model
+      // level setting.
+      if (
+        key === "enable_thinking" ||
+        key === "reasoning_effort" ||
+        key === "reasoning_budget_tokens"
+      ) {
+        diffValue[key] = val;
+        continue;
+      }
+      const modelVal = modelDefaults[key];
+      if (JSON.stringify(modelVal) !== JSON.stringify(val)) {
+        diffValue[key] = val;
+      }
+    }
+    const customDiff = diffCustomParamsForSave(
+      editingOverrideValue.__custom__,
+      (configuringModel as any).extraParams?.__custom__
+    );
+    if (Object.keys(customDiff).length > 0) {
+      diffValue.__custom__ = customDiff;
+    }
+    handleModelParamsOverrideChange(configuringModel.id, diffValue);
+    setConfiguringModelId(null);
+  };
+
   const canManage = canManageModels(user?.role ?? "");
   const isModelSelectionDisabled = isReadOnly || (!canManage && !isSpeedMode);
   const sensors = useSensors(
@@ -1058,55 +1105,9 @@ export default function AgentPrompt({
           />
         ))}
 
-      {/* v2.6.0: per-model parameter override popup */}
-      <Modal
+      {/* Per-model parameter override popup */}
+      <ModelParamsModal
         open={configuringModelId !== null}
-        onCancel={() => setConfiguringModelId(null)}
-        onOk={() => {
-          if (editingOverrideValue && configuringModel) {
-            const modelDefaults = advancedSettingsValueFromRecord(
-              {
-                temperature: (configuringModel as any).temperature,
-                top_p: (configuringModel as any).topP,
-                extra_params: (configuringModel as any).extraParams,
-                reasoning_capability: (configuringModel as any)
-                  .reasoningCapability,
-              },
-              inferenceSpecs,
-              (configuringModel as any).type ?? "llm",
-              (configuringModel as any).reasoningCapability
-            );
-            const diffValue: ModelAdvancedSettingsValue = {};
-            for (const [key, val] of Object.entries(editingOverrideValue)) {
-              // Custom params are diffed per-key below (deleting an
-              // inherited row must persist a removal, not drop the key).
-              if (key === "__custom__") continue;
-              // Reasoning is an agent-owned snapshot under Scheme B. It must
-              // not be compared with the current model-level setting.
-              if (
-                key === "enable_thinking" ||
-                key === "reasoning_effort" ||
-                key === "reasoning_budget_tokens"
-              ) {
-                diffValue[key] = val;
-                continue;
-              }
-              const modelVal = modelDefaults[key];
-              if (JSON.stringify(modelVal) !== JSON.stringify(val)) {
-                diffValue[key] = val;
-              }
-            }
-            const customDiff = diffCustomParamsForSave(
-              editingOverrideValue.__custom__,
-              (configuringModel as any).extraParams?.__custom__
-            );
-            if (Object.keys(customDiff).length > 0) {
-              diffValue.__custom__ = customDiff;
-            }
-            handleModelParamsOverrideChange(configuringModel.id, diffValue);
-          }
-          setConfiguringModelId(null);
-        }}
         title={
           configuringModel
             ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}`
@@ -1114,64 +1115,26 @@ export default function AgentPrompt({
                 defaultValue: "模型参数覆盖",
               })
         }
-        okText={t("common.confirm", { defaultValue: "确定" })}
-        cancelText={t("common.cancel", { defaultValue: "取消" })}
-        okButtonProps={{ disabled: isModelSelectionDisabled }}
-        width={600}
-        centered
-        destroyOnHidden={false}
-        styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
-      >
-        {configuringModel && (
-          <div className="space-y-3">
-            <Select
-              className="mb-2 w-full"
-              value={configuringModelId}
-              options={modelOptions}
-              onChange={(v: number) => setConfiguringModelId(v)}
-              disabled={isModelSelectionDisabled}
-            />
-            <ModelAdvancedSettings
-              modelType={(configuringModel as any).type ?? "llm"}
-              specs={Object.fromEntries(
-                Object.entries(inferenceSpecs).map(([type, specs]) => [
-                  type,
-                  (specs as any[]).filter((s) => s.key !== "tokenizer_family"),
-                ])
-              )}
-              value={
-                editingOverrideValue ??
-                advancedSettingsValueFromRecord(
-                  {},
-                  inferenceSpecs,
-                  (configuringModel as any).type ?? "llm",
-                  (configuringModel as any).reasoningCapability
-                )
-              }
-              onChange={(next) => setEditingOverrideValue(next)}
-              mode="override"
-              disabled={isModelSelectionDisabled}
-              reasoningCapability={
-                (configuringModel as any).reasoningCapability
-              }
-              // Show the model-level defaults as placeholders so "empty =
-              // inherit" is visible (the override form starts blank).
-              inheritedDefaults={{
-                display_name:
-                  configuringModel.displayName ?? configuringModel.name,
-                context_window_tokens: (configuringModel as any)
-                  .contextWindowTokens,
-                max_input_tokens: (configuringModel as any).maxInputTokens,
-                max_output_tokens: (configuringModel as any).maxOutputTokens,
-                default_output_reserve_tokens: (configuringModel as any)
-                  .defaultOutputReserveTokens,
-                temperature: (configuringModel as any).temperature,
-                top_p: (configuringModel as any).topP,
-              }}
-            />
-          </div>
-        )}
-      </Modal>
+        onClose={() => setConfiguringModelId(null)}
+        onConfirm={handleConfirmOverride}
+        modelOptions={modelOptions}
+        selectedModelId={configuringModelId}
+        onSelectModel={(id) => setConfiguringModelId(id)}
+        value={editingOverrideValue ?? {}}
+        onChange={(next) => setEditingOverrideValue(next)}
+        modelType={(configuringModel as any)?.type ?? "llm"}
+        reasoningCapability={(configuringModel as any)?.reasoningCapability}
+        inheritedDefaults={{
+          context_window_tokens: (configuringModel as any)?.contextWindowTokens,
+          max_input_tokens: (configuringModel as any)?.maxInputTokens,
+          max_output_tokens: (configuringModel as any)?.maxOutputTokens,
+          default_output_reserve_tokens: (configuringModel as any)
+            ?.defaultOutputReserveTokens,
+          temperature: (configuringModel as any)?.temperature,
+          top_p: (configuringModel as any)?.topP,
+        }}
+        disabled={isModelSelectionDisabled}
+      />
     </div>
   );
 }

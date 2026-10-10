@@ -27,9 +27,9 @@ import ToolManagement from "./capability/ToolManagement";
 import SkillBuildModal from "../../components/capability/SkillBuildModal";
 import SelectedSkillManagement from "./capability/SelectedSkillManagement";
 import McpConfigModal from "./capability/McpConfigModal";
-import SelectToolsDialog from "./capability/tool/SelectToolsDialog";
+import { AddToolDrawer } from "@/components/resource-picker/AddToolDrawer";
 import LabelManagementModal from "./capability/tool/LabelManagementModal";
-import SelectSkillsDialog from "./capability/skill/SelectSkillsDialog";
+import { AddSkillDrawer } from "@/components/resource-picker/AddSkillDrawer";
 import SkillTagManagementModal from "./capability/skill/SkillTagManagementModal";
 
 export function AgentToolCapability({
@@ -212,7 +212,7 @@ export function AgentToolCapability({
         onBeforeMcpDelete={prepareAgentForMcpDeletion}
         onMcpDeleted={refreshAgentAfterMcpDeletion}
       />
-      <SelectToolsDialog
+      <AddToolDrawer
         open={isToolSelectOpen}
         onClose={() => setIsToolSelectOpen(false)}
         onOpenManageLabels={() => setLabelModalOpen(true)}
@@ -403,7 +403,7 @@ export function AgentSkillCapability({
           />
         </>
       )}
-      <SelectSkillsDialog
+      <AddSkillDrawer
         open={isSkillSelectOpen}
         onClose={() => setIsSkillSelectOpen(false)}
         onOpenManageTags={() => setTagModalOpen(true)}

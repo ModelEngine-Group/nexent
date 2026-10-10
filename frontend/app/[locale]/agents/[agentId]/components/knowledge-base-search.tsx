@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Tag, Tooltip } from "antd";
 import { Database, ChevronRight, Settings, Trash2, Plus } from "lucide-react";
 
-import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
+import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -339,23 +339,21 @@ export function KnowledgeBaseConfigActions() {
         {t("agent.knowledge.button.select")}
       </Button>
 
-      <KnowledgeBaseSelectorModal
-        presentation="drawer"
-        isOpen={selectorOpen}
+      <AddKnowledgeDrawer
+        open={selectorOpen}
         onClose={() => setSelectorOpen(false)}
         onConfirm={(knowledgeBaseList) => {
           state.onKnowledgeBaseConfirm(knowledgeBaseList);
           setSelectorOpen(false);
         }}
         selectedIds={state.selectedIds}
-        toolType={state.profile.selectorType}
         maxSelect={state.profile.maxSelect}
+        isAidpSearch={state.profile.selectorType === "aidp_search"}
         knowledgeBases={state.knowledgeBases}
         isLoading={state.isLoading}
-        showCheckbox
         title={t("agent.knowledge.selectModal.title")}
-        onSync={async () => {
-          await state.refetch();
+        onRefresh={() => {
+          void state.refetch();
         }}
       />
       <Modal
@@ -553,23 +551,21 @@ export default function KnowledgeBaseConfig({
         )}
         {state ? (
           <>
-            <KnowledgeBaseSelectorModal
-              presentation="drawer"
-              isOpen={selectorOpen}
+            <AddKnowledgeDrawer
+              open={selectorOpen}
               onClose={() => setSelectorOpen(false)}
               onConfirm={(knowledgeBaseList) => {
                 state.onKnowledgeBaseConfirm(knowledgeBaseList);
                 setSelectorOpen(false);
               }}
               selectedIds={state.selectedIds}
-              toolType={state.profile.selectorType}
               maxSelect={state.profile.maxSelect}
+              isAidpSearch={state.profile.selectorType === "aidp_search"}
               knowledgeBases={state.knowledgeBases}
               isLoading={state.isLoading}
-              showCheckbox
               title={t("agent.knowledge.selectModal.title")}
-              onSync={async () => {
-                await state.refetch();
+              onRefresh={() => {
+                void state.refetch();
               }}
             />
             <Modal

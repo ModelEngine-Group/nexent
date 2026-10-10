@@ -1,20 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Bot, Clock } from "lucide-react";
-import { Empty, Spin } from "antd";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { App, Empty, Spin } from "antd";
+import { Bot, Clock, Globe } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
+import { useAgentStore } from "@/stores/agentStore";
 import { formatDate } from "@/lib/date";
 import type { Agent } from "@/types/agentConfig";
-import type { A2AExternalAgent } from "@/services/a2aService";
+import { a2aClientService, type A2AExternalAgent } from "@/services/a2aService";
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
 import type { AgentCardItem, SelectedItem } from "./types";
 
 const PAGE_SIZE = 10;
+
+// Stable fallback so the zustand selectors return a referentially-stable value
+// when `editedAgent` is undefined (avoids a getSnapshot infinite loop).
+const EMPTY_IDS: number[] = [];
 
 const ICON_BG_PALETTE = [
   "#8B7BF6",
@@ -34,12 +39,16 @@ function iconColorFor(seed: string): string {
 }
 
 function toLocalCard(agent: Agent): AgentCardItem {
+  const updatedAt =
+    agent.update_time || agent.create_time
+      ? formatDate(agent.update_time ?? agent.create_time)
+      : undefined;
   return {
     id: String(agent.id),
     name: agent.display_name || agent.name,
     description: agent.description ?? "",
     iconBg: iconColorFor(String(agent.id)),
-    updatedAt: formatDate(agent.update_time ?? agent.create_time),
+    updatedAt,
     online: agent.is_available !== false,
     tags: agent.tags ?? [],
   };
@@ -51,7 +60,7 @@ function toExternalCard(agent: A2AExternalAgent): AgentCardItem {
     name: agent.name,
     description: agent.description ?? "",
     iconBg: iconColorFor(String(agent.id)),
-    updatedAt: formatDate(agent.create_time),
+    updatedAt: agent.create_time ? formatDate(agent.create_time) : undefined,
     online: agent.is_available !== false,
     tags: [],
   };
@@ -61,11 +70,14 @@ function AgentCard({
   item,
   selected,
   onToggle,
+  icon,
 }: {
   item: AgentCardItem;
   selected: boolean;
   onToggle: () => void;
+  icon: ReactNode;
 }) {
+  const { t } = useTranslation("common");
   return (
     <div
       className={cn(
@@ -81,9 +93,9 @@ function AgentCard({
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] text-white"
           style={{ background: item.iconBg }}
         >
-          <Bot size={20} />
+          {icon}
         </div>
-        <span className="text-[14px] font-medium leading-[22px] text-[#191919]">
+        <span className="truncate text-[14px] font-medium leading-[22px] text-[#191919]">
           {item.name}
         </span>
       </div>
@@ -94,7 +106,7 @@ function AgentCard({
         {item.updatedAt && (
           <span className="flex items-center gap-1">
             <Clock size={14} />
-            更新于 {item.updatedAt}
+            {t("agentConfig.list.updatedAt", { date: item.updatedAt })}
           </span>
         )}
         <span className="flex items-center gap-1">
@@ -104,7 +116,9 @@ function AgentCard({
               item.online ? "bg-[#52C41A]" : "bg-[#D9D9D9]"
             )}
           />
-          {item.online ? "已上线" : "未上线"}
+          {item.online
+            ? t("agentConfig.list.online")
+            : t("agentConfig.list.offline")}
         </span>
       </div>
     </div>
@@ -114,49 +128,83 @@ function AgentCard({
 export interface AddAgentDrawerProps {
   open: boolean;
   onClose: () => void;
-  onConfirm?: (selected: AgentCardItem[]) => void;
 }
 
-export function AddAgentDrawer({ open, onClose, onConfirm }: AddAgentDrawerProps) {
+export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
   const { t } = useTranslation("common");
+  const { message: messageApi } = App.useApp();
+  const currentAgentId = useAgentStore((state) => state.agentId);
+  const editedAgent = useAgentStore((state) => state.editedAgent);
+  const selectedInternalIds = useAgentStore(
+    (state) => state.editedAgent?.sub_agent_id_list ?? EMPTY_IDS
+  );
+  const selectedExternalIds = useAgentStore(
+    (state) => state.editedAgent?.external_sub_agent_id_list ?? EMPTY_IDS
+  );
+  const updateSubAgentIds = useAgentStore((state) => state.updateSubAgentIds);
+  const updateSubAgentRelations = useAgentStore(
+    (state) => state.updateSubAgentRelations
+  );
+  const updateExternalSubAgentIds = useAgentStore(
+    (state) => state.updateExternalSubAgentIds
+  );
   const {
-    availableAgents: localAgents,
-    isLoading: isLocalLoading,
-    refetch: refetchLocal,
+    availableAgents: internalAgents,
+    isLoading: isInternalLoading,
+    invalidate: invalidateInternal,
   } = usePublishedAgentList();
   const {
     availableAgents: externalAgents,
     isLoading: isExternalLoading,
-    refetch: refetchExternal,
+    invalidate: invalidateExternal,
   } = useExternalAgents();
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [tab, setTab] = useState("local");
-  const [keyword, setKeyword] = useState("");
+  const [activeSource, setActiveSource] = useState<"internal" | "external">(
+    "internal"
+  );
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [tagFilter, setTagFilter] = useState("");
 
-  const localCards = useMemo(() => localAgents.map(toLocalCard), [localAgents]);
-  const externalCards = useMemo(() => externalAgents.map(toExternalCard), [externalAgents]);
+  useEffect(() => {
+    if (!open) return;
+    setActiveSource("internal");
+    setSearch("");
+    setPage(1);
+    setTagFilter("");
+  }, [open]);
 
-  const allCards = useMemo(() => [...localCards, ...externalCards], [
-    localCards,
-    externalCards,
-  ]);
+  const selectableInternalAgents = useMemo(
+    () =>
+      internalAgents.filter(
+        (agent: Agent) => Number(agent.id) !== currentAgentId
+      ),
+    [currentAgentId, internalAgents]
+  );
+
+  const localCards = useMemo(
+    () => selectableInternalAgents.map(toLocalCard),
+    [selectableInternalAgents]
+  );
+  const externalCards = useMemo(
+    () => externalAgents.map(toExternalCard),
+    [externalAgents]
+  );
 
   const tagOptions = useMemo(() => {
     const tags = new Set<string>();
-    localAgents.forEach((agent) =>
+    selectableInternalAgents.forEach((agent) =>
       (agent.tags ?? []).forEach((tag) => tags.add(tag))
     );
     return Array.from(tags)
       .sort()
       .map((value) => ({ value, label: value }));
-  }, [localAgents]);
+  }, [selectableInternalAgents]);
 
-  const filterCards = (cards: AgentCardItem[]): AgentCardItem[] => {
+  const filteredAgents = useMemo(() => {
+    const cards = activeSource === "internal" ? localCards : externalCards;
+    const kw = search.trim().toLowerCase();
     let filtered = cards;
-    const kw = keyword.trim().toLowerCase();
     if (kw) {
       filtered = filtered.filter(
         (item) =>
@@ -164,72 +212,171 @@ export function AddAgentDrawer({ open, onClose, onConfirm }: AddAgentDrawerProps
           item.description.toLowerCase().includes(kw)
       );
     }
-    if (tagFilter) {
-      filtered = filtered.filter((item) => (item.tags ?? []).includes(tagFilter));
+    if (activeSource === "internal" && tagFilter) {
+      filtered = filtered.filter((item) =>
+        (item.tags ?? []).includes(tagFilter)
+      );
     }
     return filtered;
-  };
+  }, [activeSource, externalCards, localCards, search, tagFilter]);
 
-  // Reset to the first page whenever the search, tag or tab changes.
-  useEffect(() => {
-    setPage(1);
-  }, [keyword, tagFilter, tab]);
-
-  const filteredAgents = filterCards(tab === "local" ? localCards : externalCards);
-  const agents = filteredAgents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const isLoading = tab === "local" ? isLocalLoading : isExternalLoading;
-
-  const selected: SelectedItem[] = useMemo(
-    () =>
-      allCards
-        .filter((item) => selectedIds.has(item.id))
-        .map((item) => ({ id: item.id, label: item.name })),
-    [allCards, selectedIds]
+  const pagedAgents = filteredAgents.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE
   );
+  const isLoading =
+    activeSource === "internal" ? isInternalLoading : isExternalLoading;
+
+  const currentSelectedIds =
+    activeSource === "internal" ? selectedInternalIds : selectedExternalIds;
+
+  const selectedChips = useMemo<SelectedItem[]>(() => {
+    const internalChips = selectedInternalIds.map((id) => {
+      const agent = internalAgents.find(
+        (item: Agent) => Number(item.id) === id
+      );
+      return {
+        id: `internal-${id}`,
+        label: agent?.display_name || agent?.name || String(id),
+      };
+    });
+    const externalChips = selectedExternalIds.map((id) => {
+      const agent = externalAgents.find(
+        (item: A2AExternalAgent) => Number(item.id) === id
+      );
+      return { id: `external-${id}`, label: agent?.name || String(id) };
+    });
+    return [...internalChips, ...externalChips];
+  }, [selectedExternalIds, selectedInternalIds, externalAgents, internalAgents]);
 
   const allSelected =
-    filteredAgents.length > 0 && filteredAgents.every((a) => selectedIds.has(a.id));
+    filteredAgents.length > 0 &&
+    filteredAgents.every((item) => currentSelectedIds.includes(Number(item.id)));
 
-  const toggle = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const applyInternalSelection = (nextIds: number[]) => {
+    updateSubAgentIds(nextIds);
+    const existing = editedAgent?.sub_agent_relations || [];
+    const addedIds = nextIds.filter(
+      (id) => !existing.some((rel) => rel.agent_id === id)
+    );
+    const nextRelations = [
+      ...existing.filter((rel) => nextIds.includes(rel.agent_id)),
+      ...addedIds.map((agentId) => {
+        const agent = internalAgents.find(
+          (item: Agent) => Number(item.id) === agentId
+        );
+        return {
+          agent_id: agentId,
+          version_no: agent?.current_version_no ?? null,
+          version_name: agent?.version_name,
+        };
+      }),
+    ];
+    updateSubAgentRelations(nextRelations);
   };
 
+  const setExternalSelection = async (nextIds: number[]) => {
+    const added = nextIds.filter((id) => !selectedExternalIds.includes(id));
+    const removed = selectedExternalIds.filter((id) => !nextIds.includes(id));
+
+    if (currentAgentId && (added.length || removed.length)) {
+      const results = await Promise.all([
+        ...added.map((id) =>
+          a2aClientService.addRelation(Number(currentAgentId), id)
+        ),
+        ...removed.map((id) =>
+          a2aClientService.removeRelation(Number(currentAgentId), id)
+        ),
+      ]);
+      if (results.some((result) => !result.success)) {
+        messageApi.error(t("a2a.service.addRelationFailed"));
+        return;
+      }
+    }
+
+    updateExternalSubAgentIds(nextIds);
+  };
+
+  const toggle = (id: string) => {
+    const num = Number(id);
+    if (activeSource === "internal") {
+      const isSelected = selectedInternalIds.includes(num);
+      applyInternalSelection(
+        isSelected
+          ? selectedInternalIds.filter((item) => item !== num)
+          : [...selectedInternalIds, num]
+      );
+    } else {
+      const isSelected = selectedExternalIds.includes(num);
+      void setExternalSelection(
+        isSelected
+          ? selectedExternalIds.filter((item) => item !== num)
+          : [...selectedExternalIds, num]
+      );
+    }
+  };
+
+  const removeSelected = (id: string) => {
+    if (id.startsWith("internal-")) {
+      const num = Number(id.slice("internal-".length));
+      applyInternalSelection(selectedInternalIds.filter((item) => item !== num));
+      return;
+    }
+    if (id.startsWith("external-")) {
+      const num = Number(id.slice("external-".length));
+      void setExternalSelection(
+        selectedExternalIds.filter((item) => item !== num)
+      );
+    }
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    const ids = filteredAgents.map((item) => Number(item.id));
+    if (activeSource === "internal") {
+      applyInternalSelection(checked ? ids : []);
+    } else {
+      void setExternalSelection(checked ? ids : []);
+    }
+  };
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeSource, search, tagFilter]);
+
   const handleRefresh = () => {
-    void refetchLocal();
-    void refetchExternal();
+    void invalidateInternal();
+    void invalidateExternal();
   };
 
   return (
     <AddResourceDrawer
       open={open}
-      title={t("resourcePicker.addAgent", "添加子智能体")}
-      searchPlaceholder={t("resourcePicker.search.agent", "按名称、描述检索")}
-      selected={selected}
-      tagOptions={tab === "local" ? tagOptions : undefined}
-      listTitle={t("resourcePicker.list.agent", "智能体列表")}
+      title={t("agent.collaborative.selector.title")}
+      searchPlaceholder={t("agent.collaborative.selector.searchPlaceholder")}
+      selected={selectedChips}
+      tagOptions={activeSource === "internal" ? tagOptions : undefined}
+      listTitle={t("resourcePicker.list.agent")}
       tabs={[
-        { key: "local", label: t("resourcePicker.tab.localAgent", "本地智能体") },
-        { key: "external", label: t("resourcePicker.tab.externalAgent", "外部智能体") },
+        {
+          key: "internal",
+          label: t("agent.collaborative.selector.tab.internal"),
+        },
+        {
+          key: "external",
+          label: t("agent.collaborative.selector.tab.external"),
+        },
       ]}
-      activeTab={tab}
+      activeTab={activeSource}
       total={filteredAgents.length}
       page={page}
       onPageChange={setPage}
-      showConfirm
+      showConfirm={false}
       onClose={onClose}
-      onConfirm={() => onConfirm?.(allCards.filter((a) => selectedIds.has(a.id)))}
-      onRemoveSelected={(id) => toggle(id)}
-      onSearch={setKeyword}
+      onRemoveSelected={removeSelected}
+      onSearch={setSearch}
       onTagChange={(value) => setTagFilter(value ?? "")}
-      onTabChange={setTab}
-      onSelectAll={(checked) =>
-        setSelectedIds(new Set(checked ? filteredAgents.map((a) => a.id) : []))
-      }
+      onTabChange={(key) => setActiveSource(key as "internal" | "external")}
+      onSelectAll={handleSelectAll}
       allSelected={allSelected}
       onRefresh={handleRefresh}
     >
@@ -237,16 +384,23 @@ export function AddAgentDrawer({ open, onClose, onConfirm }: AddAgentDrawerProps
         <div className="flex justify-center py-12">
           <Spin />
         </div>
-      ) : agents.length === 0 ? (
-        <Empty description={t("resourcePicker.empty", "暂无数据")} />
+      ) : filteredAgents.length === 0 ? (
+        <Empty description={t("agent.collaborative.selector.empty")} />
       ) : (
         <div className="grid grid-cols-2 content-start gap-2">
-          {agents.map((item) => (
+          {pagedAgents.map((item) => (
             <AgentCard
-              key={item.id}
+              key={`${activeSource}-${item.id}`}
               item={item}
-              selected={selectedIds.has(item.id)}
+              selected={currentSelectedIds.includes(Number(item.id))}
               onToggle={() => toggle(item.id)}
+              icon={
+                activeSource === "external" ? (
+                  <Globe size={20} />
+                ) : (
+                  <Bot size={20} />
+                )
+              }
             />
           ))}
         </div>

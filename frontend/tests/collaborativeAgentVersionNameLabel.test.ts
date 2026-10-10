@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const selectorPath = new URL(
-  "../app/[locale]/agents/[agentId]/components/advanced/collaborative-agent-selector-modal.tsx",
+  "../app/[locale]/agents/[agentId]/components/collaborative-agent.tsx",
   import.meta.url
 );
 const zhLocalePath = new URL(
@@ -26,7 +26,7 @@ test("labels the custom version name in the collaborative agent selector", async
 
   assert.match(
     selector,
-    /t\("agent\.collaborative\.selector\.versionName",\s*\{\s*name: internalAgent\.version_name,?\s*\}\s*\)/
+    /t\("agent\.collaborative\.selector\.versionName",\s*\{\s*name: agent\.version_name,?\s*\}\s*\)/
   );
   assert.equal(
     zhLocale["agent.collaborative.selector.versionName"],

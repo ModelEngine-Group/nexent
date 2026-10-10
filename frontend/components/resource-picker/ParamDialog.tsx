@@ -179,16 +179,18 @@ export function ParamInput({
   );
 }
 
-/** Field label with optional required mark and info icon. */
+/** Field label with optional required mark, info icon, or custom icon. */
 export function ParamLabel({
   label,
   required,
   info,
+  icon,
   size = "sm",
 }: {
   label: string;
   required?: boolean;
   info?: boolean;
+  icon?: ReactNode;
   size?: "sm" | "md";
 }) {
   return (
@@ -206,7 +208,7 @@ export function ParamLabel({
         </span>
       )}
       {label}
-      {info && <InfoIcon size={size === "md" ? 14 : 12} />}
+      {icon ?? (info && <InfoIcon size={size === "md" ? 14 : 12} />)}
     </span>
   );
 }
@@ -216,18 +218,26 @@ export function ParamField({
   label,
   required,
   info,
+  icon,
   size = "sm",
   children,
 }: {
   label: string;
   required?: boolean;
   info?: boolean;
+  icon?: ReactNode;
   size?: "sm" | "md";
   children: ReactNode;
 }) {
   return (
     <div className={cn("flex flex-col", size === "md" ? "gap-2" : "gap-1.5")}>
-      <ParamLabel label={label} required={required} info={info} size={size} />
+      <ParamLabel
+        label={label}
+        required={required}
+        info={info}
+        icon={icon}
+        size={size}
+      />
       {children}
     </div>
   );
