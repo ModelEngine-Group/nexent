@@ -723,8 +723,10 @@ from consts.model import (
 
 
 @pytest.fixture(autouse=True)
-def reset_mocks():
+def reset_mocks(mocker, request):
     """Reset all mocks before each test to ensure a clean test environment."""
+    if request.node.name.startswith(("test_update_agent_info", "test_cmsr_006")):
+        mocker.patch.object(agent_service, "resolve_agent_list_permission", return_value="EDIT")
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
     agent_run_service.get_conversation_service.reset_mock(

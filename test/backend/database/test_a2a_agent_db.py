@@ -12,6 +12,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
+from consts.exceptions import AgentNotFoundError
 
 # ---------------------------------------------------------------------------
 # Mock consts module
@@ -183,6 +184,7 @@ def _make_artifact_cls():
 # Build mock db_models module
 # ---------------------------------------------------------------------------
 db_models_mock = MagicMock()
+db_models_mock.AgentInfo = _make_cls('AgentInfo', ['agent_id', 'tenant_id', 'version_no', 'delete_flag'])
 db_models_mock.A2AExternalAgent = _make_ext_agent_cls()
 db_models_mock.A2AExternalAgentRelation = _make_ext_rel_cls()
 db_models_mock.A2AServerAgent = _make_server_agent_cls()
@@ -1152,6 +1154,21 @@ class TestUpdateAgentAvailability:
 # ===========================================================================
 
 class TestAddExternalAgentRelation:
+    @pytest.fixture(autouse=True)
+    def owned_references(self):
+        original_query = MockSession.query
+
+        def query(session, model, *others):
+            if model is db_models_mock.AgentInfo:
+                return MockQuery([db_models_mock.AgentInfo(
+                    agent_id=100, tenant_id='tenant-1', version_no=0, delete_flag='N')])
+            if model is db_models_mock.A2AExternalAgent:
+                return MockQuery([factory_external_agent(id=1)])
+            return original_query(session, model, *others)
+
+        with patch.object(MockSession, 'query', query):
+            yield
+
     def test_creates_new_relation(self):
         with patch.object(a2a_db, '_get_db_session') as mk:
             mk.return_value = MockSession()

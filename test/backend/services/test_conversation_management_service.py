@@ -2008,5 +2008,27 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
         self.assertFalse(result)
 
 
+def test_missing_message_raises_not_found_domain_error():
+    import pytest
+    from consts.exceptions import ConversationNotFoundError
+
+    with patch('backend.services.conversation_management_service.update_message_opinion', return_value=False):
+        with pytest.raises(ConversationNotFoundError):
+            update_message_opinion_service(123, "Y")
+    with patch('backend.services.conversation_management_service.get_message_id_by_index', return_value=None):
+        with pytest.raises(ConversationNotFoundError):
+            asyncio.run(get_message_id_by_index_impl(123, 0))
+
+
+def test_message_database_failure_preserves_unexpected_error():
+    import pytest
+
+    failure = RuntimeError("database unavailable")
+    with patch('backend.services.conversation_management_service.update_message_opinion', side_effect=failure):
+        with pytest.raises(RuntimeError) as error:
+            update_message_opinion_service(123, "Y")
+    assert error.value is failure
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -381,6 +381,8 @@ async def update_opinion_endpoint(request: OpinionRequest, authorization: Option
     try:
         update_message_opinion_service(request.message_id, request.opinion)
         return ConversationResponse(code=0, message="success", data=True)
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
     except Exception as e:
         logging.error(f"Failed to update message like/dislike: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -402,6 +404,8 @@ async def get_message_id_endpoint(request: MessageIdRequest):
     try:
         message_id = await get_message_id_by_index_impl(request.conversation_id, request.message_index)
         return ConversationResponse(code=0, message="success", data=message_id)
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
     except Exception as e:
         logging.error(f"Failed to get message ID: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

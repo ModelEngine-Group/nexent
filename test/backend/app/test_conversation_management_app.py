@@ -662,6 +662,23 @@ async def test_update_opinion_failure(conversation_mocks):
     conversation_mocks['logging'].error.assert_called_once()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["opinion", "lookup"])
+async def test_missing_message_returns_404(conversation_mocks, route):
+    from consts.exceptions import ConversationNotFoundError
+
+    request_obj = MagicMock(message_id=123, opinion="Y", conversation_id=1, message_index=0)
+    if route == "opinion":
+        conversation_mocks['update_opinion_service'].side_effect = ConversationNotFoundError("Message not found")
+        endpoint = update_opinion_endpoint
+    else:
+        conversation_mocks['get_message_id_impl'].side_effect = ConversationNotFoundError("Message not found")
+        endpoint = get_message_id_endpoint
+    with pytest.raises(HTTPException) as error:
+        await endpoint(request_obj)
+    assert error.value.status_code == 404
+
+
 # get_message_id_endpoint
 
 
