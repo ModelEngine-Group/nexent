@@ -34,6 +34,7 @@ import {
   Settings,
   PlusIcon,
   Sparkles,
+  X,
 } from "lucide-react";
 import { StandardInput } from "@/components/common/StandardInput";
 import {
@@ -436,8 +437,27 @@ export const Composer: FC<ComposerProps> = ({
   }, [skills, skillTab, skillSearch]);
 
   const [actionPanel, setActionPanel] = useState<
-    "plus" | "kb" | "skill" | null
+    "plus" | "plus-skill" | "plus-kb" | "kb" | null
   >(null);
+  useEffect(() => {
+    if (!newChatDesign || !actionPanel) return;
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        !target.closest(
+          "[data-composer-action-panel], [data-composer-action-trigger]"
+        )
+      ) {
+        setActionPanel(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", handleOutsidePointerDown);
+    return () =>
+      document.removeEventListener("pointerdown", handleOutsidePointerDown);
+  }, [actionPanel, newChatDesign]);
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
   // TODO(mock): knowledge-base / skill selection is visual only until the
   // conversation scope APIs are wired into the quick panels.
@@ -558,11 +578,14 @@ export const Composer: FC<ComposerProps> = ({
         <div className="mb-2 h-7" aria-hidden="true" />
       )}
       <fieldset
+        style={
+          newChatDesign ? { outlineColor: "rgba(25, 25, 25, 0.08)" } : undefined
+        }
         disabled={disabled && !disabledReason}
         aria-disabled={disabled && !disabledReason}
         className={cn(
           newChatDesign
-            ? "relative m-0 flex min-w-0 w-full flex-col gap-2 overflow-visible rounded-[20px] border-[0.5px] border-solid border-[#191919] bg-card p-4 shadow-[0_2px_12px_rgba(0,0,0,0.08)]"
+            ? "relative m-0 flex min-h-[164px] min-w-0 w-full flex-col overflow-visible rounded-[20px] border-0 bg-white p-4 outline-[0.5px] outline-solid shadow-[0_1px_6px_0_rgba(0,0,0,0.16)]"
             : "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
           !newChatDesign &&
             workbenchPresentation &&
@@ -609,7 +632,10 @@ export const Composer: FC<ComposerProps> = ({
         <ComposerPrimitive.Unstable_TriggerPopoverRoot>
           {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
           <ComposerPrimitive.Root
-            className="flex w-full flex-col outline-none"
+            className={cn(
+              "flex w-full flex-col outline-none",
+              newChatDesign && "gap-2"
+            )}
             onSubmit={(event) => {
               if (isRunning) event.preventDefault();
               else prepareSend();
@@ -625,9 +651,10 @@ export const Composer: FC<ComposerProps> = ({
               }
             }}
           >
-            {!compact && (!debugLayout || hasAttachments) && (
-              <ComposerAttachments />
-            )}
+            {!compact &&
+              (!(debugLayout || newChatDesign) || hasAttachments) && (
+                <ComposerAttachments />
+              )}
             {skillFiles ? (
               <LexicalComposerInput
                 placeholder={
@@ -639,7 +666,11 @@ export const Composer: FC<ComposerProps> = ({
                         ? t("chat.composer.workbenchPlaceholder")
                         : t("chat.composer.placeholder")
                 }
-                className="relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
+                className={cn(
+                  "relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground",
+                  newChatDesign &&
+                    "!mb-0 !min-h-[88px] !px-0 !py-0 !leading-[22px] [&_.aui-lexical-input]:!min-h-[88px] [&_.aui-lexical-placeholder]:!top-0 [&_.aui-lexical-placeholder]:!text-[#191919]/40"
+                )}
                 submitMode="enter"
                 autoFocus
                 formatter={combinedSkillDirectiveFormatter}
@@ -669,6 +700,8 @@ export const Composer: FC<ComposerProps> = ({
                   className={cn(
                     "max-h-48 min-h-14 w-full resize-none bg-transparent px-0 py-1 text-sm outline-none placeholder:text-muted-foreground",
                     workbenchPresentation && "min-h-[88px] px-4 py-2",
+                    newChatDesign &&
+                      "block !min-h-[88px] !px-0 !py-0 leading-[22px] text-[#191919] placeholder:text-[#191919]/40",
                     workbenchPresentation &&
                       !newChatDesign &&
                       "w-auto min-w-0 flex-1",
@@ -718,49 +751,300 @@ export const Composer: FC<ComposerProps> = ({
             <div
               className={cn(
                 "relative flex items-center justify-between gap-2",
+                newChatDesign && "min-h-9 flex-wrap sm:flex-nowrap",
                 workbenchPresentation &&
                   (newChatDesign
-                    ? "flex-wrap pt-2 sm:flex-nowrap"
+                    ? "flex-wrap sm:flex-nowrap"
                     : "mx-4 flex-wrap pt-2 sm:flex-nowrap"),
                 debugLayout && "!mx-0 !mb-0 !mt-1 !h-10"
               )}
             >
-              {newChatDesign && actionPanel ? (
-                <button
-                  type="button"
-                  aria-hidden
-                  tabIndex={-1}
-                  className="fixed inset-0 z-10 cursor-default"
-                  onClick={() => setActionPanel(null)}
-                />
-              ) : null}
-
-              {newChatDesign && actionPanel === "plus" ? (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-56 rounded-xl border border-[#e5e5e5] bg-white p-2 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
-                  <button
-                    type="button"
-                    className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                    onClick={() => setActionPanel("skill")}
-                  >
-                    <Layers className="size-4 shrink-0" aria-hidden />
-                    <span>{t("chat.composer.skills")}</span>
-                    <ChevronRight
-                      className="ml-auto size-3.5 shrink-0 text-[#808080]"
-                      aria-hidden
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                    onClick={() => setActionPanel("kb")}
-                  >
-                    <Database className="size-4 shrink-0" aria-hidden />
-                    <span>{t("chat.composer.knowledge")}</span>
-                    <ChevronRight
-                      className="ml-auto size-3.5 shrink-0 text-[#808080]"
-                      aria-hidden
-                    />
-                  </button>
+              {newChatDesign && actionPanel?.startsWith("plus") ? (
+                <div
+                  data-composer-action-panel
+                  className="absolute bottom-full left-0 z-20 mb-2 w-56 rounded-xl border border-[#e5e5e5] bg-white p-2 shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
+                >
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]",
+                        actionPanel === "plus-skill" && "bg-[#f5f5f5]"
+                      )}
+                      aria-expanded={actionPanel === "plus-skill"}
+                      onClick={() =>
+                        setActionPanel((panel) =>
+                          panel === "plus-skill" ? "plus" : "plus-skill"
+                        )
+                      }
+                    >
+                      <Layers className="size-4 shrink-0" aria-hidden />
+                      <span>{t("chat.composer.skills")}</span>
+                      <ChevronRight
+                        className="ml-auto size-3.5 shrink-0 text-[#808080]"
+                        aria-hidden
+                      />
+                    </button>
+                    {actionPanel === "plus-skill" ? (
+                      <div
+                        data-composer-action-panel
+                        className="absolute bottom-0 left-full z-30 -ml-3 w-[340px] rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
+                      >
+                        <div className="flex items-center gap-2 text-[14px] text-[#191919]">
+                          <Layers className="size-4" aria-hidden />
+                          <span>{t("chat.composer.skills")}</span>
+                          <button
+                            type="button"
+                            aria-label={t("common.close")}
+                            className="ml-auto flex size-6 items-center justify-center rounded-full bg-[#e5e7eb] text-[#4b5563] hover:bg-[#d1d5db]"
+                            onClick={() => setActionPanel("plus")}
+                          >
+                            <X className="size-3.5" aria-hidden />
+                          </button>
+                        </div>
+                        <div className="mt-2 flex items-center gap-4 overflow-x-auto border-b border-[#f0f0f0] px-1 text-[14px]">
+                          <button
+                            type="button"
+                            onClick={() => setSkillTab("")}
+                            className={cn(
+                              "relative shrink-0 pb-1.5 pt-1",
+                              skillTab === ""
+                                ? "text-[#2673e5]"
+                                : "text-[#191919]"
+                            )}
+                          >
+                            {t("chat.composer.skillCategoryAll")}
+                            {skillTab === "" ? (
+                              <span className="absolute inset-x-0 bottom-0 h-0.5 rounded bg-[#2673e5]" />
+                            ) : null}
+                          </button>
+                          {skillTagTabs.map((tag) => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => setSkillTab(tag)}
+                              className={cn(
+                                "relative shrink-0 pb-1.5 pt-1",
+                                skillTab === tag
+                                  ? "text-[#2673e5]"
+                                  : "text-[#191919]"
+                              )}
+                            >
+                              {tag}
+                              {skillTab === tag ? (
+                                <span className="absolute inset-x-0 bottom-0 h-0.5 rounded bg-[#2673e5]" />
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                        <StandardInput
+                          value={skillSearch}
+                          onChange={(event) =>
+                            setSkillSearch(event.target.value)
+                          }
+                          placeholder={t("chat.composer.searchSkills")}
+                          prefix={
+                            <SearchIcon
+                              className="size-3.5 text-[#808080]"
+                              aria-hidden
+                            />
+                          }
+                          className="mt-2"
+                        />
+                        <div className="mt-2 max-h-64 overflow-y-auto">
+                          {skillsLoading ? (
+                            <p className="px-2 py-3 text-[12px] text-[#808080]">
+                              {t("chat.composer.loading")}
+                            </p>
+                          ) : filteredSkills.length === 0 ? (
+                            <p className="px-2 py-3 text-[12px] text-[#808080]">
+                              {t("chat.composer.emptySkills")}
+                            </p>
+                          ) : (
+                            filteredSkills.map((skill) => {
+                              const selected = selectedSkillNames.includes(
+                                skill.name
+                              );
+                              const dotColor =
+                                SKILL_DOT_COLORS[
+                                  Math.abs(hashString(skill.name)) %
+                                    SKILL_DOT_COLORS.length
+                                ];
+                              return (
+                                <button
+                                  key={skill.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setSelectedSkillNames((prev) =>
+                                      prev.includes(skill.name)
+                                        ? prev.filter(
+                                            (name) => name !== skill.name
+                                          )
+                                        : [...prev, skill.name]
+                                    )
+                                  }
+                                  className={cn(
+                                    "flex w-full items-center gap-2 rounded-[6px] px-2 py-2 text-left hover:bg-[#f5f5f5]",
+                                    selected && "bg-[#f5f5f5]"
+                                  )}
+                                >
+                                  <span
+                                    className="size-2 shrink-0 rounded-full"
+                                    style={{ backgroundColor: dotColor }}
+                                    aria-hidden
+                                  />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-[14px] leading-[22px] text-[#191919]">
+                                      {skill.name}
+                                    </span>
+                                    {skill.description ? (
+                                      <span className="block truncate text-[12px] leading-[20px] text-[#808080]">
+                                        {skill.description}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-col border-t border-[#f0f0f0] pt-2">
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                            onClick={() => setActionPanel("plus")}
+                          >
+                            <Link2 className="size-4" aria-hidden />
+                            <span>{t("chat.composer.addLocalSkill")}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                            onClick={() => {
+                              setActionPanel(null);
+                              onOpenWorkbenchSkillPicker?.();
+                            }}
+                          >
+                            <Settings className="size-4" aria-hidden />
+                            <span>{t("chat.composer.manageSkills")}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]",
+                        actionPanel === "plus-kb" && "bg-[#f5f5f5]"
+                      )}
+                      aria-expanded={actionPanel === "plus-kb"}
+                      onClick={() =>
+                        setActionPanel((panel) =>
+                          panel === "plus-kb" ? "plus" : "plus-kb"
+                        )
+                      }
+                    >
+                      <Database className="size-4 shrink-0" aria-hidden />
+                      <span>{t("chat.composer.knowledge")}</span>
+                      <ChevronRight
+                        className="ml-auto size-3.5 shrink-0 text-[#808080]"
+                        aria-hidden
+                      />
+                    </button>
+                    {actionPanel === "plus-kb" ? (
+                      <div
+                        data-composer-action-panel
+                        className="absolute bottom-0 left-full z-30 -ml-3 w-[320px] rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
+                      >
+                        <div className="flex items-center gap-2 text-[14px] text-[#191919]">
+                          <Database className="size-4" aria-hidden />
+                          <span>{t("chat.composer.knowledge")}</span>
+                          <button
+                            type="button"
+                            aria-label={t("common.close")}
+                            className="ml-auto flex size-6 items-center justify-center rounded-full bg-[#e5e7eb] text-[#4b5563] hover:bg-[#d1d5db]"
+                            onClick={() => setActionPanel("plus")}
+                          >
+                            <X className="size-3.5" aria-hidden />
+                          </button>
+                        </div>
+                        <StandardInput
+                          value={kbSearch}
+                          onChange={(event) => setKbSearch(event.target.value)}
+                          placeholder={t("chat.composer.searchKnowledge")}
+                          prefix={
+                            <SearchIcon
+                              className="size-3.5 text-[#808080]"
+                              aria-hidden
+                            />
+                          }
+                          className="mt-2"
+                        />
+                        <div className="mt-2 max-h-64 overflow-y-auto">
+                          {kbLoading ? (
+                            <p className="px-2 py-3 text-[12px] text-[#808080]">
+                              {t("chat.composer.loading")}
+                            </p>
+                          ) : knowledgeBases.length === 0 ? (
+                            <p className="px-2 py-3 text-[12px] text-[#808080]">
+                              {t("chat.composer.emptyKnowledge")}
+                            </p>
+                          ) : (
+                            knowledgeBases
+                              .filter((kb) =>
+                                (kb.name + (kb.description || ""))
+                                  .toLowerCase()
+                                  .includes(kbSearch.trim().toLowerCase())
+                              )
+                              .map((kb) => {
+                                const selected = selectedKbIds.includes(kb.id);
+                                return (
+                                  <button
+                                    key={kb.id}
+                                    type="button"
+                                    onClick={() =>
+                                      setSelectedKbIds((prev) =>
+                                        prev.includes(kb.id)
+                                          ? prev.filter((id) => id !== kb.id)
+                                          : [...prev, kb.id]
+                                      )
+                                    }
+                                    className={cn(
+                                      "flex w-full flex-col items-start gap-0.5 rounded-[6px] px-2 py-2 text-left hover:bg-[#f5f5f5]",
+                                      selected && "bg-[#f5f5f5]"
+                                    )}
+                                  >
+                                    <span className="text-[14px] leading-[22px] text-[#191919]">
+                                      {kb.name}
+                                    </span>
+                                    {kb.description ? (
+                                      <span className="text-[12px] leading-[20px] text-[#808080]">
+                                        {kb.description}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                );
+                              })
+                          )}
+                        </div>
+                        <div className="mt-2 border-t border-[#f0f0f0] pt-2">
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
+                            onClick={() => {
+                              setActionPanel(null);
+                              setKnowledgeModalOpen(true);
+                            }}
+                          >
+                            <Settings className="size-4" aria-hidden />
+                            <span>{t("chat.composer.manageKnowledge")}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                   <ComposerPrimitive.AddAttachment asChild>
                     <button
                       type="button"
@@ -808,7 +1092,10 @@ export const Composer: FC<ComposerProps> = ({
               ) : null}
 
               {newChatDesign && actionPanel === "kb" ? (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-[320px] rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+                <div
+                  data-composer-action-panel
+                  className="absolute bottom-full left-0 z-20 mb-2 w-[320px] rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
+                >
                   <div className="flex items-center gap-2 text-[14px] text-[#191919]">
                     <Database className="size-4" aria-hidden />
                     <span>{t("chat.composer.knowledge")}</span>
@@ -888,134 +1175,6 @@ export const Composer: FC<ComposerProps> = ({
                 </div>
               ) : null}
 
-              {newChatDesign && actionPanel === "skill" ? (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-[340px] rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
-                  <div className="flex items-center gap-2 text-[14px] text-[#191919]">
-                    <Layers className="size-4" aria-hidden />
-                    <span>{t("chat.composer.skills")}</span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-4 overflow-x-auto border-b border-[#f0f0f0] px-1 text-[14px]">
-                    <button
-                      type="button"
-                      onClick={() => setSkillTab("")}
-                      className={cn(
-                        "relative shrink-0 pb-1.5 pt-1",
-                        skillTab === "" ? "text-[#2673e5]" : "text-[#191919]"
-                      )}
-                    >
-                      {t("chat.composer.skillCategoryAll")}
-                      {skillTab === "" ? (
-                        <span className="absolute inset-x-0 bottom-0 h-0.5 rounded bg-[#2673e5]" />
-                      ) : null}
-                    </button>
-                    {skillTagTabs.map((tag) => (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => setSkillTab(tag)}
-                        className={cn(
-                          "relative shrink-0 pb-1.5 pt-1",
-                          skillTab === tag ? "text-[#2673e5]" : "text-[#191919]"
-                        )}
-                      >
-                        {tag}
-                        {skillTab === tag ? (
-                          <span className="absolute inset-x-0 bottom-0 h-0.5 rounded bg-[#2673e5]" />
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                  <StandardInput
-                    value={skillSearch}
-                    onChange={(event) => setSkillSearch(event.target.value)}
-                    placeholder={t("chat.composer.searchSkills")}
-                    prefix={
-                      <SearchIcon
-                        className="size-3.5 text-[#808080]"
-                        aria-hidden
-                      />
-                    }
-                    className="mt-2"
-                  />
-                  <div className="mt-2 max-h-64 overflow-y-auto">
-                    {skillsLoading ? (
-                      <p className="px-2 py-3 text-[12px] text-[#808080]">
-                        {t("chat.composer.loading")}
-                      </p>
-                    ) : filteredSkills.length === 0 ? (
-                      <p className="px-2 py-3 text-[12px] text-[#808080]">
-                        {t("chat.composer.emptySkills")}
-                      </p>
-                    ) : (
-                      filteredSkills.map((skill) => {
-                        const selected = selectedSkillNames.includes(
-                          skill.name
-                        );
-                        const dotColor =
-                          SKILL_DOT_COLORS[
-                            Math.abs(hashString(skill.name)) %
-                              SKILL_DOT_COLORS.length
-                          ];
-                        return (
-                          <button
-                            key={skill.id}
-                            type="button"
-                            onClick={() =>
-                              setSelectedSkillNames((prev) =>
-                                prev.includes(skill.name)
-                                  ? prev.filter((name) => name !== skill.name)
-                                  : [...prev, skill.name]
-                              )
-                            }
-                            className={cn(
-                              "flex w-full items-center gap-2 rounded-[6px] px-2 py-2 text-left hover:bg-[#f5f5f5]",
-                              selected && "bg-[#f5f5f5]"
-                            )}
-                          >
-                            <span
-                              className="size-2 shrink-0 rounded-full"
-                              style={{ backgroundColor: dotColor }}
-                              aria-hidden
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[14px] leading-[22px] text-[#191919]">
-                                {skill.name}
-                              </span>
-                              {skill.description ? (
-                                <span className="block truncate text-[12px] leading-[20px] text-[#808080]">
-                                  {skill.description}
-                                </span>
-                              ) : null}
-                            </span>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                  <div className="mt-2 flex flex-col border-t border-[#f0f0f0] pt-2">
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                      onClick={() => setActionPanel(null)}
-                    >
-                      <Link2 className="size-4" aria-hidden />
-                      <span>{t("chat.composer.addLocalSkill")}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                      onClick={() => {
-                        setActionPanel(null);
-                        onOpenWorkbenchSkillPicker?.();
-                      }}
-                    >
-                      <Settings className="size-4" aria-hidden />
-                      <span>{t("chat.composer.manageSkills")}</span>
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
               <div className="flex shrink-0 items-center gap-1">
                 {(configurationLayout || debugLayout) && (
                   <ComposerAddAttachment
@@ -1030,6 +1189,7 @@ export const Composer: FC<ComposerProps> = ({
                   <button
                     type="button"
                     aria-label={t("chat.composer.plus")}
+                    data-composer-action-trigger
                     className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-[#191919] hover:bg-[#f5f5f5]"
                     onClick={() =>
                       setActionPanel((panel) =>
@@ -1183,6 +1343,7 @@ export const Composer: FC<ComposerProps> = ({
                 {newChatDesign ? (
                   <button
                     type="button"
+                    data-composer-action-trigger
                     className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[4px] px-2 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
                     onClick={() =>
                       setActionPanel((panel) => (panel === "kb" ? null : "kb"))
@@ -1542,7 +1703,7 @@ const ComposerSendOrCancel: FC<{
                 configurationLayout || debugLayout
                   ? "size-10 rounded-[26px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-30 [&_svg]:size-6"
                   : newChatDesign
-                    ? "border-0 bg-[#d9d9d9] text-white hover:bg-[#d9d9d9] disabled:bg-[#d9d9d9] disabled:text-white aria-disabled:bg-[#d9d9d9] aria-disabled:text-white [&_svg]:size-4"
+                    ? "border-0 bg-[#191919] text-white hover:bg-[#191919]/90 disabled:bg-[#d9d9d9] disabled:text-white aria-disabled:bg-[#d9d9d9] aria-disabled:text-white [&_svg]:size-4"
                     : workbench &&
                       "size-[30px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-70"
               )}
