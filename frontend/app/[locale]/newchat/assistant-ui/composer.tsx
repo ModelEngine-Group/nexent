@@ -1268,13 +1268,6 @@ export const Composer: FC<ComposerProps> = ({
                   !workbenchPresentation &&
                   !configurationLayout &&
                   !debugLayout && <ComposerAddAttachment />}
-                {!compact && !creationMode && workbenchPresentation && (
-                  <WorkbenchPlanningMenu
-                    chatMode={chatMode}
-                    onChatModeChange={onChatModeChange}
-                    disabled={isRunning}
-                  />
-                )}
                 {!compact && workbenchResources && !workbenchPresentation && (
                   <Button
                     type="button"
