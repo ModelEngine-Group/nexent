@@ -3859,7 +3859,7 @@
   "a2a.agent.url": "Agent URL",
   "a2a.agent.supportedInterfaces": "Supported Interfaces",
   "a2a.agent.agentId": "Agent ID",
-  "a2a.agent.viewA2ASettings": "View A2A Agent Settings",
+  "a2a.agent.viewA2ASettings": "View A2A Settings",
   "a2a.protocol.settings": "Protocol Settings",
   "a2a.protocol.selectProtocol": "Select protocol to use",
   "a2a.protocol.updateSuccess": "Protocol updated successfully",

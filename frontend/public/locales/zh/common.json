@@ -3737,7 +3737,7 @@
   "a2a.agent.url": "Agent URL",
   "a2a.agent.supportedInterfaces": "支持的接口",
   "a2a.agent.agentId": "Agent ID",
-  "a2a.agent.viewA2ASettings": "查看 A2A Agent 设置",
+  "a2a.agent.viewA2ASettings": "查看A2A设置",
   "a2a.protocol.settings": "协议设置",
   "a2a.protocol.selectProtocol": "选择要使用的协议",
   "a2a.protocol.updateSuccess": "协议更新成功",

@@ -34,11 +34,13 @@ import { useAgentStore } from "@/stores/agentStore";
 
 export default function AgentConfigActions({
   agentId: agentIdProp,
+  isA2A,
   readOnly,
   variant = "buttons",
   onManageVersions,
 }: {
   agentId?: number | null;
+  isA2A?: boolean;
   readOnly?: boolean;
   variant?: "buttons" | "menu";
   onManageVersions?: (agentId: number) => void;
@@ -284,6 +286,17 @@ export default function AgentConfigActions({
       disabled,
       onClick: handleExport,
     },
+    ...(isA2A
+      ? [
+          {
+            key: "a2a-settings",
+            icon: <Globe className="size-3.5" />,
+            label: t("a2a.agent.viewA2ASettings"),
+            disabled,
+            onClick: () => setIsA2ASettingsVisible(true),
+          },
+        ]
+      : []),
     { type: "divider" },
     {
       key: "delete",

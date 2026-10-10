@@ -335,6 +335,7 @@ export default function AgentsPage() {
                               <div className="flex items-center justify-end">
                                 <AgentConfigActions
                                   agentId={Number(agent.id)}
+                                  isA2A={agent.is_a2a_server}
                                   readOnly={agent.permission === "READ_ONLY"}
                                   variant="menu"
                                   onManageVersions={handleManageVersions}
