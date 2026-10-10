@@ -53,8 +53,8 @@ cases:
     status: active
     automation: automated
     objective: A protocol-invalid first attempt rolls back while its single preceding step label survives and the corrected result streams and commits.
-    preconditions: [A controlled model yields an invalid response then a pausable valid code action at step one.]
-    test_data: {profile: mock, sequence: 'invalid code, rollback, corrected code chunks, commit, parse'}
+    preconditions: [Protocol repair retry is enabled for the controlled Agent., A controlled model yields an invalid response then a pausable repair at step one.]
+    test_data: {profile: mock, sequence: 'invalid code, rollback, pausable corrected code or clarification, commit; invalid code or clarification rolls back', suppression_capabilities: [true, false]}
     steps:
       - {order: 1, action: Begin step one and return protocol-invalid model content., expected: Exactly one step label precedes begin; the attempt rolls back and one repair is scheduled.}
       - {order: 2, action: Pause the valid repair after its first safe chunk., expected: That chunk is visible before model completion.}
@@ -63,7 +63,7 @@ cases:
     forbidden_side_effects: [No failed content after rollback., No repair instruction in user output., No suppressed successful stream.]
     unit_boundary: CoreAgent semantic repair and deferred model attempt lifecycle
     inputs: ['step one', 'invalid model content', 'valid streamed <code> action']
-    assertions: [Step label occurs before both model attempts and only once., Successful repair does not set stream suppression., Corrected attempt commits once., Invalid attempt rolls back once.]
+    assertions: [Step label occurs before both model attempts and only once., Successful repair does not set stream suppression., Corrected attempt commits once., Invalid attempt rolls back once., Invalid repair rolls back without execution., Accepted clarification commits before interaction.]
   - case_id: CMSR-D1-004
     feature_id: CMSR-005
     requirement_ids: [CMSR-005]

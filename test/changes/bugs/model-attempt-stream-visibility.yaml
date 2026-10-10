@@ -56,3 +56,17 @@ changes:
     feature_contract_changed: true
     affected_features: {existing: [], added: [], modified: [CMSR-005], retired: []}
     affected_cases: {existing: [], added: [CMSR-D1-004], modified: [CMSR-D5-001], retired: []}
+  - change_id: CMSR-BUG-006
+    change_type: bugfix
+    bug_id: CMSR-BUG-006
+    title: Valid code action repair rolls back its accepted stream
+    description: Restore the existing streamed semantic repair contract with explicit enabled-mode regression coverage.
+    observed_behavior: Valid repaired code executes but its stream is rolled back; the formal test does not explicitly enable strict protocol repair after the default changed.
+    expected_behavior: Invalid attempts roll back; accepted repaired code and clarification stream and commit without suppression or repeated execution.
+    escaped_stage: production
+    coverage_gap:
+      type: missing_boundary
+      description: Formal coverage omitted the effective repair flag and suppression capability; envelope-only legacy assertions did not protect accepted code actions.
+    feature_contract_changed: false
+    affected_features: {existing: [CMSR-005], added: [], modified: [], retired: []}
+    affected_cases: {existing: [CMSR-D1-001, CMSR-D2-001, CMSR-D3-001, CMSR-D4-001, CMSR-D5-001], added: [], modified: [CMSR-D1-003], retired: []}
