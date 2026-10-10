@@ -77,6 +77,10 @@ const AidpKnowledgeGuide: React.FC = () => {
               {t("aidpKnowledge.guideWhatIs")}
             </h2>
             <p className={styles.guideIntro}>{t("aidpKnowledge.guideIntro")}</p>
+            <ol className={styles.guideBenefits}>
+              <li>{t("aidpKnowledge.guideBenefitOne")}</li>
+              <li>{t("aidpKnowledge.guideBenefitTwo")}</li>
+            </ol>
           </div>
           <div className={styles.guideFlow}>
             <h2 className={styles.guideHeading}>

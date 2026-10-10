@@ -1,5 +1,6 @@
 import React from "react";
-import { Button, Form, Input, Select } from "antd";
+import { QuestionCircleOutlined } from "@ant-design/icons";
+import { Button, Form, Input, Select, Tooltip } from "antd";
 import type { TFunction } from "i18next";
 
 import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/const/knowledgeBase";
@@ -106,7 +107,17 @@ export const AidpKnowledgeBasePermissionFields: React.FC<
   <>
     <Form.Item
       name="ingroup_permission"
-      label={t("aidpKnowledge.createIngroupPermission")}
+      label={
+        <span className="inline-flex items-center">
+          {t("aidpKnowledge.createIngroupPermission")}
+          <Tooltip title={t("aidpKnowledge.createIngroupPermissionHint")}>
+            <QuestionCircleOutlined
+              className="ml-1 cursor-help text-gray-400"
+              aria-label={t("aidpKnowledge.createIngroupPermissionHint")}
+            />
+          </Tooltip>
+        </span>
+      }
       rules={[
         {
           required: true,

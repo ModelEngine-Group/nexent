@@ -18,29 +18,42 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 0 12px;
+  padding: 0 1px 12px;
   flex-shrink: 0;
 }
 
 .searchGroup {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 100%;
+  width: 100%;
   min-width: 0;
-  flex: 1;
 }
 
 .searchInput {
-  width: 360px;
-  max-width: 100%;
-  flex-shrink: 1;
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
   height: 32px;
-  padding: 5px 12px;
+  padding: 5px 44px 5px 12px;
 }
 
 .searchInput :global(.ant-input-prefix) {
   margin-inline-end: 4px;
   color: var(--aidp-muted);
+}
+
+.searchRefresh {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
 }
 
 .createButton {
@@ -85,11 +98,37 @@
   .cardGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .searchGroup {
+    flex-basis: calc((100% - 16px) / 2 + 40px);
+    width: calc((100% - 16px) / 2 + 40px);
+  }
+
+  .searchInput {
+    flex-basis: calc(100% - 40px);
+    width: calc(100% - 40px);
+    padding-right: 12px;
+  }
+
+  .searchRefresh {
+    position: static;
+    flex: 0 0 32px;
+  }
 }
 
 @container (min-width: 1200px) {
   .cardGrid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .searchGroup {
+    flex-basis: calc((100% - 32px) / 3 + 40px);
+    width: calc((100% - 32px) / 3 + 40px);
+  }
+
+  .searchInput {
+    flex-basis: calc(100% - 40px);
+    width: calc(100% - 40px);
   }
 }
 
@@ -269,6 +308,16 @@
   line-height: 22px;
 }
 
+.guideBenefits {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-inline-start: 22px;
+  color: var(--aidp-muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+
 .guideSteps {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -277,6 +326,12 @@
 }
 
 @container (min-width: 640px) {
+  .guideSteps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 1200px) {
   .guideSteps {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

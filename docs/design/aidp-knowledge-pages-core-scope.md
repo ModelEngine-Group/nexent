@@ -36,7 +36,7 @@
 
 ## Mock 范围
 
-Mock 仅迁入模型和完整中文图谱模板、创建配置校验与保存、中文知识库和已入库文件示例、文件搜索分页、上传结果模拟，以及默认 10 秒上传响应延迟。模板数据文件为 `test/ext_components/aidp/mock_servers/graph_config_template_chinese.json`。
+Mock 仅迁入模型和完整中文图谱模板、创建配置校验与保存、中文知识库和已入库文件示例、文件搜索分页、上传结果模拟，以及默认 10 秒上传响应延迟。新上传文件默认在上传响应成功后立即进入已入库列表，确保抽屉关闭时的一次刷新能看到结果；如需模拟异步入库，可调用 `POST /_mock/processing-seconds?seconds=N` 设置处理延迟。模板数据文件为 `test/ext_components/aidp/mock_servers/graph_config_template_chinese.json`。
 
 原有兼容接口保留；没有迁入上传任务筛选和重试、失败任务样例、详细信息专用样例。现有持久化 state 和本机数据库继续使用，不重置。上传延迟可用 `--upload-seconds 0` 关闭，便于快速自动化测试。
 

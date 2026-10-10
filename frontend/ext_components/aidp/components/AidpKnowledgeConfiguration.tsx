@@ -195,7 +195,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         content: t("aidpKnowledge.confirmDeleteContent", { name: kb.kds_name }),
         okText: t("common.confirm"),
         cancelText: t("common.cancel"),
-        okButtonProps: { danger: true },
         centered: true,
         afterClose: () => setDeleteConfirmOpen(false),
         onOk: async () => {

@@ -277,7 +277,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
       },
       {
         key: "delete",
-        danger: true,
         icon: <Trash2 className="h-3.5 w-3.5" />,
         label: t("common.delete"),
       },
@@ -537,7 +536,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                 </Button>
                 <Button
                   type="link"
-                  danger
                   size="small"
                   className="px-1"
                   onClick={(event) => {
@@ -675,6 +673,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                   type="text"
                   aria-label={t("aidpKnowledge.refresh")}
                   icon={<ReloadOutlined spin={isLoading} />}
+                  className={styles.searchRefresh}
                   onClick={onRefresh}
                 />
               </Tooltip>

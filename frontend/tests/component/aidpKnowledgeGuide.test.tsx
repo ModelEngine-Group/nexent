@@ -14,6 +14,8 @@ describe("knowledge guide preference", () => {
   it("starts expanded, remembers collapse across route unmount, and reopens from usage guide", async () => {
     const first = render(<AidpKnowledgeGuide />);
     expect(screen.getByText("aidpKnowledge.guideIntro")).toBeVisible();
+    expect(screen.getByText("aidpKnowledge.guideBenefitOne")).toBeVisible();
+    expect(screen.getByText("aidpKnowledge.guideBenefitTwo")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /guideCollapse/ }));
     expect(screen.queryByText("aidpKnowledge.guideIntro")).toBeNull();
     first.unmount();

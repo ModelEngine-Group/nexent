@@ -23,7 +23,7 @@ from uuid import UUID
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import run_blocking
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
@@ -80,7 +80,7 @@ logger = logging.getLogger("aidp_mgmt_app")
 AIDP_MAX_UPLOAD_FILE_COUNT = 50
 AIDP_SMALL_FILE_MAX_SIZE_BYTES = 20 * 1024 * 1024
 AIDP_OTHER_FILE_MAX_SIZE_BYTES = 1024 * 1024 * 1024
-AIDP_SMALL_FILE_EXTENSIONS = {"txt", "xls", "xlsx", "csv"}
+AIDP_SMALL_FILE_EXTENSIONS = {"txt", "json", "md", "html", "xls", "xlsx", "csv"}
 
 # AIDP document statuses (mirrors the file-history vocabulary): UPLOADING,
 # PROCESSING and EXTRACTING are the stages a file walks through, COMPLETED and
@@ -162,18 +162,22 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
 class CreateKbRequest(BaseModel):
     """Request body for creating a knowledge base."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Knowledge base name (required)")
-    description: Optional[str] = Field(None, description="Knowledge base description")
+    description: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Knowledge base description (required)",
+    )
     embedding_model: Optional[str] = Field(None, description="Embedding model identifier")
-    is_multimodal: Optional[bool] = Field(None, description="Whether KB supports multimodal content")
-    vision_model: Optional[str] = Field(None, description="Vision model identifier for multimodal KBs")
     chunk_token_num: Optional[int] = Field(None, description="Chunk size in tokens (> 0)")
     chunk_overlap_num: Optional[int] = Field(None, description="Chunk overlap in tokens (>= 0)")
     vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
     is_personal: Optional[int] = Field(None, ge=0, le=1, description="Personal KB flag, int 0 or 1")
     topk: Optional[int] = Field(None, description="Top-K retrieval count")
     similarity: Optional[float] = Field(None, description="Similarity score threshold")
-    smartsplit: Optional[int] = Field(None, ge=0, le=1, description="Smart chunking mode, int 0 or 1")
     caption_enable: Optional[int] = Field(None, ge=0, le=1, description="Caption generation toggle, int 0 or 1")
     chunk_mode: Optional[int] = Field(
         None, ge=0, le=1, description="Chunking mode: 0 smart splitting, 1 legal clauses"
@@ -187,9 +191,6 @@ class CreateKbRequest(BaseModel):
             "Structured graph configuration. The service validates it and serializes it into the "
             "AIDP graph_config string; it is omitted entirely when the graph is disabled."
         ),
-    )
-    llm_model_name: Optional[str] = Field(
-        None, description="Graph extraction model taken from the llm category"
     )
     # Nexent-side permission payload. Never forwarded to AIDP.
     ingroup_permission: Optional[str] = Field(
@@ -258,20 +259,11 @@ async def _auth(request: Request) -> tuple[str, str]:
 
 
 def _infer_is_multimodal(detail: dict) -> bool:
-    """Reverse-derive ``is_multimodal`` from AIDP detail response.
+    """Derive the Nexent UI's multimodal flag from AIDP's caption setting.
 
-    AIDP does not return an ``is_multimodal`` field — it is a Nexent-side
-    concept. On create the SDK mapper translates it one-to-one into
-    ``caption_enable`` (``sdk/nexent/core/knowledge_base/mapper.py``):
-
-        caption_enable = 1 if is_multimodal else DEFAULT_CAPTION_ENABLE
-
-    So the reverse mapping only needs to inspect ``caption_enable``. The
-    ``vlm_model`` field is a separate, optional identifier that the user
-    may or may not supply — we deliberately do NOT gate on it being
-    non-empty, because (a) the user can choose any VLM model from the
-    AIDP catalog (not a fixed name) and (b) AIDP may not even return
-    the field for a given KB.
+    AIDP exposes ``caption_enable`` rather than ``is_multimodal``. The detail
+    response therefore only needs to be checked for an enabled caption flag;
+    ``vlm_model`` is a separate model identifier and is not used for inference.
 
     Returns ``True`` iff ``caption_enable ∈ {1, "1", True}``.
     """
@@ -917,11 +909,6 @@ async def list_knowledge_bases(
     items: list[dict] = []
     for row, (detail, resource_status) in zip(page_rows, detail_results):
         kb_id = row["kb_id"]
-        document_count = (
-            detail.get("document_count")
-            if detail.get("document_count") is not None
-            else row.get("document_count")
-        )
         items.append({
             "kds_id": kb_id,
             "kds_name": (
@@ -932,15 +919,13 @@ async def list_knowledge_bases(
                 or ""
             ),
             "description": detail.get("description") or row.get("description") or "",
-            "document_count": document_count if document_count is not None else 0,
-            "chunk_count": detail.get("chunk_count", row.get("chunk_count", 0)),
+            # AIDP's catalog contract does not include document or chunk counts.
+            # Keep compatibility keys unknown instead of trusting mock-only fields.
+            "document_count": None,
+            "chunk_count": None,
             "embedding_model": detail.get("embedding_model") or row.get("embedding_model") or "",
-            # ``is_multimodal`` is a Nexent-side concept (frontend sends it
-            # when creating a KB; the SDK mapper converts it to
-            # ``caption_enable`` + ``vlm_model``). AIDP does NOT return this
-            # field, so we reverse-derive it from ``caption_enable == 1``
-            # and a non-empty ``vlm_model``. Matches the forward mapping
-            # in ``sdk/nexent/core/knowledge_base/mapper.py``.
+            # ``is_multimodal`` is a Nexent-side display field. AIDP exposes
+            # ``caption_enable``, from which the UI value is derived.
             "is_multimodal": _infer_is_multimodal(detail or row),
             "vlm_model": detail.get("vlm_model") or row.get("vlm_model") or "",
             "caption_enable": detail.get("caption_enable", row.get("caption_enable", 0)),
@@ -969,10 +954,7 @@ async def list_knowledge_bases(
             "is_private": detail.get("is_private", row.get("is_private")),
             "current_cap": detail.get("current_cap", row.get("current_cap")),
             "user_name": detail.get("user_name", row.get("user_name")),
-            # A count from either the AIDP detail response or its catalog row
-            # is confirmed data. The compatibility default above remains
-            # marked unreliable when neither response includes a count.
-            "document_count_reliable": document_count is not None,
+            "document_count_reliable": False,
         })
 
     total_ms = (time.perf_counter() - started_at) * 1000
@@ -1157,6 +1139,22 @@ async def get_knowledge_base(
         resource_status = "UNAVAILABLE"
 
     detail = dict(detail)
+    try:
+        document_count = await run_blocking(
+            "aidp-detail-document-count",
+            _load_cached_doc_count,
+            server_url,
+            api_key,
+            kds_id,
+            lane="control-io",
+            owner="config",
+        )
+        detail["document_count"] = document_count
+        detail["document_count_reliable"] = True
+    except Exception as exc:  # noqa: BLE001 - count failure must not hide KB details
+        logger.warning("AIDP document Count API failed for KB %s: %s", kds_id, exc)
+        detail["document_count"] = None
+        detail["document_count_reliable"] = False
     detail["kds_id"] = kds_id
     detail["permission"] = decision.permission
     detail["resource_status"] = resource_status

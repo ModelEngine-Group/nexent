@@ -271,8 +271,8 @@ export interface AidpKnowledgeBaseItem {
   kds_id: string;
   kds_name: string;
   description?: string;
-  document_count?: number;
-  chunk_count?: number;
+  document_count?: number | null;
+  chunk_count?: number | null;
   /** Effective permission for the current user: "EDIT" / "READ_ONLY" / null. */
   permission?: "EDIT" | "READ_ONLY" | null;
   /** Group-level permission configured for the KB: "EDIT" / "READ_ONLY" / "PRIVATE". */

@@ -50,6 +50,30 @@ def test_file_listing_filters_before_pagination(mock_aidp_server):
     assert "keyword=%E5%88%B6%E5%BA%A6" in body["next_link"]
 
 
+def test_kb_metadata_uses_the_dedicated_document_count_endpoint(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {
+        "kds_id": "kb-1",
+        "kds_name": "测试知识库",
+        "document_count": 999,
+    }
+    server._DOCUMENTS_BY_KB["kb-1"] = [
+        {"file_uuid": "f-1", "file_name": "已入库.txt", "status": 1}
+    ]
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    kb_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases"
+
+    listed = client.get(kb_path, headers=headers).json()["value"][0]
+    detail = client.get(f"{kb_path}/kb-1", headers=headers).json()
+    count = client.post(f"{kb_path}/kb-1/KnowledgeFiles/Count", headers=headers)
+
+    assert "document_count" not in listed
+    assert "document_count" not in detail
+    assert count.status_code == 200
+    assert count.json() == {"count": 1}
+
+
 def test_upload_delay_is_applied_once_per_batch(mock_aidp_server, monkeypatch):
     server = mock_aidp_server
     server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
@@ -83,6 +107,53 @@ def test_upload_delay_is_applied_once_per_batch(mock_aidp_server, monkeypatch):
     )
     assert response.status_code == 200
     sleep.assert_not_awaited()
+
+
+def test_uploaded_file_is_visible_after_successful_response_by_default(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    upload_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Upload"
+    list_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles"
+
+    response = client.post(
+        upload_path,
+        headers=headers,
+        files={"files": ("新上传文件.txt", "测试内容".encode(), "text/plain")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["summary"] == {"total": 1, "success": 1, "failed": 0}
+    listed = client.get(list_path, headers=headers)
+    assert listed.status_code == 200
+    assert [item["file_name"] for item in listed.json()["value"]] == ["新上传文件.txt"]
+
+
+def test_processing_delay_can_still_hide_new_upload_until_ingestion_finishes(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    upload_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Upload"
+    list_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles"
+
+    assert client.post("/_mock/processing-seconds", params={"seconds": 60}).status_code == 200
+    uploaded = client.post(
+        upload_path,
+        headers=headers,
+        files={"files": ("处理中.txt", "测试内容".encode(), "text/plain")},
+    )
+    assert uploaded.status_code == 200
+    assert client.get(list_path, headers=headers).json()["value"] == []
+
+    history = client.post(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/History",
+        headers=headers,
+        json={"dir_path": "/aidp/knowledge/kb-1", "page": 1},
+    )
+    assert history.status_code == 200
+    assert any(item["file_name"] == "处理中.txt" for item in history.json()["value"])
 
 
 @pytest.mark.parametrize("seconds", [-1, 601])

@@ -207,12 +207,15 @@ def test_detail_creator_comes_from_nexent_owner_in_current_tenant(monkeypatch):
     lookup = MagicMock(return_value={"local-owner": "admin@example.test"})
     monkeypatch.setattr(module.perms, "require_permission", lambda *a, **kw: MagicMock(permission="EDIT"))
     monkeypatch.setattr(module, "get_aidp_kb_impl", lambda *a: {"kds_name": "资料库", "user_name": "remote-user"})
+    monkeypatch.setattr(module, "_load_cached_doc_count", lambda *a: 7)
     monkeypatch.setattr(module.aidp_permission_db, "get_permission_by_kb_id",
                         lambda *a: {"owner_user_id": "local-owner", "group_ids": []})
     monkeypatch.setattr(module, "get_nexent_creator_names", lookup)
     result = _client().get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()).json()
     assert result["creator_name"] == "admin@example.test"
     assert result["created_by"] == "local-owner"
+    assert result["document_count"] == 7
+    assert result["document_count_reliable"] is True
     lookup.assert_called_once_with(["local-owner"], TENANT_ID)
 
 
@@ -310,7 +313,8 @@ class TestPermissionEnforcement:
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(return_value=decision)
 
-        with patch.object(aidp_mgmt_app, "get_aidp_kb_impl") as mock_get:
+        with patch.object(aidp_mgmt_app, "get_aidp_kb_impl") as mock_get, \
+             patch.object(aidp_mgmt_app, "_load_cached_doc_count", return_value=12):
             mock_get.return_value = {"kds_name": "name", "description": "desc"}
             try:
                 response = client.get(
@@ -320,6 +324,8 @@ class TestPermissionEnforcement:
                 aidp_permission_service.require_permission = original_require
         assert response.status_code == HTTPStatus.OK
         assert response.json()["permission"] == "READ_ONLY"
+        assert response.json()["document_count"] == 12
+        assert response.json()["document_count_reliable"] is True
 
     def test_update_kb_without_edit_returns_403(self):
         client = _client()
@@ -469,6 +475,7 @@ class TestCreateKnowledgeBase:
                 headers=_bearer(),
                 json={
                     "name": "New KB",
+                    "description": "A test knowledge base",
                     "ingroup_permission": "EDIT",
                     "group_ids": [1, 2],
                 },
@@ -498,6 +505,7 @@ class TestCreateKnowledgeBase:
                 headers=_bearer(),
                 json={
                     "name": "New KB",
+                    "description": "A test knowledge base",
                     "ingroup_permission": "READ_ONLY",
                     "group_ids": [1],
                 },
@@ -520,6 +528,7 @@ class TestCreateKnowledgeBase:
                 headers=_bearer(),
                 json={
                     "name": "New KB",
+                    "description": "A test knowledge base",
                     "ingroup_permission": "READ_ONLY",
                     "group_ids": [1],
                 },
@@ -532,9 +541,40 @@ class TestCreateKnowledgeBase:
         response = client.post(
             "/aidp-mgmt/knowledge-bases",
             headers=_bearer(),
-            json={"name": "New KB", "ingroup_permission": "EDIT"},
+            json={"name": "New KB", "description": "A test knowledge base", "ingroup_permission": "EDIT"},
         )
         assert response.status_code == HTTPStatus.BAD_REQUEST
+
+    def test_create_requires_description(self):
+        response = _client().post(
+            "/aidp-mgmt/knowledge-bases",
+            headers=_bearer(),
+            json={"name": "New KB", "ingroup_permission": "PRIVATE"},
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    @pytest.mark.parametrize(
+        "legacy_field,value",
+        [
+            ("is_multimodal", True),
+            ("vision_model", "legacy-vlm"),
+            ("smartsplit", 1),
+            ("llm_model_name", "legacy-llm"),
+        ],
+    )
+    def test_create_rejects_legacy_fields(self, legacy_field, value):
+        payload = {
+            "name": "New KB",
+            "description": "A test knowledge base",
+            "ingroup_permission": "PRIVATE",
+            legacy_field: value,
+        }
+        response = _client().post(
+            "/aidp-mgmt/knowledge-bases",
+            headers=_bearer(),
+            json=payload,
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
 # --- List KBs -------------------------------------------------------------
@@ -726,8 +766,8 @@ class TestListKnowledgeBases:
         item = response.json()["value"][0]
         assert item["description"] == "From catalog"
         assert item["updated_at"] == "2026-01-01T00:00:00Z"
-        assert item["document_count"] == 8
-        assert item["document_count_reliable"] is True
+        assert item["document_count"] is None
+        assert item["document_count_reliable"] is False
         mock_detail.assert_not_called()
 
 
@@ -871,6 +911,49 @@ class TestUploadDocuments:
         assert body["summary"] == {"total": 2, "success": 1, "failed": 1}
         assert body["failed_list"][0]["file_name"] == "large.txt"
         assert mock_upload.call_args.args[3][0].filename == "valid.pdf"
+
+    def test_upload_applies_twenty_mb_limit_to_json_md_and_html(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        files = [
+            ("files", ("large.json", io.BytesIO(b"xx"), "application/json")),
+            ("files", ("large.md", io.BytesIO(b"xx"), "text/markdown")),
+            ("files", ("large.html", io.BytesIO(b"xx"), "text/html")),
+            ("files", ("valid.pdf", io.BytesIO(b"xx"), "application/pdf")),
+        ]
+        aidp_result = {
+            "summary": {"total": 1, "success": 1, "failed": 0},
+            "success_list": [{"file_name": "valid.pdf"}],
+            "failed_list": [],
+        }
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="EDIT"),
+        ), patch.object(
+            aidp_mgmt_app, "AIDP_SMALL_FILE_MAX_SIZE_BYTES", 1
+        ), patch.object(
+            aidp_mgmt_app, "AIDP_OTHER_FILE_MAX_SIZE_BYTES", 10
+        ), patch.object(
+            aidp_mgmt_app, "upload_aidp_docs_impl", return_value=aidp_result
+        ) as mock_upload:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+                files=files,
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["summary"] == {"total": 4, "success": 1, "failed": 3}
+        assert {item["file_name"] for item in body["failed_list"]} == {
+            "large.json",
+            "large.md",
+            "large.html",
+        }
+        assert [file.filename for file in mock_upload.call_args.args[3]] == ["valid.pdf"]
 
 
 # --- List documents ------------------------------------------------------
@@ -1250,7 +1333,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "User KB", "ingroup_permission": "EDIT", "group_ids": [1]},
+                json={"name": "User KB", "description": "A test knowledge base",
+                      "ingroup_permission": "EDIT", "group_ids": [1]},
             )
 
         assert response.status_code == HTTPStatus.OK
@@ -1263,7 +1347,8 @@ class TestCreateKnowledgeBaseEdgeCases:
         response = client.post(
             "/aidp-mgmt/knowledge-bases",
             headers=_bearer(),
-            json={"name": "KB", "ingroup_permission": "INVALID_VALUE", "group_ids": [1]},
+            json={"name": "KB", "description": "A test knowledge base",
+                  "ingroup_permission": "INVALID_VALUE", "group_ids": [1]},
         )
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
@@ -1280,7 +1365,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "EDIT", "group_ids": [999]},
+                json={"name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "EDIT", "group_ids": [999]},
             )
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
@@ -1298,7 +1384,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "Private KB", "ingroup_permission": "PRIVATE"},
+                json={"name": "Private KB", "description": "A test knowledge base",
+                      "ingroup_permission": "PRIVATE"},
             )
         assert response.status_code == HTTPStatus.OK
         # No group validation was called
@@ -1317,7 +1404,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         # AIDP_AUTH_ERROR maps to 502
         assert response.status_code == 502
@@ -1340,7 +1428,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         assert response.status_code == HTTPStatus.CONFLICT
 
@@ -1356,7 +1445,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         # AIDP_SERVICE_ERROR maps to 502 in ERROR_CODE_HTTP_STATUS
         assert response.status_code == 502
@@ -1373,7 +1463,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         # AIDP_SERVICE_ERROR maps to 502
         assert response.status_code == 502
@@ -1397,7 +1488,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         delete_mock.assert_called_once()
@@ -1422,7 +1514,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         mock_status.assert_called_once()
@@ -1444,11 +1537,15 @@ class TestGetKbFetchFailure:
                           return_value=MagicMock(permission="READ_ONLY")), \
              patch.object(aidp_mgmt_app, "get_aidp_kb_impl",
                           side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "down")), \
+             patch.object(aidp_mgmt_app, "_load_cached_doc_count",
+                          side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "count down")), \
              patch.object(aidp_permission_service, "update_resource_status") as mock_status:
             response = client.get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
         body = response.json()
         assert body["resource_status"] == "UNAVAILABLE"
+        assert body["document_count"] is None
+        assert body["document_count_reliable"] is False
         mock_status.assert_called_once()
 
 
@@ -1565,7 +1662,8 @@ class TestCreateKnowledgeBaseKdsName:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": body_name, "ingroup_permission": "READ_ONLY",
+                json={"name": body_name, "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY",
                       "group_ids": [1]},
             )
         assert response.status_code == HTTPStatus.OK

@@ -382,7 +382,7 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
         : row.status === "failed"
           ? row.error || t("aidpKnowledge.uploadFailed")
           : row.status === "success"
-            ? t("aidpKnowledge.importUploadComplete")
+            ? `${formatBytes(row.file.size)} · ${t("aidpKnowledge.importUploadComplete")}`
             : `${formatBytes(row.file.size)} · ${t("aidpKnowledge.importPending")}`;
 
     return (

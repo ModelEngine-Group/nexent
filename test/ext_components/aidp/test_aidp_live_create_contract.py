@@ -36,7 +36,7 @@ def test_forwarded_create_matches_live_contract(aidp_service_module, mock_aidp_s
         "name": "中文图谱知识库", "description": "中文测试资料",
         "embedding_model": "/models/bge-m3", "chunk_token_num": 512,
         "chunk_overlap_num": 51, "similarity": 0.6, "topk": 10,
-        "is_exist_graph": True, "graph_config": graph_config(), "smartsplit": 1,
+        "is_exist_graph": True, "graph_config": graph_config(),
     })
     saved = upstream.get(
         f"{mock_aidp_server._KB_PREFIX}/{result['kds_id']}",
@@ -75,9 +75,15 @@ def test_prompt_limit_counts_characters_and_disabled_graph_omits_config(aidp_ser
     config["prompt_text"] += "字"
     with pytest.raises(module.AppException):
         module._serialize_graph_config(config)
-    disabled = module._apply_create_defaults({"name": "无图谱", "is_exist_graph": False,
-                                              "graph_config": config, "llm_model_name": "hidden"})
-    assert "graph_config" not in disabled and "llm_model_name" not in disabled
+    disabled = module._apply_create_defaults(
+        {
+            "name": "无图谱",
+            "description": "禁用知识图谱的测试知识库",
+            "is_exist_graph": False,
+            "graph_config": config,
+        }
+    )
+    assert "graph_config" not in disabled
 
 
 @pytest.mark.parametrize("language", ["chinese", "english"])
@@ -118,10 +124,28 @@ def test_chinese_template_returns_complete_captured_prompts(mock_aidp_server, do
     assert parameter["param_value"] == parameter["template"]["常规"]
 
 
-def test_old_internal_aliases_translate_without_graph_topk(aidp_service_module):
-    config = {**graph_config(), "domain": "general", "prompt_language": "chinese",
-              "no_think_mode": False, "retrieve_subgraph_hop": 3, "retrieve_default_topk": 5}
+def test_current_graph_config_values_are_serialized_without_aliases(aidp_service_module):
+    config = {**graph_config(), "no_think_mode": "否", "retrieve_subgraph_hop": "3"}
     result = json.loads(aidp_service_module._serialize_graph_config(config))
     assert result["domain"] == "常规" and result["prompt_language"] == "中文"
     assert result["no_think_mode"] == "否" and result["retrieve_subgraph_hop"] == "3"
     assert "retrieve_default_topk" not in result and "retrieve_topk" not in result
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("domain", "general"),
+        ("prompt_language", "chinese"),
+        ("no_think_mode", False),
+        ("synonym_merge_enable", False),
+        ("disambiguation_enable", False),
+        ("retrieve_subgraph_hop", 3),
+        ("retrieve_default_topk", "5"),
+        ("retrieve_topk", "5"),
+    ],
+)
+def test_legacy_graph_config_values_are_rejected(aidp_service_module, key, value):
+    config = {**graph_config(), key: value}
+    with pytest.raises(aidp_service_module.AppException):
+        aidp_service_module._serialize_graph_config(config)

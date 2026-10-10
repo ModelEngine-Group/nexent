@@ -246,7 +246,6 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       Modal.confirm({
         title: t("aidpKnowledge.deleteDocTitle"),
         content: file.file_name,
-        okButtonProps: { danger: true },
         onOk: async () => {
           try {
             const result = await aidpKnowledgeService.removeDoc(
@@ -362,7 +361,6 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           {canEdit && (
             <Button
               type="link"
-              danger
               size="small"
               className="px-0"
               onClick={() => handleDeleteFile(record)}
@@ -404,101 +402,102 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       />
 
       <section className="@container shrink-0 rounded-xl border border-violet-100 bg-gradient-to-r from-violet-50 via-white to-blue-50 px-6 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-1 items-start gap-3">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-2xl text-violet-600">
-              <DatabaseOutlined />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-center gap-2">
-                <Tooltip title={detail.kds_name}>
-                  <h1 className="truncate text-lg font-semibold text-gray-800">
-                    {detail.kds_name}
-                  </h1>
-                </Tooltip>
-                {canEdit && (
-                  <Tooltip title={t("aidpKnowledge.detailEditNameDescription")}>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<EditOutlined />}
-                      onClick={() => setEditingKbMode("metadata")}
-                    />
+        <div className="flex items-start gap-4">
+          <span className="flex h-24 w-24 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-6xl text-violet-600">
+            <DatabaseOutlined />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Tooltip title={detail.kds_name}>
+                    <h1 className="truncate text-lg font-semibold text-gray-800">
+                      {detail.kds_name}
+                    </h1>
                   </Tooltip>
-                )}
+                  {canEdit && (
+                    <Tooltip
+                      title={t("aidpKnowledge.detailEditNameDescription")}
+                    >
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => setEditingKbMode("metadata")}
+                      />
+                    </Tooltip>
+                  )}
+                </div>
+                <Tooltip
+                  title={detail.description}
+                  styles={{ root: { maxWidth: 480 } }}
+                >
+                  <p className="mt-1 truncate text-sm leading-6 text-gray-600">
+                    {detail.description || t("aidpKnowledge.noDescription")}
+                  </p>
+                </Tooltip>
               </div>
-              <Tooltip
-                title={detail.description}
-                styles={{ root: { maxWidth: 480 } }}
-              >
-                <p className="mt-1 truncate text-sm leading-6 text-gray-600">
-                  {detail.description || t("aidpKnowledge.noDescription")}
-                </p>
-              </Tooltip>
+              {canEdit && (
+                <Button
+                  icon={<DeleteOutlined />}
+                  onClick={() => onDelete(knowledgeBase)}
+                >
+                  {t("common.delete")}
+                </Button>
+              )}
             </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {canEdit && (
-              <Button
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => onDelete(knowledgeBase)}
-              >
-                {t("common.delete")}
-              </Button>
-            )}
+            <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-3 @min-[600px]:grid-cols-2 @min-[900px]:grid-cols-3 @min-[1200px]:grid-cols-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <FileTextOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
+                <AidpDetailField label={t("aidpKnowledge.detailTabFiles")}>
+                  {formatAidpDocumentCount(
+                    detail.document_count,
+                    detail.document_count_reliable
+                  )}
+                </AidpDetailField>
+              </div>
+              <div className="flex min-w-0 items-center gap-3">
+                <DatabaseOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
+                <AidpDetailField label={t("aidpKnowledge.detailPermissions")}>
+                  {privateScope
+                    ? t("aidpKnowledge.scopePrivate")
+                    : t("aidpKnowledge.scopeShared")}
+                </AidpDetailField>
+              </div>
+              <div className="flex min-w-0 items-center gap-3">
+                <TeamOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
+                <AidpDetailField label={t("aidpKnowledge.detailAllowedGroups")}>
+                  {privateScope ? (
+                    t("aidpKnowledge.detailOwnerOnly")
+                  ) : groupNames.length > 0 ||
+                    (detail.group_ids || []).length > 0 ? (
+                    <AidpGroupNamesDisplay
+                      groupNames={
+                        groupNames.length > 0
+                          ? groupNames
+                          : (detail.group_ids || []).map(String)
+                      }
+                    />
+                  ) : (
+                    UNKNOWN
+                  )}
+                </AidpDetailField>
+              </div>
+              <div className="flex min-w-0 items-center gap-3">
+                <ClockCircleOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
+                <AidpDetailField label={t("aidpKnowledge.detailCreatedAt")}>
+                  {formatDetailDateTime(detail.created_at)}
+                </AidpDetailField>
+              </div>
+              <div className="flex min-w-0 items-center gap-3">
+                <UserOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
+                <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
+                  {formatAidpCreator(detail.creator_name)}
+                </AidpDetailField>
+              </div>
+            </dl>
           </div>
         </div>
-        <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-3 @min-[600px]:grid-cols-2 @min-[850px]:grid-cols-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <FileTextOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
-            <AidpDetailField label={t("aidpKnowledge.detailTabFiles")}>
-              {formatAidpDocumentCount(
-                detail.document_count,
-                detail.document_count_reliable
-              )}
-            </AidpDetailField>
-          </div>
-          <div className="flex min-w-0 items-center gap-3">
-            <DatabaseOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
-            <AidpDetailField label={t("aidpKnowledge.detailPermissions")}>
-              {privateScope
-                ? t("aidpKnowledge.scopePrivate")
-                : t("aidpKnowledge.scopeShared")}
-            </AidpDetailField>
-          </div>
-          <div className="flex min-w-0 items-center gap-3">
-            <TeamOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
-            <AidpDetailField label={t("aidpKnowledge.detailAllowedGroups")}>
-              {privateScope ? (
-                t("aidpKnowledge.detailOwnerOnly")
-              ) : groupNames.length > 0 ||
-                (detail.group_ids || []).length > 0 ? (
-                <AidpGroupNamesDisplay
-                  groupNames={
-                    groupNames.length > 0
-                      ? groupNames
-                      : (detail.group_ids || []).map(String)
-                  }
-                />
-              ) : (
-                UNKNOWN
-              )}
-            </AidpDetailField>
-          </div>
-          <div className="flex min-w-0 items-center gap-3">
-            <ClockCircleOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
-            <AidpDetailField label={t("aidpKnowledge.detailCreatedAt")}>
-              {formatDetailDateTime(detail.created_at)}
-            </AidpDetailField>
-          </div>
-          <div className="flex min-w-0 items-center gap-3">
-            <UserOutlined className="rounded-lg bg-violet-100 p-2 text-base text-violet-600" />
-            <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
-              {formatAidpCreator(detail.creator_name)}
-            </AidpDetailField>
-          </div>
-        </dl>
       </section>
 
       <Tabs

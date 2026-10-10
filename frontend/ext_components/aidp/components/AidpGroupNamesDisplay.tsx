@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Popover, Tag } from "antd";
+import { Popover } from "antd";
 
 const MAX_VISIBLE_GROUPS = 2;
 
@@ -23,13 +23,16 @@ const AidpGroupNamesDisplay = ({ groupNames }: AidpGroupNamesDisplayProps) => {
       className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden whitespace-nowrap"
     >
       {visibleGroups.map((groupName, index) => (
-        <Tag
-          key={`${groupName}-${index}`}
-          title={groupName}
-          className="!m-0 min-w-0 flex-1 truncate !whitespace-nowrap"
-        >
-          {groupName}
-        </Tag>
+        <React.Fragment key={`${groupName}-${index}`}>
+          {index > 0 && (
+            <span aria-hidden="true" className="shrink-0">
+              ·
+            </span>
+          )}
+          <span title={groupName} className="min-w-0 flex-1 truncate">
+            {groupName}
+          </span>
+        </React.Fragment>
       ))}
       {remainingCount > 0 && (
         <Popover
@@ -42,7 +45,7 @@ const AidpGroupNamesDisplay = ({ groupNames }: AidpGroupNamesDisplayProps) => {
                 {groupNames.map((groupName, index) => (
                   <li
                     key={`${groupName}-${index}`}
-                    className="rounded bg-gray-50 px-2 py-1 text-sm leading-5 text-gray-700 break-words"
+                    className="px-1 py-1 text-sm leading-5 text-gray-700 break-words"
                   >
                     {groupName}
                   </li>

@@ -21,8 +21,8 @@ export interface AidpKbDetail {
   kds_id: string;
   kds_name: string;
   description?: string;
-  document_count?: number;
-  chunk_count?: number;
+  document_count?: number | null;
+  chunk_count?: number | null;
   embedding_model?: string;
   is_multimodal?: boolean;
   caption_enable?: number | null;
@@ -239,10 +239,8 @@ export interface AidpGraphConfig {
 
 export interface AidpCreateKbPayload {
   name: string;
-  description?: string;
+  description: string;
   embedding_model?: string;
-  is_multimodal?: boolean;
-  vision_model?: string;
   /** AIDP requires chunk_token_num (int, > 0) and chunk_overlap_num (int, >= 0). */
   chunk_token_num?: number;
   chunk_overlap_num?: number;
@@ -250,12 +248,8 @@ export interface AidpCreateKbPayload {
   is_personal?: number;
   topk?: number;
   similarity?: number;
-  smartsplit?: number;
   caption_enable?: number;
-  /**
-   * Chunking mode: 0 = smart splitting, 1 = legal clauses. Distinct from
-   * ``smartsplit``, which stays in place for existing callers.
-   */
+  /** Chunking mode: 0 = smart splitting, 1 = legal clauses. */
   chunk_mode?: number;
   /** Whether knowledge graph extraction is enabled for this knowledge base. */
   is_exist_graph?: boolean;

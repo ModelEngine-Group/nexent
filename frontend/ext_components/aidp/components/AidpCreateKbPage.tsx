@@ -249,7 +249,7 @@ const AidpCreateKbPage: React.FC = () => {
       setValidating(false);
       const created = await createMutation.mutateAsync({
         name: values.name.trim(),
-        description: values.description?.trim() || "",
+        description: values.description.trim(),
         chunk_token_num: chunkTokens,
         chunk_overlap_num: overlapTokens,
         chunk_mode: values.chunk_mode ?? AIDP_CREATE_DEFAULTS.chunk_mode,

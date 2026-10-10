@@ -179,7 +179,10 @@ it("refreshes the active list after creation and deletion", async () => {
   );
   await waitFor(() => expect(result.current.list.isSuccess).toBe(true));
   await act(async () => {
-    await result.current.create.mutateAsync({ name: "新建" });
+    await result.current.create.mutateAsync({
+      name: "新建",
+      description: "新建知识库的测试描述",
+    });
   });
   await waitFor(() =>
     expect(aidpKnowledgeService.listKbs).toHaveBeenCalledTimes(2)
@@ -190,7 +193,10 @@ it("refreshes the active list after creation and deletion", async () => {
   await waitFor(() =>
     expect(aidpKnowledgeService.listKbs).toHaveBeenCalledTimes(3)
   );
-  expect(aidpKnowledgeService.createKb).toHaveBeenCalledWith({ name: "新建" });
+  expect(aidpKnowledgeService.createKb).toHaveBeenCalledWith({
+    name: "新建",
+    description: "新建知识库的测试描述",
+  });
   expect(aidpKnowledgeService.deleteKb).toHaveBeenCalledWith("2");
 });
 

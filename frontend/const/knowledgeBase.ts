@@ -228,6 +228,9 @@ export const AIDP_SMALL_FILE_MAX_SIZE_MB = 20;
 export const AIDP_OTHER_FILE_MAX_SIZE_MB = 1024;
 export const AIDP_SMALL_FILE_EXTENSIONS = [
   "txt",
+  "json",
+  "md",
+  "html",
   "xls",
   "xlsx",
   "csv",
@@ -237,7 +240,10 @@ export const AIDP_SMALL_FILE_MAX_SIZE_BYTES =
 export const AIDP_OTHER_FILE_MAX_SIZE_BYTES =
   AIDP_OTHER_FILE_MAX_SIZE_MB * 1024 * 1024;
 
-const parsePositiveIntegerEnv = (value: string | undefined, fallback: number) => {
+const parsePositiveIntegerEnv = (
+  value: string | undefined,
+  fallback: number
+) => {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };

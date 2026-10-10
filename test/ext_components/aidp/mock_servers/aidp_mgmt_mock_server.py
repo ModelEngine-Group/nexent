@@ -19,9 +19,11 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
 
 Document status simulation (drives the "processing status" UI):
-  * Uploaded documents start as ``PROCESSING`` and flip to ``COMPLETED`` once
-    ``_PROCESSING_SECONDS`` have elapsed, so polling behaviour can be observed
-    end to end. Tune it with ``POST /_mock/processing-seconds?seconds=N``.
+  * Uploads are immediately visible in the completed-files list by default, so
+    a successful upload followed by the drawer's one-time refresh has an
+    observable result. Set ``_PROCESSING_SECONDS`` above zero with
+    ``POST /_mock/processing-seconds?seconds=N`` to simulate asynchronous
+    ingestion and exercise processing-status polling.
   * ``POST /_mock/doc-status`` (body ``{kds_id, file_ino_no, status}``) forces one
     document into any status without waiting for the timer, including the
     non-terminal ``UPLOADING`` / ``EXTRACTING`` stages.
@@ -96,8 +98,10 @@ _TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED}
 _CHANNEL_ROOT = "/aidp/knowledge"
 
 # Seconds an uploaded document stays PROCESSING before turning COMPLETED.
-# Overridable at runtime through POST /_mock/processing-seconds.
-_PROCESSING_SECONDS = 8.0
+# Default to immediate completion so the single file-list refresh on drawer
+# close can show a successful upload. Tests can opt into asynchronous ingestion
+# through POST /_mock/processing-seconds.
+_PROCESSING_SECONDS = 0.0
 _UPLOAD_SECONDS = 0.0
 _FILE_QUERY_SECONDS = 0.0
 _FILE_QUERY_FAIL = False
@@ -641,15 +645,12 @@ def list_knowledge_bases(
         ]
     start = (page - 1) * page_size
     end = start + page_size
-    # Enrich each item with document_count (same as detail endpoint does)
-    enriched = [{
-        **kb,
-        "document_count": sum(
-            1 for doc in _DOCUMENTS_BY_KB.get(kb["kds_id"], [])
-            if _visible_in_completed_listing(doc)
-        ),
-    } for kb in all_items]
-    items = enriched[start:end]
+    # Match AIDP's catalog response: file counts come from the dedicated
+    # KnowledgeFiles/Count endpoint, not from each KB row.
+    items = [
+        {key: value for key, value in kb.items() if key != "document_count"}
+        for kb in all_items[start:end]
+    ]
 
     next_link = None
     if end < len(all_items):
@@ -828,12 +829,8 @@ def get_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
-    # Augment with document count for richer responses
-    docs = _DOCUMENTS_BY_KB.get(kds_id, [])
-    result = {
-        **kb,
-        "document_count": sum(1 for doc in docs if _visible_in_completed_listing(doc)),
-    }
+    # Match AIDP's detail response: file counts come from the Count endpoint.
+    result = {key: value for key, value in kb.items() if key != "document_count"}
 
     logger.info("GET  kds_id=%s", kds_id)
     return JSONResponse(content=result)

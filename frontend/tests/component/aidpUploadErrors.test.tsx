@@ -10,6 +10,7 @@ import {
 import { App } from "antd";
 
 import { ApiError } from "@/services/api";
+import { validateAidpFiles } from "@/services/uploadService";
 import { ErrorCode } from "@/const/errorCode";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import {
@@ -188,6 +189,24 @@ describe("AIDP upload failure information", () => {
   });
 });
 
+describe("AIDP upload size limits", () => {
+  it("uses the 20 MB limit for JSON, Markdown, and HTML files", () => {
+    const justOver20Mb = 20 * 1024 * 1024 + 1;
+    const files = ["large.json", "large.md", "large.html", "large.pdf"].map(
+      (name) => ({ name, size: justOver20Mb, type: "" }) as File
+    );
+
+    const result = validateAidpFiles(files);
+
+    expect(result.oversized.map(({ file }) => file.name)).toEqual([
+      "large.json",
+      "large.md",
+      "large.html",
+    ]);
+    expect(result.valid.map(({ name }) => name)).toEqual(["large.pdf"]);
+  });
+});
+
 describe("upload file rows", () => {
   const knowledgeBase = {
     kds_id: "1",
@@ -274,7 +293,7 @@ describe("upload file rows", () => {
     await waitFor(() => expect(confirm).toBeEnabled());
     expect(document.querySelector('svg[aria-label="100%"]')).toBeNull();
     expect(
-      screen.getByText(zh["aidpKnowledge.importUploadComplete"])
+      screen.getByText(`4 B · ${zh["aidpKnowledge.importUploadComplete"]}`)
     ).toBeInTheDocument();
   });
 
