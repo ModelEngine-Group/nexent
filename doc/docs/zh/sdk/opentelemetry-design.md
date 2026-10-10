@@ -485,9 +485,8 @@ Collector trace pipeline 使用 `zipkin` exporter 转发到 `http://zipkin:9411/
 | `agent.run` | `NexentAgent.agent_run_with_observer` | AGENT | query、session、user、tenant、agent、metadata、tags | 作为一次 Agent 运行的顶层业务 trace |
 | `agent.run.loop` | `NexentAgent.agent_run_with_observer` | CHAIN | Agent loop、step、最终输出 | 追踪实际 Agent 执行生命周期 |
 | `{display_name or model_id}.generate` | `sdk/nexent/core/models/openai_llm.py` | LLM / generation | 模型、温度、top_p、消息、输入输出、token、TTFT、chunk 数 | LLM 性能、成本、输出和异常分析 |
-| `python_interpreter` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 生成代码、step number、执行输出、日志、是否最终答案 | 观测 CodeAgent 解释器执行 |
+| `python_interpreter` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 生成代码、step number、执行输出和日志 | 观测 CodeAgent 解释器执行 |
 | 真实工具名 | `sdk/nexent/core/agents/nexent_agent.py` | TOOL | local/MCP/langchain/builtin 工具输入输出 | 观测真实工具可用性、延迟、错误和输入输出 |
-| `FinalAnswerTool` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 最终答案输出 | 让 Phoenix/Langfuse 中能明确看到最终答案节点 |
 | `monitor_endpoint` | SDK 兼容 API | AGENT / CHAIN | 自定义 operation、参数、错误 | 低层 escape hatch；不推荐业务层新增常规埋点 |
 | `start_agent_run` / `trace_agent_step` / `trace_retriever_call` | SDK 公共 API | AGENT / CHAIN / RETRIEVER | Agent metadata、输入输出、session、user | SDK 生命周期埋点和少量自定义层级埋点 |
 | `trace_tool_call` | SDK 公共 API | TOOL | 工具名、输入、输出、耗时、错误 | SDK 用户自定义工具埋点 |
@@ -531,10 +530,8 @@ flowchart TD
   Step --> LLM[Model.generate: LLM / generation]
   Step --> PY[python_interpreter: TOOL]
   PY --> Tool[Real local / MCP / langchain / builtin tool: TOOL]
-  PY --> Final[FinalAnswerTool: TOOL]
   LLM --> Attr1[OpenInference + Langfuse attrs]
   Tool --> Attr1
-  Final --> Attr1
   Attr1 --> OTel[OpenTelemetry Tracer/Meter Provider]
   OTel --> Collector[OTLP Collector]
   Collector --> Phoenix[Phoenix]
@@ -552,7 +549,6 @@ agent.run                         agent
    ├─ Model.generate               llm / generation
    ├─ python_interpreter           tool
    │  └─ RealTool                  tool
-   └─ FinalAnswerTool              tool
 ```
 
 FastAPI HTTP span 可以保留在最上层用于接口视角，也可以通过 `MONITORING_FASTAPI_EXCLUDED_URLS=/agent/run` 在 AI trace 视图中隐藏。
@@ -623,7 +619,7 @@ flowchart TB
 | Phoenix/Langfuse 中出现大量 `unknown POST /agent/run http ...` | 默认排除 FastAPI ASGI `receive/send` span；requests 自动埋点默认关闭；可配置隐藏 `/agent/run` HTTP span |
 | Langfuse 字段耦合过重 | 不写入 `langfuse.*` 专用 span 属性，仅保留 OTLP 转发和 OpenInference 语义 |
 | LLM span 不明显或缺输出 | LLM span 命名为 `{display_name or model_id}.generate`，并写入 `output.value` |
-| 工具 span 缺失 | 在 `NexentAgent.create_single_agent` 统一包装 local/MCP/langchain/builtin 工具，并在 `CoreAgent` 增加 `python_interpreter` 和 `FinalAnswerTool` span |
+| 工具 span 缺失 | 在 `NexentAgent.create_single_agent` 统一包装 local/MCP/langchain/builtin 工具，并在 `CoreAgent` 增加 `python_interpreter` span |
 | 单测漏掉 SDK 生命周期路径 | 增加 AgentRunMetadata、Agent/chain、LLM/Tool 继承上下文测试 |
 
 ## 使用建议

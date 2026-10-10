@@ -10,6 +10,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from database.agent_db import query_sub_agent_relations, search_agent_info_by_agent_id
 from database.tool_db import search_tools_for_sub_agent
 from management.services.skill.service import SkillService
+from nexent.core.agents.prompt.evaluation import (
+    format_agent_profile_context as compose_agent_profile_context,
+    format_profile_list_section,
+    format_profile_tool_section,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -188,32 +193,12 @@ def _format_list_section(
 
     Returns ``""`` when ``items`` is empty.
     """
-    if not items:
-        return ""
-    parts: List[str] = []
-    for item in items:
-        desc = item.get("description", "")
-        if desc:
-            parts.append(f"{item['name']} ({desc})")
-        else:
-            parts.append(item["name"])
-    return f"{label}: {'; '.join(parts)}"
+    return format_profile_list_section(items, label)
 
 
 def _format_tool_section(tools: List[Dict[str, Any]]) -> str:
     """Format tools as a labeled line, including source tags."""
-    if not tools:
-        return ""
-    parts: List[str] = []
-    for t in tools:
-        src = t.get("source", "")
-        tag = f" [{src.upper()}]" if src and src != "local" else ""
-        desc = t.get("description", "")
-        if desc:
-            parts.append(f"{t['name']}{tag}: {desc}")
-        else:
-            parts.append(f"{t['name']}{tag}")
-    return f"Tools: {'; '.join(parts)}"
+    return format_profile_tool_section(tools)
 
 
 def format_agent_profile_context(profile: Optional[Dict[str, Any]]) -> str:
@@ -221,33 +206,4 @@ def format_agent_profile_context(profile: Optional[Dict[str, Any]]) -> str:
 
     Returns an empty string when ``profile`` is ``None`` or empty.
     """
-    if not profile:
-        return ""
-
-    lines: List[str] = [f"### Agent: {profile['name']}"]
-    if profile["description"]:
-        lines.append(f"Description: {profile['description']}")
-    if profile["duty_prompt"]:
-        lines.append(f"Duty: {profile['duty_prompt']}")
-    if profile["constraint_prompt"]:
-        lines.append(f"Constraints: {profile['constraint_prompt']}")
-    if profile["business_description"]:
-        lines.append(f"Business Context: {profile['business_description']}")
-
-    tool_line = _format_tool_section(profile.get("tools", []))
-    if tool_line:
-        lines.append(tool_line)
-
-    skill_line = _format_list_section(profile.get("skills", []), "Skills")
-    if skill_line:
-        lines.append(skill_line)
-
-    sub_line = _format_list_section(profile.get("sub_agents", []), "Sub-agents")
-    if sub_line:
-        lines.append(sub_line)
-
-    kb_line = _format_list_section(profile.get("knowledge_bases", []), "Knowledge Bases")
-    if kb_line:
-        lines.append(kb_line)
-
-    return "## Agent Configuration\n" + "\n".join(lines)
+    return compose_agent_profile_context(profile)

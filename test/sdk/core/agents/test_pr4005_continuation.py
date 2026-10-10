@@ -2,7 +2,7 @@
 
 import sys
 from types import ModuleType, SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 from test_core_agent import TestRunStreamRealExecution as _CoreAgentFixtures
@@ -93,7 +93,7 @@ def _agent_with_responses(contents, *, strict, monkeypatch):
 @pytest.mark.parametrize("strict", [False, True])
 def test_oc_027_bare_generation_routes_by_switch(strict, monkeypatch):
     agent, responses, base = _agent_with_responses(
-        ["The answer is ready.", '<code>final_answer("done")</code>'],
+        ["The answer is ready.", '<final_answer>done</final_answer>'],
         strict=strict,
         monkeypatch=monkeypatch,
     )
@@ -112,7 +112,9 @@ def test_oc_027_bare_generation_routes_by_switch(strict, monkeypatch):
         assert _text(second[-2]) == core_agent_module._ACTION_FORMAT_REMINDER
         assert "no action ran" in _text(second[-1])
         assert all("The answer is ready" not in _text(message) for message in second)
-        agent.observer.rollback_model_attempt.assert_called_once_with("attempt-0", 1)
+        assert agent.observer.rollback_model_attempt.call_args_list == [
+            call("attempt-0", 1), call("attempt-1", 1),
+        ]
     else:
         assert all(
             core_agent_module._ACTION_FORMAT_REMINDER != _text(message)
@@ -164,7 +166,7 @@ def test_oc_028_alternating_malformed_and_bare_use_last_answer(monkeypatch):
 
 def test_oc_014_protocol_repair_precedes_single_fixed_reminder(monkeypatch):
     agent, _, _ = _agent_with_responses(
-        ["<code>final_answer(", '<code>final_answer("done")</code>'],
+        ["<code>final_answer(", '<final_answer>done</final_answer>'],
         strict=True,
         monkeypatch=monkeypatch,
     )
@@ -237,7 +239,7 @@ def test_oc_027_disabled_request_omits_post_baseline_platform_sentence(monkeypat
 
 def test_chinese_request_only_reminders_and_continuation(monkeypatch):
     agent, _, base = _agent_with_responses(
-        ["先想一下", '<code>final_answer("完成")</code>'],
+        ["先想一下", "<final_answer>done</final_answer>"],
         strict=True,
         monkeypatch=monkeypatch,
     )

@@ -71,7 +71,6 @@ export interface ExistingSkill {
 export interface CreateSkillStreamRequest {
   user_request: string;
   existing_skill?: ExistingSkill;
-  complexity?: string;
   language?: string;
   files?: SkillFileContent[];
 }

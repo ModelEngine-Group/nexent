@@ -17,7 +17,7 @@ from .clarification import CLARIFICATION_SCHEMA_GUIDANCE, ClarificationForm
 
 
 
-OutputProtocol = Literal["code_action", "final_answer_envelope"]
+OutputProtocol = Literal["code_action", "final_envelope"]
 
 
 class ProtocolErrorReason(str, Enum):
@@ -43,7 +43,7 @@ class ExecutableAction:
 
 @dataclass(frozen=True)
 class ExplicitFinalAnswer:
-    """One validated NL2Skill final-answer envelope payload."""
+    """One validated final-answer envelope payload."""
 
     answer: str
 
@@ -88,14 +88,14 @@ class ModelOutputProtocolExhaustedError(Exception):
     """Terminal failure after the runtime exhausts protocol repair attempts."""
 
 
-_RUN_RE = re.compile(r"\A```<RUN>(?P<body>[\s\S]*?)```\Z")
+_RUN_RE = re.compile(r"\A```<run>(?P<body>[\s\S]*?)```\Z")
 _ACTION_PREAMBLE_RE = re.compile(
-    r"\A(?P<preamble>(?:(?:Think|Thought|思考)[ \t]*[:：][\s\S]*?\n)?"
-    r"[ \t]*(?:Code|代码)[ \t]*[:：])\s*(?P<action><code>[\s\S]*|```<RUN>[\s\S]*)\Z",
-    re.IGNORECASE,
+    r"\A(?P<preamble>(?:(?:[Tt]hink|[Tt]hought|思考)[ \t]*[:：][\s\S]*?\n)?"
+    r"[ \t]*(?:[Cc]ode|代码)[ \t]*[:：])\s*(?P<action><code>[\s\S]*|```<run>[\s\S]*)\Z",
 )
 _CODE_LABEL_RE = re.compile(r"(?m)^[ \t]*(?:Code|代码)[ \t]*[:：]", re.IGNORECASE)
-_FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z")
+
+_FINAL_ENVELOPE_RE = re.compile(r"\A<final_answer>(?P<body>[\s\S]*)</final_answer>\Z")
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]{0,255}>")
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
 _CODE_MARKER_RE = re.compile(r"</?code>")
@@ -151,10 +151,10 @@ def protocol_repair_instruction(
     """Build safe feedback that teaches only the configured runtime protocol."""
 
     prefix = f"The previous response violated the Agent output protocol ({reason.value}). "
-    if protocol == "final_answer_envelope":
+    if protocol == "final_envelope":
         return (
-            prefix + "Return exactly one complete <FINAL_ANSWER>...</FINAL_ANSWER> envelope. "
-            "Put the required <SKILL>, <FILE>, and <SUMMARY> content inside it, with no content outside the envelope."
+            prefix + "Return exactly one complete <final_answer>...</final_answer> envelope. "
+            "Put the required <skill>, <file>, and <summary> content inside it, with no content outside the envelope."
         )
     if reason == ProtocolErrorReason.INVALID_CLARIFICATION_FORM:
         return (
@@ -166,7 +166,7 @@ def protocol_repair_instruction(
     return (
         prefix + "Return optional reasoning followed by one or more complete <code>...</code> blocks. "
         "Prefer one block; if multiple blocks are needed, put only whitespace between them because they execute together as one Python action. "
-        "Put no text after the final block. To finish, call final_answer(...) in the final block as the last top-level statement; never return a bare-text final answer."
+        "Put no text after the final block. To finish, return exactly one complete <final_answer>...</final_answer> envelope with no content outside it."
     )
 
 
@@ -263,55 +263,6 @@ def _validate_reasoning_prefix(
         _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
 
 
-class _RuntimeFinalAnswerVisitor(ast.NodeVisitor):
-    """Find executed final_answer calls without descending into definitions."""
-
-    def __init__(self) -> None:
-        self.calls: list[ast.Call] = []
-
-    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802 - ast visitor API
-        if isinstance(node.func, ast.Name) and node.func.id == "final_answer":
-            self.calls.append(node)
-        self.generic_visit(node)
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
-        return
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
-        return
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
-        return
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
-        return
-
-
-def _validate_terminal_final_answer(
-    tree: ast.Module,
-    *,
-    last_block_start_line: int,
-    protocol: OutputProtocol,
-    logger: Any,
-) -> None:
-    final_statement_indexes: list[int] = []
-    final_call_lines: list[int] = []
-    for index, statement in enumerate(tree.body):
-        visitor = _RuntimeFinalAnswerVisitor()
-        visitor.visit(statement)
-        if not visitor.calls:
-            continue
-        final_statement_indexes.append(index)
-        final_call_lines.extend(call.lineno for call in visitor.calls)
-
-    if not final_statement_indexes:
-        return
-    if any(index != len(tree.body) - 1 for index in final_statement_indexes) or any(
-        line < last_block_start_line for line in final_call_lines
-    ):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-
-
 def _parse_code_action(
     text: str,
     *,
@@ -356,22 +307,11 @@ def _parse_code_action(
     if has_meaningful_visible_content(action_region[previous_end:]):
         _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
 
-    block_start_lines: list[int] = []
-    current_line = 1
-    for body in bodies:
-        block_start_lines.append(current_line)
-        current_line += body.count("\n") + 2
     code = "\n\n".join(bodies)
     try:
-        tree = ast.parse(code)
+        ast.parse(code)
     except (SyntaxError, ValueError, TypeError):
         _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-    _validate_terminal_final_answer(
-        tree,
-        last_block_start_line=block_start_lines[-1],
-        protocol=protocol,
-        logger=logger,
-    )
     return ExecutableAction(code=code)
 
 
@@ -386,7 +326,7 @@ def _classify_code_action(
         return code_action
 
     run_match = _RUN_RE.fullmatch(text)
-    if run_match and text.count("```<RUN>") == 1:
+    if run_match and text.count("```<run>") == 1:
         return _parse_executable_action(
             run_match.group("body"),
             protocol=protocol,
@@ -394,7 +334,7 @@ def _classify_code_action(
             legacy_format=True,
         )
 
-    if any(marker in text for marker in ("<code>", "</code>", "```<RUN>")):
+    if any(marker in text for marker in ("<code>", "</code>", "```<run>")):
         _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
     if _CODE_LABEL_RE.search(text):
         _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
@@ -414,7 +354,11 @@ def _classify_final_envelope(
     logger: Any,
 ) -> ExplicitFinalAnswer:
     envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
-    if envelope_match and text.count("<FINAL_ANSWER>") == 1 and text.count("</FINAL_ANSWER>") == 1:
+    if (
+        envelope_match
+        and text.count("<final_answer>") == 1
+        and text.count("</final_answer>") == 1
+    ):
         answer = envelope_match.group("body")
         if has_meaningful_visible_content(answer):
             return ExplicitFinalAnswer(answer=answer)
@@ -434,7 +378,7 @@ def classify_model_output(
 ) -> ExecutableAction | ExplicitFinalAnswer | NonterminalThought:
     """Classify one complete model response using a closed runtime protocol."""
 
-    if protocol not in ("code_action", "final_answer_envelope"):
+    if protocol not in ("code_action", "final_envelope"):
         raise ValueError(f"Unsupported output protocol: {protocol}")
     if finish_reason == "length":
         _raise_protocol_error(ProtocolErrorReason.TRUNCATED_GENERATION, protocol, logger)
@@ -443,18 +387,25 @@ def classify_model_output(
     if not has_meaningful_visible_content(text):
         _raise_protocol_error(ProtocolErrorReason.EMPTY_VISIBLE_CONTENT, protocol, logger)
 
-    if protocol == "code_action":
-        # The platform prompt explicitly requests Think:/Code: (or 思考：/代码：).
-        # Preserve labeled legacy RUN actions and reject embedded examples
-        # before validating the remaining action with the shared parser.
-        preamble_match = _ACTION_PREAMBLE_RE.fullmatch(text)
-        if preamble_match:
-            preamble = preamble_match.group("preamble")
-            if any(marker in preamble for marker in ("<code>", "</code>", "```")):
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            text = preamble_match.group("action")
-        return _classify_code_action(text, protocol=protocol, logger=logger)
-    return _classify_final_envelope(text, protocol=protocol, logger=logger)
+    if protocol == "final_envelope":
+        return _classify_final_envelope(text, protocol=protocol, logger=logger)
+    if "<code>" not in text and (
+        text.startswith("<final_answer>")
+        or "<final_answer>" in text
+        or "</final_answer>" in text
+    ):
+        return _classify_final_envelope(text, protocol=protocol, logger=logger)
+
+    # The platform prompt explicitly requests Think:/Code: (or 思考：/代码：).
+    # Preserve labeled legacy RUN actions and reject embedded examples before
+    # validating the remaining action with the shared parser.
+    preamble_match = _ACTION_PREAMBLE_RE.fullmatch(text)
+    if preamble_match:
+        preamble = preamble_match.group("preamble")
+        if any(marker in preamble for marker in ("<code>", "</code>", "```")):
+            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+        text = preamble_match.group("action")
+    return _classify_code_action(text, protocol=protocol, logger=logger)
 
 
 def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm | None:

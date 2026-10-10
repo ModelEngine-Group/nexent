@@ -20,7 +20,7 @@ class TestContextItemTypeEnum:
             "SKILL",
             "MEMORY",
             "KNOWLEDGE_BASE",
-            "MANAGED_AGENT",
+            "WORKER_AGENT",
             "EXTERNAL_AGENT",
             "HISTORY_TURN",
             "TOOL_CALL_RESULT",

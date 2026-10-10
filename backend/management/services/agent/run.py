@@ -95,7 +95,6 @@ from services.memory_config_service import build_memory_context
 from services.memory_backend_adapter import _build_ingestion_event_service
 from services.thread_lifecycle_service import runtime_thread_manager
 from services.knowledge_scope_service import (
-    build_runtime_knowledge_policy,
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
 )
@@ -1601,6 +1600,7 @@ async def run_agent_stream(
     agent_request.query = prepend_current_time(
         agent_request.query,
         http_request.headers.get("x-user-timezone") if http_request else None,
+        language=language,
     )  # pragma: no cover
 
     conversation = None
@@ -1737,8 +1737,7 @@ async def run_agent_stream(
         )
         agent_request.tool_params = resolved_scope.tool_params
         agent_request.__dict__["_runtime_knowledge_context"] = {
-            "policy": build_runtime_knowledge_policy(language),
-            "resources": build_runtime_knowledge_resources(resolved_scope, language),
+            "scope": build_runtime_knowledge_resources(resolved_scope),
         }
         agent_request.__dict__["_resolved_knowledge_scope_event"] = {
             "effective": {

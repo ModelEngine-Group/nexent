@@ -1,3 +1,5 @@
+import importlib.machinery
+from pathlib import Path
 import sys
 import asyncio
 import json
@@ -118,6 +120,8 @@ nexent_agent_model_mock = MagicMock()
 nexent_agent_model_mock.ToolConfig = MockToolConfig
 sys.modules["nexent"] = MagicMock()
 sys.modules["nexent.core"] = MagicMock()
+sys.modules["nexent.core"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 _concurrency_module = types.ModuleType("nexent.core.concurrency")
 
 
@@ -178,6 +182,8 @@ _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
 sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
+sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
 sys.modules["nexent.core.agents.agent_model"] = nexent_agent_model_mock
 sys.modules["nexent.core.agents.run_agent"] = MagicMock()
 context_input_mock = types.ModuleType("nexent.core.agents.context_input")
@@ -201,7 +207,6 @@ memory_models_module = types.ModuleType("nexent.memory.models")
 memory_models_module.MemoryIngestUnit = MagicMock
 sys.modules["nexent.memory.models"] = memory_models_module
 knowledge_scope_service_module = types.ModuleType("services.knowledge_scope_service")
-knowledge_scope_service_module.build_runtime_knowledge_policy = MagicMock
 knowledge_scope_service_module.build_runtime_knowledge_resources = MagicMock
 knowledge_scope_service_module.resolve_knowledge_scope = MagicMock
 sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_module
@@ -390,7 +395,6 @@ setattr(
 
 # Load real asset_owner_visibility (agent_service imports resolve_agent_list_permission)
 import importlib.util
-from pathlib import Path
 
 _asset_owner_path = (
     Path(__file__).resolve().parents[3]
@@ -509,7 +513,11 @@ elasticsearch_client_mock = MagicMock()
 nexent_mock = MagicMock()
 sys.modules["nexent"] = nexent_mock
 sys.modules["nexent.core"] = MagicMock()
+sys.modules["nexent.core"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 sys.modules["nexent.core.agents"] = MagicMock()
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
+sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
 sys.modules["nexent.core.models"] = MagicMock()
 sys.modules["nexent.core.utils"] = MagicMock()
 
@@ -8705,17 +8713,7 @@ async def test_import_agent_all_model_fields_in_database(
 def test_render_prompt_template_success(monkeypatch):
     """_render_prompt_template should render a jinja2 template successfully."""
 
-    class FakeTemplate:
-        def __init__(self, template_str):
-            self.template_str = template_str
-
-        def render(self, **context):
-            # Very small fake renderer for test purposes
-            return self.template_str.format(**context)
-
-    monkeypatch.setattr(naming_service, "Template", FakeTemplate, raising=False)
-
-    tpl = "Hello {name}"
+    tpl = "Hello {{ name }}"
     rendered = _render_prompt_template(tpl, name="World")
     assert rendered == "Hello World"
 
@@ -8730,7 +8728,7 @@ def test_render_prompt_template_on_error_returns_original(monkeypatch):
         def render(self, **context):
             raise ValueError("render failed")
 
-    monkeypatch.setattr(naming_service, "Template", FailingTemplate, raising=False)
+    monkeypatch.setitem(_render_prompt_template.__globals__, "Template", FailingTemplate)
 
     tpl = "Broken {template"
     # Should not raise; should return original string
@@ -19802,7 +19800,7 @@ def test_inject_user_timezone_time_with_valid_timezone():
         result = prepend_current_time(
             "What time is it?", request.headers.get("x-user-timezone")
         )
-    assert result.startswith("[Current time:")
+    assert result.startswith("What time is it?\n\n[Current time:")
     assert "What time is it?" in result
 
 
@@ -19818,13 +19816,13 @@ def test_inject_user_timezone_time_without_header():
     assert result == "What time is it?"
 
 
-def test_inject_user_timezone_time_with_existing_prefix():
-    """Should not double-inject when query already has [Current time:] prefix."""
+def test_inject_user_timezone_time_with_existing_marker():
+    """Do not append a second runtime time marker."""
     from unittest.mock import MagicMock
 
     request = MagicMock()
     request.headers = {"x-user-timezone": "Asia/Shanghai"}
-    prefixed = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    prefixed = "What time is it?\n\n[Current time: 2026-01-01 20:00:00]"
     result = prepend_current_time(prefixed, request.headers.get("x-user-timezone"))
     assert result == prefixed
 
@@ -19856,13 +19854,9 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
 
     mock_create_conversation = mocker.patch.object(
@@ -19927,8 +19921,8 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(
     }
     assert mock_agent_request.tool_params == {"index_names": ["pool-a"]}
     assert mock_agent_request.__dict__["_runtime_knowledge_context"] == {
-        "policy": "scope policy",
-        "resources": "scope resources",
+        "scope": {"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                  "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     }
     event = mock_agent_request.__dict__["_resolved_knowledge_scope_event"]
     assert event["warnings"] == ["warn-1"]
@@ -19950,13 +19944,9 @@ async def test_run_agent_stream_persists_request_scope_on_existing_conversation(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mocker.patch.object(
         agent_run_service,
@@ -20034,13 +20024,9 @@ async def test_run_agent_stream_uses_stored_scope_when_request_has_none(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mock_get_conversation = mocker.patch.object(
         agent_run_service,
@@ -20108,13 +20094,9 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mocker.patch.object(
         agent_run_service,

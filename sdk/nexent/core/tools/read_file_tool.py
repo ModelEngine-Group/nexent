@@ -13,13 +13,9 @@ logger = logging.getLogger("read_file_tool")
 class ReadFileTool(Tool):
     """File reading tool for reading file contents"""
     name = "read_file"
-    description = "Read content from a file at the specified path. " \
-                  "Path should be relative to the workspace (e.g., 'documents/file.txt'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "Supports custom encoding, defaults to utf-8. " \
-                  "Returns the file content as a string along with file metadata."
+    description = "Read a workspace file and return its content with file metadata."
 
-    description_zh = "读取指定文件的内容，路径需为工作区相对路径（例如，'documents/file.txt'），出于安全考虑，不支持绝对路径。支持自定义编码，默认为 utf-8 ，文件内容以字符串形式返回，同时返回文件元数据。"
+    description_zh = "读取工作区文件，返回内容和文件元数据。"
 
     inputs = {
         "file_path": {

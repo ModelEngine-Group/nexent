@@ -214,3 +214,14 @@ def test_posix_bind_access_grants_permissions_before_probe(bind_agent, mocker):
     bind_agent._verify_bind_workspace_access([container], PurePosixPath('/host/run'), bind_agent.workspace_mapping)
     grant.assert_called_once_with(container, bind_agent.workspace_mapping.container_root)
     probe.assert_called_once_with(container, bind_agent.workspace_mapping.container_root)
+
+
+@pytest.mark.parametrize('language', ['en', 'zh'])
+def test_workspace_prompt_uses_container_paths_and_localized_resource(bind_agent, mocker, language):
+    bind_agent.observer = SimpleNamespace(lang=language)
+    bind_agent.minio_files = []
+    bind_agent.agent.tools = {}
+    mocker.patch.object(bind_agent, '_push_file_workspace_to_sandbox')
+    mocker.patch.object(bind_agent, '_initialize_sandbox_workspaces')
+    result = bind_agent._prepare_file_workspace('query')
+    assert result == 'query\n\nRun workspace: /mnt/work/user/run'

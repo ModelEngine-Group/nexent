@@ -40,15 +40,11 @@ class CreatePlanTool(Tool):
 
     name = "create_plan"
     description = (
-        "Create the execution plan for the current task. Call this exactly once "
-        "at the start of execution with 3-8 functional steps. Each step must "
-        "have a stable id (step-1, step-2, ...), a short title, and a detailed "
-        "description. Returns the created plan id and step count."
+        "Create the execution plan for the current task before acting. "
+        "Returns the plan id and step count."
     )
     description_zh = (
-        "为当前任务创建执行计划。开始执行前调用一次，传入 3-8 个功能块步骤。"
-        "每个步骤必须有稳定的 id（step-1、step-2、...）、简短标题和详细描述。"
-        "返回创建的计划 id 和步骤数量。"
+        "开始行动前为当前任务创建执行计划。返回计划 id 和步骤数量。"
     )
 
     inputs = {
@@ -185,16 +181,10 @@ class UpdatePlanStepTool(Tool):
 
     name = "update_plan_step"
     description = (
-        "Update the status of a single plan step. Call this with "
-        "status='completed' after finishing a step, or status='skipped' if the "
-        "step is no longer needed. You may also call this with "
-        "status='in_progress' at the start of a step to mark it active. "
-        "Returns the updated step id and status."
+        "Update one plan step as work proceeds. Returns its id and new status."
     )
     description_zh = (
-        "更新单个计划步骤的状态。完成后调用 status='completed'，不再需要时调用"
-        " status='skipped'，开始执行时调用 status='in_progress'。"
-        "返回被更新的步骤 id 和状态。"
+        "按执行进度更新单个计划步骤，返回其 id 和新状态。"
     )
 
     inputs = {
@@ -206,8 +196,8 @@ class UpdatePlanStepTool(Tool):
         "status": {
             "type": "string",
             "enum": [s.value for s in PlanStatus],
-            "description": "New status for the step",
-            "description_zh": "步骤的新状态",
+            "description": "New status: in_progress when starting, completed when done, skipped if no longer needed",
+            "description_zh": "新状态：开始时为 in_progress，完成时为 completed，不再需要时为 skipped",
         },
     }
     output_type = "object"

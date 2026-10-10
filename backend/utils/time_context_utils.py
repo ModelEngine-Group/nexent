@@ -1,27 +1,25 @@
-"""Format and remove the runtime-only current-time message prefix."""
+"""Format and remove runtime-only time markers in user messages."""
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-CURRENT_TIME_PREFIX = "[Current time:"
+from nexent.core.agents.prompt.user_context import CURRENT_TIME_MARKER, has_current_time_marker, render_user_context
 
 
-def prepend_current_time(query: str, timezone: str | None, *, now: datetime | None = None) -> str:
-    """Leave missing/invalid timezones and already-prefixed messages unchanged."""
-    if timezone and query and not query.startswith(CURRENT_TIME_PREFIX):
+def prepend_current_time(query: str, timezone: str | None, *, now: datetime | None = None, language: str = "en") -> str:
+    """Append local time before workspace; retain the legacy public function name."""
+    if timezone and query and not has_current_time_marker(query):
         try:
             zone = ZoneInfo(timezone)
             current = now.astimezone(zone) if now is not None else datetime.now(zone)
-            return f"{CURRENT_TIME_PREFIX} {current:%Y-%m-%d %H:%M:%S}]\n\n{query}"
+            return render_user_context(language, "current_time", {"time": current.strftime("%Y-%m-%d %H:%M:%S"), "query": query})
         except Exception:
             pass
     return query
 
 
 def strip_current_time_prefix(query: str | None) -> str | None:
-    """Strip one complete prefix, preserving unmarked or malformed input."""
-    if query and query.startswith(CURRENT_TIME_PREFIX):
-        end = query.find("]", len(CURRENT_TIME_PREFIX))
-        if end >= 0:
-            return query[end + 1:].lstrip("\n").strip()
+    """Remove only the current runtime marker appended after the request."""
+    if query:
+        return CURRENT_TIME_MARKER.sub("", query, count=1)
     return query

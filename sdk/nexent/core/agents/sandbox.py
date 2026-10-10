@@ -1896,9 +1896,7 @@ class _DockerKernelLease:
         return self._container_executor.container
 
     def run_code_raise_errors(self, code: str) -> Any:
-        import base64
         import json
-        import pickle
 
         from smolagents.remote_executors import (
             AgentError,
@@ -1922,7 +1920,6 @@ class _DockerKernelLease:
             msg_id = _websocket_send_execute_request(code, ws)
             outputs = []
             result = None
-            is_final_answer = False
             status_deadline = time.monotonic() + self._receive_timeout_seconds
 
             while True:
@@ -1986,18 +1983,14 @@ class _DockerKernelLease:
                     result = content["data"].get("text/plain")
                     status_deadline = time.monotonic() + self._receive_timeout_seconds
                 elif msg_type == "error":
-                    if content.get("ename", "") == RemotePythonExecutor.FINAL_ANSWER_EXCEPTION:
-                        result = pickle.loads(base64.b64decode(content.get("evalue", "")))
-                        is_final_answer = True
-                    else:
-                        raise AgentError("\n".join(content.get("traceback", [])), self.logger)
+                    raise AgentError("\n".join(content.get("traceback", [])), self.logger)
                 elif msg_type == "status" and content.get("execution_state") == "idle":
                     break
 
             return CodeOutput(
                 output=result,
                 logs="".join(outputs),
-                is_final_answer=is_final_answer,
+                is_final_answer=False,
             )
 
     def _check_kernel_channel_health(
@@ -2168,44 +2161,6 @@ class _DockerKernelLease:
     def install_packages(self, additional_imports: list[str]) -> list[str]:
         from smolagents.remote_executors import RemotePythonExecutor
         return RemotePythonExecutor.install_packages(self, additional_imports)
-
-    def _patch_final_answer_with_exception(self, final_answer_tool: Any) -> None:
-        """Patch final_answer while preserving its class-defined implementation."""
-        import inspect
-
-        if getattr(final_answer_tool, "_nexent_final_answer_patched", False):
-            return
-
-        instance_forward = final_answer_tool.forward
-        original_forward = getattr(instance_forward, "__func__", None)
-        wrapped_instance_forward = original_forward is None
-        if wrapped_instance_forward:
-            original_forward = getattr(type(final_answer_tool), "forward", None)
-        if not callable(original_forward):
-            raise TypeError("final_answer tool must define a callable forward method")
-
-        class _FinalAnswerTool(final_answer_tool.__class__):
-            pass
-
-        def forward(self, *args, **kwargs) -> Any:
-            import base64
-            import pickle
-
-            class FinalAnswerException(Exception):
-                def __init__(self, value):
-                    self.value = value
-
-            raise FinalAnswerException(base64.b64encode(pickle.dumps(self._forward(*args, **kwargs))).decode())
-
-        _FinalAnswerTool.forward = forward
-        _FinalAnswerTool._forward = original_forward
-        _FinalAnswerTool._forward.__source__ = inspect.getsource(original_forward).replace(
-            "def forward(", "def _forward("
-        )
-        if wrapped_instance_forward:
-            del final_answer_tool.forward
-        final_answer_tool.__class__ = _FinalAnswerTool
-        final_answer_tool._nexent_final_answer_patched = True
 
     def send_tools(self, tools: dict[str, Any]) -> None:
         from smolagents.remote_executors import RemotePythonExecutor
@@ -3500,7 +3455,7 @@ def _now() -> float:
 def build_python_executor(
     config: SandboxConfig,
     logger_: logging.Logger,
-    managed_agents_exist: bool = False,
+    worker_agents_exist: bool = False,
     host_tools_exist: bool = False,
     session_container_group: Optional[_SessionDockerContainerGroup] = None,
     cancellation_scope: Optional[RunCancellationScope] = None,
@@ -3515,7 +3470,7 @@ def build_python_executor(
     Args:
         config: sandbox configuration.
         logger_: logger instance.
-        managed_agents_exist: Deprecated compatibility flag. Managed-agent
+        worker_agents_exist: Deprecated compatibility flag. Worker-agent
             orchestration is proxied to the Runtime process, so it no longer
             requires disabling the configured sandbox.
         session_container_group: Internal agent-tree container group. When set,

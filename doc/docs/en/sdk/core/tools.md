@@ -51,7 +51,6 @@ The current SDK includes the following tool types:
 ### Skill and Task Tools (system-managed internally)
 - **ReadSkillConfigTool / ReadSkillMdTool**: Read config.yaml and SKILL.md under the skill directory
 - **RunSkillScriptTool**: Execute skill scripts
-- **WriteSkillFileTool**: Write files into the tenant-isolated skill directory
 - **CreateScheduledTaskProposalTool**: Create scheduled task proposals pending user confirmation (only saves the proposal, does not execute business tasks)
 
 > Note: The tools above are managed internally by the system and are not exported uniformly in the `__init__.py` of `nexent.core.tools`.
@@ -394,4 +393,4 @@ class SearchTool(Tool):
 4. **Configuration Management**: All configuration is passed in through constructor parameters (the SDK does not read environment variables directly; environment variables are read by the service layer and passed in)
 5. **Error Recovery**: Provide error recovery mechanisms when possible
 
-By following these guidelines, you can ensure that newly developed tools maintain consistency with existing tools and have good maintainability and extensibility. 
+By following these guidelines, you can ensure that newly developed tools maintain consistency with existing tools and have good maintainability and extensibility.

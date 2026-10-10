@@ -14,6 +14,7 @@ MIGRATED_MODULES = {
     "agent/icon_storage.py",
     "agent/management.py",
     "agent/naming.py",
+    "agent/prompt_template_loader.py",
     "agent/read.py",
     "agent/runtime_sub_agent_adapter.py",
     "agent/run_context.py",

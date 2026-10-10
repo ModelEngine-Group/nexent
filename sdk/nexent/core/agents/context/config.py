@@ -4,6 +4,7 @@ import logging
 from dataclasses import InitVar, dataclass, field
 from typing import Any, Callable, Dict, Mapping
 
+from ...prompts import load_prompt
 from .policy import PolicyLayers
 
 
@@ -29,27 +30,13 @@ class ContextManagerConfig:
     keep_recent_steps: int = 4
     enable_long_term_memory_selection: bool = True
 
-    summary_system_prompt: str = (
-        "You are a conversation summarization assistant. Compress the following "
-        "conversation history into a structured Markdown summary, preserving all "
-        "key information: user's core requirements, completed work, important "
-        "findings and decisions, unresolved issues, pending items, next steps, "
-        "and context to preserve. "
-        "Output the summary as Markdown with a top-level heading "
-        "'# Compact Result of History' and one '## Section' heading per field. "
-        "Do not wrap the output in code fences."
-    )
+    summary_system_prompt: str = field(default_factory=lambda: load_prompt(
+        "en", "agent/context_summary",
+    )["system_prompt"])
 
-    incremental_summary_system_prompt: str = (
-        "You are a conversation summarization assistant updating an existing "
-        "structured summary. The input has two sections: '## Previous Summary' "
-        "(the prior compaction) and '## New Conversations' or '## New Steps' "
-        "(turns that occurred after the prior compaction). Produce an updated "
-        "Markdown summary that PRESERVES information from the previous summary "
-        "(do not drop it unless clearly obsolete), MERGES the new turns into "
-        "the appropriate sections, and KEEPS the same section headings. "
-        "Do not wrap the output in code fences."
-    )
+    incremental_summary_system_prompt: str = field(default_factory=lambda: load_prompt(
+        "en", "agent/context_summary",
+    )["incremental_system_prompt"])
 
     summary_json_schema: Dict[str, Any] = field(default_factory=lambda: {
         "task_overview": "User's core request and success criteria (<=150 words)",

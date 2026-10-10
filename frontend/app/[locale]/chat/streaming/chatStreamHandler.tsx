@@ -4,6 +4,7 @@ import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, AgentStep } from "@/types/chat";
 import log from "@/lib/logger";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import { stripStreamedFinalAnswerEcho } from "@/lib/streamFinalAnswer";
 
 // Streaming message types for recovery
@@ -409,13 +410,15 @@ export function reconstructFromStreamingMessage(
         processThinkingCodeUnit(unit, state);
         break;
 
-      case "final_answer":
+      case "final_answer": {
+        const answer = unwrapFinalAnswer(unit.unit_content);
         removeFinalAnswerEchoFromStep(
           state.currentStep ?? state.steps[state.steps.length - 1] ?? null,
-          unit.unit_content
+          answer
         );
-        state.finalAnswer = unit.unit_content;
+        state.finalAnswer = answer;
         break;
+      }
 
       default: {
         if (isSkippedUnitType(unit.unit_type)) {
@@ -1067,11 +1070,13 @@ export const handleStreamResponse = async (
                   }
                   break;
 
-                case chatConfig.messageTypes.FINAL_ANSWER:
+                case chatConfig.messageTypes.FINAL_ANSWER: {
                   // Accumulate final answer content and process user break tag
-                  removeFinalAnswerEchoFromStep(currentStep, messageContent);
-                  finalAnswer += processUserBreakTag(messageContent, t);
+                  const answer = unwrapFinalAnswer(messageContent);
+                  removeFinalAnswerEchoFromStep(currentStep, answer);
+                  finalAnswer += processUserBreakTag(answer, t);
                   break;
+                }
 
                 case chatConfig.messageTypes.PARSE:
                   // Code display message, skip
@@ -1497,7 +1502,7 @@ export const handleStreamResponse = async (
 
           // Process the last message, focusing on final_answer and card
           if (messageType === chatConfig.messageTypes.FINAL_ANSWER) {
-            finalAnswer += messageContent;
+            finalAnswer += unwrapFinalAnswer(messageContent);
           }
         }
       } catch (error) {

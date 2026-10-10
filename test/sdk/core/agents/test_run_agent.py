@@ -112,10 +112,6 @@ for _sub in [
             "RunResult",
         ]:
             setattr(sub_mod, _name, MagicMock(name=f"smolagents.agents.{_name}"))
-    elif _sub == "local_python_executor":
-        setattr(
-            sub_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code")
-        )
     elif _sub == "memory":
 
         class _TaskStepBase:
