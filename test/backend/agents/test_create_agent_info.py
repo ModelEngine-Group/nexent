@@ -11,6 +11,10 @@ from test.common.test_mocks import bootstrap_test_env
 env_state = bootstrap_test_env()
 consts_const = env_state["mock_const"]
 consts_const.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS = 120
+consts_const.NEXENT_TOOL_FASTPATH_ENABLED = False
+consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = (
+    "KnowledgeBaseSearchTool", "ReadSkillMdTool", "ReadSkillConfigTool", "AidpSearchTool",
+)
 
 # Mock consts.model module with HistoryItem class
 from typing import List, Optional, Dict, Any
@@ -4729,6 +4733,8 @@ class TestCreateAgentRunInfo:
                 context_budget_snapshot=None,
                 redis_client=ANY,
                 sandbox_config=None,
+                tool_fastpath_enabled=False,
+                tool_fastpath_allowed_tools=list(consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
                 minio_client=None,
                 workspace_path=ANY,
                 workspace_run_id=ANY,

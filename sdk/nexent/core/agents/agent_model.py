@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..utils.observer import MessageObserver
 from ..models.capacity_budget import ContextBudgetSnapshot
+from ..utils.observer import MessageObserver
 from .context.models import ContextItemInput
 
 
@@ -473,6 +473,14 @@ class AgentRunInfo(BaseModel):
             "and NEXENT_SANDBOX_* environment variables.  "
             "When None the SDK uses LocalPythonExecutor (backwards-compatible)."
         ),
+        default=None,
+    )
+    tool_fastpath_enabled: bool = Field(
+        description="Enable restricted official-tool actions before ordinary Docker initialization.",
+        default=True,
+    )
+    tool_fastpath_allowed_tools: Optional[List[str]] = Field(
+        description="Deployment-approved official implementation IDs for local fast-path actions.",
         default=None,
     )
     minio_client: Optional[Any] = Field(

@@ -1,0 +1,38 @@
+schema_version: '1.0'
+module:
+  id: RUNTIME-SANDBOX
+  name: Agent sandbox execution
+features:
+- feature_id: TFP-001
+  name: Official tool fast path with deferred Docker initialization
+  status: active
+  description: All Docker-configured Agents can execute approved simple tool steps
+    locally before creating their ordinary executor.
+  business_rules:
+  - rule_id: TFP-RULE-001
+    description: Eligible complete steps execute locally without acquiring or warming
+      a Docker executor.
+  - rule_id: TFP-RULE-002
+    description: Only the exact approved official implementations and restricted syntax
+      qualify; mixed steps execute once through the original executor. The default
+      registry includes KnowledgeBaseSearchTool, ReadSkillMdTool, ReadSkillConfigTool
+      and AidpSearchTool.
+  - rule_id: TFP-RULE-003
+    description: The first ordinary step initializes the original executor once and
+      receives prior user variables; later steps use that executor.
+  - rule_id: TFP-RULE-004
+    description: Cancellation and idempotent cleanup never initialize unused resources
+      and reclaim initialized resources.
+  - rule_id: TFP-RULE-005
+    description: Deployment and SDK defaults enable the deferred Docker path; explicit
+      false keeps eager initialization. Tool authorization, observer wrappers, workspace,
+      session tree sharing and existing local fallback remain compatible.
+  required_test_stages:
+  - D1
+  - D3
+  - D4
+  - D5
+  source:
+    requirement_ids:
+    - TFP-001
+    spec_path: nexent-doc/docs/Developing/runtime-sandbox-tool-fastpath/proposal.md

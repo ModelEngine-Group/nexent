@@ -1,0 +1,245 @@
+schema_version: '1.0'
+stage: D1
+module: RUNTIME-SANDBOX
+cases:
+- case_id: TFP-D1-001
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-001
+  - TFP-RULE-005
+  title: Simple official tool steps and final answers never acquire Docker
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Simple official tool steps and final answers never acquire Docker
+  preconditions:
+  - Use isolated official tool instances and a controlled executor factory.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Execute assignment, print and final_answer using an approved official
+      tool.
+    expected: The value, logs and final flag match the local interpreter.
+  - order: 2
+    action: Official aidp_search uses its existing allowed KDS scope and emits real
+      tool events without Docker, including an empty permission scope with no provider
+      request.
+    expected: The existing AIDP authorization and complete-step routing contract is
+      preserved.
+  expected_results: &id001
+  - Factory acquisition and warm-up counts are zero.
+  - The wrapped tool is called once and final_answer returns the saved result.
+  - Official aidp_search uses its existing allowed KDS scope and emits real tool events
+    without Docker, including an empty permission scope with no provider request.
+  forbidden_side_effects:
+  - No Docker bridge, container or kernel is created.
+  unit_boundary: Restricted AST admission, real LocalPythonExecutor and NexentAgent
+    executor lifecycle
+  inputs:
+  - Simple official tool steps and final answers never acquire Docker
+  assertions: *id001
+- case_id: TFP-D1-002
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-002
+  title: Full-step admission prevents partial local execution
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Full-step admission prevents partial local execution
+  preconditions:
+  - Use isolated official tool instances and a controlled executor factory.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Submit a tool call followed by an import, an unapproved call or a bare
+      data expression outside assignment and call arguments.
+    expected: The whole step is delegated before any local call.
+  - order: 2
+    action: An aidp_search step followed by ordinary code makes no provider request
+      before whole-step delegation.
+    expected: The existing AIDP authorization and complete-step routing contract is
+      preserved.
+  expected_results: &id002
+  - Mixed code is passed once to the original executor.
+  - No approved tool is called by the fast path before delegation.
+  - An aidp_search step followed by ordinary code makes no provider request before
+    whole-step delegation.
+  forbidden_side_effects:
+  - No partial execution or tool replay.
+  unit_boundary: Restricted AST admission, real LocalPythonExecutor and NexentAgent
+    executor lifecycle
+  inputs:
+  - Full-step admission prevents partial local execution
+  assertions: *id002
+- case_id: TFP-D1-003
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-003
+  title: Promotion preserves user values and remains sticky
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Promotion preserves user values and remains sticky
+  preconditions:
+  - Use isolated official tool instances and a controlled executor factory.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Produce aliased user containers and a tool result, then submit ordinary
+      code.
+    expected: One executor is initialized and receives the user namespace.
+  - order: 2
+    action: Submit another approved step.
+    expected: The initialized executor is reused.
+  expected_results: &id003
+  - Values and shared container references survive migration.
+  - Internal interpreter state and tool objects are not migrated.
+  - The factory is called once.
+  forbidden_side_effects:
+  - No repeated prior tool invocation.
+  unit_boundary: Restricted AST admission, real LocalPythonExecutor and NexentAgent
+    executor lifecycle
+  inputs:
+  - Promotion preserves user values and remains sticky
+  assertions: *id003
+- case_id: TFP-D1-004
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-002
+  title: Tool identity cannot be forged by names or sources
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Tool identity cannot be forged by names or sources
+  preconditions:
+  - Use isolated official tool instances and a controlled executor factory.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Provide an exact official tool, an unknown subclass, a same-name custom
+      tool and an MCP source.
+    expected: Only the approved official source and exact implementation qualify.
+  - order: 2
+    action: Only exact AidpSearchTool from the local source qualifies; MCP, custom,
+      subclass and IndependentAidpSearchTool identities cannot impersonate aidp_search.
+      Explicit omission from the allowlist delegates.
+    expected: The existing AIDP authorization and complete-step routing contract is
+      preserved.
+  expected_results: &id004
+  - Unapproved identities delegate to the original executor.
+  - Reserved names and callable aliases do not qualify.
+  - Only exact AidpSearchTool from the local source qualifies; MCP, custom, subclass
+    and IndependentAidpSearchTool identities cannot impersonate aidp_search. Explicit
+    omission from the allowlist delegates.
+  forbidden_side_effects:
+  - No unauthorized local invocation.
+  unit_boundary: Restricted AST admission, real LocalPythonExecutor and NexentAgent
+    executor lifecycle
+  inputs:
+  - Tool identity cannot be forged by names or sources
+  assertions: *id004
+- case_id: TFP-D1-005
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-004
+  title: Exceptions, cancellation and cleanup are safe
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Exceptions, cancellation and cleanup are safe
+  preconditions:
+  - Use isolated official tool instances and a controlled executor factory.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Fail an approved tool, close an unused wrapper, fail workspace or variable
+      initialization and cancel during acquisition.
+    expected: No failed call is replayed and acquired resources close once.
+  - order: 2
+    action: AIDP provider errors propagate without acquiring or replaying through
+      Docker.
+    expected: The existing AIDP authorization and complete-step routing contract is
+      preserved.
+  expected_results: &id005
+  - Local errors do not trigger remote replay.
+  - Cleanup is idempotent.
+  - Cancellation before execution prevents tool calls and releases acquired resources.
+  - AIDP provider errors propagate without acquiring or replaying through Docker.
+  forbidden_side_effects:
+  - No initialization during cleanup.
+  - No execution after cancellation.
+  unit_boundary: Restricted AST admission, real LocalPythonExecutor and NexentAgent
+    executor lifecycle
+  inputs:
+  - Exceptions, cancellation and cleanup are safe
+  assertions: *id005
+- case_id: TFP-D1-006
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-001
+  - TFP-RULE-004
+  - TFP-RULE-005
+  title: Factory defers initialization and prepares promoted workspaces
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Factory defers initialization and prepares promoted workspaces
+  preconditions:
+  - Use isolated official tool instances and a controlled executor factory.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Construct a root and child with Docker fast paths and omit the SDK enablement argument.
+    expected: Both remain uninitialized.
+  - order: 2
+    action: Activate root and child ordinary executors.
+    expected: The session group is shared and each workspace is initialized when its
+      executor appears.
+  - order: 3
+    action: Omit the deployment enablement flag and SDK run-info field, then repeat
+      with an explicit false flag. Exercise MCP and non-MCP run construction.
+    expected: Omitted flags enable deferred execution; explicit false retains eager
+      initialization in both paths. Default allowlists include AidpSearchTool, and
+      explicit allowlists retain their configured contents.
+  expected_results: &id006
+  - Disabled mode keeps eager initialization.
+  - Omitted deployment and SDK flags enable the deferred Docker path, including
+    missing-field fallbacks in MCP and non-MCP run construction.
+  - Enabled mode delays warm-up and script binding until activation.
+  - Workspace synchronization precedes ordinary code.
+  - Actual executors release exactly once.
+  - Deployment and SDK default allowlists include AidpSearchTool; explicit allowlists
+    and explicit false opt-out remain respected.
+  forbidden_side_effects:
+  - No kernel for unused child.
+  - No duplicated session container.
+  unit_boundary: Restricted AST admission, real LocalPythonExecutor and NexentAgent
+    executor lifecycle
+  inputs:
+  - Factory defers initialization and prepares promoted workspaces
+  assertions: *id006

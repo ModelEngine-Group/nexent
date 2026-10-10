@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D4
+module: RUNTIME-SANDBOX
+cases:
+- case_id: TFP-D4-001
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-001
+  - TFP-RULE-003
+  - TFP-RULE-005
+  title: Chat displays fast and promoted tool tasks correctly
+  type: E2E
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: Chat displays fast and promoted tool tasks correctly
+  preconditions:
+  - A disposable Nexent deployment with this implementation and an approved controlled
+    provider profile is available.
+  - A disposable authenticated browser session and a working current sandbox image are available.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Open a disposable Agent chat and request a knowledge answer.
+    expected: A single tool event and correct final answer appear.
+  - order: 2
+    action: Request a task requiring Python and reload the conversation.
+    expected: The task completes and history preserves the result without duplicates.
+  expected_results:
+  - The final answer and artifact are accessible.
+  - Refreshed history matches the live result.
+  forbidden_side_effects:
+  - No duplicate tool card or stale sibling output.
+  actor: Authenticated disposable tenant user
+  journey:
+  - Open chat.
+  - Run approved tool task.
+  - Run ordinary Python task.
+  - Reload history and download artifact.
+  final_business_result:
+  - Both task types complete with correct visible output.
+  failure_evidence:
+  - Retain Playwright trace, screenshot and network evidence on failure.
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - model-provider

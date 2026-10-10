@@ -10,6 +10,10 @@ from typing import Any, Dict, Union
 
 import httpx
 
+from ...consts.mcp_errors import (
+    is_mcp_connection_timeout_error,
+    is_mcp_timeout_error,
+)
 from ...monitor import (
     AgentRunMetadata,
     get_agent_monitoring_context,
@@ -24,19 +28,15 @@ from ..concurrency import (
     ThreadManager,
     get_current_thread_manager,
 )
+from ..concurrency.cancellation import RunTerminated
 from ..concurrency.context import _reset_current_thread_manager, _set_current_thread_manager
 from ..concurrency.helpers import (
     get_fallback_thread_manager,
     shutdown_fallback_thread_manager,
 )
-from ..concurrency.cancellation import RunTerminated
 from ..model_errors import ModelInvocationTerminalError
 from .agent_model import AgentRunInfo
 from .managed_mcp import ManagedMCPToolCollection
-from ...consts.mcp_errors import (
-    is_mcp_connection_timeout_error,
-    is_mcp_timeout_error,
-)
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 from .output_protocol import ModelOutputProtocolExhaustedError
 
@@ -386,6 +386,8 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 redis_client=agent_run_info.redis_client,
                 user_context=user_context,
                 sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                tool_fastpath_enabled=getattr(agent_run_info, "tool_fastpath_enabled", True),
+                tool_fastpath_allowed_tools=getattr(agent_run_info, "tool_fastpath_allowed_tools", None),
                 minio_client=getattr(agent_run_info, "minio_client", None),
                 conversation_id=agent_run_info.conversation_id,
                 user_id=agent_run_info.user_id,
@@ -433,6 +435,8 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                     redis_client=agent_run_info.redis_client,
                     user_context=user_context,
                     sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                    tool_fastpath_enabled=getattr(agent_run_info, "tool_fastpath_enabled", True),
+                    tool_fastpath_allowed_tools=getattr(agent_run_info, "tool_fastpath_allowed_tools", None),
                     minio_client=getattr(agent_run_info, "minio_client", None),
                     conversation_id=agent_run_info.conversation_id,
                     user_id=agent_run_info.user_id,

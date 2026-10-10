@@ -1,0 +1,152 @@
+schema_version: '1.0'
+cases:
+- case_id: TFP-D1-001
+  stage: D1
+  status: implemented
+  contract_hash: sha256:f49d99ec8a0bad9223bdd15df090912a0a2c67816b5857d6add0a9fbd42f851c
+  implementation_hash: sha256:01d39055c92bd0c0fe6e4360ed1345a6eae93173d20da7f1fea830c15a61839e
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_001
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_aidp.py
+    selector: test_tfp_d1_001_aidp
+    profiles:
+    - mock
+- case_id: TFP-D1-002
+  stage: D1
+  status: implemented
+  contract_hash: sha256:45bd2b9559253a21e4b96e995b91daa065ff8f9ea28bf3c3908b9756b5791782
+  implementation_hash: sha256:01d39055c92bd0c0fe6e4360ed1345a6eae93173d20da7f1fea830c15a61839e
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_002
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_aidp.py
+    selector: test_tfp_d1_002_aidp
+    profiles:
+    - mock
+- case_id: TFP-D1-003
+  stage: D1
+  status: implemented
+  contract_hash: sha256:78c3f112432755e552f23bdb788339f518f550d911228d013071fc2c932db42d
+  implementation_hash: sha256:fba0f34909d32b214bd0a02edc0f4c28eaf34e88e682b3977a2f5a6ea22a64cb
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_003
+    profiles:
+    - mock
+- case_id: TFP-D1-004
+  stage: D1
+  status: implemented
+  contract_hash: sha256:2c10e437ccb446a0554d12e76188babbe4d97d0bffc4fd19f98498a86a05c17a
+  implementation_hash: sha256:01d39055c92bd0c0fe6e4360ed1345a6eae93173d20da7f1fea830c15a61839e
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_004
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_aidp.py
+    selector: test_tfp_d1_004_aidp
+    profiles:
+    - mock
+- case_id: TFP-D1-005
+  stage: D1
+  status: implemented
+  contract_hash: sha256:f9b9a844e326fc8cac16cb7fa2c69d2ea2f5604696c678c814dfa2ff0058d915
+  implementation_hash: sha256:e263aa60250b6329f8943aaa6a2f8f0be1b27c3a8dcdfc7364eff56c8ededcaa
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_005
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_005_deferred_setup
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_aidp.py
+    selector: test_tfp_d1_005_aidp
+    profiles:
+    - mock
+- case_id: TFP-D1-006
+  stage: D1
+  status: implemented
+  contract_hash: sha256:2bd5d2095842fbb8b4a21db9116ddf8f82a85adfd71351b5084d0d8005a387dc
+  implementation_hash: sha256:071883550d50b75dd6588a75d883d5af51a92b6edadbf1c02b30412179705beb
+  implementation:
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_006
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_006_backends
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath.py
+    selector: test_tfp_d1_006_configuration
+    profiles:
+    - mock
+  - framework: pytest
+    file: test/automation/d1/test_tool_fastpath_defaults.py
+    selector: test_tfp_d1_006_run_defaults
+    profiles:
+    - mock
+- case_id: TFP-D3-001
+  stage: D3
+  status: blocked
+  contract_hash: sha256:d0707e473b4368889ed27687c15f63d454b843ff2296508357797058551c52f3
+  implementation_hash: sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+  implementation: []
+  required_mock_services:
+  - model-provider
+  notes: Requires a disposable Nexent deployment with this implementation, a controlled
+    model provider, the current sandbox image and artifact storage; D4 also requires
+    a browser journey.
+- case_id: TFP-D4-001
+  stage: D4
+  status: blocked
+  contract_hash: sha256:82e008044b9a89dd07a01bdb8aba0553d5b2d2b173758d98b3011e370e0f6463
+  implementation_hash: sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+  implementation: []
+  required_mock_services:
+  - model-provider
+  notes: Requires a disposable Nexent deployment with this implementation, a controlled
+    model provider, the current sandbox image and artifact storage; D4 also requires
+    a browser journey.
+- case_id: TFP-D5-001
+  stage: D5
+  status: implemented
+  contract_hash: sha256:cad74b7982db6a898f9267891d908d5e4a026fff456b4e16172e26fa1f499f08
+  implementation_hash: sha256:6af5717e8cd49952880712aeb98f89e5242c74430374ce491d472e1f80f687cc
+  implementation:
+  - framework: pytest
+    file: test/automation/d5/test_tool_fastpath_risks.py
+    selector: test_tfp_d5_001
+    profiles:
+    - mock
+- case_id: TFP-D5-002
+  stage: D5
+  status: implemented
+  contract_hash: sha256:29bfd14fe4f25184e0320e677b23279765cab9691cf05c6bbf44e76dc8bd0e73
+  implementation_hash: sha256:6af5717e8cd49952880712aeb98f89e5242c74430374ce491d472e1f80f687cc
+  implementation:
+  - framework: pytest
+    file: test/automation/d5/test_tool_fastpath_risks.py
+    selector: test_tfp_d5_002
+    profiles:
+    - mock

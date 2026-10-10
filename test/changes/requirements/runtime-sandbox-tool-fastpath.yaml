@@ -1,0 +1,72 @@
+schema_version: '1.0'
+changes:
+- change_id: TFP-CHANGE-001
+  change_type: requirement
+  requirement_id: TFP-001
+  title: Deferred Docker with an official-tool fast path
+  description: Implement the user-approved minimal wrapper and full-step admission
+    without changing public protocols or the existing fallback policy.
+  affected_features:
+    existing: []
+    added:
+    - TFP-001
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - TFP-D1-001
+    - TFP-D1-002
+    - TFP-D1-003
+    - TFP-D1-004
+    - TFP-D1-005
+    - TFP-D1-006
+    - TFP-D3-001
+    - TFP-D4-001
+    - TFP-D5-001
+    - TFP-D5-002
+    modified: []
+    retired: []
+- change_id: TFP-CHANGE-002
+  change_type: requirement
+  requirement_id: TFP-001
+  title: Add official AIDP search to the default local fast path
+  description: Register exact AidpSearchTool in the SDK and deployment defaults without
+    changing knowledge permissions, provider transport or event behavior.
+  affected_features:
+    existing:
+    - TFP-001
+    added: []
+    modified:
+    - TFP-001
+    retired: []
+  affected_cases:
+    existing: &id001
+    - TFP-D1-001
+    - TFP-D1-002
+    - TFP-D1-004
+    - TFP-D1-005
+    - TFP-D1-006
+    added: []
+    modified: *id001
+    retired: []
+- change_id: TFP-CHANGE-003
+  change_type: requirement
+  requirement_id: TFP-001
+  title: Enable the deferred official-tool executor by default
+  description: Default deployment and SDK flags to true while retaining explicit
+    false as an opt-out and preserving Local and WASM behavior.
+  affected_features:
+    existing:
+    - TFP-001
+    added: []
+    modified:
+    - TFP-001
+    retired: []
+  affected_cases:
+    existing:
+    - TFP-D1-006
+    added: []
+    modified:
+    - TFP-D1-006
+    retired: []

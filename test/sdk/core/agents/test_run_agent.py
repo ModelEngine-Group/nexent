@@ -397,9 +397,12 @@ def _mock_managed_mcp(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
+@pytest.mark.parametrize("fastpath_enabled", [False, True])
+def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch, fastpath_enabled):
     """Verify local execution path when mcp_host is empty or None."""
     # Patch NexentAgent inside run_agent to a MagicMock instance
+    basic_agent_run_info.tool_fastpath_enabled = fastpath_enabled
+    basic_agent_run_info.tool_fastpath_allowed_tools = ["ReadSkillConfigTool"]
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     monkeypatch.setattr(
         run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance)
@@ -416,6 +419,8 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         redis_client=basic_agent_run_info.redis_client,
         user_context=basic_agent_run_info.user_context,
         sandbox_config=None,
+        tool_fastpath_enabled=basic_agent_run_info.tool_fastpath_enabled,
+        tool_fastpath_allowed_tools=basic_agent_run_info.tool_fastpath_allowed_tools,
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,
@@ -503,11 +508,14 @@ def test_emit_uncertainty_reserve_warning_noops_without_warning(basic_agent_run_
     basic_agent_run_info.observer.add_message.assert_not_called()
 
 
+@pytest.mark.parametrize("fastpath_enabled", [False, True])
 def test_agent_run_thread_mcp_flow(
-    basic_agent_run_info, mock_memory_context, monkeypatch
+    basic_agent_run_info, mock_memory_context, monkeypatch, fastpath_enabled
 ):
     """Verify behaviour when an MCP host list is provided with auto-detected transport."""
     # Give the AgentRunInfo an MCP host list (string format, auto-detect transport)
+    basic_agent_run_info.tool_fastpath_enabled = fastpath_enabled
+    basic_agent_run_info.tool_fastpath_allowed_tools = ["ReadSkillConfigTool"]
     basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
 
     managed_mcp_factory, mock_tool_collection = _mock_managed_mcp(monkeypatch)
@@ -544,6 +552,8 @@ def test_agent_run_thread_mcp_flow(
         redis_client=basic_agent_run_info.redis_client,
         user_context=basic_agent_run_info.user_context,
         sandbox_config=None,
+        tool_fastpath_enabled=basic_agent_run_info.tool_fastpath_enabled,
+        tool_fastpath_allowed_tools=basic_agent_run_info.tool_fastpath_allowed_tools,
         minio_client=None,
         conversation_id=basic_agent_run_info.conversation_id,
         user_id=basic_agent_run_info.user_id,

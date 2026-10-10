@@ -849,6 +849,18 @@ APP_VERSION = _resolve_app_version()
 # Agent Sandbox Configuration
 # =============================================================================
 
+NEXENT_TOOL_FASTPATH_ENABLED = (
+    os.getenv("NEXENT_TOOL_FASTPATH_ENABLED", "true").strip().lower() == "true"
+)
+NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys(
+    item.strip()
+    for item in os.getenv(
+        "NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS",
+        "KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool",
+    ).split(",")
+    if item.strip()
+))
+
 NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL", "local").lower()
 """Default sandbox isolation level: local / docker / wasm.
    Default 'local' preserves backward-compatibility for existing deployments."""

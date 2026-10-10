@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-SANDBOX
+cases:
+- case_id: TFP-D5-001
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-002
+  title: Untrusted syntax and hostile tool identities cannot enter the local path
+  type: SECURITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: Untrusted syntax and hostile tool identities cannot enter the local path
+  preconditions:
+  - Use isolated official tool instances and a controlled executor factory.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Submit attributes, imports, alias calls, unpacking, loops and reserved-variable
+      assignments, including initial variables that shadow tool or framework call names.
+    expected: All are rejected before execution.
+  expected_results:
+  - Zero local tool calls for all rejected inputs.
+  - The full source is delegated unchanged.
+  forbidden_side_effects:
+  - No host file, shell or reflection operation is executed.
+  risk_type: SECURITY
+  risk: A permissive fast-path validator could allow arbitrary host code.
+  condition:
+  - Controlled hostile source and same-name tool fixtures.
+  metrics:
+  - Local invocation count.
+  - Admission result.
+  thresholds:
+  - Zero unauthorized local invocations.
+  - Every hostile sample rejects admission.
+  recovery_expectations:
+  - A later valid step can still use the ordinary executor.
+- case_id: TFP-D5-002
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-001
+  - TFP-RULE-004
+  title: Repeated simple actions avoid startup and cleanup overhead
+  type: PERFORMANCE
+  priority: P0
+  status: active
+  automation: automated
+  objective: Repeated simple actions avoid startup and cleanup overhead
+  preconditions:
+  - Use isolated official tool instances and a controlled executor factory.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run one thousand small approved steps, then close the wrapper twice.
+    expected: No ordinary executor is created and every intended tool call occurs
+      once.
+  expected_results:
+  - Factory count is zero.
+  - All one thousand results are correct.
+  - P95 local route time is at most 10 ms for small fixtures.
+  forbidden_side_effects:
+  - No kernel, bridge or container created by the fast-path wrapper.
+  risk_type: PERFORMANCE
+  risk: Interpreter routing could erase the saved sandbox startup cost.
+  condition:
+  - One thousand warmed steps smaller than 4 KiB with a controlled immediate official
+    tool.
+  metrics:
+  - Factory call count.
+  - Per-step P95 duration.
+  thresholds:
+  - Factory count equals zero.
+  - P95 is at most 10 ms excluding provider and tool I/O.
+  recovery_expectations:
+  - Cleanup remains idempotent and does not acquire resources.

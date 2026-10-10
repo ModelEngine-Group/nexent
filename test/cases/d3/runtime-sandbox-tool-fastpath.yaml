@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SANDBOX
+cases:
+- case_id: TFP-D3-001
+  feature_id: TFP-001
+  requirement_ids:
+  - TFP-001
+  business_rule_ids:
+  - TFP-RULE-001
+  - TFP-RULE-003
+  - TFP-RULE-005
+  title: Real Nexent runtime defers Docker until ordinary code
+  type: AGENT-IT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: Real Nexent runtime defers Docker until ordinary code
+  preconditions:
+  - A disposable Nexent deployment with this implementation and an approved controlled
+    provider profile is available.
+  - The current sandbox image has its sandbox user and a reachable kernel service.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run an approved knowledge query with a controlled model.
+    expected: No kernel or warm-up appears.
+  - order: 2
+    action: Run retrieval followed by ordinary Python and a script-produced artifact.
+    expected: The saved variable is available and the artifact is downloadable.
+  expected_results:
+  - Correct final answer and persisted tool events.
+  - One activation per Agent needing ordinary code.
+  - All run resources are reclaimed.
+  forbidden_side_effects:
+  - No duplicate tool call or cross-tenant access.
+  integration_boundary:
+  - Running Nexent API, SDK model loop, official tools, Docker kernel and artifact
+    storage
+  observations:
+  - Executor acquisition counters, warm-up traces, tool events, variable consumption
+    and downloaded artifact
+  cleanup:
+  - Remove disposable conversations and artifacts; release run kernels.
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - model-provider
+    - name: real_smoke
+      required_services:
+      - model-provider

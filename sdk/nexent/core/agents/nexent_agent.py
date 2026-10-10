@@ -13,27 +13,28 @@ import time
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
-from threading import Event
+from threading import Event, RLock
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
+from ...consts.mcp_errors import is_mcp_timeout_error
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
-from ..models.openai_llm import OpenAIModel
 from ..model_errors import ModelInvocationTerminalError
+from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
-from ...consts.mcp_errors import is_mcp_timeout_error
 from .output_protocol import ModelOutputProtocolExhaustedError
 from .tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,
     apply_user_context_to_mcp_tool,
 )
+
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
@@ -240,7 +241,9 @@ class NexentAgent:
                  workspace_run_id=None,
                  minio_files=None,
                  cancellation_scope=None,
-                 user_context=None):
+                 user_context=None,
+                 tool_fastpath_enabled=True,
+                 tool_fastpath_allowed_tools=None):
         """
         Initialize the NexentAgent factory.
 
@@ -263,6 +266,8 @@ class NexentAgent:
             cancellation_scope: Optional run-scoped cancellation registry.
             user_context: Optional caller user context (tenant/user/groups)
                 passed through to tools for tool-side authorization.
+            tool_fastpath_enabled: Enable restricted local actions before Docker initialization.
+            tool_fastpath_allowed_tools: Approved official implementation IDs.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -274,6 +279,8 @@ class NexentAgent:
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
+        self.tool_fastpath_enabled = tool_fastpath_enabled
+        self.tool_fastpath_allowed_tools = tool_fastpath_allowed_tools
         self.minio_client = minio_client
         self.conversation_id = conversation_id
         self.user_id = user_id
@@ -286,6 +293,7 @@ class NexentAgent:
         self._workspace_uploaded_paths: set[str] = set()
         self._sandbox_executors: List[Any] = []
         self._sandbox_skill_runners: List[Any] = []
+        self._tool_fastpath_executors: List[Any] = []
 
         self.agent = None
 
@@ -746,6 +754,7 @@ class NexentAgent:
             raise TypeError("agent_config must be a AgentConfig object")
         if _sandbox_tree_context is None:
             _sandbox_tree_context = {}
+        _sandbox_tree_context.setdefault("initialization_lock", RLock())
 
         try:
             model = self.create_model(agent_config.model_name)
@@ -859,120 +868,188 @@ class NexentAgent:
             # nested execution deadlocks; session containers can still be shared.
             python_executor = None
             if self.sandbox_config is not None:
-                from .sandbox import SandboxLevel, build_python_executor
-                has_managed = bool(
-                    agent_config.managed_agents
-                    or getattr(agent_config, "external_a2a_agents", [])
-                )
-                python_executor = build_python_executor(
-                    config=self.sandbox_config,
-                    logger_=logger,
-                    managed_agents_exist=has_managed,
-                    host_tools_exist=_has_host_tools([
-                        *tool_list,
-                        *managed_agents_list,
-                    ]),
-                    session_container_group=_sandbox_tree_context.get(
-                        "session_container_group"
-                    ),
-                    cancellation_scope=self.cancellation_scope,
-                )
-                session_container_group = None
-                if (
-                    self.sandbox_config.level == SandboxLevel.DOCKER
-                    and self.sandbox_config.scope.value == "session"
-                ):
-                    session_container_group = getattr(
-                        python_executor,
-                        "_nexent_session_container_group",
-                        None,
-                    )
-                if session_container_group is not None:
-                    existing_group = _sandbox_tree_context.setdefault(
-                        "session_container_group",
-                        session_container_group,
-                    )
-                    if existing_group is not session_container_group:
-                        raise RuntimeError(
-                            "Agent tree received multiple session sandbox containers"
-                        )
-                self._sandbox_executors.append(python_executor)
-                if self.sandbox_config.level != SandboxLevel.LOCAL:
-                    from .sandbox import SandboxSkillScriptRunner
+                from .sandbox import SandboxLevel
 
-                    configured_timeout = getattr(self.sandbox_config, "timeout_seconds", None)
-                    skill_timeout = (
-                        max(1, int(configured_timeout))
-                        if isinstance(configured_timeout, (int, float))
-                        and not isinstance(configured_timeout, bool)
-                        else 300
-                    )
-                    script_runner = SandboxSkillScriptRunner(
-                        python_executor,
-                        timeout_seconds=skill_timeout,
-                        workspace_path=self.workspace_path,
-                        network_enabled=not self.sandbox_config.network_disabled,
-                    )
-                    for tool in tool_list:
-                        bind_backend = getattr(tool, "bind_execution_backend", None)
-                        if callable(bind_backend) and _tool_name(tool) == "run_skill_script":
-                            bind_backend(
-                                script_runner,
-                                on_complete=lambda _result: self._pull_file_workspace_from_sandbox(),
-                            )
-                    self._sandbox_skill_runners.append(script_runner)
-                # Eager warm-up for remote executors (skip for LOCAL which is instant).
-                if self.sandbox_config.level != SandboxLevel.LOCAL:
-                    try:
-                        warm_start = time.time()
-                        current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
-                        warmup_metadata = replace(
-                            current_metadata,
-                            agent_id=(
-                                getattr(agent_config, "_sub_agent_id", None)
-                                if _managed_context else current_metadata.agent_id
-                            ),
-                            agent_name=agent_config.name,
-                            agent_display_name=agent_config.display_name,
-                            model_name=agent_config.model_name,
-                        )
-                        with get_monitoring_manager().trace_agent_step(
-                            "agent.sandbox.warmup",
-                            warmup_metadata,
-                            step_type="sandbox_warmup",
-                            **{
-                                "sandbox.level": self.sandbox_config.level.value,
-                                "sandbox.scope": self.sandbox_config.scope.value,
-                                "sandbox.backend": getattr(python_executor, "_nexent_backend", "unknown"),
-                            },
-                        ):
-                            python_executor("[0, None]")
-                        warm_dur = time.time() - warm_start
-                        backend = getattr(python_executor, "_nexent_backend", "unknown")
-                        if backend == "local":
-                            logger.warning(
-                                "Sandbox level '%s' unavailable; using LocalPythonExecutor instead "
-                                "(scope=%s, warm-up %.2fs)",
-                                self.sandbox_config.level.value,
-                                self.sandbox_config.scope.value,
-                                warm_dur,
-                            )
-                        else:
-                            logger.info(
-                                "Sandbox warmed up in %.2fs (backend=%s, level=%s, scope=%s)",
-                                warm_dur,
-                                backend,
-                                self.sandbox_config.level.value,
-                                self.sandbox_config.scope.value,
-                            )
-                    except Exception as warm_err:
-                        logger.warning(
-                            "Sandbox warm-up failed (%s): %s",
-                            self.sandbox_config.level.value,
-                            warm_err,
-                        )
-                # Store scope on NexentAgent so _cleanup_sandbox() can read it.
+                deferred = self.tool_fastpath_enabled and self.sandbox_config.level == SandboxLevel.DOCKER
                 self._sandbox_scope = self.sandbox_config.scope.value
+
+                def release_executor(executor):
+                    with _sandbox_tree_context["initialization_lock"]:
+                        self._release_deferred_executor(executor)
+                        group = _sandbox_tree_context.get("session_container_group")
+                        if group is not None and getattr(group, "_closed", False):
+                            _sandbox_tree_context.pop("session_container_group", None)
+
+                def create_executor():
+                    python_executor = None
+                    script_runner = None
+                    with _sandbox_tree_context["initialization_lock"]:
+                        try:
+                            from .sandbox import build_python_executor
+                            if deferred and self.stop_event.is_set():
+                                raise RuntimeError("Agent execution cancelled")
+                            if deferred and self.workspace_path:
+                                self._pull_file_workspace_from_sandbox()
+                            has_managed = bool(
+                                agent_config.managed_agents
+                                or getattr(agent_config, "external_a2a_agents", [])
+                            )
+                            python_executor = build_python_executor(
+                                config=self.sandbox_config,
+                                logger_=logger,
+                                managed_agents_exist=has_managed,
+                                host_tools_exist=_has_host_tools([
+                                    *tool_list,
+                                    *managed_agents_list,
+                                ]),
+                                session_container_group=_sandbox_tree_context.get(
+                                    "session_container_group"
+                                ),
+                                cancellation_scope=self.cancellation_scope,
+                            )
+                            self._sandbox_executors.append(python_executor)
+                            if deferred and self.stop_event.is_set():
+                                raise RuntimeError("Agent execution cancelled")
+                            session_container_group = None
+                            if (
+                                self.sandbox_config.level == SandboxLevel.DOCKER
+                                and self.sandbox_config.scope.value == "session"
+                            ):
+                                session_container_group = getattr(
+                                    python_executor,
+                                    "_nexent_session_container_group",
+                                    None,
+                                )
+                            if session_container_group is not None:
+                                existing_group = _sandbox_tree_context.setdefault(
+                                    "session_container_group",
+                                    session_container_group,
+                                )
+                                if existing_group is not session_container_group:
+                                    raise RuntimeError(
+                                        "Agent tree received multiple session sandbox containers"
+                                    )
+                            if self.sandbox_config.level != SandboxLevel.LOCAL:
+                                from .sandbox import SandboxSkillScriptRunner
+
+                                configured_timeout = getattr(self.sandbox_config, "timeout_seconds", None)
+                                skill_timeout = (
+                                    max(1, int(configured_timeout))
+                                    if isinstance(configured_timeout, (int, float))
+                                    and not isinstance(configured_timeout, bool)
+                                    else 300
+                                )
+                                script_runner = SandboxSkillScriptRunner(
+                                    python_executor,
+                                    timeout_seconds=skill_timeout,
+                                    workspace_path=self.workspace_path,
+                                    network_enabled=not self.sandbox_config.network_disabled,
+                                )
+                                for tool in tool_list:
+                                    bind_backend = getattr(tool, "bind_execution_backend", None)
+                                    if callable(bind_backend) and _tool_name(tool) == "run_skill_script":
+                                        bind_backend(
+                                            script_runner,
+                                            on_complete=lambda _result: self._pull_file_workspace_from_sandbox(),
+                                        )
+                                self._sandbox_skill_runners.append(script_runner)
+                            if deferred and self.stop_event.is_set():
+                                raise RuntimeError("Agent execution cancelled")
+                            # Warm up remote executors when they are acquired.
+                            if self.sandbox_config.level != SandboxLevel.LOCAL:
+                                try:
+                                    warm_start = time.time()
+                                    current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
+                                    warmup_metadata = replace(
+                                        current_metadata,
+                                        agent_id=(
+                                            getattr(agent_config, "_sub_agent_id", None)
+                                            if _managed_context else current_metadata.agent_id
+                                        ),
+                                        agent_name=agent_config.name,
+                                        agent_display_name=agent_config.display_name,
+                                        model_name=agent_config.model_name,
+                                    )
+                                    with get_monitoring_manager().trace_agent_step(
+                                        "agent.sandbox.warmup",
+                                        warmup_metadata,
+                                        step_type="sandbox_warmup",
+                                        **{
+                                            "sandbox.level": self.sandbox_config.level.value,
+                                            "sandbox.scope": self.sandbox_config.scope.value,
+                                            "sandbox.backend": getattr(python_executor, "_nexent_backend", "unknown"),
+                                        },
+                                    ):
+                                        python_executor("[0, None]")
+                                    warm_dur = time.time() - warm_start
+                                    backend = getattr(python_executor, "_nexent_backend", "unknown")
+                                    if backend == "local":
+                                        logger.warning(
+                                            "Sandbox level '%s' unavailable; using LocalPythonExecutor instead "
+                                            "(scope=%s, warm-up %.2fs)",
+                                            self.sandbox_config.level.value,
+                                            self.sandbox_config.scope.value,
+                                            warm_dur,
+                                        )
+                                    else:
+                                        logger.info(
+                                            "Sandbox warmed up in %.2fs (backend=%s, level=%s, scope=%s)",
+                                            warm_dur,
+                                            backend,
+                                            self.sandbox_config.level.value,
+                                            self.sandbox_config.scope.value,
+                                        )
+                                except Exception as warm_err:
+                                    logger.warning(
+                                        "Sandbox warm-up failed (%s): %s",
+                                        self.sandbox_config.level.value,
+                                        warm_err,
+                                    )
+                            # Store scope on NexentAgent so _cleanup_sandbox() can read it.
+                            self._sandbox_scope = self.sandbox_config.scope.value
+
+                            if deferred:
+                                if self.stop_event.is_set():
+                                    raise RuntimeError("Agent execution cancelled")
+                                container = getattr(python_executor, "container", None)
+                                if container is not None:
+                                    self._push_file_workspace_to_sandbox(containers=[container])
+                                self._initialize_sandbox_workspaces(executors=[python_executor])
+                            return python_executor
+                        except BaseException:
+                            if deferred and python_executor is not None:
+                                try:
+                                    if script_runner is not None:
+                                        script_runner.cleanup()
+                                        self._sandbox_skill_runners[:] = [
+                                            runner for runner in self._sandbox_skill_runners
+                                            if runner is not script_runner
+                                        ]
+                                finally:
+                                    release_executor(python_executor)
+                            raise
+
+                if deferred:
+                    from .tool_fastpath import (
+                        OFFICIAL_FASTPATH_TOOL_CLASSES,
+                        DeferredToolExecutor,
+                        official_fastpath_tools,
+                    )
+
+                    allowed_classes = (
+                        OFFICIAL_FASTPATH_TOOL_CLASSES
+                        if self.tool_fastpath_allowed_tools is None
+                        else self.tool_fastpath_allowed_tools
+                    )
+                    python_executor = DeferredToolExecutor(
+                        create_executor=create_executor,
+                        release_executor=release_executor,
+                        allowed_tools=official_fastpath_tools(agent_config.tools, tool_list, allowed_classes),
+                        stop_event=self.stop_event,
+                    )
+                    self._tool_fastpath_executors.append(python_executor)
+                else:
+                    python_executor = create_executor()
 
             # Create the agent
             agent = CoreAgent(
@@ -1406,9 +1483,10 @@ class NexentAgent:
             and extra_kwargs.get("workspace_volume_name")
         )
 
-    def _push_file_workspace_to_sandbox(self) -> None:
+    def _push_file_workspace_to_sandbox(self, containers: Optional[List[Any]] = None) -> None:
         """Copy the prepared host workspace into every Docker sandbox."""
-        containers = self._sandbox_containers()
+        if containers is None:
+            containers = self._sandbox_containers()
         if not containers or not self.workspace_path:
             return
         workspace = Path(self.workspace_path).resolve()
@@ -1427,7 +1505,7 @@ class NexentAgent:
                 raise RuntimeError("Failed to copy run workspace into the sandbox")
             self._grant_sandbox_output_access(container, workspace)
 
-    def _initialize_sandbox_workspaces(self) -> None:
+    def _initialize_sandbox_workspaces(self, executors: Optional[List[Any]] = None) -> None:
         """Set every Docker kernel's cwd and workspace environment for this run."""
         if not self.workspace_path:
             return
@@ -1443,7 +1521,7 @@ class NexentAgent:
             "[_nexent_workspace, _nexent_output_dir]"
         )
         seen_executor_ids = set()
-        for executor in self._sandbox_executors:
+        for executor in self._sandbox_executors if executors is None else executors:
             executor_id = id(executor)
             if executor_id in seen_executor_ids:
                 continue
@@ -1722,6 +1800,18 @@ class NexentAgent:
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
 
+    def _release_deferred_executor(self, executor: Any) -> None:
+        """Release a deferred executor through its original lifecycle owner."""
+        self._sandbox_executors[:] = [item for item in self._sandbox_executors if item is not executor]
+        if getattr(self, "_sandbox_scope", None) == "system":
+            from .sandbox import release_python_executor
+
+            release_python_executor(executor, logger)
+        else:
+            from .sandbox import cleanup_executor
+
+            cleanup_executor(executor, logger, timeout=5.0)
+
     def _cleanup_sandbox(self) -> None:
         """
         Clean up the sandbox executor after an agent run.
@@ -1732,13 +1822,16 @@ class NexentAgent:
         Must run AFTER any output-sync logic, because the container filesystem
         is inaccessible after the executor is released / destroyed.
         """
+        from .tool_fastpath import DeferredToolExecutor
+
+        wrappers = list(self._tool_fastpath_executors)
         root_executor = getattr(self.agent, "python_executor", None)
         executors = list(self._sandbox_executors)
-        if root_executor is not None and all(
+        if root_executor is not None and not isinstance(root_executor, DeferredToolExecutor) and all(
             item is not root_executor for item in executors
         ):
             executors.append(root_executor)
-        if not executors:
+        if not executors and not wrappers:
             return
 
         scope = getattr(self, "_sandbox_scope", None)
@@ -1749,7 +1842,8 @@ class NexentAgent:
 
         # Sync outputs to MinIO before destroying the container.
         if (
-            not self.workspace_path
+            executors
+            and not self.workspace_path
             and self.sandbox_config is not None
             and self.sandbox_config.auto_sync_outputs
             and self.minio_client is not None
@@ -1774,10 +1868,11 @@ class NexentAgent:
                 logger.error("Output sync to MinIO failed: %s", exc)
 
         # Release or destroy the executor.
+        wrapped_executor_ids = {id(wrapper.remote) for wrapper in wrappers if wrapper.remote is not None}
         seen_executor_ids = set()
         for executor in reversed(executors):
             executor_id = id(executor)
-            if executor_id in seen_executor_ids:
+            if executor_id in seen_executor_ids or executor_id in wrapped_executor_ids:
                 continue
             seen_executor_ids.add(executor_id)
             if scope == "system":
@@ -1789,6 +1884,10 @@ class NexentAgent:
                 # agent-tree container is deleted after the final lease closes.
                 from .sandbox import cleanup_executor
                 cleanup_executor(executor, logger, timeout=5.0)
+
+        for wrapper in reversed(wrappers):
+            wrapper.cleanup()
+        self._tool_fastpath_executors.clear()
 
         # Clear the reference so GC can collect the wrapper objects.
         if self.agent is not None:
