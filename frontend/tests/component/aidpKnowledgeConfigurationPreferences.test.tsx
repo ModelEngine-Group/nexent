@@ -13,6 +13,24 @@ const service = vi.hoisted(() => ({
 vi.mock("@/ext_components/aidp/services/aidpKnowledgeService", () => ({
   default: service,
 }));
+vi.mock("@/ext_components/aidp/components/AidpImportDrawer", () => ({
+  default: ({
+    onDocsUploaded,
+    onRefresh,
+  }: {
+    onDocsUploaded: (ids: string[]) => void;
+    onRefresh: () => void;
+  }) => (
+    <button
+      onClick={() => {
+        onRefresh();
+        onDocsUploaded(["uploaded-file"]);
+      }}
+    >
+      finish test upload
+    </button>
+  ),
+}));
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
@@ -59,9 +77,7 @@ const makeTree = () => {
 beforeEach(() => {
   window.sessionStorage.clear();
   service.listKbs.mockResolvedValue({
-    value: [
-      { kds_id: "kb-1", kds_name: "测试知识库", permission: "READ_ONLY" },
-    ],
+    value: [{ kds_id: "kb-1", kds_name: "测试知识库", permission: "EDIT" }],
     total_count: 1,
   });
 });
@@ -86,5 +102,21 @@ describe("knowledge list view preference", () => {
         screen.getByRole("button", { name: "aidpKnowledge.columnSettings" })
       ).toBeVisible()
     );
+  });
+
+  it("refreshes the list once when an import finishes", async () => {
+    makeTree();
+    await screen.findByText("测试知识库");
+    service.listKbs.mockClear();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "aidpKnowledge.moreOperations" })
+    );
+    fireEvent.click(await screen.findByText("aidpKnowledge.importFile"));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "finish test upload" })
+    );
+
+    await waitFor(() => expect(service.listKbs).toHaveBeenCalledTimes(1));
   });
 });

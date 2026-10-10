@@ -220,10 +220,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     [updateKnowledgeBase]
   );
 
-  const handleQuickDocsUploaded = useCallback(() => {
-    void refreshLists();
-  }, [refreshLists]);
-
   const handleCreateNew = useCallback(() => {
     router.push(`/${locale}/knowledges/create`);
   }, [locale, router]);
@@ -288,7 +284,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           open
           knowledgeBase={quickImportKb}
           onClose={() => setQuickImportKb(null)}
-          onDocsUploaded={handleQuickDocsUploaded}
+          onDocsUploaded={() => undefined}
           onRefresh={() => void refreshLists()}
         />
       )}
