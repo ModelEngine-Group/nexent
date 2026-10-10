@@ -671,7 +671,8 @@ export const Composer: FC<ComposerProps> = ({
             }}
           >
             {!compact &&
-              (!(debugLayout || newChatDesign) || hasAttachments) && (
+              (hasAttachments ||
+                !(debugLayout || newChatDesign || workbenchPresentation)) && (
                 <ComposerAttachments
                   className={
                     workbenchPresentation && !newChatDesign ? "px-0" : undefined
@@ -1065,7 +1066,9 @@ export const Composer: FC<ComposerProps> = ({
                             className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
                             onClick={() => {
                               setActionPanel(null);
-                              router.push(`/${params.locale || "en"}/knowledges`);
+                              router.push(
+                                `/${params.locale || "en"}/knowledges`
+                              );
                             }}
                           >
                             <Settings className="size-4" aria-hidden />
@@ -1612,7 +1615,9 @@ export const Composer: FC<ComposerProps> = ({
           onCancel={() => setLocalSkillModalOpen(false)}
           onSuccess={async () => {
             setLocalSkillModalOpen(false);
-            await queryClient.invalidateQueries({ queryKey: ["composerSkills"] });
+            await queryClient.invalidateQueries({
+              queryKey: ["composerSkills"],
+            });
           }}
         />
       )}
