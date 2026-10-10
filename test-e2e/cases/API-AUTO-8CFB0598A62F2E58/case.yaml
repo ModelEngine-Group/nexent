@@ -1,0 +1,50 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-8CFB0598A62F2E58
+  feature_id: F-184
+  business_rule_ids: [F-184-RULE-01]
+  title: Market与Repository代理原路径及状态透传、隔离上游故障恢复
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: 分开验证代理传输契约与已注册Repository业务接口，不以旧Market的200作为代理通过条件。
+  preconditions:
+  - 配置后端和前端已启动，使用已有服务配置及隔离租户管理员账号（具备Skill Repository权限）。
+  - Node.js及frontend的http-proxy依赖已准备，测试使用仓库server.js真实函数及错误处理。
+  - 故障注入仅针对测试创建的loopback上游，不停止共享容器。
+  test_data:
+    upstream_statuses: [200, 403, 404]
+    routes: ['/api/market/*', '/api/repository/*']
+  steps:
+  - order: 1
+    action: 在动态本地端口启动临时HTTP上游及运行生产代理函数的HTTP服务。
+    expected: 所有资源为本用例创建，不需要固定端口或修改环境变量。
+  - order: 2
+    action: 分别发送Market和Repository请求，包含编码查询参数，由上游返回200、403、404。
+    expected: 原始路径及查询参数、方法不变，状态和JSON正文及上游标识正确透传；不得分流到Runtime。
+  - order: 3
+    action: 仅关闭临时上游，再请求两类路径，然后恢复临时上游并重试。
+    expected: 上游不可达返回502及Backend unavailable，恢复后返回原有200正文。
+  - order: 4
+    action: 使用相同账号分别直连真实配置后端及经过真实前端请求Repository列表、标签和过滤接口。
+    expected: 列表、标签及合法过滤返回200，缺definition_id/value_ids的非法谓词返回400；前端状态及JSON与上游一致。
+  - order: 5
+    action: 比较真实旧Market接口的直连与代理响应。
+    expected: 状态及JSON一致；上游404应透传404，不证明旧页面可用或已退役。
+  - order: 6
+    action: 关闭所有临时监听及代理对象，保存脱敏证据。
+    expected: 无残留监听，不影响共享服务，无凭据泄露。
+  expected_results:
+  - 原始路径及查询参数、上游状态与JSON响应正确透传。
+  - 隔离上游故障返回502，恢复后可用。
+  - 已注册Repository业务接口返回200，旧Market路由不与代理契约混淆。
+  forbidden_side_effects: [停止共享产品容器, 将旧页面残留伪报为通过, 泄露凭据]
+  integration_boundary:
+  - loopback受控上游与真实server.js处理函数通过HTTP交互，另验证真实部署前端与配置后端。
+  observations: [上游请求回执, HTTP状态和JSON, 502及恢复证据]
+  cleanup: [关闭临时监听及代理对象]
+  source:
+    notes: Strengthened existing V5 proxy case; legacy Market page lifecycle is deferred, not silently retired.

@@ -1,0 +1,91 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MCP-MARKET-01
+  feature_id: V5-PW-MCP-MARKET-01
+  business_rule_ids:
+  - V5-PW-MCP-MARKET-01-RULE-01
+  title: Mine申请发布→Admin Review→Repository安装
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证MCP Repository/Mine/Review发布安装闭环，并核对发布前为源MCP分配的结构化标签在发布确认弹窗只读继承、发布后Repository/Mine一致展示、已发布详情只读展示。
+  preconditions:
+  - 作者账号可为本用例独立创建健康的 run_id MCP，不复用其他 Journey 的生命周期资产
+  - Admin reviewer
+  - 消费者租户
+  - 默认标签定义库下已存在结构化标签定义（或可经TagDefinitionManagementModal创建）
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/mcp.yaml
+  steps:
+  - order: 1
+    action: 作者Mine定位run_id MCP，打开编辑详情，点击“编辑标签”为源MCP分配结构化标签并保存。
+    expected: Review仅管理员可见。
+  - order: 2
+    action: 确认Mine卡片展示该结构化标签。
+    expected: 批准后Repository可见。
+  - order: 3
+    action: 作者点击“申请发布”，发布确认弹窗展示从源MCP继承的结构化标签且无标签编辑控件。
+    expected: 消费者Mine得到可用实例。
+  - order: 4
+    action: Admin进入Review，搜索申请并打开。
+    expected: 发布确认弹窗只读继承源MCP结构化标签，无TagEditor/可编辑标签控件。
+  - order: 5
+    action: 批准并等待状态更新，断言Repository可见。
+    expected: 发布后Repository与Mine展示的结构化标签与发布前分配一致。
+  - order: 6
+    action: 消费者Repository搜索run_id MCP并打开详情，断言标签与源MCP结构化分配一致。
+    expected: 已发布详情标签只读，无编辑标签入口。
+  - order: 7
+    action: 点击安装/添加到Mine。
+    expected: 已发布详情标签只读，无编辑标签入口。
+  - order: 8
+    action: 切消费者Mine确认实例并执行健康检查，断言卡片结构化标签与分配一致。
+    expected: 已发布详情标签只读，无编辑标签入口。
+  - order: 9
+    action: 打开已发布详情，断言标签区域只读、无“编辑标签”入口。
+    expected: 已发布详情标签只读，无编辑标签入口。
+  - order: 10
+    action: 清理安装和发布项。
+    expected: 已发布详情标签只读，无编辑标签入口。
+  expected_results:
+  - Review仅管理员可见。
+  - 批准后Repository可见。
+  - 消费者Mine得到可用实例。
+  - 发布确认弹窗只读继承源MCP结构化标签，无TagEditor/可编辑标签控件。
+  - 发布后Repository与Mine展示的结构化标签与发布前分配一致。
+  - 已发布详情标签只读，无编辑标签入口。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 32
+  actor: Nexent browser user
+  journey:
+  - 作者Mine定位run_id MCP，打开编辑详情，点击“编辑标签”为源MCP分配结构化标签并保存。
+  - 确认Mine卡片展示该结构化标签。
+  - 作者点击“申请发布”，发布确认弹窗展示从源MCP继承的结构化标签且无标签编辑控件。
+  - Admin进入Review，搜索申请并打开。
+  - 批准并等待状态更新，断言Repository可见。
+  - 消费者Repository搜索run_id MCP并打开详情，断言标签与源MCP结构化分配一致。
+  - 点击安装/添加到Mine。
+  - 切消费者Mine确认实例并执行健康检查，断言卡片结构化标签与分配一致。
+  - 打开已发布详情，断言标签区域只读、无“编辑标签”入口。
+  - 清理安装和发布项。
+  final_business_result:
+  - Review仅管理员可见。
+  - 批准后Repository可见。
+  - 消费者Mine得到可用实例。
+  - 发布确认弹窗只读继承源MCP结构化标签，无TagEditor/可编辑标签控件。
+  - 发布后Repository与Mine展示的结构化标签与发布前分配一致。
+  - 已发布详情标签只读，无编辑标签入口。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MCP-MARKET-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

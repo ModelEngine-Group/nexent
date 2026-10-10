@@ -1,0 +1,92 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-BA4BBC902BC06BE6
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AIDP 知识库新建/更新弹窗与服务层：两步向导、USER仅PRIVATE、VLM模型默认回退、重复名拦截、上传分区校验、更新变更检测、multipart与错误映射｜核心流程与边界
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: AIDP 知识库新建/更新弹窗与服务层：两步向导、USER仅PRIVATE、VLM模型默认回退、重复名拦截、上传分区校验、更新变更检测、multipart与错误映射｜核心流程与边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/secrets.env
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 AidpCreateKbModal 与 AidpUpdateKbModal，注入最小 props（open、existingKbs/knowledgeBase、onCancel、onSuccess），mock
+      授权上下文（user.role/tenantId）、useGroupList 返回的组列表与 aidpKnowledgeService 各方法。
+    expected: USER 角色：权限组配置区隐藏，ingroup_permission 固定 PRIVATE、group_ids 固定 []；createKb 提交 payload 的 ingroup_permission=PRIVATE
+      且 group_ids=[]。
+  - order: 2
+    action: 首次渲染后检查两步向导 Steps 状态、默认值（chunk_token_num=1024、chunk_overlap_num=128、caption_enable 关闭）、按钮启停、字段显隐与 loading/empty
+      状态是否符合设计。
+    expected: 非 USER 角色：READ_ONLY/EDIT 时 group_ids 必填校验生效，PRIVATE 时 group_ids 选择器禁用且提交为空数组。
+  - order: 3
+    action: 使用真实用户事件模拟 click/fill/select/checkbox/keyboard，而非直接修改组件内部状态。
+    expected: 两步向导：Step0 填名称点“下一步”进入 Step1；“上一步”回填 formValues；重复名触发 createDuplicateName 提示且停留在 Step0。
+  - order: 4
+    action: 分别以 USER 与非 USER（SU/DEV）角色渲染，检查权限组配置区显隐、ingroup_permission 默认值与 group_ids 必填校验。
+    expected: VLM 模型：caption_enable 关闭时隐藏 vlm_model 下拉且提交 vlm_model 为空；开启时从 listModels("llm","KnowledgeBase") 解析默认 Qwen3-VL-8B-Instruct，缺省时回退列表第一个，列表为空时回退
+      Qwen3-VL-8B-Instruct。
+  - order: 5
+    action: 在 Step0 输入合法/非法名称（含与 existingKbs 重复的名称），触发“下一步”，断言是否进入 Step1 或停在 Step0 并提示重复名。
+    expected: beforeUpload：单次多选仅执行一次分区校验；非法文件被拦截并提示；选择“跳过上传”时不再校验文件；提交前 validateAidpFiles 兜底。
+  - order: 6
+    action: 开启/关闭 caption_enable 开关，断言 vlm_model 下拉显隐；mock listModels 返回不同模型列表（含/不含 Qwen3-VL-8B-Instruct、空列表），断言默认 vlm_model
+      解析与回退。
+    expected: 更新变更检测：name/description/ingroup_permission/group_ids 均无变化时不调用 setPermission，直接 onSuccess(原对象)；有变化时仅携带变更字段调用
+      setPermission。
+  - order: 7
+    action: 在 Step1 触发 beforeUpload 批量选择与跳过上传，断言 partitionAidpFiles 仅触发一次、非法文件被拦截提示；随后提交，断言 createKb 与 uploadDocs 的调用参数与顺序。
+    expected: 更新失败回退：setPermission 返回 metadata_status="failed" 时提示 updateKbMetadataFailed，且 kds_name/description 回退为原值。
+  - order: 8
+    action: 修改 update 弹窗的 name/description/ingroup_permission/group_ids（含无变更场景），断言 setPermission 是否被调用及其 payload 仅含变更字段；mock
+      metadata_status=failed，断言提示与回退。
+    expected: multipart 与错误映射：uploadDocs 构造 FormData 且剥离 Content-Type（由浏览器设置 boundary）；失败响应优先映射 details.upstream_reason，其次
+      message，非 JSON 回退 errorText。
+  - order: 9
+    action: mock uploadDocs 的 fetch 失败响应（含 details.upstream_reason 与非 JSON 文本），断言错误信息映射；检查构造的 FormData 且请求头剥离 Content-Type。
+    expected: 日志、Trace 与报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 重新渲染/模拟刷新后初始数据加载，确认回显与服务端数据映射一致。
+    expected: 日志、Trace 与报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - USER 角色：权限组配置区隐藏，ingroup_permission 固定 PRIVATE、group_ids 固定 []；createKb 提交 payload 的 ingroup_permission=PRIVATE 且 group_ids=[]。
+  - 非 USER 角色：READ_ONLY/EDIT 时 group_ids 必填校验生效，PRIVATE 时 group_ids 选择器禁用且提交为空数组。
+  - 两步向导：Step0 填名称点“下一步”进入 Step1；“上一步”回填 formValues；重复名触发 createDuplicateName 提示且停留在 Step0。
+  - VLM 模型：caption_enable 关闭时隐藏 vlm_model 下拉且提交 vlm_model 为空；开启时从 listModels("llm","KnowledgeBase") 解析默认 Qwen3-VL-8B-Instruct，缺省时回退列表第一个，列表为空时回退
+    Qwen3-VL-8B-Instruct。
+  - beforeUpload：单次多选仅执行一次分区校验；非法文件被拦截并提示；选择“跳过上传”时不再校验文件；提交前 validateAidpFiles 兜底。
+  - 更新变更检测：name/description/ingroup_permission/group_ids 均无变化时不调用 setPermission，直接 onSuccess(原对象)；有变化时仅携带变更字段调用 setPermission。
+  - 更新失败回退：setPermission 返回 metadata_status="failed" 时提示 updateKbMetadataFailed，且 kds_name/description 回退为原值。
+  - multipart 与错误映射：uploadDocs 构造 FormData 且剥离 Content-Type（由浏览器设置 boundary）；失败响应优先映射 details.upstream_reason，其次 message，非
+    JSON 回退 errorText。
+  - 日志、Trace 与报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 448
+  unit_boundary: 前端表单
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - USER 角色：权限组配置区隐藏，ingroup_permission 固定 PRIVATE、group_ids 固定 []；createKb 提交 payload 的 ingroup_permission=PRIVATE 且 group_ids=[]。
+  - 非 USER 角色：READ_ONLY/EDIT 时 group_ids 必填校验生效，PRIVATE 时 group_ids 选择器禁用且提交为空数组。
+  - 两步向导：Step0 填名称点“下一步”进入 Step1；“上一步”回填 formValues；重复名触发 createDuplicateName 提示且停留在 Step0。
+  - VLM 模型：caption_enable 关闭时隐藏 vlm_model 下拉且提交 vlm_model 为空；开启时从 listModels("llm","KnowledgeBase") 解析默认 Qwen3-VL-8B-Instruct，缺省时回退列表第一个，列表为空时回退
+    Qwen3-VL-8B-Instruct。
+  - beforeUpload：单次多选仅执行一次分区校验；非法文件被拦截并提示；选择“跳过上传”时不再校验文件；提交前 validateAidpFiles 兜底。
+  - 更新变更检测：name/description/ingroup_permission/group_ids 均无变化时不调用 setPermission，直接 onSuccess(原对象)；有变化时仅携带变更字段调用 setPermission。
+  - 更新失败回退：setPermission 返回 metadata_status="failed" 时提示 updateKbMetadataFailed，且 kds_name/description 回退为原值。
+  - multipart 与错误映射：uploadDocs 构造 FormData 且剥离 Content-Type（由浏览器设置 boundary）；失败响应优先映射 details.upstream_reason，其次 message，非
+    JSON 回退 errorText。
+  - 日志、Trace 与报告中不出现明文 API Key/Token/Password/模型密钥。

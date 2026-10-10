@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-0A1F1A158A053D79
+  feature_id: F-185
+  business_rule_ids:
+  - F-185-RULE-01
+  title: USER 角色创建 KB 强制 PRIVATE 并清空 group_ids、更新仅限个人 KB 不可转共享/分配组｜异常/边界/越权
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: USER 角色创建 KB 强制 PRIVATE 并清空 group_ids、更新仅限个人 KB 不可转共享/分配组｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml
+  - users.yaml 中隔离账号（USER 角色 UserA 与可管理共享 KB 的 Admin）可登录，测试租户数据可被清理；models.yaml 提供本用例可用的有效 embedding_model_id。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号（至少一个 USER 角色 UserA 与一个 Admin），密码/Token 仅从 secrets.env 注入；从 config/models.yaml 获取有效
+      embedding_model_id。
+    expected: USER 创建 KB 返回成功，且持久化记录的 ingroup_permission 强制为 PRIVATE、group_ids 清空为 None，不因请求体传入的共享权限/组参数而改变。
+  - order: 2
+    action: USER 角色调用 POST /indices/{index_name}（index_name 作为用户可见 KB 名称，带 RunID 前缀），请求体显式携带 ingroup_permission=EDIT 与 group_ids=[<组ID>]，记录响应状态与返回的
+      index_name。
+    expected: USER 更新自身 PRIVATE 个人 KB 时，将 ingroup_permission 改为 EDIT/READ_ONLY 被拒绝，抛出 PermissionError（"USER role cannot turn
+      a personal knowledge base into a shared knowledge base"），记录仍为 PRIVATE。
+  - order: 3
+    action: 重新读取该 KB 记录（GET /indices 列表/详情），断言 ingroup_permission 被强制为 PRIVATE 且 group_ids 被清空为 None。
+    expected: USER 更新时携带 group_ids 被拒绝，抛出 PermissionError（"USER role cannot assign groups to a personal knowledge base"），记录
+      group_ids 不变。
+  - order: 4
+    action: USER 角色调用 PATCH /indices/{index_name} 携带 ingroup_permission=EDIT，试图将 PRIVATE 个人 KB 转为共享，记录响应状态与错误信息。
+    expected: USER 更新非 PRIVATE（共享）KB 被拒绝，抛出 PermissionError（"USER role can only manage PRIVATE personal knowledge bases"）。
+  - order: 5
+    action: USER 角色调用 PATCH /indices/{index_name} 携带 group_ids=[<组ID>]，断言被拒绝且 KB 记录 group_ids 仍为 None。
+    expected: 失败路径不产生半写入、重复副作用或跨租户泄露；日志、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 使用 Admin 账号创建一个 ingroup_permission=EDIT（或 READ_ONLY）的共享 KB，再以 USER 角色 PATCH 该共享 KB，断言被拒绝。
+    expected: 失败路径不产生半写入、重复副作用或跨租户泄露；日志、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 每次被拒绝后重新读取 KB 记录，确认未发生半写入、权限状态未被改变。
+    expected: 失败路径不产生半写入、重复副作用或跨租户泄露；日志、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 清理当次创建的 KB 与测试资源，确认无脏状态残留。
+    expected: 失败路径不产生半写入、重复副作用或跨租户泄露；日志、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - USER 创建 KB 返回成功，且持久化记录的 ingroup_permission 强制为 PRIVATE、group_ids 清空为 None，不因请求体传入的共享权限/组参数而改变。
+  - USER 更新自身 PRIVATE 个人 KB 时，将 ingroup_permission 改为 EDIT/READ_ONLY 被拒绝，抛出 PermissionError（"USER role cannot turn a personal
+    knowledge base into a shared knowledge base"），记录仍为 PRIVATE。
+  - USER 更新时携带 group_ids 被拒绝，抛出 PermissionError（"USER role cannot assign groups to a personal knowledge base"），记录 group_ids
+    不变。
+  - USER 更新非 PRIVATE（共享）KB 被拒绝，抛出 PermissionError（"USER role can only manage PRIVATE personal knowledge bases"）。
+  - 失败路径不产生半写入、重复副作用或跨租户泄露；日志、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 488
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取隔离测试账号（至少一个 USER 角色 UserA 与一个 Admin），密码/Token 仅从 secrets.env 注入；从 config/models.yaml 获取有效 embedding_model_id。
+    - USER 角色调用 POST /indices/{index_name}（index_name 作为用户可见 KB 名称，带 RunID 前缀），请求体显式携带 ingroup_permission=EDIT 与 group_ids=[<组ID>]，记录响应状态与返回的
+      index_name。
+    - 重新读取该 KB 记录（GET /indices 列表/详情），断言 ingroup_permission 被强制为 PRIVATE 且 group_ids 被清空为 None。
+    - USER 角色调用 PATCH /indices/{index_name} 携带 ingroup_permission=EDIT，试图将 PRIVATE 个人 KB 转为共享，记录响应状态与错误信息。
+    - USER 角色调用 PATCH /indices/{index_name} 携带 group_ids=[<组ID>]，断言被拒绝且 KB 记录 group_ids 仍为 None。
+    - 使用 Admin 账号创建一个 ingroup_permission=EDIT（或 READ_ONLY）的共享 KB，再以 USER 角色 PATCH 该共享 KB，断言被拒绝。
+    - 每次被拒绝后重新读取 KB 记录，确认未发生半写入、权限状态未被改变。
+    - 清理当次创建的 KB 与测试资源，确认无脏状态残留。
+    response_expectations:
+    - USER 创建 KB 返回成功，且持久化记录的 ingroup_permission 强制为 PRIVATE、group_ids 清空为 None，不因请求体传入的共享权限/组参数而改变。
+    - USER 更新自身 PRIVATE 个人 KB 时，将 ingroup_permission 改为 EDIT/READ_ONLY 被拒绝，抛出 PermissionError（"USER role cannot turn a personal
+      knowledge base into a shared knowledge base"），记录仍为 PRIVATE。
+    - USER 更新时携带 group_ids 被拒绝，抛出 PermissionError（"USER role cannot assign groups to a personal knowledge base"），记录 group_ids
+      不变。
+    - USER 更新非 PRIVATE（共享）KB 被拒绝，抛出 PermissionError（"USER role can only manage PRIVATE personal knowledge bases"）。
+    - 失败路径不产生半写入、重复副作用或跨租户泄露；日志、报告中不出现明文 API Key/Token/Password/模型密钥。

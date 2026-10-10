@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-9AD31E451F5DE0D1
+  feature_id: F-065
+  business_rule_ids:
+  - F-065-RULE-01
+  title: history_summary 事件渲染历史摘要卡片（compacting/accepted/idle/malformed）｜核心流程
+  type: FE-COMP
+  priority: P0
+  status: active
+  automation: automated
+  objective: history_summary 事件渲染历史摘要卡片（compacting/accepted/idle/malformed）｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：history_summary 事件固定 fixture（compacting/accepted/idle/malformed JSON 样例，内嵌于测试代码，可离线执行）。
+  test_data:
+    legacy_asset_declaration: '- history_summary SSE 事件固定 fixture（compacting/accepted/idle/malformed JSON JSON.stringify 样例，内嵌于测试代码）'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 history_summary 渲染链路源码（remote-chat-model-adapter.ts 与 thread.tsx），构造 history_summary 事件的固定 fixture：compacting、accepted（含
+      summary.markdown 与 covered_through_message_id）、idle、malformed JSON 四类 content。
+    expected: history_summary SSE 事件映射为 name=history-summary 的 data part；status=compacting 渲染加载态（spinner + 文案），不显示摘要正文。
+  - order: 2
+    action: 对 updateHistorySummary 逻辑分别注入四类固定 payload，断言返回布尔值及 contentParts 中 name=history-summary 的 data part 的新增/覆盖/移除行为。
+    expected: status=accepted 渲染可折叠卡片，展示标题、covered_through_message_id 与 markdown 摘要正文。
+  - order: 3
+    action: 对 HistorySummaryCard 组件注入 status=compacting 数据，断言渲染 loading spinner（LoaderCircleIcon + animate-spin）与 compacting
+      文案，不出现摘要正文。
+    expected: summary 为空（无 markdown）时组件返回 null，不产生空摘要卡片。
+  - order: 4
+    action: 对 HistorySummaryCard 组件注入 status=accepted 且含 summary.markdown 与 covered_through_message_id 数据，断言渲染可折叠 details
+      卡片、标题、covered_through_message_id 文本与摘要正文。
+    expected: status=idle 移除已有 history-summary 卡片；compacting/accepted 之外的 status 不改变渲染。
+  - order: 5
+    action: 对 status=accepted 但 summary 为空（无 markdown）的数据，断言组件返回 null，不产生空摘要卡片。
+    expected: malformed JSON 被静默降级，不抛出异常、不产生伪卡片，功能结果与代码契约一致。
+  - order: 6
+    action: 注入 malformed JSON content，断言 JSON.parse 失败后静默降级（不新增/不修改卡片、不抛出异常）。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 注入 status=idle content，断言已有 history-summary part 被移除（splice），再次渲染不再出现该卡片。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 检查测试过程无未处理异常，无明文密钥输出，测试可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - history_summary SSE 事件映射为 name=history-summary 的 data part；status=compacting 渲染加载态（spinner + 文案），不显示摘要正文。
+  - status=accepted 渲染可折叠卡片，展示标题、covered_through_message_id 与 markdown 摘要正文。
+  - summary 为空（无 markdown）时组件返回 null，不产生空摘要卡片。
+  - status=idle 移除已有 history-summary 卡片；compacting/accepted 之外的 status 不改变渲染。
+  - malformed JSON 被静默降级，不抛出异常、不产生伪卡片，功能结果与代码契约一致。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 441
+  unit_boundary: 前端流式状态
+  inputs:
+  - '- history_summary SSE 事件固定 fixture（compacting/accepted/idle/malformed JSON JSON.stringify 样例，内嵌于测试代码）'
+  assertions:
+  - history_summary SSE 事件映射为 name=history-summary 的 data part；status=compacting 渲染加载态（spinner + 文案），不显示摘要正文。
+  - status=accepted 渲染可折叠卡片，展示标题、covered_through_message_id 与 markdown 摘要正文。
+  - summary 为空（无 markdown）时组件返回 null，不产生空摘要卡片。
+  - status=idle 移除已有 history-summary 卡片；compacting/accepted 之外的 status 不改变渲染。
+  - malformed JSON 被静默降级，不抛出异常、不产生伪卡片，功能结果与代码契约一致。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

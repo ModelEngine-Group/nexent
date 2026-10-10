@@ -1,0 +1,92 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-3B8A8FB947806F0E
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: 验证 /aidp-mgmt 全部管理端点鉴权与权限面：401/403/404 及 USER 仅管理自有 PRIVATE｜接口契约
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证 /aidp-mgmt 全部管理端点鉴权与权限面：401/403/404 及 USER 仅管理自有 PRIVATE｜接口契约
+  preconditions:
+  - 后端服务已在隔离测试环境启动并挂载 /aidp-mgmt 路由；当次 run_id 已生成，执行时记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中 SU/Admin/DEV/UserA/UserB 等隔离账号可登录并签发 Authorization token；其中 UserA/UserB 为 USER 角色，SU/Admin 为管理角色，DEV 归属指定
+    group_id(g_dev)。
+  - 本地数据库可写，可向 aidp_kb_permission_t 构造/清理权限 fixture（kb_private：owner=UserA、ingroup_permission=PRIVATE、group_ids=[]；kb_shared：owner=UserA、ingroup_permission=READ_ONLY、group_ids=[g_dev]）。
+  - 鉴权失败路径（401）、越权路径（403）与不存在资源路径（404）均不依赖外部 AIDP 服务在线。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - aidp_kb_permission_t 本地 DB 权限 fixture（测试内构造、测试后清理）'
+  steps:
+  - order: 1
+    action: 从 users.yaml/secrets.env 加载 SU/Admin/DEV/UserA/UserB 账号，各自获取 Authorization token；向 aidp_kb_permission_t 插入 kb_private
+      与 kb_shared 两条权限 fixture，供后续 403 断言使用。
+    expected: 全部管理端点对缺失 Authorization 头、非法 token 均返回 401，不进入业务处理，不泄漏 KB/权限数据。
+  - order: 2
+    action: 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/documents、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
+      Authorization 头的请求，断言均返回 401。
+    expected: 请求不存在 kds_id 的资源操作返回 404，与 AidpKbNotFoundError 语义一致。
+  - order: 3
+    action: 携带非法/过期 Authorization token 请求详情端点与列表端点，断言返回 401，且响应体不包含 KB 列表、权限或详情数据。
+    expected: 非 owner 用户对 PRIVATE KB 的读/写操作返回 403；非 owner 对共享 KB 的 EDIT 类操作（PUT/DELETE/上传）返回 403，匹配 v7.1 权限矩阵。
+  - order: 4
+    action: 用 UserB token 请求 GET /knowledge-bases/{不存在的 kds_id}，断言返回 404。
+    expected: USER 角色 PATCH 非 PRIVATE 权限返回 403，detail 为 "USER role can only manage PRIVATE personal knowledge bases"。
+  - order: 5
+    action: 用 UserB token 请求 GET /knowledge-bases/kb_private（PRIVATE 且非 owner），断言返回 403；随后用 UserB token 分别 PUT/ DELETE/ POST-documents
+      请求 kb_private，断言均返回 403（require_permission required=EDIT 被拒）。
+    expected: 非 USER 管理角色对共享 KB 配置 EDIT+group_ids（无 metadata）返回 200 且 permissions_saved=true，本地权限行已正确落库。
+  - order: 6
+    action: 用 UserA token（USER 角色、kb_shared 的 owner）请求 PATCH /aidp-permissions/kb_shared，body 为 ingroup_permission=EDIT +
+      group_ids=[g_dev]，断言返回 403。
+    expected: 全程响应与日志中不出现明文 API Key/Token/Password。
+  - order: 7
+    action: 用 SU token 请求 PATCH /aidp-permissions/kb_shared，body 为 ingroup_permission=EDIT + group_ids=[g_dev]（不含 name/description），断言返回
+      200 且 permissions_saved=true；读取 aidp_kb_permission_t 验证 kb_shared 的 ingroup_permission 已更新为 EDIT。
+    expected: 全程响应与日志中不出现明文 API Key/Token/Password。
+  - order: 8
+    action: 测试结束后清理 kb_private/kb_shared fixture 及本用例产生的临时资源，确保可重复执行。
+    expected: 全程响应与日志中不出现明文 API Key/Token/Password。
+  expected_results:
+  - 全部管理端点对缺失 Authorization 头、非法 token 均返回 401，不进入业务处理，不泄漏 KB/权限数据。
+  - 请求不存在 kds_id 的资源操作返回 404，与 AidpKbNotFoundError 语义一致。
+  - 非 owner 用户对 PRIVATE KB 的读/写操作返回 403；非 owner 对共享 KB 的 EDIT 类操作（PUT/DELETE/上传）返回 403，匹配 v7.1 权限矩阵。
+  - USER 角色 PATCH 非 PRIVATE 权限返回 403，detail 为 "USER role can only manage PRIVATE personal knowledge bases"。
+  - 非 USER 管理角色对共享 KB 配置 EDIT+group_ids（无 metadata）返回 200 且 permissions_saved=true，本地权限行已正确落库。
+  - 全程响应与日志中不出现明文 API Key/Token/Password。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 493
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 users.yaml/secrets.env 加载 SU/Admin/DEV/UserA/UserB 账号，各自获取 Authorization token；向 aidp_kb_permission_t 插入 kb_private
+      与 kb_shared 两条权限 fixture，供后续 403 断言使用。
+    - 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/documents、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
+      Authorization 头的请求，断言均返回 401。
+    - 携带非法/过期 Authorization token 请求详情端点与列表端点，断言返回 401，且响应体不包含 KB 列表、权限或详情数据。
+    - 用 UserB token 请求 GET /knowledge-bases/{不存在的 kds_id}，断言返回 404。
+    - 用 UserB token 请求 GET /knowledge-bases/kb_private（PRIVATE 且非 owner），断言返回 403；随后用 UserB token 分别 PUT/ DELETE/ POST-documents
+      请求 kb_private，断言均返回 403（require_permission required=EDIT 被拒）。
+    - 用 UserA token（USER 角色、kb_shared 的 owner）请求 PATCH /aidp-permissions/kb_shared，body 为 ingroup_permission=EDIT + group_ids=[g_dev]，断言返回
+      403。
+    - 用 SU token 请求 PATCH /aidp-permissions/kb_shared，body 为 ingroup_permission=EDIT + group_ids=[g_dev]（不含 name/description），断言返回
+      200 且 permissions_saved=true；读取 aidp_kb_permission_t 验证 kb_shared 的 ingroup_permission 已更新为 EDIT。
+    - 测试结束后清理 kb_private/kb_shared fixture 及本用例产生的临时资源，确保可重复执行。
+    response_expectations:
+    - 全部管理端点对缺失 Authorization 头、非法 token 均返回 401，不进入业务处理，不泄漏 KB/权限数据。
+    - 请求不存在 kds_id 的资源操作返回 404，与 AidpKbNotFoundError 语义一致。
+    - 非 owner 用户对 PRIVATE KB 的读/写操作返回 403；非 owner 对共享 KB 的 EDIT 类操作（PUT/DELETE/上传）返回 403，匹配 v7.1 权限矩阵。
+    - USER 角色 PATCH 非 PRIVATE 权限返回 403，detail 为 "USER role can only manage PRIVATE personal knowledge bases"。
+    - 非 USER 管理角色对共享 KB 配置 EDIT+group_ids（无 metadata）返回 200 且 permissions_saved=true，本地权限行已正确落库。
+    - 全程响应与日志中不出现明文 API Key/Token/Password。

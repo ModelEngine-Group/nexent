@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-088
+  name: Agent 工具初始化、schema、metadata/tool_params 透传
+  status: active
+  description: 'MCP / Agent调用: Agent 工具初始化、schema、metadata/tool_params 透传'
+  business_rules:
+  - rule_id: F-088-RULE-01
+    description: Agent 工具初始化、schema、metadata/tool_params 透传
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

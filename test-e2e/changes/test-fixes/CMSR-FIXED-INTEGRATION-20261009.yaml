@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: CMSR-FIXED-INTEGRATION-20261009
+  change_type: test-fix
+  title: Implement controlled retry integration and browser journeys
+  description: >-
+    Bind independent D3 and D4 scripts to real Agent, observer, SSE, persistence
+    and browser paths. Reuse the runner-owned controlled HTTP service for a
+    partial transport failure or invalid semantic output followed by gated
+    successful code. Check visibility before completion, rollback, request count,
+    one executed action, history and refresh. No product/runtime monkeypatch,
+    global model replacement or unimplemented real-smoke completion claim.
+  affected_features:
+    existing: [CMSR-005]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CMSR-D3-001, CMSR-D4-001]
+    retired: []

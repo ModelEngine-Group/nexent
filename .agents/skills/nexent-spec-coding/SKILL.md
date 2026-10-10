@@ -1,6 +1,6 @@
 ---
 name: nexent-spec-coding
-description: Run the Nexent requirement or bug lifecycle from SPEC analysis through feature catalog and D1-D5 case design, product implementation, fixed test implementation, local verification, and delivery evidence. Use for features, fixes, refactors, APIs, UI, and model or Agent runtime changes.
+description: Run Nexent requirements and bugfixes through SPEC acceptance, traditional UT and applicable D1-D5 test design, product/test implementation, local verification, and delivery evidence. Use for features, fixes, refactors, APIs, UI, and model or Agent runtime changes.
 ---
 
 # Nexent SPEC Coding
@@ -12,19 +12,27 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 - Treat `nexent/` as the Git-managed product repository and its sibling `nexent-doc/` as the document repository.
 - Never run Git commands in the document repository or move SPEC documents into the product repository.
 - Preserve unrelated changes. Record the initial branch/status, applicable repository instructions, build configuration, and test layout.
-- Keep the existing tests under `test/backend`, `test/sdk`, and `test/ext_components` as Legacy UT. Do not map them into the formal D1-D5 manifest.
+- Keep the existing tests under `test/backend`, `test/sdk`, and `test/ext_components` as Legacy UT. Do not map them into the formal D1-D5 registry.
+- Traditional UT is a permanently maintained PR obligation, not a temporary baseline. Assess it for every product-code change, using nexent-python-tests. Preserve all existing D1 Cases/scripts; new D1 focuses on component evidence beyond UT, while D3 proves actual runtime integration. Do not force new Cases at all five stages.
 
 ## Read the right references
 
 | Work | Required reference |
 | --- | --- |
 | Choose the SPEC maintenance mode | [spec-maintenance-guide.md](references/spec-maintenance-guide.md) |
+| Fix a bug with or without an existing SPEC | [spec-maintenance-guide.md](references/spec-maintenance-guide.md), [bugfix-design-template.md](references/bugfix-design-template.md), and `nexent-test-assets`'s bugfix reference |
 | Create or revise `proposal.md` | [proposal-template.md](references/proposal-template.md) |
 | Create or revise `design.md`; design formal D1-D5 cases | [design-template.md](references/design-template.md) and [test-design-guide.md](references/test-design-guide.md) |
 | Create or revise `task.md` | [task-template.md](references/task-template.md) |
 | Plan, execute, or close verification | [verification-guide.md](references/verification-guide.md) |
 
-Use `nexent-test-assets` for the concrete feature-catalog, case, automation, manifest, schema, and Excel formats. `proposal.md` owns the current-change acceptance criteria, `design.md` owns design rationale and test strategy, and `task.md` owns the change-level traceability and evidence record.
+Use `nexent-test-assets` for the concrete Feature, Case, execution binding, schema, and Excel formats. `proposal.md` owns the current-change acceptance criteria, `design.md` owns design rationale and test strategy, and `task.md` owns the change-level traceability and evidence record.
+
+## Bugfix route
+
+For a bug, search the existing SPEC and formal assets before selecting the document scope. With a usable SPEC, follow its Feature/business-rule/Case links and check actual callers and scripts to determine affected behavior; update only relevant sections. Without a usable SPEC, create a lightweight `design.md` using the bugfix template. Define the complete coherent capability that owns the bug, its final expected behavior and existing Feature/Case coverage. Keep the current fix and verification scope explicit. A missing SPEC does not require creating `proposal.md` or `task.md`, reconstructing unrelated capabilities, or completing historical test coverage.
+
+Distinguish missing requirement documentation, a test baseline unavailable in this checkout, and a verified coverage gap. Reuse or strengthen existing Cases before adding any. Zero new Cases is valid when existing coverage reproduces the defect. Add stages only for a concrete proof boundary; D1-D5 is a classification, not a per-bug quota. Use the lightweight design's Acceptance Traceability for evidence when there is no `task.md`.
 
 ## Gated workflow
 
@@ -32,35 +40,41 @@ Use `nexent-test-assets` for the concrete feature-catalog, case, automation, man
 
 Search existing SPECs and choose the maintenance mode. Inspect the relevant code, callers, interfaces, persistence, services, UI, formal test assets, configuration, and runtime paths. Cite concrete paths, symbols, APIs, schemas, and configuration names. Do not implement production code during analysis.
 
-### 2. Define behavior and formal D1-D5 cases
+### 2. Define behavior and test responsibilities
 
-Create or update `proposal.md`, `design.md`, and `task.md`. Update the product feature catalog and define observable acceptance criteria. Design every applicable D1-D5 case before product implementation. Each case must have a stable Case ID, owning Feature ID, priority, precise preconditions, steps, expected results, forbidden side effects, and the stage-specific fields required by the repository schemas.
+For requirements, create or update `proposal.md`, `design.md`, and `task.md`. For bugs, use the Bugfix route above. Preserve correct existing Feature and Case contracts; update them only for affected behavior or a confirmed gap. Define observable acceptance criteria and select the necessary proving stages before product implementation. Each new or modified case must have a stable Case ID, owning Feature ID, priority, precise preconditions, steps, expected results, forbidden side effects, and the stage-specific fields required by the repository schemas.
 
-Create a requirement change record under `test/changes/requirements/` or a lightweight bug record under `test/changes/bugs/`. Run the formal asset validators and regenerate the Excel view. Do not invent final script paths, selectors, implementation hashes, or passing results during design.
+Use the Traditional UT + D1-D5 responsibility matrix in test-design-guide.md. Every acceptance requirement needs an appropriate proving surface, not necessarily a formal Case: UT may prove a unit contract but cannot satisfy an independently required API/runtime/journey/risk boundary. Record UT behavior intentions at design time; establish real test selectors after implementation. Distinguish reuse, strengthen, add and documented irrelevance. Do not fabricate file edits, selectors or five-stage coverage.
 
-The design gate fails when an in-scope behavior lacks an applicable case or justified exclusion, a case lacks executable assertions, stage boundaries are violated, affected Feature/Case declarations are stale, or schema and traceability validation fail. Resolve material behavior conflicts before implementation. No separate manual test-case approval is required by this workflow.
+Create a requirement change record under `test-e2e/changes/requirements/` or a lightweight bug record under `test-e2e/changes/bugs/`. Put lasting Feature and Case contracts in `test-e2e/features/` and `test-e2e/cases/`, not only in the change record. Run the design-phase validator and regenerate the Excel view. Do not invent final script paths, selectors, implementation hashes, or passing results during design.
+
+For each current product Change, include traditional_ut (decision, behavior intentions, rationale) and require it with --require-ut-change <Change-ID> in both validator phases. Confirm its actual UT selectors after implementation. Also pass --require-acceptance-case <Case-ID> for every added/acceptance-modified automated formal Case. Repeat flags as needed; unchanged historical records and regression Cases need no artificial edits. The strict selection must match the current change, not the whole baseline.
+
+The design gate applies to current-change acceptance and justified regression behavior, not every historical path in the functional inventory. It fails when required proof is missing, assertions are not executable, stage boundaries are violated, affected Feature/Case declarations are stale, or schema and traceability validation fail. Resolve material behavior conflicts before implementation. No separate manual test-case approval is required by this workflow.
 
 ### 3. Implement the product behavior
 
 Implement the minimum change needed to satisfy the defined behavior, following existing architecture and contracts. If implementation reveals that a requirement, product rule, Scenario, or test contract is wrong, update and validate the formal design assets before continuing. Do not silently weaken a case to fit the implementation.
 
-### 4. Implement fixed tests and the manifest
+### 4. Implement fixed tests and case-local bindings
 
-After product implementation, implement the affected formal D1-D5 scripts under `test/automation/d1` through `test/automation/d5`. Bind each automated script or test item to its Case ID and incrementally update only the affected entries in `test/manifests/d1-d5.yaml`. Then run full manifest and traceability validation.
+After product implementation, implement each affected D1-D5 primary script beside `test-e2e/cases/<Case-ID>/case.yaml`; keep reusable helpers under `test-e2e/infra/automation/`. Add or update that Case's `execution.yaml` with framework, file, selector, and declared profile/asset needs. Then run full binding and traceability validation. Do not hand-edit the derived registry.
 
 For a confirmed bug, a focused failing reproduction may be implemented before the product fix when that is the clearest way to preserve the regression. Existing formal cases should be strengthened instead of duplicated when they already own the behavior.
 
-Legacy UT maintenance remains separate and uses `nexent-python-tests` only when the change breaks or intentionally updates that suite.
+Implement or demonstrate adequate traditional UT for the changed behavior using nexent-python-tests, even when existing UT was not broken by the change. New behavior needs appropriate success, boundary and error assertions; bugs need regression protection. An existing test may be reused when its assertions genuinely detect the defect. Keep UT outside the formal registry. For new or acceptance-modified formal Cases, apply nexent-test-assets/references/acceptance-integrity.md; test bindings and script hashes alone do not prove complete implementation.
 
 ### 5. Verify affected behavior
 
-Run the affected formal D1-D5 cases selected from the change record. Use fixed Playwright scripts for D4. Keep Mock and Real Smoke results distinct when both profiles apply. Missing, unimplemented, skipped, or expected-failure required cases do not pass. Keep product, test, environment, and external-provider failures distinguishable.
+Run relevant traditional UT locally before a product-code PR, separately from the affected formal D1-D5 Cases selected from the change record. Record a justified exemption only for a non-behavior change, not an unavailable environment. CI reruns its configured UT set; GitHub required-check enforcement is external configuration and must not be claimed or changed without authority. Use fixed Playwright scripts for D4. Keep Mock and Real Smoke results distinct. Missing, unimplemented, skipped, or expected-failure required proof does not pass. Keep product, test, environment, and external-provider failures distinguishable.
 
-Record sanitized commands, results, evidence paths, and unresolved blockers in `task.md`. Do not claim API, browser, model, Agent, security, reliability, performance, or deployment acceptance from a lower layer.
+Record sanitized commands, results, evidence paths, and unresolved blockers in `task.md`, or the lightweight bugfix `design.md` when that is the selected document mode. Run only the affected selection, broadening when caller/risk evidence warrants it. Do not claim API, browser, model, Agent, security, reliability, performance, or deployment acceptance from a lower layer.
 
 ### 6. Close out
 
-Run the unified formal-asset validator, deterministic Excel check, affected tests, and relevant product checks. Confirm SPEC, feature catalog, cases, change record, scripts, manifest, implementation, and evidence agree. Report changed files, Case results, remaining risks, and unverified items. Formal completion requires every current required acceptance criterion to pass.
+Run the unified formal-asset validator, deterministic Excel check, affected tests, and relevant product checks. Confirm SPEC, Feature, Case, change record, scripts, case-local bindings, implementation, and evidence agree. Report changed files, Case results, remaining risks, and unverified items. Formal completion requires every current required acceptance criterion to pass.
+
+Report UT results/coverage independently of formal Case outcomes. Do not combine frontend and Python percentages. Preserve legacy D1 execution results while explicitly distinguishing unreviewed acceptance completeness; a PASS script does not certify missing obligations. Daily consumes locked repository assets and does not generate/promote formal tests. No workflow or remote changes are implied by this lifecycle.
 
 ## Stop conditions
 

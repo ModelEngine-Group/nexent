@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-127
+  name: max_fire_count/end_at/misfire/restart/recovery
+  status: active
+  description: '自动任务 / 执行语义: max_fire_count/end_at/misfire/restart/recovery'
+  business_rules:
+  - rule_id: F-127-RULE-01
+    description: max_fire_count/end_at/misfire/restart/recovery
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

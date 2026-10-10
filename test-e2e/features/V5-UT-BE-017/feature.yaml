@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-BE-017
+  name: Agent Card security requirement 选择和 credential mapping
+  status: active
+  description: Agent Card security requirement 选择和 credential mapping
+  business_rules:
+  - rule_id: V5-UT-BE-017-RULE-01
+    description: Agent Card security requirement 选择和 credential mapping
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

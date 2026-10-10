@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-004
+  name: 退出幂等；CAS session 同步撤销
+  status: active
+  description: '身份认证与账号 / 会话: 退出幂等；CAS session 同步撤销'
+  business_rules:
+  - rule_id: F-004-RULE-01
+    description: 退出幂等；CAS session 同步撤销
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

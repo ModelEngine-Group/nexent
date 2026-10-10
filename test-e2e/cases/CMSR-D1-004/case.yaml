@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D1
+module: CHAT-MESSAGE
+case:
+  case_id: CMSR-D1-004
+  feature_id: CMSR-005
+  requirement_ids:
+  - CMSR-005
+  business_rule_ids:
+  - CMSR-RULE-018
+  title: Rejected model output diagnostics distinguish budget exhaustion without default content leakage
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Correlate each protocol rejection to the model response shape and budget while gating bounded raw previews.
+  preconditions:
+  - Use isolated model diagnostics for a reasoning-only length response and a malformed nonempty response.
+  test_data:
+    profile: mock
+    responses:
+    - length with 4096 reasoning-only output tokens
+    - malformed nonempty code Action
+  steps:
+  - order: 1
+    action: Reject a reasoning-only length response with diagnostics disabled.
+    expected: The log records model, attempt, requested and consumed tokens, reasoning and content counts, and reasoning-only
+      budget exhaustion without raw text.
+  - order: 2
+    action: Reject a malformed content response.
+    expected: The distinct protocol reason and response shape are logged under its own attempt identifier.
+  - order: 3
+    action: Enable diagnostic content preview for a rejected response longer than the preview cap.
+    expected: Only a single escaped bounded prefix of model content and reasoning is logged; the full text remains absent.
+  expected_results:
+  - Each rejection is attributable to one attempt and specific failure class.
+  - Raw output is absent by default and bounded on explicit opt-in.
+  forbidden_side_effects:
+  - No model output or user prompt enters SSE or persisted history from diagnostics.
+  - No secret or full raw payload is logged by default.
+  - No retry-budget or execution behavior changes.
+  unit_boundary: OpenAI model response diagnostics and CoreAgent protocol-error logging
+  inputs:
+  - finish_reason=length
+  - reasoning_content
+  - invalid code Action
+  - explicit diagnostic flag
+  assertions:
+  - Reasoning-only budget exhaustion flag is accurate.
+  - Logs include attempt and token counts.
+  - Default logs omit raw content.
+  - Opt-in previews are escaped and capped.

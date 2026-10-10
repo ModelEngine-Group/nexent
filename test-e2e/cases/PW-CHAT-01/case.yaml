@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-CHAT-01
+  feature_id: V5-PW-CHAT-01
+  business_rule_ids:
+  - V5-PW-CHAT-01-RULE-01
+  title: Execution流式Chat→Stop→继续→刷新恢复→会话管理
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证Composer当前Execution模式的核心会话链。
+  preconditions:
+  - 测试Agent使用真实LLM
+  - 准备较长输出问题
+  test_data:
+    legacy_asset_declaration: config/models.yaml；config/users.yaml
+  steps:
+  - order: 1
+    action: 打开/newchat选择run_id Agent。
+    expected: Execution真实streaming，Stop后旧流不再追加。
+  - order: 2
+    action: 确认模式为Execution，不寻找独立ReAct模式。
+    expected: 停止后可继续发送，刷新恢复一致。
+  - order: 3
+    action: 输入固定问题发送，观察assistant消息流式增长。
+    expected: 会话切换不串消息。
+  - order: 4
+    action: 生成中点击Stop并等待流式终止。
+    expected: 会话切换不串消息。
+  - order: 5
+    action: 发送第二条短问题，确认会话可继续。
+    expected: 会话切换不串消息。
+  - order: 6
+    action: 刷新并从侧栏重新打开当前会话，确认历史和停止状态恢复。
+    expected: 会话切换不串消息。
+  - order: 7
+    action: 执行当前侧栏支持的重命名/新建会话。
+    expected: 会话切换不串消息。
+  - order: 8
+    action: 切换两个会话确认消息不串。
+    expected: 会话切换不串消息。
+  - order: 9
+    action: 删除测试会话并确认列表更新。
+    expected: 会话切换不串消息。
+  expected_results:
+  - Execution真实streaming，Stop后旧流不再追加。
+  - 停止后可继续发送，刷新恢复一致。
+  - 会话切换不串消息。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 38
+  actor: Nexent browser user
+  journey:
+  - 打开/newchat选择run_id Agent。
+  - 确认模式为Execution，不寻找独立ReAct模式。
+  - 输入固定问题发送，观察assistant消息流式增长。
+  - 生成中点击Stop并等待流式终止。
+  - 发送第二条短问题，确认会话可继续。
+  - 刷新并从侧栏重新打开当前会话，确认历史和停止状态恢复。
+  - 执行当前侧栏支持的重命名/新建会话。
+  - 切换两个会话确认消息不串。
+  - 删除测试会话并确认列表更新。
+  final_business_result:
+  - Execution真实streaming，Stop后旧流不再追加。
+  - 停止后可继续发送，刷新恢复一致。
+  - 会话切换不串消息。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-CHAT-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

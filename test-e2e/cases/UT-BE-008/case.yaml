@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-008
+  feature_id: V5-UT-BE-008
+  business_rule_ids:
+  - V5-UT-BE-008-RULE-01
+  title: 容量单位、usage rate、hard-limit conflict 纯逻辑
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 容量单位、usage rate、hard-limit conflict 纯逻辑
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 导入 backend/services/quota_service.py 的 QuotaService，构造 tenant 下含普通源与 datamate KB 的最小 kb_list，mock get_committed_bytes_by_kb
+      返回已知 source bytes，mock ES indices_detail 返回已知 store_size/doc_count。
+    expected: stats 与 total_bytes 以源文件账本为唯一计量口径；ES 物理容量仅存放于 store_size_bytes/es_physical_* 等观测字段，不参与 quota 计量。
+  - order: 2
+    action: 调用 _get_kb_storage_stats(kb_list)，断言 stats 每个 index_name 的值为 source bytes（非 ES store_size），details[index].source_size_bytes
+      与 total_size_bytes 均等于 source_bytes，store_size_bytes 等于 ES 物理容量，返回的 total_bytes 等于 sum(stats.values())。
+    expected: ES 统计异常仅告警不抛异常（fail-open）；source 账本在 strict=True 下异常抛 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE。
+  - order: 3
+    action: 模拟 ES 查询抛 AppException 与任意 Exception 两种场景，断言 _get_kb_storage_stats 仍返回 source 账本结果且不向上抛异常（fail-open/仅告警），ES 相关字段为
+      0。
+    expected: _compute_usage 的 total_bytes 等于租户已提交 source 字节，usage_pct 与 hard-limit/soft-quota 判定仅基于 source bytes，ES 段回收异步不影响放行判断。
+  - order: 4
+    action: 以 strict=True 且 get_committed_bytes_by_kb 抛异常，断言抛出 AppException 且 ErrorCode 为 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE；以
+      strict=True 但仅 ES 查询失败，断言不抛异常。
+    expected: _parse_store_size 与 _bytes_to_readable 对合法/非法/空输入返回预期字节与可读字符串，非法输入回退 0，不抛未处理异常。
+  - order: 5
+    action: 调用 _compute_usage()，断言 total_bytes 等于 get_tenant_committed_source_bytes(tenant_id)（source-only），es_physical_bytes
+      独立等于 total_es_bytes，usage_pct 仅基于 source bytes（不含 ES 物理容量）计算。
+    expected: 配额低于 usage 或超限的领域异常 ErrorCode 正确，失败不产生半写入或重复副作用。
+  - order: 6
+    action: 调用 _parse_store_size 对 "1.5 GB"/"500 MB"/None/非法串断言字节换算与 0 回退；通过 _bytes_to_readable 对 0/正整数断言可读输出分支。
+    expected: 测试过程无未处理异常，日志无明文密钥，可重复执行。
+  - order: 7
+    action: 调用 set_personal_user_quota：设定限值低于当前 source usage 时断言抛 AppException 且 ErrorCode 为 TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE，其
+      usage 以 include_es=False 的 source 账本计算。
+    expected: 测试过程无未处理异常，日志无明文密钥，可重复执行。
+  - order: 8
+    action: 校验 check_personal_user_quota / check_personal_kb_quota 以 include_es=False, strict=True 取数：超限抛 AppException 且 ErrorCode
+      为 TENANT_PERSONAL_KB_QUOTA_EXCEEDED，ES 物理容量不影响该判定。
+    expected: 测试过程无未处理异常，日志无明文密钥，可重复执行。
+  expected_results:
+  - stats 与 total_bytes 以源文件账本为唯一计量口径；ES 物理容量仅存放于 store_size_bytes/es_physical_* 等观测字段，不参与 quota 计量。
+  - ES 统计异常仅告警不抛异常（fail-open）；source 账本在 strict=True 下异常抛 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE。
+  - _compute_usage 的 total_bytes 等于租户已提交 source 字节，usage_pct 与 hard-limit/soft-quota 判定仅基于 source bytes，ES 段回收异步不影响放行判断。
+  - _parse_store_size 与 _bytes_to_readable 对合法/非法/空输入返回预期字节与可读字符串，非法输入回退 0，不抛未处理异常。
+  - 配额低于 usage 或超限的领域异常 ErrorCode 正确，失败不产生半写入或重复副作用。
+  - 测试过程无未处理异常，日志无明文密钥，可重复执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 355
+  unit_boundary: 配额
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - stats 与 total_bytes 以源文件账本为唯一计量口径；ES 物理容量仅存放于 store_size_bytes/es_physical_* 等观测字段，不参与 quota 计量。
+  - ES 统计异常仅告警不抛异常（fail-open）；source 账本在 strict=True 下异常抛 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE。
+  - _compute_usage 的 total_bytes 等于租户已提交 source 字节，usage_pct 与 hard-limit/soft-quota 判定仅基于 source bytes，ES 段回收异步不影响放行判断。
+  - _parse_store_size 与 _bytes_to_readable 对合法/非法/空输入返回预期字节与可读字符串，非法输入回退 0，不抛未处理异常。
+  - 配额低于 usage 或超限的领域异常 ErrorCode 正确，失败不产生半写入或重复副作用。
+  - 测试过程无未处理异常，日志无明文密钥，可重复执行。

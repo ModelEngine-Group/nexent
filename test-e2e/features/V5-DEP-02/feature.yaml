@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-02
+  name: Docker restart/持久化
+  status: active
+  description: 重启/重建不丢配置、数据与日志
+  business_rules:
+  - rule_id: V5-DEP-02-RULE-01
+    description: Docker restart/持久化
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,87 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-2B3A078E3CD1B151
+  feature_id: F-131
+  business_rule_ids:
+  - F-131-RULE-01
+  title: 处理/转发途中删除栅栏取消处理链：process/forward/part/aggregate/cleanup 整体取消、chunks 不落库、清理跳过｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: 处理/转发途中删除栅栏取消处理链：process/forward/part/aggregate/cleanup 整体取消、chunks 不落库、清理跳过｜核心流程
+  preconditions:
+  - 每日CI 环境已启动：后端 API、Redis（REDIS_URL/REDIS_BACKEND_URL）、PostgreSQL、MinIO、Elasticsearch（ELASTICSEARCH_SERVICE）及 Celery worker（process_q/forward_q/process_part_q/forward_part_q/forward_aggregate_q）均可用。
+  - 知识库文件生命周期迁移已执行，knowledge_file_lifecycle 表存在且 get_file_record/transition_file_record 可用。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 已准备隔离 tenant_id/index_name 与测试文档 fixture，并为目标文档登记 file_id 记录（初始 status 非 DELETE_REQUESTED/DELETED）。
+  - 测试账号可访问后端任务接口；测试结束后可清理隔离资源，不污染生产数据。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/knowledge/（本地测试文档 fixture）
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml（后端/Redis/PG/MinIO/ES 连接参数）'
+  steps:
+  - order: 1
+    action: 准备隔离测试资源：生成带 run_id 的 tenant_id/index_name，取一份本地测试文档 fixture，并为其登记 file_id 记录（knowledge_file_lifecycle，初始 status
+      非 DELETE_REQUESTED/DELETED）。
+    expected: POST /tasks 正常返回 201 与 chain task_id；入队失败路径返回 503。
+  - order: 2
+    action: 通过 POST /tasks 提交处理请求（携带 source、source_type、chunking_strategy、index_name、tenant_id、file_id），记录 HTTP 201 与返回的 chain
+      task_id。
+    expected: 删除栅栏命中时，process 返回 cancelled 结果且不把 chunks 写入 Redis（dp:{task_id}:chunks 无有效内容）。
+  - order: 3
+    action: 在处理链执行期间（process 处理中或 forward 转发前），将目标 file_id 置为删除请求：写入 Redis 删除栅栏键（is_document_delete_requested 命中）或将 PG knowledge_file_lifecycle.status
+      置为 DELETE_REQUESTED。
+    expected: forward 返回 cancelled 结果，chunks_stored=0、total_indexed=0，不向 ES 写入文档。
+  - order: 4
+    action: 返回的 task_id 为 cleanup_source 链尾 ID；轮询本次链尾终态后，仅沿 parent_id 定位 forward 和 process，核对链根和各阶段 SUCCESS，分别读取阶段结果；不得把链尾结果当作 process 或扫描其他批次的任务。
+    expected: cleanup_source 以 skipped_reason="document_delete_requested" 跳过，不发起源文件删除请求。
+  - order: 5
+    action: 断言 process 阶段返回 cancelled 结果（chunks=None、cancelled=true、message 含 "Processing cancelled because document deletion
+      was requested."），且 Redis dp:{task_id}:chunks 键未写入有效内容或 chunks_count=0。
+    expected: 整条 process/forward/part/aggregate/cleanup 链整体取消，无半写入（无部分 chunks 落库）。
+  - order: 6
+    action: 断言 forward 阶段返回 cancelled 结果：chunks_stored=0、es_result.success=false、es_result.message 含 "Indexing cancelled because
+      document was deleted."、total_indexed=0。
+    expected: Redis 故障时回退 PG status 判定，仍能取消处理。
+  - order: 7
+    action: 断言 cleanup_source 阶段跳过源文件清理：source_cleanup.skipped_reason="document_delete_requested"，未向 DELETE /indices/{index_name}/documents
+      发起源文件删除。
+    expected: PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
+  - order: 8
+    action: Redis 故障回退 PG：模拟 redis_service.is_document_delete_requested 抛异常（Redis 不可用），确认 _is_document_delete_requested 回退读取
+      PG file record status=DELETE_REQUESTED 并仍判定删除请求，链继续取消。
+    expected: PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
+  - order: 9
+    action: PG 失败保留旧行为：使 PG 生命周期查询异常或查不到记录，确认 _is_document_delete_requested 返回 False，处理链不被错误取消（保留旧有处理行为）。
+    expected: PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
+  - order: 10
+    action: 清理隔离测试资源（删除临时 file 记录、Redis 键、索引测试数据），确保可重复执行。
+    expected: PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
+  expected_results:
+  - POST /tasks 正常返回 201 与 chain task_id；入队失败路径返回 503。
+  - 删除栅栏命中时，process 返回 cancelled 结果且不把 chunks 写入 Redis（dp:{task_id}:chunks 无有效内容）。
+  - forward 返回 cancelled 结果，chunks_stored=0、total_indexed=0，不向 ES 写入文档。
+  - cleanup_source 以 skipped_reason="document_delete_requested" 跳过，不发起源文件删除请求。
+  - 整条 process/forward/part/aggregate/cleanup 链整体取消，无半写入（无部分 chunks 落库）。
+  - Redis 故障时回退 PG status 判定，仍能取消处理。
+  - PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 523
+  integration_boundary:
+  - LOCAL_SERVICE_REQUIRED：使用每日CI环境内真实 Redis/PostgreSQL/MinIO/Elasticsearch/Celery 组件；不访问公网模型或外部 Provider。
+  observations:
+  - POST /tasks 正常返回 201 与 chain task_id；入队失败路径返回 503。
+  - 删除栅栏命中时，process 返回 cancelled 结果且不把 chunks 写入 Redis（dp:{task_id}:chunks 无有效内容）。
+  - forward 返回 cancelled 结果，chunks_stored=0、total_indexed=0，不向 ES 写入文档。
+  - cleanup_source 以 skipped_reason="document_delete_requested" 跳过，不发起源文件删除请求。
+  - 整条 process/forward/part/aggregate/cleanup 链整体取消，无半写入（无部分 chunks 落库）。
+  - Redis 故障时回退 PG status 判定，仍能取消处理。
+  - PG 查询失败/无记录时返回 False，保留旧有处理行为（不错误取消）。
+  cleanup:
+  - API 响应/任务终态 JSON、Redis dp:{task_id}:chunks 键内容、ES 索引文档数、Celery worker 日志、PG file lifecycle 状态记录、pytest JUnit/XML。

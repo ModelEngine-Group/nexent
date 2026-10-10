@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: UBUNTU-DAILY-TRIAGE-20261008
+  change_type: test-fix
+  title: Repair evidenced test harness and stale contract failures from Ubuntu Daily
+  description: Drain Ant Design delayed timers before JSDOM teardown. Use the current Agent editor dynamic route
+    and update the case reference. Keep the task enqueue contract's broker and result backend in memory before importing
+    Celery, since enqueue itself is stubbed. Patch the canonical local MCP constant as well as the NL2Agent service
+    alias in its context-budget fixture. Use MODEL_TIMEOUT for LLM name regeneration, not the ordinary HTTP timeout.
+    Scope the Local KB create action to a native toolbar button. Pass the authorized KB owner into SEC-02's shared
+    file ACL scenario. Read Memory Provider error messages through the product-wide message envelope while preserving
+    wire error-code assertions. Separate tenant-scoped tag metadata reads from MANAGE-only mutations and usage;
+    remove fixed database IDs from the governance attack paths. Do not edit product code, operator configuration,
+    or turn failures into policy skips. Prepare repository listing model health with the existing same-tenant reviewer,
+    preserving developer-owned Agent creation and publishing permissions.
+  affected_features:
+    existing:
+    - F-045
+    - F-086
+    - F-071
+    - F-054
+    - F-131
+    - F-178
+    - F-185
+    - V5-PW-KB-LOCAL-01
+    - V5-SEC-02
+    added: []
+    modified:
+    - V5-SEC-AUTO-A4AD5354E1E6A58E
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - UT-FE-AUTO-B3718E0BBA849044
+    - API-AUTO-A311B5BCB0E23EFF
+    - API-AUTO-EA69132B4642BB43
+    - API-AUTO-DDE7582FFE405D54
+    - AGT-AUTO-01804EF17A1DF51B
+    - API-074
+    - CTR-AUTO-9ACCCB74F6E72CCC
+    - PW-KB-LOCAL-01
+    - SEC-02
+    retired: []

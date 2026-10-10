@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: UT-BE-AUTO-A5E5C8329C318684
+implementations:
+- framework: pytest
+  file: test.py
+  selector: UT-BE-AUTO-A5E5C8329C318684
+notes: V5 source binding migrated; runtime parity is not yet certified.

@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-475EB869B7D8F069
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: plugin.yaml 必填字段/implements 协议校验/导入失败跳过/指纹热刷新/builtin-external 覆盖｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: plugin.yaml 必填字段/implements 协议校验/导入失败跳过/指纹热刷新/builtin-external 覆盖｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务或外部记忆 Provider 在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 可创建/清理临时插件目录，写入合法与非法 plugin.yaml、provider.py 样例；backend/services/memory_provider_plugin_loader.py 及其依赖 nexent.memory.providers.base
+    可被导入。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/plugins/fixtures（临时构造的 plugin.yaml 与 provider.py 样例，测试结束清理）'
+  steps:
+  - order: 1
+    action: 导入 backend/services/memory_provider_plugin_loader.py 的 PluginLoader 与 PluginInfo，构造临时插件目录，放入一个合法插件（plugin.yaml
+      含 name/version/entry_point/class_name/implements 且 provider_class 实现 search/ingest）与多组非法插件 fixture。
+    expected: 合法插件被正确解析为 PluginInfo，包含 name/version/implements/config_schema/plugin_dir/provider_class 等字段，implements 与 config_schema
+      内容来自 plugin.yaml。
+  - order: 2
+    action: 构造 PluginLoader(plugins_dir=<临时目录>)，调用 load_all()，断言 list_plugins() 仅返回通过校验的插件，失败插件被跳过且 load_all 不抛异常。
+    expected: 缺失必填字段、implements 非 list、YAML 解析失败或非 mapping 的 manifest 对应插件被跳过，其余插件不受影响，load_all 不抛异常。
+  - order: 3
+    action: 对缺失 name/version/entry_point/class_name/implements 任一必填字段的 plugin.yaml，断言该插件不被加载；对 implements 非 list、YAML 语法错误、非
+      mapping 的 manifest，断言插件被跳过。
+    expected: 声明 searchable/ingestible 但类未实现 search/ingest 方法、或 implements 含未知协议名的插件被跳过（协议校验返回 False）。
+  - order: 4
+    action: 对 implements 含未知协议名（非 searchable/ingestible），或声明 searchable/ingestible 但 provider_class 未实现对应 search/ingest 方法，断言插件被跳过。
+    expected: entry_point 缺失、class_name 缺失、import 异常的插件被跳过并计入失败，不阻断其他插件加载。
+  - order: 5
+    action: 对 entry_point 文件不存在、class_name 在模块中不存在、entry 模块 import 抛异常三种情况，断言对应插件被跳过且其余合法插件正常加载。
+    expected: 目录内容未变化时 refresh_if_changed 返回 False 且不重扫；内容变化时返回 True 并刷新注册表。
+  - order: 6
+    action: 首次加载后再次调用 refresh_if_changed()，断言返回 False 且插件集合不变；向插件目录新增或修改文件后再次调用 refresh_if_changed()，断言返回 True 且注册表刷新。
+    expected: builtin 与 external 同名时 external 覆盖 builtin，覆盖发生时记录 warning 日志。
+  - order: 7
+    action: 构造 PluginLoader(plugins_dir=<external>, builtin_plugins_dir=<builtin>, include_builtin_plugins=True)，两目录放入同名 name
+      的插件，断言 list_plugins() 返回 external 版本（external 覆盖 builtin）。
+    expected: get_plugin 未知 name 返回 None；build_provider 未知 name 抛 ValueError 且消息包含可用插件列表。
+  - order: 8
+    action: 对 get_plugin(不存在 name) 断言返回 None；对 build_provider(不存在 name) 断言抛 ValueError 且消息含可用插件列表。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 确认日志中不输出 API Key、Token、密码或模型密钥；测试结束后释放临时目录，确保可重复执行。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 合法插件被正确解析为 PluginInfo，包含 name/version/implements/config_schema/plugin_dir/provider_class 等字段，implements 与 config_schema
+    内容来自 plugin.yaml。
+  - 缺失必填字段、implements 非 list、YAML 解析失败或非 mapping 的 manifest 对应插件被跳过，其余插件不受影响，load_all 不抛异常。
+  - 声明 searchable/ingestible 但类未实现 search/ingest 方法、或 implements 含未知协议名的插件被跳过（协议校验返回 False）。
+  - entry_point 缺失、class_name 缺失、import 异常的插件被跳过并计入失败，不阻断其他插件加载。
+  - 目录内容未变化时 refresh_if_changed 返回 False 且不重扫；内容变化时返回 True 并刷新注册表。
+  - builtin 与 external 同名时 external 覆盖 builtin，覆盖发生时记录 warning 日志。
+  - get_plugin 未知 name 返回 None；build_provider 未知 name 抛 ValueError 且消息包含可用插件列表。
+  - 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 396
+  unit_boundary: 插件加载器
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/plugins/fixtures（临时构造的 plugin.yaml 与 provider.py 样例，测试结束清理）'
+  assertions:
+  - 合法插件被正确解析为 PluginInfo，包含 name/version/implements/config_schema/plugin_dir/provider_class 等字段，implements 与 config_schema
+    内容来自 plugin.yaml。
+  - 缺失必填字段、implements 非 list、YAML 解析失败或非 mapping 的 manifest 对应插件被跳过，其余插件不受影响，load_all 不抛异常。
+  - 声明 searchable/ingestible 但类未实现 search/ingest 方法、或 implements 含未知协议名的插件被跳过（协议校验返回 False）。
+  - entry_point 缺失、class_name 缺失、import 异常的插件被跳过并计入失败，不阻断其他插件加载。
+  - 目录内容未变化时 refresh_if_changed 返回 False 且不重扫；内容变化时返回 True 并刷新注册表。
+  - builtin 与 external 同名时 external 覆盖 builtin，覆盖发生时记录 warning 日志。
+  - get_plugin 未知 name 返回 None；build_provider 未知 name 抛 ValueError 且消息包含可用插件列表。
+  - 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。

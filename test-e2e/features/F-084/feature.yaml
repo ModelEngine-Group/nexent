@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-084
+  name: 端口 check/suggest 与 cache header
+  status: active
+  description: 'MCP / Remote MCP: 端口 check/suggest 与 cache header'
+  business_rules:
+  - rule_id: F-084-RULE-01
+    description: 端口 check 返回 available 和禁止缓存头；suggest 返回范围内端口；check 对 1–65535 外的端口返回
+      422。
+  required_test_stages:
+  - D2
+  source:
+    notes: Clarified against original port endpoint contract from ee181cf34e; cache
+      headers belong to check, not suggest.

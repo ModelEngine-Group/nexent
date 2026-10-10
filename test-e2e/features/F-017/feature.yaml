@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-017
+  name: 删除租户级联用户/组/模型/KB/Agent/MCP/邀请码/配置
+  status: active
+  description: '租户与资源权限 / 租户: 删除租户级联用户/组/模型/KB/Agent/MCP/邀请码/配置'
+  business_rules:
+  - rule_id: F-017-RULE-01
+    description: 删除租户级联用户/组/模型/KB/Agent/MCP/邀请码/配置
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

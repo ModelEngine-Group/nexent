@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-C41A646DB91F8B53
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: aidp_permission_service._resolve_permission 权限决策矩阵（owner/PRIVATE/USER/管理角色/DEV组交集及404/403）｜核心流程
+  type: BE-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: aidp_permission_service._resolve_permission 权限决策矩阵（owner/PRIVATE/USER/管理角色/DEV组交集及404/403）｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测文件 backend/ext_components/aidp/services/aidp_permission_service.py 可从测试工作区访问。
+  test_data:
+    legacy_asset_declaration: '- 无本地资产；通过显式传参 user_role / user_groups 及 monkeypatch _get_permission_record 隔离 group_db/user_tenant_db/aidp_permission_db
+      查询。'
+  steps:
+  - order: 1
+    action: 在本地测试工作区导入 backend/ext_components/aidp/services/aidp_permission_service.py 的 _resolve_permission、_decision_meets、require_permission
+      与 AidpPermissionDecision，构造最小有效 record（含 kb_id/owner_user_id/group_ids/ingroup_permission）。
+    expected: 创建者分支返回 AidpPermissionDecision 且 permission="EDIT"、is_management_role=False、matched_group_ids=()。
+  - order: 2
+    action: 隔离数据库：_resolve_permission 显式传入 user_role 与 user_groups；require_permission 通过 monkeypatch _get_permission_record
+      返回固定 record，避免真实查询 group_db/user_tenant_db/aidp_permission_db。
+    expected: PRIVATE 非创建者（含管理角色）返回 permission=None。
+  - order: 3
+    action: 创建者分支：record.owner_user_id == user_id 时（任意角色），记录返回的 decision。
+    expected: role="USER" 非创建者返回 permission=None。
+  - order: 4
+    action: PRIVATE 分支：非创建者且 ingroup_permission=PRIVATE（含 SU 等管理角色），记录 decision。
+    expected: 管理角色（SU/ADMIN/SPEED/ASSET_OWNER）共享 KB 返回 permission="EDIT"、is_management_role=True、matched_group_ids=()。
+  - order: 5
+    action: USER 分支：role="USER" 且非创建者，记录 decision。
+    expected: DEV 且 record_groups∩user_groups 非空返回 permission=ingroup_permission（缺省 "READ_ONLY"）、matched_group_ids 为交集升序；无交集或
+      record_groups 为空返回 permission=None。
+  - order: 6
+    action: 管理角色分支：role 依次取 SU/ADMIN/SPEED/ASSET_OWNER（CAN_EDIT_ALL_USER_ROLES），共享 KB（非 PRIVATE），记录 decision。
+    expected: record 为空抛 AidpKbNotFoundError（映射 404）；权限不足时 require_permission 抛 AidpKbPermissionDeniedError（映射 403），不吞异常返回伪成功。
+  - order: 7
+    action: DEV 组交集分支：role="DEV"，分别构造 record_groups 与 user_groups 存在交集、无交集、record_groups 为空三种情况，记录 decision 与 matched_group_ids。
+    expected: 全流程无未处理异常，日志不含明文凭据。
+  - order: 8
+    action: 异常分支：record 为空/None 断言异常类型；require_permission 指定 required=EDIT 但 decision.permission 为 READ_ONLY/None 时断言异常类型。
+    expected: 全流程无未处理异常，日志不含明文凭据。
+  - order: 9
+    action: group_ids 边界：分别传入 JSONB 列表、逗号分隔字符串、None 作为 group_ids，确认 _parse_group_ids 归一化为 int 列表且不抛非预期异常。
+    expected: 全流程无未处理异常，日志不含明文凭据。
+  - order: 10
+    action: 断言日志不输出 API Key/Token/密码/模型密钥，结束后释放临时对象，确保可重复执行。
+    expected: 全流程无未处理异常，日志不含明文凭据。
+  expected_results:
+  - 创建者分支返回 AidpPermissionDecision 且 permission="EDIT"、is_management_role=False、matched_group_ids=()。
+  - PRIVATE 非创建者（含管理角色）返回 permission=None。
+  - role="USER" 非创建者返回 permission=None。
+  - 管理角色（SU/ADMIN/SPEED/ASSET_OWNER）共享 KB 返回 permission="EDIT"、is_management_role=True、matched_group_ids=()。
+  - DEV 且 record_groups∩user_groups 非空返回 permission=ingroup_permission（缺省 "READ_ONLY"）、matched_group_ids 为交集升序；无交集或 record_groups
+    为空返回 permission=None。
+  - record 为空抛 AidpKbNotFoundError（映射 404）；权限不足时 require_permission 抛 AidpKbPermissionDeniedError（映射 403），不吞异常返回伪成功。
+  - 全流程无未处理异常，日志不含明文凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 415
+  unit_boundary: AIDP权限矩阵
+  inputs:
+  - '- 无本地资产；通过显式传参 user_role / user_groups 及 monkeypatch _get_permission_record 隔离 group_db/user_tenant_db/aidp_permission_db
+    查询。'
+  assertions:
+  - 创建者分支返回 AidpPermissionDecision 且 permission="EDIT"、is_management_role=False、matched_group_ids=()。
+  - PRIVATE 非创建者（含管理角色）返回 permission=None。
+  - role="USER" 非创建者返回 permission=None。
+  - 管理角色（SU/ADMIN/SPEED/ASSET_OWNER）共享 KB 返回 permission="EDIT"、is_management_role=True、matched_group_ids=()。
+  - DEV 且 record_groups∩user_groups 非空返回 permission=ingroup_permission（缺省 "READ_ONLY"）、matched_group_ids 为交集升序；无交集或 record_groups
+    为空返回 permission=None。
+  - record 为空抛 AidpKbNotFoundError（映射 404）；权限不足时 require_permission 抛 AidpKbPermissionDeniedError（映射 403），不吞异常返回伪成功。
+  - 全流程无未处理异常，日志不含明文凭据。

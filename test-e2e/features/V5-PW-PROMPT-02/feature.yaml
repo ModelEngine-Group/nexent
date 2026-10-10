@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-PROMPT-02
+  name: Debug Compare→修改Prompt→重新执行对比
+  status: active
+  description: 依据当前Debug Compare Mode验证调试-修改-再验证闭环。
+  business_rules:
+  - rule_id: V5-PW-PROMPT-02-RULE-01
+    description: Debug Compare→修改Prompt→重新执行对比
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

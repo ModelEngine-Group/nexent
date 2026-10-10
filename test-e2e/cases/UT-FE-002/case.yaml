@@ -1,0 +1,98 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-002
+  feature_id: F-054
+  business_rule_ids:
+  - F-054-RULE-01
+  title: 基础/工具与技能/高级三Tab导航下基础信息、模型多选优先级、Prompt、工具、技能、高级设置状态与未保存变更｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 基础/工具与技能/高级三Tab导航下基础信息、模型多选优先级、Prompt、工具、技能、高级设置状态与未保存变更｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 473b65268ba8cda3db53be735f97678e214c583b；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/skills/
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/skills/'
+  steps:
+  - order: 1
+    action: 组件测试环境加载 frontend/app/[locale]/agents/agent-config.tsx 的 AgentConfig 组件，注入最小 props、agentStore 与本地固定测试数据（含 availableLlmModels、editedAgent、defaultLlmConfig、serverSnapshotRevision）。
+    expected: 三 Tab（基础/工具与技能/高级）按 CONFIG_TAB_BY_SECTION 映射正确渲染，各分区归属符合映射表。
+  - order: 2
+    action: 首次渲染后断言存在三个 Tab 触发器（基础/工具与技能/高级），默认激活“基础”Tab，并按 CONFIG_TAB_BY_SECTION 映射检查分区归属：基础 Tab 含展示信息/角色与模型/知识库/开场白，工具与技能
+      Tab 含工具与技能，高级 Tab 含协同 Agent/运行策略/发布属性/安全护栏。
+    expected: 模型多选仅接受可用模型 id，配置中不可用 id 被过滤并从 model_ids/model_names/主模型同步移除。
+  - order: 3
+    action: 切换到“工具与技能”Tab，断言工具与技能分区各自独立渲染；切回“基础”Tab，断言知识库与开场白分区位于基础 Tab 内。
+    expected: 拖拽排序后 model_ids 顺序与 reorderModelIds 结果一致，首位模型标记为主模型。
+  - order: 4
+    action: 在角色与模型分区验证模型多选：从可用模型列表选择多个模型，断言 model_ids 与主模型字段随选择更新；仅接受 availableLlmModels 中的 id，配置中不可用 id 被过滤并同步移除。
+    expected: 不可用原因告警展示 getUnavailableReasonLabels 拼接结果，刷新后 replaceServerSnapshot 更新数据且告警更新或消失。
+  - order: 5
+    action: 打开模型优先级 Popover（仅当选中模型数 >=2 且可管理模型时显示触发按钮），拖拽排序模型，断言 reorderModelIds 后 model_ids 顺序更新且首位标记为主模型。
+    expected: 标签分配入口在 agentId 为空时禁用、非空时可用。
+  - order: 6
+    action: 模拟 editedAgent.unavailable_reasons 非空，断言不可用原因告警条展示并含手动刷新按钮；点击刷新触发 searchAgentInfo 并调用 replaceServerSnapshot 更新快照。
+    expected: '未保存变更通过 save 校验（display_name/name/description/model_ids 必填），失败路径返回明确错误，不出现半写入或旧请求覆盖新状态；日志/Trace/报告中不出现明文 API
+      Key/Token/Password/模型密钥。
+
+      重新加载后 current version 被刷新；协作选择器显示发布名称。'
+  - order: 7
+    action: 在展示信息分区断言 Agent 标签分配入口（ResourceTagChips 与编辑标签按钮）在 agentId 非空时可用，agentId 为空时禁用。
+    expected: '未保存变更通过 save 校验（display_name/name/description/model_ids 必填），失败路径返回明确错误，不出现半写入或旧请求覆盖新状态；日志/Trace/报告中不出现明文 API
+      Key/Token/Password/模型密钥。
+
+      重新加载后 current version 被刷新；协作选择器显示发布名称。'
+  - order: 8
+    action: 触发保存/调试/发布动作，断言 save 校验 display_name、name、description、model_ids 必填，按钮 disabled 状态与校验结果一致；对关键字段输入非法值检查校验文案。
+    expected: '未保存变更通过 save 校验（display_name/name/description/model_ids 必填），失败路径返回明确错误，不出现半写入或旧请求覆盖新状态；日志/Trace/报告中不出现明文 API
+      Key/Token/Password/模型密钥。
+
+      重新加载后 current version 被刷新；协作选择器显示发布名称。'
+  - order: 9
+    action: '切换 Tab 或触发防抖/卸载场景，使用 fake timer 或 AbortSignal 断言旧请求不会覆盖新状态且 flushDraft 被调用。
+
+      473b6526：验证 Agent 版本刷新回调及协作智能体自定义 version_name 的展示链路。'
+    expected: '未保存变更通过 save 校验（display_name/name/description/model_ids 必填），失败路径返回明确错误，不出现半写入或旧请求覆盖新状态；日志/Trace/报告中不出现明文 API
+      Key/Token/Password/模型密钥。
+
+      重新加载后 current version 被刷新；协作选择器显示发布名称。'
+  expected_results:
+  - 三 Tab（基础/工具与技能/高级）按 CONFIG_TAB_BY_SECTION 映射正确渲染，各分区归属符合映射表。
+  - 模型多选仅接受可用模型 id，配置中不可用 id 被过滤并从 model_ids/model_names/主模型同步移除。
+  - 拖拽排序后 model_ids 顺序与 reorderModelIds 结果一致，首位模型标记为主模型。
+  - 不可用原因告警展示 getUnavailableReasonLabels 拼接结果，刷新后 replaceServerSnapshot 更新数据且告警更新或消失。
+  - 标签分配入口在 agentId 为空时禁用、非空时可用。
+  - '未保存变更通过 save 校验（display_name/name/description/model_ids 必填），失败路径返回明确错误，不出现半写入或旧请求覆盖新状态；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+
+    重新加载后 current version 被刷新；协作选择器显示发布名称。'
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 102
+  unit_boundary: 配置前端
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/assets/skills/'
+  assertions:
+  - 三 Tab（基础/工具与技能/高级）按 CONFIG_TAB_BY_SECTION 映射正确渲染，各分区归属符合映射表。
+  - 模型多选仅接受可用模型 id，配置中不可用 id 被过滤并从 model_ids/model_names/主模型同步移除。
+  - 拖拽排序后 model_ids 顺序与 reorderModelIds 结果一致，首位模型标记为主模型。
+  - 不可用原因告警展示 getUnavailableReasonLabels 拼接结果，刷新后 replaceServerSnapshot 更新数据且告警更新或消失。
+  - 标签分配入口在 agentId 为空时禁用、非空时可用。
+  - '未保存变更通过 save 校验（display_name/name/description/model_ids 必填），失败路径返回明确错误，不出现半写入或旧请求覆盖新状态；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+
+    重新加载后 current version 被刷新；协作选择器显示发布名称。'

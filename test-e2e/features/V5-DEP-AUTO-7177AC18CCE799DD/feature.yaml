@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-7177AC18CCE799DD
+  name: --sandbox-mode 三态解析/校验/持久化、NEXENT_SANDBOX_DEFAULT_LEVEL 与镜像选择、固定沙箱容器重建
+  status: active
+  description: 沙箱模式在解析、校验、持久化与镜像/执行级别落地的链路中存在不一致或失效风险：非法 --sandbox-mode 未被拒绝；full 模式错误选用 lightweight 镜像(nexent-sandbox)导致技能依赖缺失；disabled
+    模式仍拉取/启动 Docker 沙箱导致隔离级别与实际不符；或模式/镜像变更后未重建固定沙箱容器(nexent-runtime-sandbox)导致旧隔离级别残留。
+  business_rules:
+  - rule_id: V5-DEP-AUTO-7177AC18CCE799DD-RULE-01
+    description: --sandbox-mode 三态解析/校验/持久化、NEXENT_SANDBOX_DEFAULT_LEVEL 与镜像选择、固定沙箱容器重建
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

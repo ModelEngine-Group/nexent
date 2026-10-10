@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-01
+  name: 跨租户IDOR矩阵
+  status: active
+  description: 所有带tenant/user/group/resource/provider_config id的读写接口不能被猜ID越权，外部记忆 provider 配置/测试端点需按 tenant 隔离且无未授权副作用。
+  business_rules:
+  - rule_id: V5-SEC-01-RULE-01
+    description: 跨租户IDOR矩阵
+  required_test_stages: []
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

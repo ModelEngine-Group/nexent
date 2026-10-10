@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-MEDIA-VLM-01
+  name: 真实VLM→图片附件→多模态回答
+  status: active
+  description: 验证图片上传、附件上下文和真实多模态链路。
+  business_rules:
+  - rule_id: V5-PW-MEDIA-VLM-01-RULE-01
+    description: 真实VLM→图片附件→多模态回答
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

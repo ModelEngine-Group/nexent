@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-173
+  name: Docker/K8s/Helm/离线部署与卸载：编排、镜像、持久卷、备份恢复、沙箱模式与离线资产
+  status: active
+  description: 'SDK与基础设施 / 部署基础设施: Docker/K8s/Helm/离线部署与卸载：编排、镜像、持久卷、备份恢复、沙箱模式与离线资产'
+  business_rules:
+  - rule_id: F-173-RULE-01
+    description: Docker/K8s/Helm/离线部署与卸载：编排、镜像、持久卷、备份恢复、沙箱模式与离线资产
+  required_test_stages: []
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

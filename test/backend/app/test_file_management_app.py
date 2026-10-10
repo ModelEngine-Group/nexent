@@ -31,19 +31,6 @@ services_pkg = types.ModuleType("services")
 services_pkg.__path__ = []
 sys.modules.setdefault("services", services_pkg)
 
-# The empty-__path__ services stub blocks submodule imports; register the real
-# audit_service (loaded from file) so the app module's audit import resolves
-# and caplog can capture its records.
-import importlib.util
-
-_audit_spec = importlib.util.spec_from_file_location(
-    "services.audit_service",
-    os.path.join(BACKEND_ROOT, "services", "audit_service.py"),
-)
-_audit_module = importlib.util.module_from_spec(_audit_spec)
-sys.modules["services.audit_service"] = _audit_module
-_audit_spec.loader.exec_module(_audit_module)
-
 sfms_stub = types.ModuleType("services.file_management_service")
 
 async def _stub_upload_to_minio(files, folder, user_id=None):
@@ -279,7 +266,7 @@ async def test_upload_files_success(monkeypatch):
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
 
-    result = await file_management_app.upload_files(http_request=None,
+    result = await file_management_app.upload_files(
         file=[make_upload_file("a.txt")], destination="local", folder="attachments", index_name=None,
         authorization=MOCK_AUTH
     )
@@ -327,7 +314,7 @@ def test_upload_files_forbidden_for_read_only(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_files_no_files_bad_request():
     with pytest.raises(Exception) as ei:
-        await file_management_app.upload_files(http_request=None,
+        await file_management_app.upload_files(
             file=[], destination="local", folder="attachments", index_name=None,
             authorization=MOCK_AUTH
         )
@@ -362,7 +349,7 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
         return UploadResult()
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
-    response = await file_management_app.upload_files(http_request=None,
+    response = await file_management_app.upload_files(
         file=[make_upload_file("x.txt")], destination="minio", folder="attachments", index_name=None,
         authorization=MOCK_AUTH
     )
@@ -393,7 +380,7 @@ async def test_upload_files_internal_error(monkeypatch):
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
     with pytest.raises(Exception) as ei:
-        await file_management_app.upload_files(http_request=None,
+        await file_management_app.upload_files(
             file=[make_upload_file("a.txt")], destination="local", folder="attachments", index_name=None,
             authorization=MOCK_AUTH
         )
@@ -769,7 +756,7 @@ async def test_storage_upload_files_knowledge_base_folder(monkeypatch):
     """Generic storage uploads cannot create unowned knowledge-base objects."""
     f1 = make_upload_file("shared.pdf")
     with pytest.raises(HTTPException) as exc_info:
-        await file_management_app.storage_upload_files(http_request=None,
+        await file_management_app.storage_upload_files(
             files=[f1],
             folder="knowledge_base",
             authorization=MOCK_AUTH
@@ -790,7 +777,7 @@ async def test_storage_upload_files_attachments_folder_user_isolation(monkeypatc
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("private.txt")
-    result = await file_management_app.storage_upload_files(http_request=None,
+    result = await file_management_app.storage_upload_files(
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -813,7 +800,7 @@ async def test_storage_upload_files_attachments_no_auth_uses_raw_folder(monkeypa
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("test.txt")
-    result = await file_management_app.storage_upload_files(http_request=None,
+    result = await file_management_app.storage_upload_files(
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH_NONE
@@ -835,7 +822,7 @@ async def test_storage_upload_files_counts(monkeypatch):
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
     f1 = make_upload_file("a.txt")
     f2 = make_upload_file("b.txt")
-    result = await file_management_app.storage_upload_files(http_request=None,
+    result = await file_management_app.storage_upload_files(
         files=[f1, f2],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -856,7 +843,7 @@ async def test_storage_upload_files_internal_error(monkeypatch):
     f1 = make_upload_file("a.txt")
 
     with pytest.raises(Exception) as ei:
-        await file_management_app.storage_upload_files(http_request=None,
+        await file_management_app.storage_upload_files(
             files=[f1],
             folder="attachments",
             authorization=MOCK_AUTH
@@ -2440,75 +2427,3 @@ class TestParseRangeHeader:
     def test_negative_start_returns_none(self):
         """Negative start values are invalid."""
         assert file_management_app._parse_range_header("bytes=-10-20", 1000) is None
-
-
-# ============================================================================
-# Security audit entries
-# ============================================================================
-
-class TestFileAuditEntries:
-    """Security audit entries emitted by file upload endpoints."""
-
-    def test_kb_upload_emits_audit_entry(self, monkeypatch, caplog):
-        """Successful KB source upload records names/count/index, not content."""
-        import logging
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
-        mock_upload_impl = AsyncMock(return_value=([], ["/abs/path1"], ["a.txt"]))
-        monkeypatch.setattr(file_management_app, "upload_files_impl", mock_upload_impl)
-
-        app = FastAPI()
-        app.include_router(file_management_app.file_management_config_router)
-        client = TestClient(app)
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            response = client.post(
-                "/file/upload",
-                data={
-                    "destination": "minio",
-                    "folder": "knowledge_base",
-                    "index_name": "test_index",
-                },
-                files=[("file", ("a.txt", b"secret file body", "text/plain"))],
-                headers={"Authorization": MOCK_AUTH},
-            )
-
-        assert response.status_code == 200
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=file_upload" in messages[0]
-        assert "result=success" in messages[0]
-        assert "user_id=user1" in messages[0]
-        assert '"index_name":"test_index"' in messages[0]
-        assert '"files_count":1' in messages[0]
-        assert '"filenames":["a.txt"]' in messages[0]
-        assert "secret file body" not in messages[0]
-
-    def test_storage_upload_emits_audit_entry(self, monkeypatch, caplog):
-        """Successful chat-attachment upload records folder and filenames."""
-        import logging
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
-        app = FastAPI()
-        app.include_router(file_management_app.file_management_runtime_router)
-        client = TestClient(app)
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            response = client.post(
-                "/file/storage",
-                files=[("files", ("note.txt", b"secret attachment body", "text/plain"))],
-                headers={"Authorization": MOCK_AUTH},
-            )
-
-        assert response.status_code == 200
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=file_storage_upload" in messages[0]
-        assert "user_id=user1" in messages[0]
-        assert '"files_count":1' in messages[0]
-        assert '"filenames":["note.txt"]' in messages[0]
-        assert "secret attachment body" not in messages[0]

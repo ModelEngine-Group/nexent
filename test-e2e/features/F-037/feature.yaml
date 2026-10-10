@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-037
+  name: 不同模型类型字段动态显隐、必填、URL/维度/容量校验、debounce
+  status: active
+  description: '模型与多模态 / 前端表单: 不同模型类型字段动态显隐、必填、URL/维度/容量校验、debounce'
+  business_rules:
+  - rule_id: F-037-RULE-01
+    description: 不同模型类型字段动态显隐、必填、URL/维度/容量校验、debounce
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

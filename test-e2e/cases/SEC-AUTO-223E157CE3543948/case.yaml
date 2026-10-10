@@ -1,0 +1,91 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: SEC-AUTO-223E157CE3543948
+  feature_id: V5-SEC-AUTO-223E157CE3543948
+  business_rule_ids:
+  - V5-SEC-AUTO-223E157CE3543948-RULE-01
+  title: 沙箱策略解析与安全降级（build_sandbox_policy / get_sandbox_minio_client）
+  type: SECURITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 威胁/风险：沙箱策略解析错误或降级失败可能扩大 Agent 执行边界（如 local 级别误组装 docker 策略、网络禁用或命令策略被放宽/丢失），或 MinIO 未配置时抛异常导致 Agent 运行中断。目标：验证
+    build_sandbox_policy 依据 NEXENT_SANDBOX_* 严格组装策略，local 级别安全返回 None 不暴露过宽策略，docker 级别字段完整一致；MinIO 未配置或依赖缺失时 get_sandbox_minio_client
+    安全返回 None 不抛异常。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（NEXENT_SANDBOX_* 与 MINIO_* 测试配置值）
+
+    - 测试环境变量：NEXENT_SANDBOX_DEFAULT_LEVEL / NEXENT_SANDBOX_DEFAULT_SCOPE / NEXENT_SANDBOX_DOCKER_IMAGE / NEXENT_SANDBOX_MEMORY_LIMIT_MB
+    / NEXENT_SANDBOX_CPU_QUOTA / NEXENT_SANDBOX_TIMEOUT_S / NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S / NEXENT_SANDBOX_NETWORK_DISABLED
+    / NEXENT_SANDBOX_SHELL_POLICY / NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS / NEXENT_SANDBOX_OUTPUT_BUCKET / MINIO_ENDPOINT / MINIO_ACCESS_KEY
+    / MINIO_SECRET_KEY / MINIO_SECURE'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（NEXENT_SANDBOX_* 与 MINIO_* 测试配置值）
+
+      - 测试环境变量：NEXENT_SANDBOX_DEFAULT_LEVEL / NEXENT_SANDBOX_DEFAULT_SCOPE / NEXENT_SANDBOX_DOCKER_IMAGE / NEXENT_SANDBOX_MEMORY_LIMIT_MB
+      / NEXENT_SANDBOX_CPU_QUOTA / NEXENT_SANDBOX_TIMEOUT_S / NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S / NEXENT_SANDBOX_NETWORK_DISABLED
+      / NEXENT_SANDBOX_SHELL_POLICY / NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS / NEXENT_SANDBOX_OUTPUT_BUCKET / MINIO_ENDPOINT / MINIO_ACCESS_KEY
+      / MINIO_SECRET_KEY / MINIO_SECURE'
+  steps:
+  - order: 1
+    action: 在本地组件测试环境导入 backend/management/services/agent/management.py 的 build_sandbox_policy 与 get_sandbox_minio_client；不连接真实模型或外部沙箱运行时。
+    expected: DEFAULT_LEVEL=local 时 build_sandbox_policy 返回 None，不暴露 docker 沙箱策略。
+  - order: 2
+    action: 设置 NEXENT_SANDBOX_DEFAULT_LEVEL=local，调用 build_sandbox_policy(tenant_id, agent_type)，断言返回 None（local 级别不组装 docker
+      沙箱策略）。
+    expected: docker 级别返回的策略字典字段齐全且与 NEXENT_SANDBOX_* 配置一致，网络禁用/命令策略不被放宽或丢失。
+  - order: 3
+    action: 设置 NEXENT_SANDBOX_DEFAULT_LEVEL=docker 并配置 NEXENT_SANDBOX_DOCKER_IMAGE / NEXENT_SANDBOX_MEMORY_LIMIT_MB / NEXENT_SANDBOX_CPU_QUOTA
+      / NEXENT_SANDBOX_TIMEOUT_S / NEXENT_SANDBOX_NETWORK_DISABLED / NEXENT_SANDBOX_SHELL_POLICY 等，断言返回字典包含 level/scope/docker_image/memory_limit_mb/cpu_quota/timeout_seconds/host_tool_timeout_seconds/network_disabled/shell_policy/auto_sync_outputs
+      且取值与环境配置一致。
+    expected: MinIO 未配置或依赖缺失时 get_sandbox_minio_client 返回 None 且无异常抛出，运行不中断。
+  - order: 4
+    action: 断言 network_disabled（网络禁用）与 shell_policy（命令策略）在 docker 级别被正确透传，不出现缺失或退化为放行值。
+    expected: 全流程无未处理异常，日志不泄露 MinIO 访问密钥/密钥。
+  - order: 5
+    action: 在 MINIO_ENDPOINT 未配置（空值）时调用 get_sandbox_minio_client()，断言返回 None 且不抛异常。
+    expected: 全流程无未处理异常，日志不泄露 MinIO 访问密钥/密钥。
+  - order: 6
+    action: 模拟 MinIOStorageClient 依赖不可导入（ImportError）时调用 get_sandbox_minio_client()，断言安全返回 None 不抛异常。
+    expected: 全流程无未处理异常，日志不泄露 MinIO 访问密钥/密钥。
+  - order: 7
+    action: 确认测试日志不输出 MINIO_ACCESS_KEY / MINIO_SECRET_KEY 等明文密钥。
+    expected: 全流程无未处理异常，日志不泄露 MinIO 访问密钥/密钥。
+  expected_results:
+  - DEFAULT_LEVEL=local 时 build_sandbox_policy 返回 None，不暴露 docker 沙箱策略。
+  - docker 级别返回的策略字典字段齐全且与 NEXENT_SANDBOX_* 配置一致，网络禁用/命令策略不被放宽或丢失。
+  - MinIO 未配置或依赖缺失时 get_sandbox_minio_client 返回 None 且无异常抛出，运行不中断。
+  - 全流程无未处理异常，日志不泄露 MinIO 访问密钥/密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 68
+  risk_type: SECURITY
+  risk: 威胁/风险：沙箱策略解析错误或降级失败可能扩大 Agent 执行边界（如 local 级别误组装 docker 策略、网络禁用或命令策略被放宽/丢失），或 MinIO 未配置时抛异常导致 Agent 运行中断。目标：验证 build_sandbox_policy
+    依据 NEXENT_SANDBOX_* 严格组装策略，local 级别安全返回 None 不暴露过宽策略，docker 级别字段完整一致；MinIO 未配置或依赖缺失时 get_sandbox_minio_client 安全返回 None
+    不抛异常。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（NEXENT_SANDBOX_* 与 MINIO_* 测试配置值）
+
+    - 测试环境变量：NEXENT_SANDBOX_DEFAULT_LEVEL / NEXENT_SANDBOX_DEFAULT_SCOPE / NEXENT_SANDBOX_DOCKER_IMAGE / NEXENT_SANDBOX_MEMORY_LIMIT_MB
+    / NEXENT_SANDBOX_CPU_QUOTA / NEXENT_SANDBOX_TIMEOUT_S / NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S / NEXENT_SANDBOX_NETWORK_DISABLED
+    / NEXENT_SANDBOX_SHELL_POLICY / NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS / NEXENT_SANDBOX_OUTPUT_BUCKET / MINIO_ENDPOINT / MINIO_ACCESS_KEY
+    / MINIO_SECRET_KEY / MINIO_SECURE'
+  metrics:
+  - DEFAULT_LEVEL=local 时 build_sandbox_policy 返回 None，不暴露 docker 沙箱策略。
+  - docker 级别返回的策略字典字段齐全且与 NEXENT_SANDBOX_* 配置一致，网络禁用/命令策略不被放宽或丢失。
+  - MinIO 未配置或依赖缺失时 get_sandbox_minio_client 返回 None 且无异常抛出，运行不中断。
+  - 全流程无未处理异常，日志不泄露 MinIO 访问密钥/密钥。
+  thresholds:
+  - DEFAULT_LEVEL=local 时 build_sandbox_policy 返回 None，不暴露 docker 沙箱策略。
+  - docker 级别返回的策略字典字段齐全且与 NEXENT_SANDBOX_* 配置一致，网络禁用/命令策略不被放宽或丢失。
+  - MinIO 未配置或依赖缺失时 get_sandbox_minio_client 返回 None 且无异常抛出，运行不中断。
+  - 全流程无未处理异常，日志不泄露 MinIO 访问密钥/密钥。
+  recovery_expectations:
+  - DEFAULT_LEVEL=local 时 build_sandbox_policy 返回 None，不暴露 docker 沙箱策略。
+  - docker 级别返回的策略字典字段齐全且与 NEXENT_SANDBOX_* 配置一致，网络禁用/命令策略不被放宽或丢失。
+  - MinIO 未配置或依赖缺失时 get_sandbox_minio_client 返回 None 且无异常抛出，运行不中断。
+  - 全流程无未处理异常，日志不泄露 MinIO 访问密钥/密钥。

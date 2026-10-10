@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-70481C0B221C926E
+  feature_id: F-156
+  business_rule_ids:
+  - F-156-RULE-01
+  title: get_capacity_reserve_policy 容量策略键迁移与 legacy 回退｜键优先级与异常
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: get_capacity_reserve_policy 容量策略键迁移与 legacy 回退｜键优先级与异常
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 测试可直接导入 backend/utils/config_utils.py 的 TenantConfigManager 与 nexent.core.models.capacity_budget 的 CapacityReservePolicy、InvalidReservePolicy。
+  - 被测方法 get_capacity_reserve_policy 依赖的 load_config 通过桩/mock 注入受控租户配置字典，不访问真实数据库。
+  test_data:
+    legacy_asset_declaration: 无本地 fixture；租户配置通过桩/mock 注入（见详细测试步骤），不读取生产凭据。
+  steps:
+  - order: 1
+    action: 导入 backend/utils/config_utils.py 的 TenantConfigManager（或 tenant_config_manager 单例），以及 nexent.core.models.capacity_budget
+      的 CapacityReservePolicy 与 InvalidReservePolicy。
+    expected: 场景A：返回 CapacityReservePolicy，compaction_trigger_ratio == 0.8，compaction_trigger_ratio_source == "tenant_config"。
+  - order: 2
+    action: 用桩/mock 替换 get_capacity_reserve_policy 内部调用的 load_config，使其返回受控租户配置字典。
+    expected: 场景B：返回 CapacityReservePolicy，compaction_trigger_ratio == 0.9，compaction_trigger_ratio_source == "legacy_payload"。
+  - order: 3
+    action: '场景A（canonical 键生效）：令 load_config 返回 {"context.compaction_trigger_ratio": "0.8"}，调用 get_capacity_reserve_policy("tenant-a")，记录返回对象字段。'
+    expected: 场景C：返回 compaction_trigger_ratio == 0.8 且 source == "tenant_config"，legacy 值被忽略。
+  - order: 4
+    action: '场景B（canonical 缺失、legacy 回退）：令 load_config 返回 {"context.soft_limit_ratio": "0.9"}，调用 get_capacity_reserve_policy("tenant-a")。'
+    expected: 场景D：返回默认 CapacityReservePolicy()，使用代码默认而非任何配置值。
+  - order: 5
+    action: '场景C（canonical 优先）：令 load_config 同时返回 {"context.compaction_trigger_ratio": "0.8", "context.soft_limit_ratio":
+      "0.9"}，调用后确认 canonical 优先。'
+    expected: 场景E：抛出 InvalidReservePolicy，异常消息包含 "context.compaction_trigger_ratio must be a decimal in (0, 1]"；不得吞异常返回伪成功。
+  - order: 6
+    action: 场景D（两键均缺失）：令 load_config 返回 {}，调用 get_capacity_reserve_policy("tenant-a")，记录返回默认策略。
+    expected: 全程无未处理异常、无真实数据库/外部服务访问，日志不输出明文凭据。
+  - order: 7
+    action: '场景E（非法值 fail-closed）：分别令 load_config 返回 {"context.compaction_trigger_ratio": "abc"} 与 {"context.compaction_trigger_ratio":
+      "1.5"}，调用并捕获异常。'
+    expected: 全程无未处理异常、无真实数据库/外部服务访问，日志不输出明文凭据。
+  - order: 8
+    action: 断言通过后清理桩，确保用例可重复执行。
+    expected: 全程无未处理异常、无真实数据库/外部服务访问，日志不输出明文凭据。
+  expected_results:
+  - 场景A：返回 CapacityReservePolicy，compaction_trigger_ratio == 0.8，compaction_trigger_ratio_source == "tenant_config"。
+  - 场景B：返回 CapacityReservePolicy，compaction_trigger_ratio == 0.9，compaction_trigger_ratio_source == "legacy_payload"。
+  - 场景C：返回 compaction_trigger_ratio == 0.8 且 source == "tenant_config"，legacy 值被忽略。
+  - 场景D：返回默认 CapacityReservePolicy()，使用代码默认而非任何配置值。
+  - 场景E：抛出 InvalidReservePolicy，异常消息包含 "context.compaction_trigger_ratio must be a decimal in (0, 1]"；不得吞异常返回伪成功。
+  - 全程无未处理异常、无真实数据库/外部服务访问，日志不输出明文凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 404
+  unit_boundary: 容量预留策略
+  inputs:
+  - 无本地 fixture；租户配置通过桩/mock 注入（见详细测试步骤），不读取生产凭据。
+  assertions:
+  - 场景A：返回 CapacityReservePolicy，compaction_trigger_ratio == 0.8，compaction_trigger_ratio_source == "tenant_config"。
+  - 场景B：返回 CapacityReservePolicy，compaction_trigger_ratio == 0.9，compaction_trigger_ratio_source == "legacy_payload"。
+  - 场景C：返回 compaction_trigger_ratio == 0.8 且 source == "tenant_config"，legacy 值被忽略。
+  - 场景D：返回默认 CapacityReservePolicy()，使用代码默认而非任何配置值。
+  - 场景E：抛出 InvalidReservePolicy，异常消息包含 "context.compaction_trigger_ratio must be a decimal in (0, 1]"；不得吞异常返回伪成功。
+  - 全程无未处理异常、无真实数据库/外部服务访问，日志不输出明文凭据。

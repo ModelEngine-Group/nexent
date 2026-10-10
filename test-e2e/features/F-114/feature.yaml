@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-114
+  name: message like/dislike、message index→id
+  status: active
+  description: '会话与分享 / 反馈: message like/dislike、message index→id'
+  business_rules:
+  - rule_id: F-114-RULE-01
+    description: message like/dislike、message index→id
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

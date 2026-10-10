@@ -2,7 +2,7 @@ import logging
 from http import HTTPStatus
 from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Header, HTTPException, Body, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Body, Query
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
 
@@ -25,7 +25,6 @@ from services.agent_draft_permission_service import (
     ResourceBindingError,
 )
 from database.user_tenant_db import get_user_email_map
-from services.audit_service import record_security_event
 from utils.auth_utils import get_current_user_id
 
 router = APIRouter(prefix="/tool")
@@ -74,22 +73,12 @@ async def search_tool_info_api(request: ToolInstanceSearchRequest, authorization
 
 
 @router.post("/update")
-async def update_tool_info_api(
-    request: ToolInstanceInfoRequest,
-    http_request: Request,
-    authorization: Optional[str] = Header(None)
-):
+async def update_tool_info_api(request: ToolInstanceInfoRequest, authorization: Optional[str] = Header(None)):
     """
     Update an existing tool, create or update tool instance
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        # Tool params may embed API keys and never reach the log.
-        record_security_event("tool_config_update", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"tool_id": request.tool_id,
-                                       "agent_id": request.agent_id,
-                                       "enabled": request.enabled})
         return await run_blocking(
             "update-tool-config", update_tool_info_impl,
             request, tenant_id, user_id,
@@ -209,7 +198,6 @@ async def validate_tool(
 
 @router.post("/openapi_service")
 async def import_openapi_service_api(
-    http_request: Request,
     openapi_service_request: Dict[str, Any] = Body(...),
     authorization: Optional[str] = Header(None)
 ):
@@ -269,14 +257,6 @@ async def import_openapi_service_api(
         # the MCP runtime alone does not make newly imported tools selectable.
         await update_tool_list(tenant_id=tenant_id, user_id=user_id)
 
-        # openapi_json/headers_template may embed auth material and never
-        # reach the log; server_url is the endpoint the tools will call.
-        record_security_event("tool_openapi_register", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"service_name": service_name,
-                                       "server_url": server_url,
-                                       "force_update": bool(force_update)})
-
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -326,7 +306,6 @@ async def list_openapi_services_api(
 @router.delete("/openapi_service/{service_name}")
 async def delete_openapi_service_api(
     service_name: str,
-    http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -342,9 +321,6 @@ async def delete_openapi_service_api(
             )
         # Refresh MCP service to reflect the deletion
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
-        record_security_event("tool_openapi_delete", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"service_name": service_name})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

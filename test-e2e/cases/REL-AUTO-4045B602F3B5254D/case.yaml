@@ -1,0 +1,94 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-4045B602F3B5254D
+  feature_id: V5-REL-AUTO-4045B602F3B5254D
+  business_rule_ids:
+  - V5-REL-AUTO-4045B602F3B5254D-RULE-01
+  title: 中断上传清理删除部分对象失败时的降级与状态机收尾
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 风险：服务重启清理中断上传时，若 MinIO 删除部分对象失败（delete_file 返回 success=false 且对象仍存在）而清理逻辑未正确降级，生命周期记录会残留 UPLOADING 状态，后续每次重启都会重复选中该记录反复删除失败，形成悬空上传记录并持续重试。目标：删除失败时记录转入
+    FAILED/UPLOAD_RECOVERY 阶段并置 error_code=UPLOAD_RECOVERY_FAILED，不再残留 UPLOADING 状态，且该记录可被后续处理（列表查询不再命中 UPLOADING，状态为终态 FAILED）。
+  preconditions:
+  - '- 本地测试数据库与 MinIO 组件可用；不要求外部模型服务在线。
+
+    - 通过 mock 使 database.attachment_db.delete_file 返回 {"success": false}，并使 database.client.minio_client.file_exists 返回 True，构造删除失败且部分对象仍存在的场景。
+
+    - 测试夹具预先写入 knowledge_file_lifecycle 记录：status=UPLOADING、stage=UPLOAD、upload_owner_service=CONFIG_SERVICE_NAME、object_name/bucket_name
+    已设置、create_time 早于 cutoff。'
+  test_data:
+    legacy_asset_declaration: '- 本地测试数据库与 MinIO 组件可用；不要求外部模型服务在线。
+
+      - 通过 mock 使 database.attachment_db.delete_file 返回 {"success": false}，并使 database.client.minio_client.file_exists 返回
+      True，构造删除失败且部分对象仍存在的场景。
+
+      - 测试夹具预先写入 knowledge_file_lifecycle 记录：status=UPLOADING、stage=UPLOAD、upload_owner_service=CONFIG_SERVICE_NAME、object_name/bucket_name
+      已设置、create_time 早于 cutoff。'
+  steps:
+  - order: 1
+    action: 在测试数据库写入一条 knowledge_file_lifecycle 记录：status=UPLOADING、stage=UPLOAD、upload_owner_service=CONFIG_SERVICE_NAME、object_name/bucket_name
+      已设置、create_time 早于 cutoff（cutoff=当前时间-UPLOAD_RECOVERY_GRACE_SECONDS）。
+    expected: 删除失败时记录最终 status=FAILED、stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED。
+  - order: 2
+    action: '使用 mock 让 database.attachment_db.delete_file 返回 {"success": false}，并让 database.client.minio_client.file_exists
+      返回 True，模拟删除失败且部分对象仍然存在。'
+    expected: 清理后 list_uploading_files_created_before 不再返回该记录，无残留 UPLOADING 状态。
+  - order: 3
+    action: 调用 backend/services/startup_recovery_service.py 的 fail_interrupted_uploads(cutoff, upload_owner_service=CONFIG_SERVICE_NAME)。
+    expected: 记录可从 FAILED/UPLOAD_RECOVERY 状态被后续处理读取，不会重复进入 UPLOADING 或反复触发删除。
+  - order: 4
+    action: 断言第一次状态流转已发生：transition_file_record 将记录置为 status=FAILED、stage=UPLOAD、error_code=CONTAINER_RESTARTED。
+    expected: fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。
+  - order: 5
+    action: 断言删除失败后的二次降级流转发生：记录最终 status=FAILED、stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED、error_stage=UPLOAD_RECOVERY、error_message
+      包含删除失败信息。
+    expected: fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。
+  - order: 6
+    action: 再次调用 list_uploading_files_created_before(cutoff, upload_owner_service=CONFIG_SERVICE_NAME)，断言不再返回该记录（无悬空 UPLOADING
+      状态）。
+    expected: fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。
+  - order: 7
+    action: 通过 get_file_record 读取该记录，断言 status=FAILED 且 stage=UPLOAD_RECOVERY 为可被后续处理的终态，不会再次进入 UPLOADING。
+    expected: fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。
+  - order: 8
+    action: 断言 fail_interrupted_uploads 返回的 failed 计数为 1（记录已纳入清理统计），且函数整体未向上抛出异常。
+    expected: fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。
+  expected_results:
+  - 删除失败时记录最终 status=FAILED、stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED。
+  - 清理后 list_uploading_files_created_before 不再返回该记录，无残留 UPLOADING 状态。
+  - 记录可从 FAILED/UPLOAD_RECOVERY 状态被后续处理读取，不会重复进入 UPLOADING 或反复触发删除。
+  - fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 52
+  risk_type: RELIABILITY
+  risk: 风险：服务重启清理中断上传时，若 MinIO 删除部分对象失败（delete_file 返回 success=false 且对象仍存在）而清理逻辑未正确降级，生命周期记录会残留 UPLOADING 状态，后续每次重启都会重复选中该记录反复删除失败，形成悬空上传记录并持续重试。目标：删除失败时记录转入
+    FAILED/UPLOAD_RECOVERY 阶段并置 error_code=UPLOAD_RECOVERY_FAILED，不再残留 UPLOADING 状态，且该记录可被后续处理（列表查询不再命中 UPLOADING，状态为终态 FAILED）。
+  condition:
+  - '- 本地测试数据库与 MinIO 组件可用；不要求外部模型服务在线。
+
+    - 通过 mock 使 database.attachment_db.delete_file 返回 {"success": false}，并使 database.client.minio_client.file_exists 返回 True，构造删除失败且部分对象仍存在的场景。
+
+    - 测试夹具预先写入 knowledge_file_lifecycle 记录：status=UPLOADING、stage=UPLOAD、upload_owner_service=CONFIG_SERVICE_NAME、object_name/bucket_name
+    已设置、create_time 早于 cutoff。'
+  metrics:
+  - 删除失败时记录最终 status=FAILED、stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED。
+  - 清理后 list_uploading_files_created_before 不再返回该记录，无残留 UPLOADING 状态。
+  - 记录可从 FAILED/UPLOAD_RECOVERY 状态被后续处理读取，不会重复进入 UPLOADING 或反复触发删除。
+  - fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。
+  thresholds:
+  - 删除失败时记录最终 status=FAILED、stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED。
+  - 清理后 list_uploading_files_created_before 不再返回该记录，无残留 UPLOADING 状态。
+  - 记录可从 FAILED/UPLOAD_RECOVERY 状态被后续处理读取，不会重复进入 UPLOADING 或反复触发删除。
+  - fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。
+  recovery_expectations:
+  - 删除失败时记录最终 status=FAILED、stage=UPLOAD_RECOVERY、error_code=UPLOAD_RECOVERY_FAILED。
+  - 清理后 list_uploading_files_created_before 不再返回该记录，无残留 UPLOADING 状态。
+  - 记录可从 FAILED/UPLOAD_RECOVERY 状态被后续处理读取，不会重复进入 UPLOADING 或反复触发删除。
+  - fail_interrupted_uploads 不向上抛出异常，返回的 failed 计数与实际处理条数一致。

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-015
+  name: Agent选择器URL单一事实来源：搜索/选择/NEW badge、切换顺序守卫与非法agent_id清理
+  status: active
+  description: Agent选择器URL单一事实来源：搜索/选择/NEW badge、切换顺序守卫与非法agent_id清理
+  business_rules:
+  - rule_id: V5-UT-FE-015-RULE-01
+    description: Agent选择器URL单一事实来源：搜索/选择/NEW badge、切换顺序守卫与非法agent_id清理
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

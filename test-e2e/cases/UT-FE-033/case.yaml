@@ -1,0 +1,61 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-033
+  feature_id: V5-UT-FE-033
+  business_rule_ids:
+  - V5-UT-FE-033-RULE-01
+  title: 配置开关、disabled scopes、long-term version选择
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 配置开关、disabled scopes、long-term version选择
+  preconditions:
+  - 仓库 D1 前端组件运行器及隔离依赖可用。
+  - TEST_HOME 位于仓库外；测试不访问生产资源。
+  test_data:
+    fixtures: &id001
+    - 内存 fixture 和受控服务响应；不依赖真实数据库 ID、模型或凭据。
+  steps:
+  - order: 1
+    action: 用真实 service 解析配置
+    expected: 开关、shareOption、TopK 和 disabled Agent/User-Agent 集合完整映射。
+  - order: 2
+    action: 点击开关，分别模拟成功与失败
+    expected: 成功提交请求值；失败回滚并提示错误，卸载移除订阅。
+  - order: 3
+    action: 选择历史版本，确认激活
+    expected: 显示历史内容；确认前无请求，确认后携带 scope、选中版本、当前活动版本。
+  - order: 4
+    action: 编辑后模拟并发保存冲突
+    expected: 提交 expected_active_version_id，提示冲突并保留草稿，不报告成功。
+  - order: 5
+    action: 模拟读取失败并点击重试
+    expected: 错误态有重试入口，成功恢复活动版本。
+  - order: 6
+    action: 禁止组织修改权限，卸载用户面板
+    expected: 组织编辑不可见，用户可编辑；事件和 beforeunload 监听清理。
+  expected_results:
+  - 开关、shareOption、TopK 和 disabled Agent/User-Agent 集合完整映射。
+  - 成功提交请求值；失败回滚并提示错误，卸载移除订阅。
+  - 显示历史内容；确认前无请求，确认后携带 scope、选中版本、当前活动版本。
+  - 提交 expected_active_version_id，提示冲突并保留草稿，不报告成功。
+  - 错误态有重试入口，成功恢复活动版本。
+  - 组织编辑不可见，用户可编辑；事件和 beforeunload 监听清理。
+  forbidden_side_effects:
+  - 不得访问真实用户、模型 Provider 或数据库，不得输出真实凭据。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 346
+  unit_boundary: 真实 MemoryManager / LongTermMemoryPanel / loadMemoryConfig
+  inputs: *id001
+  assertions:
+  - 开关、shareOption、TopK 和 disabled Agent/User-Agent 集合完整映射。
+  - 成功提交请求值；失败回滚并提示错误，卸载移除订阅。
+  - 显示历史内容；确认前无请求，确认后携带 scope、选中版本、当前活动版本。
+  - 提交 expected_active_version_id，提示冲突并保留草稿，不报告成功。
+  - 错误态有重试入口，成功恢复活动版本。
+  - 组织编辑不可见，用户可编辑；事件和 beforeunload 监听清理。

@@ -35,6 +35,7 @@ def test_cmsr_d3_001_deployed_retry_streams_and_persists(scenario, tmp_path):
     _request(config, 'POST', '/__control', {
         'scenario': scenario, 'response_protocol': 'code_then_final',
         'response_text': marker, 'pause_after_success_chunks': 4,
+        'auxiliary_max_tokens': 8192,
     }, provider=True)
     conversation = _request(config, 'PUT', '/conversation/create', {'title': 'CMSR deployment regression'})
     conversation_id = conversation['data']['conversation_id']
@@ -101,7 +102,7 @@ def test_cmsr_d3_001_deployed_retry_streams_and_persists(scenario, tmp_path):
         assert sum(e.get('type') == 'step_count' for e in events) == 2
         stats = _request(config, 'GET', '/__stats', provider=True)
         # Third request is the normal final envelope after one executable action.
-        assert stats['request_count'] == 3
+        assert stats['request_count'] == 3, stats['requests']
         history = _request(config, 'GET', f'/conversation/{conversation_id}')
         units = _units(history)
         raw = ''.join(str(u.get('content', '')) for u in units)
@@ -130,6 +131,7 @@ def test_cmsr_deployed_truncated_repairs_never_execute(tmp_path):
     config = _config()
     _request(config, 'POST', '/__control', {
         'scenario': 'length', 'response_protocol': 'code_action', 'response_text': 'TRUNCATED_ACTION_MUST_NOT_RUN',
+        'auxiliary_max_tokens': 8192,
     }, provider=True)
     conversation = _request(config, 'PUT', '/conversation/create', {'title': 'CMSR rejected repair regression'})
     conversation_id = conversation['data']['conversation_id']
@@ -146,14 +148,18 @@ def test_cmsr_deployed_truncated_repairs_never_execute(tmp_path):
         (evidence / 'truncated-observed.json').write_text(json.dumps(events, ensure_ascii=False, indent=2))
         controls = [e for e in events if e.get('type') == 'model_attempt_control']
         assert [e['phase'] for e in controls] == ['begin', 'rollback'] * 3
-        assert not any(e.get('type') in {'parse', 'tool', 'tool-call'} for e in events)
+        # The target branch emits an empty tool reset before the first step.
+        # Rejected model actions must never parse or execute within that step.
+        first_step = next(i for i, event in enumerate(events) if event.get('type') == 'step_count')
+        assert not any(e.get('type') in {'parse', 'tool', 'tool-call'} for e in events[first_step:])
         assert sum(e.get('type') == 'step_count' for e in events) == 1
         stats = _request(config, 'GET', '/__stats', provider=True)
         assert stats['request_count'] == 3
         history = _request(config, 'GET', f'/conversation/{conversation_id}')
         units = _units(history)
         assert not any(u.get('type', '').startswith('model_output_') for u in units)
-        assert not any(u.get('type') in {'parse', 'tool', 'tool-call'} for u in units)
+        assert not any(u.get('type') == 'parse' for u in units)
+        assert not any(u.get('type') in {'tool', 'tool-call'} and u.get('content') for u in units)
         evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR', tmp_path))
         evidence.mkdir(parents=True, exist_ok=True)
         (evidence / 'truncated-repairs.json').write_text(json.dumps({

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-128
+  name: timeout/skipped/retry/consecutive failures auto-pause/lock release
+  status: active
+  description: '自动任务 / 并发与失败: timeout/skipped/retry/consecutive failures auto-pause/lock release'
+  business_rules:
+  - rule_id: F-128-RULE-01
+    description: timeout/skipped/retry/consecutive failures auto-pause/lock release
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

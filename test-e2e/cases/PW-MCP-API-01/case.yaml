@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MCP-API-01
+  feature_id: V5-PW-MCP-API-01
+  business_rule_ids:
+  - V5-PW-MCP-API-01-RULE-01
+  title: Mine新增API型MCP→转换/健康→Agent Tool调用
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 补足v4遗漏的deployment_type=API。
+  preconditions:
+  - Test HTTP API提供固定OpenAPI/endpoint
+  - API-to-MCP依赖可用
+  test_data:
+    legacy_asset_declaration: config/mcp.yaml；services/test-api/
+  steps:
+  - order: 1
+    action: Mine→Add选择API类型。
+    expected: API类型可创建并生成Tool。
+  - order: 2
+    action: 填写Test API/OpenAPI地址、认证/必要参数和run_id名称。
+    expected: Agent真实调用到Test API。
+  - order: 3
+    action: 提交转换/创建并等待完成。
+    expected: schema/参数映射精确断言由CONTRACT。
+  - order: 4
+    action: 执行健康检查，打开详情确认转换出的Tool名称/参数可见。
+    expected: schema/参数映射精确断言由CONTRACT。
+  - order: 5
+    action: 从工具目录解析本次服务生成的唯一转换工具实际名称，在Agent Tools的outer-apis分组绑定，不以API服务名假设分组名称。
+    expected: schema/参数映射精确断言由CONTRACT。
+  - order: 6
+    action: Debug固定调用，等待LLM→MCP→Test API完成。
+    expected: schema/参数映射精确断言由CONTRACT。
+  - order: 7
+    action: 检查Test API wire log和结果marker。
+    expected: schema/参数映射精确断言由CONTRACT。
+  - order: 8
+    action: 删除run_id MCP。
+    expected: schema/参数映射精确断言由CONTRACT。
+  expected_results:
+  - API类型可创建并生成Tool。
+  - Agent真实调用到Test API。
+  - schema/参数映射精确断言由CONTRACT。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 30
+  actor: Nexent browser user
+  journey:
+  - Mine→Add选择API类型。
+  - 填写Test API/OpenAPI地址、认证/必要参数和run_id名称。
+  - 提交转换/创建并等待完成。
+  - 执行健康检查，打开详情确认转换出的Tool名称/参数可见。
+  - 从工具目录解析本次服务生成的唯一转换工具实际名称，在Agent Tools的outer-apis分组绑定，不以API服务名假设分组名称。
+  - Debug固定调用，等待LLM→MCP→Test API完成。
+  - 检查Test API wire log和结果marker。
+  - 删除run_id MCP。
+  final_business_result:
+  - API类型可创建并生成Tool。
+  - Agent真实调用到Test API。
+  - schema/参数映射精确断言由CONTRACT。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MCP-API-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

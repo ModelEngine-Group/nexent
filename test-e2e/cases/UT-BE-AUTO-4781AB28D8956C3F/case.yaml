@@ -1,0 +1,77 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-4781AB28D8956C3F
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: jiuwen run_async 在 nest_asyncio 不可用时经 manager.run_sync 于 model-tool-io Lane 受管线程执行协程并回传结果/异常｜核心流程与异常边界
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: jiuwen run_async 在 nest_asyncio 不可用时经 manager.run_sync 于 model-tool-io Lane 受管线程执行协程并回传结果/异常｜核心流程与异常边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；执行时另记录实际被测 commit。
+  - 被测代码 backend/adapters/jiuwen_sdk_adapter.py 可正常导入；通过 mock 分别模拟“无运行事件循环”“有运行事件循环且 nest_asyncio 可用/不可用”三种上下文，并注入 fake thread
+    manager 以捕获 run_sync 调用。
+  test_data:
+    legacy_asset_declaration: 无固定本地资产；使用 mock 模拟 asyncio 事件循环与 nest_asyncio 导入，注入 fake thread manager 记录 run_sync 调用参数。
+  steps:
+  - order: 1
+    action: 在本地工作区定位被测函数 backend/adapters/jiuwen_sdk_adapter.py 中的 run_async(coro)，直接导入并构造最小有效协程。
+    expected: nest_asyncio 不可用时，run_async 通过 ThreadManager.run_sync 在 model-tool-io Lane 的受管线程执行协程，不再每次新建 ThreadPoolExecutor
+      直调。
+  - order: 2
+    action: 分支一（无运行事件循环）：mock asyncio.get_running_loop 抛出 RuntimeError，调用 run_async(coro)，断言走 asyncio.run 直通并返回协程结果。
+    expected: run_sync 收到 lane="model-tool-io"、ManagedTaskSpec(task_name="jiuwen-coroutine", owner="runtime") 及 run_in_thread
+      可调用对象。
+  - order: 3
+    action: 分支二（有运行事件循环且 nest_asyncio 可用）：mock get_running_loop 返回 is_running()=True 的 loop 且 nest_asyncio 可导入，调用 run_async(coro)，断言
+      nest_asyncio.apply() 与 loop.run_until_complete(coro) 被调用并返回结果。
+    expected: 协程返回值经受管线程正确回传；协程异常 X 原样传播，不被吞或包装为伪成功。
+  - order: 4
+    action: 分支三（有运行事件循环但 nest_asyncio 不可用，受管线程回退）：mock get_running_loop 返回 is_running()=True 的 loop，mock nest_asyncio 导入抛
+      ImportError，并注入 fake thread manager（get_current_thread_manager 返回 None 且 _get_default_agent_thread_manager 返回 fake），调用
+      run_async(coro)。
+    expected: 无运行事件循环时走 asyncio.run 直通；nest_asyncio 可用时走 nest_asyncio.apply() + loop.run_until_complete，均返回正确结果。
+  - order: 5
+    action: 断言 fake manager.run_sync 以 lane="model-tool-io"、ManagedTaskSpec(task_name="jiuwen-coroutine", owner="runtime")
+      以及一个在新事件循环中运行 coro 的 run_in_thread 可调用对象被调用。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 断言 run_in_thread 在被调用时新建事件循环、执行 new_loop.run_until_complete(coro) 并在 finally 关闭循环，且协程返回值经 manager.run_sync 的 future.result
+      正确回传。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 异常传播：构造会抛出特定异常 X 的协程，在分支三下调用 run_async，断言异常 X 原样抛出，不吞异常、不返回伪成功。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 测试结束后释放 mock 与临时对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - nest_asyncio 不可用时，run_async 通过 ThreadManager.run_sync 在 model-tool-io Lane 的受管线程执行协程，不再每次新建 ThreadPoolExecutor 直调。
+  - run_sync 收到 lane="model-tool-io"、ManagedTaskSpec(task_name="jiuwen-coroutine", owner="runtime") 及 run_in_thread 可调用对象。
+  - 协程返回值经受管线程正确回传；协程异常 X 原样传播，不被吞或包装为伪成功。
+  - 无运行事件循环时走 asyncio.run 直通；nest_asyncio 可用时走 nest_asyncio.apply() + loop.run_until_complete，均返回正确结果。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 397
+  unit_boundary: 并发调度与取消
+  inputs:
+  - 无固定本地资产；使用 mock 模拟 asyncio 事件循环与 nest_asyncio 导入，注入 fake thread manager 记录 run_sync 调用参数。
+  assertions:
+  - nest_asyncio 不可用时，run_async 通过 ThreadManager.run_sync 在 model-tool-io Lane 的受管线程执行协程，不再每次新建 ThreadPoolExecutor 直调。
+  - run_sync 收到 lane="model-tool-io"、ManagedTaskSpec(task_name="jiuwen-coroutine", owner="runtime") 及 run_in_thread 可调用对象。
+  - 协程返回值经受管线程正确回传；协程异常 X 原样传播，不被吞或包装为伪成功。
+  - 无运行事件循环时走 asyncio.run 直通；nest_asyncio 可用时走 nest_asyncio.apply() + loop.run_until_complete，均返回正确结果。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-D4-JOURNEYS-20261009
+  change_type: test-fix
+  title: Bind fixed A2A discovery and publication Playwright Journeys
+  description: >-
+    Add owned-resource browser Journeys matching current discovery and Advanced
+    publish UI. Keep the actual external call and post-reload relationship
+    acceptance. Use an independent Python Northbound client with existing
+    configuration; reuse existing test API keys without regeneration and delete
+    only keys created by the probe. The basic Mock name is a valid executable
+    collaborator identifier; Nacos keeps its configured registration name.
+    Permit whitespace around the deterministic total field, without weakening
+    the actual external invocation check. Preserve cleanup query parameters.
+    Published invocation must complete and return its marker in Agent output;
+    HTTP 200 or a marker echoed in input history alone is not success.
+  affected_features:
+    existing: [V5-PW-A2A-DISCOVERY-01, V5-PW-A2A-PUBLISH-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-A2A-DISCOVERY-01, PW-A2A-PUBLISH-01]
+    retired: []

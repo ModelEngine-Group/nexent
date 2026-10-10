@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-01
+  name: Runtime重启恢复与线程生命周期优雅关闭收敛
+  status: active
+  description: scheduler lifecycle / thread lifecycle / graceful shutdown
+  business_rules:
+  - rule_id: V5-REL-01-RULE-01
+    description: Runtime重启恢复与线程生命周期优雅关闭收敛
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -493,6 +493,51 @@ async def test_create_provider_model_exception(client, auth_header, user_credent
     mock_get.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_create_provider_model_preserves_http_exception(client, auth_header, user_credentials, mocker):
+    """A provider failure classified by the service layer keeps its status.
+
+    Regression for API-049: an upstream connection failure is raised as
+    HTTPException(502) by create_provider_models_for_tenant, but the generic
+    ``except Exception`` handlers used to swallow it and the endpoint answered
+    500 with the real status buried in the message body.
+    """
+    from fastapi import HTTPException as FastAPIHTTPException
+
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    mock_get = mocker.patch(
+        'backend.apps.model_managment_app.create_provider_models_for_tenant',
+        side_effect=FastAPIHTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail="connection_failed: Failed to connect to OpenAI-compatible",
+        ),
+    )
+
+    request_data = {"provider": "silicon", "model_type": "llm", "api_key": "test_key"}
+    response = client.post(
+        "/model/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.BAD_GATEWAY
+    assert "connection_failed" in response.json().get("detail", "")
+    mock_get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_provider_model_rejects_blank_provider(client, auth_header, user_credentials, mocker):
+    """A blank provider is rejected at the boundary with 422, not a 500."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mock_get = mocker.patch(
+        'backend.apps.model_managment_app.create_provider_models_for_tenant')
+
+    request_data = {"provider": "", "model_type": "llm", "api_key": "", "base_url": "not-a-url"}
+    response = client.post(
+        "/model/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    mock_get.assert_not_called()
+
+
 # Tests for /model/provider/batch_create endpoint
 @pytest.mark.asyncio
 async def test_provider_batch_create_success(client, auth_header, user_credentials, mocker):
@@ -2037,92 +2082,3 @@ def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]
-
-
-class TestModelAuditEntries:
-    """Security audit entries emitted by model configuration endpoints."""
-
-    def test_model_create_emits_audit_entry_without_credentials(self, client, caplog):
-        import logging
-        from unittest.mock import AsyncMock, patch
-
-        with patch("backend.apps.model_managment_app.create_model_for_tenant",
-                   new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = {"auto_configured_defaults": []}
-
-            with caplog.at_level(logging.INFO, logger="audit.security"):
-                response = client.post(
-                    "/model/create",
-                    json={"model_name": "gpt-x", "model_type": "llm",
-                          "base_url": "https://api.example.com/v1",
-                          "api_key": "sk-secret", "display_name": "GPT X"},
-                )
-
-        assert response.status_code == HTTPStatus.OK
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=model_create" in messages[0]
-        assert "result=success" in messages[0]
-        assert "user_id=test_user" in messages[0]
-        assert "tenant_id=test_tenant" in messages[0]
-        assert '"model_name":"gpt-x"' in messages[0]
-        assert '"base_url":"https://api.example.com/v1"' in messages[0]
-        assert "sk-secret" not in messages[0]
-
-    def test_manage_batch_import_emits_audit_entry(self, client, caplog):
-        import logging
-        from unittest.mock import AsyncMock, patch
-
-        with patch("backend.apps.model_managment_app.batch_create_models_for_tenant",
-                   new_callable=AsyncMock) as mock_batch:
-            mock_batch.return_value = {"auto_configured_defaults": []}
-
-            with caplog.at_level(logging.INFO, logger="audit.security"):
-                response = client.post(
-                    "/model/manage/batch_create",
-                    json={"tenant_id": "tenant-9", "provider": "silicon", "type": "llm",
-                          "api_key": "sk-batch",
-                          "models": [
-                              {"model_name": "Qwen/Qwen2.5-7B", "model_repo": "Qwen",
-                               "display_name": "qwen-7b"},
-                              {"model_name": "Qwen/Qwen2.5-14B", "model_repo": "Qwen"},
-                          ]},
-                )
-
-        assert response.status_code == HTTPStatus.OK
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=tenant_model_batch_import" in messages[0]
-        assert "result=success" in messages[0]
-        assert "user_id=test_user" in messages[0]
-        assert '"target_tenant_id":"tenant-9"' in messages[0]
-        assert '"provider":"silicon"' in messages[0]
-        assert '"models_count":2' in messages[0]
-        assert '"model_repo":"Qwen"' in messages[0]
-        assert "sk-batch" not in messages[0]
-
-    def test_backfill_defaults_emits_audit_entry(self, client, caplog):
-        import logging
-        from unittest.mock import patch
-
-        with patch("backend.apps.model_managment_app._ids_for_created_models") as mock_ids, \
-                patch("backend.apps.model_managment_app._backfill_default_model_slots") as mock_backfill:
-            mock_ids.return_value = [11, 12]
-            mock_backfill.return_value = ["llm"]
-
-            with caplog.at_level(logging.INFO, logger="audit.security"):
-                response = client.post(
-                    "/model/backfill_defaults",
-                    json={"display_names": ["qwen-7b", "qwen-14b"]},
-                )
-
-        assert response.status_code == HTTPStatus.OK
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=model_defaults_backfill" in messages[0]
-        assert "result=success" in messages[0]
-        assert '"display_names":["qwen-7b","qwen-14b"]' in messages[0]
-        assert '"auto_configured_defaults":["llm"]' in messages[0]

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-10
+  name: 认证/限流/幂等滥用
+  status: active
+  description: 暴力调用、key撤销、idempotency冲突
+  business_rules:
+  - rule_id: V5-SEC-10-RULE-01
+    description: 认证/限流/幂等滥用
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-178
+  name: Provider 插件发现、配置 CRUD、连通性搜索/写入测试、运行时检索与热更新
+  status: active
+  description: '记忆 / 外部记忆Provider: Provider 插件发现、配置 CRUD、连通性搜索/写入测试、运行时检索与热更新'
+  business_rules:
+  - rule_id: F-178-RULE-01
+    description: Provider 插件发现、配置 CRUD、连通性搜索/写入测试、运行时检索与热更新
+  required_test_stages:
+  - D1
+  - D2
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

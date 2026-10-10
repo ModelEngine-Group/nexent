@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: CTR-042
+  feature_id: F-096
+  business_rule_ids:
+  - F-096-RULE-01
+  title: 认证 header/idkey/JWT/custom metadata 实际 wire 传输｜异常/边界/越权
+  type: CONTRACT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 认证 header/idkey/JWT/custom metadata 实际 wire 传输｜异常/边界/越权
+  preconditions:
+  - Nexent服务与仓库受控A2A Mock就绪，无其他故障注入批次。
+  - config/a2a.yaml符合统一Schema，控制令牌由既有环境或secrets.env提供。
+  - 使用本次动态ID、唯一source URL及受控测试身份，不借用历史资源。
+  test_data:
+    configuration: config/a2a.yaml
+    mock_service: a2a-agent
+  steps:
+  - order: 1
+    action: 发现JWT卡片并保存受控损坏JWT
+    expected: 配置可保存，不将格式检查误作真实认证
+  - order: 2
+    action: 经Nexent调用受保护Agent
+    expected: 400并明确外部401；wire认证失败，不判成功
+  - order: 3
+    action: 提交非对象metadata
+    expected: 422且不新增外部调用
+  - order: 4
+    action: 清理本次Agent
+    expected: 回读404，保存脱敏wire
+  expected_results:
+  - 配置可保存，不将格式检查误作真实认证
+  - 400并明确外部401；wire认证失败，不判成功
+  - 422且不新增外部调用
+  - 回读404，保存脱敏wire
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 190
+  contract:
+    protocol: Nexent HTTP API and real external A2A wire
+    request_expectations:
+    - 发现JWT卡片并保存受控损坏JWT
+    - 经Nexent调用受保护Agent
+    - 提交非对象metadata
+    - 清理本次Agent
+    response_expectations:
+    - 配置可保存，不将格式检查误作真实认证
+    - 400并明确外部401；wire认证失败，不判成功
+    - 422且不新增外部调用
+    - 回读404，保存脱敏wire

@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: DEP-003-OFFLINE-LATEST-001
+  change_type: test-fix
+  title: Keep DEP-003 offline packaging on the current local latest images
+  description: >-
+    The migrated script used the repository release VERSION and default registry source,
+    then asserted a tar.gz path that the packaging command does not produce. The Case
+    now pins local-latest, checks the complete local image set before packaging,
+    validates the actual manifest and checksums, and records its long-running output.
+  affected_features:
+    existing:
+    - F-174
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - DEP-003
+    retired: []

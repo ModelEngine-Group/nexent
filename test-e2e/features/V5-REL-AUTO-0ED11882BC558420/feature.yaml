@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-0ED11882BC558420
+  name: 孤儿虚拟评测集启动清理与引用判定
+  status: active
+  description: 风险：no-set 评测场景在配置服务重启后，若评测集物化过程中断（进程崩溃/未成功挂接 pending run），会残留 source_filename=__no_set_virtual__ 且不被任何 AgentEvaluation
+    引用的孤儿虚拟评测集及其 case，造成数据膨胀与后续引用误判。目标：验证 cleanup_orphaned_virtual_evaluation_sets 仅删除未被任何 delete_flag=N 的 run 引用的 __no_set_virtual__
+    评测集及其全部 case，同时保留已被 run 引用的虚拟集、普通评测集与软删除记录。
+  business_rules:
+  - rule_id: V5-REL-AUTO-0ED11882BC558420-RULE-01
+    description: 孤儿虚拟评测集启动清理与引用判定
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

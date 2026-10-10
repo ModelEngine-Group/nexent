@@ -5,7 +5,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "aiofiles>=0.8.0",
     "uvicorn>=0.34.0",
-    "fastapi>=0.115.12",
+    "fastapi>=0.115.12,<=0.141.1",
     "python-multipart>=0.0.9",
     "email-validator>=2.0.0",
     "aiohttp>=3.8.0",

@@ -1,0 +1,60 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-071
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: 真实外部记忆写入→检索→Agent 上下文与配置热更新
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 真实外部记忆写入→检索→Agent 上下文与配置热更新
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  - models.yaml 中所需真实 Provider 通过预检，名称与凭据不得硬编码。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 使用配置中的真实 Provider 写入 run_id marker。
+    expected: 真实写入和检索成功。
+  - order: 2
+    action: 轮询直至可检索。
+    expected: Agent trace 显示外部记忆命中。
+  - order: 3
+    action: 运行启用外部记忆的真实 Agent 对话。
+    expected: 热更新只影响后续运行。
+  - order: 4
+    action: 校验检索 trace 和回答 marker。
+    expected: 故障有明确 provider 错误且本地记忆仍按契约工作。
+  - order: 5
+    action: 更新 provider 参数后再次运行，最后清理。
+    expected: 故障有明确 provider 错误且本地记忆仍按契约工作。
+  expected_results:
+  - 真实写入和检索成功。
+  - Agent trace 显示外部记忆命中。
+  - 热更新只影响后续运行。
+  - 故障有明确 provider 错误且本地记忆仍按契约工作。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 385
+  integration_boundary:
+  - REAL_REQUIRED：使用 secrets.env 配置的真实外部记忆 Provider 与 models.yaml 的真实 LLM。
+  observations:
+  - 真实写入和检索成功。
+  - Agent trace 显示外部记忆命中。
+  - 热更新只影响后续运行。
+  - 故障有明确 provider 错误且本地记忆仍按契约工作。
+  cleanup:
+  - JUnit、run_id、stream/tool/retrieval trace、脱敏模型快照。

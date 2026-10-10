@@ -1,0 +1,47 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-19E0779FED1B649A
+  feature_id: F-131
+  business_rule_ids: [F-131-RULE-01]
+  title: 工具列表托管知识工具隐藏及独立 AIDP 工具可选契约
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证工具服务输出的本地工具元数据与序列化可选性，不引用已删除的部署控制函数。
+  preconditions:
+  - 后端与本地工具依赖可导入，不需要 AIDP 外部服务或修改部署开关。
+  test_data:
+    mode_variants: 用 monkeypatch 临时切换 consts.const 中的部署开关，测试结束自动恢复。
+  steps:
+  - order: 1
+    action: 在两种部署开关下检查托管知识工具可选性及 get_local_tools 的真实输出。
+    expected: knowledge_base_search 和 aidp_search 恒不可选。
+  - order: 2
+    action: 检查 ind_aidp_search 的默认 true/false 与两种模式下本地目录的实际值。
+    expected: 独立 AIDP 工具遵循自身默认值，不被部署开关隐藏，本地目录保持可选。
+  - order: 3
+    action: 检查普通本地工具默认值、名称、布尔字段及 ToolInfo.model_dump。
+    expected: 普通工具默认值不被覆盖，序列化 is_user_selectable 为布尔值。
+  expected_results:
+  - 托管知识工具恒不可选。
+  - 独立 AIDP 工具不随部署开关被隐藏，普通工具保留默认值。
+  - 本地工具目录的名称与布尔可选字段及序列化正确。
+  forbidden_side_effects: []
+  contract:
+    protocol: Tool service metadata serialization
+    request_expectations:
+    - 通过真实 get_local_tools 输出检查目录，临时模式变更自动恢复。
+    response_expectations:
+    - 托管工具隐藏，独立 AIDP 与普通工具遵循自身默认值。
+  acceptance:
+  - id: AC-01
+    description: 托管知识工具和独立工具在两种模式下输出正确且元数据可序列化。
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 490

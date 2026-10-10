@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-SKILL-01
+  feature_id: V5-PW-SKILL-01
+  business_rule_ids:
+  - V5-PW-SKILL-01-RULE-01
+  title: Mine创建/上传Skill→编辑→Agent绑定→Debug
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证Skill资产创建到Agent运行的真实UI主链。
+  preconditions:
+  - 固定测试Skill资产
+  - 真实LLM可用
+  test_data:
+    legacy_asset_declaration: assets/skills/test_skill/；config/models.yaml
+  steps:
+  - order: 1
+    action: 打开/skill-space→Mine。
+    expected: Skill真实创建/编辑且刷新存在。
+  - order: 2
+    action: 点击创建/上传Skill，使用run_id名称并上传固定Skill资产或按当前表单创建。
+    expected: Agent绑定持久化并可运行。
+  - order: 3
+    action: 等待创建成功，打开编辑并修改允许字段后保存。
+    expected: 恶意ZIP/路径穿越由SEC。
+  - order: 4
+    action: 刷新Mine搜索run_id Skill。
+    expected: 恶意ZIP/路径穿越由SEC。
+  - order: 5
+    action: 创建独立Agent，配置真实模型、作者、描述与角色提示词，满足Debug运行前置条件。
+    expected: 恶意ZIP/路径穿越由SEC。
+  - order: 6
+    action: 在工具与技能Tab搜索并绑定该Skill，等待autosave。
+    expected: 恶意ZIP/路径穿越由SEC。
+  - order: 7
+    action: 点击Debug发送固定输入并等待真实模型完成。
+    expected: 恶意ZIP/路径穿越由SEC。
+  - order: 8
+    action: 按expected marker/结构确认Skill效果。
+    expected: 恶意ZIP/路径穿越由SEC。
+  - order: 9
+    action: 登记本用例的独立清理，完成持久化断言后清理本次创建的Skill和Agent。
+    expected: 恶意ZIP/路径穿越由SEC。
+  expected_results:
+  - Skill真实创建/编辑且刷新存在。
+  - Agent绑定持久化并可运行。
+  - 恶意ZIP/路径穿越由SEC。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 26
+  actor: Nexent browser user
+  journey:
+  - 打开/skill-space→Mine。
+  - 点击创建/上传Skill，使用run_id名称并上传固定Skill资产或按当前表单创建。
+  - 等待创建成功，打开编辑并修改允许字段后保存。
+  - 刷新Mine搜索run_id Skill。
+  - 创建独立Agent，配置真实模型、作者、描述与角色提示词，满足Debug运行前置条件。
+  - 在工具与技能Tab搜索并绑定该Skill，等待autosave。
+  - 点击Debug发送固定输入并等待真实模型完成。
+  - 按expected marker/结构确认Skill效果。
+  - 登记本用例的独立清理，完成持久化断言后清理本次创建的Skill和Agent。
+  final_business_result:
+  - Skill真实创建/编辑且刷新存在。
+  - Agent绑定持久化并可运行。
+  - 恶意ZIP/路径穿越由SEC。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-SKILL-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

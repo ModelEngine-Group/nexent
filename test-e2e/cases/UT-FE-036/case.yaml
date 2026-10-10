@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-036
+  feature_id: F-153
+  business_rule_ids:
+  - F-153-RULE-01
+  title: 监控 Dashboard 默认/动态角色白名单与 SPEED 模式
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 监控 Dashboard 默认/动态角色白名单与 SPEED 模式
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 校验默认允许 SU/SPEED。
+    expected: 默认仅 SU/SPEED 可见。
+  - order: 2
+    action: 使用大小写和空格混合角色。
+    expected: SPEED 模式按 SPEED 判定。
+  - order: 3
+    action: 切换 SPEED 模式。
+    expected: 动态白名单覆盖默认值。
+  - order: 4
+    action: 注入动态 TENANT_ADMIN 白名单并测试未知/空角色。
+    expected: 未知或空角色不可见。
+  expected_results:
+  - 默认仅 SU/SPEED 可见。
+  - SPEED 模式按 SPEED 判定。
+  - 动态白名单覆盖默认值。
+  - 未知或空角色不可见。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 349
+  unit_boundary: 监控与通知UI
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  assertions:
+  - 默认仅 SU/SPEED 可见。
+  - SPEED 模式按 SPEED 判定。
+  - 动态白名单覆盖默认值。
+  - 未知或空角色不可见。

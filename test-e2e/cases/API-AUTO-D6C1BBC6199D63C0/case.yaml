@@ -1,0 +1,98 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-D6C1BBC6199D63C0
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: Agent 仓库列表/mine 结构化标签谓词过滤命中与可见性、非法谓词报错
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Agent 仓库列表/mine 结构化标签谓词过滤命中与可见性、非法谓词报错
+  preconditions:
+  - 本地接口集成测试环境可运行，后端服务与依赖组件（数据库等）可用；不要求真实外部模型在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录；测试租户内预置若干带结构化标签的 Agent 与已共享仓库 listing 数据，且测试数据可清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 以 UserA 登录并携带有效 authorization，请求 GET /repository/agent?status=shared&page=1&page_size=10，记录 items 与 pagination
+      原始结构。
+    expected: HTTP 200；响应含 items（每项含 agent_repository_id/agent_id/name/display_name/description/status/tags 等）与 pagination
+      {page, page_size, total, total_pages}；total_pages == ceil(total/page_size)，total=0 时 total_pages=0。
+  - order: 2
+    action: 请求 GET /repository/agent，将 tag_predicates 传成非 JSON 字符串（如 URL 编码的 not-json），断言状态码与 detail。
+    expected: HTTP 400；detail == "tag_predicates must be valid JSON"。
+  - order: 3
+    action: 请求 GET /repository/agent，将 tag_predicates 传成合法 JSON 但非数组（如 {"a":1}），断言状态码与 detail。
+    expected: HTTP 400；detail == "tag_predicates must be a list"。
+  - order: 4
+    action: 对 search_tag_predicates 分别传非法 JSON 与合法 JSON 非数组，断言 400 且 detail 与 tag_predicates 相同（_parse_tag_predicates 复用同一错误文案）。
+    expected: HTTP 400；search_tag_predicates 的非法 JSON 与非 list 分别返回 detail "tag_predicates must be valid JSON" 与 "tag_predicates
+      must be a list"（复用 _parse_tag_predicates 的固定文案）。
+  - order: 5
+    action: 构造多个符合 consts.model.TagAssignmentFilter 的谓词对象并 JSON 数组编码后经 tag_predicates 传入，断言仅返回同时匹配所有谓词的 listing（谓词之间为交集过滤）。
+    expected: tag_predicates 多谓词取交集，仅同时满足全部谓词的 listing 命中；经 TagManagementDB.filter_authorized_resource_ids 仅 tenant 授权可见资源可入选。
+  - order: 6
+    action: 经 search_tag_predicates 传入多个谓词并同时给 search 文本，断言命中任一谓词的 agent 被并入搜索命中（谓词之间为并集）。
+    expected: search_tag_predicates 多谓词取并集，命中任一谓词的 agent 与文本命中一起并入搜索。
+  - order: 7
+    action: 经 tag 传入精确标签值，断言仅返回 record.tags 中精确含该值的 listing，子串与大小写不一致不命中。
+    expected: tag 精确匹配：仅 record.tags 精确含 tag 时保留，无子串/大小写误命中。
+  - order: 8
+    action: '请求 GET /repository/agent/mine 并传 tag_predicates，断言 items 中每个 agent 匹配谓词且均为租户可见 agent，且 items 不出现 {"new_agent_padding":
+      true} 占位。'
+    expected: mine 的 tag_predicates 过滤后 items 均匹配且可见，且 items 无 new_agent_padding 占位。
+  - order: 9
+    action: 用缺失/非法 authorization 请求列表与 mine 接口，断言返回 401；用另一租户（或越权身份）请求，断言不返回非本租户可见 listing，且分页 total 不计入。
+    expected: 未授权请求返回 401；跨租户 listing 不出现在 items 与 pagination.total 中，不泄露其他租户数据。
+  expected_results:
+  - HTTP 200；响应含 items（每项含 agent_repository_id/agent_id/name/display_name/description/status/tags 等）与 pagination {page, page_size,
+    total, total_pages}；total_pages == ceil(total/page_size)，total=0 时 total_pages=0。
+  - HTTP 400；detail == "tag_predicates must be valid JSON"。
+  - HTTP 400；detail == "tag_predicates must be a list"。
+  - HTTP 400；search_tag_predicates 的非法 JSON 与非 list 分别返回 detail "tag_predicates must be valid JSON" 与 "tag_predicates must
+    be a list"（复用 _parse_tag_predicates 的固定文案）。
+  - tag_predicates 多谓词取交集，仅同时满足全部谓词的 listing 命中；经 TagManagementDB.filter_authorized_resource_ids 仅 tenant 授权可见资源可入选。
+  - search_tag_predicates 多谓词取并集，命中任一谓词的 agent 与文本命中一起并入搜索。
+  - tag 精确匹配：仅 record.tags 精确含 tag 时保留，无子串/大小写误命中。
+  - mine 的 tag_predicates 过滤后 items 均匹配且可见，且 items 无 new_agent_padding 占位。
+  - 未授权请求返回 401；跨租户 listing 不出现在 items 与 pagination.total 中，不泄露其他租户数据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 508
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 以 UserA 登录并携带有效 authorization，请求 GET /repository/agent?status=shared&page=1&page_size=10，记录 items 与 pagination 原始结构。
+    - 请求 GET /repository/agent，将 tag_predicates 传成非 JSON 字符串（如 URL 编码的 not-json），断言状态码与 detail。
+    - 请求 GET /repository/agent，将 tag_predicates 传成合法 JSON 但非数组（如 {"a":1}），断言状态码与 detail。
+    - 对 search_tag_predicates 分别传非法 JSON 与合法 JSON 非数组，断言 400 且 detail 与 tag_predicates 相同（_parse_tag_predicates 复用同一错误文案）。
+    - 构造多个符合 consts.model.TagAssignmentFilter 的谓词对象并 JSON 数组编码后经 tag_predicates 传入，断言仅返回同时匹配所有谓词的 listing（谓词之间为交集过滤）。
+    - 经 search_tag_predicates 传入多个谓词并同时给 search 文本，断言命中任一谓词的 agent 被并入搜索命中（谓词之间为并集）。
+    - 经 tag 传入精确标签值，断言仅返回 record.tags 中精确含该值的 listing，子串与大小写不一致不命中。
+    - '请求 GET /repository/agent/mine 并传 tag_predicates，断言 items 中每个 agent 匹配谓词且均为租户可见 agent，且 items 不出现 {"new_agent_padding":
+      true} 占位。'
+    - 用缺失/非法 authorization 请求列表与 mine 接口，断言返回 401；用另一租户（或越权身份）请求，断言不返回非本租户可见 listing，且分页 total 不计入。
+    response_expectations:
+    - HTTP 200；响应含 items（每项含 agent_repository_id/agent_id/name/display_name/description/status/tags 等）与 pagination {page,
+      page_size, total, total_pages}；total_pages == ceil(total/page_size)，total=0 时 total_pages=0。
+    - HTTP 400；detail == "tag_predicates must be valid JSON"。
+    - HTTP 400；detail == "tag_predicates must be a list"。
+    - HTTP 400；search_tag_predicates 的非法 JSON 与非 list 分别返回 detail "tag_predicates must be valid JSON" 与 "tag_predicates must
+      be a list"（复用 _parse_tag_predicates 的固定文案）。
+    - tag_predicates 多谓词取交集，仅同时满足全部谓词的 listing 命中；经 TagManagementDB.filter_authorized_resource_ids 仅 tenant 授权可见资源可入选。
+    - search_tag_predicates 多谓词取并集，命中任一谓词的 agent 与文本命中一起并入搜索。
+    - tag 精确匹配：仅 record.tags 精确含 tag 时保留，无子串/大小写误命中。
+    - mine 的 tag_predicates 过滤后 items 均匹配且可见，且 items 无 new_agent_padding 占位。
+    - 未授权请求返回 401；跨租户 listing 不出现在 items 与 pagination.total 中，不泄露其他租户数据。

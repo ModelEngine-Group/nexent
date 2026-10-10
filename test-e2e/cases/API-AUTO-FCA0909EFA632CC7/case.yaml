@@ -1,0 +1,89 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-FCA0909EFA632CC7
+  feature_id: F-185
+  business_rule_ids:
+  - F-185-RULE-01
+  title: delete_document_by_scope 按 source_only/full 删除并完成生命周期硬删与计量释放｜持久化栅栏/任务取消/终态等待/后台重试
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: delete_document_by_scope 按 source_only/full 删除并完成生命周期硬删与计量释放｜持久化栅栏/任务取消/终态等待/后台重试
+  preconditions:
+  - 真实后端组件已启动并可用：PostgreSQL、Redis、Elasticsearch、MinIO 及 Celery worker，隔离租户数据可被清理。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/assets/documents/
+  - users.yaml 中 SU/Admin 等隔离账号可登录，可调用知识库管理 API 创建带 embedding_model_id 的知识库并上传文档生成 lifecycle 记录。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/assets/documents/'
+  steps:
+  - order: 1
+    action: 通过管理 API 创建隔离知识库（携带 tenant_id 与有效 embedding_model_id），获取 index_name；资源名称携带当次 run_id 便于清理。
+    expected: scope=source_only 且文档终态：返回 status=success，deleted_es_count=0，deleted_minio=true，source_available=false，索引 chunks/vectors
+      保留。
+  - order: 2
+    action: 上传一个本地固定文档到该知识库，轮询文件状态直至 COMPLETED（父任务链进入终态），记录 file_id 与 path_or_url。
+    expected: scope=full：返回 status=success，deleted_es_count>0，deleted_minio=true，lifecycle_deleted=true，PG lifecycle 记录硬删除、Redis
+      记录清理、计量 charge 释放。
+  - order: 3
+    action: 调用文档删除 API，scope=source_only，检查返回 status、deleted_es_count、deleted_minio、source_available 及 cancelled_tasks。
+    expected: 非法 scope 或 source_only 作用于非终态文档：抛出明确 ValueError，消息含 Invalid scope 或 Cannot delete source file while document
+      is in state，不产生半写入或跨租户泄露。
+  - order: 4
+    action: 另上传一个文档并处理至 COMPLETED，调用 scope=full，检查 ES 文档、MinIO 源文件、Redis 记录、PG lifecycle 记录的清理及生命周期硬删除和计量释放。
+    expected: 删除开始前安装 PG tombstone（DELETE_REQUESTED）与 Redis fence；取消并 revoke 已记录 Celery 任务；返回体含 cancelled_tasks 计数字段。
+  - order: 5
+    action: 构造一个处于非终态（如 PROCESSING/FORWARDING）的文档，调用 scope=source_only，记录领域错误信息。
+    expected: 外部清理失败或 fence 未清：首轮返回 status=pending、deletion_pending=true、lifecycle_status=DELETE_REQUESTED，后台重试最终完成 lifecycle
+      硬删除与 fence 清理（lifecycle_deleted=true）。
+  - order: 6
+    action: 传入非法 scope（如 invalid），记录 ValueError 信息。
+    expected: 父任务链未终态：返回 pending（等待 Celery 任务停止），父任务链进入终态后由后台重试完成清理。
+  - order: 7
+    action: 注入外部清理失败或 Redis fence 未清除的条件（如 mark_document_delete_requested 安装 fence 后未 clear），调用 scope=full，检查首轮返回 pending
+      及后台重试后终态。
+    expected: 关键状态在 API 返回、PG、Redis、ES、MinIO 及后续读取保持一致；日志无明文凭据。
+  - order: 8
+    action: 对处理链路中（父任务未终态）的文档发起删除，检查 pending 返回与 drain/终态等待表现；测试结束清理隔离租户全部资源、PG tombstone 与 Redis fence，保证可重复执行。
+    expected: 关键状态在 API 返回、PG、Redis、ES、MinIO 及后续读取保持一致；日志无明文凭据。
+  expected_results:
+  - scope=source_only 且文档终态：返回 status=success，deleted_es_count=0，deleted_minio=true，source_available=false，索引 chunks/vectors
+    保留。
+  - scope=full：返回 status=success，deleted_es_count>0，deleted_minio=true，lifecycle_deleted=true，PG lifecycle 记录硬删除、Redis 记录清理、计量
+    charge 释放。
+  - 非法 scope 或 source_only 作用于非终态文档：抛出明确 ValueError，消息含 Invalid scope 或 Cannot delete source file while document is in state，不产生半写入或跨租户泄露。
+  - 删除开始前安装 PG tombstone（DELETE_REQUESTED）与 Redis fence；取消并 revoke 已记录 Celery 任务；返回体含 cancelled_tasks 计数字段。
+  - 外部清理失败或 fence 未清：首轮返回 status=pending、deletion_pending=true、lifecycle_status=DELETE_REQUESTED，后台重试最终完成 lifecycle 硬删除与 fence
+    清理（lifecycle_deleted=true）。
+  - 父任务链未终态：返回 pending（等待 Celery 任务停止），父任务链进入终态后由后台重试完成清理。
+  - 关键状态在 API 返回、PG、Redis、ES、MinIO 及后续读取保持一致；日志无明文凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 534
+  integration_boundary:
+  - REAL_INFRA_REQUIRED：需要真实 PostgreSQL/Redis/Elasticsearch/MinIO 本地组件与 Celery worker；不访问公网模型或第三方 SaaS。
+  observations:
+  - scope=source_only 且文档终态：返回 status=success，deleted_es_count=0，deleted_minio=true，source_available=false，索引 chunks/vectors
+    保留。
+  - scope=full：返回 status=success，deleted_es_count>0，deleted_minio=true，lifecycle_deleted=true，PG lifecycle 记录硬删除、Redis 记录清理、计量
+    charge 释放。
+  - 非法 scope 或 source_only 作用于非终态文档：抛出明确 ValueError，消息含 Invalid scope 或 Cannot delete source file while document is in state，不产生半写入或跨租户泄露。
+  - 删除开始前安装 PG tombstone（DELETE_REQUESTED）与 Redis fence；取消并 revoke 已记录 Celery 任务；返回体含 cancelled_tasks 计数字段。
+  - 外部清理失败或 fence 未清：首轮返回 status=pending、deletion_pending=true、lifecycle_status=DELETE_REQUESTED，后台重试最终完成 lifecycle 硬删除与 fence
+    清理（lifecycle_deleted=true）。
+  - 父任务链未终态：返回 pending（等待 Celery 任务停止），父任务链进入终态后由后台重试完成清理。
+  - 关键状态在 API 返回、PG、Redis、ES、MinIO 及后续读取保持一致；日志无明文凭据。
+  cleanup:
+  - pytest JUnit/XML、HTTP 请求/响应记录、PG lifecycle 状态快照、Redis fence/task 快照、失败堆栈与日志。

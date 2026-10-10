@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: WINDOWS-D1-TRIAGE-20260930
+  change_type: test-fix
+  title: Repair D1 case-local execution and Windows test doubles
+  description: >-
+    Scope is the 43 failed and 7 blocked D1 Cases in the three-batch merged report.
+    Resolve test-only libraries from the isolated frontend runner; run the entire
+    Case-local Vitest file so unnamed boundary sub-scenarios are not filtered out.
+    Update only observed Agent component paths to the current agentId route.
+    Supply DB system-Agent classification, query count and reasoning metadata in
+    controlled unit fixtures. Exercise real Windows directory-link escapes with
+    NTFS junction fallback when symbolic-link privilege is unavailable.
+    Assert the typed MCP connection timeout instead of obsolete error wording.
+    Update icon_url field boundaries using resource-card refactor 3a378d51d as
+    change evidence, preserving tag and sensitive-log assertions. Do not change
+    product sources or database-test safety policy. Retire the historical built-in
+    OTel Case against removal commit b8f8f6f29; retain its ID and evidence rather
+    than synthesizing a passing replacement. Update F-186's optional hook contract.
+    Use ESM React imports in case-local mock factories, provide QueryClient and
+    current route/store seams, update combined-filter interaction selectors,
+    preserve the current landing-thread metadata contract (0c9ff869c), and test
+    the real Debug-Chat-Thread chain after the workbench refactor (106729394).
+    Drain Ant Design callbacks before JSDOM teardown. Retain both default text
+    logs and JUnit, including unhandled-error evidence and nonzero process exits.
+    Replace five unrelated placeholder scripts with real locale, Agent state,
+    group/invitation form, Memory version/configuration and Cookie-auth tests.
+    Synchronize their steps/assertions and update the obsolete refresh contract
+    against e98b84b2b. Component results do not imply full browser integration.
+    On 2026-10-09, the user explicitly requested deletion of retired Case
+    UT-SDK-AUTO-40B60A7E416881CF. Its earlier retirement remains documented here
+    and in historical reports; its live affected_cases reference is removed.
+  affected_features:
+    existing: []
+    added: []
+    modified: [V5-UT-FE-037, F-186]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-BE-015, UT-BE-AUTO-1B0108BB27372242, UT-BE-AUTO-BCADEBF043C5DE3C, UT-FE-002, UT-FE-005, UT-FE-006, UT-FE-011, UT-FE-033, UT-FE-037, UT-FE-AUTO-02FA904A1C3AD386, UT-FE-AUTO-0330CCC385F313B2, UT-FE-AUTO-0440200269363B14, UT-FE-AUTO-3D13A0DB24D58E7C, UT-FE-AUTO-4DE990B773C33378, UT-FE-AUTO-4971F03331327F7A, UT-FE-AUTO-583566BA85F098F1, UT-FE-AUTO-A2A0CB86E6D3E2F3, UT-FE-AUTO-A60EF4DAA250E60E, UT-FE-AUTO-BECEA5CE0869F353, UT-FE-AUTO-CC79D2BB8D78E346, UT-SDK-016, UT-SDK-AUTO-0B19AA67FBDC7E1E, UT-SDK-AUTO-E6DDFB4661E0D8B4]
+    retired: []

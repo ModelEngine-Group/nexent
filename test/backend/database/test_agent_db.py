@@ -53,6 +53,11 @@ class TenantResourceLimitError(ValueError):
 
 exceptions_mock = types.ModuleType("consts.exceptions")
 exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
+class AgentNotFoundError(ValueError):
+    """Test stub preserving the Agent lookup error type."""
+
+
+exceptions_mock.AgentNotFoundError = AgentNotFoundError
 sys.modules["consts.exceptions"] = exceptions_mock
 
 # 模拟utils模块
@@ -240,7 +245,7 @@ def test_search_agent_info_by_agent_id_not_found(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
-    with pytest.raises(ValueError, match="agent not found"):
+    with pytest.raises(AgentNotFoundError, match="agent not found"):
         search_agent_info_by_agent_id(999, "tenant1")
 
 def test_search_agent_id_by_agent_name_success(monkeypatch, mock_session):
@@ -277,7 +282,7 @@ def test_search_agent_id_by_agent_name_not_found(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
-    with pytest.raises(ValueError, match="agent not found"):
+    with pytest.raises(AgentNotFoundError, match="agent not found"):
         search_agent_id_by_agent_name("nonexistent_agent", "tenant1")
 
 

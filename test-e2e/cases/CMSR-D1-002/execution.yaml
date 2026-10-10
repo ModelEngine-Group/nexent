@@ -1,0 +1,8 @@
+schema_version: '1.0'
+case_id: CMSR-D1-002
+implementations:
+- framework: custom
+  file: test.ts
+  selector: CMSR-D1-002
+  profiles:
+  - mock

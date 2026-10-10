@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-80AA755E2436D269
+  name: ES向量库统计异常时个人/租户配额检查与用量展示fail-open（源文件账本唯一口径）
+  status: active
+  description: ES向量库统计故障不得导致基于源文件持久账本的个人/租户配额检查被错误拒收（TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE）；usage与容量展示应继续以源文件账本为唯一口径，ES物理容量作为独立观测字段返回，ES不可用不得使整体配额检查或用量展示失败。
+  business_rules:
+  - rule_id: V5-REL-AUTO-80AA755E2436D269-RULE-01
+    description: ES向量库统计异常时个人/租户配额检查与用量展示fail-open（源文件账本唯一口径）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

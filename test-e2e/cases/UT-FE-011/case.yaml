@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-011
+  feature_id: V5-UT-FE-011
+  business_rule_ids:
+  - V5-UT-FE-011-RULE-01
+  title: 组成员选择、批量更新、邀请码表单与过期状态
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 组成员选择、批量更新、邀请码表单与过期状态
+  preconditions:
+  - 仓库 D1 前端组件运行器及隔离依赖可用。
+  - TEST_HOME 位于仓库外；测试不访问生产资源。
+  test_data:
+    fixtures: &id001
+    - 内存 fixture 和受控服务响应；不依赖真实数据库 ID、模型或凭据。
+  steps:
+  - order: 1
+    action: 打开组编辑，选择第二名成员并提交
+    expected: 一次批量请求带精确成员集合，组信息保留，成功刷新用户查询。
+  - order: 2
+    action: 模拟成员更新失败
+    expected: 错误可见，弹窗保留，不刷新为成功状态。
+  - order: 3
+    action: 加载 EXPIRE 邀请码
+    expected: 显示过期，不显示可用状态。
+  - order: 4
+    action: 输入小写含非法字符的邀请码、选择到期日并创建
+    expected: 规范化大写合法字符；保留默认组和 YYYY-MM-DD 到期日，成功刷新列表。
+  - order: 5
+    action: 输入容量 0 并提交
+    expected: 最小容量校验阻止创建 API。
+  expected_results:
+  - 一次批量请求带精确成员集合，组信息保留，成功刷新用户查询。
+  - 错误可见，弹窗保留，不刷新为成功状态。
+  - 显示过期，不显示可用状态。
+  - 规范化大写合法字符；保留默认组和 YYYY-MM-DD 到期日，成功刷新列表。
+  - 最小容量校验阻止创建 API。
+  forbidden_side_effects:
+  - 不得访问真实用户、模型 Provider 或数据库，不得输出真实凭据。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 324
+  unit_boundary: 真实 GroupList / InvitationList 表单，service 为受控边界
+  inputs: *id001
+  assertions:
+  - 一次批量请求带精确成员集合，组信息保留，成功刷新用户查询。
+  - 错误可见，弹窗保留，不刷新为成功状态。
+  - 显示过期，不显示可用状态。
+  - 规范化大写合法字符；保留默认组和 YYYY-MM-DD 到期日，成功刷新列表。
+  - 最小容量校验阻止创建 API。

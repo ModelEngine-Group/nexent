@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-9411BBC4D2CE908C
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: create_agent_info 迁移 ContextBudgetCalculator｜effective_input_limit/compaction 阈值与目标及 context_window_tokens 缺失时 W1
+    input_budget 回退
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: create_agent_info 迁移 ContextBudgetCalculator｜effective_input_limit/compaction 阈值与目标及 context_window_tokens 缺失时
+    W1 input_budget 回退
+  preconditions:
+  - 本地组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - backend/agents/create_agent_info.py 可正常导入，_resolve_context_budget、ContextBudgetCalculator、ContextBudgetSnapshot、UncertaintyReserveBasisUnknown、ModelCapacitySnapshot
+    可引用。
+  - 使用 unittest.mock 替换 ContextBudgetCalculator.calculate_context_budget 与 tenant_config_manager.get_capacity_reserve_policy，不依赖真实模型记录或数据库。
+  - 测试代码不得读取生产凭据，不使用真实模型 Token。
+  test_data:
+    legacy_asset_declaration: '- 无外部本地文件资产；容量快照与预算快照字段由测试内构造/mock 注入。
+
+      - 测试代码不得读取生产凭据。'
+  steps:
+  - order: 1
+    action: 导入 backend/agents/create_agent_info.py 的 _resolve_context_budget，并 mock tenant_config_manager.get_capacity_reserve_policy
+      与 ContextBudgetCalculator.calculate_context_budget。
+    expected: capacity_snapshot=None 时 _resolve_context_budget 返回 None，不触发 ContextBudgetCalculator 调用。
+  - order: 2
+    action: 以 capacity_snapshot=None 调用 _resolve_context_budget，记录返回值并断言为 None，且未触发计算器调用。
+    expected: W2 预算可用时返回 ContextBudgetSnapshot，且 effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_tokens
+      与计算器输出一致（非 None）。
+  - order: 3
+    action: 构造含 provider/model_name/context_window_tokens 的合法 ModelCapacitySnapshot，令 agent_requested_output_tokens=None、request_requested_output_tokens=None，调用后断言返回
+      ContextBudgetSnapshot，其 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens 与
+      mock 计算器返回一致，且计算器收到 output_reserve_source="model_default"。
+    expected: 无 agent 请求输出 token 时 output_reserve_source="model_default"；有 agent 请求输出 token 时 output_reserve_source="agent"；request_requested_output_tokens
+      非空时透传至 request_overrides.requested_output_tokens。
+  - order: 4
+    action: 传入非空 agent_requested_output_tokens 与 request_requested_output_tokens，断言计算器收到 output_reserve_source="agent" 且 request_overrides.requested_output_tokens
+      等于请求值。
+    expected: 计算器抛出 UncertaintyReserveBasisUnknown 时返回 None（供 create_agent_config 回退：token_threshold=input_budget，三个新字段置 0），不向上抛出该异常。
+  - order: 5
+    action: 令 mock 计算器抛出 UncertaintyReserveBasisUnknown（模拟模型行 max_input_tokens 有值而 context_window_tokens 为 NULL），断言 _resolve_context_budget
+      返回 None 且日志包含 "falling back to W1 input_budget"。
+    expected: 回退路径日志包含 "falling back to W1 input_budget"，且日志/报告不含明文凭据，测试可重复执行无残留副作用。
+  - order: 6
+    action: 对每个分支核对：(a) 不吞异常返回伪成功；(b) 无明文 API Key/Token/密码输出；(c) 测试结束后释放 mock/临时对象保证可重复执行。
+    expected: 回退路径日志包含 "falling back to W1 input_budget"，且日志/报告不含明文凭据，测试可重复执行无残留副作用。
+  expected_results:
+  - capacity_snapshot=None 时 _resolve_context_budget 返回 None，不触发 ContextBudgetCalculator 调用。
+  - W2 预算可用时返回 ContextBudgetSnapshot，且 effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_tokens
+    与计算器输出一致（非 None）。
+  - 无 agent 请求输出 token 时 output_reserve_source="model_default"；有 agent 请求输出 token 时 output_reserve_source="agent"；request_requested_output_tokens
+    非空时透传至 request_overrides.requested_output_tokens。
+  - 计算器抛出 UncertaintyReserveBasisUnknown 时返回 None（供 create_agent_config 回退：token_threshold=input_budget，三个新字段置 0），不向上抛出该异常。
+  - 回退路径日志包含 "falling back to W1 input_budget"，且日志/报告不含明文凭据，测试可重复执行无残留副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 408
+  unit_boundary: 上下文预算计算
+  inputs:
+  - '- 无外部本地文件资产；容量快照与预算快照字段由测试内构造/mock 注入。
+
+    - 测试代码不得读取生产凭据。'
+  assertions:
+  - capacity_snapshot=None 时 _resolve_context_budget 返回 None，不触发 ContextBudgetCalculator 调用。
+  - W2 预算可用时返回 ContextBudgetSnapshot，且 effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_tokens
+    与计算器输出一致（非 None）。
+  - 无 agent 请求输出 token 时 output_reserve_source="model_default"；有 agent 请求输出 token 时 output_reserve_source="agent"；request_requested_output_tokens
+    非空时透传至 request_overrides.requested_output_tokens。
+  - 计算器抛出 UncertaintyReserveBasisUnknown 时返回 None（供 create_agent_config 回退：token_threshold=input_budget，三个新字段置 0），不向上抛出该异常。
+  - 回退路径日志包含 "falling back to W1 input_budget"，且日志/报告不含明文凭据，测试可重复执行无残留副作用。

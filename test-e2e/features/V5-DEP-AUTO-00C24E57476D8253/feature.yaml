@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-00C24E57476D8253
+  name: 离线 k8s 目标镜像经 ctr 导入 containerd(k8s.io)、ctr 缺失 Docker 回退、sudo/非 root 分支，以及 k8s 目标强制打包官方技能 zip
+  status: active
+  description: 离线 k8s 部署环境通常仅提供 containerd 而非 Docker。load-images.sh 的 k8s 目标若错用 Docker 加载、ctr 不可用时回退/报错不当、或非 root 用户无法访问 containerd
+    socket，镜像将无法导入 k8s.io 命名空间，导致离线 k8s 部署无法拉起 Pod；build_offline_package.sh 若未在 k8s 目标强制打包官方技能 zip，将导致离线环境缺失技能资产。
+  business_rules:
+  - rule_id: V5-DEP-AUTO-00C24E57476D8253-RULE-01
+    description: 离线 k8s 目标镜像经 ctr 导入 containerd(k8s.io)、ctr 缺失 Docker 回退、sudo/非 root 分支，以及 k8s 目标强制打包官方技能 zip
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

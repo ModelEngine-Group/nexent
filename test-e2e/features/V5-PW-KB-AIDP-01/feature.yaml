@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-KB-AIDP-01
+  name: AIDP Knowledge页面→检索→Agent绑定/对话
+  status: active
+  description: 独立验证AIDP分支，禁止同脚本locator猜Local/AIDP。
+  business_rules:
+  - rule_id: V5-PW-KB-AIDP-01-RULE-01
+    description: AIDP Knowledge页面→检索→Agent绑定/对话
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

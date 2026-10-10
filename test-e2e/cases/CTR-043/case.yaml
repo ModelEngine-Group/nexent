@@ -1,0 +1,55 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: CTR-043
+  feature_id: F-096
+  business_rule_ids: [F-096-RULE-01]
+  title: 认证 header/idkey/JWT/custom metadata 实际 wire 传输｜外部依赖异常与超时
+  type: CONTRACT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 认证 header/idkey/JWT/custom metadata 实际 wire 传输｜外部依赖异常与超时
+  preconditions:
+  - Nexent 测试服务和租户管理员身份可用。
+  - config/a2a.yaml 符合 Schema，受控 Mock 就绪且无残留故障。
+  test_data:
+    resource_ownership: 独立 nonce 和动态 Agent ID；凭据从受保护 fixture 获取。
+  steps:
+  - order: 1
+    action: 发现 idkey Agent 并保存凭据
+    expected: 凭据来自受保护 fixture，资源动态生成
+  - order: 2
+    action: 注入 305 秒延迟，携带 metadata 发起调用
+    expected: 三次真实 wire 均认证成功，metadata 指纹一致，产品超时返回明确 400
+  - order: 3
+    action: 恢复 Mock 并重新调用
+    expected: 真实返回 total=1283，不泄露凭据
+  - order: 4
+    action: 删除本用例 Agent 并回读
+    expected: 详情返回 404
+  expected_results:
+  - 凭据来自受保护 fixture，资源动态生成
+  - 三次真实 wire 均认证成功，metadata 指纹一致，产品超时返回明确 400
+  - 真实返回 total=1283，不泄露凭据
+  - 详情返回 404
+  forbidden_side_effects:
+  - 不修改共享 Agent、不吞掉超时、不用提前的客户端超时代替产品超时。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 191
+  contract:
+  contract:
+    protocol: Nexent A2A API and controlled real wire
+    request_expectations:
+    - 发现 idkey Agent 并保存凭据
+    - 注入 305 秒延迟，携带 metadata 发起调用
+    - 恢复 Mock 并重新调用
+    - 删除本用例 Agent 并回读
+    response_expectations:
+    - 凭据来自受保护 fixture，资源动态生成
+    - 三次真实 wire 均认证成功，metadata 指纹一致，产品超时返回明确 400
+    - 真实返回 total=1283，不泄露凭据
+    - 详情返回 404

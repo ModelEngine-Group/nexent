@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-CHAT-03
+  feature_id: V5-PW-CHAT-03
+  business_rule_ids:
+  - V5-PW-CHAT-03-RULE-01
+  title: Planning模式→Plan步骤展示→执行→Stop/恢复
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证frontend真实存在的Planning模式和步骤UI。
+  preconditions:
+  - 适合复杂任务的测试Agent
+  - 固定多步骤任务
+  test_data:
+    legacy_asset_declaration: config/models.yaml；expected/plan_expected.json
+  steps:
+  - order: 1
+    action: 打开newchat选择Agent。
+    expected: Planning按钮真实存在并切mode。
+  - order: 2
+    action: 点击Composer【Planning】，确认模式切换。
+    expected: 步骤实时更新而非仅最终文本。
+  - order: 3
+    action: 输入固定多步骤任务并发送。
+    expected: Stop和刷新恢复正确。
+  - order: 4
+    action: 等待Plan/Steps区域出现。
+    expected: Stop和刷新恢复正确。
+  - order: 5
+    action: 观察至少一个步骤进入执行/完成状态。
+    expected: Stop和刷新恢复正确。
+  - order: 6
+    action: 在较长Planning运行中点击Stop。
+    expected: Stop和刷新恢复正确。
+  - order: 7
+    action: 刷新并重开会话，确认完成/停止步骤恢复。
+    expected: Stop和刷新恢复正确。
+  - order: 8
+    action: 切回Execution发普通问题确认模式切换正常。
+    expected: Stop和刷新恢复正确。
+  expected_results:
+  - Planning按钮真实存在并切mode。
+  - 步骤实时更新而非仅最终文本。
+  - Stop和刷新恢复正确。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 40
+  actor: Nexent browser user
+  journey:
+  - 打开newchat选择Agent。
+  - 点击Composer【Planning】，确认模式切换。
+  - 输入固定多步骤任务并发送。
+  - 等待Plan/Steps区域出现。
+  - 观察至少一个步骤进入执行/完成状态。
+  - 在较长Planning运行中点击Stop。
+  - 刷新并重开会话，确认完成/停止步骤恢复。
+  - 切回Execution发普通问题确认模式切换正常。
+  final_business_result:
+  - Planning按钮真实存在并切mode。
+  - 步骤实时更新而非仅最终文本。
+  - Stop和刷新恢复正确。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-CHAT-03/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-74596A453826C6C0
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: RunCancellationScope 资源关闭钩子注册/注销/取消与幂等｜核心与边界
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: RunCancellationScope 资源关闭钩子注册/注销/取消与幂等｜核心与边界
+  preconditions:
+  - 本地 SDK 单元测试环境可运行；不要求外部模型服务在线。
+  - 测试直接导入 sdk/nexent/core/concurrency 的 RunCancellationScope 与 ResourceToken，不依赖 ThreadManager 或后端服务。
+  - 使用内存内闭包计数器与 threading.Event 模拟资源关闭钩子，不读取任何生产凭据或外部文件。
+  test_data:
+    legacy_asset_declaration: 无专有本地资产/配置；测试使用内存内闭包计数器与 threading.Event 模拟资源关闭钩子。
+  steps:
+  - order: 1
+    action: 导入 sdk/nexent/core/concurrency 中的 RunCancellationScope 与 ResourceToken，构造 scope = RunCancellationScope()（内部自建
+      threading.Event）。
+    expected: register_closer 每次返回唯一 ResourceToken（uuid4 hex）；未取消时注册不执行钩子，cancelled 保持 False。
+  - order: 2
+    action: 在未取消状态下用闭包计数器构造两个关闭钩子 close_a、close_b，分别调用 register_closer 得到 token_a、token_b；断言返回 token 非空唯一、scope.cancelled
+      为 False，且注册未触发任何钩子。
+    expected: unregister_closer 对其 token 生效：被注销钩子不在取消时执行；对未知 token 重复注销幂等且不抛异常。
+  - order: 3
+    action: 对 token_a 调用 unregister_closer(token_a)，再对一个从未注册的 ResourceToken 调用 unregister_closer，验证注销幂等且不抛异常。
+    expected: 首次 cancel() 将 cancelled 置为 True、stop_event 置位，并按注册顺序执行所有仍未注销的关闭钩子，每个恰好一次。
+  - order: 4
+    action: 首次调用 scope.cancel()，记录各钩子执行计数，断言 scope.cancelled 变为 True 且 scope.stop_event.is_set() 为 True。
+    expected: cancel() 具备幂等性：第二次调用直接返回，已注册钩子不二次执行。
+  - order: 5
+    action: 再次调用 scope.cancel()，断言各钩子执行计数不变（取消幂等，不重复执行关闭钩子）。
+    expected: 取消后 register_closer 走 close_immediately 分支：新钩子立即同步执行一次并返回 token。
+  - order: 6
+    action: 在已取消的 scope 上构造新钩子 close_c 并 register_closer，断言 close_c 被立即执行一次且返回 token（取消后注册立即关闭分支）。
+    expected: cancel() 中单个关闭钩子抛异常被吞掉（继续执行其余），不影响其他钩子执行，cancel() 不向调用方抛异常。
+  - order: 7
+    action: 新建 scope，用一个抛出异常的钩子与一个正常钩子分别 register_closer 后调用 cancel()，断言 cancel() 正常返回、异常被吞掉、正常钩子仍被执行。
+    expected: 并发 register/unregister/cancel 无死锁、无未处理异常，钩子各执行一次且最终状态一致。
+  - order: 8
+    action: 用多线程并发调用 register_closer/unregister_closer/cancel，断言无死锁、无未捕获异常，最终钩子执行计数与注册状态一致。
+    expected: 并发 register/unregister/cancel 无死锁、无未处理异常，钩子各执行一次且最终状态一致。
+  expected_results:
+  - register_closer 每次返回唯一 ResourceToken（uuid4 hex）；未取消时注册不执行钩子，cancelled 保持 False。
+  - unregister_closer 对其 token 生效：被注销钩子不在取消时执行；对未知 token 重复注销幂等且不抛异常。
+  - 首次 cancel() 将 cancelled 置为 True、stop_event 置位，并按注册顺序执行所有仍未注销的关闭钩子，每个恰好一次。
+  - cancel() 具备幂等性：第二次调用直接返回，已注册钩子不二次执行。
+  - 取消后 register_closer 走 close_immediately 分支：新钩子立即同步执行一次并返回 token。
+  - cancel() 中单个关闭钩子抛异常被吞掉（继续执行其余），不影响其他钩子执行，cancel() 不向调用方抛异常。
+  - 并发 register/unregister/cancel 无死锁、无未处理异常，钩子各执行一次且最终状态一致。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 471
+  unit_boundary: 取消作用域
+  inputs:
+  - 无专有本地资产/配置；测试使用内存内闭包计数器与 threading.Event 模拟资源关闭钩子。
+  assertions:
+  - register_closer 每次返回唯一 ResourceToken（uuid4 hex）；未取消时注册不执行钩子，cancelled 保持 False。
+  - unregister_closer 对其 token 生效：被注销钩子不在取消时执行；对未知 token 重复注销幂等且不抛异常。
+  - 首次 cancel() 将 cancelled 置为 True、stop_event 置位，并按注册顺序执行所有仍未注销的关闭钩子，每个恰好一次。
+  - cancel() 具备幂等性：第二次调用直接返回，已注册钩子不二次执行。
+  - 取消后 register_closer 走 close_immediately 分支：新钩子立即同步执行一次并返回 token。
+  - cancel() 中单个关闭钩子抛异常被吞掉（继续执行其余），不影响其他钩子执行，cancel() 不向调用方抛异常。
+  - 并发 register/unregister/cancel 无死锁、无未处理异常，钩子各执行一次且最终状态一致。

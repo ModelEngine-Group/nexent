@@ -1,0 +1,20 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-BCE0AAF43667C67B
+  name: lifespan 下 northbound_thread_manager 启动、/internal/thread-capacity 容量快照与优雅关停
+  status: active
+  description: '1) 线程管理器在 lifespan 中未按 CREATED 状态启动或启动失败，导致 control-io 任务无法执行、恢复中断任务与清理中断上传未调度，遗留数据不一致。
+
+    2) /internal/thread-capacity 快照错误或端点不可用，无法观测线程容量。
+
+    3) 关停未按 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 优雅关停，或 finally 中未清理默认线程管理器，造成线程泄漏、任务丢失或进程无法干净退出。'
+  business_rules:
+  - rule_id: V5-REL-AUTO-BCE0AAF43667C67B-RULE-01
+    description: lifespan 下 northbound_thread_manager 启动、/internal/thread-capacity 容量快照与优雅关停
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

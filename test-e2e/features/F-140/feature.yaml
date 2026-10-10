@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-140
+  name: LLM analyze/cache/force、PDF report 下载
+  status: active
+  description: '评估 / 分析报告: LLM analyze/cache/force、PDF report 下载'
+  business_rules:
+  - rule_id: F-140-RULE-01
+    description: LLM analyze/cache/force、PDF report 下载
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

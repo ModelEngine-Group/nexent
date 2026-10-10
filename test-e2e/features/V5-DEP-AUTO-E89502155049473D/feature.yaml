@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-E89502155049473D
+  name: user_tenant_t 插入触发器预置 default_resource/knowledge_content 桶、六类资源绑定与 agent_category 预设20值的幂等
+  status: active
+  description: 验证统一标签管理的租户预置语义：provision_unified_tag_management 在 user_tenant_t AFTER INSERT 触发器（provision_unified_tag_management_trigger）下，为每个租户预置
+    default_resource、knowledge_content 两个标签桶、六类资源类型绑定（default_resource 桶的 agent/skill/tool/mcp_service/knowledge_base
+    与 knowledge_content 桶的 knowledge_document）以及 definition_key='agent_category' 的 multi_select 定义与 20 个预设值；并保证同一租户多条用户记录（触发器重复触发）或函数重复调用时保持幂等、不产生重复桶/绑定/定义/值。风险：预置缺失或重复会导致租户标签录入、查询、筛选失效或跨租户数据异常，租户创建流程中断。
+  business_rules:
+  - rule_id: V5-DEP-AUTO-E89502155049473D-RULE-01
+    description: user_tenant_t 插入触发器预置 default_resource/knowledge_content 桶、六类资源绑定与 agent_category 预设20值的幂等
+  required_test_stages: []
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

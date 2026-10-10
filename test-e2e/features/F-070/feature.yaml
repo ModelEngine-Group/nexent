@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-070
+  name: 从指定版本创建listing、共享/撤回/审核/驳回/通知
+  status: active
+  description: '版本与市场 / Agent仓库: 从指定版本创建listing、共享/撤回/审核/驳回/通知'
+  business_rules:
+  - rule_id: F-070-RULE-01
+    description: 从指定版本创建listing、共享/撤回/审核/驳回/通知
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

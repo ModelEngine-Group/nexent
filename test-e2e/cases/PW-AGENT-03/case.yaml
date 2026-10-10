@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AGENT-03
+  feature_id: V5-PW-AGENT-03
+  business_rule_ids:
+  - V5-PW-AGENT-03-RULE-01
+  title: 工具与技能Tab Tools+Skills选择→autosave→Debug真实调用
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证工具/技能绑定UI到真实运行。
+  preconditions:
+  - 本用例资产注册表中的READY受控MCP服务含唯一get_test_code；不得绑定其他历史服务的同名工具
+  - 固定测试Skill
+  - 真实LLM支持tool call
+  test_data:
+    legacy_asset_declaration: config/mcp.yaml；assets/skills/*；config/models.yaml
+  steps:
+  - order: 1
+    action: 进入 /agents 页面，选择 Draft Agent。
+    expected: Tool/Skill绑定刷新后不丢。
+  - order: 2
+    action: 点击「工具与技能」Tab（t('agent.config.tab.toolsSkills')）。
+    expected: 真实LLM产生可用tool call且marker正确。
+  - order: 3
+    action: 在「工具」分区点击「选择工具」，选择本用例资产注册表中的受控MCP服务，再搜索并勾选get_test_code，读取保存结果核对工具ID与该服务一致。
+    expected: wire证明真实请求到达。
+  - order: 4
+    action: 在「技能」分区点击「选择技能」，搜索并绑定固定 Skill。
+    expected: wire证明真实请求到达。
+  - order: 5
+    action: 等待 autosave，切换 Agent 再切回并重新进入「工具与技能」Tab，确认仍选中。
+    expected: wire证明真实请求到达。
+  - order: 6
+    action: 点击 Debug 按钮发送必须调用 Tool 的问题。
+    expected: wire证明真实请求到达。
+  - order: 7
+    action: 等待工具执行 UI 和最终 NX-92831。
+    expected: wire证明真实请求到达。
+  - order: 8
+    action: 发送需要 Skill 指导的问题并等待完成。
+    expected: wire证明真实请求到达。
+  - order: 9
+    action: 关联 Test MCP wire log 确认真实调用。
+    expected: wire证明真实请求到达。
+  expected_results:
+  - Tool/Skill绑定刷新后不丢。
+  - 真实LLM产生可用tool call且marker正确。
+  - wire证明真实请求到达。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 20
+  actor: Nexent browser user
+  journey:
+  - 进入 /agents 页面，选择 Draft Agent。
+  - 点击「工具与技能」Tab（t('agent.config.tab.toolsSkills')）。
+  - 在「工具」分区点击「选择工具」，选择本用例资产注册表中的受控MCP服务，再搜索并勾选get_test_code，读取保存结果核对工具ID与该服务一致。
+  - 在「技能」分区点击「选择技能」，搜索并绑定固定 Skill。
+  - 等待 autosave，切换 Agent 再切回并重新进入「工具与技能」Tab，确认仍选中。
+  - 点击 Debug 按钮发送必须调用 Tool 的问题。
+  - 等待工具执行 UI 和最终 NX-92831。
+  - 发送需要 Skill 指导的问题并等待完成。
+  - 关联 Test MCP wire log 确认真实调用。
+  final_business_result:
+  - Tool/Skill绑定刷新后不丢。
+  - 真实LLM产生可用tool call且marker正确。
+  - wire证明真实请求到达。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-AGENT-03/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

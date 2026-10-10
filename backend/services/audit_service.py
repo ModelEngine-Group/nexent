@@ -25,9 +25,6 @@ logger = logging.getLogger("audit.security")
 
 AUDIT_LOG_PREFIX = "[SEC_AUDIT]"
 USER_AGENT_MAX_LENGTH = 200
-# Upper bound for identifier lists copied into audit details so a payload
-# with hundreds of entries cannot bloat the audit line.
-AUDIT_DETAIL_LIST_LIMIT = 20
 
 AUDIT_RESULT_SUCCESS = "success"
 

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "families"
+  ],
+  "properties": {
+    "anchors": {
+      "type": "boolean",
+      "default": false
+    },
+    "d4_groups": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "vlm",
+          "stt",
+          "chat",
+          "tool_chat",
+          "multi",
+          "scope",
+          "evaluation",
+          "basic_agent",
+          "llm_agent",
+          "llm_model",
+          "embedding_model",
+          "knowledge",
+          "mcp",
+          "file_chat"
+        ]
+      }
+    },
+    "special_assets": {
+      "type": "boolean",
+      "default": false
+    },
+    "families": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "completed_evaluation",
+          "evaluation_inputs",
+          "configurable_skill",
+          "market_skill",
+          "automation_task",
+          "share_assets",
+          "tag_resources",
+          "basic_agent",
+          "tool_agent",
+          "relationship_agent",
+          "metadata_agent",
+          "skill_agent",
+          "agent_listing",
+          "performance_upload",
+          "performance_range"
+        ]
+      }
+    }
+  }
+}

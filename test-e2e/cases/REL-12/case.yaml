@@ -1,0 +1,63 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-12
+  feature_id: V5-REL-12
+  business_rule_ids:
+  - V5-REL-12-RULE-01
+  title: 分类日志持久化、混合轮转、容器重启与磁盘边界
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 轮转/重启不丢关键错误，不无限占盘，不泄露密钥。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  steps:
+  - order: 1
+    action: 在测试日志目录产生各分类日志。
+    expected: 分类、轮转、保留和挂载符合配置。
+  - order: 2
+    action: 触发 size/time 轮转并超过 backupCount。
+    expected: 重启后关键日志可追溯。
+  - order: 3
+    action: 重启容器验证挂载持久化。
+    expected: 磁盘异常不导致静默崩溃。
+  - order: 4
+    action: 模拟目录只读/空间不足，检查服务降级和告警。
+    expected: 无明文 secret。
+  - order: 5
+    action: 扫描全部轮转文件的 secret marker。
+    expected: 无明文 secret。
+  expected_results:
+  - 分类、轮转、保留和挂载符合配置。
+  - 重启后关键日志可追溯。
+  - 磁盘异常不导致静默崩溃。
+  - 无明文 secret。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 34
+  risk_type: RELIABILITY
+  risk: 轮转/重启不丢关键错误，不无限占盘，不泄露密钥。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  metrics:
+  - 分类、轮转、保留和挂载符合配置。
+  - 重启后关键日志可追溯。
+  - 磁盘异常不导致静默崩溃。
+  - 无明文 secret。
+  thresholds:
+  - 分类、轮转、保留和挂载符合配置。
+  - 重启后关键日志可追溯。
+  - 磁盘异常不导致静默崩溃。
+  - 无明文 secret。
+  recovery_expectations:
+  - 分类、轮转、保留和挂载符合配置。
+  - 重启后关键日志可追溯。
+  - 磁盘异常不导致静默崩溃。
+  - 无明文 secret。

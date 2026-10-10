@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: LOCAL-CMSR-EXECUTION-001
+  change_type: test-fix
+  title: Restore formal CMSR case collection and terminal result reporting
+  description: >-
+    The local full batch could not collect four CMSR pytest Cases because stage
+    and case_id markers were missing. CMSR-D1-001 and CMSR-D2-001 also contained
+    multiple collected items for one formal Case. Preserve all original assertions
+    as isolated sub-scenarios behind one marked entry point per Case, without
+    creating new coverage or changing product behavior. The Node runner now
+    explicitly selects TAP so a successful CMSR-D1-002 is not an automation error.
+    CMSR-D1-003 declares protocol repair enabled and supplies the current
+    prepare_step memory_messages field in its controlled context fixture.
+    Capture the actual model_call logger and assert content-free protocol lifecycle
+    events separately from ordinary model-output logs.
+  affected_features:
+    existing: [CMSR-005]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CMSR-D1-002]
+    added: []
+    modified: [CMSR-D1-001, CMSR-D1-003, CMSR-D1-004, CMSR-D2-001]
+    retired: []

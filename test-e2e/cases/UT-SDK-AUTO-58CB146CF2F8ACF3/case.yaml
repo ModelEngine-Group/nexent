@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-58CB146CF2F8ACF3
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: ind_aidp_search_tool 输入校验与独立权限参与语义｜核心/异常/边界
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: ind_aidp_search_tool 输入校验与独立权限参与语义｜核心/异常/边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；执行时另记录实际被测 commit。
+  - 本用例仅做构造与调用输入校验及权限参与差异断言，不访问真实 AIDP 服务器，无需额外本地资产。
+  test_data:
+    legacy_asset_declaration: 无（纯输入校验与契约断言，不依赖外部服务与本地资产）
+  steps:
+  - order: 1
+    action: 直接导入 sdk/nexent/core/tools/ind_aidp_search_tool.py 的 IndependentAidpSearchTool、_validate_base_url、_parse_kds_list、_field_default，构造最小有效输入与必要依赖对象，测试代码不得读取生产凭据。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: server_url 校验：分别传入空字符串、缺失 scheme（如 "localhost:8080"）、非 HTTP(S) scheme（如 "ftp://host"）、含 username 或 password（如
+      "https://u:p@host"）、含 query 或 fragment（如 "https://host?a=1#f"）的 URL，断言均抛出 ValueError 且消息对应契约。
+    expected: server_url 为空、非绝对 HTTP(S)、含凭据/query/fragment 时均抛 ValueError，错误消息与契约一致。
+  - order: 3
+    action: api_key/tenant_id 校验：api_key 传空字符串或纯空白串、tenant_id 传空字符串，断言均抛出 ValueError（api_key/tenant_id is required and must
+      be a non-empty string）；tenant_id 缺省时断言实例 tenant_id 回退为 "aidp"。
+    expected: api_key/tenant_id 为空或纯空白抛 ValueError；tenant_id 缺省回退为 "aidp"。
+  - order: 4
+    action: kds_list 校验（实例构造，allow_empty=False）：分别传入非法 JSON 字符串、空列表、超过 10 个元素的列表、包含空字符串项的列表，断言均抛出 ValueError；合法 1-10 个知识库
+      ID 时构造成功。
+    expected: kds_list 为非法 JSON、空列表（构造）、超过 10 个元素或含空项均抛 ValueError；合法 1-10 个 ID 构造成功。
+  - order: 5
+    action: 以合法参数构造实例（server_url="https://aidp.example.com"、api_key="ak_test"、kds_list=["kb-1","kb-2"]），断言默认字段（search_method=hybrid_search、reranking_enable=True、score_threshold=0.0、top_k=10、multi_modal=True）。
+    expected: 权限参与差异：_resolve_search_scope 以 permission_tracking_enabled=False 解析，独立工具不参与 Nexent 权限过滤。
+  - order: 6
+    action: 权限参与差异：调用 _resolve_search_scope(None)，断言其内部以 permission_tracking_enabled=False 解析 scope（独立工具不参与 Nexent 托管权限、不依赖
+      set_allowed_kds 白名单语义），available_scope 与 configured_scope 均等于工具配置 kds_list。
+    expected: per-call kds_list 覆盖工具默认 scope，缺省时回退默认 scope；query 为空抛 ValueError。
+  - order: 7
+    action: per-call kds_list 覆盖默认：调用 _payload("query", ["kb-9"]) 断言 payload["kds_list"]==["kb-9"]；缺省 kds_list 时断言 payload["kds_list"]==["kb-1","kb-2"]；forward
+      传入空字符串 query 断言抛出 ValueError。
+    expected: 日志、Trace、报告中不出现明文 api_key/Token/Password/模型密钥。
+  - order: 8
+    action: 确认日志中不输出 api_key 或模型密钥；测试结束后释放临时对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 api_key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - server_url 为空、非绝对 HTTP(S)、含凭据/query/fragment 时均抛 ValueError，错误消息与契约一致。
+  - api_key/tenant_id 为空或纯空白抛 ValueError；tenant_id 缺省回退为 "aidp"。
+  - kds_list 为非法 JSON、空列表（构造）、超过 10 个元素或含空项均抛 ValueError；合法 1-10 个 ID 构造成功。
+  - 权限参与差异：_resolve_search_scope 以 permission_tracking_enabled=False 解析，独立工具不参与 Nexent 权限过滤。
+  - per-call kds_list 覆盖工具默认 scope，缺省时回退默认 scope；query 为空抛 ValueError。
+  - 日志、Trace、报告中不出现明文 api_key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 464
+  unit_boundary: AIDP独立检索
+  inputs:
+  - 无（纯输入校验与契约断言，不依赖外部服务与本地资产）
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - server_url 为空、非绝对 HTTP(S)、含凭据/query/fragment 时均抛 ValueError，错误消息与契约一致。
+  - api_key/tenant_id 为空或纯空白抛 ValueError；tenant_id 缺省回退为 "aidp"。
+  - kds_list 为非法 JSON、空列表（构造）、超过 10 个元素或含空项均抛 ValueError；合法 1-10 个 ID 构造成功。
+  - 权限参与差异：_resolve_search_scope 以 permission_tracking_enabled=False 解析，独立工具不参与 Nexent 权限过滤。
+  - per-call kds_list 覆盖工具默认 scope，缺省时回退默认 scope；query 为空抛 ValueError。
+  - 日志、Trace、报告中不出现明文 api_key/Token/Password/模型密钥。

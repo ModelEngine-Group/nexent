@@ -3,7 +3,7 @@ import json
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 import re
 
@@ -24,7 +24,6 @@ from management.services.knowledge_base.service import (
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
 )
-from services.audit_service import record_security_event
 from services.file_management_service import check_file_access
 from services.quota_service import QuotaService
 from services.redis_service import get_redis_service
@@ -87,7 +86,6 @@ async def check_knowledge_base_exist(
 
 @router.post("/{index_name}")
 def create_new_index(
-        http_request: Request,
         index_name: str = Path(..., description="Name of the index to create"),
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
@@ -117,7 +115,7 @@ def create_new_index(
             raise ValueError("embedding_model_id must be an integer")
 
         # Treat path parameter as user-facing knowledge base name for new creations
-        result = ElasticSearchService.create_knowledge_base(
+        return ElasticSearchService.create_knowledge_base(
             knowledge_name=index_name,
             embedding_dim=embedding_dim,
             vdb_core=vdb_core,
@@ -130,12 +128,6 @@ def create_new_index(
             quota_limit_bytes=quota_limit_bytes,
             user_role=user_role,
         )
-        record_security_event("kb_index_create", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"knowledge_name": index_name,
-                                       "embedding_model_id": embedding_model_id,
-                                       "quota_limit_bytes": quota_limit_bytes})
-        return result
     except HTTPException:
         raise
     except AppException:
@@ -159,7 +151,6 @@ def create_new_index(
 
 @router.delete("/{index_name}")
 async def delete_index(
-        http_request: Request,
         index_name: str = Path(..., description="Name of the index to delete"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
@@ -179,9 +170,6 @@ async def delete_index(
         TagManagementService.cleanup_document_assignments_for_knowledge_base(
             tenant_id, "local", index_name, user_id
         )
-        record_security_event("kb_index_delete", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"index_name": index_name})
         return result
     except AppException:
         # Preserve the EDS code/details for the common application handler.
@@ -403,7 +391,6 @@ def get_embedding_model_status(
 
 @router.put("/{index_name}/embedding-model")
 def update_embedding_model(
-        http_request: Request,
         index_name: str = Path(
             ..., description="Internal index name of the knowledge base to update"),
         request: Dict[str, Any] = Body(...,
@@ -432,11 +419,6 @@ def update_embedding_model(
             tenant_id=tenant_id,
             user_id=user_id,
         )
-
-        record_security_event("kb_embedding_model_change", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"index_name": index_name,
-                                       "model_id": model_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -655,7 +637,6 @@ async def get_index_files(
 
 @router.delete("/{index_name}/documents")
 async def delete_documents(
-        http_request: Request,
         index_name: str = Path(..., description="Name of the index"),
         path_or_url: Optional[str] = Query(None,
                                            description="Legacy object path to delete"),
@@ -696,11 +677,6 @@ async def delete_documents(
                         status_code=HTTPStatus.BAD_REQUEST,
                         detail="A file without a storage object can only use full deletion",
                     )
-                record_security_event("kb_document_delete", request=http_request,
-                                      user_id=user_id, tenant_id=tenant_id,
-                                      details={"index_name": index_name,
-                                               "file_id": file_id,
-                                               "scope": scope})
                 return ElasticSearchService.delete_lifecycle_record_without_object(
                     lifecycle_record,
                     requested_by=user_id,
@@ -769,12 +745,6 @@ async def delete_documents(
                         f"{redis_cleanup.get('cache_keys_deleted', 0)} cache keys)."
                     )
 
-        record_security_event("kb_document_delete", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"index_name": index_name,
-                                       "path_or_url": path_or_url,
-                                       "file_id": file_id,
-                                       "scope": scope})
         return result
 
     except ValueError as exc:

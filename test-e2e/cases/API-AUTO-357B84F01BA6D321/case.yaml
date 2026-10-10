@@ -1,0 +1,97 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-357B84F01BA6D321
+  feature_id: F-177
+  business_rule_ids:
+  - F-177-RULE-01
+  title: 文档标签投影状态机(pending/synced/failed/unsupported)、local ES 真实写入与 aidp 降级、失败退避重试、知识库删除清理及 synced-only 标签筛选｜跨服务集成
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: 文档标签投影状态机(pending/synced/failed/unsupported)、local ES 真实写入与 aidp 降级、失败退避重试、知识库删除清理及 synced-only 标签筛选｜跨服务集成
+  preconditions:
+  - 后端服务、PostgreSQL（nexent schema）与本地 Elasticsearch/向量库已启动，统一标签管理所需的数据结构可用，租户已预置 default_resource/knowledge_content
+    两个桶及六类资源类型绑定。
+  - 可用 SU/ADMIN 账号登录，持有 RESOURCE/TAG_LIBRARY/MANAGE 治理权限；分配接口经 tag_resource_adapters 按调用者现有 read/edit 权限 fail-closed 解析。
+  - 已生成当次 run_id，所有新建标签定义/值/文档均属于可清理的测试租户；TAG_DOCUMENT_PROJECTION_ENABLED 开启。
+  - 自动发现部署的 ES 端口时使用该部署 config 容器中的凭据；显式 URL 覆盖仍使用显式凭据，不写回本地配置或日志。
+  - 已创建本地(local)知识库及至少一个真实文档（provider_document_id 指向本地 ES 的 path_or_url），可用 provider=aidp 的文档验证 unsupported 降级路径。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml（含本地向量库/ES 连接与测试租户）
+
+      - 测试租户内预置的 tag_definition / tag_value 与 local 知识库文档记录'
+  steps:
+  - order: 1
+    action: 通过治理接口在 knowledge_content 桶创建/复用标签定义与值，记录 definition_id/value_id；在本地(local)知识库中创建文档并记录 knowledge_base_id/provider_document_id。
+    expected: 步骤2 返回 200，assignment_count 正确；projection_status.status=synced，version>=1，tag_count 与提交 value_ids 数量一致。
+  - order: 2
+    action: 计算 encoded_resource_id = base64url(json([provider, knowledge_base_id, provider_document_id]))，调用 PUT /tag-libraries/assignments/knowledge_document/{encoded_resource_id}?provider=local&knowledge_base_id=...
+      提交 {"value_ids":[...]}，记录响应的 projection_status。
+    expected: 步骤3 复读 status=synced、version/tag_count 与步骤2 一致（保存后可复读，非仅内存态）。
+  - order: 3
+    action: 调用 GET /tag-libraries/assignments/knowledge_document/{encoded_resource_id}/projection-status?provider=local&knowledge_base_id=...
+      复读状态，与步骤2交叉核对。
+    expected: 步骤4 确认 ES 索引中已实际写入该 chunk 及 tags 元数据，provider=local 走 full 写入路径。
+  - order: 4
+    action: 查询本地 ES 索引 nexent_tag_projection，确认存在 resource_id 对应的 chunk，metadata 中 tenant_id/knowledge_base_id/provider_document_id/tags/version
+      与提交一致（真实跨服务持久化写入）。
+    expected: 步骤5 幂等：status 保持 synced，version 不递增，retry_count=0，不产生重复 chunk。
+  - order: 5
+    action: 使用相同 value_ids 再次 PUT 相同文档分配，随后复读 projection-status，验证幂等行为。
+    expected: 步骤6 aidp 场景 projection_status.status=unsupported，last_error 表明 provider 不提供元数据写入端点，next_attempt_at=null（不进入重试）。
+  - order: 6
+    action: 对 provider=aidp 的文档执行分配 PUT，复读 projection-status，观察降级终态。
+    expected: 步骤7 batch-status 仅把 status=synced 的文档计入标签匹配；unsupported/ failed 文档不命中标签筛选（filter 仅承认 synced 文档）。
+  - order: 7
+    action: 调用 POST /tag-libraries/documents/batch-status?provider=local&knowledge_base_id=...，body 传 {"document_ids":[...],"predicates":[{"definition_id":...,"value_ids":[...]}]}，观察每个文档的
+      projection_status 与匹配结果。
+    expected: 步骤8 失败后 status=failed，retry_count=retry_count+1，next_attempt_at=last_attempt_at+min(30*2^(retry_count-1),900)s；canonical
+      resource_tag_assignment 不回滚。
+  - order: 8
+    action: 测试基座注入会抛异常的 vdb_core（或临时阻断 ES 写入）制造一次投影写入失败，再次对 local 文档分配并复读 projection-status，记录 status/retry_count/next_attempt_at/last_error。
+    expected: 步骤9 重试后 status 转 synced，retry_count 归 0，last_error 清空，next_attempt_at=null。
+  - order: 9
+    action: 恢复写入后，通过 backend service retry_pending_document_projections 触发到期重试（或等待 next_attempt_at 到期），再次复读 projection-status。
+    expected: 步骤10 文档删除后 projection-status 返回 not_projected/version=0/tag_count=0；知识库删除后该 KB 投影状态行被清理，无孤儿投影。
+  - order: 10
+    action: 删除测试文档（触发 clear_document_projection）并复读状态；删除测试知识库（触发 clear_projection_states_for_knowledge_base）后确认 ledger 中该
+      KB 投影状态被清理。
+    expected: 步骤10 文档删除后 projection-status 返回 not_projected/version=0/tag_count=0；知识库删除后该 KB 投影状态行被清理，无孤儿投影。
+  expected_results:
+  - 步骤2 返回 200，assignment_count 正确；projection_status.status=synced，version>=1，tag_count 与提交 value_ids 数量一致。
+  - 步骤3 复读 status=synced、version/tag_count 与步骤2 一致（保存后可复读，非仅内存态）。
+  - 步骤4 确认 ES 索引中已实际写入该 chunk 及 tags 元数据，provider=local 走 full 写入路径。
+  - 步骤5 幂等：status 保持 synced，version 不递增，retry_count=0，不产生重复 chunk。
+  - 步骤6 aidp 场景 projection_status.status=unsupported，last_error 表明 provider 不提供元数据写入端点，next_attempt_at=null（不进入重试）。
+  - 步骤7 batch-status 仅把 status=synced 的文档计入标签匹配；unsupported/ failed 文档不命中标签筛选（filter 仅承认 synced 文档）。
+  - 步骤8 失败后 status=failed，retry_count=retry_count+1，next_attempt_at=last_attempt_at+min(30*2^(retry_count-1),900)s；canonical
+    resource_tag_assignment 不回滚。
+  - 步骤9 重试后 status 转 synced，retry_count 归 0，last_error 清空，next_attempt_at=null。
+  - 步骤10 文档删除后 projection-status 返回 not_projected/version=0/tag_count=0；知识库删除后该 KB 投影状态行被清理，无孤儿投影。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 525
+  integration_boundary:
+  - LOCAL_COMPONENTS_REQUIRED：依赖本地 PostgreSQL、本地 Elasticsearch/向量库与本地知识库文档；不访问真实 AIDP 或外部模型（aidp 仅用于验证 unsupported 降级路径）。
+  observations:
+  - 步骤2 返回 200，assignment_count 正确；projection_status.status=synced，version>=1，tag_count 与提交 value_ids 数量一致。
+  - 步骤3 复读 status=synced、version/tag_count 与步骤2 一致（保存后可复读，非仅内存态）。
+  - 步骤4 确认 ES 索引中已实际写入该 chunk 及 tags 元数据，provider=local 走 full 写入路径。
+  - 步骤5 幂等：status 保持 synced，version 不递增，retry_count=0，不产生重复 chunk。
+  - 步骤6 aidp 场景 projection_status.status=unsupported，last_error 表明 provider 不提供元数据写入端点，next_attempt_at=null（不进入重试）。
+  - 步骤7 batch-status 仅把 status=synced 的文档计入标签匹配；unsupported/ failed 文档不命中标签筛选（filter 仅承认 synced 文档）。
+  - 步骤8 失败后 status=failed，retry_count=retry_count+1，next_attempt_at=last_attempt_at+min(30*2^(retry_count-1),900)s；canonical
+    resource_tag_assignment 不回滚。
+  - 步骤9 重试后 status 转 synced，retry_count 归 0，last_error 清空，next_attempt_at=null。
+  - 步骤10 文档删除后 projection-status 返回 not_projected/version=0/tag_count=0；知识库删除后该 KB 投影状态行被清理，无孤儿投影。
+  cleanup:
+  - API 请求/响应日志、projection-status 复读 JSON、document_tag_projection 表快照、本地 ES index 查询结果、失败堆栈与告警日志。

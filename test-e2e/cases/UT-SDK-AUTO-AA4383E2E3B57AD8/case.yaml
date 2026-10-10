@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-AA4383E2E3B57AD8
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: run_skill_script source/授权分支与沙箱 shell guard（pip 白名单/IPython magic 拦截）｜核心流程与异常/边界/越权
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: run_skill_script source/授权分支与沙箱 shell guard（pip 白名单/IPython magic 拦截）｜核心流程与异常/边界/越权
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线，不使用真实 Docker 沙箱与真实模型。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/assets/skills/（fixture 技能目录，测试内以 mock SkillManager 构造，不触发真实技能加载）。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/skills/（fixture 技能目录，测试内以 mock SkillManager 构造）'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“run_skill_script source/授权分支与沙箱 shell guard”相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: source 为 skill/workspace 均按契约解析；非法值返回包含 ValueError 的 [UnexpectedError] 错误字符串，且不调用执行后端或技能管理器。
+  - order: 2
+    action: 导入 sdk/nexent/core/tools/run_skill_script_tool.py 的 RunSkillScriptTool 与 SkillScriptExecutionError，以及 sdk/nexent/core/agents/sandbox.py
+      的 _scan_shell_calls；构造 mock SkillManager、mock execution_backend 与必要依赖对象。
+    expected: authorized_skill_names 未授权时返回包含 PermissionError 和 "not enabled for agent" 的 [UnexpectedError] 错误字符串，且不调用执行后端或技能管理器；授权后正常进入执行路径。
+  - order: 3
+    action: source 分支：分别以 source="skill"（默认）与 source="workspace" 调用 execute，断言均按契约解析；以 source="invalid" 调用，断言返回以 [UnexpectedError]
+      开头、包含 ValueError 和 source must be either 的错误字符串，且不调用执行后端或技能管理器。
+    expected: execution_backend 返回 error JSON 时抛出 SkillScriptExecutionError 且不被吞；无 backend 的 workspace 请求返回包含 RuntimeError
+      的 [UnexpectedError] 错误字符串，且不回退到本地脚本执行。
+  - order: 4
+    action: 授权分支：构造 authorized_skill_names={"allowed-skill"}，以未授权 skill_name 调用 execute，断言返回以 [UnexpectedError] 开头、包含 PermissionError
+      和 "not enabled for agent" 的错误字符串，且不调用执行后端或技能管理器；以已授权 skill_name 调用，断言进入 manager/execution_backend 路径且不抛授权异常。
+    expected: 网络启用（allow_package_installs=True）下 shell-free 的 pip install argv 被放行，关闭时被拦截；IPython magic 与 subprocess/os shell
+      调用均被拦截并返回具体违规项。
+  - order: 5
+    action: 'execution_backend 错误上抛：mock execution_backend 返回 json 字符串 ''{"error": "boom"}''，断言 execute 抛出 SkillScriptExecutionError；验证
+      except SkillScriptExecutionError 分支原样 re-raise 而不吞异常。'
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 无 backend + source="workspace"：不绑定 execution_backend 时以 source="workspace" 调用，断言返回以 [UnexpectedError] 开头、包含 RuntimeError
+      和 Workspace scripts require an available Docker sandbox execution backend 的错误字符串，且不调用本地 run_skill_script。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: shell guard pip 白名单：以 allow_package_installs=True 调用 _scan_shell_calls 扫描 shell-free 的 subprocess.check_call([sys.executable,
+      "-m", "pip", "install", "pkg"])，断言返回空列表（放行）；以 allow_package_installs=False 扫描同一段代码，断言返回包含 "subprocess.check_call(...)"
+      的违规项。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: shell guard IPython magic 拦截：扫描包含 "!ls"、"%system echo hi"、"%%bash" 的代码，断言违规列表分别包含 "IPython shell escape (!...)"、"IPython
+      shell magic"、"IPython shell cell magic"；扫描普通 subprocess.run / os.system 代码，断言返回对应违规条目。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 确认日志不输出 API Key/Token/用户密码/模型密钥；测试结束后释放临时对象，确保可重复执行。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - source 为 skill/workspace 均按契约解析；非法值返回包含 ValueError 的 [UnexpectedError] 错误字符串，且不调用执行后端或技能管理器。
+  - authorized_skill_names 未授权时返回包含 PermissionError 和 "not enabled for agent" 的 [UnexpectedError] 错误字符串，且不调用执行后端或技能管理器；授权后正常进入执行路径。
+  - execution_backend 返回 error JSON 时抛出 SkillScriptExecutionError 且不被吞；无 backend 的 workspace 请求返回包含 RuntimeError 的 [UnexpectedError]
+    错误字符串，且不回退到本地脚本执行。
+  - 网络启用（allow_package_installs=True）下 shell-free 的 pip install argv 被放行，关闭时被拦截；IPython magic 与 subprocess/os shell 调用均被拦截并返回具体违规项。
+  - 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 477
+  unit_boundary: Core Agent
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/assets/skills/（fixture 技能目录，测试内以 mock SkillManager 构造）'
+  assertions:
+  - source 为 skill/workspace 均按契约解析；非法值返回包含 ValueError 的 [UnexpectedError] 错误字符串，且不调用执行后端或技能管理器。
+  - authorized_skill_names 未授权时返回包含 PermissionError 和 "not enabled for agent" 的 [UnexpectedError] 错误字符串，且不调用执行后端或技能管理器；授权后正常进入执行路径。
+  - execution_backend 返回 error JSON 时抛出 SkillScriptExecutionError 且不被吞；无 backend 的 workspace 请求返回包含 RuntimeError 的 [UnexpectedError]
+    错误字符串，且不回退到本地脚本执行。
+  - 网络启用（allow_package_installs=True）下 shell-free 的 pip install argv 被放行，关闭时被拦截；IPython magic 与 subprocess/os shell 调用均被拦截并返回具体违规项。
+  - 功能结果与代码契约一致，测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。

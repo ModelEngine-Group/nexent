@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-717BD679DD9A2E82
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AidpSearchTool 502/503/504 自动重试与图片防泄露（marker隔离、text/table剥离<img>）｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: AidpSearchTool 502/503/504 自动重试与图片防泄露（marker隔离、text/table剥离<img>）｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 使用 mock httpx 同步客户端与内存 MessageObserver 观察者，不发起真实 HTTP 请求；构造 AidpSearchTool 的 server_url/api_key/tenant_id 仅为满足必填校验的占位符，不得读取生产凭据。
+  test_data:
+    legacy_asset_declaration: '- 无固定本地资产；依赖 mock httpx 客户端与内存观察者注入，不读取生产凭据。'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“AidpSearchTool 502/503/504 自动重试与图片防泄露（marker隔离、text/table剥离<img>）”相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 直接导入 sdk/nexent/core/ext_components/aidp/aidp_search_tool.py 的 AidpSearchTool、AidpSearchError，以占位 server_url/api_key/tenant_id
+      与默认 search_method=hybrid_search 构造实例，注入 mock httpx 同步客户端与内存 MessageObserver。
+    expected: 502/503/504 触发最多 3 次自动重试，指数退避 0.5s→1.0s；首次成功无需重试，4xx 与其它非 502/503/504 的 5xx 不重试。
+  - order: 3
+    action: 正常路径：令 mock 客户端返回 200 且 result 含 text/table 块，调用 forward(query, kds_list)，记录返回文本、observer 各通道消息与 mock 客户端调用次数/请求体。
+    expected: 503 连续 3 次失败后抛 AidpSearchError，消息为面向用户的友好说明（提示 KB 可能无内容/待索引）；502/504 失败抛含“after 3 attempts”的 AidpSearchError，均不泄漏原始
+      httpx 异常细节。
+  - order: 4
+    action: 重试边界：令 mock 客户端按序返回 502、503、200（第 3 次成功），断言 post 被调用 3 次、每次 Authorization 为 Bearer 占位 token，且两次重试前 mock 的 time.sleep
+      退避分别为 0.5s、1.0s（0.5 * 2^(attempt-1)）。
+    expected: 图片块完整 URL 不进入 model 文本，仅出现 `![AIDP image](/__aidp_image__/{tool_sign}{cite_index})` marker；真实图片 URL 仅经 PICTURE_WEB
+      observer 通道（由 image_service 代理补 Bearer）传递。
+  - order: 5
+    action: 503 最终失败：令 mock 客户端连续 3 次返回 503，断言抛出 AidpSearchError 且消息含“HTTP 503”与“upload at least one document”面向用户的说明，不透出原始
+      httpx 异常字符串；分别以 502、504 连续 3 次失败，断言抛出 AidpSearchError 且消息含“after 3 attempts”。
+    expected: text/table 块 `<img>` 标签被剥离且其余文字保留，ui 与 model 两路文本一致。
+  - order: 6
+    action: 图片安全：构造 chunk_type=="image" 且 file_url 为相对路径的 result（multi_modal=True），断言返回的 model 文本不包含拼接后的完整图片 URL 或原始 file_url，仅出现
+      `![AIDP image](/__aidp_image__/{tool_sign}{cite_index})` marker；mock 观察者收到 ProcessType.PICTURE_WEB 消息，images_url 为经
+      _build_image_url 拼接的完整 URL，且该 URL 不出现在 SEARCH_CONTENT 文本中。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: text/table 剥离：构造 text 含 `<img …>` 标签的 text/table 块，断言返回的 model 文本与 ui 文本中 `<img>` 标签均被剥离、其余文字保留。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 异常/越权：空/空白 query 抛 ValueError；kds_list 非法 JSON 或长度超过 10 抛 ValueError；mock 客户端返回 401 时不重试且立即抛 AidpSearchError。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥；测试结束后释放临时对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 502/503/504 触发最多 3 次自动重试，指数退避 0.5s→1.0s；首次成功无需重试，4xx 与其它非 502/503/504 的 5xx 不重试。
+  - 503 连续 3 次失败后抛 AidpSearchError，消息为面向用户的友好说明（提示 KB 可能无内容/待索引）；502/504 失败抛含“after 3 attempts”的 AidpSearchError，均不泄漏原始 httpx
+    异常细节。
+  - 图片块完整 URL 不进入 model 文本，仅出现 `![AIDP image](/__aidp_image__/{tool_sign}{cite_index})` marker；真实图片 URL 仅经 PICTURE_WEB observer
+    通道（由 image_service 代理补 Bearer）传递。
+  - text/table 块 `<img>` 标签被剥离且其余文字保留，ui 与 model 两路文本一致。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 469
+  unit_boundary: AIDP检索工具
+  inputs:
+  - '- 无固定本地资产；依赖 mock httpx 客户端与内存观察者注入，不读取生产凭据。'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 502/503/504 触发最多 3 次自动重试，指数退避 0.5s→1.0s；首次成功无需重试，4xx 与其它非 502/503/504 的 5xx 不重试。
+  - 503 连续 3 次失败后抛 AidpSearchError，消息为面向用户的友好说明（提示 KB 可能无内容/待索引）；502/504 失败抛含“after 3 attempts”的 AidpSearchError，均不泄漏原始 httpx
+    异常细节。
+  - 图片块完整 URL 不进入 model 文本，仅出现 `![AIDP image](/__aidp_image__/{tool_sign}{cite_index})` marker；真实图片 URL 仅经 PICTURE_WEB observer
+    通道（由 image_service 代理补 Bearer）传递。
+  - text/table 块 `<img>` 标签被剥离且其余文字保留，ui 与 model 两路文本一致。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

@@ -41,12 +41,11 @@ from consts.model import (
 )
 from consts.const import CAPACITY_SUGGESTION_ENABLED
 
-from fastapi import APIRouter, Depends, Header, Query, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
 from typing import Annotated, Any, List, Optional
-from services.audit_service import record_security_event
 from services.model_health_service import (
     check_model_connectivity,
     verify_model_config_connectivity,
@@ -118,18 +117,6 @@ except Exception as _exc:  # noqa: BLE001
 
 router = APIRouter(prefix="/model")
 logger = logging.getLogger("model_management_app")
-
-# Allowlisted payload keys that are safe to copy into audit entries; anything
-# credential-like (api_key, access_token, ...) must never reach the log.
-_AUDIT_SAFE_MODEL_KEYS = (
-    "model_name", "display_name", "model_repo", "model_type",
-    "model_factory", "base_url", "provider", "type",
-)
-
-
-def _audit_safe_model_fields(data: dict) -> dict:
-    """Pick the allowlisted, non-credential fields of a model payload for audit details."""
-    return {key: data[key] for key in _AUDIT_SAFE_MODEL_KEYS if data.get(key) not in (None, "")}
 
 # Shared response message for every catalog endpoint's failure branch.
 _CATALOG_UNAVAILABLE_MESSAGE = "catalog unavailable"
@@ -265,7 +252,6 @@ def _capacity_suggestion_for_model_request(request: ModelRequest):
 @router.post("/create")
 async def create_model(
     request: ModelRequest,
-    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Create a single model record for the current tenant.
@@ -295,9 +281,6 @@ async def create_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
-        record_security_event("model_create", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details=_audit_safe_model_fields(model_data))
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully"
@@ -318,7 +301,6 @@ async def create_model(
 @router.post("/backfill_defaults")
 async def backfill_default_model_slots(
     request: BackfillDefaultsRequest,
-    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Finalize default-model auto-configuration after a batch import.
@@ -336,10 +318,6 @@ async def backfill_default_model_slots(
             request.display_names, tenant_id)
         auto_configured = _backfill_default_model_slots(
             user_id, tenant_id, new_model_ids=created_ids)
-        record_security_event("model_defaults_backfill", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"display_names": request.display_names,
-                                       "auto_configured_defaults": auto_configured})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "auto_configured_defaults": auto_configured,
             "message": "Default model backfill completed"
@@ -436,6 +414,12 @@ async def create_provider_model(
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        # Surface provider failures (e.g. 502 connection_failed) with the
+        # status the service layer classified, instead of flattening every
+        # error to 500. HTTPException is an Exception subclass, so it must be
+        # caught before the generic handler below.
+        raise
     except Exception as e:
         logging.error(f"Failed to create provider model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -445,7 +429,6 @@ async def create_provider_model(
 @router.post("/provider/batch_create")
 async def batch_create_models(
     request: BatchCreateModelsRequest,
-    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Synchronize provider models for a tenant by creating/updating/deleting records.
@@ -473,15 +456,6 @@ async def batch_create_models(
         provider = batch_model_config.get("provider")
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], provider)
-        audit_models = [
-            _audit_safe_model_fields(model) for model in batch_model_config.get("models", [])
-        ]
-        record_security_event("model_batch_import", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"provider": provider,
-                                       "model_type": batch_model_config.get("type"),
-                                       "models_count": len(audit_models),
-                                       "models": audit_models})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully",
             "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
@@ -532,7 +506,6 @@ async def get_provider_list(
 @router.post("/update")
 async def update_single_model(
     request: dict,
-    http_request: Request,
     display_name: str = Query(..., description="Current display name of the model to update"),
     current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
@@ -557,10 +530,6 @@ async def update_single_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.get("model_factory")
             )
-        record_security_event("model_update", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"display_name": display_name,
-                                       "updated_fields": sorted(request.keys())})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model updated successfully"
         })
@@ -584,7 +553,6 @@ async def update_single_model(
 @router.post("/batch_update")
 async def batch_update_models(
     request: List[dict],
-    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Batch update multiple models for the current tenant.
@@ -595,11 +563,6 @@ async def batch_update_models(
     try:
         user_id, tenant_id = current_user.user_id, current_user.tenant_id
         await batch_update_models_for_tenant(user_id, tenant_id, request)
-        record_security_event("model_batch_update", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"models_count": len(request),
-                                       "model_ids": [item.get("model_id") for item in request
-                                                     if isinstance(item, dict)]})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch update models successfully"
         })
@@ -614,7 +577,6 @@ async def batch_update_models(
 
 @router.post("/delete")
 async def delete_model(
-    http_request: Request,
     display_name: str = Query(..., embed=True),
     current_user: CurrentUser = Depends(require(MODEL_DELETE_PERMISSION)),
 ):
@@ -632,9 +594,6 @@ async def delete_model(
         logger.info(
             f"Start to delete model, user_id: {user_id}, tenant_id: {tenant_id}")
         model_name = await delete_model_for_tenant(user_id, tenant_id, display_name)
-        record_security_event("model_delete", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"display_name": display_name})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model deleted successfully",
             "data": model_name
@@ -852,7 +811,6 @@ async def manage_check_model_health(
 @router.post("/manage/create")
 async def manage_create_model(
     request: ManageTenantModelCreateRequest,
-    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Create a model in a specified tenant (admin/manage operation).
@@ -884,10 +842,6 @@ async def manage_create_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
-        record_security_event("tenant_model_create", request=http_request,
-                              user_id=user_id, tenant_id=current_user.tenant_id,
-                              details={"target_tenant_id": request.tenant_id,
-                                       **_audit_safe_model_fields(model_data)})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully",
@@ -908,7 +862,6 @@ async def manage_create_model(
 @router.post("/manage/update")
 async def manage_update_model(
     request: ManageTenantModelUpdateRequest,
-    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Update a model in a specified tenant (admin/manage operation).
@@ -939,11 +892,6 @@ async def manage_update_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
-        record_security_event("tenant_model_update", request=http_request,
-                              user_id=user_id, tenant_id=current_user.tenant_id,
-                              details={"target_tenant_id": request.tenant_id,
-                                       "current_display_name": request.current_display_name,
-                                       **_audit_safe_model_fields(model_data)})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model updated successfully",
             "data": {"tenant_id": request.tenant_id}
@@ -966,7 +914,6 @@ async def manage_update_model(
 @router.post("/manage/delete")
 async def manage_delete_model(
     request: ManageTenantModelDeleteRequest,
-    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_DELETE_PERMISSION)),
 ):
     """Delete a model from a specified tenant (admin/manage operation).
@@ -989,10 +936,6 @@ async def manage_delete_model(
         model_name = await delete_model_for_tenant(
             user_id, request.tenant_id, request.display_name
         )
-        record_security_event("tenant_model_delete", request=http_request,
-                              user_id=user_id, tenant_id=current_user.tenant_id,
-                              details={"target_tenant_id": request.tenant_id,
-                                       "display_name": request.display_name})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model deleted successfully",
             "data": {
@@ -1015,7 +958,6 @@ async def manage_delete_model(
 @router.post("/manage/batch_create")
 async def manage_batch_create_models(
     request: ManageBatchCreateModelsRequest,
-    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Batch create/update models in a specified tenant (admin/manage operation).
@@ -1048,16 +990,6 @@ async def manage_batch_create_models(
         batch_result = await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], request.provider)
-        audit_models = [
-            _audit_safe_model_fields(model) for model in batch_model_config.get("models", [])
-        ]
-        record_security_event("tenant_model_batch_import", request=http_request,
-                              user_id=user_id, tenant_id=current_user.tenant_id,
-                              details={"target_tenant_id": request.tenant_id,
-                                       "provider": request.provider,
-                                       "model_type": request.type,
-                                       "models_count": len(audit_models),
-                                       "models": audit_models})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully",
             "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
@@ -1193,6 +1125,10 @@ async def manage_create_provider_models(
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        # Same contract as /provider/create: keep the classified provider
+        # status (e.g. 502) instead of flattening it to 500.
+        raise
     except Exception as e:
         logging.error(f"Failed to create provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

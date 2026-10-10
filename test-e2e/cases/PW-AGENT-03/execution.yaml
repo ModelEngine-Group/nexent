@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: PW-AGENT-03
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: PW-AGENT-03
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - configurable_skill
+  anchors: true
+  special_assets: false
+  d4_groups:
+  - mcp

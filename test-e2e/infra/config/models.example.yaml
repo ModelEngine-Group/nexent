@@ -1,0 +1,17 @@
+# Copy to machine-local config/models.yaml; credentials belong only in secrets.env.
+models:
+  - id: daily-llm
+    model_id:
+    capability: llm
+    provider: replace-me
+    base_url: replace-me
+    model: replace-me
+    secret_env_key: NEXENT_DAILY_LLM_API_KEY
+  - id: daily-embedding
+    model_id:
+    capability: embedding
+    provider: replace-me
+    base_url: replace-me
+    model: replace-me
+    dimension: 1024
+    secret_env_key: NEXENT_DAILY_EMBEDDING_API_KEY

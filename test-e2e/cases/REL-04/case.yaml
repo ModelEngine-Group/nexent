@@ -1,0 +1,85 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-04
+  feature_id: V5-REL-04
+  business_rule_ids:
+  - V5-REL-04-RULE-01
+  title: Redis/状态存储中断后的stop/resume
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: runtime state可恢复性
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - D5_ENABLE_MUTATING_DEPLOYMENT=true
+
+    - D5_ISOLATED_ENVIRONMENT=true（仅隔离、可恢复环境）'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml
+
+      - D5_ENABLE_MUTATING_DEPLOYMENT=true
+
+      - D5_ISOLATED_ENVIRONMENT=true（仅隔离、可恢复环境）'
+  steps:
+  - order: 1
+    action: 仅在可恢复的隔离环境中设置 D5_ENABLE_MUTATING_DEPLOYMENT=true 与 D5_ISOLATED_ENVIRONMENT=true；否则结果必须为 SKIPPED_BY_SAFETY，不得判定为产品失败。
+    expected: 不给出错误成功状态；恢复后可结束任务；无串会话。
+  - order: 2
+    action: 先在无故障情况下执行“Redis/状态存储中断后的stop/resume”基线并确认正常通过。
+    expected: 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  - order: 3
+    action: 运行中断开状态服务，恢复后stop/resume。
+    expected: 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  - order: 4
+    action: 故障注入期间持续记录 run/task/connection 状态和前端/后端日志。
+    expected: 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  - order: 5
+    action: 恢复依赖后等待系统自恢复，检查锁、重试、状态机、未完成任务和用户可见状态是否收敛。
+    expected: 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  - order: 6
+    action: 再执行一次正常请求验证系统没有进入永久坏状态。
+    expected: 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  - order: 7
+    action: 保存故障开始/结束时间、恢复耗时、关键日志与状态快照。
+    expected: 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  expected_results:
+  - 不给出错误成功状态；恢复后可结束任务；无串会话。
+  - 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 25
+  risk_type: RELIABILITY
+  risk: runtime state可恢复性
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - D5_ENABLE_MUTATING_DEPLOYMENT=true
+
+    - D5_ISOLATED_ENVIRONMENT=true（仅隔离、可恢复环境）'
+  metrics:
+  - 不给出错误成功状态；恢复后可结束任务；无串会话。
+  - 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  thresholds:
+  - 不给出错误成功状态；恢复后可结束任务；无串会话。
+  - 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。
+  recovery_expectations:
+  - 不给出错误成功状态；恢复后可结束任务；无串会话。
+  - 未同时满足两个安全开关时，SKIPPED_BY_SAFETY 为预期门禁结果；启用后才评价 Redis 中断恢复能力。

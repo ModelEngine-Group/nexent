@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-RESOURCE-APIKEY-01
+  feature_id: V5-PW-RESOURCE-APIKEY-01
+  business_rule_ids:
+  - V5-PW-RESOURCE-APIKEY-01-RULE-01
+  title: 租户API Key：刷新独立用户Key→管理员可见性→撤销
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证resource-manage管理员API Key UI；仅创建/刷新返回完整Secret，列表返回对应掩码；Northbound调用移到CONTRACT。
+  preconditions:
+  - Tenant Admin/SU storageState。
+  - 为本轮创建独立用户、邀请码及用户组，准备初始Key并登记用户清理；不得刷新共享账号Key。
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/northbound.yaml；config/secrets.env
+  steps:
+  - order: 1
+    action: 选择测试租户并打开 API Key 标签。
+    expected: 非管理员不可见API Key管理入口，直接路由也不可操作。
+  - order: 2
+    action: 找到本轮独立用户，点击刷新Key并确认。
+    expected: 完整Secret仅在创建/刷新结果展示；管理员列表显示对应掩码，用户归属和掩码前缀/尾码与刷新结果一致。
+  - order: 3
+    action: 成功弹窗展示完整Secret。
+    expected: 撤销后有效Key列表更新。
+  - order: 4
+    action: 若有复制入口则复制，关闭弹窗。
+    expected: Northbound认证有效性由CONTRACT覆盖。
+  - order: 5
+    action: 刷新页面，管理员列表中该用户的Key掩码应与刷新结果对应，不得重新展示完整Secret。
+    expected: Northbound认证有效性由CONTRACT覆盖。
+  - order: 6
+    action: 撤销本轮用户Key。
+    expected: Northbound认证有效性由CONTRACT覆盖。
+  - order: 7
+    action: 刷新确认该用户Key不再出现在有效Key列表。
+    expected: Northbound认证有效性由CONTRACT覆盖。
+  expected_results:
+  - 非管理员不可见API Key管理入口，直接路由也不可操作。
+  - 完整Secret仅在创建/刷新结果展示；管理员列表显示对应掩码，用户归属和掩码前缀/尾码与刷新结果一致。
+  - 撤销后有效Key列表更新。
+  - Northbound认证有效性由CONTRACT覆盖。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 11
+  actor: Nexent browser user
+  journey:
+  - 选择测试租户并打开 API Key 标签。
+  - 找到本轮独立用户，点击刷新Key并确认。
+  - 成功弹窗展示完整Secret。
+  - 若有复制入口则复制，关闭弹窗。
+  - 刷新页面，管理员列表中该用户的Key掩码应与刷新结果对应，不得重新展示完整Secret。
+  - 撤销本轮用户Key。
+  - 刷新确认该用户Key不再出现在有效Key列表。
+  final_business_result:
+  - 非管理员不可见API Key管理入口，直接路由也不可操作。
+  - 完整Secret仅在创建/刷新结果展示；管理员列表显示对应掩码，用户归属和掩码前缀/尾码与刷新结果一致。
+  - 撤销后有效Key列表更新。
+  - Northbound认证有效性由CONTRACT覆盖。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-RESOURCE-APIKEY-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

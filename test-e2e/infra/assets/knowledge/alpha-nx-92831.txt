@@ -1,0 +1,5 @@
+Nexent D4 knowledge retrieval fixture alpha.
+
+The unique verification marker is NX-92831.
+When asked for the alpha knowledge marker, the exact answer is NX-92831.
+

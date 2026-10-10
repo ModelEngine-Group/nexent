@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: CTR-039
+  feature_id: F-093
+  business_rule_ids: [F-093-RULE-01]
+  title: JSON-RPC/HTTP+JSON/gRPC 协议切换与兼容性｜核心流程
+  type: CONTRACT
+  priority: P0
+  status: active
+  automation: automated
+  objective: JSON-RPC/HTTP+JSON/gRPC 协议切换与兼容性｜核心流程
+  preconditions:
+  - Nexent 测试服务和租户管理员身份可用。
+  - config/a2a.yaml 符合 Schema，受控 Mock 就绪且无残留故障。
+  test_data:
+    resource_ownership: 独立 nonce 和动态 Agent ID；凭据从受保护 fixture 获取。
+  steps:
+  - order: 1
+    action: 切换为 JSONRPC 与 HTTP+JSON，并刷新卡片
+    expected: 选定协议和端点保持一致
+  - order: 2
+    action: 分别调用真实 Mock 并核对返回与 wire
+    expected: 两种支持协议均返回 total=1283，实际 wire 路径符合卡片
+  - order: 3
+    action: 请求卡片未声明且 UI 禁用的 GRPC
+    expected: 返回 400；保留原协议，不把 HTTP 调用当成 gRPC 成功
+  expected_results:
+  - 选定协议和端点保持一致
+  - 两种支持协议均返回 total=1283，实际 wire 路径符合卡片
+  - 返回 400；保留原协议，不把 HTTP 调用当成 gRPC 成功
+  forbidden_side_effects:
+  - 不修改共享 Agent、不吞掉超时、不用提前的客户端超时代替产品超时。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 184
+  contract:
+  contract:
+    protocol: Nexent A2A API and controlled real wire
+    request_expectations:
+    - 切换为 JSONRPC 与 HTTP+JSON，并刷新卡片
+    - 分别调用真实 Mock 并核对返回与 wire
+    - 请求卡片未声明且 UI 禁用的 GRPC
+    response_expectations:
+    - 选定协议和端点保持一致
+    - 两种支持协议均返回 total=1283，实际 wire 路径符合卡片
+    - 返回 400；保留原协议，不把 HTTP 调用当成 gRPC 成功

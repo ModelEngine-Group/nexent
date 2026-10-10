@@ -1,0 +1,69 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-BCD444C05F3FCB6E
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: LanePolicy/ManagedTaskSpec/ManagedThreadSpec 非法输入校验｜异常/边界
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: LanePolicy/ManagedTaskSpec/ManagedThreadSpec 非法输入校验｜异常/边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 本用例为纯输入校验，不依赖任何本地资产或外部服务。
+  test_data:
+    legacy_asset_declaration: 无（纯输入校验，不依赖本地资产）
+  steps:
+  - order: 1
+    action: 导入 sdk/nexent/core/concurrency/models.py 中的 LanePolicy、ManagedTaskSpec、ManagedThreadSpec 及 sdk/nexent/core/concurrency/errors.py
+      中的 InvalidThreadPolicy。
+    expected: LanePolicy 对空名称、非正 max_workers、负 max_queue_size、负 queue_timeout_seconds、负 cancel_grace_seconds、非正 shutdown_grace_seconds
+      均抛出 InvalidThreadPolicy，且该异常为 ThreadManagerError 与 ValueError 的子类。
+  - order: 2
+    action: 用合法参数构造 LanePolicy（name="lane-a", max_workers=2, max_queue_size=4），确认构造成功且不抛异常。
+    expected: ManagedTaskSpec 对空 task_name、空 owner 均抛出 ValueError。
+  - order: 3
+    action: 分别以空名称 ""、max_workers=0、max_workers=-1、max_queue_size=-1、queue_timeout_seconds=-0.5、cancel_grace_seconds=-1、shutdown_grace_seconds=0、shutdown_grace_seconds=-1
+      构造 LanePolicy，断言每种情况均抛出 InvalidThreadPolicy。
+    expected: ManagedThreadSpec 对空 task_name、空 owner、空 lane 均抛出 ValueError。
+  - order: 4
+    action: 用合法参数构造 ManagedTaskSpec（task_name="task", owner="owner"），确认构造成功且不抛异常。
+    expected: 合法输入构造成功且无副作用；全程无未处理异常，测试可重复执行。
+  - order: 5
+    action: 分别以空 task_name、空 owner 构造 ManagedTaskSpec，断言均抛出 ValueError。
+    expected: 合法输入构造成功且无副作用；全程无未处理异常，测试可重复执行。
+  - order: 6
+    action: 用合法参数构造 ManagedThreadSpec（task_name="svc", owner="owner", lane="background-service"），确认构造成功且不抛异常。
+    expected: 合法输入构造成功且无副作用；全程无未处理异常，测试可重复执行。
+  - order: 7
+    action: 分别以空 task_name、空 owner、空 lane 构造 ManagedThreadSpec，断言均抛出 ValueError。
+    expected: 合法输入构造成功且无副作用；全程无未处理异常，测试可重复执行。
+  - order: 8
+    action: 所有断言均使用 pytest.raises 捕获异常，无吞异常；测试无临时资源，可重复执行。
+    expected: 合法输入构造成功且无副作用；全程无未处理异常，测试可重复执行。
+  expected_results:
+  - LanePolicy 对空名称、非正 max_workers、负 max_queue_size、负 queue_timeout_seconds、负 cancel_grace_seconds、非正 shutdown_grace_seconds
+    均抛出 InvalidThreadPolicy，且该异常为 ThreadManagerError 与 ValueError 的子类。
+  - ManagedTaskSpec 对空 task_name、空 owner 均抛出 ValueError。
+  - ManagedThreadSpec 对空 task_name、空 owner、空 lane 均抛出 ValueError。
+  - 合法输入构造成功且无副作用；全程无未处理异常，测试可重复执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 479
+  unit_boundary: 并发策略与规格校验
+  inputs:
+  - 无（纯输入校验，不依赖本地资产）
+  assertions:
+  - LanePolicy 对空名称、非正 max_workers、负 max_queue_size、负 queue_timeout_seconds、负 cancel_grace_seconds、非正 shutdown_grace_seconds
+    均抛出 InvalidThreadPolicy，且该异常为 ThreadManagerError 与 ValueError 的子类。
+  - ManagedTaskSpec 对空 task_name、空 owner 均抛出 ValueError。
+  - ManagedThreadSpec 对空 task_name、空 owner、空 lane 均抛出 ValueError。
+  - 合法输入构造成功且无副作用；全程无未处理异常，测试可重复执行。

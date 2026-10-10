@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-119
+  name: memory config load、dreaming switch、disable agent/user-agent
+  status: active
+  description: '记忆 / 配置: memory config load、dreaming switch、disable agent/user-agent'
+  business_rules:
+  - rule_id: F-119-RULE-01
+    description: memory config load、dreaming switch、disable agent/user-agent
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

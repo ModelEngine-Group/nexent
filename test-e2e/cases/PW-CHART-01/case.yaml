@@ -1,0 +1,103 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-CHART-01
+  feature_id: V5-PW-CHART-01
+  business_rule_ids:
+  - V5-PW-CHART-01-RULE-01
+  title: Markdown/Mermaid流式渲染→异常降级→XSS Smoke
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证真实DOM/SVG渲染和安全边界；只点当前renderer实际存在控件。
+  preconditions:
+  - 能稳定输出Mermaid的测试Agent/提示词
+  - 本地XSS fixture
+  test_data:
+    legacy_asset_declaration: assets/expected/mermaid_cases.json；config/models.yaml
+  steps:
+  - order: 1
+    action: 发送固定提示输出最小合法Mermaid，等待streaming完成。
+    expected: 合法Mermaid真实SVG渲染。
+  - order: 2
+    action: 确认完成后DOM出现Mermaid SVG/可视节点。
+    expected: 非法语法降级。
+  - order: 3
+    action: 输出两个Mermaid图，确认独立渲染。
+    expected: XSS不执行。
+  - order: 4
+    action: 输出语法错误Mermaid，确认可控降级而非整页异常。
+    expected: 交互只覆盖真实存在控件。
+  - order: 5
+    action: 若DOM真实存在Source/Render、缩放、下载控件，则逐个点击；不存在则不虚构。
+    expected: GFM 删除线内容渲染为纯文本 span，无 del/s 标签与删除线装饰，且不执行注入内容。
+  - order: 6
+    action: 通过受控输出注入script/onerror/javascript URL payload。
+    expected: 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  - order: 7
+    action: 确认无脚本执行/alert，危险属性不可执行。
+    expected: 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  - order: 8
+    action: 发送受控输出包含 GFM 删除线 ~~~~删除线文本~~~~，等待流式完成。
+    expected: 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  - order: 9
+    action: 确认删除线内容渲染为纯文本 span，DOM 无 del/s 标签、无 line-through 装饰，文本保留。
+    expected: 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  - order: 10
+    action: 发送受控输出包含引用角标 [[a1]] 及兼容的纯数字旧角标 [[1]]，等待流式完成。
+    expected: 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  - order: 11
+    action: 确认引用角标渲染为带 data-citekey 的 CiteMarker（非原始 [[..]] 文本）；点击角标，确认打开 SourcesPanel 且 selectedCitationKey 与点击 citekey 一致，句级高亮
+      scope 取角标前一句文本。
+    expected: 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  - order: 12
+    action: 在删除线/引用角标内容中注入可执行 payload，确认无脚本执行、危险属性不可执行。
+    expected: 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  - order: 13
+    action: 刷新会话确认内容恢复。
+    expected: 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  expected_results:
+  - 合法Mermaid真实SVG渲染。
+  - 非法语法降级。
+  - XSS不执行。
+  - 交互只覆盖真实存在控件。
+  - GFM 删除线内容渲染为纯文本 span，无 del/s 标签与删除线装饰，且不执行注入内容。
+  - 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 50
+  actor: Nexent browser user
+  journey:
+  - 发送固定提示输出最小合法Mermaid，等待streaming完成。
+  - 确认完成后DOM出现Mermaid SVG/可视节点。
+  - 输出两个Mermaid图，确认独立渲染。
+  - 输出语法错误Mermaid，确认可控降级而非整页异常。
+  - 若DOM真实存在Source/Render、缩放、下载控件，则逐个点击；不存在则不虚构。
+  - 通过受控输出注入script/onerror/javascript URL payload。
+  - 确认无脚本执行/alert，危险属性不可执行。
+  - 发送受控输出包含 GFM 删除线 ~~~~删除线文本~~~~，等待流式完成。
+  - 确认删除线内容渲染为纯文本 span，DOM 无 del/s 标签、无 line-through 装饰，文本保留。
+  - 发送受控输出包含引用角标 [[a1]] 及兼容的纯数字旧角标 [[1]]，等待流式完成。
+  - 确认引用角标渲染为带 data-citekey 的 CiteMarker（非原始 [[..]] 文本）；点击角标，确认打开 SourcesPanel 且 selectedCitationKey 与点击 citekey 一致，句级高亮 scope
+    取角标前一句文本。
+  - 在删除线/引用角标内容中注入可执行 payload，确认无脚本执行、危险属性不可执行。
+  - 刷新会话确认内容恢复。
+  final_business_result:
+  - 合法Mermaid真实SVG渲染。
+  - 非法语法降级。
+  - XSS不执行。
+  - 交互只覆盖真实存在控件。
+  - GFM 删除线内容渲染为纯文本 span，无 del/s 标签与删除线装饰，且不执行注入内容。
+  - 引用角标按 citation key（toolSign+citeIndex 组合，兼容纯数字旧角标）渲染，点击打开 SourcesPanel 并携带一致 selectedCitationKey 与句级 scope，且角标内容不可执行。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-CHART-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

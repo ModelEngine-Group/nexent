@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-CHAT-04
+  name: 多Agent协作卡片→部分失败/完成展示
+  status: active
+  description: 只验证用户可见多Agent展示，不用UI证明后端并行。
+  business_rules:
+  - rule_id: V5-PW-CHAT-04-RULE-01
+    description: 多Agent协作卡片→部分失败/完成展示
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'
