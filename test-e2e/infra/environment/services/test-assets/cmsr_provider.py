@@ -47,7 +47,7 @@ async def reset(nonce: str, request: Request):
     if not re.fullmatch(r'[a-f0-9]{32}', nonce):
         raise HTTPException(400, 'Invalid nonce')
     mode = (await request.json()).get('mode')
-    if mode not in {'transport', 'semantic'}:
+    if mode not in {'transport', 'semantic', 'length'}:
         raise HTTPException(400, 'Invalid mode')
     if nonce in scenarios:
         raise HTTPException(409, 'Scenario already exists')
@@ -95,6 +95,12 @@ async def chunks(item, nonce):
             'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': 'cmsr',
             'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}]}) + '\n\n'
 
+    if item.mode == 'length':
+        # A valid-looking but truncated action must never become executable.
+        yield chunk("<code>print('CMSR_REJECTED_" + nonce + "')")
+        yield chunk(finish='length')
+        yield 'data: [DONE]\n\n'
+        return
     if attempt == 1:
         yield chunk('CMSR_FAILED_' + nonce if item.mode == 'transport' else '<code></code>')
         item.paused = 'failed'

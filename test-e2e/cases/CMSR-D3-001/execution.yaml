@@ -1,5 +1,9 @@
 schema_version: '1.0'
 case_id: CMSR-D3-001
+acceptance_bindings:
+  AC-ORDER: [test_cmsr_d3_001]
+  AC-PERSISTENCE: [test_cmsr_d3_001]
+  AC-REJECTION: [test_cmsr_d3_001_truncated_repairs_never_execute]
 implementations:
 - framework: pytest
   file: test.py

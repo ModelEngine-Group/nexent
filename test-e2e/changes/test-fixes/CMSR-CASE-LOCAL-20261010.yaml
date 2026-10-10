@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: CMSR-CASE-LOCAL-20261010
+  change_type: test-fix
+  title: Reconcile PR4057 standalone acceptance scripts with formal CMSR Cases
+  description: >-
+    Commit 49d0879a2 introduced D3 and Codex-tab D4 scripts under test/automation,
+    outside the formal runner. Remove those duplicate entry points and retain
+    the existing case-local CMSR-D3-001 and CMSR-D4-001 implementations. D3 gains
+    the rejected-truncation regression and exact retry lifecycle/action-count
+    assertions from the standalone script. The existing owned HTTP provider
+    gains a bounded length scenario; no new credential environment variables,
+    fixed resource IDs or shared global provider state are introduced. D4 uses
+    the existing fixed Playwright journey and failure-only evidence mechanism,
+    not the Codex built-in tab or success screenshots. Both Cases gain explicit
+    acceptance bindings. Provider unit checks are framework checks, not evidence
+    that deployed runtime or browser acceptance has passed. Product code and
+    traditional UT remain unchanged; historical commit identity is preserved.
+  affected_features:
+    existing: [CMSR-005]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CMSR-D3-001, CMSR-D4-001]
+    retired: []

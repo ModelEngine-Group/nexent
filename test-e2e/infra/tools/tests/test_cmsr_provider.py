@@ -13,6 +13,19 @@ spec.loader.exec_module(module)
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_truncated_attempts_never_emit_stop_or_success(self):
+        item = module.Scenario('length')
+        for _ in range(3):
+            chunks = [chunk async for chunk in module.chunks(item, 'c' * 32)]
+            self.assertIn('CMSR_REJECTED_', chunks[0])
+            self.assertIn('"finish_reason": "length"', chunks[1])
+            self.assertEqual(chunks[-1], 'data: [DONE]\n\n')
+            self.assertFalse(any('</code>' in chunk or 'CMSR_OK_' in chunk for chunk in chunks))
+        self.assertEqual(item.calls, 3)
+        self.assertFalse(item.completed)
+        with self.assertRaises(RuntimeError):
+            await anext(module.chunks(item, 'c' * 32))
+
     async def test_transport_and_semantic_sequences(self):
         for mode in ('transport', 'semantic'):
             item = module.Scenario(mode)

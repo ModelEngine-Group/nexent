@@ -46,6 +46,17 @@ case:
   forbidden_side_effects:
   - No failed partial text after rollback.
   - No duplicate execution card.
+  acceptance:
+  - id: AC-STREAM
+    description: Step 1 and successful reasoning appear before the provider completes.
+    steps: [1, 2]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-REFRESH
+    description: Both repair modes preserve one executed action and matching history after reload.
+    steps: [3, 4]
+    expected_results: [4]
+    forbidden_side_effects: [2]
   actor: Authenticated test tenant user
   journey:
   - Open the Agent conversation.

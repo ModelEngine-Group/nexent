@@ -1,8 +1,6 @@
 """Real Agent/observer/SSE/persistence, with only the provider controlled."""
 import asyncio
 import json
-import os
-from pathlib import Path
 
 import pytest
 
@@ -80,6 +78,13 @@ async def test_cmsr_d3_001():
                     # its attempt is rolled back and its answer persisted.
                     assert sum(e.get('phase') == 'commit' for e in events) == 1
                     assert sum(e.get('type') == 'parse' for e in events) == 1
+                    controls = [e['phase'] for e in events if e.get('type') == 'model_attempt_control']
+                    assert controls == ['begin', 'rollback', 'begin', 'commit', 'begin', 'rollback']
+                    assert sum(e.get('type') == 'step_count' for e in events) == 2
+                    assert sum(e.get('type') == 'final_answer' for e in events) == 1
+                    executions = [e for e in events if e.get('type') == 'execution_logs'
+                                  and 'CMSR_OK_' + nonce in str(e.get('content', ''))]
+                    assert len(executions) == 1
                     assert (await control(nonce, 'state'))['calls'] == 3
                     async with client('runtime', token=identity.access_token) as api:
                         history = await api.get(f'/conversation/{conversation_id}')
@@ -90,13 +95,12 @@ async def test_cmsr_d3_001():
                     })
                     verify_history(history.json(), nonce)
                 finally:
-                    if os.getenv('RESULT_DIR'):
-                        Path(os.environ['RESULT_DIR'], 'cmsr-' + mode + '-events.json').write_text(
-                            json.dumps([{'type': e.get('type'), 'phase': e.get('phase'),
-                                'has_success_marker': 'CMSR_OK_' + nonce in str(e.get('content', '')),
-                                'has_final_marker': e.get('type') == 'final_answer'
-                                    and 'CMSR_FINAL_' + nonce in str(e.get('content', ''))}
-                                for e in events], indent=2), encoding='utf-8')
+                    write_case_evidence('cmsr-' + mode + '-events', [
+                        {'type': e.get('type'), 'phase': e.get('phase'),
+                         'has_success_marker': 'CMSR_OK_' + nonce in str(e.get('content', '')),
+                         'has_final_marker': e.get('type') == 'final_answer'
+                             and 'CMSR_FINAL_' + nonce in str(e.get('content', ''))}
+                        for e in events])
                     await control(nonce, 'failed')
                     await control(nonce, 'success')
                     if not task.done():
@@ -104,3 +108,48 @@ async def test_cmsr_d3_001():
                     await asyncio.gather(task, return_exceptions=True)
         finally:
             await control(nonce, 'delete')
+
+
+@pytest.mark.asyncio
+async def test_cmsr_d3_001_truncated_repairs_never_execute():
+    """Exercise real runtime rejection; only the HTTP provider is controlled."""
+    identity = await sign_in('tenant_a_admin')
+    fixture = await setup('CMSR-D3-001')
+    nonce = fixture['nonce']
+    await control(nonce, 'reset', mode='length')
+    events = []
+    try:
+        async with owned_conversation(identity, 'CMSR rejected ' + nonce) as conversation_id:
+            async with client('runtime', token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
+                async with api.stream('POST', '/agent/run', json={
+                    'query': 'Execute one code action and finish.', 'agent_id': fixture['agent_id'],
+                    'conversation_id': conversation_id, 'history': [], 'is_debug': False}) as response:
+                    assert_status(response, 200)
+                    async for line in response.aiter_lines():
+                        if line.startswith('data:') and line[5:].strip() != '[DONE]':
+                            events.append(json.loads(line[5:]))
+                history = await api.get(f'/conversation/{conversation_id}')
+            assert_status(history, 200)
+            state = await control(nonce, 'state')
+            write_case_evidence('cmsr-truncated-observations', {
+                'event_types': [event.get('type') for event in events],
+                'attempt_phases': [event.get('phase') for event in events
+                                   if event.get('type') == 'model_attempt_control'],
+                'provider_calls': state['calls'],
+            })
+            assert state['calls'] == 3
+            phases = [event['phase'] for event in events if event.get('type') == 'model_attempt_control']
+            assert phases == ['begin', 'rollback'] * 3
+            assert sum(event.get('type') == 'step_count' for event in events) == 1
+            first_step = next(index for index, event in enumerate(events) if event.get('type') == 'step_count')
+            assert not any(event.get('type') in {'parse', 'tool', 'tool-call', 'execution_logs'}
+                           for event in events[first_step:])
+            parts = [part for row in history.json().get('data', []) for message in row.get('message', [])
+                     if message.get('role') == 'assistant' for part in message.get('message', [])
+                     if isinstance(part, dict)]
+            assert not any(part.get('type', '').startswith('model_output_') for part in parts)
+            assert not any(part.get('type') in {'parse', 'execution_logs'} for part in parts)
+            assert not any(part.get('type') in {'tool', 'tool-call'} and part.get('content') for part in parts)
+            assert not any('CMSR_REJECTED_' + nonce in str(part.get('content', '')) for part in parts)
+    finally:
+        await control(nonce, 'delete')

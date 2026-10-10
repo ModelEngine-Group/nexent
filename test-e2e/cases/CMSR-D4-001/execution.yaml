@@ -1,5 +1,8 @@
 schema_version: '1.0'
 case_id: CMSR-D4-001
+acceptance_bindings:
+  AC-STREAM: [CMSR-D4-001]
+  AC-REFRESH: [CMSR-D4-001]
 implementations:
 - framework: playwright
   file: test.spec.ts

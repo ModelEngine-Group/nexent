@@ -37,15 +37,35 @@ case:
   - order: 4
     action: Repeat with semantic repair and inspect database units.
     expected: Only corrected raw model output is stored; its fragments appeared before completion.
+  - order: 5
+    action: Return three truncated code responses with finish_reason length and inspect SSE and persisted assistant units.
+    expected: All attempts roll back; no rejected code is parsed, executed or persisted.
   expected_results:
   - Step 1 precedes its model chunks and is stored once despite retry; the explicit final-answer turn may emit Step 2 without another code action.
   - Successful text is incremental.
   - Stored units contain no failed text.
   - History matches committed SSE.
+  - Three truncated attempts roll back without executing or persisting the rejected action.
   forbidden_side_effects:
   - No failed-fragment persistence.
   - No duplicate tool execution.
   - No unexpected model request beyond the failed attempt, repaired action and separate final-answer turn.
+  - No rejected truncated action execution or persistence.
+  acceptance:
+  - id: AC-ORDER
+    description: Retry preserves Step 1 and emits live successful fragments before completion.
+    steps: [1, 2]
+    expected_results: [1, 2]
+  - id: AC-PERSISTENCE
+    description: Transport and semantic repair commit one action and retain only successful history.
+    steps: [3, 4]
+    expected_results: [3, 4]
+    forbidden_side_effects: [1, 2, 3]
+  - id: AC-REJECTION
+    description: Exhausted truncated repairs never execute or persist a model action.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [4]
   integration_boundary:
   - Agent runtime to provider fixture
   - Observer to SSE
