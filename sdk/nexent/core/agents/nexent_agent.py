@@ -272,6 +272,7 @@ class NexentAgent:
         self.observer = observer
         self.model_config_list = model_config_list
         self.stop_event = stop_event
+        self._sandbox_skill_cleanup_owner = self
         self.cancellation_scope = cancellation_scope
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
@@ -748,7 +749,7 @@ class NexentAgent:
         """Keep allocation, state, cancellation and cleanup local to one call."""
         from ..concurrency.cancellation import RunCancellationScope, RunTerminated
 
-        scope = RunCancellationScope()
+        scope = RunCancellationScope(parent_stop_event=self.stop_event)
         done = Event()
         with self._subagent_invocations_lock:
             if self._subagent_invocations_closed or self.stop_event.is_set():
@@ -778,8 +779,11 @@ class NexentAgent:
                 cancellation_scope=scope,
                 user_context=self.user_context,
             )
+            runtime._sandbox_skill_cleanup_owner = self._sandbox_skill_cleanup_owner
+            from .agent_model import copy_invocation_config
+
             agent = runtime.create_single_agent(
-                config.model_copy(deep=True), _managed_context=True, _sandbox_tree_context=tree_context,
+                copy_invocation_config(config), _managed_context=True, _sandbox_tree_context=tree_context,
             )
             runtime.set_agent(agent)
             runtime._set_runtime_metadata_for_agent_tree(agent, definition.get_runtime_metadata())
@@ -1832,8 +1836,15 @@ class NexentAgent:
 
         scope = getattr(self, "_sandbox_scope", None)
 
-        for runner in self._sandbox_skill_runners:
-            runner.cleanup()
+        skill_owner = self._sandbox_skill_cleanup_owner
+        if skill_owner is self:
+            for runner in self._sandbox_skill_runners:
+                runner.cleanup()
+        else:
+            # Shared skill paths outlive individual kernel leases. Transfer
+            # cleanup ownership before this invocation signals completion.
+            with skill_owner._subagent_invocations_lock:
+                skill_owner._sandbox_skill_runners.extend(self._sandbox_skill_runners)
         self._sandbox_skill_runners.clear()
 
         # Sync outputs to MinIO before destroying the container.
