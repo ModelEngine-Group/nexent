@@ -107,23 +107,13 @@ class WikipediaSearchTool(Tool):
 - 返回值是拼接好的文档文本，agent 以 Observation 形式接收
 - 端口通过 `--retriever_port` 指定（默认 8005）
 
-### final_answer
+### 最终回答
 
-提交最终答案，结束当前任务。
-
-```python
-class FinalAnswerTool(Tool):
-    name = "final_answer"
-    inputs = {"answer": {"type": "any"}}
-    output_type = "any"
-
-    def forward(self, answer: Any) -> Any:
-        return answer
-```
+模型使用唯一一对 `<final_answer>...</final_answer>` 提交最终答案并结束当前任务。该过程不注册工具。
 
 ### 工具注册
 
-`register_acon_tools()` 将两个类注入到 `nexent.core.tools` 和 `nexent.core.agents.nexent_agent` 模块的命名空间，使 `NexentAgent.create_local_tool()` 能通过 `globals()` 找到它们。`get_acon_tool_configs(port)` 返回对应的 `ToolConfig` 列表。
+`register_acon_tools()` 将 `WikipediaSearchTool` 注入到 `nexent.core.tools` 和 `nexent.core.agents.nexent_agent` 模块的命名空间，使 `NexentAgent.create_local_tool()` 能通过 `globals()` 找到它。`get_acon_tool_configs(port)` 返回对应的 `ToolConfig` 列表。
 
 ```python
 from tools import register_acon_tools, get_acon_tool_configs

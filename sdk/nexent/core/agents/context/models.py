@@ -17,7 +17,7 @@ class ContextItemType(str, Enum):
     SKILL = "skill"
     MEMORY = "memory"
     KNOWLEDGE_BASE = "knowledge_base"
-    MANAGED_AGENT = "managed_agent"
+    WORKER_AGENT = "worker_agent"
     EXTERNAL_AGENT = "external_agent"
     HISTORY_SUMMARY = "history_summary"
     CONVERSATION_TURN = "conversation_turn"
@@ -32,7 +32,7 @@ class ContextSection(IntEnum):
     SYSTEM = 0
     TOOL = 10
     SKILL = 20
-    MANAGED_AGENT = 30
+    WORKER_AGENT = 30
     EXTERNAL_AGENT = 40
     MEMORY = 50
     KNOWLEDGE_BASE = 60
@@ -76,7 +76,7 @@ class ContextItemInput(BaseModel):
         required_fields = {
             ContextItemType.TOOL: ("name",),
             ContextItemType.SKILL: ("name",),
-            ContextItemType.MANAGED_AGENT: ("name",),
+            ContextItemType.WORKER_AGENT: ("name",),
             ContextItemType.EXTERNAL_AGENT: ("agent_id", "name"),
             ContextItemType.HISTORY_SUMMARY: ("summary", "covered_through_message_id"),
             ContextItemType.CONVERSATION_TURN: (
@@ -138,16 +138,16 @@ class ContextItem(BaseModel):
         return item_class(**data)
 
     @property
-    def layout_key(self) -> tuple[int, int, int, str]:
+    def layout_key(self) -> tuple[int, int, str]:
         # Current-run tasks, plans and actions share one timeline. Grouping them
         # by type moves later human input ahead of the actions it was correcting.
         run_order = self.metadata.get("run_order")
         if isinstance(run_order, int) and self.type in {
             ContextItemType.CURRENT_TASK, ContextItemType.CURRENT_PLANNING, ContextItemType.CURRENT_ACTION,
         }:
-            return int(ContextSection.CURRENT_TASK), run_order, -self.priority, self.id
+            return int(ContextSection.CURRENT_TASK), run_order, self.id
         order = self.metadata.get("layout_order", 0)
-        return int(self.SECTION), int(order), -self.priority, self.id
+        return int(self.SECTION), int(order), self.id
 
     @property
     def supports_compact(self) -> bool:
@@ -223,14 +223,14 @@ class SkillContextItem(ContextItem):
         return _compact_skill(content)
 
 
-class ManagedAgentContextItem(ContextItem):
-    ITEM_TYPE = ContextItemType.MANAGED_AGENT
-    SECTION = ContextSection.MANAGED_AGENT
+class WorkerAgentContextItem(ContextItem):
+    ITEM_TYPE = ContextItemType.WORKER_AGENT
+    SECTION = ContextSection.WORKER_AGENT
     REQUIRED = True
     SUPPORTS_COMPACT = True
 
     def _build_compact_content(self, content: dict[str, Any]) -> dict[str, Any]:
-        return _compact_managed_agent(content)
+        return _compact_worker_agent(content)
 
 
 class ExternalAgentContextItem(ContextItem):
@@ -305,7 +305,7 @@ _ITEM_CLASSES: dict[ContextItemType, type[ContextItem]] = {
         SystemContextItem,
         ToolContextItem,
         SkillContextItem,
-        ManagedAgentContextItem,
+        WorkerAgentContextItem,
         ExternalAgentContextItem,
         MemoryContextItem,
         KnowledgeBaseContextItem,
@@ -375,7 +375,7 @@ def _compact_memory(content: dict[str, Any]) -> dict[str, Any]:
     return {name: deepcopy(content[name]) for name in ("memory", "content", "text", "memory_level", "source") if name in content}
 
 
-def _compact_managed_agent(content: dict[str, Any]) -> dict[str, Any]:
+def _compact_worker_agent(content: dict[str, Any]) -> dict[str, Any]:
     return {name: deepcopy(content[name]) for name in ("name", "description", "tools", "requirements") if name in content}
 
 

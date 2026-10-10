@@ -24,7 +24,7 @@ _MINIMUM_FIDELITY_MAP: Dict[ContextItemType, RepresentationTier] = {
     ContextItemType.SKILL: RepresentationTier.STRUCTURED,
     ContextItemType.MEMORY: RepresentationTier.STRUCTURED,
     ContextItemType.KNOWLEDGE_BASE: RepresentationTier.COMPRESSED,
-    ContextItemType.MANAGED_AGENT: RepresentationTier.STRUCTURED,
+    ContextItemType.WORKER_AGENT: RepresentationTier.STRUCTURED,
     ContextItemType.EXTERNAL_AGENT: RepresentationTier.STRUCTURED,
 }
 
@@ -71,7 +71,7 @@ class ContextProjector:
         if isinstance(component, KnowledgeBaseComponent):
             return self._project_knowledge_base(component)
         if isinstance(component, ManagedAgentsComponent):
-            return self._project_managed_agents(component)
+            return self._project_worker_agents(component)
         if isinstance(component, ExternalAgentsComponent):
             return self._project_external_agents(component)
         return []
@@ -188,17 +188,17 @@ class ContextProjector:
             )
         ]
 
-    def _project_managed_agents(self, component: ManagedAgentsComponent) -> List[ContextItem]:
+    def _project_worker_agents(self, component: ManagedAgentsComponent) -> List[ContextItem]:
         items: List[ContextItem] = []
         for agent in component.agents:
             agent_name = agent.get("name", "unknown")
             items.append(
                 ContextItem(
-                    item_id=_make_item_id(ContextItemType.MANAGED_AGENT, agent_name),
-                    item_type=ContextItemType.MANAGED_AGENT,
+                    item_id=_make_item_id(ContextItemType.WORKER_AGENT, agent_name),
+                    item_type=ContextItemType.WORKER_AGENT,
                     source_refs=[agent_name],
                     authority_tier=AuthorityTier.PLATFORM,
-                    minimum_fidelity=_MINIMUM_FIDELITY_MAP[ContextItemType.MANAGED_AGENT],
+                    minimum_fidelity=_MINIMUM_FIDELITY_MAP[ContextItemType.WORKER_AGENT],
                     current_representation=RepresentationTier.FULL,
                     content=agent,
                     token_estimate=_estimate_item_tokens(agent),

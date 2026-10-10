@@ -87,7 +87,7 @@ nexent/
 - **目录**：`sdk/nexent/core/agents/`
 - **核心功能**：智能体运行、工具调用、多智能体协作、记忆、流式输出和沙箱工作区
 - **配置方式**：后端服务读取平台配置，再通过参数传给 SDK；SDK 不直接读取部署环境变量
-- **系统提示词**：位于 `backend/prompts/`
+- **系统提示词**：内置资源位于 `sdk/nexent/core/prompts/`，Backend 传入业务参数
 - **详细信息**：查看 [智能体模块](../sdk/core/agents)
 
 ### 🛠️ 工具开发

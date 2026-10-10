@@ -13,13 +13,9 @@ logger = logging.getLogger("delete_file_tool")
 class DeleteFileTool(Tool):
     """File deletion tool for deleting a single file"""
     name = "delete_file"
-    description = "Delete a single file at the specified path. " \
-                  "Path should be relative to the workspace (e.g., 'documents/file.txt'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "This operation is irreversible and only works on individual files, not directories. " \
-                  "Use with caution as deleted files cannot be recovered."
+    description = "Delete one workspace file. This action is irreversible and does not delete directories."
 
-    description_zh = "删除指定路径的单个文件，路径需为工作区相对路径（例如，'documents/file.txt'），出于安全考虑，不支持绝对路径。该操作仅对单个文件生效，不支持删除目录。删除的文件无法恢复，使用时请谨慎操作。"
+    description_zh = "删除单个工作区文件。此操作不可恢复，也不会删除目录。"
 
     inputs = {
         "file_path": {
@@ -57,6 +53,7 @@ class DeleteFileTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
+        self.workspace_mapping = None
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
@@ -70,6 +67,8 @@ class DeleteFileTool(Tool):
         Raises:
             Exception: If path is outside workspace or invalid
         """
+        if self.workspace_mapping is not None:
+            return str(self.workspace_mapping.resolve_file(file_path, self.init_path))
         # Check for absolute path
         if os.path.isabs(file_path):
             abs_path = os.path.abspath(file_path)
@@ -135,7 +134,9 @@ class DeleteFileTool(Tool):
             success_msg = {
                 "status": "success",
                 "file_path": relative_path,
-                "absolute_path": abs_path,
+                "absolute_path": (
+                    str(self.workspace_mapping.to_container(abs_path)) if self.workspace_mapping else abs_path
+                ),
                 "file_name": file_name,
                 "file_size_bytes": file_size,
                 "message": f"File deleted successfully: {relative_path}"

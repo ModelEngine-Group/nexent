@@ -1,8 +1,13 @@
 """Terminal clarification parsing rejects the complete block before execution."""
 import pytest
-
-from nexent.core.agents.clarification import choose_clarification_tool_name, render_question_text
-from nexent.core.agents.output_protocol import ModelOutputProtocolError, extract_clarification_form
+from nexent.core.agents.clarification import (
+    choose_clarification_tool_name,
+    render_question_text,
+)
+from nexent.core.agents.output_protocol import (
+    ModelOutputProtocolError,
+    extract_clarification_form,
+)
 
 QUESTIONS = "[{'id': 'scope', 'type': 'text', 'title': 'Which region?'}]"
 
@@ -40,7 +45,7 @@ def test_invalid_form_is_a_repairable_protocol_error(code):
     assert error.value.reason.value == "malformed_action"
 
 
-def test_schema_failure_teaches_option_limit_without_echoing_rejected_values():
+def test_schema_failure_teaches_yaml_option_contract_without_echoing_rejected_values():
     question = {
         "id": "scope", "type": "single_choice", "title": "Which scope?",
         "options": [{"id": f"option_{index}", "label": "private label"} for index in range(13)],
@@ -51,7 +56,7 @@ def test_schema_failure_teaches_option_limit_without_echoing_rejected_values():
     assert error.value.reason.value == "invalid_clarification_form"
     assert "questions.0.options: too_long" in error.value.repair_instruction
     assert "2-12 options" in error.value.repair_instruction
-    assert "do not add an extra Other option" in error.value.repair_instruction
+    assert "allow_other" in error.value.repair_instruction
     assert "private label" not in error.value.repair_instruction
 
 

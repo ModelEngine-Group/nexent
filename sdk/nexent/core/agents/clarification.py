@@ -4,43 +4,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ..prompts import load_prompt
+
 
 Identifier = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")]
 
-CLARIFICATION_SCHEMA_GUIDANCE = (
-    "Each question has a unique id, type (text/single_choice/multiple_choice), a distinct title and required. "
-    "Question and option IDs use 1-64 ASCII letters, digits, underscores or hyphens. "
-    "Titles use 1-500 characters; option labels use 1-300 characters. "
-    "Choice questions have 2-12 options with unique IDs. Put options [{id,label}] and allow_other "
-    "directly on the question object, never inside a nested choices object. "
-    "Use allow_other=True for free-text Other input; do not add an extra Other option. "
-    "Text questions must omit options and allow_other or use options=[] and allow_other=False. "
-    "Use Python True/False for booleans, and no additional fields. "
-)
-
-CLARIFICATION_POLICY = (
-    "Human clarification is optional, not a required first step. Answer clear requests directly. "
-    "First use the user's message, conversation history, attachments and available tools. "
-    "An uploaded report with a request to analyze it is sufficient intent: read and analyze it first. "
-    "Do not ask about optional preferences, information already supplied, or facts tools can retrieve. "
-    "Only call ask_user when a missing key fact prevents a correct or safe next action, or when materially "
-    "different interpretations cannot reasonably be resolved from context. "
-    "If clarification is necessary, call ask_user(questions=[...]) once with one concise structured card. "
-    "Normally ask up to 3 key questions; use 4-5 only for independent essential blockers. "
-    "If only 1-2 facts are missing, ask only those; never pad the form. Five questions is the maximum. "
-    "Use short titles in the user's language, one fact per question, and useful choices where possible. "
-    + CLARIFICATION_SCHEMA_GUIDANCE
-    + "Example: "
-    "ask_user(questions=[{'id':'topic','type':'text','title':'What is the notice about?','required':True}]). "
-    "Do not print the same questions in chat or use final_answer to solicit input. "
-    "Emit one standalone call with literal question data inside <code>...</code>. "
-    "This displays a clarification card and ends the current execution. It does not return an answer. "
-    "Do not assign its result or place actions around it. The user submits the card as a new query "
-    "in the same conversation. "
-    "After the user replies, use their answers without repeating or rephrasing the questions. "
-    "For any remaining unknowns, proceed with explicit reasonable assumptions or explain what cannot safely "
-    "be concluded; never fabricate critical facts or request passwords/credentials."
-)
+CLARIFICATION_SCHEMA_GUIDANCE = load_prompt("en", "agent/human_interaction")["questions_description"]
+CLARIFICATION_POLICY = load_prompt("en", "agent/human_interaction")["clarification_policy"]
 
 
 class ClarificationOption(BaseModel):
@@ -98,9 +68,10 @@ class ClarificationForm(BaseModel):
         return self
 
 
-def clarification_policy(tool_name: str) -> str:
+def clarification_policy(tool_name: str, language: str = "en") -> str:
     """Describe the selected terminal form name without registering a Python tool."""
-    return CLARIFICATION_POLICY.replace("ask_user", tool_name)
+    policy = load_prompt(language, "agent/human_interaction")["clarification_policy"]
+    return policy.replace("ask_user", tool_name)
 
 
 def render_question_text(form: ClarificationForm) -> str:

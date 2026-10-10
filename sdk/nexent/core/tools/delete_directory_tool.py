@@ -14,13 +14,9 @@ logger = logging.getLogger("delete_directory_tool")
 class DeleteDirectoryTool(Tool):
     """Directory deletion tool for deleting directories and their contents"""
     name = "delete_directory"
-    description = "Delete a directory at the specified path. " \
-                  "Path should be relative to the workspace (e.g., 'documents/subfolder'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "This operation is irreversible and will delete the directory and all its contents. " \
-                  "Use with caution as deleted directories cannot be recovered."
+    description = "Permanently delete a workspace directory and all its contents."
 
-    description_zh = "删除指定路径的目录，路径需为工作区相对路径（例如，'documents/subfolder'），出于安全考虑，不支持绝对路径。该操作不可逆，会删除目标目录及其中所有内容，删除后无法恢复，使用时请谨慎操作。"
+    description_zh = "永久删除工作区目录及其全部内容，此操作不可恢复。"
 
     inputs = {
         "directory_path": {

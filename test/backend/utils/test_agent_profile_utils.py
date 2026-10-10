@@ -116,6 +116,28 @@ def _install_stubs():
     sys.modules["management.services.skill.service"] = skill_service
     services_pkg.skill_service = skill_service
 
+    sdk_root = _REPO_ROOT / "sdk/nexent"
+    for package_name, package_path in (
+        ("nexent", sdk_root),
+        ("nexent.core", sdk_root / "core"),
+        ("nexent.core.prompts", sdk_root / "core/prompts"),
+    ):
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(package_path)]
+        sys.modules[package_name] = package
+
+    def load_test_prompt(language, path):
+        import yaml
+        source = sdk_root / "core/prompts" / language / f"{path}.yaml"
+        return yaml.safe_load(source.read_text(encoding="utf-8"))
+
+    def render_test_prompt(source, parameters):
+        from jinja2 import Environment, StrictUndefined
+        return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+
+    sys.modules["nexent.core.prompts"].load_prompt = load_test_prompt
+    sys.modules["nexent.core.prompts"].render_prompt_text = render_test_prompt
+
     return _StubBundle(agent_db, tool_db, knowledge_db, client, db_models, skill_service)
 
 

@@ -13,13 +13,9 @@ logger = logging.getLogger("create_directory_tool")
 class CreateDirectoryTool(Tool):
     """Directory creation tool for creating directories"""
     name = "create_directory"
-    description = "Create a directory at the specified path. " \
-                  "Path should be relative to the workspace (e.g., 'documents/subfolder'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "Will create parent directories if they don't exist. " \
-                  "If the target directory already exists, the operation will still succeed without error."
+    description = "Create a workspace directory; an existing directory is left unchanged."
 
-    description_zh = "在指定路径创建目录，路径需为工作区相对路径（例如，'documents/subfolder'），出于安全考虑，不支持绝对路径，父目录不存在时将自动创建。若目标目录已存在，操作仍将完成且不会报错。"
+    description_zh = "在工作区创建目录；目标目录已存在时保持原状。"
 
     inputs = {
         "directory_path": {

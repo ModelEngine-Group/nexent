@@ -21,7 +21,7 @@ from .conftest import assert_child, by_name
 def config(name="root", display_name="主智能体", children=()):
     return AgentConfig(
         name=name, display_name=display_name, description="Warm-up test", model_name="test-model",
-        tools=[], managed_agents=list(children),
+        tools=[], worker_agents=list(children),
     )
 
 

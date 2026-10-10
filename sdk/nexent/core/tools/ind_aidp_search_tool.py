@@ -78,6 +78,7 @@ class IndependentAidpSearchTool(Tool):
     """Search an independently configured AIDP knowledge-base scope."""
 
     name = "ind_aidp_search"
+    is_user_selectable = True
     description = (
         "Searches independently configured AIDP knowledge bases with FusionSearch. "
         "The configured knowledge bases are the default scope; callers may provide a "

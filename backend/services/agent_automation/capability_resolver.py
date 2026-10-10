@@ -101,16 +101,16 @@ async def resolve_agent_capabilities(
             for skill in getattr(component, "skills", []) or []:
                 skill_bindings.append(_skill_binding(skill))
 
-    managed_bindings = [
-        _agent_binding(agent, CapabilityType.MANAGED_AGENT)
-        for agent in getattr(agent_config, "managed_agents", []) or []
+    worker_bindings = [
+        _agent_binding(agent, CapabilityType.WORKER_AGENT)
+        for agent in getattr(agent_config, "worker_agents", []) or []
     ]
     a2a_bindings = [
         _agent_binding(agent, CapabilityType.EXTERNAL_A2A_AGENT)
         for agent in getattr(agent_config, "external_a2a_agents", []) or []
     ]
 
-    all_bindings = tool_bindings + skill_bindings + managed_bindings + a2a_bindings
+    all_bindings = tool_bindings + skill_bindings + worker_bindings + a2a_bindings
     lower_instruction = instruction.lower()
     missing: List[Dict[str, Any]] = []
 
@@ -163,7 +163,7 @@ async def resolve_agent_capabilities(
             "description": getattr(agent_config, "description", ""),
             "tools_count": len(tool_bindings),
             "skills_count": len(skill_bindings),
-            "managed_agents_count": len(managed_bindings),
+            "managed_agents_count": len(worker_bindings),
             "external_a2a_agents_count": len(a2a_bindings),
         },
         executable=len(missing) == 0,

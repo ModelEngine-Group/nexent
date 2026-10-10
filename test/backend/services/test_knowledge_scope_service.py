@@ -14,7 +14,6 @@ from backend.services.knowledge_scope_service import (
     _resolve_local_override,
     _tool_default,
     _walk_agent_tree,
-    build_runtime_knowledge_policy,
     build_runtime_knowledge_resources,
     get_agent_knowledge_capabilities,
     resolve_root_version,
@@ -35,7 +34,7 @@ def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker
         )
 
     root = node("system:root", "root-index")
-    root.managed_agents = [node("system:child", "child-index")]
+    root.worker_agents = [node("system:child", "child-index")]
     before = root.model_dump()
     walk = mocker.patch("backend.services.knowledge_scope_service._walk_agent_tree")
     version = mocker.patch("backend.services.knowledge_scope_service.resolve_root_version")
@@ -45,7 +44,7 @@ def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker
     scope = ConversationKnowledgeScopeRequest.model_validate({"local": {"mode": "inherit"}, "aidp": {"mode": "disabled"}})
     compiled, resolution = resolve_executable_knowledge_scope(root, scope, tenant_id="tenant", user_id="user")
     assert compiled.tools[0].params["index_names"] == ["root-index"]
-    assert compiled.managed_agents[0].tools[0].params["index_names"] == ["child-index"]
+    assert compiled.worker_agents[0].tools[0].params["index_names"] == ["child-index"]
     assert set(resolution.tool_params.agents) == {"system:root", "system:child"}
     assert root.model_dump() == before
     walk.assert_not_called()
@@ -54,7 +53,7 @@ def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker
     disabled = scope.model_copy(deep=True)
     disabled.local.mode = "disabled"
     cleared, _ = resolve_executable_knowledge_scope(root, disabled, tenant_id="tenant", user_id="user")
-    for agent in [cleared, *cleared.managed_agents]:
+    for agent in [cleared, *cleared.worker_agents]:
         assert agent.tools[0].params["index_names"] == []
         assert agent.tools[0].metadata["allowed_index_names"] == []
         assert agent.tools[0].metadata["untouched"] == "value"
@@ -67,7 +66,7 @@ def test_executable_knowledge_rejects_ambiguous_runtime_identity(child_ref, mock
     from nexent.core.agents.agent_model import AgentConfig
 
     root = AgentConfig(runtime_ref="system:root", name="root", description="test", model_name="model", tools=[])
-    root.managed_agents = [root.model_copy(update={"runtime_ref": child_ref})]
+    root.worker_agents = [root.model_copy(update={"runtime_ref": child_ref})]
     resolve = mocker.patch("backend.services.knowledge_scope_service.resolve_knowledge_scope")
     with pytest.raises(ValidationError):
         resolve_executable_knowledge_scope(root, ConversationKnowledgeScopeRequest(), tenant_id="tenant", user_id="user")
@@ -266,7 +265,7 @@ def test_static_scope_scanner_uses_high_confidence_assignment_pattern():
     assert not STATIC_SCOPE_PATTERN.search("Do not use fixed index_names values")
 
 
-def test_runtime_resource_names_are_sanitized_and_bounded():
+def test_ut_be_fps_014_runtime_resource_names_are_sanitized_and_bounded():
     resolved = ResolvedKnowledgeScope(
         desired_scope={},
         tool_params=ToolParamsRequest(agents={}),
@@ -274,13 +273,17 @@ def test_runtime_resource_names_are_sanitized_and_bounded():
         aidp_display_names=[f"aidp-{index}" for index in range(20)],
     )
 
-    content = build_runtime_knowledge_resources(resolved, "en")
+    data = build_runtime_knowledge_resources(resolved)
 
-    assert "first name" in content
-    assert "\x00" not in content
-    assert "\u200b" not in content
-    assert "10. aidp-9" in content
-    assert "11. aidp-10" not in content
+    assert "first name" in data["local_display_names"]
+    assert "\x00" not in str(data)
+    assert "\u200b" not in str(data)
+    assert len(data["aidp_display_names"]) == 10
+    assert "aidp-10" not in data["aidp_display_names"]
+    assert set(data) == {
+        "local_capable", "aidp_capable", "local_disabled", "aidp_disabled",
+        "local_display_names", "aidp_display_names",
+    }
 
 
 @patch("backend.services.knowledge_scope_service.query_current_version_no", return_value=8)
@@ -498,21 +501,23 @@ def test_missing_capability_warns_for_explicit_override(_mock_local, _mock_tree)
 
 
 def test_runtime_policy_and_empty_resource_variants():
-    assert "当前会话" in build_runtime_knowledge_policy("zh")
-    assert "platform-resolved" in build_runtime_knowledge_policy("en")
+    from nexent.core.agents.prompt.knowledge import render_knowledge_scope_resources
+
     resolved = ResolvedKnowledgeScope(
         desired_scope={},
         tool_params=ToolParamsRequest(agents={}),
     )
-    zh_content = build_runtime_knowledge_resources(resolved, "zh")
+    zh_content = render_knowledge_scope_resources("zh", build_runtime_knowledge_resources(resolved))
     assert "当前会话没有可用知识库资源" in zh_content
     resolved.local_disabled = True
     resolved.aidp_disabled = True
-    en_content = build_runtime_knowledge_resources(resolved, "en")
+    en_content = render_knowledge_scope_resources("en", build_runtime_knowledge_resources(resolved))
     assert "Knowledge retrieval is disabled for this conversation" in en_content
 
 
 def test_runtime_resources_omit_unsupported_sources():
+    from nexent.core.agents.prompt.knowledge import render_knowledge_scope_resources
+
     resolved = ResolvedKnowledgeScope(
         desired_scope={},
         tool_params=ToolParamsRequest(agents={}),
@@ -521,7 +526,7 @@ def test_runtime_resources_omit_unsupported_sources():
         aidp_capable=False,
     )
 
-    content = build_runtime_knowledge_resources(resolved, "zh")
+    content = render_knowledge_scope_resources("zh", build_runtime_knowledge_resources(resolved))
 
     assert "当前会话已禁用知识库检索" in content
     assert "本地知识库：当前会话已禁用" not in content
@@ -529,6 +534,8 @@ def test_runtime_resources_omit_unsupported_sources():
 
 
 def test_runtime_resources_only_describe_effective_source():
+    from nexent.core.agents.prompt.knowledge import render_knowledge_scope_resources
+
     resolved = ResolvedKnowledgeScope(
         desired_scope={},
         tool_params=ToolParamsRequest(agents={}),
@@ -538,7 +545,7 @@ def test_runtime_resources_only_describe_effective_source():
         aidp_capable=True,
     )
 
-    content = build_runtime_knowledge_resources(resolved, "zh")
+    content = render_knowledge_scope_resources("zh", build_runtime_knowledge_resources(resolved))
 
     assert "本地知识库：" in content
     assert "本地1" in content

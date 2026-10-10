@@ -170,7 +170,7 @@ async def test_save_config_success(config_mocks):
 
     # Execute
     from backend.apps.config_sync_app import save_config
-    result = await save_config(global_config, mock_auth_header)
+    result = await save_config(global_config, None, mock_auth_header)
 
     # Assert
     assert isinstance(result, JSONResponse)
@@ -203,7 +203,7 @@ async def test_save_config_with_error(config_mocks):
     # Execute and Assert
     from backend.apps.config_sync_app import save_config
     with pytest.raises(HTTPException) as exc_info:
-        await save_config(global_config, mock_auth_header)
+        await save_config(global_config, None, mock_auth_header)
 
     assert exc_info.value.status_code == 400
     assert "Failed to save configuration" in str(exc_info.value.detail)
@@ -257,7 +257,7 @@ async def test_save_config_empty_auth_header(config_mocks):
 
     # Execute
     from backend.apps.config_sync_app import save_config
-    result = await save_config(global_config, mock_auth_header)
+    result = await save_config(global_config, None, mock_auth_header)
 
     # Assert
     assert isinstance(result, JSONResponse)
@@ -309,7 +309,7 @@ async def test_save_config_token_expired(config_mocks):
     from backend.apps.config_sync_app import save_config
 
     with pytest.raises(HTTPException) as exc_info:
-        await save_config(global_config, "Bearer expired-token")
+        await save_config(global_config, None, "Bearer expired-token")
 
     assert exc_info.value.status_code == 401
 
@@ -327,4 +327,36 @@ async def test_load_config_token_expired(config_mocks):
         await load_config("Bearer expired-token", MagicMock())
 
     assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_save_config_emits_audit_entry(config_mocks, caplog):
+    """Successful global config save records field names, never values."""
+    import logging
+
+    config_mocks['get_current_user_id'].return_value = (
+        "test_user_id", "test_tenant_id")
+    config_mocks['save_config_impl'].return_value = None
+    global_config = MagicMock()
+    global_config.model_dump.return_value = {
+        "app": {"name": "Test App", "language": "en"},
+        "models": {"llm_id": "gpt-x"},
+    }
+
+    from backend.apps.config_sync_app import save_config
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        result = await save_config(global_config, None, "Bearer test-token")
+
+    assert isinstance(result, JSONResponse)
+    assert result.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=global_config_save" in messages[0]
+    assert "result=success" in messages[0]
+    assert "user_id=test_user_id" in messages[0]
+    assert '"field_keys":["app.language","app.name","models.llm_id"]' in messages[0]
+    assert "Test App" not in messages[0]
+    assert "gpt-x" not in messages[0]
 
