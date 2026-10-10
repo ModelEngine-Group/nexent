@@ -27,7 +27,8 @@ export const useAidpKnowledgeList = (
   page: number,
   pageSize: number,
   keyword: string,
-  enabled = true
+  enabled = true,
+  pollingPaused = false
 ) => {
   const scope = useAidpQueryScope();
   return useQuery({
@@ -36,6 +37,33 @@ export const useAidpKnowledgeList = (
     enabled: scope.enabled && enabled,
     staleTime: 30_000,
     refetchOnMount: "always",
+    refetchInterval: pollingPaused ? false : 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: pollingPaused ? false : "always",
+    retry: false,
+  });
+};
+
+export const useAidpKnowledgeFiles = (
+  id: string,
+  page: number,
+  pageSize: number,
+  keyword: string
+) => {
+  const scope = useAidpQueryScope();
+  return useQuery({
+    queryKey: [...scope.key, "files", id, { page, pageSize, keyword }],
+    queryFn: ({ signal }) =>
+      aidpKnowledgeService.listIngestedFiles(
+        id,
+        page,
+        pageSize,
+        keyword,
+        signal
+      ),
+    enabled: scope.enabled && !!id,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
     retry: false,
   });
 };
@@ -69,7 +97,11 @@ export const useAidpKnowledgeCache = () => {
   const { key } = useAidpQueryScope();
   const queryClient = useQueryClient();
   const refreshLists = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: [...key, "list"] }),
+    () =>
+      queryClient.invalidateQueries(
+        { queryKey: [...key, "list"] },
+        { cancelRefetch: false }
+      ),
     [key, queryClient]
   );
   const updateKnowledgeBase = useCallback(

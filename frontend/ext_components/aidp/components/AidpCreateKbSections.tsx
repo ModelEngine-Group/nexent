@@ -489,7 +489,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                   message: t("aidpKnowledge.createChunkTokenNumRequired"),
                 },
                 {
-                  type: "number",
+                  type: "integer",
                   min: CHUNK_TOKEN_MIN,
                   max: CHUNK_TOKEN_MAX,
                   message: t("aidpKnowledge.createChunkTokenNumRange", {
@@ -670,7 +670,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                 t("aidpKnowledge.createTopk"),
                 t("aidpKnowledge.createTopkHint")
               )}
-              rules={[{ required: true, type: "number", min: 1, max: 100 }]}
+              rules={[{ required: true, type: "integer", min: 1, max: 100 }]}
             >
               <AidpSliderNumberField
                 min={1}

@@ -27,6 +27,11 @@ const AidpSliderNumberField: React.FC<AidpSliderNumberFieldProps> = ({
   ariaLabel,
 }) => {
   const safeValue = typeof value === "number" ? value : min;
+  const integer = step === 1 && precision === undefined;
+  const changeValue = (nextValue: number | null) =>
+    onChange?.(
+      integer && nextValue !== null ? Math.round(nextValue) : nextValue
+    );
 
   return (
     <div className="w-full">
@@ -41,7 +46,7 @@ const AidpSliderNumberField: React.FC<AidpSliderNumberFieldProps> = ({
             tooltip={{
               formatter: (sliderValue) => `${sliderValue}${unit || ""}`,
             }}
-            onChange={(nextValue) => onChange?.(nextValue)}
+            onChange={changeValue}
             aria-label={ariaLabel}
           />
           <div className={styles.sliderMarks}>
@@ -56,10 +61,11 @@ const AidpSliderNumberField: React.FC<AidpSliderNumberFieldProps> = ({
             min={min}
             max={max}
             step={step}
-            precision={precision}
+            precision={integer ? 0 : precision}
+            changeOnBlur
             controls={false}
             value={value}
-            onChange={onChange}
+            onChange={changeValue}
           />
           <span className={styles.sliderUnit}>{unit || ""}</span>
         </div>

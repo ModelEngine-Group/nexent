@@ -16,6 +16,7 @@ import type { AidpGraphConfig } from "@/ext_components/aidp/services/aidpKnowled
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { ApiError } from "@/services/api";
 import { useErrorHandler } from "@/hooks/useErrorHandler";
+import { getAidpErrorMessage } from "../services/aidpErrorUtils";
 import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
 import {
   useAidpModels,
@@ -275,11 +276,13 @@ const AidpCreateKbPage: React.FC = () => {
       ) {
         return;
       }
-      const result = handleError(error, {
+      handleError(error, {
         showMessage: false,
         handleSession: false,
       });
-      message.error(result.message);
+      message.error(
+        getAidpErrorMessage(error, t, t("aidpKnowledge.createKbFailed"))
+      );
     } finally {
       setValidating(false);
       submittingRef.current = false;

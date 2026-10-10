@@ -9,8 +9,8 @@ import { App, Modal } from "antd";
 import { KB_SEARCH_DEBOUNCE_MS } from "@/const/knowledgeBase";
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import log from "@/lib/logger";
-import { ApiError } from "@/services/api";
 import { useErrorHandler } from "@/hooks/useErrorHandler";
+import { getAidpErrorMessage } from "../services/aidpErrorUtils";
 import {
   useAidpKnowledgeCache,
   useAidpKnowledgeList,
@@ -33,7 +33,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const params = useParams();
   const searchParams = useSearchParams();
   const locale = (params?.locale as string) || "zh";
-  const { getI18nErrorMessage, handleError } = useErrorHandler();
+  const { handleError } = useErrorHandler();
   const { refreshLists, updateKnowledgeBase, fetchKnowledgeBase } =
     useAidpKnowledgeCache();
   const deleteMutation = useDeleteAidpKnowledgeBase();
@@ -44,6 +44,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(
     null
   );
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -90,13 +91,13 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     kbPage,
     kbPageSize,
     listParams.keyword,
-    !selectedKb
+    !selectedKb,
+    !!quickImportKb || deleteConfirmOpen
   );
-  const kbs = listQuery.isError ? [] : (listQuery.data?.value ?? []);
-  const listErrorMessage =
-    listQuery.error instanceof ApiError
-      ? getI18nErrorMessage(listQuery.error.code)
-      : listQuery.error?.message;
+  const kbs = listQuery.data?.value ?? [];
+  const listErrorMessage = listQuery.error
+    ? getAidpErrorMessage(listQuery.error, t, t("aidpKnowledge.listLoadFailed"))
+    : undefined;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -158,14 +159,16 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         setSelectedKb(item);
       } catch (error) {
         log.error("Failed to open AIDP knowledge base from query:", error);
-        const result = handleError(error, {
+        handleError(error, {
           showMessage: false,
           handleSession: false,
         });
-        message.error(result.message);
+        message.error(
+          getAidpErrorMessage(error, t, t("aidpKnowledge.detailLoadFailed"))
+        );
       }
     },
-    [fetchKnowledgeBase, handleError, message]
+    [fetchKnowledgeBase, handleError, message, t]
   );
 
   const requestedKbId = searchParams?.get("kb") || null;
@@ -186,6 +189,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
 
   const handleDeleteKb = useCallback(
     (kb: AidpKnowledgeBaseItem) => {
+      setDeleteConfirmOpen(true);
       Modal.confirm({
         title: t("aidpKnowledge.confirmDeleteTitle"),
         content: t("aidpKnowledge.confirmDeleteContent", { name: kb.kds_name }),
@@ -193,17 +197,20 @@ const AidpKnowledgeConfiguration: React.FC = () => {
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
         centered: true,
+        afterClose: () => setDeleteConfirmOpen(false),
         onOk: async () => {
           try {
             await deleteMutation.mutateAsync(kb.kds_id);
             message.success(t("aidpKnowledge.deleteKbSuccess"));
             setSelectedKb(null);
           } catch (error) {
-            const result = handleError(error, {
+            handleError(error, {
               showMessage: false,
               handleSession: false,
             });
-            message.error(result.message);
+            message.error(
+              getAidpErrorMessage(error, t, t("aidpKnowledge.deleteKbFailed"))
+            );
             throw error;
           }
         },
@@ -248,13 +255,9 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           isLoading={listQuery.isFetching}
           loadFailed={listQuery.isError}
           loadError={listErrorMessage}
-          total={
-            listQuery.isError ? 0 : (listQuery.data?.total_count ?? kbs.length)
-          }
-          totalReliable={
-            !listQuery.isError && listQuery.data?.total_reliable !== false
-          }
-          hasMore={!listQuery.isError && (listQuery.data?.has_more ?? false)}
+          total={listQuery.data?.total_count ?? kbs.length}
+          totalReliable={listQuery.data?.total_reliable !== false}
+          hasMore={listQuery.data?.has_more ?? false}
           currentPage={kbPage}
           pageSize={kbPageSize}
           keyword={kbKeyword}

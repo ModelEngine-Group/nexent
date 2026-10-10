@@ -99,6 +99,9 @@ _CHANNEL_ROOT = "/aidp/knowledge"
 # Overridable at runtime through POST /_mock/processing-seconds.
 _PROCESSING_SECONDS = 8.0
 _UPLOAD_SECONDS = 0.0
+_FILE_QUERY_SECONDS = 0.0
+_FILE_QUERY_FAIL = False
+_FILE_DELETE_FAIL = False
 
 # Entries one history page returns. Real AIDP pages the channel directory, so the
 # backend has to walk the pages; keep this small to exercise that locally.
@@ -760,6 +763,24 @@ def set_upload_seconds(
     return JSONResponse(content={"upload_seconds": _UPLOAD_SECONDS})
 
 
+@app.post("/_mock/file-faults")
+def set_file_faults(
+    query_seconds: float = Query(0.0, ge=0.0, le=30.0),
+    query_fail: bool = Query(False),
+    delete_fail: bool = Query(False),
+) -> JSONResponse:
+    """Configure transient file-page acceptance scenarios without changing data."""
+    global _FILE_QUERY_SECONDS, _FILE_QUERY_FAIL, _FILE_DELETE_FAIL
+    _FILE_QUERY_SECONDS = query_seconds
+    _FILE_QUERY_FAIL = query_fail
+    _FILE_DELETE_FAIL = delete_fail
+    return JSONResponse(content={
+        "query_seconds": query_seconds,
+        "query_fail": query_fail,
+        "delete_fail": delete_fail,
+    })
+
+
 @app.put(_KB_PREFIX)
 def create_knowledge_base(
     body: CreateKbBody,
@@ -956,6 +977,13 @@ def list_documents(
     """
     _check_auth(authorization)
 
+    if _FILE_QUERY_SECONDS:
+        time.sleep(_FILE_QUERY_SECONDS)
+    if _FILE_QUERY_FAIL:
+        raise HTTPException(503, detail={
+            "code": "130501", "message": "Mock file query service unavailable",
+        })
+
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
@@ -1012,8 +1040,12 @@ def remove_documents(
             (document for document in remaining if document.get("file_uuid") == file_uuid),
             None,
         )
-        if matched is None:
-            failed_list.append({"file_uuid": file_uuid})
+        if matched is None or _FILE_DELETE_FAIL:
+            failed_list.append({
+                "file_uuid": file_uuid,
+                **({"code": "130501", "message": "Mock file removal failed"}
+                   if _FILE_DELETE_FAIL else {}),
+            })
             continue
         remaining.remove(matched)
         success_list.append({"file_uuid": file_uuid})

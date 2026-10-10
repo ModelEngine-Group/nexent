@@ -7,6 +7,7 @@ import { Modal, Form, Input, message } from "antd";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
+import { getAidpErrorMessage } from "../services/aidpErrorUtils";
 import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
 import {
   AIDP_MODAL_STYLES,
@@ -155,7 +156,9 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       if (error && typeof error === "object" && "errorFields" in error) {
         return;
       }
-      message.error(t("aidpKnowledge.updateKbFailed"));
+      message.error(
+        getAidpErrorMessage(error, t, t("aidpKnowledge.updateKbFailed"))
+      );
     } finally {
       setLoading(false);
     }

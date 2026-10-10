@@ -1,6 +1,10 @@
 import type { PropsWithChildren } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  focusManager,
+} from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
@@ -51,7 +55,52 @@ beforeEach(() => {
   auth.user = { id: "admin", tenantId: "tenant" };
   vi.resetAllMocks();
 });
-afterEach(() => clients.splice(0).forEach((client) => client.clear()));
+afterEach(() => {
+  clients.splice(0).forEach((client) => client.clear());
+  vi.useRealTimers();
+  focusManager.setFocused(undefined);
+});
+
+it("polls the current page every 30 seconds and pauses while interacting or hidden", async () => {
+  vi.useFakeTimers();
+  focusManager.setFocused(true);
+  vi.mocked(aidpKnowledgeService.listKbs).mockResolvedValue(
+    listResponse("知识库")
+  );
+  const { wrapper } = makeWrapper();
+  const { rerender } = renderHook(
+    ({ paused }) => useAidpKnowledgeList(2, 20, "搜索", true, paused),
+    {
+      wrapper,
+      initialProps: { paused: false },
+    }
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(aidpKnowledgeService.listKbs).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  expect(aidpKnowledgeService.listKbs).toHaveBeenCalledTimes(2);
+  expect(aidpKnowledgeService.listKbs).toHaveBeenLastCalledWith(2, 20, "搜索");
+  rerender({ paused: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  expect(aidpKnowledgeService.listKbs).toHaveBeenCalledTimes(2);
+  rerender({ paused: false });
+  focusManager.setFocused(false);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  expect(aidpKnowledgeService.listKbs).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    focusManager.setFocused(true);
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(aidpKnowledgeService.listKbs).toHaveBeenCalledTimes(3);
+});
 
 it("keeps a late response from an earlier search out of the current page", async () => {
   let finishFirst!: (value: ReturnType<typeof listResponse>) => void;

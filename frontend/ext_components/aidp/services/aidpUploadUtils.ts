@@ -43,17 +43,7 @@ export const parseAidpUploadError = (
 };
 
 /** Resolve row text without triggering a page-level notification. */
-export const getAidpUploadErrorMessage = (
-  error: unknown,
-  translate: (key: string, options: { defaultValue: string }) => string,
-  fallbackMessage: string
-): string => {
-  const message =
-    error instanceof Error && error.message ? error.message : fallbackMessage;
-  return error instanceof ApiError
-    ? translate(`errorCode.${error.code}`, { defaultValue: message })
-    : message;
-};
+export { getAidpErrorMessage as getAidpUploadErrorMessage } from "./aidpErrorUtils";
 
 export const getAidpUploadFailureDetails = (
   failedList: AidpUploadFailedItem[],

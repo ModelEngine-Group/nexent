@@ -121,6 +121,12 @@ export interface AidpUploadResponse {
 
 export interface AidpDocumentOperationItem {
   file_uuid: string;
+  code?: string | number;
+  error_code?: string | number;
+  message?: string;
+  reason?: string;
+  reason_zh?: string;
+  reason_en?: string;
 }
 
 export interface AidpDocumentRemoveResponse {
@@ -669,7 +675,8 @@ class AidpKnowledgeService {
     id: string,
     page: number = 1,
     pageSize: number = 10,
-    keyword: string = ""
+    keyword: string = "",
+    signal?: AbortSignal
   ): Promise<AidpDocumentListResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
       page,
@@ -679,6 +686,7 @@ class AidpKnowledgeService {
     const response = await fetchWithErrorHandling(url, {
       method: "GET",
       headers: getAuthHeaders(),
+      signal,
     });
     const result = await response.json();
     return {

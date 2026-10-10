@@ -1,4 +1,5 @@
 import { App } from "antd";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -13,6 +14,14 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: mocks.t, i18n: { language: "zh" } }),
+}));
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({
+    user: { id: "admin", tenantId: "tenant" },
+  }),
+}));
+vi.mock("@/components/providers/deploymentProvider", () => ({
+  useDeployment: () => ({ enableAidpKnowledge: true, isDeploymentReady: true }),
 }));
 vi.mock("@/ext_components/aidp/services/aidpKnowledgeService", () => ({
   default: { getKb: mocks.getKb, listIngestedFiles: mocks.listIngestedFiles },
@@ -47,14 +56,16 @@ describe("AIDP file page scope", () => {
       total_count: 1,
     });
     render(
-      <App>
-        <AidpKnowledgeFilesPage
-          knowledgeBase={kb}
-          onBack={vi.fn()}
-          onDelete={vi.fn()}
-          onUpdated={vi.fn()}
-        />
-      </App>
+      <QueryClientProvider client={new QueryClient()}>
+        <App>
+          <AidpKnowledgeFilesPage
+            knowledgeBase={kb}
+            onBack={vi.fn()}
+            onDelete={vi.fn()}
+            onUpdated={vi.fn()}
+          />
+        </App>
+      </QueryClientProvider>
     );
     expect(await screen.findByText("使用说明.pdf")).toBeVisible();
     expect(screen.getAllByRole("tab")).toHaveLength(1);
@@ -73,7 +84,8 @@ describe("AIDP file page scope", () => {
         "kb-1",
         1,
         10,
-        "使用说明"
+        "使用说明",
+        expect.any(AbortSignal)
       )
     );
   });

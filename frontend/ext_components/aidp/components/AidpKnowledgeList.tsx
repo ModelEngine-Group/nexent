@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
+  Alert,
   Button,
   Checkbox,
   ConfigProvider,
@@ -650,6 +651,14 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
           ref={tableContainer}
           className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white"
         >
+          {loadFailed && displayedKbs.length > 0 && (
+            <Alert
+              type="error"
+              showIcon
+              title={loadError || t("aidpKnowledge.listLoadFailed")}
+              className="mb-3 shrink-0"
+            />
+          )}
           <div className={styles.toolbar}>
             <div className={styles.searchGroup}>
               <Input

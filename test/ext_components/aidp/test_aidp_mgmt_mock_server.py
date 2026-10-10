@@ -89,3 +89,42 @@ def test_upload_delay_is_applied_once_per_batch(mock_aidp_server, monkeypatch):
 def test_upload_delay_rejects_out_of_range_values(mock_aidp_server, seconds):
     client = TestClient(mock_aidp_server.app)
     assert client.post("/_mock/upload-seconds", params={"seconds": seconds}).status_code == 422
+
+
+def test_file_query_failure_can_be_enabled_and_reset(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    server._DOCUMENTS_BY_KB["kb-1"] = [
+        {"file_uuid": "f-1", "file_name": "制度.pdf", "status": 1},
+    ]
+    client = TestClient(server.app)
+    path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles"
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    assert client.post("/_mock/file-faults", params={"query_fail": True}).status_code == 200
+    failed = client.get(path, headers=headers)
+    assert failed.status_code == 503
+    assert failed.json()["detail"]["code"] == "130501"
+    client.post("/_mock/file-faults")
+    restored = client.get(path, headers=headers)
+    assert restored.status_code == 200
+    assert restored.json()["value"][0]["file_uuid"] == "f-1"
+
+
+def test_file_removal_failure_reports_the_file_without_removing_data(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    file_uuid = "00000000-0000-4000-8000-000000000001"
+    document = {"file_uuid": file_uuid, "file_name": "制度.pdf", "status": 1}
+    server._DOCUMENTS_BY_KB["kb-1"] = [document]
+    client = TestClient(server.app)
+    client.post("/_mock/file-faults", params={"delete_fail": True})
+    response = client.post(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Remove",
+        headers={"Authorization": "Bearer mock-aidp-key"},
+        json={"file_uuids": [file_uuid]},
+    )
+    assert response.status_code == 200
+    assert response.json()["summary"] == {"total": 1, "success": 0, "failed": 1}
+    assert response.json()["failed_list"][0]["file_uuid"] == file_uuid
+    assert response.json()["failed_list"][0]["code"] == "130501"
+    assert server._DOCUMENTS_BY_KB["kb-1"] == [document]
