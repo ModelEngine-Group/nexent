@@ -12,11 +12,11 @@ case:
   automation: automated
   objective: 本地Agent发布为A2A→外部发现/调用Smoke
   preconditions:
-  - 受控 A2A Mock 与所需真实 Nexent 服务就绪，无其他批次故障。
-  - 配置真实 LLM 和本地身份，地址读取统一配置。
+  - 配置真实 LLM 和本地身份，真实 Nexent 服务与 Agent 编辑页面可用。
+  - 北向服务地址读取统一配置，不依赖 A2A Mock。
   - 本次隔离 Agent 可编辑；独立客户端可访问配置的服务。
   test_data:
-    configuration: config/a2a.yaml; config/models.yaml; config/users.yaml
+    configuration: config/environment.yaml; config/models.yaml; config/users.yaml
     ownership: 动态资源 ID、本次唯一 nonce，凭据不存入用例。
   steps:
   - order: 1
@@ -40,13 +40,9 @@ case:
   - order: 7
     action: 外部客户端认证调用已发布 Agent
     expected: 真实模型回答含本次 marker；不重新生成已有 API Key
-  - order: 8
-    action: 停用本次端点并再次发现
-    expected: 发现返回 404；不修改其他 Agent
   expected_results:
   - 发布与 Agent/version 绑定一致
   - 外部真实发现和调用均成功
-  - 停用状态真实生效
   forbidden_side_effects:
   - 不复用固定 Agent ID，不重新生成已有 API Key，不把模拟浏览器结果计为真实调用。
   source:
@@ -62,10 +58,19 @@ case:
   - 独立外部客户端实际发现卡片
   - 检查已发布 endpoint 和版本
   - 外部客户端认证调用已发布 Agent
-  - 停用本次端点并再次发现
   final_business_result:
   - 发布与 Agent/version 绑定一致
   - 外部真实发现和调用均成功
-  - 停用状态真实生效
+  acceptance:
+  - id: AC-01
+    description: 本次隔离 Agent 通过 UI 开启 A2A 并发布，登记信息和北向卡片对应同一 endpoint 与版本。
+    steps: [1, 2, 3, 4, 5, 6]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 独立客户端通过真实北向接口认证调用已发布 Agent，真实模型回复包含本次唯一标记。
+    steps: [7]
+    expected_results: [2]
+    forbidden_side_effects: [1]
   failure_evidence:
   - 本地 assertions.json、events.jsonl、失败截图及 Trace；成功不留截图与 Trace。

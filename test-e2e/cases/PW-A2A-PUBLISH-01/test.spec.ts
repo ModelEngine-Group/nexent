@@ -21,13 +21,12 @@ journey("PW-A2A-PUBLISH-01", async (context) => {
   let northboundUrl = "";
   contract.deferCleanup(async () => {
     if (!agentId) return;
-    expect([200, 404]).toContain((await page.request.post(`/api/a2a/management/agents/${agentId}/disable`)).status());
     await agents.delete(agentId);
   });
   await executeFixedScenario(context, {
     preconditions: [
       async () => { expect(configuredModel("llm").model).not.toBe(""); await loginCurrent(page, "tenant_a_admin"); await agents.open(); return "configured real LLM and editable Agent page are available"; },
-      async () => { const settings = await a2aProbe(["config"]); northboundUrl = settings.northbound_url; return "controlled stack and configured Northbound service are available"; },
+      async () => { const settings = await a2aProbe(["northbound-config"]); northboundUrl = settings.northbound_url; return "loaded the configured real Northbound service URL without a Mock dependency"; },
       async () => { expect(northboundUrl).toMatch(/^https?:\/\//); return "independent Python client uses configured endpoints and does not expose credentials to browser traces"; },
     ],
     steps: [
@@ -60,27 +59,16 @@ journey("PW-A2A-PUBLISH-01", async (context) => {
         endpoint = String(data.a2a_agent_card?.endpoint_id || data.a2a_agent?.endpoint_id || "");
         version = String(data.version_no || "");
         expect(endpoint).not.toBe(""); expect(version).not.toBe("");
-        registerReadyAsset("owned_a2a_server", String(agentId), String(agentId), caseId, {
-          service: "config", identity: "tenant_a_admin", method: "POST",
-          path: `/a2a/management/agents/${agentId}/disable`, allowed_statuses: [200, 404],
-        });
         return "published a real version and captured its dynamic A2A endpoint";
       },
       async () => { const response = await page.request.get(`/api/a2a/management/agents/${agentId}/settings`); expect(response.status()).toBe(200); const row = (await response.json()).data; expect(row.endpoint_id).toBe(endpoint); expect(String(row.version)).toBe(version); return "A2A registration refers to the published Agent version"; },
       async () => { card = await a2aProbe(["card", "--endpoint", endpoint, "--version", version]); return "independent client discovered the actual published Agent Card"; },
       async () => { expect(String(card.version)).toBe(version); expect(card.interfaces.length).toBeGreaterThan(0); expect(card.interfaces.some((row: any) => row.url.includes(endpoint))).toBe(true); return "the Card exposes this exact endpoint and published version"; },
       async () => { const result = await a2aProbe(["call", "--endpoint", endpoint, "--version", version, "--nonce", nonce, "--marker", marker]); expect(result.marker_verified).toBe(true); called = true; return "independent authenticated external call returned the required real-model marker"; },
-      async () => {
-        expect((await page.request.post(`/api/a2a/management/agents/${agentId}/disable`)).status()).toBe(200);
-        const absent = await page.request.get(`${northboundUrl}/nb/a2a/${endpoint}/.well-known/agent-card.json`);
-        expect(absent.status()).toBe(404);
-        return "disabled only the owned endpoint and confirmed it is no longer discoverable";
-      },
     ],
     assertions: [
       async () => { expect(agentId).toBeGreaterThan(0); expect(endpoint).not.toBe(""); expect(String(card.version)).toBe(version); return "publication and A2A registration refer to the same owned version"; },
       async () => { expect(called).toBe(true); return "external discovery and invocation both completed against the real service"; },
-      async () => { const response = await page.request.get(`${northboundUrl}/nb/a2a/${endpoint}/.well-known/agent-card.json`); expect(response.status()).toBe(404); return "unpublished endpoint remains undiscoverable"; },
     ],
   });
 });

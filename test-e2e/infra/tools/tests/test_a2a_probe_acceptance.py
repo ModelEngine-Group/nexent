@@ -1,5 +1,6 @@
 """A2A transport success or echoed input must not be counted as completion."""
 import ast
+import asyncio
 from pathlib import Path
 import types
 import unittest
@@ -8,13 +9,30 @@ PATH = Path(__file__).resolve().parents[2] / 'automation/d4/a2a_client.py'
 tree = ast.parse(PATH.read_text(encoding='utf-8'))
 definitions = ast.Module(body=[node for node in tree.body if
     isinstance(node, (ast.FunctionDef, ast.ClassDef)) and
-    node.name in ('ProbeFailure', 'verify_invocation')], type_ignores=[])
+    node.name in ('ProbeFailure', 'verify_invocation') or
+    isinstance(node, ast.AsyncFunctionDef) and node.name == 'run'], type_ignores=[])
 namespace = {}
 exec(compile(definitions, str(PATH), 'exec'), namespace)
 verify = namespace['verify_invocation']
 
 
 class AcceptanceTests(unittest.TestCase):
+    def test_publication_configuration_does_not_require_mock(self):
+        def unavailable_mock():
+            self.fail('publication configuration must not construct an A2A Mock')
+
+        services = []
+
+        def configured_url(service):
+            services.append(service)
+            return 'http://northbound.example:5013'
+
+        run_namespace = dict(namespace, A2AMock=unavailable_mock, service_url=configured_url)
+        run = types.FunctionType(namespace['run'].__code__, run_namespace)
+        result = asyncio.run(run(types.SimpleNamespace(command='northbound-config')))
+        self.assertEqual(result, {'northbound_url': 'http://northbound.example:5013'})
+        self.assertEqual(services, ['northbound'])
+
     def response(self, payload):
         return types.SimpleNamespace(status_code=200, json=lambda: payload)
 
