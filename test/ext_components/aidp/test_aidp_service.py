@@ -607,115 +607,6 @@ class TestFetchAllAidpKnowledgeBasesImpl:
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
 
-# ---------------------------------------------------------------------------
-# _apply_create_defaults tests
-# Pure helper, no mocking required -- tests default injection behavior.
-# ---------------------------------------------------------------------------
-class TestApplyCreateDefaults:
-    """Tests for _apply_create_defaults (AIDP create KB payload defaults)."""
-
-    @pytest.fixture
-    def aidp_mod(self, aidp_service_module):
-        return aidp_service_module
-
-    def test_fills_all_defaults_when_payload_is_minimal(self, aidp_mod):
-        result = aidp_mod._apply_create_defaults(
-            {"name": "kb-1", "description": "A test knowledge base"}
-        )
-        assert result["name"] == "kb-1"
-        assert result["chunk_token_num"] == 1024
-        assert result["chunk_overlap_num"] == 128
-        assert result["embedding_model"] == "default"
-        assert result["vlm_model"] == ""
-        assert result["is_personal"] == 0
-        assert result["topk"] == 10
-        assert result["similarity"] == 0.0
-        assert result["caption_enable"] == 0
-
-    def test_preserves_client_supplied_values(self, aidp_mod):
-        payload = {
-            "name": "kb-custom",
-            "description": "my desc",
-            "chunk_token_num": 512,
-            "embedding_model": "bge-m3",
-            "is_personal": 1,
-        }
-        result = aidp_mod._apply_create_defaults(payload)
-        assert result["name"] == "kb-custom"
-        assert result["description"] == "my desc"
-        assert result["chunk_token_num"] == 512
-        assert result["embedding_model"] == "bge-m3"
-        assert result["is_personal"] == 1
-        assert result["chunk_overlap_num"] == 128
-        assert result["vlm_model"] == ""
-        assert result["topk"] == 10
-
-    @pytest.mark.parametrize(
-        "legacy_field,value",
-        [
-            ("is_multimodal", True),
-            ("vision_model", "legacy-vlm"),
-            ("smartsplit", 1),
-            ("llm_model_name", "legacy-llm"),
-        ],
-    )
-    def test_rejects_legacy_create_fields(self, aidp_mod, legacy_field, value):
-        payload = {
-            "name": "kb",
-            "description": "A test knowledge base",
-            legacy_field: value,
-        }
-        with pytest.raises(AppException) as exc_info:
-            aidp_mod._apply_create_defaults(payload)
-        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
-
-    def test_does_not_mutate_input_payload(self, aidp_mod):
-        original = {"name": "kb-x", "description": "A test knowledge base"}
-        snapshot = dict(original)
-        aidp_mod._apply_create_defaults(original)
-        assert original == snapshot
-
-    def test_false_value_preserved_not_replaced_by_default(self, aidp_mod):
-        result = aidp_mod._apply_create_defaults(
-            {
-                "name": "kb",
-                "description": "A test knowledge base",
-                "chunk_token_num": 0,
-                "caption_enable": 1,
-                "vlm_model": "my-vlm",
-            }
-        )
-        assert result["chunk_token_num"] == 0
-        assert result["vlm_model"] == "my-vlm"
-
-    def test_graph_llm_model_is_serialized_inside_aidp_graph_config(self, aidp_mod):
-        result = aidp_mod._apply_create_defaults(
-            {
-                "name": "kb-graph",
-                "description": "A test knowledge base",
-                "is_exist_graph": True,
-                "graph_config": {
-                    "domain": "常规",
-                    "llm_model_name": "model-graph",
-                    "prompt_text": "Extract entity relationships.",
-                },
-            }
-        )
-
-        graph_config = json.loads(result["graph_config"])
-        assert graph_config["llm_model_name"] == "model-graph"
-
-    def test_serialized_graph_config_string_is_rejected(self, aidp_mod):
-        with pytest.raises(AppException) as exc_info:
-            aidp_mod._apply_create_defaults(
-                {
-                    "name": "kb-graph",
-                    "description": "A test knowledge base",
-                    "is_exist_graph": True,
-                    "graph_config": '{"domain":"常规","prompt_text":"提示词"}',
-                }
-            )
-        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
 
 
 # ---------------------------------------------------------------------------
@@ -1132,51 +1023,12 @@ class TestFetchAllAidpKnowledgeBasesImplGaps:
         assert result["value"] == [{"kds_id": "kb-1"}]
 
 
-# ---------------------------------------------------------------------------
-# _apply_create_defaults remaining gap
-# ---------------------------------------------------------------------------
-class TestApplyCreateDefaultsGaps:
-    """The create service rejects missing descriptions instead of inventing one."""
-
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            {"name": "kb"},
-            {"name": "kb", "description": ""},
-            {"name": "kb", "description": "   "},
-            {"name": "kb", "description": "x" * 256},
-        ],
-    )
-    def test_requires_non_blank_description(self, aidp_service_module, payload):
-        with pytest.raises(AppException) as exc_info:
-            aidp_service_module._apply_create_defaults(payload)
-        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
 
 
 class TestGraphConfigValidation:
     """Graph settings are validated against the values accepted by AIDP."""
 
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            {"chunk_token_num": "512", "chunk_overlap_num": 128},
-            {"chunk_token_num": True, "chunk_overlap_num": 128},
-            {"chunk_token_num": 0, "chunk_overlap_num": 128},
-            {"chunk_token_num": 512, "chunk_overlap_num": None},
-            {"chunk_token_num": 512, "chunk_overlap_num": False},
-            {"chunk_token_num": 512, "chunk_overlap_num": 128},
-        ],
-    )
-    def test_valid_or_unverifiable_chunk_pairs_are_left_to_aidp(self, aidp_service_module, payload):
-        aidp_service_module._validate_chunking(payload)
 
-    @pytest.mark.parametrize("overlap", [-1, 257])
-    def test_rejects_chunk_overlap_outside_half_the_chunk(self, aidp_service_module, overlap):
-        with pytest.raises(AppException) as exc_info:
-            aidp_service_module._validate_chunking(
-                {"chunk_token_num": 512, "chunk_overlap_num": overlap}
-            )
-        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
 
     @pytest.mark.parametrize(
         "override",
@@ -1186,10 +1038,9 @@ class TestGraphConfigValidation:
             {"prompt_text": 7},
             {"retrieve_subgraph_hop": 2},
             {"llm_model_name": 7},
-            {"llm_model_name": "模型" * 129},
         ],
     )
-    def test_rejects_wrong_types_and_oversized_llm_names(self, aidp_service_module, override):
+    def test_rejects_wrong_graph_value_types(self, aidp_service_module, override):
         config = {
             "domain": "常规",
             "retrieve_subgraph_hop": "2",
@@ -1205,7 +1056,7 @@ class TestGraphConfigValidation:
             aidp_service_module._serialize_graph_config(config)
         assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
 
-    def test_omits_optional_llm_model_name_when_not_configured(self, aidp_service_module):
+    def test_requires_llm_model_when_graph_is_enabled(self, aidp_service_module):
         config = {
             "domain": "常规",
             "retrieve_subgraph_hop": "2",
@@ -1215,8 +1066,9 @@ class TestGraphConfigValidation:
             "synonym_merge_enable": "否",
             "disambiguation_enable": "否",
         }
-        serialized = json.loads(aidp_service_module._serialize_graph_config(config))
-        assert "llm_model_name" not in serialized
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._serialize_graph_config(config)
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
 
 
 class TestGetAidpGraphTemplateImpl:
@@ -1230,14 +1082,6 @@ class TestGetAidpGraphTemplateImpl:
         module._request_with_retry = lambda request_fn, context: request_fn()
         return client
 
-    def test_rejects_unsupported_language_before_request(self, aidp_service_module):
-        with pytest.raises(AppException) as exc_info:
-            aidp_service_module.get_aidp_graph_template_impl(
-                "http://aidp.example.test", "api-key", "klingon"
-            )
-
-        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
-        aidp_service_module.http_client_manager.get_sync_client.assert_not_called()
 
     def test_rejects_unexpected_response_shape(self, aidp_service_module):
         response = MagicMock(status_code=200)
@@ -1570,7 +1414,7 @@ class TestCreateAidpKbImpl:
     def test_invalid_config(self, aidp_service_module, server_url, api_key):
         with pytest.raises(AppException) as exc_info:
             aidp_service_module.create_aidp_kb_impl(
-                server_url=server_url, api_key=api_key, payload={"name": "kb"}
+                server_url=server_url, api_key=api_key, payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb"}
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
 
@@ -1581,7 +1425,7 @@ class TestCreateAidpKbImpl:
         result = aidp_service_module.create_aidp_kb_impl(
             server_url="http://127.0.0.1:30081",
             api_key="jwt-token",
-            payload={"name": "test-kb", "description": "A test knowledge base"},
+            payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "test-kb", "description": "A test knowledge base"},
         )
         assert result["kds_id"] == "new-kb"
 
@@ -1593,7 +1437,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb", "description": "A test knowledge base"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
@@ -1604,7 +1448,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb", "description": "A test knowledge base"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_AUTH_ERROR
 
@@ -1614,7 +1458,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb", "description": "A test knowledge base"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RATE_LIMIT
 
@@ -1624,7 +1468,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb", "description": "A test knowledge base"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
@@ -1638,7 +1482,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb", "description": "A test knowledge base"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
 
@@ -1650,7 +1494,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb", "description": "A test knowledge base"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
@@ -1668,7 +1512,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb", "description": "A test knowledge base"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
@@ -2649,10 +2493,11 @@ class TestListAidpModelsImpl:
         mock_resp = _make_success_response({})
         _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
 
-        result = aidp_service_module.list_aidp_models_impl(
-            server_url="http://127.0.0.1:30081", api_key="jwt-token"
-        )
-        assert result["total_count"] == 0
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_models_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
     def test_non_dict_response_raises(self, aidp_service_module):
         mock_resp = _make_success_response("not-an-object-or-array")
@@ -3200,11 +3045,6 @@ class TestListAidpDocHistoryImpl:
 
         assert "status" not in result["value"][0]
 
-    @pytest.mark.parametrize("value, expected", [(4, "4"), (4.5, "4.5"), (True, None)])
-    def test_numeric_canonical_status_is_preserved_but_boolean_is_ignored(
-        self, aidp_service_module, value, expected
-    ):
-        assert aidp_service_module._extract_doc_status({"status": value}) == expected
 
 
     def test_unreadable_status_payload_is_reported(

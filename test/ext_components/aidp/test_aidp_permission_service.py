@@ -812,7 +812,7 @@ class TestIntersectAccessibleKbs:
             return_value=(local_rows, {}),
         ):
             remote = [
-                {"kds_id": "k1", "kds_name": "Remote KB 1", "creator_name": "remote-owner"},
+                {"kds_id": "k1", "kds_name": "Remote KB 1"},
                 {"kds_id": "k2", "kds_name": "Remote KB 2"},
             ]
             result = svc.intersect_accessible_kbs(remote, "u", "t")

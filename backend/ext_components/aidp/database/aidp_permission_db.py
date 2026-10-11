@@ -22,7 +22,6 @@ from database.client import as_dict, get_db_session
 from database.db_models import UserTenant
 from ext_components.aidp.database.db_models import AidpKbPermission
 
-
 logger = logging.getLogger("aidp_permission_db")
 
 
@@ -52,21 +51,14 @@ def _normalize_group_ids(group_ids: Any) -> list[int]:
 
 
 def _permission_with_creator():
-    """Join the owner's latest active tenant record without dropping ownerless KBs."""
-    owner_record_id = (
-        select(UserTenant.user_tenant_id)
-        .where(
+    """Join the owner's active tenant record while retaining KBs without a matching user."""
+    return select(AidpKbPermission, UserTenant.user_email.label("creator_name")).outerjoin(
+        UserTenant,
+        and_(
             UserTenant.user_id == AidpKbPermission.owner_user_id,
             UserTenant.tenant_id == AidpKbPermission.tenant_id,
             UserTenant.delete_flag == _ACTIVE_FILTER,
-        )
-        .order_by(UserTenant.user_tenant_id.desc())
-        .limit(1)
-        .correlate(AidpKbPermission)
-        .scalar_subquery()
-    )
-    return select(AidpKbPermission, UserTenant.user_email.label("creator_name")).outerjoin(
-        UserTenant, UserTenant.user_tenant_id == owner_record_id,
+        ),
     )
 
 

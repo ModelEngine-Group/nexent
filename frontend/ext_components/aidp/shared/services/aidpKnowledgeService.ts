@@ -357,7 +357,7 @@ class AidpKnowledgeService {
     service: string = "llm",
     app: string = "KnowledgeBase"
   ): Promise<AidpModelListResponse> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.models, { service, app });
+    const url = `${buildUrl(API_ENDPOINTS.aidpMgmt.models, { app })}&service=${encodeURIComponent(service)}`;
 
     const response = await fetchWithErrorHandling(url, {
       method: "GET",
@@ -414,44 +414,11 @@ class AidpKnowledgeService {
   async listDocs(
     id: string,
     page: number = 1,
-    pageSize: number = 10
-  ): Promise<AidpDocumentListResponse> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {
-      page,
-      page_size: pageSize,
-    });
-
-    const response = await fetchWithErrorHandling(url, {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
-    const result = await response.json();
-
-    return {
-      value: Array.isArray(result.value) ? result.value : [],
-      total_count:
-        typeof result.total_count === "number" ? result.total_count : undefined,
-      has_more:
-        typeof result.has_more === "boolean" ? result.has_more : undefined,
-      total_reliable:
-        typeof result.total_reliable === "boolean"
-          ? result.total_reliable
-          : typeof result.total_count === "number",
-      processing_count:
-        typeof result.processing_count === "number"
-          ? result.processing_count
-          : undefined,
-    };
-  }
-
-  async listIngestedFiles(
-    id: string,
-    page: number = 1,
     pageSize: number = 10,
     keyword: string = "",
     signal?: AbortSignal
   ): Promise<AidpDocumentListResponse> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {
       page,
       page_size: pageSize,
       keyword,
@@ -469,7 +436,6 @@ class AidpKnowledgeService {
       has_more:
         typeof result.has_more === "boolean" ? result.has_more : undefined,
       total_reliable: result.total_reliable !== false,
-      processing_count: 0,
     };
   }
 

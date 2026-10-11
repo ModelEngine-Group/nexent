@@ -12,13 +12,7 @@ export const useAidpKnowledgeFiles = (
   return useQuery({
     queryKey: [...scope.key, "files", id, { page, pageSize, keyword }],
     queryFn: ({ signal }) =>
-      aidpKnowledgeService.listIngestedFiles(
-        id,
-        page,
-        pageSize,
-        keyword,
-        signal
-      ),
+      aidpKnowledgeService.listDocs(id, page, pageSize, keyword, signal),
     enabled: scope.enabled && !!id,
     refetchOnMount: "always",
     refetchOnWindowFocus: false,

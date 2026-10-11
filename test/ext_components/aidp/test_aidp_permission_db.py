@@ -406,7 +406,7 @@ class TestListAllPermissionsByTenant:
         assert "user_tenant_t.user_id = nexent.aidp_kb_permission_t.owner_user_id" in sql
         assert "user_tenant_t.tenant_id = nexent.aidp_kb_permission_t.tenant_id" in sql
         assert "user_tenant_t.delete_flag" in sql
-        assert "ORDER BY nexent.user_tenant_t.user_tenant_id DESC" in sql
+        assert "LIMIT" not in sql
 
     def test_rejects_empty_tenant_id(self, aidp_permission_db, fake_session):
         with pytest.raises(ValueError):
