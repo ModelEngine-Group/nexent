@@ -1,0 +1,66 @@
+.pagination {
+  --aidp-primary: #0067d1;
+  --aidp-text: #191919;
+  --aidp-secondary: rgba(25, 25, 25, 0.7);
+  --aidp-muted: #777777;
+  --aidp-outline: rgba(201, 201, 201, 0.4);
+  color: var(--aidp-text);
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  width: 100%;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.paginationTotal {
+  flex-shrink: 0;
+  color: var(--aidp-secondary);
+  line-height: 22px;
+}
+
+.paginationControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-inline-start: auto;
+  min-width: 0;
+}
+
+.pageSize {
+  width: 136px;
+}
+
+.pageNumbers :global(.ant-pagination-item),
+.pageNumbers :global(.ant-pagination-prev),
+.pageNumbers :global(.ant-pagination-next) {
+  border-color: transparent;
+}
+
+.pageNumbers :global(.ant-pagination-item-active) {
+  border-color: transparent;
+  font-weight: 400;
+}
+
+.pageNumbers :global(.ant-pagination-item-active:hover) {
+  border-color: transparent;
+}
+
+.pageJump {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pageJumpInput {
+  width: 44px;
+  padding-inline: 4px;
+  text-align: center;
+}

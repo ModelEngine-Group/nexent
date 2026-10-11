@@ -1,4 +1,4 @@
-import AidpCreateKbPage from "@/ext_components/aidp/components/AidpCreateKbPage";
+import AidpCreateKbPage from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbPage";
 
 /**
  * Dedicated AIDP knowledge base creation entry.

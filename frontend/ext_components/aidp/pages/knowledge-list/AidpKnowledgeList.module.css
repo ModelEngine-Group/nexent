@@ -1,0 +1,346 @@
+.overview {
+  --aidp-primary: #0067d1;
+  --aidp-text: #191919;
+  --aidp-secondary: rgba(25, 25, 25, 0.7);
+  --aidp-muted: #777777;
+  --aidp-outline: rgba(201, 201, 201, 0.4);
+  color: var(--aidp-text);
+}
+
+.overview {
+  container-type: inline-size;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 1px 12px;
+  flex-shrink: 0;
+}
+
+.searchGroup {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+}
+
+.searchInput {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 5px 44px 5px 12px;
+}
+
+.searchInput :global(.ant-input-prefix) {
+  margin-inline-end: 4px;
+  color: var(--aidp-muted);
+}
+
+.searchRefresh {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+}
+
+.createButton {
+  min-width: 102px;
+  padding-inline: 16px;
+  box-shadow: none;
+}
+
+.viewSwitch {
+  border-radius: 6px;
+}
+
+.viewSwitch :global(.ant-segmented-group) {
+  gap: 4px;
+}
+
+.viewSwitch :global(.ant-segmented-item-label) {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 18px;
+  font-size: 18px;
+}
+
+.viewSwitch :global(.ant-segmented-item-selected) {
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 12px 16px;
+  padding: 1px;
+}
+
+@container (min-width: 640px) {
+  .cardGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .searchGroup {
+    flex-basis: calc((100% - 16px) / 2 + 40px);
+    width: calc((100% - 16px) / 2 + 40px);
+  }
+
+  .searchInput {
+    flex-basis: calc(100% - 40px);
+    width: calc(100% - 40px);
+    padding-right: 12px;
+  }
+
+  .searchRefresh {
+    position: static;
+    flex: 0 0 32px;
+  }
+}
+
+@container (min-width: 1200px) {
+  .cardGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .searchGroup {
+    flex-basis: calc((100% - 48px) / 4 + 40px);
+    width: calc((100% - 48px) / 4 + 40px);
+  }
+
+  .searchInput {
+    flex-basis: calc(100% - 40px);
+    width: calc(100% - 40px);
+  }
+}
+
+.card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  height: 148px;
+  min-width: 0;
+  padding: 16px 24px;
+  border-radius: 12px;
+  background: white;
+  outline: 1px solid var(--aidp-outline);
+  cursor: pointer;
+  transition: outline-color 0.15s;
+}
+
+.card:hover,
+.card:focus-visible {
+  outline-color: var(--aidp-primary);
+}
+
+.cardContent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  min-width: 0;
+}
+
+.cardIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  color: #7c50e8;
+  background: #f3edff;
+  font-size: 24px;
+}
+
+.cardTitle {
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--aidp-text);
+}
+
+.cardMore {
+  align-self: flex-start;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: #939393;
+}
+
+.cardDescription {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  height: 42px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  color: var(--aidp-secondary);
+}
+
+.cardMetadata {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--aidp-secondary);
+}
+
+.cardMetadata > span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cardMetadata :global(.anticon) {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: #939393;
+}
+
+.metadataValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardDate {
+  flex: 0 1 auto;
+}
+
+.cardStatistic {
+  flex-shrink: 0;
+}
+
+.tableName {
+  color: var(--aidp-primary);
+  font-weight: 400;
+}
+
+.tableName:hover {
+  color: #0052a8;
+}
+
+.tableArea {
+  width: 100%;
+  min-width: 0;
+}
+
+.knowledgeTable :global(table) {
+  width: var(--aidp-table-width, 100%) !important;
+  min-width: var(--aidp-table-width, 100%) !important;
+}
+
+.knowledgeTable :global(.ant-table-thead > tr > th) {
+  height: 40px;
+  padding: 8px !important;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.knowledgeTable :global(.ant-table-tbody > tr > td) {
+  height: 40px;
+  padding: 4px 8px !important;
+  font-size: 14px;
+  line-height: 22px;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.knowledgeTable :global(.ant-table-thead > tr > th[data-column-key="name"]),
+.knowledgeTable :global(.ant-table-tbody > tr > td:first-child) {
+  padding-left: 16px !important;
+}
+
+.knowledgeTable :global(.ant-table-thead > tr > th::before) {
+  display: none;
+}
+
+.tableCellText {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tableScope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tableScope :global(.ant-tag) {
+  flex-shrink: 0;
+  height: 22px;
+  line-height: 20px;
+  border-radius: 4px;
+}
+
+.tableScope .tableGroup {
+  min-width: 0;
+  max-width: 96px;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tableActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.tableActions :global(.ant-btn) {
+  height: 24px;
+  padding: 0;
+  line-height: 22px;
+  font-size: 14px;
+}
