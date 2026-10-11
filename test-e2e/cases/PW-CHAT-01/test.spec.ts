@@ -5,6 +5,7 @@ import { runToken } from "../../infra/automation/d4/runner/runtime-config";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
 import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { watchTitleRequests } from "../../infra/automation/d4/runner/title-requests";
 
 journey("PW-CHAT-01", async (context) => {
   const { page, expect, contract } = context;
@@ -19,13 +20,11 @@ journey("PW-CHAT-01", async (context) => {
   let originalThreadTitle = "";
   let stoppedHistory: Awaited<ReturnType<ChatPage["persistedMessages"]>> = [];
   let completedHistory: Awaited<ReturnType<ChatPage["persistedMessages"]>> = [];
+  let firstConversationId = 0;
+  let secondTitleVerified = false;
   const ownedConversationIds = new Set<number>();
-  const titleRequests: Array<Promise<unknown>> = [];
-  page.on("request", (request) => {
-    if (new URL(request.url()).pathname.endsWith("/conversation/generate_title")) {
-      titleRequests.push(request.response().then((response) => response?.finished()));
-    }
-  });
+  const titleRequests = watchTitleRequests(page, join(contract.caseDir, "title-requests.json"));
+  contract.deferCleanup(async () => { titleRequests.close(); });
   // Stop validates an in-progress stream, including visible reasoning. Other
   // journeys still require final-answer Markdown through ChatPage.messageText.
   const streamText = async (message: ReturnType<ChatPage["assistantMessages"]>) => {
@@ -61,6 +60,7 @@ journey("PW-CHAT-01", async (context) => {
       async () => {
         const message = await chat.startMessage(`先原样输出标记 ${firstMarker}，再逐项详细列出 1 到 1200，每项写一句不同的说明。必须逐项输出，不能使用代码、循环或省略号代替；这个长输出用于验证用户中途停止，不要提前总结。`);
         ownedConversationIds.add(chat.currentConversationId());
+        firstConversationId = chat.currentConversationId();
         await expect.poll(async () => (await streamText(message)).length, { timeout: 120_000 }).toBeGreaterThan(0);
         const initial = await streamText(message);
         await expect.poll(async () => (await streamText(message)).length, { timeout: 120_000 }).toBeGreaterThan(initial.length);
@@ -132,14 +132,15 @@ journey("PW-CHAT-01", async (context) => {
         ownedConversationIds.add(chat.currentConversationId());
         await chat.waitForCompletion();
         await chat.renameActiveThread(secondTitle);
-        await Promise.all(titleRequests);
-        await expect(page.getByRole("button", { name: secondTitle, exact: true })).toBeVisible();
-        const persisted = await page.request.get(`/api/conversation/${chat.currentConversationId()}`);
-        expect(persisted.status()).toBe(200);
-        expect((await persisted.json()).data.conversation_title).toBe(secondTitle);
+        await titleRequests.settle();
+        await expect(chat.threadButton(secondTitle)).toBeVisible();
+        expect(await chat.persistedThreadTitle(chat.currentConversationId())).toBe(secondTitle);
         await page.reload({ waitUntil: "domcontentloaded" });
         await chat.openThread(secondTitle);
-        return "both manual titles are preserved after automatic title requests settle; the second title is persisted and survives refresh";
+        secondTitleVerified = true;
+        expect(await chat.persistedThreadTitle(firstConversationId)).toBe(firstTitle);
+        await expect(chat.threadButton(firstTitle)).toBeVisible();
+        return "both manual titles are preserved in UI and server after automatic title requests settle; the second title survives refresh before deletion";
       },
       async () => {
         await chat.openThread(firstTitle);
@@ -170,6 +171,15 @@ journey("PW-CHAT-01", async (context) => {
       async () => {
         await expect(chat.userMessages().filter({ hasText: secondMarker })).toHaveCount(0);
         return "the remaining first conversation contains no message from the deleted isolated conversation";
+      },
+      async () => {
+        expect(secondTitleVerified).toBe(true);
+        await titleRequests.settle();
+        expect(await chat.persistedThreadTitle(firstConversationId)).toBe(firstTitle);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await chat.openThread(firstTitle);
+        await expect(chat.threadButton(firstTitle)).toBeVisible();
+        return "manual rename remains authoritative in persisted data and refreshed sidebar, including after late automatic-title completion; second thread was checked before deletion";
       },
     ],
   });

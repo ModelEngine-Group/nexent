@@ -18,6 +18,7 @@ case:
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml
   - users.yaml 中隔离账号（USER 角色 UserA 与可管理共享 KB 的 Admin）可登录，测试租户数据可被清理；models.yaml 提供本用例可用的有效 embedding_model_id。
+  - Embedding 健康检查最多三次，每次使用独立连接并记录时间、HTTP 状态和完整尝试结果；持续不连通时记录依赖阻断，不执行或伪造权限验收，不用历史健康缓存掩盖本次失败。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
 

@@ -10,7 +10,9 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from d3.assets import create_registered_knowledge_base, model_id, model_request
-from shared.asset_registry import register_asset, register_asset_failure, resolve_asset
+from shared.asset_registry import AssetDependencyError, register_asset, register_asset_failure, resolve_asset
+from shared.model_health import create_configured_model_dependency
+from shared.preparation_evidence import record_failure, safe_reason, run_preparation
 from shared.auth import sign_in
 from shared.config import test_root
 from shared.http import MODEL_TIMEOUT, assert_status, client
@@ -31,8 +33,6 @@ def _object_name(payload: dict) -> str:
 async def prepare_knowledge(identity) -> None:
     existing_index = resolve_asset("performance", "upload_kb_index", required=False)
     if existing_index:
-        if not resolve_asset("performance", "large_kb_indices", required=False):
-            register_asset("performance", "large_kb_indices", [str(existing_index)], owner_case_id="PERF-04")
         return
     embedding_id = await prepare_performance_embedding(identity)
     kb = await create_registered_knowledge_base(
@@ -45,7 +45,22 @@ async def prepare_knowledge(identity) -> None:
     )
     index_name = str(kb["index_name"])
     register_asset("performance", "upload_kb_index", index_name, owner_case_id="PERF-03")
-    register_asset("performance", "large_kb_indices", [index_name], owner_case_id="PERF-04")
+    # An empty upload target is NOT a populated vector-scale benchmark.
+    # PERF-04 needs independently declared, populated scale assets.
+
+
+async def prepare_vector_scale(identity) -> None:
+    indices = resolve_asset("performance", "large_kb_indices", required=False)
+    if not isinstance(indices, list) or len(set(map(str, indices))) < 2:
+        raise AssetDependencyError("performance", "large_kb_indices", consumer_case_id="PERF-04",
+            detail="PERF-04 requires populated different-scale indices and multi-KB assets; "
+                   "an empty PERF-03 upload target is not a scale fixture")
+    # Preserve the full declared benchmark obligations. The old timing helper
+    # only measured three queries and cannot certify scale/rerank/isolation.
+    raise AssetDependencyError("performance", "vector_scale_workload", consumer_case_id="PERF-04",
+        detail="Controlled scale corpus, rerank/relevance/isolation oracles and performance.yaml "
+               "measurement plan must be implemented before full PERF-04 acceptance; "
+               "the legacy three-query smoke is insufficient")
 
 
 async def prepare_performance_embedding(identity) -> int:
@@ -54,14 +69,13 @@ async def prepare_performance_embedding(identity) -> int:
         return int(existing)
     display_name = f"daily-performance-embedding-{uuid4().hex[:8]}"
     payload = model_request("embedding", display_name=display_name)
-    payload["model_name"] = str(payload["model_name"]).split(",", 1)[0].strip()
-    payload["base_url"] = str(payload["base_url"]).rstrip("/")
-    if not payload["base_url"].endswith("/embeddings"):
-        payload["base_url"] += "/embeddings"
-    payload["expected_chunk_size"] = int(payload.get("expected_chunk_size") or 1024)
+    payload["skip_default_backfill"] = True
     async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-        created = await api.post("/model/create", json=payload)
-    assert_status(created, 200)
+        await create_configured_model_dependency(api, payload, case_id="PERF-03")
+    # Register cleanup immediately after confirmed creation, before listing.
+    register_asset("performance", "embedding_model_display_name", display_name, owner_case_id="PERF-03",
+        cleanup={"service": "config", "identity": identity.id, "method": "POST",
+                 "path": "/model/delete", "params": {"display_name": display_name}, "allowed_statuses": [200, 404]})
     async with client("config", token=identity.access_token) as api:
         listed = await api.get("/model/list")
     assert_status(listed, 200)
@@ -73,11 +87,7 @@ async def prepare_performance_embedding(identity) -> int:
         raise AssertionError(f"performance embedding model {display_name} not returned by /model/list")
     embedding_id = int(match.get("model_id") or match["id"])
     register_asset(
-        "performance", "embedding_model_id", embedding_id, owner_case_id="PERF-04",
-        cleanup={
-            "service": "config", "identity": "tenant_a_admin", "method": "POST",
-            "path": f"/model/delete?display_name={quote(display_name)}", "allowed_statuses": [200, 404],
-        },
+        "performance", "embedding_model_id", embedding_id, owner_case_id="PERF-03",
     )
     return embedding_id
 
@@ -227,34 +237,41 @@ async def prepare_evaluation_200(identity) -> None:
     register_asset("performance", "evaluation_200_run_id", run_id, owner_case_id="PERF-06")
 
 
-async def guarded(name: str, section: str, key: str, operation) -> None:
+async def guarded(name: str, section: str, key: str, operation) -> bool:
     try:
         await operation
     except Exception as exc:
-        register_asset_failure(section, key, owner_case_id=name, reason=str(exc))
-        print(f"{name}: FAILED: {exc}", flush=True)
+        register_asset_failure(section, key, owner_case_id=name, reason=safe_reason(exc))
+        record_failure(exc)
+        print(f"{name}: FAILED: {type(exc).__name__}; see runtime/preparation-failure.json", flush=True)
+        return False
     else:
         print(f"{name}: READY", flush=True)
+        return True
 
 
-async def main(case_ids: set[str] | None = None) -> None:
+async def main(case_ids: set[str] | None = None) -> bool:
     admin = await sign_in("tenant_a_admin")
     user = await sign_in("tenant_a_user")
     operations = (
-        ({"PERF-03", "PERF-04"}, "PERF-03", "performance", "upload_kb_index", prepare_knowledge(admin)),
+        ({"PERF-03"}, "PERF-03", "performance", "upload_kb_index", prepare_knowledge(admin)),
+        ({"PERF-04"}, "PERF-04", "performance", "large_kb_indices", prepare_vector_scale(admin)),
         ({"PERF-10"}, "PERF-10", "performance", "large_attachment_object_name", prepare_large_attachment(user)),
         ({"REL-02"}, "REL-02", "reliability", "fault_model_id", prepare_fault_model(admin)),
         ({"PERF-06"}, "PERF-06", "performance", "evaluation_200_run_id", prepare_evaluation_200(admin)),
     )
+    successful = True
     for owners, name, section, key, operation in operations:
         if case_ids is None or owners & case_ids:
-            await guarded(name, section, key, operation)
+            successful = await guarded(name, section, key, operation) and successful
         else:
             operation.close()
+    return successful
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--case", action="append", default=[])
     arguments = parser.parse_args()
-    asyncio.run(main(set(arguments.case) if arguments.case else None))
+    # Do not run acceptance after prerequisite generation failed with exit 0.
+    raise SystemExit(0 if run_preparation(main(set(arguments.case) if arguments.case else None)) else 1)

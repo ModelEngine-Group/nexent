@@ -13,14 +13,14 @@ change:
     description: Existing API-114, API-154, API-155, AGT-035, AGT-065 and PW-CHAT-03 already detect the reported defects.
   feature_contract_changed: false
   affected_features:
-    existing: [F-114, F-150, F-151, F-063, F-146, V5-PW-CHAT-03]
+    existing: [F-114, F-150, F-151, F-063, F-146, V5-PW-CHAT-03, F-131]
     added: []
     modified: []
     retired: []
   affected_cases:
     existing: [API-114, API-154, API-155, AGT-035, AGT-065, PW-CHAT-03]
     added: []
-    modified: []
+    modified: [UT-BE-AUTO-2862BAF58D3E695E, UT-BE-AUTO-A5E5C8329C318684]
     retired: []
   traditional_ut:
     decision: add
@@ -31,7 +31,7 @@ change:
       - Northbound model work has a bounded lane with lifecycle cleanup.
       - An admitted new turn clears previous cancellation before preparation and retains stops requested during preparation.
       - Execution follow-ups preserve the restored stopped plan while returning their own response.
-    reason: Add focused unit regressions and run the existing formal cases unchanged against the authorized environment.
+    reason: Add focused unit regressions and run existing formal cases against the authorized environment. Synchronize the two affected F-131 D1 contracts and scripts through D1-RUNTIME-CONTRACTS-20261011; preserve the other existing contracts.
     test_selectors:
       - test/backend/app/test_conversation_management_app.py
       - test/backend/services/test_conversation_management_service.py

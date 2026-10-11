@@ -272,21 +272,26 @@ async def _check_async_wrappers_fallback_match_sync(service, fake_client):
 async def _check_managed_and_direct_paths_consistent(service, fake_client):
     manager = FakeThreadManager(execute=True)
     service.set_thread_manager(manager)
+    replica = RuntimeStateService()
+    replica.set_thread_manager(FakeThreadManager(execute=True))
 
     service.mark_run_finished(UID, CID, 'stopped')
     direct_state = service.get_run_state(UID, CID)
     managed_state = await service.get_run_state_async(UID, CID)
     assert managed_state == direct_state
+    assert await replica.get_run_state_async(UID, CID) == direct_state
     assert direct_state['status'] == 'stopped'
 
     assert service.set_cancel_signal(UID, CID) is True
     assert service.is_cancelled(UID, CID) is True
     assert await service.is_cancelled_async(UID, CID) is True
+    assert await replica.is_cancelled_async(UID, CID) is True
 
     event_id = service.append_stream_event(UID, CID, 'chunk-a')
     direct_events = service.read_stream_events(UID, CID)
     managed_events = await service.read_stream_events_async(UID, CID)
     assert managed_events == direct_events
+    assert await replica.read_stream_events_async(UID, CID) == direct_events
     assert direct_events == [(event_id, 'chunk-a')]
 
 
@@ -303,8 +308,50 @@ def _check_register_run_contract(service, fake_client):
     assert 'updated_at' in mapping
     expire_call = next(c for c in fake_client.calls if c[0] == 'expire')
     assert expire_call[1] == (service._run_key(UID, CID), rss.RUNTIME_RUN_TTL_SECONDS)
-    delete_call = next(c for c in fake_client.calls if c[0] == 'delete')
-    assert delete_call[1] == (service._cancel_key(UID, CID),)
+    assert not any(
+        c[0] == 'delete' and service._cancel_key(UID, CID) in c[1]
+        for c in fake_client.calls
+    ), 'register_run must preserve a Stop received during preparation'
+
+
+async def _check_cancellation_lifecycle(service, fake_client):
+    """A new turn clears old Stop, never the Stop received during preparation."""
+    for manager in (None, FakeThreadManager(execute=True)):
+        fake_client.reset()
+        service.set_thread_manager(manager)
+        stream_key = service._stream_key(UID, CID)
+        done_key = service._stream_done_key(UID, CID)
+        cancel_key = service._cancel_key(UID, CID)
+        fake_client.streams[stream_key] = [('1-0', {'chunk': 'old-turn'})]
+        fake_client.store[done_key] = {'status': 'stopped'}
+        fake_client.store[cancel_key] = 'previous-turn-stop'
+        foreign_keys = (
+            service._cancel_key('other-user', CID),
+            service._cancel_key(UID, CID + 1),
+            service._stream_done_key('other-user', CID),
+            service._run_key(UID, CID + 1),
+        )
+        foreign_state = {key: 'unchanged' for key in foreign_keys}
+        fake_client.store.update(foreign_state)
+        foreign_stream = service._stream_key('other-user', CID)
+        fake_client.streams[foreign_stream] = [('2-0', {'chunk': 'foreign'})]
+
+        await service.reset_stream_async(UID, CID)
+        assert stream_key not in fake_client.streams
+        assert done_key not in fake_client.store
+        assert cancel_key not in fake_client.store
+        assert await service.is_cancelled_async(UID, CID) is False
+
+        assert service.set_cancel_signal(UID, CID) is True
+        preparation_stop = fake_client.store[cancel_key]
+        service.register_run(UID, CID, message_id=7)
+        assert fake_client.store.get(cancel_key) == preparation_stop
+        assert await service.is_cancelled_async(UID, CID) is True
+        state = await service.get_run_state_async(UID, CID)
+        assert state['status'] == 'running'
+        assert state['message_id'] == '7'
+        assert {key: fake_client.store.get(key) for key in foreign_keys} == foreign_state
+        assert fake_client.streams.get(foreign_stream) == [('2-0', {'chunk': 'foreign'})]
 
 
 @pytest.mark.stage('D1')
@@ -477,6 +524,7 @@ async def test_runtime_state_service_contract(
     await _check_async_wrappers_fallback_match_sync(service, fake_client)
     fake_client.reset()
     await _check_managed_and_direct_paths_consistent(service, fake_client)
+    await _check_cancellation_lifecycle(service, fake_client)
 
     for check in (
         _check_register_run_contract,

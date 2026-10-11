@@ -82,6 +82,19 @@ export class ChatPage {
     return this.lastServerConversationId;
   }
 
+  async persistedThreadTitle(conversationId: number): Promise<string> {
+    const response = await this.page.request.get(`/api/conversation/${conversationId}`);
+    expect(response.status()).toBe(200);
+    const payload = await response.json();
+    expect(payload.code).toBe(0);
+    expect(Array.isArray(payload.data)).toBe(true);
+    expect(payload.data).toHaveLength(1);
+    const history = payload.data[0];
+    expect(String(history.conversation_id)).toBe(String(conversationId));
+    expect(typeof history.conversation_title).toBe("string");
+    return history.conversation_title;
+  }
+
   async deleteConversationById(conversationId: number): Promise<void> {
     const endpoint = new URL(`/api/conversation/${conversationId}`, this.page.url()).toString();
     const response = await this.page.request.delete(endpoint);
@@ -203,9 +216,9 @@ export class ChatPage {
       throw new Error(`conversation rename failed: HTTP ${response.status()} body=${JSON.stringify(body)}`);
     }
     try {
-      await expect(this.page.getByRole("button", { name: title, exact: true })).toBeVisible();
+      await expect(this.threadButton(title)).toBeVisible();
     } catch {
-      const error = new Error("conversation rename API succeeded but sidebar did not expose the new title " + title + "; generatedTitles may be overriding the persisted title");
+      const error = new Error("conversation rename API succeeded but the sidebar title did not update to " + title);
       error.name = "ProductFailure";
       throw error;
     }
@@ -223,10 +236,16 @@ export class ChatPage {
     await expect(this.page.getByPlaceholder("发送消息...")).toBeVisible();
   }
 
+  threadButton(title: string): Locator {
+    // Status badges contribute to the button's accessible name. Match only
+    // the exact title node inside history rows, not badges or creation actions.
+    const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.page.locator('[class~="group/item"]').getByRole("button")
+      .filter({ has: this.page.locator("span.truncate").filter({ hasText: new RegExp(`^${escaped}$`) }) });
+  }
+
   async openThread(title: string, occurrence?: "first" | "last"): Promise<void> {
-    // Scope to history roots: a persisted title can equal the New action.
-    const matches = this.page.locator('[class~="group/item"]')
-      .getByRole("button", { name: title, exact: true });
+    const matches = this.threadButton(title);
     const target = occurrence === "first" ? matches.first() : occurrence === "last" ? matches.last() : matches;
     await target.click();
     await expect(this.activeThread()).toContainText(title);
@@ -241,7 +260,7 @@ export class ChatPage {
     const dialog = this.page.getByRole("dialog");
     await expect(dialog.getByText("确定要删除这个对话吗？此操作无法撤销。")).toBeVisible();
     await dialog.getByRole("button", { name: /确\s*定|删\s*除/ }).last().click();
-    await expect(this.page.getByRole("button", { name: title, exact: true })).toHaveCount(0);
+    await expect(this.threadButton(title)).toHaveCount(0);
   }
 
   async deleteActiveThread(): Promise<void> {
@@ -256,8 +275,16 @@ export class ChatPage {
     await expect(dialog).toHaveCount(0);
   }
 
+  metadataButton(): Locator {
+    // RuntimeMetadataEditor appends a key-count badge after saving. Match the
+    // complete label (with optional badge) and the real editor's Braces icon;
+    // sidebar conversation titles, including an exact "Metadata", are excluded.
+    return this.page.getByRole("button", { name: /^Metadata(?:\s*\(\d+\))?$/ })
+      .filter({ has: this.page.locator("svg.lucide-braces") });
+  }
+
   async setRuntimeMetadata(value: Record<string, unknown>): Promise<void> {
-    await this.page.getByRole("button", { name: /Metadata/ }).click();
+    await this.metadataButton().click();
     const dialog = this.page.getByRole("dialog", { name: "Metadata" });
     const editor = dialog.locator("textarea");
     await editor.fill(JSON.stringify(value, null, 2));
@@ -266,7 +293,7 @@ export class ChatPage {
   }
 
   async assertRuntimeMetadata(value: Record<string, unknown>): Promise<void> {
-    await this.page.getByRole("button", { name: /Metadata/ }).click();
+    await this.metadataButton().click();
     const dialog = this.page.getByRole("dialog", { name: "Metadata" });
     await expect(dialog.locator("textarea")).toHaveValue(JSON.stringify(value, null, 2));
     await dialog.getByRole("button", { name: "取消", exact: true }).click();

@@ -27,45 +27,61 @@ case:
     expected: 四个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、northbound、api-to-mcp。
   - order: 2
     action: 断言四个 manager 为独立实例，service_name 依次为 runtime、config、northbound、api-to-mcp。
-    expected: 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 consts.const
-      对应常量相等。
+    expected: 四个 manager 对象互不相同，service_name 与对应服务一致。
   - order: 3
     action: 断言四个 manager 使用当前实现的 _policies 内部策略映射，键集合及 LanePolicy.name 与源码一致，不再访问不存在的 lane_policies 属性。
-    expected: runtime 7 lane、config 4 lane、northbound 2 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+    expected: runtime 7 lane、config 4 lane、northbound 3 lane（control-io/background-service/model-tool-io）、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
   - order: 4
     action: 断言 runtime：control-io worker16/queue32/cancel2，sandbox worker200/queue8/cancel5，evaluation worker6/queue12/cancel5。
-    expected: 四个 manager 的 lane policy 相互隔离、不共享可变状态，同名 lane control-io 不跨 manager 串扰；控制类 lane 的 shutdown_grace 分别绑定各自 RUNTIME/NORTHBOUND
-      shutdown_grace 常量。
+    expected: runtime 三个指定 lane 的精确策略参数与契约一致。
   - order: 5
     action: 断言 agent-run、model-tool-io 及 shutdown_grace 等常量派生参数与 consts.const 一致。
-    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+    expected: agent-run、model-tool-io 和 shutdown_grace 常量派生参数正确。
   - order: 6
     action: 断言 config：control-io worker16/queue32/cancel2，background-service worker12/queue8/cancel5，evaluation worker6/queue12/cancel5，model-tool-io
       worker6/queue16/cancel5。
-    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+    expected: config 四个 lane 的精确策略参数与契约一致。
   - order: 7
-    action: 断言 northbound：control-io 使用 NORTHBOUND_* 常量，background-service worker12/queue8/cancel2。
-    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+    action: 断言 northbound：control-io 使用 NORTHBOUND_* 常量，background-service worker12/queue8/cancel2，model-tool-io worker6/queue16/queue_timeout0/cancel5/shutdown_grace=NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS。
+    expected: northbound 三个 lane 精确匹配策略，model-tool-io 有独立容量和 northbound 关闭宽限。
   - order: 8
     action: 断言 mcp：control-io worker8/queue16/cancel5，background-service worker12/queue8/cancel5。
-    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+    expected: mcp 两个 lane 的精确策略参数与契约一致。
   - order: 9
     action: 断言各 manager 的 _policies 与同名 LanePolicy 实例互不共享。
-    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+    expected: 策略映射和同名 LanePolicy 实例互不共享，各服务 shutdown_grace 常量正确绑定。
   - order: 10
-    action: 启动 runtime manager，在 control-io 提交阻塞任务，同时在 evaluation lane 提交立即返回任务，确认跨 lane 不互阻塞；最后关闭 manager。
-    expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+    action: 启动 runtime manager，在 control-io 提交阻塞任务，同时在 evaluation lane 提交立即返回任务；再启动 northbound manager，control-io 阻塞时在 model-tool-io 执行成功及受控异常任务，验证结果/异常传播、容量22和任务清理；释放阻塞任务并关闭各 manager，无遗留执行。
+    expected: 跨 lane 任务在 control-io 释放前完成；成功结果与受控异常正确传播，model-tool-io 释放全部容量，关闭后无遗留执行。
   - order: 11
     action: 确认日志不泄露凭据，测试可重复执行。
     expected: 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
   expected_results:
   - 四个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、northbound、api-to-mcp。
   - 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 consts.const 对应常量相等。
-  - runtime 7 lane、config 4 lane、northbound 2 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+  - runtime 7 lane、config 4 lane、northbound 3 lane（control-io/background-service/model-tool-io）、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
   - 四个 manager 的 lane policy 相互隔离、不共享可变状态，同名 lane control-io 不跨 manager 串扰；控制类 lane 的 shutdown_grace 分别绑定各自 RUNTIME/NORTHBOUND
     shutdown_grace 常量。
-  - 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
-  forbidden_side_effects: []
+  - 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用；northbound model-tool-io 成功结果与受控异常正确传播，任务完成后释放容量，关闭后无遗留执行；日志不泄露敏感信息。
+  forbidden_side_effects:
+  - 不得取消 model-tool-io 的独立容量限制，或将其错误吞掉并返回成功。
+  - 测试结束不得遗留阻塞任务或未关闭的测试启动 manager。
+  acceptance:
+  - id: AC-01
+    description: 四个独立 manager 的 lane 集合及精确策略参数符合契约，包括 northbound model-tool-io。
+    steps: [1, 2, 3, 4, 5, 6, 7, 8]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: []
+  - id: AC-02
+    description: 同名 lane 和策略映射不跨 manager 共享，shutdown 常量正确绑定。
+    steps: [9]
+    expected_results: [4]
+    forbidden_side_effects: []
+  - id: AC-03
+    description: runtime/northbound 跨 lane 运行隔离、成功/异常传播和生命周期清理有执行证据。
+    steps: [10, 11]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
@@ -76,7 +92,7 @@ case:
   assertions:
   - 四个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、northbound、api-to-mcp。
   - 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 consts.const 对应常量相等。
-  - runtime 7 lane、config 4 lane、northbound 2 lane、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
+  - runtime 7 lane、config 4 lane、northbound 3 lane（control-io/background-service/model-tool-io）、mcp 2 lane 的键集合无误，LanePolicy.name 与键一致。
   - 四个 manager 的 lane policy 相互隔离、不共享可变状态，同名 lane control-io 不跨 manager 串扰；控制类 lane 的 shutdown_grace 分别绑定各自 RUNTIME/NORTHBOUND
     shutdown_grace 常量。
-  - 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用，日志不泄露敏感信息。
+  - 运行时验证中 control-io 阻塞不影响其它 lane 任务正常完成，无未处理异常、无半写入/重复副作用；northbound model-tool-io 成功结果与受控异常正确传播，任务完成后释放容量，关闭后无遗留执行；日志不泄露敏感信息。

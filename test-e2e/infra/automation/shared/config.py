@@ -34,14 +34,26 @@ def load_yaml(name: str) -> dict[str, Any]:
 
 
 def load_secret_env() -> dict[str, str]:
+    return load_config_env('secrets.env')
+
+
+def load_config_env(name: str, *, optional: bool = False) -> dict[str, str]:
+    """Read a registered machine-local env file, without shell evaluation."""
     result: dict[str, str] = {}
-    path = test_root() / "config" / "secrets.env"
+    if name not in {'secrets.env', 'memory-mock.env'}:
+        raise ValueError('Unsupported test configuration env file')
+    path = test_root() / 'config' / name
+    if optional and not path.is_file():
+        return result
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        result[key.strip()] = value.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        result[key.strip()] = value
     return result
 
 

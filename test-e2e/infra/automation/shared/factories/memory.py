@@ -6,6 +6,7 @@ from shared.http import MODEL_TIMEOUT
 from d3.assets import get_test_asset
 import os
 from shared.asset_registry import register_asset, mark_asset_state
+from shared.case_evidence import write_case_evidence
 
 
 async def delete_owned_memory(identity, memory_id: int) -> None:
@@ -59,6 +60,9 @@ async def _create_agent_memory(identity, marker: str, *, require_indexed: bool =
             # Do not leak a newly created record if persisting its journal fails.
             await delete_owned_memory(identity, memory_id)
             raise
+    write_case_evidence('memory-create', {'http_status': created.status_code, 'memory_id': memory_id,
+                                        'indexed': body.get('indexed'),
+                                        'vector_presence': 'not_exposed_by_create_response'})
     if require_indexed:
         if body.get("indexed") is not True:
             try:

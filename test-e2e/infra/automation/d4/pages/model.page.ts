@@ -247,8 +247,13 @@ export class ModelPage {
   }
 
   async openEditDialog(displayName: string, typeLabel: string): Promise<Locator> {
+    // The library is paginated (eight rows per page). Search through the UI
+    // before locating the row; the configured-slot combobox is not the library.
+    const library = this.page.getByRole("heading", { name: "模型库", exact: true }).locator("xpath=ancestor::section[1]");
+    await library.getByPlaceholder("搜索模型名 / 自定义名称 / API 地址", { exact: true }).fill(displayName);
     const row = this.libraryRow(displayName);
     await expect(row).toBeVisible();
+    await expect(row.getByRole("button", { name: "编辑", exact: true })).toHaveCount(1);
     await row.getByRole("button", { name: "编辑", exact: true }).click();
     const editor = this.page.getByRole("dialog", { name: "编辑模型" });
     await expect(editor).toBeVisible();

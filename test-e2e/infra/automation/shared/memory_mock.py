@@ -8,19 +8,21 @@ from uuid import uuid4
 import httpx
 
 from shared.asset_registry import AssetDependencyError
-from shared.config import load_secret_env, repo_root
+from shared.config import load_config_env, load_secret_env, repo_root
 from shared.http import assert_status
 
 
 def memory_settings():
     secrets = load_secret_env()
+    mock_config = load_config_env('memory-mock.env', optional=True)
     settings = {}
     for name in ('NEXENT_EXTERNAL_MEMORY_PLUGIN', 'NEXENT_EXTERNAL_MEMORY_ENDPOINT',
                  'NEXENT_EXTERNAL_MEMORY_API_KEY'):
-        configured, exported = secrets.get(name, ''), os.environ.get(name, '')
-        if configured and exported and configured != exported:
+        values = {value for value in (secrets.get(name, ''), mock_config.get(name, ''),
+                                     os.environ.get(name, '')) if value}
+        if len(values) > 1:
             raise AssetDependencyError('memory', 'configuration', detail='Conflicting configured/exported ' + name)
-        settings[name] = exported or configured
+        settings[name] = next(iter(values), '')
         if not settings[name]:
             raise AssetDependencyError('memory', 'configuration', detail='Missing existing configuration ' + name)
     if settings['NEXENT_EXTERNAL_MEMORY_PLUGIN'] != 'mem0':

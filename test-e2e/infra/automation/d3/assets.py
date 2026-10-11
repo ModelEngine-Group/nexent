@@ -57,7 +57,7 @@ def configured_model(model_type: str) -> dict:
     return model
 
 
-async def model_id(model_type: str, identity) -> int:
+async def model_id(model_type: str, identity, *, force_health: bool = False) -> int:
     """Use only the configured model name/type within the authenticated tenant."""
     from shared.model_selection import select_configured_model
     from shared.model_catalog import load_model_catalog
@@ -71,7 +71,7 @@ async def model_id(model_type: str, identity) -> int:
     numeric = select_configured_model(model, model_type, rows, selected_id=selected_id)
     from shared.model_health import ensure_model_health
     row = next(row for row in rows if int(row.get('model_id') or row.get('id') or 0) == numeric)
-    await ensure_model_health(reader, model, row)
+    await ensure_model_health(reader, model, row, force=force_health)
     return numeric
 
 

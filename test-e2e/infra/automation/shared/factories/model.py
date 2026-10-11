@@ -5,7 +5,7 @@ from uuid import uuid4
 from d3.assets import configured_model, model_request
 from shared.asset_registry import AssetDependencyError, mark_asset_state, register_asset
 from shared.http import assert_status, client
-from shared.model_health import ensure_model_health
+from shared.model_health import create_configured_model_dependency, ensure_model_health
 
 
 @asynccontextmanager
@@ -18,13 +18,7 @@ async def owned_configured_model(identity, case_id, model_type="llm"):
     created = False
     try:
         async with client("config", token=identity.access_token) as api:
-            response = await api.post("/model/create", json=payload)
-            if response.status_code == 409 and model_type in {"embedding", "multi_embedding"}:
-                message = response.json().get("message", "")
-                if isinstance(message, str) and message.startswith("Failed to get embedding dimension for model"):
-                    raise AssetDependencyError("models", model_type,
-                        detail="configured vector Provider dimension probe failed; no model was created")
-            assert_status(response, 200)
+            await create_configured_model_dependency(api, payload, case_id=case_id)
             created = True
             register_asset("owned_models", display, display, owner_case_id=case_id,
                 cleanup={"service": "config", "identity": identity.id, "method": "POST",

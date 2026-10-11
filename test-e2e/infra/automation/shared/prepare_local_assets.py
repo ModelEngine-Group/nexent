@@ -59,4 +59,5 @@ async def main():
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    from shared.preparation_evidence import run_preparation
+    run_preparation(main())

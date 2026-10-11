@@ -20,6 +20,8 @@ import pytest
 from d3.assets import model_id, model_request
 from shared.asset_registry import AssetDependencyError, mark_asset_state, register_asset
 from shared.http import assert_no_server_error, assert_status, client, redacted_response_body
+from shared.model_health import create_configured_model_dependency
+from shared.model_selection import MissingConfiguredModelError
 
 CASE_ID = 'API-AUTO-551F4FB10B22BB13'
 STAGE = 'D2'
@@ -56,9 +58,10 @@ def _pick_embedding_model_id(payload):
 async def _resolve_embedding_model_id(identity, suffix):
     try:
         return await model_id('embedding', identity), None
-    except AssetDependencyError:
+    except MissingConfiguredModelError:
         # A second test tenant need not share the anchor tenant's models.
-        # Create the configured real model in this tenant only.
+        # Create only a missing model; health/configuration failures are not
+        # absence and must never trigger extra model creation.
         async with client('config', token=identity.access_token) as api:
             return await _create_embedding_model(api, suffix, identity)
 
@@ -66,13 +69,13 @@ async def _resolve_embedding_model_id(identity, suffix):
 def _embedding_model_request(suffix):
     # Keep the provider's real model name. Only the tenant-local display name
     # is unique to this case; fabricated model names fail live connectivity.
-    return model_request('embedding', display_name=f'tagpred-embedding-{suffix}')
+    return {**model_request('embedding', display_name=f'tagpred-embedding-{suffix}'),
+            'skip_default_backfill': True}
 
 
 async def _create_embedding_model(api, suffix, identity):
     request = _embedding_model_request(suffix)
-    response = await api.post('/model/create', json=request)
-    assert_status(response, 200)
+    await create_configured_model_dependency(api, request, case_id=CASE_ID)
     register_asset('case_models',request['display_name'],request['display_name'],owner_case_id=CASE_ID,cleanup={
         'service':'config','identity':identity.id,'method':'POST',
         'path':'/model/delete?display_name='+request['display_name'],'allowed_statuses':[200,404]})

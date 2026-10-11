@@ -44,7 +44,7 @@ RUNTIME_LANES = {
     'evaluation',
 }
 CONFIG_LANES = {'control-io', 'background-service', 'evaluation', 'model-tool-io'}
-NORTHBOUND_LANES = {'control-io', 'background-service'}
+NORTHBOUND_LANES = {'control-io', 'background-service', 'model-tool-io'}
 MCP_LANES = {'control-io', 'background-service'}
 
 
@@ -63,7 +63,7 @@ def _assert_policy(policy, lane_name, max_workers, max_queue_size,
 @pytest.mark.asyncio
 @pytest.mark.case_id(CASE_ID)
 @pytest.mark.stage('D1')
-async def test_thread_lifecycle_configured_policies_and_isolation():
+async def test_thread_lifecycle_configured_policies_and_isolation(caplog):
     managers = [
         runtime_thread_manager,
         config_thread_manager,
@@ -122,6 +122,8 @@ async def test_thread_lifecycle_configured_policies_and_isolation():
                    0, 2, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS)
     _assert_policy(nb._policies['background-service'], 'background-service',
                    12, 8, 0, 2, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS)
+    _assert_policy(nb._policies['model-tool-io'], 'model-tool-io',
+                   6, 16, 0, 5, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS)
 
     mcp = mcp_thread_manager
     assert set(mcp._policies.keys()) == MCP_LANES
@@ -179,7 +181,72 @@ async def test_thread_lifecycle_configured_policies_and_isolation():
         assert time.monotonic() - begun < 30
     finally:
         release.set()
-        control_result = await asyncio.wait_for(control_task, timeout=30)
-        assert control_result == 'control-done'
-        if started_here:
-            await runtime_thread_manager.shutdown(timeout=30)
+        try:
+            control_result = await asyncio.wait_for(control_task, timeout=30)
+            assert control_result == 'control-done'
+        finally:
+            if started_here:
+                drained = await runtime_thread_manager.shutdown(timeout=30)
+                assert drained.stuck_execution_ids == ()
+                assert runtime_thread_manager.snapshot().active_count == 0
+
+    await _check_northbound_model_lane_isolation(nb)
+    for secret in ('sk-', 'api_key=', 'password=', 'authorization: bearer'):
+        assert secret not in caplog.text.lower()
+
+
+async def _check_northbound_model_lane_isolation(manager):
+    """Model results/errors propagate while control I/O is blocked, then drain."""
+    started_here = manager.state is ManagerState.CREATED
+    if started_here:
+        manager.start()
+    entered = threading.Event()
+    release = threading.Event()
+    effects = []
+
+    def blocking_fn():
+        entered.set()
+        assert release.wait(timeout=10), 'test control blocker was not released'
+        return 'control-done'
+
+    def model_error():
+        effects.append('error')
+        raise ValueError('controlled model failure')
+
+    def model_success():
+        effects.append('success')
+        return 'model-result'
+
+    blocker = asyncio.create_task(manager.run(
+        'control-io', ManagedTaskSpec(task_name='nb-control-blocker', owner='formal-d1'), blocking_fn,
+    ))
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(entered.wait, 5), timeout=6)
+        result = await asyncio.wait_for(manager.run(
+            'model-tool-io', ManagedTaskSpec(task_name='nb-model-success', owner='formal-d1'),
+            model_success,
+        ), timeout=5)
+        assert result == 'model-result'
+        with pytest.raises(ValueError, match='controlled model failure'):
+            await asyncio.wait_for(manager.run(
+                'model-tool-io', ManagedTaskSpec(task_name='nb-model-error', owner='formal-d1'),
+                model_error,
+            ), timeout=5)
+        snapshot = manager.snapshot()
+        lane = next(item for item in snapshot.lanes if item.name == 'model-tool-io')
+        assert lane.capacity == 22
+        assert lane.active_count == lane.running_count == lane.queued_count == 0
+        assert lane.available_count == 22
+        assert not any(item.lane == 'model-tool-io' for item in snapshot.executions)
+        assert effects == ['success', 'error'], 'each controlled operation executes exactly once'
+        assert not release.is_set(), 'model work must finish before control I/O is released'
+    finally:
+        release.set()
+        try:
+            assert await asyncio.wait_for(blocker, timeout=5) == 'control-done'
+        finally:
+            if started_here:
+                drained = await manager.shutdown(timeout=5)
+                assert drained.stuck_execution_ids == ()
+                assert manager.state is ManagerState.CLOSED
+                assert manager.snapshot().active_count == 0

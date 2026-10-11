@@ -23,44 +23,66 @@ case:
   - order: 1
     action: 导入 backend/services/runtime_state_service.py 的 RuntimeStateService，实例化被测对象；构造 fake Redis client（hset/hgetall/get/set/setex/xadd/xrange/xread/delete/expire/pipeline
       等方法可注入返回值），monkeypatch RUNTIME_STATE_REDIS_URL 使 enabled=True。
-    expected: 注入 manager 时所有异步封装方法均经 lane="control-io"、owner="services.runtime_state_service" 与对应固定 task_name 的 ManagedTaskSpec
-      调用 ThreadManager.run，不发生直接同步调用。
+    expected: RuntimeStateService 使用隔离 fake Redis client，enabled=True，无真实 Redis 连接。
   - order: 2
     action: 构造 fake ThreadManager（run(lane, spec, fn, *args, **kwargs) 返回可 await 的结果并记录 lane/spec/fn/args），通过 set_thread_manager
       注入。
-    expected: 未注入 manager 时回退为直接调用对应同步方法，返回值与同步方法一致。
+    expected: fake ThreadManager 可记录 lane/spec/fn/args，并透传受控结果或执行真实同步方法。
   - order: 3
     action: 逐一调用 reset_stream_async / get_run_state_async / is_cancelled_async / append_stream_event_async / mark_stream_completed_async
       / get_stream_status_async / read_stream_events_async / wait_for_stream_events_async / acquire_idempotency_async / release_idempotency_async
       / consume_rate_limit_async，断言均以 lane="control-io"、spec.owner="services.runtime_state_service"、spec.task_name 为各自固定任务名、fn
       为对应同步方法、args 与入参一致调用 manager.run，并透传返回结果。
-    expected: managed 与 direct 两条路径对 stop/resume、取消信号、流事件读写的 Redis 写入/读取结果一致，多副本状态不丢失。
+    expected: 所有异步封装经 control-io 和固定 owner/task_name 调用对应同步方法，参数和结果完整透传。
   - order: 4
     action: 将 _thread_manager 置回 None，再次调用上述异步方法，断言 _run_managed 直接调用对应同步方法（同步返回、不路由到 manager），返回值与同步方法直接调用一致（回退分支）。
-    expected: 同步方法捕获异常后返回安全默认值（{} / None / False / []），不向上抛出未处理异常；client 在缺失 RUNTIME_STATE_REDIS_URL 或未安装 redis 时抛 ValueError。
+    expected: 未注入 manager 时直接执行同步方法，与同步方法的返回值及状态变化一致。
   - order: 5
-    action: 覆盖同步方法契约：register_run 写入 run key(hset) 并 expire 且删除 cancel key；set_cancel_signal 写 cancel key 并返回 True；append_stream_event
+    action: 验证新一轮取消时序：reset_stream 清除上一轮 stream、stream:done 与 cancel，不影响其他用户/会话；准备期间写入新的 Stop 后，register_run 写入 run key(hset) 并 expire，但保留本轮 cancel；分别验证 managed/direct 路径。覆盖同步方法契约：set_cancel_signal 写 cancel key 并返回 True；append_stream_event
       执行 xadd(maxlen=RUNTIME_STREAM_MAX_LEN, approximate=True) 并 expire、返回 event_id；read_stream_events 按 after_id 构造 xrange
       min_id（无 after_id 为 "-"，有 after_id 为 "(<id>"）并返回 (event_id, chunk) 列表；wait_for_stream_events 经 xread 返回事件列表。
-    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+    expected: 上一轮取消被 reset_stream 清理，本轮准备期 Stop 在 register_run 后仍可读；其他用户/会话状态不变，流事件读写契约不变。
   - order: 6
     action: 验证 stop/resume 一致性：mark_run_finished(status) 写入 status 与 updated_at 并调用 _expire_completed_runtime_keys 对 run/cancel/stream/stream:done
       四个 key 设置 expire；随后 get_run_state 读回一致 status，且 managed 与 direct 两条路径产生相同 Redis 写入与读取结果。
-    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+    expected: stopped 状态可读回，run/cancel/stream/stream:done 均设置过期时间，managed/direct 路径一致。
   - order: 7
     action: 覆盖异常分支：fake Redis client 抛异常时，同步方法捕获后返回安全默认值（{} / None / False / []）且不向上抛出；client 属性在 RUNTIME_STATE_REDIS_URL
       为空或 redis 包未安装时抛 ValueError。
-    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+    expected: Redis 操作异常不向上泄露未处理异常并返回安全默认值；缺失 URL/redis 时抛 ValueError。
   - order: 8
     action: 确认日志不输出 API Key/Token/用户密码/模型密钥；测试结束还原 monkeypatch 与临时对象，确保可重复执行。
     expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
   expected_results:
   - 注入 manager 时所有异步封装方法均经 lane="control-io"、owner="services.runtime_state_service" 与对应固定 task_name 的 ManagedTaskSpec 调用 ThreadManager.run，不发生直接同步调用。
   - 未注入 manager 时回退为直接调用对应同步方法，返回值与同步方法一致。
-  - managed 与 direct 两条路径对 stop/resume、取消信号、流事件读写的 Redis 写入/读取结果一致，多副本状态不丢失。
+  - managed 与 direct 两条路径对 stop/resume、取消信号、流事件读写的 Redis 写入/读取结果一致，共享 Redis 的服务副本可读回一致状态；reset_stream 清除上一轮取消，register_run 保留准备期间新产生的 Stop，其他用户/会话状态不变。
   - 同步方法捕获异常后返回安全默认值（{} / None / False / []），不向上抛出未处理异常；client 在缺失 RUNTIME_STATE_REDIS_URL 或未安装 redis 时抛 ValueError。
   - 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
-  forbidden_side_effects: []
+  forbidden_side_effects:
+  - register_run 不得清除当前已接纳轮次在准备期间收到的取消信号。
+  - reset_stream 不得清除其他用户或其他会话的状态。
+  acceptance:
+  - id: AC-01
+    description: 所有异步封装按固定 lane/spec 路由，未注入 manager 时保持同步回退语义。
+    steps: [1, 2, 3, 4]
+    expected_results: [1, 2]
+    forbidden_side_effects: []
+  - id: AC-02
+    description: stop/resume、流读写一致；上一轮取消可清理，本轮准备期 Stop 不丢失，其他会话隔离。
+    steps: [5, 6]
+    expected_results: [3]
+    forbidden_side_effects: [1, 2]
+  - id: AC-03
+    description: Redis 操作异常返回安全默认值，缺失依赖有明确错误。
+    steps: [7]
+    expected_results: [4]
+    forbidden_side_effects: []
+  - id: AC-04
+    description: 受控异常日志不泄露敏感数据，隔离对象和 monkeypatch 可清理。
+    steps: [8]
+    expected_results: [5]
+    forbidden_side_effects: []
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
@@ -71,6 +93,6 @@ case:
   assertions:
   - 注入 manager 时所有异步封装方法均经 lane="control-io"、owner="services.runtime_state_service" 与对应固定 task_name 的 ManagedTaskSpec 调用 ThreadManager.run，不发生直接同步调用。
   - 未注入 manager 时回退为直接调用对应同步方法，返回值与同步方法一致。
-  - managed 与 direct 两条路径对 stop/resume、取消信号、流事件读写的 Redis 写入/读取结果一致，多副本状态不丢失。
+  - managed 与 direct 两条路径对 stop/resume、取消信号、流事件读写的 Redis 写入/读取结果一致，共享 Redis 的服务副本可读回一致状态；reset_stream 清除上一轮取消，register_run 保留准备期间新产生的 Stop，其他用户/会话状态不变。
   - 同步方法捕获异常后返回安全默认值（{} / None / False / []），不向上抛出未处理异常；client 在缺失 RUNTIME_STATE_REDIS_URL 或未安装 redis 时抛 ValueError。
   - 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。

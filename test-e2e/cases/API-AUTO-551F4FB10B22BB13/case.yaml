@@ -18,6 +18,7 @@ case:
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/assets/knowledge/；${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
   - 至少准备两个隔离租户各一个已配置 embedding 模型、写入带标签固定文档的知识库，models.yaml 中本用例所需真实向量/模型已配置且预检连通通过。
+  - 仅当本租户缺少配置指定的模型时创建临时模型，不把健康检查失败当作模型缺失；临时模型禁止回填租户默认模型。创建前向量维度探测失败最多重试三次，持续失败记录依赖阻断；其他 409/校验/权限/服务错误仍按失败处理，不放宽业务断言。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
 

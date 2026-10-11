@@ -22,7 +22,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from packaging.requirements import Requirement
 
-from run_cases import machine_environment, run_one
+from run_cases import machine_environment, run_one, result_reason
 from launch_runtime import test_python
 from local_preflight import live_service_problems, static_config_problems
 from static_assets import entries as static_entries, inventory as static_inventory
@@ -175,6 +175,12 @@ def worker(repo, home, record, directory, settings):
     outcome = "AUTOMATION_ERROR"
     reason = None
     test_details = {}
+    preparation_log = None
+    def preparation_failed(code, log):
+        nonlocal outcome, preparation_log
+        preparation_log = log
+        outcome = "TIMEOUT" if code == 124 else "BLOCKED"
+        raise RuntimeError("Preparation failed; inspect " + str(log.relative_to(directory)))
     services = controlled_services(repo, directory, env, bool((review or {}).get("anchors")))
     services_started = False
     try:
@@ -184,20 +190,17 @@ def worker(repo, home, record, directory, settings):
             code = run_logged([sys.executable, str(automation / "prepare_anchor_assets.py")], repo, env,
                           directory / "logs/prepare-anchors.log", settings["command_timeout_seconds"])
             if code:
-                outcome = "TIMEOUT" if code == 124 else "BLOCKED"
-                raise RuntimeError("Anchor preparation failed")
+                preparation_failed(code, directory / "logs/prepare-anchors.log")
         for family in (review or {}).get("families", []):
             code = run_logged([sys.executable, "-m", "shared.prepare_local_assets", "--family", family],
                           repo, env, directory / "logs" / f"prepare-{family}.log", settings["command_timeout_seconds"])
             if code:
-                outcome = "TIMEOUT" if code == 124 else "BLOCKED"
-                raise RuntimeError("Asset preparation did not complete")
+                preparation_failed(code, directory / "logs" / f"prepare-{family}.log")
         if (review or {}).get("special_assets"):
             code = run_logged([sys.executable, str(automation / "prepare_special_assets.py"), "--case", record["case_id"]],
                           repo, env, directory / "logs/prepare-special.log", settings["command_timeout_seconds"])
             if code:
-                outcome = "TIMEOUT" if code == 124 else "BLOCKED"
-                raise RuntimeError("Special asset preparation failed")
+                preparation_failed(code, directory / "logs/prepare-special.log")
         if (review or {}).get("d4_groups"):
             output = directory / "runtime/d4-shared-assets.env"
             command = [sys.executable, str(automation / "prepare_d4_shared_assets.py"), "--output", str(output)]
@@ -205,8 +208,7 @@ def worker(repo, home, record, directory, settings):
                 command += ["--group", group]
             code = run_logged(command, repo, env, directory / "logs/prepare-d4.log", settings["command_timeout_seconds"])
             if code:
-                outcome = "TIMEOUT" if code == 124 else "BLOCKED"
-                raise RuntimeError("D4 asset preparation failed")
+                preparation_failed(code, directory / "logs/prepare-d4.log")
             for line in output.read_text(encoding="utf-8").splitlines():
                 parts = shlex.split(line.removeprefix("export "))
                 if len(parts) != 1 or "=" not in parts[0]:
@@ -220,6 +222,18 @@ def worker(repo, home, record, directory, settings):
             reason = test_details.get("reason")
     except Exception as exc:
         reason = type(exc).__name__
+        if preparation_log:
+            evidence = [preparation_log.relative_to(directory).as_posix()]
+            reason = str(exc)
+            try:
+                receipt = json.loads((directory / 'runtime/preparation-failure.json').read_text(encoding='utf-8'))
+                if outcome != 'TIMEOUT' and receipt.get('result') in {'BLOCKED', 'BLOCKED_BY_DEPENDENCY', 'TIMEOUT'}:
+                    outcome = receipt['result']
+                    reason = result_reason(receipt.get('reason') or receipt.get('error_type'), env)
+                    evidence.append('runtime/preparation-failure.json')
+            except (OSError, ValueError, AttributeError):
+                pass
+            test_details = {'evidence': evidence}
     finally:
         cleanup_code = 1 if test_details.get("cleanup_failed") else 0
         registry = directory / "runtime/resolved-assets.yaml"

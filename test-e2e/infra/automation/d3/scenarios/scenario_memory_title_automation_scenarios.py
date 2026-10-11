@@ -6,6 +6,7 @@ from shared.resource_ids import absent_numeric_id
 
 import asyncio
 import json
+import time
 from uuid import uuid4
 
 import pytest
@@ -16,6 +17,25 @@ from shared.asset_registry import register_asset
 from shared.http import MODEL_TIMEOUT, assert_status, client
 from shared.factories.tenant import isolated_accounts
 from shared.sse import assert_terminal_event, read_sse
+from shared.case_evidence import write_case_evidence
+from shared.asset_registry import AssetDependencyError
+
+
+async def _assert_memory_marker(identity, found: bool, operations: list[dict]) -> None:
+    """Keep a failed business assertion; a later probe is diagnostic, not causal proof."""
+    if found:
+        return
+    probe = 'connected'
+    try:
+        await model_id('embedding', identity, force_health=True)
+    except AssetDependencyError:
+        probe = 'unavailable'
+    operations.append({'operation': 'post_failure_embedding_probe', 'outcome': probe,
+                       'causality': 'not_proven_by_later_probe'})
+    write_case_evidence('memory-operations', operations)
+    raise AssertionError('Stored memory marker was not retrieved; embedding recheck=' + probe
+                         + '; inspect runtime/memory-operations.json and model-health.jsonl. '
+                           'A later health probe does not establish the cause of an earlier write/search failure.')
 
 
 CASES = [
@@ -90,24 +110,45 @@ async def _memory_records(identity, valid: bool) -> None:
         assert_status(invalid, 422)
         return
     marker = f"MEMORY-{uuid4().hex[:10]}"
-    memory_id_value = await _create_agent_memory(identity, marker)
+    await model_id('embedding', identity, force_health=True)
+    memory_id_value = await _create_agent_memory(identity, marker, require_indexed=True)
+    operations = []
     try:
         async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
             fetched = await api.get(f"/memory/records/{memory_id_value}")
             listed = await api.get("/memory/records", params={"layer": "agent", "agent_id": get_test_asset("agents", "basic_id")})
             updated = await api.patch(f"/memory/records/{memory_id_value}", json={"content": f"Updated {marker}", "concept_tags": ["d3", "updated"]})
-            searched = await api.post(
-                "/memory/records/search",
-                json={"query": marker, "agent_id": str(get_test_asset("agents", "basic_id")), "layers": ["agent"], "top_k": 10, "threshold": 0.0, "hybrid": True},
-            )
-        for response in (fetched, listed, updated, searched):
+            operations.append({'operation': 'update', 'http_status': updated.status_code})
+            write_case_evidence('memory-operations', operations)
+            # Poll only this read-like search for eventual refresh. Never
+            # repeat the preceding create/update writes on ambiguous errors.
+            deadline = time.monotonic() + 60
+            found = False
+            for attempt in range(10):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                operations.append({'operation': 'search_started', 'attempt': attempt + 1})
+                write_case_evidence('memory-operations', operations)
+                searched = await asyncio.wait_for(api.post(
+                    "/memory/records/search",
+                    json={"query": marker, "agent_id": str(get_test_asset("agents", "basic_id")), "layers": ["agent"], "top_k": 10, "threshold": 0.0, "hybrid": True},
+                ), timeout=min(30, remaining))
+                assert_status(searched, 200)
+                found = marker.lower() in json.dumps(searched.json(), ensure_ascii=False).lower()
+                operations.append({'operation': 'search', 'attempt': attempt + 1,
+                                   'http_status': searched.status_code, 'marker_found': found})
+                write_case_evidence('memory-operations', operations)
+                if found:
+                    break
+                if attempt < 9:
+                    await asyncio.sleep(1)
+        for response in (fetched, listed, updated):
             assert_status(response, 200)
         assert str(memory_id_value) in json.dumps(listed.json())
-        assert marker.lower() in json.dumps(searched.json(), ensure_ascii=False).lower()
+        await _assert_memory_marker(identity, found, operations)
     finally:
-        async with client("config", token=identity.access_token) as api:
-            deleted = await api.delete(f"/memory/records/{memory_id_value}")
-        assert_status(deleted, (200, 400))
+        await cleanup_owned_memory(identity, memory_id_value)
 
 
 async def _long_term_memory(admin, user, valid: bool) -> None:
@@ -243,23 +284,35 @@ async def _memory_agent_context(identity, mode: str) -> None:
     # Record indexing alone does not prove that the vector Provider works.
     # Classify an unavailable dependency before creating memory or blaming
     # an empty context on the retrieval/prompt implementation.
-    await model_id("embedding", identity)
+    await model_id("embedding", identity, force_health=True)
     marker = f"CTXMEM{uuid4().hex[:10]}"
     lookup = f"CTXLOOKUP{uuid4().hex[:10]}"
     memory_id_value = await _create_agent_memory(identity, f"{lookup} has unique answer {marker}", require_indexed=True)
+    operations = []
     try:
         async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
+            deadline = time.monotonic() + 60
+            found = False
             for attempt in range(10):
-                context = await api.get(
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                operations.append({'operation': 'context_started', 'attempt': attempt + 1})
+                write_case_evidence('memory-operations', operations)
+                context = await asyncio.wait_for(api.get(
                     "/memory/context",
                     params={"query": lookup, "agent_id": str(get_test_asset("agents", "basic_id")), "layers": "agent", "top_k": 10, "threshold": 0.0},
-                )
+                ), timeout=min(30, remaining))
                 assert_status(context, 200)
-                if marker.lower() in context.json().get("prompt_text", "").lower():
+                found = marker.lower() in context.json().get("prompt_text", "").lower()
+                operations.append({'operation': 'context', 'attempt': attempt + 1,
+                                   'http_status': context.status_code, 'marker_found': found})
+                write_case_evidence('memory-operations', operations)
+                if found:
                     break
                 if attempt < 9:
                     await asyncio.sleep(1)
-        assert marker.lower() in context.json().get("prompt_text", "").lower(), context.json()
+        await _assert_memory_marker(identity, found, operations)
         async with temporary_conversation(identity, "D3 memory context") as conversation_id:
             async with client("runtime", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
                 async with api.stream(

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { appPath, configuredModel, runToken } from "../../infra/automation/d4/runner/runtime-config";
@@ -7,6 +8,7 @@ import { registerReadyAsset, resolveReadyAsset } from "../../infra/automation/d4
 import { AgentPage } from "../../infra/automation/d4/pages/agent.page";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
 import { SkillPage } from "../../infra/automation/d4/pages/skill.page";
+import { watchGeneration, waitForGenerationProgress } from "../../infra/automation/d4/runner/generation-progress";
 
 const need = (name: string) => { const value = process.env[name] || ""; if (!value) throw new Error(`${name} is required`); return value; };
 const esc = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -20,6 +22,8 @@ journey("PW-NL2AGENT-01", async (context) => {
   const agents = new AgentPage(page);
   let agentId = 0;
   let generatedSkill = "";
+  const generation = watchGeneration(page, join(contract.caseDir, "generation-failure.json"));
+  contract.deferCleanup(async () => { generation.close(); });
   contract.deferCleanup(async () => { if (agentId) await agents.delete(agentId); });
   await executeFixedScenario(context, {
     preconditions: [
@@ -33,7 +37,7 @@ journey("PW-NL2AGENT-01", async (context) => {
       async () => { const input = page.locator("textarea:visible").first(); await input.fill(`${setting("NEXENT_TEST_NL2AGENT_REQUIREMENT", "创建一个中文格式化助手；先澄清目标用户和输出格式")}。必须使用已安装技能 ${generatedSkill}；不得使用知识库、MCP或任何外部资源；配置中必须保留标记 ${marker}`); await input.press("Enter"); return `sent fixed target requirement constrained to controlled Skill ${generatedSkill}`; },
       async () => {
         let answered = 0;
-        await expect(page.locator("[data-slot='aui-requirement-clarification']").first()).toBeVisible({ timeout: 300_000 });
+        await waitForGenerationProgress(page, generation, () => page.locator("[data-slot='aui-requirement-clarification']").first().isVisible(), 300_000);
         for (; answered < 6; answered += 1) {
           const cards = page.locator("[data-slot='aui-requirement-clarification']");
           const card = cards.last();
@@ -56,7 +60,7 @@ journey("PW-NL2AGENT-01", async (context) => {
           const previousCount = await cards.count();
           await submit.click();
           await expect(card.getByRole("button", { name: "已提交", exact: true })).toBeVisible({ timeout: 120_000 });
-          await page.waitForFunction(
+          await waitForGenerationProgress(page, generation, () => page.evaluate(
             ({ count }) => {
               const clarificationCards = document.querySelectorAll("[data-slot='aui-requirement-clarification']");
               const hasNewClarification = clarificationCards.length > count;
@@ -66,8 +70,7 @@ journey("PW-NL2AGENT-01", async (context) => {
               return hasNewClarification || hasDraft || hasInstallation || hasBinding;
             },
             { count: previousCount },
-            { timeout: 300_000 },
-          );
+          ), 300_000);
         }
         expect(answered).toBeGreaterThan(0);
         return `answered ${answered} consecutive clarification card(s), including every required rendered field`;
@@ -106,9 +109,10 @@ journey("PW-NL2AGENT-01", async (context) => {
       async () => {
         const draftCard = page.locator("[data-slot='aui-agent-draft']").last();
         const completionSummary = page.getByText(/新智能体总结|如需更新.*右侧表单/).last();
-        await expect(draftCard.or(completionSummary)).toBeVisible({ timeout: 300_000 });
+        await waitForGenerationProgress(page, generation, () => draftCard.or(completionSummary).isVisible(), 300_000);
         await expect(page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 300_000 });
         await expect(page.getByPlaceholder("请输入智能体描述")).not.toHaveValue("");
+        generation.close();
         return "observed the current agent_generation_completed UI (draft card or final summary), idle composer, and automatically refreshed server-backed Config";
       },
       async () => { await expect(page.getByPlaceholder("请输入智能体描述")).not.toHaveValue(""); await agents.openSection("模型与提示词"); await page.getByRole("tab", { name: "智能体角色", exact: true }).click(); await expect(page.getByPlaceholder(/请输入智能体的角色、职责和能力/)).not.toHaveValue(""); return "opened the generated prompt section and verified description/prompt without modifying the generated values"; },

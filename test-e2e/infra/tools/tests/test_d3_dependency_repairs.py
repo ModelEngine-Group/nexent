@@ -172,6 +172,7 @@ async def test_memory_control_cleanup_is_scoped_and_uses_actual_plugin_keys():
 
 def test_memory_conflicting_credentials_do_not_silently_override(monkeypatch):
     monkeypatch.setattr(fixture, 'load_secret_env', lambda: {'NEXENT_EXTERNAL_MEMORY_API_KEY': 'first'})
+    monkeypatch.setattr(fixture, 'load_config_env', lambda *args, **kwargs: {})
     monkeypatch.setenv('NEXENT_EXTERNAL_MEMORY_PLUGIN', 'mem0')
     monkeypatch.setenv('NEXENT_EXTERNAL_MEMORY_ENDPOINT', 'http://fixture')
     monkeypatch.setenv('NEXENT_EXTERNAL_MEMORY_API_KEY', 'second')

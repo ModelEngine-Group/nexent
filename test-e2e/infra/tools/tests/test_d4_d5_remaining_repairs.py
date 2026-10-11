@@ -16,6 +16,7 @@ from d5.scenarios import scenario_security_special as security
 from shared.asset_registry import AssetDependencyError
 from shared.factories import model as models
 from shared.factories import tenant
+from shared import model_health
 
 
 def test_browser_health_failure_is_not_pass_and_preserves_primary_assertions():
@@ -71,8 +72,9 @@ async def test_only_explicit_dimension_failure_is_dependency(monkeypatch, status
     async def client(*args, **kwargs):
         yield API()
     monkeypatch.setattr(models, 'client', client)
-    monkeypatch.setattr(models, 'model_request', lambda kind, display_name: {'model_type': kind, 'display_name': display_name})
+    monkeypatch.setattr(models, 'model_request', lambda kind, display_name: {'model_type': kind, 'display_name': 'fixture'})
+    monkeypatch.setattr(model_health.asyncio, 'sleep', AsyncMock())
     with pytest.raises(expected):
         async with models.owned_configured_model(SimpleNamespace(access_token='fixture'), 'SEC-09', 'embedding'):
             pytest.fail('An unsuccessful preparation cannot enter security acceptance')
-    assert posts == ['/model/create']
+    assert posts == ['/model/create'] * (3 if expected is AssetDependencyError else 1)

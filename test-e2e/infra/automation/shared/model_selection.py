@@ -2,6 +2,10 @@
 from shared.asset_registry import AssetDependencyError
 
 
+class MissingConfiguredModelError(AssetDependencyError):
+    """No exact tenant model exists; not a health/configuration/ambiguity error."""
+
+
 def select_configured_model(config: dict, model_type: str, rows: list, *, selected_id=None) -> int:
     expected = [name.strip().casefold() for name in str(
         config.get('model') or config.get('model_name') or '').split(',') if name.strip()]
@@ -54,4 +58,5 @@ def select_configured_model(config: dict, model_type: str, rows: list, *, select
             if selected in ids:
                 return selected
             fail('multiple matching configured models; set a verified tenant-local model_id')
-    fail('no exact configured name/type/model_id match in the authenticated tenant')
+    raise MissingConfiguredModelError('models', model_type,
+                                     detail='no exact configured name/type/model_id match in the authenticated tenant')

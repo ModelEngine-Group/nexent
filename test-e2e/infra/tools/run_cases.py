@@ -38,13 +38,18 @@ from acceptance_integrity import execution_report
 
 
 ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+MEMORY_ENV_KEYS = frozenset({"NEXENT_EXTERNAL_MEMORY_PLUGIN", "NEXENT_EXTERNAL_MEMORY_ENDPOINT",
+                             "NEXENT_EXTERNAL_MEMORY_API_KEY"})
 
 
 def machine_environment(home: Path, repo: Path) -> dict[str, str]:
     env = dict(os.environ)
-    for filename in ("daily.env", "secrets.env"):
+    memory_sources = {key: "process environment" for key in MEMORY_ENV_KEYS if env.get(key)}
+    for filename in ("daily.env", "secrets.env", "memory-mock.env"):
         path = home / "config" / filename
         if not path.is_file():
+            if filename == "memory-mock.env":
+                continue
             raise ValueError(f"Required machine-local config is missing: {path}")
         for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             line = raw.strip()
@@ -54,10 +59,18 @@ def machine_environment(home: Path, repo: Path) -> dict[str, str]:
             if not match:
                 raise ValueError(f"{path}:{number}: expected NAME=value")
             key, value = match.groups()
+            # Export only the registered provider settings, not mock control
+            # ports/secrets or arbitrary names from the optional service file.
+            if filename == "memory-mock.env" and key not in MEMORY_ENV_KEYS:
+                continue
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
                 value = value[1:-1]
             if value:
+                if key in MEMORY_ENV_KEYS:
+                    if key in memory_sources and env[key] != value:
+                        raise ValueError(f"Conflicting {key} in {memory_sources[key]} and {filename}")
+                    memory_sources[key] = filename
                 env[key] = value
     environment_path = home / "config/environment.yaml"
     if not environment_path.is_file():
@@ -194,6 +207,15 @@ def junit_outcome(path: Path) -> tuple[str, dict[str, int]]:
     if counts["failures"] or counts["errors"]:
         return "FAIL", counts
     if counts["skipped"]:
+        reasons = [str(node.get('message', '')) + ' ' + str(node.text or '')
+                   for case in cases if (node := case.find('skipped')) is not None]
+        # Preserve explicit policy/safety/dependency reasons; a mixed or
+        # unexplained skip remains BLOCKED, never PASS.
+        for status in ('SKIPPED_BY_SAFETY', 'SKIPPED_BY_POLICY', 'BLOCKED_BY_DEPENDENCY'):
+            if status == 'SKIPPED_BY_POLICY' and counts['skipped'] != counts['tests']:
+                continue
+            if all(status + ':' in reason for reason in reasons):
+                return status, counts
         return "BLOCKED", counts
     return "PASS", counts
 
@@ -222,8 +244,8 @@ def result_reason(value: object, env: dict[str, str]) -> str:
 
 def pytest_failure_details(result_dir: Path, case_id: str, stage: str,
                            summary: dict[str, int], env: dict[str, str]) -> dict:
-    """Refine one failed item, never turn JUnit failures or teardown errors green."""
-    if summary.get('tests') != 1 or summary.get('failures', 0) + summary.get('errors', 0) != 1:
+    """Refine a complete Case checkpoint, never turn failures/cleanup green."""
+    if not summary.get('tests'):
         return {}
     try:
         rows = [json.loads(line) for line in
@@ -232,6 +254,16 @@ def pytest_failure_details(result_dir: Path, case_id: str, stage: str,
         if len(rows) != 1:
             return {}
         row = rows[0]
+        members = row.get('member_results')
+        if members is not None:
+            if (row.get('expected_items') != summary['tests'] or
+                    row.get('completed_items') != summary['tests'] or
+                    len({item['nodeid'] for item in members}) != summary['tests']):
+                return {}
+            if any(item.get('result') == 'FAIL' for item in members):
+                return {}
+        elif summary.get('tests') != 1 or summary.get('failures', 0) + summary.get('errors', 0) != 1:
+            return {}
         allowed = {'BLOCKED', 'BLOCKED_BY_DEPENDENCY', 'TIMEOUT', 'AUTOMATION_ERROR'}
         if row.get('case_id') != case_id or row.get('stage') != stage or row.get('result') not in allowed:
             return {}

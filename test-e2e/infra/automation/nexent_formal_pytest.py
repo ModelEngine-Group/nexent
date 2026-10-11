@@ -126,7 +126,7 @@ async def _required_identity(identity_id: str):
 def _redact_reason(value: str) -> str:
     value = re.sub(r"(?i)bearer\s+[a-z0-9._~+/=-]+", "Bearer ***", value)
     value = re.sub(
-        r"(?i)(api[_-]?key|access[_-]?key|northbound_admin_key|password|secret|token)(\s*[:=]\s*)['\"]?[^\s,'\"}]+",
+        r"(?i)(api[_-]?key|access[_-]?key|northbound_admin_key|password|secret|token)(['\"]?\s*[:=]\s*)['\"]?[^\s,'\"}]+",
         r"\1\2***",
         value,
     )
@@ -268,6 +268,9 @@ def pytest_configure(config: pytest.Config) -> None:
             if case_id:
                 recorded.add(case_id)
     config._nexent_recorded = recorded  # type: ignore[attr-defined]
+    config._nexent_members = {}  # type: ignore[attr-defined]
+    config._nexent_reports = {}  # type: ignore[attr-defined]
+    config._nexent_completed = set()  # type: ignore[attr-defined]
 
     planned: dict[str, str] = {}
     plan_path = result_dir / "agent-input" / "execution-plan.json" if result_dir else None
@@ -312,12 +315,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     outcome = yield
     report = outcome.get_result()
     redact_report(report, item.funcargs)
-    # A setup error/skip never reaches the call phase. Record it immediately;
-    # otherwise record the final call result. Teardown failures are surfaced by
-    # pytest/JUnit and intentionally do not create a second result for one case.
-    if report.when == "setup" and report.passed:
-        return
-    if report.when not in {"setup", "call"}:
+    if report.when not in {"setup", "call", "teardown"}:
         return
     case_id = _marker_value(item, "case_id")
     stage = _marker_value(item, "stage")
@@ -369,6 +367,35 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
         result = "PASS"
         reason = ""
     reason = _redact_reason(reason)[:4000]
+    reports = item.config._nexent_reports.setdefault(case_id, [])
+    reports.append({"nodeid": item.nodeid, "phase": report.when, "result": result,
+                    "reason": reason, "duration_seconds": float(report.duration), **extra})
+    if report.when == "teardown":
+        item.config._nexent_completed.add(item.nodeid)
+    members = item.config._nexent_members[case_id]
+    if not set(members).issubset(item.config._nexent_completed):
+        return
+    _write_case_result(item.config, case_id, stage, reports)
+
+
+def _write_case_result(config, case_id, stage, reports):
+    """One terminal Case result, only after every collected member/cleanup."""
+    priority = {"PASS": 0, "SKIPPED_BY_POLICY": 1, "SKIPPED_BY_SAFETY": 2,
+                "BLOCKED": 3, "BLOCKED_BY_DEPENDENCY": 4,
+                "FAIL": 5, "TIMEOUT": 6, "AUTOMATION_ERROR": 7}
+    worst = max(reports, key=lambda row: priority[row["result"]])
+    result = worst['result']
+    if result == 'SKIPPED_BY_POLICY':
+        per_member = [max((row for row in reports if row['nodeid'] == nodeid),
+                          key=lambda row: priority[row['result']])['result']
+                      for nodeid in config._nexent_members[case_id]]
+        if any(status != 'SKIPPED_BY_POLICY' for status in per_member):
+            result = 'BLOCKED'  # Partial exclusion is not whole-Case policy exemption.
+    reason = "\n".join(f"{row['nodeid']} [{row['phase']}]: {row['reason']}"
+                       for row in reports if row['result'] != 'PASS')[:4000]
+    extra = {key: worst[key] for key in ('dependency_case_id', 'asset_role') if key in worst}
+    result_dir = config._nexent_result_dir
+    recorded = config._nexent_recorded
     evidence: list[str] = []
     environment_evidence = result_dir / stage.lower() / case_id / 'environment.json'
     if environment_evidence.is_file():
@@ -390,7 +417,10 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
         "case_id": case_id,
         "result": result,
         "stage": stage,
-        "duration_seconds": round(float(report.duration), 3),
+        "duration_seconds": round(sum(row['duration_seconds'] for row in reports), 3),
+        "expected_items": len(config._nexent_members[case_id]),
+        "completed_items": len(set(config._nexent_members[case_id]) & config._nexent_completed),
+        "member_results": reports,
         "failure_reason": reason,
         "analysis": "repository case-local fixed automation",
         "executed_at": datetime.now(timezone.utc).isoformat(),
@@ -406,8 +436,24 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     recorded.add(case_id)
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """Interrupted/maxfail sessions must not certify an incomplete Case PASS."""
+    config = session.config
+    if config._nexent_result_dir is None or config.option.collectonly:
+        return
+    for case_id, members in config._nexent_members.items():
+        if case_id in config._nexent_recorded:
+            continue
+        reports = list(config._nexent_reports.get(case_id, []))
+        reports.append({'nodeid': case_id, 'phase': 'session', 'result': 'AUTOMATION_ERROR',
+                        'reason': f'Incomplete case execution (pytest exit={int(exitstatus)}); '
+                                  'not all members reached teardown', 'duration_seconds': 0})
+        _write_case_result(config, case_id, config._nexent_case_stages[case_id], reports)
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    seen: dict[str, str] = {}
+    seen: dict[str, tuple[str, str, str]] = {}
+    config._nexent_case_stages = {}
     planned: dict[str, str] = config._nexent_planned  # type: ignore[attr-defined]
     selected: list[pytest.Item] = []
     deselected: list[pytest.Item] = []
@@ -424,9 +470,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         case_id = _marker_value(item, "case_id")
         stage = _marker_value(item, "stage").upper()
         stages.add(stage)
-        if case_id in seen:
-            raise pytest.UsageError(f"duplicate case_id {case_id}: {seen[case_id]} and {item.nodeid}")
-        seen[case_id] = item.nodeid
+        binding = (str(item.path.resolve()), stage, item.nodeid)
+        if case_id in seen and seen[case_id][:2] != binding[:2]:
+            raise pytest.UsageError(f"duplicate case_id {case_id}: {seen[case_id][2]} and {item.nodeid}")
+        seen[case_id] = binding
         if planned and case_id not in planned:
             deselected.append(item)
             continue
@@ -435,6 +482,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                 f"{case_id}: implementation stage {stage} does not match execution plan stage {planned[case_id]}"
             )
         selected.append(item)
+        config._nexent_members.setdefault(case_id, []).append(item.nodeid)
+        config._nexent_case_stages[case_id] = stage
         if case_id in DATABASE_TEST_CASES:
             item.add_marker(pytest.mark.skip(reason="SKIPPED_BY_POLICY: database and migration tests are excluded"))
         elif case_id in disabled_feature_cases:
@@ -460,6 +509,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                 {
                     "planned_filter_enabled": bool(planned),
                     "collected": len(seen),
+                    "collected_items": len(items) + len(deselected) if deselected else len(items),
                     "selected": len(selected),
                     "deselected_unplanned": sorted(_marker_value(item, "case_id") for item in deselected),
                 },
