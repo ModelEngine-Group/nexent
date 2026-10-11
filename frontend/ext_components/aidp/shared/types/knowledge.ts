@@ -6,12 +6,10 @@ import type {
 /** Metadata returned by the AIDP knowledge management pages. */
 export interface AidpKnowledgeBaseItem extends Omit<
   SharedKnowledgeBaseItem,
-  "document_count" | "chunk_count"
+  "document_count" | "chunk_count" | "updated_at" | "created_by"
 > {
-  document_count?: number | null;
-  chunk_count?: number | null;
+  created_by?: string | null;
   creator_name?: string | null;
-  document_count_reliable?: boolean;
 }
 
 export interface AidpKnowledgeBaseListResponse extends Omit<
@@ -19,4 +17,7 @@ export interface AidpKnowledgeBaseListResponse extends Omit<
   "value"
 > {
   value: AidpKnowledgeBaseItem[];
+  total_count: number;
+  has_more: boolean;
+  total_reliable: boolean;
 }

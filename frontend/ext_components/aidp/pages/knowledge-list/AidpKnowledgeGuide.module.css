@@ -87,7 +87,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 16px;
-  height: 156px;
+  min-height: 156px;
   padding: 24px;
   overflow: hidden;
   border-radius: 8px;

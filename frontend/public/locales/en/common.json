@@ -4221,7 +4221,7 @@
   "aidpKnowledge.createAccessGroups": "Accessible User Groups",
   "aidpKnowledge.createAccessGroupsPlaceholder": "Select user groups that can access this knowledge base",
   "aidpKnowledge.createAccessGroupsRequired": "Please select at least one user group that can access this knowledge base",
-  "aidpKnowledge.invalidFileType": "{{count}} file(s) with unsupported format have been filtered. Only Text (txt/json/markdown), Web (html), Docs (pdf/docx/doc/ppt/pptx), Sheets (xlsx/xls/csv), Images (png/jpeg/jpg/bmp) are supported",
+  "aidpKnowledge.invalidFileType": "{{count}} file(s) use unsupported formats. Choose one of the listed supported formats.",
   "aidpKnowledge.showTotal": "Total {{count}} items",
   "project.config": "System config",
   "project.config.title": "System name",
@@ -5401,7 +5401,7 @@
   "aidpKnowledge.createGraphPromptZh": "Chinese",
   "aidpKnowledge.createGraphSynonymMerge": "Enable synonym detection and merging",
   "aidpKnowledge.createGraphThinking": "Enable LLM reasoning during graph construction",
-  "aidpKnowledge.createGraphThinkingHint": "Disabling LLM thinking returns extracted triples without the full reasoning process to improve extraction efficiency. Yes here enables thinking, which submits No for disabling thinking.",
+  "aidpKnowledge.createGraphThinkingHint": "Choose Yes to enable model thinking, or No to return only extracted triples for more efficient extraction.",
   "aidpKnowledge.createModelLoading": "Loading…",
   "aidpKnowledge.createModelNone": "No models available",
   "aidpKnowledge.createModelSearch": "Search models",
@@ -5443,7 +5443,7 @@
   "aidpKnowledge.guideStepCreate": "Configure knowledge base parameters",
   "aidpKnowledge.guideStepCreateDescription": "Convert text into machine-readable vectors and build an index for more accurate, responsive semantic search. Configure the embedding model, chunking method and retrieval value.",
   "aidpKnowledge.guideStepUpload": "Import data",
-  "aidpKnowledge.guideStepUploadDescription": "Bring enterprise documents or local files into the system to build a reliable knowledge base. Connect file storage to upload and import local data.",
+  "aidpKnowledge.guideStepUploadDescription": "Upload local documents to the knowledge base. Files are processed using its configured settings to provide searchable information for agents.",
   "aidpKnowledge.showLoadedCount": "Loaded {{count}} items",
   "aidpKnowledge.guideTitle": "Getting started",
   "aidpKnowledge.kbTypeEnterprise": "Enterprise",
@@ -5498,5 +5498,8 @@
   "errorCode.130503": "Failed to connect to AIDP. Please check network connection and URL.",
   "errorCode.130504": "AIDP authentication failed. Please check your API key.",
   "errorCode.130505": "AIDP API rate limit exceeded. Please try again later.",
-  "errorCode.130506": "Failed to parse AIDP response. Please check API URL."
+  "errorCode.130506": "Failed to parse AIDP response. Please check API URL.",
+  "aidpKnowledge.groupsLoadFailed": "Failed to load user groups",
+  "aidpKnowledge.groupsPermissionRequired": "This account does not have permission to view user groups",
+  "aidpKnowledge.createEmbeddingUnavailable": "No embedding model is available to create a knowledge base"
 }

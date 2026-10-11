@@ -36,18 +36,16 @@ const AidpKnowledgeGuide: React.FC = () => {
   }, []);
 
   const toggleGuide = () => {
-    setExpanded((previous) => {
-      const next = !previous;
-      try {
-        window.sessionStorage.setItem(
-          "aidpKnowledge.guideExpanded",
-          String(next)
-        );
-      } catch {
-        // Keep the change in memory when browser storage is unavailable.
-      }
-      return next;
-    });
+    const next = !expanded;
+    setExpanded(next);
+    try {
+      window.sessionStorage.setItem(
+        "aidpKnowledge.guideExpanded",
+        String(next)
+      );
+    } catch {
+      // Keep the change in memory when browser storage is unavailable.
+    }
   };
 
   return (

@@ -3,19 +3,15 @@ export interface AidpKbDetail {
   kds_name: string;
   description?: string;
   document_count?: number | null;
-  chunk_count?: number | null;
   embedding_model?: string;
   is_multimodal?: boolean;
   caption_enable?: number | null;
   created_at?: string;
-  updated_at?: string;
   permission?: "EDIT" | "READ_ONLY" | null;
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
   resource_status?:
     "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
-  /** False when the reported document count is not a confirmed statistic. */
-  document_count_reliable?: boolean;
   chunk_mode?: number | null;
   chunk_token_num?: number | null;
   chunk_overlap_num?: number | null;
@@ -37,35 +33,16 @@ export interface AidpDocumentItem {
   file_size?: number;
   file_type?: string;
   created_at?: string;
-  /**
-   * Processing status reported by the AIDP file history endpoint:
-   * `PROCESSING` | `COMPLETED` | `FAILED` (upper-cased by the backend).
-   * Absent when the backend falls back to the completed-files listing, which
-   * only ever reports ingested files.
-   */
-  status?: string | number;
-  /** Channel directory the file was ingested from. */
-  dir_path?: string;
-  error_code?: string | number | null;
-  reason?: string | null;
-  extraction_failure_reason?: string | null;
+  updated_at?: string;
   [key: string]: unknown;
 }
 
 export interface AidpDocumentListResponse {
   value: AidpDocumentItem[];
-  total_count?: number;
-  has_more?: boolean;
-  /** Whether `total_count` comes from the AIDP Count API (true) or is a
-   *  fallback estimate when Count fails (false). When false the frontend
-   *  should treat the total as approximate and avoid displaying "共 N 条". */
-  total_reliable?: boolean;
-  /**
-   * Number of files still being processed across the WHOLE knowledge base
-   * (not just the returned page). The list polls while this is greater than
-   * zero and stops once every file has reached a terminal status.
-   */
-  processing_count?: number;
+  total_count: number;
+  has_more: boolean;
+  /** False for search pagination, whose filtered global total is unavailable. */
+  total_reliable: boolean;
 }
 
 export interface AidpUploadSuccessItem {
@@ -141,9 +118,7 @@ export interface AidpModelItem {
 
 export interface AidpModelListResponse {
   service: string;
-  app: string;
   models: AidpModelItem[];
-  total_count: number;
 }
 
 /**
@@ -152,28 +127,28 @@ export interface AidpModelListResponse {
  * so the frontend never hand-builds the JSON payload.
  */
 export interface AidpGraphConfig {
-  /** Optional graph extraction LLM model; nested in AIDP graph_config. */
-  llm_model_name?: string;
+  /** Graph extraction LLM model; nested in AIDP graph_config. */
+  llm_model_name: string;
   /** Extraction domain. */
-  domain?: "医疗" | "金融" | "常规" | "法律法规";
+  domain: "医疗" | "金融" | "常规" | "法律法规";
   /** Sub-graph expansion hop count. */
-  retrieve_subgraph_hop?: string;
+  retrieve_subgraph_hop: string;
   /** Inverse of the "enable model thinking" switch. */
-  no_think_mode?: "是" | "否";
+  no_think_mode: "是" | "否";
   /** Extraction prompt language. */
-  prompt_language?: "中文" | "英文";
+  prompt_language: "中文" | "英文";
   /** Editable extraction prompt, limited to 4096 characters. */
-  prompt_text?: string;
+  prompt_text: string;
   /** Whether synonym merging is enabled. */
-  synonym_merge_enable?: "是" | "否";
+  synonym_merge_enable: "是" | "否";
   /** Whether semantic disambiguation is enabled. */
-  disambiguation_enable?: "是" | "否";
+  disambiguation_enable: "是" | "否";
 }
 
 export interface AidpCreateKbPayload {
   name: string;
   description: string;
-  embedding_model?: string;
+  embedding_model: string;
   /** AIDP requires chunk_token_num (int, > 0) and chunk_overlap_num (int, >= 0). */
   chunk_token_num?: number;
   chunk_overlap_num?: number;
@@ -216,11 +191,4 @@ export interface AidpSaveSettingsResult {
   permissions_saved: boolean;
   metadata_status: "unchanged" | "updated" | "failed";
   metadata?: AidpKbDetail;
-}
-
-export interface AidpUpdateKbPayload {
-  name?: string;
-  description?: string;
-  chunk_mode?: number;
-  topk?: number;
 }

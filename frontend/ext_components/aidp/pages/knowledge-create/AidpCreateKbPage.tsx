@@ -75,6 +75,7 @@ const AidpCreateKbPage: React.FC = () => {
 
   const [form] = Form.useForm();
   const [validating, setValidating] = useState(false);
+  const [invalidFields, setInvalidFields] = useState<string[]>([]);
   const createMutation = useCreateAidpKnowledgeBase();
   const loading = validating || createMutation.isPending;
   /** Guards against a second create while one submission is in flight. */
@@ -90,8 +91,14 @@ const AidpCreateKbPage: React.FC = () => {
   }, [enableAidpKnowledge, isDeploymentReady, locale, router]);
 
   // ---- Permissions and groups ----
-  const { isUser, canConfigureGroupPermissions, groupOptions } =
-    useAidpGroupOptions();
+  const {
+    isUser,
+    canConfigureGroupPermissions,
+    canReadGroups,
+    groupOptions,
+    groupsLoading,
+    groupsError,
+  } = useAidpGroupOptions();
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
 
   const modelsQuery = useAidpModels();
@@ -274,6 +281,13 @@ const AidpCreateKbPage: React.FC = () => {
         error !== null &&
         "errorFields" in error
       ) {
+        const fields = (error as { errorFields: { name: string[] }[] })
+          .errorFields;
+        const names = fields.map((field) => field.name[0]);
+        setInvalidFields(names);
+        window.requestAnimationFrame(() => {
+          if (fields[0]) form.scrollToField(fields[0].name, { focus: true });
+        });
         return;
       }
       handleError(error, {
@@ -335,8 +349,36 @@ const AidpCreateKbPage: React.FC = () => {
             }
           />
         )}
+        {canConfigureGroupPermissions &&
+          (groupsError || (!canReadGroups && !groupsLoading)) && (
+            <Alert
+              className="mb-4"
+              type="error"
+              showIcon
+              title={
+                groupsError
+                  ? getAidpErrorMessage(
+                      groupsError,
+                      t,
+                      t("aidpKnowledge.groupsLoadFailed")
+                    )
+                  : t("aidpKnowledge.groupsPermissionRequired")
+              }
+            />
+          )}
+        {modelsQuery.isSuccess && embeddingModelOptions.length === 0 && (
+          <Alert
+            className="mb-4"
+            type="error"
+            showIcon
+            title={t("aidpKnowledge.createEmbeddingUnavailable")}
+          />
+        )}
         <AidpCreateKbSections
           form={form}
+          invalidFields={invalidFields}
+          groupsLoading={groupsLoading}
+          groupsUnavailable={!!groupsError || !canReadGroups}
           t={t}
           canConfigureGroupPermissions={canConfigureGroupPermissions}
           groupOptions={groupOptions}
@@ -364,6 +406,10 @@ const AidpCreateKbPage: React.FC = () => {
             disabled={
               modelsQuery.isPending ||
               modelsQuery.isError ||
+              (modelsQuery.isSuccess && embeddingModelOptions.length === 0) ||
+              (canConfigureGroupPermissions &&
+                ingroupPermission !== "PRIVATE" &&
+                (groupsLoading || !!groupsError || !canReadGroups)) ||
               (graphEnabled &&
                 (templateQuery.isPending || templateQuery.isError))
             }

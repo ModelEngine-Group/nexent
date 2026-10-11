@@ -1,6 +1,5 @@
 import {
   AIDP_ALLOWED_EXTENSIONS,
-  AIDP_ALLOWED_MIME_TYPES,
   AIDP_MAX_UPLOAD_FILE_COUNT,
   AIDP_OTHER_FILE_MAX_SIZE_BYTES,
   AIDP_OTHER_FILE_MAX_SIZE_MB,
@@ -10,10 +9,9 @@ import {
 } from "@/ext_components/aidp/features/file-import/uploadConstants";
 
 /**
- * Pure check (no side effects): returns true if the file's MIME type or extension is allowed for AIDP.
+ * Check the extension against AIDP's supported formats.
  */
 export const isAidpFileValid = (file: File): boolean => {
-  if (file.type && AIDP_ALLOWED_MIME_TYPES.has(file.type)) return true;
   const ext = file.name.toLowerCase().split(".").pop() ?? "";
   return (AIDP_ALLOWED_EXTENSIONS as readonly string[]).includes(ext);
 };

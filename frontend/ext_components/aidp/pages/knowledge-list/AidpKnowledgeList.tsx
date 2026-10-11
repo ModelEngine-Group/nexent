@@ -38,8 +38,9 @@ import {
   formatAidpCreator,
   formatAidpDateTime,
 } from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
-import { useGroupList } from "@/hooks/group/useGroupList";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
+import { usePermission } from "@/hooks/permission/usePermission";
+import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { Can } from "@/components/permission/Can";
 import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
 import AidpResizableTitle, {
@@ -116,26 +117,19 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   onRetry,
 }) => {
   const { t } = useTranslation();
-  const { user } = useAuthorizationContext();
-  const tenantId = user?.tenantId ?? null;
-  const { data: groupListData } = useGroupList(tenantId);
+  const { can } = usePermission();
+  const { groupOptions, groupsError } = useAidpGroupOptions();
   const groupById = useMemo(() => {
     const map = new Map<number, string>();
-    (groupListData?.groups ?? []).forEach((group) => {
-      map.set(group.group_id, group.group_name);
+    groupOptions.forEach((group) => {
+      map.set(group.value, group.label);
     });
     return map;
-  }, [groupListData]);
+  }, [groupOptions]);
   const { tableContainer, activeKeys, columnWidths, handleResize } =
     useAidpColumnWidths(visibleColumns);
 
-  const displayedKbs = useMemo(
-    () =>
-      [...kbs].sort((a, b) =>
-        (a.kds_name || "").localeCompare(b.kds_name || "")
-      ),
-    [kbs]
-  );
+  const displayedKbs = kbs;
 
   const isRowUnavailable = (kb: AidpKnowledgeBaseItem) =>
     kb.resource_status === "UNAVAILABLE" || kb.resource_status === "ORPHANED";
@@ -144,54 +138,78 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
 
   const getGroupNames = (ids: number[] | undefined) =>
     Array.isArray(ids)
-      ? ids
-          .map((id) => groupById.get(id))
-          .filter((name): name is string => Boolean(name))
+      ? ids.map((id) => groupById.get(id) || AIDP_UNKNOWN_VALUE)
       : [];
 
-  const renderScope = (kb: AidpKnowledgeBaseItem) => {
+  const scopeDescription = (kb: AidpKnowledgeBaseItem) => {
     const isPrivate = kb.ingroup_permission === "PRIVATE";
     const isShared =
       kb.ingroup_permission === "EDIT" || kb.ingroup_permission === "READ_ONLY";
-    const groupNames = isShared ? getGroupNames(kb.group_ids) : [];
-
+    return {
+      isPrivate,
+      isShared,
+      groupNames:
+        isShared && can("group:read") && !groupsError
+          ? getGroupNames(kb.group_ids)
+          : [],
+      scope: isPrivate
+        ? t("aidpKnowledge.scopePrivate")
+        : isShared
+          ? t("aidpKnowledge.scopeShared")
+          : AIDP_UNKNOWN_VALUE,
+      groupPermission: isShared
+        ? t(
+            kb.ingroup_permission === "EDIT"
+              ? "aidpKnowledge.scopeGroupEdit"
+              : "aidpKnowledge.scopeGroupRead"
+          )
+        : "",
+      readOnly: kb.permission === "READ_ONLY" && !isRowUnavailable(kb),
+      unavailable: isRowUnavailable(kb),
+    };
+  };
+  const scopeText = (kb: AidpKnowledgeBaseItem) => {
+    const scope = scopeDescription(kb);
+    return [
+      scope.scope,
+      scope.groupPermission,
+      scope.groupNames.join("、"),
+      scope.readOnly ? t("aidpKnowledge.kbReadOnly") : "",
+      scope.unavailable ? t("aidpKnowledge.kbUnavailable") : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+  const renderScope = (kb: AidpKnowledgeBaseItem) => {
+    const scope = scopeDescription(kb);
     return (
       <div className={styles.tableScope}>
-        {isPrivate ? (
-          <Tag color="blue" className="mr-0">
-            {t("aidpKnowledge.scopePrivate")}
-          </Tag>
-        ) : isShared ? (
-          <>
-            <Tag color="geekblue" className="mr-0">
-              {t("aidpKnowledge.scopeShared")}
-            </Tag>
-            <Tag className="mr-0">
-              {kb.ingroup_permission === "EDIT"
-                ? t("aidpKnowledge.scopeGroupEdit")
-                : t("aidpKnowledge.scopeGroupRead")}
-            </Tag>
-          </>
-        ) : (
-          <Tag className="mr-0">{AIDP_UNKNOWN_VALUE}</Tag>
+        <Tag
+          color={
+            scope.isPrivate ? "blue" : scope.isShared ? "geekblue" : undefined
+          }
+          className="mr-0"
+        >
+          {scope.scope}
+        </Tag>
+        {scope.groupPermission && (
+          <Tag className="mr-0">{scope.groupPermission}</Tag>
         )}
-        <Can permission="group:read">
-          {groupNames.length > 0 && (
-            <Tooltip title={groupNames.join("、")}>
-              <Tag className={`${styles.tableGroup} mr-0`}>
-                {t("aidpKnowledge.scopeGroupCount", {
-                  count: groupNames.length,
-                })}
-              </Tag>
-            </Tooltip>
-          )}
-        </Can>
-        {kb.permission === "READ_ONLY" && !isRowUnavailable(kb) && (
+        {scope.groupNames.length > 0 && (
+          <Tooltip title={scope.groupNames.join("、")}>
+            <Tag className={`${styles.tableGroup} mr-0`}>
+              {t("aidpKnowledge.scopeGroupCount", {
+                count: scope.groupNames.length,
+              })}
+            </Tag>
+          </Tooltip>
+        )}
+        {scope.readOnly && (
           <Tag color="default" className="mr-0">
             {t("aidpKnowledge.kbReadOnly")}
           </Tag>
         )}
-        {isRowUnavailable(kb) && (
+        {scope.unavailable && (
           <Tag color="default" className="mr-0">
             {t("aidpKnowledge.kbUnavailable")}
           </Tag>
@@ -207,14 +225,16 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         icon: <FileAddOutlined />,
         label: t("aidpKnowledge.importFile"),
       },
-      {
-        type: "divider" as const,
-      },
-      {
-        key: "delete",
-        icon: <Trash2 className="h-3.5 w-3.5" />,
-        label: t("common.delete"),
-      },
+      ...(can("kb:delete")
+        ? [
+            { type: "divider" as const },
+            {
+              key: "delete",
+              icon: <Trash2 className="h-3.5 w-3.5" />,
+              label: t("common.delete"),
+            },
+          ]
+        : []),
     ],
     onClick: ({ key, domEvent }) => {
       domEvent.stopPropagation();
@@ -304,31 +324,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         <span className={styles.tableCellText}>{value}</span>
       </Tooltip>
     );
-    const scopeText = (kb: AidpKnowledgeBaseItem) => {
-      const shared =
-        kb.ingroup_permission === "EDIT" ||
-        kb.ingroup_permission === "READ_ONLY";
-      return (
-        <>
-          {kb.ingroup_permission === "PRIVATE"
-            ? t("aidpKnowledge.scopePrivate")
-            : shared
-              ? `${t("aidpKnowledge.scopeShared")} · ${t(kb.ingroup_permission === "EDIT" ? "aidpKnowledge.scopeGroupEdit" : "aidpKnowledge.scopeGroupRead")}`
-              : AIDP_UNKNOWN_VALUE}
-          <Can permission="group:read">
-            {shared && getGroupNames(kb.group_ids).length > 0
-              ? ` · ${getGroupNames(kb.group_ids).join("、")}`
-              : null}
-          </Can>
-          {kb.permission === "READ_ONLY" && !isRowUnavailable(kb)
-            ? ` · ${t("aidpKnowledge.kbReadOnly")}`
-            : null}
-          {isRowUnavailable(kb)
-            ? ` · ${t("aidpKnowledge.kbUnavailable")}`
-            : null}
-        </>
-      );
-    };
     const makeColumn = (
       key: AidpKbColumnKey,
       column: ColumnsType<AidpKnowledgeBaseItem>[number]
@@ -432,17 +427,19 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                 >
                   {t("aidpKnowledge.importFile")}
                 </Button>
-                <Button
-                  type="link"
-                  size="small"
-                  className="px-1"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDelete(kb);
-                  }}
-                >
-                  {t("common.delete")}
-                </Button>
+                <Can permission="kb:delete">
+                  <Button
+                    type="link"
+                    size="small"
+                    className="px-1"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDelete(kb);
+                    }}
+                  >
+                    {t("common.delete")}
+                  </Button>
+                </Can>
               </div>
             )
           ) : null,
@@ -555,6 +552,18 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
               className="mb-3 shrink-0"
             />
           )}
+          {groupsError && (
+            <Alert
+              type="error"
+              showIcon
+              className="mb-3 shrink-0"
+              title={getAidpErrorMessage(
+                groupsError,
+                t,
+                t("aidpKnowledge.groupsLoadFailed")
+              )}
+            />
+          )}
           <div className={styles.toolbar}>
             <div className={styles.searchGroup}>
               <Input
@@ -618,7 +627,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">{renderBody()}</div>
-          {kbs.length > 0 && (
+          {(total > 0 || currentPage > 1) && (
             <div className="flex shrink-0 pt-3">
               <AidpPagination
                 currentPage={currentPage}

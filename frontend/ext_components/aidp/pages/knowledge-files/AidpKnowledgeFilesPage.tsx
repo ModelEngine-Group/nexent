@@ -31,8 +31,8 @@ import {
 
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
 import type {
-  AidpKbDetail,
   AidpDocumentItem,
+  AidpKbDetail,
 } from "@/ext_components/aidp/shared/types/management";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import {
@@ -44,6 +44,9 @@ import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpG
 import { useAidpKnowledgeFiles } from "@/ext_components/aidp/pages/knowledge-files/hooks/useAidpKnowledgeFiles";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { ApiError } from "@/services/api";
+import log from "@/lib/logger";
+import { usePermission } from "@/hooks/permission/usePermission";
+import { useAidpKnowledgeDetail } from "./hooks/useAidpKnowledgeDetail";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpUpdateKbModal from "@/ext_components/aidp/pages/knowledge-files/AidpUpdateKbModal";
@@ -54,6 +57,7 @@ interface AidpKnowledgeFilesPageProps {
   onBack: () => void;
   onDelete: (knowledgeBase: AidpKnowledgeBaseItem) => void;
   onUpdated: (knowledgeBase: AidpKnowledgeBaseItem) => void;
+  pollingPaused?: boolean;
 }
 
 const AidpDetailField = ({
@@ -77,21 +81,8 @@ const PAGE_SIZE = 10;
 const UNKNOWN = AIDP_UNKNOWN_VALUE;
 
 const formatDetailDateTime = (value: unknown): string => {
-  let date: Date;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    date = new Date(value < 1e12 ? value * 1000 : value);
-  } else if (typeof value === "string" && value.trim()) {
-    const normalized = value.trim();
-    const numeric = /^\d+(?:\.\d+)?$/.test(normalized)
-      ? Number(normalized)
-      : null;
-    date =
-      numeric === null
-        ? new Date(normalized)
-        : new Date(numeric < 1e12 ? numeric * 1000 : numeric);
-  } else {
-    return UNKNOWN;
-  }
+  if (typeof value !== "string" || !value.trim()) return UNKNOWN;
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return UNKNOWN;
   return date.toLocaleString(undefined, {
     year: "numeric",
@@ -120,11 +111,18 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   onBack,
   onDelete,
   onUpdated,
+  pollingPaused = false,
 }) => {
   const { t, i18n } = useTranslation();
   const { message } = App.useApp();
-  const { groupOptions } = useAidpGroupOptions();
-  const [detail, setDetail] = useState<AidpKbDetail>(knowledgeBase);
+  const { groupOptions, canReadGroups, groupsError } = useAidpGroupOptions();
+  const { can } = usePermission();
+  const detailQuery = useAidpKnowledgeDetail(knowledgeBase.kds_id);
+  const detail = useMemo<AidpKbDetail>(
+    () => ({ ...knowledgeBase, ...detailQuery.data }),
+    [knowledgeBase, detailQuery.data]
+  );
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [editingKbMode, setEditingKbMode] = useState<
     "metadata" | "permissions" | null
   >(null);
@@ -140,7 +138,8 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     knowledgeBase.kds_id,
     filePage,
     filePageSize,
-    fileParams.keyword
+    fileParams.keyword,
+    pollingPaused || importOpen || deleteConfirmOpen || editingKbMode !== null
   );
   const files = filesQuery.data?.value ?? [];
   const fileTotal = filesQuery.data?.total_count ?? files.length;
@@ -159,36 +158,13 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     const names = new Map(
       groupOptions.map((option) => [option.value, option.label])
     );
-    return (detail.group_ids || [])
-      .map((id) => names.get(id))
-      .filter((name): name is string => Boolean(name));
+    return (detail.group_ids || []).map((id) => names.get(id) || UNKNOWN);
   }, [detail.group_ids, groupOptions]);
   const canEdit = detail.permission === "EDIT";
+  const canDeleteKb = canEdit && can("kb:delete");
   const isAvailable =
     detail.resource_status !== "UNAVAILABLE" &&
     detail.resource_status !== "ORPHANED";
-
-  const refreshDetail = useCallback(async () => {
-    try {
-      const result = await aidpKnowledgeService.getKb(knowledgeBase.kds_id);
-      const merged = { ...knowledgeBase, ...result } as AidpKbDetail;
-      setDetail(merged);
-      onUpdated(merged as AidpKnowledgeBaseItem);
-    } catch (error) {
-      message.error(
-        getAidpErrorMessage(error, t, t("aidpKnowledge.detailLoadFailed"))
-      );
-    }
-  }, [knowledgeBase, message, onUpdated, t]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void refreshDetail();
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // The parent remounts this component when the selected KB id changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [knowledgeBase.kds_id]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -200,23 +176,38 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     return () => window.clearTimeout(timer);
   }, [fileKeyword]);
 
-  const refreshFiles = useCallback(async () => {
-    const result = await refetchFiles({ cancelRefetch: false });
-    if (!result.isSuccess || result.data.value.length > 0 || filePage <= 1)
+  const refreshFiles = useCallback(
+    () => refetchFiles({ cancelRefetch: false }),
+    [refetchFiles]
+  );
+
+  useEffect(() => {
+    if (
+      !filesQuery.isSuccess ||
+      filesQuery.isFetching ||
+      files.length ||
+      filePage <= 1
+    )
       return;
-    const lastPage =
-      result.data.total_reliable !== false &&
-      result.data.total_count !== undefined
-        ? Math.max(1, Math.ceil(result.data.total_count / filePageSize))
-        : filePage - 1;
-    setFileParams((current) =>
-      current.page === filePage &&
-      current.pageSize === filePageSize &&
-      current.keyword === fileParams.keyword
-        ? { ...current, page: Math.min(filePage - 1, lastPage) }
-        : current
+    const lastPage = fileTotalReliable
+      ? Math.max(1, Math.ceil(fileTotal / filePageSize))
+      : filePage - 1;
+    const frame = window.requestAnimationFrame(() =>
+      setFileParams((current) => ({
+        ...current,
+        page: Math.min(filePage - 1, lastPage),
+      }))
     );
-  }, [refetchFiles, filePage, filePageSize, fileParams.keyword]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    filesQuery.isSuccess,
+    filesQuery.isFetching,
+    files.length,
+    filePage,
+    filePageSize,
+    fileTotal,
+    fileTotalReliable,
+  ]);
 
   const handleDownload = useCallback(
     async (file: AidpDocumentItem) => {
@@ -234,6 +225,11 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         link.remove();
         URL.revokeObjectURL(blobUrl);
       } catch (error) {
+        log.error("Failed to download AIDP file:", {
+          id: knowledgeBase.kds_id,
+          fileUuid: file.file_uuid,
+          error,
+        });
         message.error(
           getAidpErrorMessage(error, t, t("aidpKnowledge.downloadFailed"))
         );
@@ -244,8 +240,13 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
 
   const handleDeleteFile = useCallback(
     (file: AidpDocumentItem) => {
+      setDeleteConfirmOpen(true);
       Modal.confirm({
         title: t("aidpKnowledge.deleteDocTitle"),
+        centered: true,
+        okText: t("common.confirm"),
+        cancelText: t("common.cancel"),
+        afterClose: () => setDeleteConfirmOpen(false),
         content: file.file_name,
         onOk: async () => {
           try {
@@ -275,8 +276,12 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
             }
             message.success(t("aidpKnowledge.deleteDocSuccess"));
             void refreshFiles();
-            void refreshDetail();
           } catch (error) {
+            log.error("Failed to delete AIDP file:", {
+              id: knowledgeBase.kds_id,
+              fileUuid: file.file_uuid,
+              error,
+            });
             message.error(
               getAidpErrorMessage(error, t, t("aidpKnowledge.deleteDocFailed"))
             );
@@ -285,14 +290,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         },
       });
     },
-    [
-      refreshFiles,
-      i18n.language,
-      knowledgeBase.kds_id,
-      message,
-      refreshDetail,
-      t,
-    ]
+    [refreshFiles, i18n.language, knowledgeBase.kds_id, message, t]
   );
 
   const fileColumns: ColumnsType<AidpDocumentItem> = [
@@ -438,10 +436,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
                   </p>
                 </Tooltip>
               </div>
-              {canEdit && (
+              {canDeleteKb && (
                 <Button
                   icon={<DeleteOutlined />}
-                  onClick={() => onDelete(knowledgeBase)}
+                  onClick={() => onDelete(detail)}
                 >
                   {t("common.delete")}
                 </Button>
@@ -452,8 +450,9 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
                 <FileTextOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
                 <AidpDetailField label={t("aidpKnowledge.detailTabFiles")}>
                   {formatAidpDocumentCount(
-                    detail.document_count,
-                    detail.document_count_reliable
+                    !fileParams.keyword && filesQuery.isSuccess
+                      ? fileTotal
+                      : detail.document_count
                   )}
                 </AidpDetailField>
               </div>
@@ -470,15 +469,8 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
                 <AidpDetailField label={t("aidpKnowledge.detailAllowedGroups")}>
                   {privateScope ? (
                     t("aidpKnowledge.detailOwnerOnly")
-                  ) : groupNames.length > 0 ||
-                    (detail.group_ids || []).length > 0 ? (
-                    <AidpGroupNamesDisplay
-                      groupNames={
-                        groupNames.length > 0
-                          ? groupNames
-                          : (detail.group_ids || []).map(String)
-                      }
-                    />
+                  ) : canReadGroups && !groupsError && groupNames.length > 0 ? (
+                    <AidpGroupNamesDisplay groupNames={groupNames} />
                   ) : (
                     UNKNOWN
                   )}
@@ -501,6 +493,28 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         </div>
       </section>
 
+      {detailQuery.isError && (
+        <Alert
+          type="error"
+          showIcon
+          title={getAidpErrorMessage(
+            detailQuery.error,
+            t,
+            t("aidpKnowledge.detailLoadFailed")
+          )}
+        />
+      )}
+      {groupsError && (
+        <Alert
+          type="error"
+          showIcon
+          title={getAidpErrorMessage(
+            groupsError,
+            t,
+            t("aidpKnowledge.groupsLoadFailed")
+          )}
+        />
+      )}
       <Tabs
         activeKey="files"
         className="shrink-0 [&>.ant-tabs-nav]:mb-0 [&>.ant-tabs-content-holder]:hidden"
@@ -576,27 +590,23 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       <AidpUpdateKbModal
         open={editingKbMode !== null}
         mode={editingKbMode || "metadata"}
-        knowledgeBase={detail as AidpKnowledgeBaseItem}
+        knowledgeBase={detail}
         onCancel={() => setEditingKbMode(null)}
         onSuccess={(updated) => {
           setEditingKbMode(null);
-          setDetail((current) => ({ ...current, ...updated }));
           onUpdated(updated);
-          void refreshDetail();
+          void detailQuery.refetch();
         }}
       />
 
       <AidpImportDrawer
         title={t("aidpKnowledge.importDrawerTitle")}
         open={importOpen}
-        knowledgeBase={knowledgeBase}
+        knowledgeBase={detail}
         onClose={() => {
           setImportOpen(false);
           void refreshFiles();
-          void refreshDetail();
         }}
-        onDocsUploaded={() => undefined}
-        onRefresh={() => undefined}
       />
     </div>
   );

@@ -13,21 +13,14 @@ interface AidpPaginationProps {
   currentPage: number;
   pageSize: number;
   total: number;
-  /** True when `total` came from the AIDP Count API. */
+  /** True when the backend reports a confirmed global total. */
   totalReliable: boolean;
   hasMore: boolean;
   onPageChange: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
 }
 
-/**
- * Server-side pagination shared by the AIDP knowledge base and document lists.
- *
- * AIDP exposes a dedicated Count API; when it succeeds `totalReliable` is true
- * and the full control including the total is shown. When Count fails the total
- * is only a fallback estimate, so the control degrades to simple prev/next mode
- * driven by `hasMore` and omits the total.
- */
+/** Show totals only when known; search pagination uses hasMore. */
 const AidpPagination: React.FC<AidpPaginationProps> = ({
   currentPage,
   pageSize,
@@ -55,13 +48,11 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
       locale={i18n.language.startsWith("zh") ? zhCN : enUS}
     >
       <div className={styles.pagination}>
-        <span className={styles.paginationTotal}>
-          {totalReliable
-            ? t("aidpKnowledge.showTotal", { count: total })
-            : t("aidpKnowledge.showLoadedCount", {
-                count: Math.max(0, total),
-              })}
-        </span>
+        {totalReliable && (
+          <span className={styles.paginationTotal}>
+            {t("aidpKnowledge.showTotal", { count: total })}
+          </span>
+        )}
         <div className={styles.paginationControls}>
           {onPageSizeChange && (
             <Select

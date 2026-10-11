@@ -1,4 +1,3 @@
-import type { AidpUploadFailedItem } from "@/ext_components/aidp/shared/types/management";
 import { ApiError } from "@/services/api";
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -6,7 +5,7 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
     ? (value as Record<string, unknown>)
     : undefined;
 
-/** Preserve business codes and upstream reasons for both upload transports. */
+/** Preserve business codes and upstream reasons for the upload transport. */
 export const parseAidpUploadError = (
   status: number,
   statusText: string,
@@ -44,17 +43,3 @@ export const parseAidpUploadError = (
 
 /** Resolve row text without triggering a page-level notification. */
 export { getAidpErrorMessage as getAidpUploadErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
-
-export const getAidpUploadFailureDetails = (
-  failedList: AidpUploadFailedItem[],
-  language: string,
-  fallbackMessage: string
-) => {
-  const isChinese = language.startsWith("zh");
-  return failedList.map((item) => {
-    const reason = isChinese
-      ? item.reason_zh || item.reason_en
-      : item.reason_en || item.reason_zh;
-    return `${item.file_name}: ${reason || fallbackMessage}`;
-  });
-};

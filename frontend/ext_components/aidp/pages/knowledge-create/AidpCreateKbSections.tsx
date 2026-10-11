@@ -35,6 +35,9 @@ const OVERLAP_PERCENT_MAX = 40;
 
 interface AidpCreateKbSectionsProps {
   form: FormInstance;
+  invalidFields: string[];
+  groupsLoading: boolean;
+  groupsUnavailable: boolean;
   t: TFunction;
   canConfigureGroupPermissions: boolean;
   groupOptions: AidpGroupOption[];
@@ -53,6 +56,9 @@ type CollapsibleSection = "graph" | "chunk" | "vector" | "retrieval";
 
 const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
   form,
+  invalidFields,
+  groupsLoading,
+  groupsUnavailable,
   t,
   canConfigureGroupPermissions,
   groupOptions,
@@ -77,6 +83,27 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
       retrieval: false,
     }
   );
+
+  const [previousInvalidFields, setPreviousInvalidFields] =
+    useState(invalidFields);
+  if (previousInvalidFields !== invalidFields) {
+    setPreviousInvalidFields(invalidFields);
+    if (!invalidFields.length) return;
+    const sections = invalidFields.flatMap((name): CollapsibleSection[] => {
+      if (name.startsWith("graph_") || name === "llm_model_name")
+        return ["graph"];
+      if (name.startsWith("chunk_")) return ["chunk"];
+      if (["embedding_model", "vlm_model", "caption_enable"].includes(name))
+        return ["vector"];
+      if (["topk", "similarity"].includes(name)) return ["retrieval"];
+      return [];
+    });
+    if (sections.length)
+      setExpanded((current) => ({
+        ...current,
+        ...Object.fromEntries(sections.map((section) => [section, true])),
+      }));
+  }
 
   const toggleSection = (section: CollapsibleSection) =>
     setExpanded((current) => ({ ...current, [section]: !current[section] }));
@@ -225,6 +252,8 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                 t={t}
                 groupOptions={groupOptions}
                 ingroupPermission={ingroupPermission}
+                groupsLoading={groupsLoading}
+                groupsUnavailable={groupsUnavailable}
               />
             </>
           )}
@@ -440,7 +469,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
               <Form.Item
                 name="chunk_mode"
                 label={t("aidpKnowledge.createChunkMode")}
-                className={styles.firstColumn}
+                className={`${styles.firstColumn} ${styles.chunkModeField}`}
                 rules={[{ required: true }]}
               >
                 <Radio.Group className="w-full">
@@ -586,7 +615,6 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
               />
             </Form.Item>
             <Form.Item
-              className={styles.vlmFormItem}
               label={
                 <span className={styles.vlmLabelRow}>
                   <span>{t("aidpKnowledge.createVlmModel")}</span>
@@ -610,7 +638,6 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
             >
               <Form.Item
                 name="vlm_model"
-                className={styles.vlmModelControl}
                 rules={[
                   {
                     required: captionEnabled,

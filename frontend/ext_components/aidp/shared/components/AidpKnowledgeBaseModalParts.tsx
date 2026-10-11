@@ -40,6 +40,7 @@ interface AidpModalFooterProps {
   onCancel: () => void;
   onSubmit: () => void;
   loading: boolean;
+  submitDisabled?: boolean;
   cancelText: string;
   submitText: string;
 }
@@ -48,6 +49,7 @@ export const AidpKnowledgeBaseModalFooter: React.FC<AidpModalFooterProps> = ({
   onCancel,
   onSubmit,
   loading,
+  submitDisabled = false,
   cancelText,
   submitText,
 }) => (
@@ -55,7 +57,12 @@ export const AidpKnowledgeBaseModalFooter: React.FC<AidpModalFooterProps> = ({
     <Button onClick={onCancel} disabled={loading}>
       {cancelText}
     </Button>
-    <Button type="primary" loading={loading} onClick={onSubmit}>
+    <Button
+      type="primary"
+      loading={loading}
+      disabled={submitDisabled}
+      onClick={onSubmit}
+    >
       {submitText}
     </Button>
   </div>
@@ -96,6 +103,8 @@ interface AidpPermissionFieldsProps {
   groupOptions: AidpGroupOption[];
   ingroupPermission?: string;
   showSearch?: boolean;
+  groupsLoading?: boolean;
+  groupsUnavailable?: boolean;
 }
 
 const hasRequiredGroupIds = (permission: string, value: unknown) =>
@@ -103,7 +112,14 @@ const hasRequiredGroupIds = (permission: string, value: unknown) =>
 
 export const AidpKnowledgeBasePermissionFields: React.FC<
   AidpPermissionFieldsProps
-> = ({ t, groupOptions, ingroupPermission, showSearch = false }) => (
+> = ({
+  t,
+  groupOptions,
+  ingroupPermission,
+  showSearch = false,
+  groupsLoading = false,
+  groupsUnavailable = false,
+}) => (
   <>
     <Form.Item
       name="ingroup_permission"
@@ -165,7 +181,10 @@ export const AidpKnowledgeBasePermissionFields: React.FC<
         mode="multiple"
         showSearch={showSearch ? { optionFilterProp: "label" } : undefined}
         placeholder={t("aidpKnowledge.createAccessGroupsPlaceholder")}
-        disabled={ingroupPermission === "PRIVATE"}
+        loading={groupsLoading}
+        disabled={
+          ingroupPermission === "PRIVATE" || groupsLoading || groupsUnavailable
+        }
         options={groupOptions}
       />
     </Form.Item>

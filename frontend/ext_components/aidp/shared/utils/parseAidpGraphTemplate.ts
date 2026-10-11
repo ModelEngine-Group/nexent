@@ -1,3 +1,5 @@
+import { ApiError } from "@/services/api";
+import { ErrorCode } from "@/const/errorCode";
 import type { AidpGraphTemplate } from "@/ext_components/aidp/shared/types/graph";
 
 const parameterKeys = [
@@ -24,8 +26,18 @@ export function parseAidpGraphTemplate(raw: unknown): AidpGraphTemplate {
       )
     )
   )
-    throw new Error("Incomplete AIDP graph configuration template");
+    throw new ApiError(
+      ErrorCode.AIDP_RESPONSE_ERROR,
+      "Incomplete AIDP graph configuration template"
+    );
   // Reject invalid constraints before they reach form validation.
-  data.value.forEach((p) => new RegExp(p.regexp, "u"));
+  try {
+    data.value.forEach((p) => new RegExp(p.regexp, "u"));
+  } catch {
+    throw new ApiError(
+      ErrorCode.AIDP_RESPONSE_ERROR,
+      "Invalid AIDP graph template constraint"
+    );
+  }
   return data;
 }

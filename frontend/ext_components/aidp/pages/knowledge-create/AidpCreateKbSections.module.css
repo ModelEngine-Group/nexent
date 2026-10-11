@@ -130,16 +130,15 @@
   grid-column: 1;
 }
 
-.desktopSpacer {
-  display: none;
-}
-
 .chunkModeSection {
   margin-bottom: 16px;
 }
 
-.chunkChoices {
+.chunkModeField {
   container-type: inline-size;
+}
+
+.chunkChoices {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
@@ -289,10 +288,6 @@
   .formGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 32px;
-  }
-
-  .desktopSpacer {
-    display: block;
   }
 }
 

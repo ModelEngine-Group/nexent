@@ -3931,7 +3931,7 @@
   "aidpKnowledge.createAccessGroups": "可访问用户组",
   "aidpKnowledge.createAccessGroupsPlaceholder": "选择可访问本知识库的用户组",
   "aidpKnowledge.createAccessGroupsRequired": "请至少选择一个可访问该知识库的用户组",
-  "aidpKnowledge.invalidFileType": "{{count}} 个文件格式不支持，已自动过滤。仅支持文本（txt/json/markdown）、网页（html）、文档（pdf/docx/doc/ppt/pptx）、表格（xlsx/xls/csv）、图片（png/jpeg/jpg/bmp）格式",
+  "aidpKnowledge.invalidFileType": "{{count}} 个文件格式不支持，请选择提示中的支持格式",
   "aidpKnowledge.showTotal": "共 {{count}} 条",
   "quota.title": "配额管理",
   "quota.hardLimit": "硬配额",
@@ -5415,7 +5415,7 @@
   "aidpKnowledge.createGraphPromptZh": "中文",
   "aidpKnowledge.createGraphSynonymMerge": "开启同义词检测合并",
   "aidpKnowledge.createGraphThinking": "构图过程开启大模型思考",
-  "aidpKnowledge.createGraphThinkingHint": "禁用LLM思考过程，LLM提取三元组时只返回提取结果，不输出完整思考过程，提升三元组提取效率，可选是或否 此处选择“是”表示开启思考，对应接口禁用思考为“否”。",
+  "aidpKnowledge.createGraphThinkingHint": "选择“是”时，模型开启思考；选择“否”时，模型只返回三元组提取结果，提升提取效率。",
   "aidpKnowledge.createModelLoading": "加载中…",
   "aidpKnowledge.createModelNone": "暂无可用模型",
   "aidpKnowledge.createModelSearch": "搜索模型",
@@ -5457,7 +5457,7 @@
   "aidpKnowledge.guideStepCreate": "配置知识库参数",
   "aidpKnowledge.guideStepCreateDescription": "将文本转化为机器可理解的向量并建立索引，提升语义检索的精准度与响应速度，需配置知识库向量模型、切片方式、检索值。",
   "aidpKnowledge.guideStepUpload": "导入数据",
-  "aidpKnowledge.guideStepUploadDescription": "将企业文档或本地文件注入系统以构建知识底座，确保 AI 回答有据可依，需要连接文件存储和上传导入本地数据。",
+  "aidpKnowledge.guideStepUploadDescription": "上传本地文档到知识库，按已配置的规则进行解析和入库，为智能体提供可检索的资料。",
   "aidpKnowledge.showLoadedCount": "已加载 {{count}} 条",
   "aidpKnowledge.guideTitle": "知识库使用引导",
   "aidpKnowledge.kbTypeEnterprise": "企业",
@@ -5512,5 +5512,8 @@
   "errorCode.130503": "连接AIDP失败，请检查网络和URL",
   "errorCode.130504": "AIDP认证失败，请检查API Key",
   "errorCode.130505": "AIDP请求频率超限，请稍后重试",
-  "errorCode.130506": "AIDP响应解析失败，请检查API URL"
+  "errorCode.130506": "AIDP响应解析失败，请检查API URL",
+  "aidpKnowledge.groupsLoadFailed": "读取用户组失败",
+  "aidpKnowledge.groupsPermissionRequired": "当前账号没有查看用户组的权限",
+  "aidpKnowledge.createEmbeddingUnavailable": "暂无可用向量化模型，无法创建知识库"
 }

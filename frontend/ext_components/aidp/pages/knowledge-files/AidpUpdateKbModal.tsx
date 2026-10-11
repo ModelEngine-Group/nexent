@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Modal, Form, Input, message } from "antd";
+import { Alert, Modal, Form, Input, message } from "antd";
+
+import log from "@/lib/logger";
 
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
-import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
+import { useSaveAidpKnowledgeSettings } from "./hooks/useAidpKnowledgeDetail";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
 import {
@@ -34,10 +36,19 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
 }) => {
   const { t } = useTranslation();
   const [form] = Form.useForm();
-  const [loading, setLoading] = React.useState(false);
+  const [validating, setValidating] = React.useState(false);
+  const saveMutation = useSaveAidpKnowledgeSettings();
+  const loading = validating || saveMutation.isPending;
+  const submittingRef = useRef(false);
 
-  const { isUser, canConfigureGroupPermissions, groupOptions } =
-    useAidpGroupOptions();
+  const {
+    isUser,
+    canConfigureGroupPermissions,
+    canReadGroups,
+    groupOptions,
+    groupsLoading,
+    groupsError,
+  } = useAidpGroupOptions();
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
 
   // Pre-fill form when opening. ``group_ids`` may be null/undefined on rows
@@ -61,11 +72,11 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
   }, [open, knowledgeBase, form, isUser]);
 
   const handleOk = async () => {
-    if (!knowledgeBase) return;
-
+    if (!knowledgeBase || submittingRef.current) return;
+    submittingRef.current = true;
+    setValidating(true);
     try {
       const values = await form.validateFields();
-      setLoading(true);
 
       const name =
         mode === "metadata"
@@ -118,15 +129,16 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       }
 
       // Omitted metadata fields must never trigger an upstream AIDP request.
-      const result = await aidpKnowledgeService.setPermission(
-        knowledgeBase.kds_id,
-        {
+      setValidating(false);
+      const result = await saveMutation.mutateAsync({
+        id: knowledgeBase.kds_id,
+        payload: {
           ingroup_permission: newPermission,
           group_ids: normalizedNewGroupIds,
           ...(nameChanged ? { name } : {}),
           ...(descriptionChanged ? { description } : {}),
-        }
-      );
+        },
+      });
       const metadataFailed = result.metadata_status === "failed";
       if (metadataFailed) {
         message.warning(t("aidpKnowledge.updateKbMetadataFailed"));
@@ -156,15 +168,21 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       if (error && typeof error === "object" && "errorFields" in error) {
         return;
       }
+      log.error("Failed to update AIDP knowledge base:", {
+        id: knowledgeBase.kds_id,
+        error,
+      });
       message.error(
         getAidpErrorMessage(error, t, t("aidpKnowledge.updateKbFailed"))
       );
     } finally {
-      setLoading(false);
+      submittingRef.current = false;
+      setValidating(false);
     }
   };
 
   const handleCancel = () => {
+    if (submittingRef.current) return;
     form.resetFields();
     onCancel();
   };
@@ -178,6 +196,8 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       okText={t("common.confirm")}
       cancelText={t("common.cancel")}
       confirmLoading={loading}
+      closable={!loading}
+      keyboard={!loading}
       centered
       width={640}
       mask={{ closable: false }}
@@ -188,6 +208,11 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           onCancel={handleCancel}
           onSubmit={handleOk}
           loading={loading}
+          submitDisabled={
+            canConfigureGroupPermissions &&
+            ingroupPermission !== "PRIVATE" &&
+            (groupsLoading || !!groupsError || !canReadGroups)
+          }
           cancelText={t("common.cancel")}
           submitText={t("common.confirm")}
         />
@@ -210,6 +235,23 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           style={{ padding: "20px 24px 8px" }}
         >
           {mode === "metadata" && <AidpKnowledgeBaseBasicFields t={t} />}
+          {canConfigureGroupPermissions &&
+            (groupsError || (!canReadGroups && !groupsLoading)) && (
+              <Alert
+                className="mb-4"
+                type="error"
+                showIcon
+                title={
+                  groupsError
+                    ? getAidpErrorMessage(
+                        groupsError,
+                        t,
+                        t("aidpKnowledge.groupsLoadFailed")
+                      )
+                    : t("aidpKnowledge.groupsPermissionRequired")
+                }
+              />
+            )}
           {canConfigureGroupPermissions ? (
             <div className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
               <AidpKnowledgeBasePermissionFields
@@ -217,6 +259,8 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
                 groupOptions={groupOptions}
                 ingroupPermission={ingroupPermission}
                 showSearch
+                groupsLoading={groupsLoading}
+                groupsUnavailable={!!groupsError || !canReadGroups}
               />
             </div>
           ) : (

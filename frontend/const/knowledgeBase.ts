@@ -165,10 +165,7 @@ export const EXTENSION_TO_TYPE_MAP = {
   [FILE_EXTENSIONS.EPUB]: FILE_TYPES.EPUB,
 } as const;
 
-const parsePositiveIntegerEnv = (
-  value: string | undefined,
-  fallback: number
-) => {
+const parsePositiveIntegerEnv = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };

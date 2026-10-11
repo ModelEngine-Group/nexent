@@ -1,9 +1,7 @@
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type {
-  AidpKnowledgeBaseItem,
-  AidpKnowledgeBaseListResponse,
-} from "../types/knowledge";
+import type { AidpKnowledgeBaseItem } from "../types/knowledge";
+import type { AidpKbDetail } from "../types/management";
 import aidpKnowledgeService from "../services/aidpKnowledgeService";
 import { useAidpQueryScope } from "./useAidpQueryScope";
 
@@ -20,28 +18,20 @@ export const useAidpKnowledgeCache = () => {
   );
   const updateKnowledgeBase = useCallback(
     (updated: AidpKnowledgeBaseItem) => {
-      queryClient.setQueriesData<AidpKnowledgeBaseListResponse>(
-        { queryKey: [...key, "list"] },
-        (current) =>
-          current && {
-            ...current,
-            value: current.value.map((item) =>
-              item.kds_id === updated.kds_id ? { ...item, ...updated } : item
-            ),
-          }
+      queryClient.setQueryData<AidpKbDetail>(
+        [...key, "detail", updated.kds_id],
+        (current) => ({ ...current, ...updated })
       );
-      queryClient.removeQueries({
-        queryKey: [...key, "detail", updated.kds_id],
-      });
+      void refreshLists();
     },
-    [key, queryClient]
+    [key, queryClient, refreshLists]
   );
   const fetchKnowledgeBase = useCallback(
     (id: string) =>
       queryClient.fetchQuery({
         queryKey: [...key, "detail", id],
-        queryFn: () => aidpKnowledgeService.getKb(id),
-        staleTime: 0,
+        queryFn: ({ signal }) => aidpKnowledgeService.getKb(id, signal),
+        staleTime: 30_000,
         retry: false,
       }),
     [key, queryClient]

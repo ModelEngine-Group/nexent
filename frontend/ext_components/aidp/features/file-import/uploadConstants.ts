@@ -15,26 +15,6 @@ export const AIDP_ALLOWED_EXTENSIONS = [
   ...AIDP_FILE_EXTENSIONS.IMAGE,
 ] as const;
 
-// MIME types accepted by AIDP
-export const AIDP_ALLOWED_MIME_TYPES = new Set<string>([
-  "text/plain",
-  "application/json",
-  "text/markdown",
-  "text/html",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-  "text/csv",
-  "application/csv",
-  "image/png",
-  "image/jpeg",
-  "image/bmp",
-]);
-
 // Dragger `accept` prop value (comma-separated dot-extensions)
 export const AIDP_ACCEPT_STRING = [
   ...AIDP_FILE_EXTENSIONS.TEXT,

@@ -14,7 +14,7 @@ Updated 2026-10-09. Applies only to the AIDP knowledge-base overview and detail 
 
 ## Transport
 
-`AidpImportDrawer` calls `aidpKnowledgeService.uploadDocsWithProgress`, using XHR to report multipart progress. The existing `uploadDocs` contract remains available to other callers. Browser credentials use the existing cookie/proxy authentication; AIDP credentials stay server-side.
+`AidpImportDrawer` calls `aidpKnowledgeService.uploadDocsWithProgress`, using XHR to report multipart progress. Browser credentials use the existing cookie/proxy authentication; AIDP credentials stay server-side.
 
 The frontend proxy sends the body to Nexent's `POST /aidp-mgmt/knowledge-bases/{id}/documents`. FastAPI receives `List[UploadFile]`, validates permissions and files, then `upload_aidp_docs_impl` sends all files to AIDP's `KnowledgeFiles/Upload` endpoint in one request. It returns the existing summary, success_list and failed_list response. No MinIO, ES, persistent upload staging or background job is introduced.
 
@@ -22,7 +22,7 @@ Refreshing the browser can interrupt transfer before Nexent receives the complet
 
 ## Verification on a real AIDP environment
 
-Set `ENABLE_AIDP_KNOWLEDGE=true`, configure `AIDP_SERVER_URL`, `AIDP_API_KEY` and `AIDP_TENANT_ID` for the real environment, restart the services, and use this branch for both frontend and backend. Keep secrets in local environment configuration, outside Git. Existing file/history search and page filters are forwarded to AIDP; the mock service is updated as well.
+Set `ENABLE_AIDP_KNOWLEDGE=true`, configure `AIDP_SERVER_URL`, `AIDP_API_KEY` and `AIDP_TENANT_ID` for the real environment, restart the services, and use this branch for both frontend and backend. Keep secrets in local environment configuration, outside Git. Ingested-file name searches and page parameters are forwarded to AIDP.
 
 1. Select multiple supported files together; verify one browser multipart request with repeated `files` parts and the same percentage in each uploading ring.
 2. Verify Confirm remains disabled after transfer completes while the response is pending.

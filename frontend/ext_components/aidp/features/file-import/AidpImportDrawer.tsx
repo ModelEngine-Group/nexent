@@ -39,8 +39,6 @@ interface AidpImportDrawerProps {
   title: string;
   knowledgeBase: AidpKnowledgeBaseItem;
   onClose: () => void;
-  onDocsUploaded: (uploadedFileIds: string[]) => void;
-  onRefresh: () => void;
 }
 
 const formatBytes = (bytes: number): string => {
@@ -111,8 +109,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
   title,
   knowledgeBase,
   onClose,
-  onDocsUploaded,
-  onRefresh,
 }) => {
   const { t, i18n } = useTranslation();
   const { message } = App.useApp();
@@ -181,7 +177,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
       );
     updateBatch((row) => ({ ...row, status: "uploading", progress: 0 }));
 
-    const uploadedFileIds: string[] = [];
     try {
       const result = await aidpKnowledgeService.uploadDocsWithProgress(
         knowledgeBase.kds_id,
@@ -206,9 +201,7 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
           (item) => item.file_name === row.file.name
         );
         if (successIndex >= 0) {
-          const [success] = successes.splice(successIndex, 1);
-          if (success.file_ino_no)
-            uploadedFileIds.push(String(success.file_ino_no));
+          successes.splice(successIndex, 1);
           return { ...row, status: "success", progress: 100 };
         }
         const failureIndex = failures.findIndex(
@@ -245,7 +238,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
     if (!mountedRef.current) return;
     uploadingRef.current = false;
     setUploading(false);
-    onRefresh();
 
     const finishedRows = rowsRef.current.filter((row) => batchIds.has(row.id));
     const failedCount = finishedRows.filter(
@@ -254,7 +246,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
     const succeededCount = finishedRows.filter(
       (row) => row.status === "success"
     ).length;
-    if (uploadedFileIds.length > 0) onDocsUploaded(uploadedFileIds);
 
     if (failedCount > 0) {
       if (succeededCount > 0) {
@@ -273,15 +264,7 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
         t("aidpKnowledge.uploadSuccess", { count: succeededCount })
       );
     }
-  }, [
-    i18n.language,
-    knowledgeBase.kds_id,
-    message,
-    onDocsUploaded,
-    onRefresh,
-    replaceRows,
-    t,
-  ]);
+  }, [i18n.language, knowledgeBase.kds_id, message, replaceRows, t]);
 
   const flushSelection = useCallback(() => {
     const selectedFiles = pendingSelectionRef.current;

@@ -1,18 +1,8 @@
 /** Placeholder used wherever a real value is unavailable. */
 export const AIDP_UNKNOWN_VALUE = "—";
 
-/**
- * Format the document count.
- *
- * `documentCountReliable` is false when the backend could not confirm a real
- * AIDP count; in that case the value stays unknown, because the backend fills
- * a compatibility default that is not a real statistic.
- */
-export function formatAidpDocumentCount(
-  count: unknown,
-  documentCountReliable: unknown
-): string {
-  if (documentCountReliable === false) return AIDP_UNKNOWN_VALUE;
+/** Format the confirmed document count returned by the backend. */
+export function formatAidpDocumentCount(count: unknown): string {
   if (typeof count !== "number" || !Number.isFinite(count)) {
     return AIDP_UNKNOWN_VALUE;
   }
