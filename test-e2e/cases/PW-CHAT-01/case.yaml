@@ -38,7 +38,7 @@ case:
     expected: 会话切换不串消息。
   - order: 7
     action: 执行当前侧栏支持的重命名/新建会话。
-    expected: 会话切换不串消息。
+    expected: 两个会话重命名成功；等待已发起的自动标题请求收口后，侧栏及服务端持久化标题仍为手动名称。
   - order: 8
     action: 切换两个会话确认消息不串。
     expected: 会话切换不串消息。
@@ -49,7 +49,9 @@ case:
   - Execution真实streaming，Stop后旧流不再追加。
   - 停止后可继续发送，刷新恢复一致。
   - 会话切换不串消息。
-  forbidden_side_effects: []
+  - 手动重命名成功后，晚返回的自动标题不覆盖侧栏或服务端名称。
+  forbidden_side_effects:
+  - 不覆盖用户手动名称，不修改或删除非本用例创建的会话。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 03_Playwright_Journey
@@ -69,6 +71,18 @@ case:
   - Execution真实streaming，Stop后旧流不再追加。
   - 停止后可继续发送，刷新恢复一致。
   - 会话切换不串消息。
+  - 手动重命名成功后，晚返回的自动标题不覆盖侧栏或服务端名称。
+  acceptance:
+  - id: AC-01
+    description: Execution真实流式生成、Stop、续聊和刷新恢复保留已提交历史及停止状态。
+    steps: [1, 2, 3, 4, 5, 6]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 手动名称在自动标题请求收口后仍被持久化并显示；两会话消息隔离且仅清理本用例会话。
+    steps: [7, 8, 9]
+    expected_results: [3, 4]
+    forbidden_side_effects: [1]
   failure_evidence:
   - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-CHAT-01/
 

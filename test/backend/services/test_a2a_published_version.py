@@ -68,3 +68,39 @@ async def test_a2a_invalid_version_never_dispatches_draft(mocker, streaming, ver
     resolve.assert_not_called()
     store.assert_not_called()
     forward.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("metadata", [None, {}, {"session": "s1"}])
+async def test_a2a_preserves_absent_vs_explicit_metadata(mocker, streaming, metadata):
+    from backend.services import a2a_server_service as module
+    from consts.model import AgentRequest
+
+    service = module.A2AServerService()
+    mocker.patch.object(module.a2a_agent_db, "get_server_agent_by_endpoint", return_value={
+        "agent_id": 7, "tenant_id": "tenant", "version": "1", "is_enabled": True,
+    })
+    mocker.patch.object(service, "_resolve_task_id", return_value=(None, None, False))
+    mocker.patch.object(service, "_store_user_message")
+    mocker.patch.object(service, "_store_agent_response")
+
+    async def body():
+        yield 'data: {"type": "final_answer", "content": "done"}\n\n'
+
+    response = MagicMock(status_code=200, headers={}, body_iterator=body())
+    forward = mocker.patch.object(module, "forward_agent_run", new_callable=AsyncMock, return_value=response)
+    # Request-level metadata must not become Message.metadata.
+    payload = {"metadata": {"ignored": True}, "message": {"parts": [{"text": "hello"}]}}
+    if metadata is not None:
+        payload["message"]["metadata"] = metadata
+    if streaming:
+        [event async for event in service.handle_message_stream("endpoint", payload, user_id="caller")]
+    else:
+        await service.handle_message_send("endpoint", payload, user_id="caller")
+    request = forward.call_args.kwargs["agent_request"]
+    received = AgentRequest.model_validate(request.model_dump(mode="json"))
+    assert received.metadata == metadata
+    update_requested = "metadata" in received.model_fields_set and received.metadata is not None
+    assert update_requested is (metadata is not None)
+    assert getattr(received, "_runtime_metadata_entrypoint", "native") == "native"

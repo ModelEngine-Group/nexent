@@ -1094,6 +1094,7 @@ class ConversationResponse(BaseModel):
 class RenameRequest(BaseModel):
     conversation_id: int
     name: str
+    only_if_default_title: bool = False
 
 
 class BatchDeleteConversationRequest(BaseModel):

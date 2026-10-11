@@ -129,9 +129,10 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        rename_conversation_service(
-            request.conversation_id, request.name, user_id)
-        return ConversationResponse(code=0, message="success", data=True)
+        kwargs = {"only_if_default_title": True} if request.only_if_default_title else {}
+        renamed = rename_conversation_service(
+            request.conversation_id, request.name, user_id, **kwargs)
+        return ConversationResponse(code=0, message="success", data=renamed)
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))

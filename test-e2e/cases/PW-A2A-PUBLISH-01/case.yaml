@@ -38,8 +38,8 @@ case:
     action: 检查已发布 endpoint 和版本
     expected: 卡片接口引用当前 endpoint，版本一致
   - order: 7
-    action: 外部客户端认证调用已发布 Agent
-    expected: 真实模型回答含本次 marker；不重新生成已有 API Key
+    action: 外部客户端认证调用已发布 Agent，不携带Message.metadata且不启用allow_chat_metadata。
+    expected: 真实模型回答含本次 marker；不因隐式空metadata触发权限拒绝，不重新生成已有 API Key。
   expected_results:
   - 发布与 Agent/version 绑定一致
   - 外部真实发现和调用均成功
@@ -68,7 +68,7 @@ case:
     expected_results: [1]
     forbidden_side_effects: [1]
   - id: AC-02
-    description: 独立客户端通过真实北向接口认证调用已发布 Agent，真实模型回复包含本次唯一标记。
+    description: 独立客户端不携带Message.metadata、不启用allow_chat_metadata，通过真实北向接口认证调用已发布Agent，真实模型回复包含本次唯一标记；不把HTTP 200错误文本当成功。
     steps: [7]
     expected_results: [2]
     forbidden_side_effects: [1]

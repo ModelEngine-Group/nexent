@@ -20,6 +20,12 @@ journey("PW-CHAT-01", async (context) => {
   let stoppedHistory: Awaited<ReturnType<ChatPage["persistedMessages"]>> = [];
   let completedHistory: Awaited<ReturnType<ChatPage["persistedMessages"]>> = [];
   const ownedConversationIds = new Set<number>();
+  const titleRequests: Array<Promise<unknown>> = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/conversation/generate_title")) {
+      titleRequests.push(request.response().then((response) => response?.finished()));
+    }
+  });
   // Stop validates an in-progress stream, including visible reasoning. Other
   // journeys still require final-answer Markdown through ChatPage.messageText.
   const streamText = async (message: ReturnType<ChatPage["assistantMessages"]>) => {
@@ -126,7 +132,14 @@ journey("PW-CHAT-01", async (context) => {
         ownedConversationIds.add(chat.currentConversationId());
         await chat.waitForCompletion();
         await chat.renameActiveThread(secondTitle);
-        return "used the supported sidebar New action and renamed both run-scoped conversations";
+        await Promise.all(titleRequests);
+        await expect(page.getByRole("button", { name: secondTitle, exact: true })).toBeVisible();
+        const persisted = await page.request.get(`/api/conversation/${chat.currentConversationId()}`);
+        expect(persisted.status()).toBe(200);
+        expect((await persisted.json()).data.conversation_title).toBe(secondTitle);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await chat.openThread(secondTitle);
+        return "both manual titles are preserved after automatic title requests settle; the second title is persisted and survives refresh";
       },
       async () => {
         await chat.openThread(firstTitle);

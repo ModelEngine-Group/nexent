@@ -4,6 +4,9 @@ implementations:
 - framework: playwright
   file: test.spec.ts
   selector: PW-CHAT-01
+acceptance_bindings:
+  AC-01: [PW-CHAT-01]
+  AC-02: [PW-CHAT-01]
 notes: V5 source binding migrated; runtime parity is not yet certified.
 preparation:
   families: []

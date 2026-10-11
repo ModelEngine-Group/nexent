@@ -339,12 +339,13 @@ async def test_rename_conversation_success(conversation_mocks):
     # Setup mocks
     conversation_mocks['get_current_user_id'].return_value = (
         "user_id", "tenant_id")
-    # rename_conversation_service returns None, indicating success
+    conversation_mocks['rename_conversation'].return_value = True
 
     # Create a request-like object with required attributes
     request_obj = MagicMock()
     request_obj.conversation_id = conversation_id
     request_obj.name = new_title
+    request_obj.only_if_default_title = False
 
     # Act
     result = await rename_conversation_endpoint(request_obj, authorization=mock_auth_header)
@@ -356,6 +357,21 @@ async def test_rename_conversation_success(conversation_mocks):
         mock_auth_header)
     conversation_mocks['rename_conversation'].assert_called_once_with(
         conversation_id, new_title, "user_id")
+
+
+@pytest.mark.asyncio
+async def test_automatic_fallback_rename_returns_false_without_claiming_a_write(conversation_mocks):
+    from consts.model import RenameRequest
+
+    conversation_mocks['get_current_user_id'].return_value = ("user", "tenant")
+    conversation_mocks['rename_conversation'].return_value = False
+    request = RenameRequest(conversation_id=42, name="Fallback", only_if_default_title=True)
+    response = await rename_conversation_endpoint(request, authorization="Bearer test-token")
+    assert response.code == 0
+    assert response.data is False
+    conversation_mocks['rename_conversation'].assert_called_once_with(
+        42, "Fallback", "user", only_if_default_title=True,
+    )
 
 
 # -----------------------------

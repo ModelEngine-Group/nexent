@@ -6,7 +6,7 @@ feature:
   feature_id: V5-PW-A2A-PUBLISH-01
   name: 本地Agent发布为A2A→外部发现/调用Smoke
   status: active
-  description: 把v4混在一起的“发现外部Agent”和“发布本地Agent”拆开。
+  description: 发布本地Agent后通过真实北向入口发现和调用；未携带Message.metadata的普通调用无需开启allow_chat_metadata，显式metadata继续遵守现有权限策略。
   business_rules:
   - rule_id: V5-PW-A2A-PUBLISH-01-RULE-01
     description: 本地Agent发布为A2A→外部发现/调用Smoke

@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: V5-PW-MCP-MARKET-01-RULE-01
     description: Mine申请发布→Admin Review→Repository安装
-  required_test_stages:
-  - D4
+  required_test_stages: []
   source:
-    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID. PW-MCP-MARKET-01 was explicitly deleted by the user on 2026-10-10; this Journey currently has no formal automated coverage. The product feature remains active.'

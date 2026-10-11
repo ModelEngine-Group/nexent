@@ -734,7 +734,9 @@ class A2AServerService:
                 history=internal_request.get("history", []),
                 minio_files=None,
                 is_debug=internal_request.get("is_debug", True),
-                metadata=internal_request.get("metadata", {}),
+                # An absent A2A Message.metadata is not an empty metadata update.
+                metadata=(internal_request.get("metadata")
+                          if "metadata" in (parsed_message.get("message") or {}) else None),
             )
             agent_request.__dict__["_runtime_metadata_entrypoint"] = "a2a"
 
@@ -852,7 +854,8 @@ class A2AServerService:
                 history=internal_request.get("history", []),
                 minio_files=None,
                 is_debug=internal_request.get("is_debug", True),
-                metadata=internal_request.get("metadata", {}),
+                metadata=(internal_request.get("metadata")
+                          if "metadata" in (parsed_message.get("message") or {}) else None),
             )
             agent_request.__dict__["_runtime_metadata_entrypoint"] = "a2a"
 

@@ -1122,9 +1122,10 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_message.assert_called_once_with(123, 2)
 
     # Tests for generate_conversation_title_service
+    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
     @patch('backend.services.conversation_management_service.call_llm_for_title')
     @patch('backend.services.conversation_management_service.update_conversation_title')
-    def test_generate_conversation_title_service(self, mock_update_title, mock_call_llm):
+    def test_generate_conversation_title_service(self, mock_update_title, mock_call_llm, mock_read):
         """Test generate_conversation_title_service generates title from question."""
         # Setup
         mock_call_llm.return_value = "Python Tips"
@@ -1140,13 +1141,15 @@ class TestConversationManagementService(unittest.TestCase):
         mock_call_llm.assert_called_once_with(
             "How to use Python effectively?", self.tenant_id, "en", None)
         mock_update_title.assert_called_once_with(
-            123, "Python Tips", self.user_id)
+            123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "update_time": None})
 
+    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
     @patch('backend.services.conversation_management_service.call_llm_for_title')
     @patch('backend.services.conversation_management_service.update_conversation_title')
     def test_generate_conversation_title_service_forwards_model_id(
-            self, mock_update_title, mock_call_llm):
+            self, mock_update_title, mock_call_llm, mock_read):
         mock_call_llm.return_value = "Python Tips"
+        mock_update_title.return_value = True
 
         result = asyncio.run(generate_conversation_title_service(
             123, "How to use Python?", self.user_id, self.tenant_id, "en", model_id=7))
@@ -1154,12 +1157,13 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result, "Python Tips")
         mock_call_llm.assert_called_once_with(
             "How to use Python?", self.tenant_id, "en", 7)
-        mock_update_title.assert_called_once_with(123, "Python Tips", self.user_id)
+        mock_update_title.assert_called_once_with(123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "update_time": None})
 
+    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
     @patch('backend.services.conversation_management_service.call_llm_for_title')
     @patch('backend.services.conversation_management_service.update_conversation_title')
     def test_generate_conversation_title_service_does_not_persist_validation_failure(
-            self, mock_update_title, mock_call_llm):
+            self, mock_update_title, mock_call_llm, mock_read):
         mock_call_llm.side_effect = ValidationError("Selected model is unavailable")
 
         with self.assertRaises(ValidationError):
@@ -1954,9 +1958,10 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
 class TestGenerateConversationTitleServiceEdgeCases(unittest.TestCase):
     """Test edge cases for generate_conversation_title_service."""
 
+    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
     @patch('backend.services.conversation_management_service.update_conversation_title')
     @patch('backend.services.conversation_management_service.call_llm_for_title')
-    def test_title_generation_exception(self, mock_call_llm, mock_update_title):
+    def test_title_generation_exception(self, mock_call_llm, mock_update_title, mock_read):
         """Should re-raise exception when title generation fails."""
         mock_call_llm.side_effect = Exception("LLM error")
         from backend.services.conversation_management_service import generate_conversation_title_service
