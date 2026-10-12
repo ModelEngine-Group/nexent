@@ -50,6 +50,7 @@ import {
 } from "./ModelChunkSizeSilder";
 import {
   isEmbeddingModelType,
+  isVoiceModelType,
   TYPE_BADGE_CLASS,
   useTypeOptions,
 } from "./modelTypeUi";
@@ -340,16 +341,25 @@ function applyAdvancedSettingsToParams(
     params.tokenizerFamily = payload.tokenizer_family;
   if (hasCapacity) params.capacitySource = "operator";
   // rerank / stt / tts dedicated fields (old spec field set). The service
-  // request builders only read the camelCase keys, so map them explicitly;
-  // for stt/tts a settings-level factory override wins over the form's
-  // provider key (V2 parity).
-  if (payload.max_tokens != null) params.maxTokens = payload.max_tokens;
-  if (payload.model_factory != null)
-    params.modelFactory = String(payload.model_factory);
-  if (payload.model_appid != null)
-    params.modelAppid = String(payload.model_appid);
-  if (payload.access_token != null)
-    params.accessToken = String(payload.access_token);
+  // request builders only read the camelCase keys, so map them explicitly.
+  // Each mapping is gated by the row's type: gear settings survive a row
+  // type change, and a stale rerank max_tokens must not overwrite an
+  // embedding row's 1024 dimension placeholder, nor stale voice
+  // credentials a non-voice model's factory.
+  if (
+    (params.type === MODEL_TYPES.RERANK || params.type === MODEL_TYPES.TTS) &&
+    payload.max_tokens != null
+  ) {
+    params.maxTokens = payload.max_tokens;
+  }
+  if (isVoiceModelType(params.type as string | undefined)) {
+    if (payload.model_factory != null)
+      params.modelFactory = String(payload.model_factory);
+    if (payload.model_appid != null)
+      params.modelAppid = String(payload.model_appid);
+    if (payload.access_token != null)
+      params.accessToken = String(payload.access_token);
+  }
 }
 
 /* ------------------------------ 单个添加 ------------------------------ */
@@ -492,14 +502,16 @@ function SingleAddForm({
         // stt/tts: settings-level factory + Volcano credentials ride along
         // (V2 parity). The snake_case payload keys are not read by the
         // verify builder, so the camelCase fields are passed explicitly and
-        // override the form-level provider key above.
-        ...(effective?.settings?.model_factory != null
+        // override the form-level provider key above. Voice-only: settings
+        // survive a type change and stale credentials must not leak into a
+        // non-voice probe.
+        ...(isVoiceModelType(type) && effective?.settings?.model_factory != null
           ? { modelFactory: String(effective.settings.model_factory) }
           : {}),
-        ...(effective?.settings?.model_appid != null
+        ...(isVoiceModelType(type) && effective?.settings?.model_appid != null
           ? { modelAppid: String(effective.settings.model_appid) }
           : {}),
-        ...(effective?.settings?.access_token != null
+        ...(isVoiceModelType(type) && effective?.settings?.access_token != null
           ? { accessToken: String(effective.settings.access_token) }
           : {}),
       });
@@ -1009,23 +1021,26 @@ function BatchAddForm({
     setRowCheck((s) => ({ ...s, [row.id]: "checking" }));
     try {
       // stt/tts rows: settings-level factory + Volcano credentials ride
-      // along with the probe (V2 parity); overrides win over nothing since
-      // the batch tab has no form-level factory for the verify call.
-      const settings =
-        rowOverrides[row.id]?.settings ?? rowSuggestions[row.id]?.settings;
+      // along with the probe (V2 parity). Voice-only gate: settings survive
+      // a row type change and stale credentials must not leak into a
+      // non-voice probe. Only manual overrides are considered — catalog
+      // suggestions never carry voice credentials.
+      const voiceSettings = isVoiceModelType(row.model_type)
+        ? rowOverrides[row.id]?.settings
+        : undefined;
       const result = await modelService.verifyModelConfigConnectivity({
         modelName: row.model_name,
         modelType: row.model_type,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
-        ...(settings?.model_factory != null
-          ? { modelFactory: String(settings.model_factory) }
+        ...(voiceSettings?.model_factory != null
+          ? { modelFactory: String(voiceSettings.model_factory) }
           : {}),
-        ...(settings?.model_appid != null
-          ? { modelAppid: String(settings.model_appid) }
+        ...(voiceSettings?.model_appid != null
+          ? { modelAppid: String(voiceSettings.model_appid) }
           : {}),
-        ...(settings?.access_token != null
-          ? { accessToken: String(settings.access_token) }
+        ...(voiceSettings?.access_token != null
+          ? { accessToken: String(voiceSettings.access_token) }
           : {}),
       });
       setRowCheck((s) => ({

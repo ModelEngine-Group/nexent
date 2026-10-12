@@ -150,7 +150,11 @@ export const ModelEditDialog = ({
         next.chunk_batch = model.chunkingBatchSize;
     }
     if (model.type === MODEL_TYPES.STT || model.type === MODEL_TYPES.TTS) {
-      if (model.modelFactory) next.model_factory = model.modelFactory;
+      // getAllModels maps the API's model_factory into `source` only
+      // (model.modelFactory is never populated by the list mapper), so fall
+      // back to source for the provider prefill.
+      const voiceFactory = model.modelFactory || model.source;
+      if (voiceFactory) next.model_factory = voiceFactory;
       if (model.modelAppid) next.model_appid = model.modelAppid;
       if (model.accessToken) next.access_token = model.accessToken;
     }
