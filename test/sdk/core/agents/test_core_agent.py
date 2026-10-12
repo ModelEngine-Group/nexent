@@ -3316,7 +3316,6 @@ class TestRunStreamRealExecution:
 
     @pytest.mark.parametrize("content", [
         "A complete plain answer.",
-        "<code>final_answer(",
     ])
     def test_oc_028_strict_third_visible_output_becomes_answer(self, monkeypatch, content):
         """OC-028: the last complete strict output is committed without execution."""
@@ -3346,6 +3345,8 @@ class TestRunStreamRealExecution:
         ("   ", "stop"),
         ("\u200b\u200b", "stop"),
         ("A truncated answer", "length"),
+        ("<code>final_answer(", "stop"),
+        ("<think>Only reasoning.</think>", "stop"),
     ])
     def test_oc_029_strict_third_invalid_output_still_fails(self, content, finish_reason):
         """OC-029: empty, invisible and truncated responses cannot use raw fallback."""
