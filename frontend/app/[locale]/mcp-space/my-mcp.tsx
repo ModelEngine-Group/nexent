@@ -725,7 +725,7 @@ export function MyMcp({
                   connectionStatus={connectionStatuses[key] ?? "unchecked"}
                   tagRefreshKey={
                     item.kind === "local"
-                      ? tagRefreshKeys[item.service.mcpId]
+                      ? tagRefreshKeys?.[item.service.mcpId]
                       : undefined
                   }
                 />

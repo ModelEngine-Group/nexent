@@ -23,7 +23,10 @@ journey("PW-TASK-01", async (context) => {
   const chat = new ChatPage(page);
   let agent = "";
   let exists = false;
-  const taskRow = () => page.getByRole("row").filter({ hasText: agent }).first();
+  let taskTitle = "";
+  let taskId = 0;
+  const taskRow = () => page.getByRole("row").filter({ hasText: agent })
+    .filter({ has: page.getByText(taskTitle, { exact: true }) });
   contract.deferCleanup(async () => {
     if (!exists) return;
     await page.goto(appPath("/agent-tasks"));
@@ -39,8 +42,38 @@ journey("PW-TASK-01", async (context) => {
     steps: [
       async () => { await page.goto(appPath("/agent-tasks")); await expect(page.getByRole("button", { name: /通过会话创建|Create in Chat/ })).toBeVisible(); return "opened Agent Tasks"; },
       async () => { await page.getByRole("button", { name: /通过会话创建|Create in Chat/ }).click(); await expect(page).toHaveURL(/newchat.*entry=automation/); await chat.selectAgent(agent); return `Create through conversation selected configured Agent ${agent} at the automation entry`; },
-      async () => { await chat.startMessage(`请调用 create_scheduled_task_proposal 创建一个周期性自动任务：标题严格为 ${name}，指令严格为只回复 TASK-${token}，首次执行时间为30分钟后，此后每60分钟执行一次。`); return "submitted a fixed delayed recurring-task requirement supported by the current scheduling tool"; },
-      async () => { await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 240000 }); await expect(page.getByText(/TASK-/).first()).toBeVisible(); await page.getByRole("button", { name: /确认创建|创建任务/ }).last().click(); exists = true; return "reviewed the latest proposal title/instruction/schedule and confirmed creation"; },
+      async () => { await chat.startMessage(`30分钟后，每60分钟告诉我 TASK-${token}`); return "submitted an ordinary delayed recurring-task user requirement, not undocumented tool/title meta syntax"; },
+      async () => {
+        const answer = chat.assistantMessages().last();
+        const confirm = answer.getByRole("button", { name: /确认创建|创建任务/ });
+        // The user message already contains the task title. It is not evidence
+        // that the asynchronous tool has generated an executable proposal.
+        await expect(confirm).toBeVisible({ timeout: 240000 });
+        await expect(confirm).toBeEnabled();
+        const card = confirm.locator("xpath=ancestor::div[contains(@class, 'border-gray-200')][1]");
+        const title = card.locator("div.font-medium").first();
+        await expect(title).not.toHaveText("");
+        taskTitle = (await title.innerText()).trim();
+        await expect(card).toContainText(`TASK-${token}`);
+        await expect(card).toContainText(/60\s*分钟|1\s*小时/);
+        const created = page.waitForResponse((response) => response.request().method() === "POST"
+          && /\/agent\/automations\/proposals\/[^/]+\/confirm$/.test(new URL(response.url()).pathname));
+        await confirm.click();
+        const response = await created;
+        expect(response.ok()).toBe(true);
+        exists = true;
+        const task = await response.json();
+        taskId = Number(task.task_id);
+        expect(taskId).toBeGreaterThan(0);
+        expect(task.title).toBe(taskTitle);
+        expect(task.instruction).toContain(`TASK-${token}`);
+        expect(task.schedule_rule_type).toBe("INTERVAL");
+        expect(task.schedule_config.interval_seconds).toBe(3600);
+        const delay = Date.parse(task.schedule_config.start_at) - Date.now();
+        expect(delay).toBeGreaterThan(20 * 60000);
+        expect(delay).toBeLessThan(31 * 60000);
+        return "reviewed the rendered proposal title/instruction/interval and confirmed persisted creation";
+      },
       async () => { await page.goto(appPath("/agent-tasks")); await expect(taskRow()).toBeVisible(); return `found the run-scoped task through its unique Agent ${agent}`; },
       async () => { const row = taskRow(); await row.getByRole("button", { name: /运行|Run/ }).click(); return "triggered an immediate run"; },
       async () => { const row = taskRow(); await row.getByRole("button", { name: /更多/ }).click(); await page.getByRole("menuitem", { name: /历史|History/ }).click(); await expect(page.getByText(/status|状态|trigger|触发/).first()).toBeVisible(); return "opened History and observed run status/trigger fields"; },

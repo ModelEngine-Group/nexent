@@ -29,7 +29,22 @@ def final_text(events):
     return text
 
 
-async def run_memory_agent(identity, agent_id, query, phase):
+def external_context_has_marker(events, marker):
+    """Only retrieved external context, not model reasoning or echo, is proof."""
+    for event in events:
+        data = event.get('data')
+        if not isinstance(data, dict) or data.get('type') != 'execution_logs':
+            continue
+        content = data.get('content')
+        if not isinstance(content, str) or '#### External Memory\n' not in content:
+            continue
+        external = content.split('#### External Memory\n', 1)[1].split('\n#### ', 1)[0]
+        if marker in external:
+            return True
+    return False
+
+
+async def run_memory_agent(identity, agent_id, query, phase, *, expected_external=None):
     async with temporary_conversation(identity, 'D3 external memory ' + phase) as conversation_id:
         async with client('runtime', token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
             async with api.stream('POST', '/agent/run', json={
@@ -41,6 +56,12 @@ async def run_memory_agent(identity, agent_id, query, phase):
                 events = await read_sse_with_evidence(response, CASE_ID + '-' + phase,
                     secrets=(identity.access_token, identity.refresh_token))
         assert_terminal_event(events)
+        if expected_external is not None:
+            observed = external_context_has_marker(events, expected_external)
+            write_case_evidence(CASE_ID + '-' + phase + '-context', {
+                'external_memory_context_present': observed,
+            })
+            assert observed, 'External Provider result did not reach runtime memory context'
         return final_text(events)
 
 
@@ -58,7 +79,9 @@ async def test_external_memory_real_ingest_search_and_hot_update() -> None:
 
 async def exercise_external_memory(identity, mock, api):
     nonce = uuid4().hex
-    lookup, marker, local_marker = 'MEMLOOKUP-' + nonce, 'EXTMEM-' + nonce, 'LOCALMEM-' + nonce
+    lookup, marker = 'MEMLOOKUP-' + nonce, 'EXTMEM-' + nonce
+    local_nonce = uuid4().hex
+    local_lookup, local_marker = 'LOCALLOOKUP-' + local_nonce, 'LOCALMEM-' + local_nonce
     name = 'case-memory-' + nonce
     api_key = mock.settings['api_key']
     params = mock.provider_params()
@@ -97,7 +120,7 @@ async def exercise_external_memory(identity, mock, api):
             assert_status(searched, 200)
             assert any(marker in item['content'] and item.get('is_external') is True for item in searched.json()['items'])
             before = await mock.counts()
-            answer = await run_memory_agent(identity, agent_id, query, 'initial')
+            answer = await run_memory_agent(identity, agent_id, query, 'initial', expected_external=marker)
             observed = await mock.counts()
             assert observed.get('search', 0) > before.get('search', 0), 'Agent did not query external Provider'
             assert marker in answer, 'Agent final answer did not use retrieved external memory'
@@ -130,7 +153,7 @@ async def exercise_external_memory(identity, mock, api):
             # User long-term memory is loaded in full, not query-filtered.
             # Seed it only after the empty-organization acceptance is complete.
             local = await api.post('/memory/long-term/user/versions', json={
-                'content': f'Local lookup LOCALLOOKUP-{nonce} has unique answer {local_marker}',
+                'content': f'Local lookup {local_lookup} has unique answer {local_marker}',
                 'expected_active_version_id': None})
             assert_status(local, 201)
             for phase, status, delay in (('unavailable', 503, 0), ('timeout', 200, 3)):
@@ -142,13 +165,52 @@ async def exercise_external_memory(identity, mock, api):
                 expected_code = 'timeout' if delay else 'provider_error'
                 assert diagnostic.json()['last_error_code'] == expected_code
                 fallback = await run_memory_agent(identity, agent_id,
-                    f'Return the unique local memory answer for LOCALLOOKUP-{nonce}.', 'local-' + phase)
+                        f'Return the unique local memory answer for {local_lookup}.', 'local-' + phase)
                 assert local_marker in fallback, 'External Provider fault blocked local memory context'
                 write_case_evidence(CASE_ID + '-' + phase + '-receipt', {
                     'profile': 'mock', 'error_code': expected_code, 'local_fallback': True})
                 await mock.fault()
-            recovered = await run_memory_agent(identity, agent_id, query, 'recovery')
-            assert marker in recovered, 'External retrieval did not recover after scoped faults'
+            # Completed turns are legitimately ingested back into the Provider.
+            # A fresh lookup avoids old query echoes/thinking outranking the
+            # seed in the lexical Mock. Keep the same Provider/org/Agent and
+            # local memory: rebuilding or clearing them would hide recovery bugs.
+            recovery_nonce = uuid4().hex
+            recovery_lookup = 'RECOVERYLOOKUP-' + recovery_nonce
+            recovery_marker = 'RECOVERYANSWER-' + recovery_nonce
+            recovery_ingest = await api.post(prefix + '/test-ingest', json={'units': [{
+                'event_id': recovery_nonce, 'event_type': 'memory_stored', 'unit_type': 'text',
+                'unit_content': f'Nexent lookup {recovery_lookup} has unique answer {recovery_marker}',
+                'metadata': {'case_id': CASE_ID, 'run_marker': recovery_nonce}}]})
+            assert_status(recovery_ingest, 200)
+            assert recovery_ingest.json()['accepted_count'] == 1 and recovery_ingest.json()['rejected_count'] == 0
+            recovery_search = await api.post(prefix + '/test-search', json={
+                'query': recovery_lookup, 'top_k': 10})
+            assert_status(recovery_search, 200)
+            matches = recovery_search.json()['items']
+            seed_found = any(recovery_marker in item['content'] and item.get('is_external') is True
+                             for item in matches)
+            local_found = any(local_marker in item['content'] for item in matches)
+            write_case_evidence(CASE_ID + '-recovery-search', {
+                'seed_found': seed_found, 'items': len(matches),
+                'local_answer_present': local_found,
+                'lookup': recovery_lookup,
+            })
+            assert seed_found, 'Same external Provider did not recover its ingest/search path'
+            assert not local_found, 'Fresh recovery lookup returned unrelated local dialogue'
+            # The query contains only the independent lookup, never its answer.
+            # This is still a real Agent/LLM call, not a fixture-supplied answer.
+            recovery_before = await mock.counts()
+            recovered = await run_memory_agent(identity, agent_id, recovery_lookup, 'recovery',
+                                                expected_external=recovery_marker)
+            recovery_after = await mock.counts()
+            search_delta = recovery_after.get('search', 0) - recovery_before.get('search', 0)
+            write_case_evidence(CASE_ID + '-recovery-wire', {
+                'search_delta': search_delta, 'expected_answer_present': recovery_marker in recovered,
+                'local_answer_present': local_marker in recovered,
+            })
+            assert search_delta > 0, 'Recovery Agent did not query the same external Provider'
+            assert recovery_marker in recovered, 'Recovery Agent did not consume the fresh external memory'
+            assert local_marker not in recovered, 'Recovery Agent returned the unrelated local memory'
             write_case_evidence(CASE_ID + '-summary', {'profile': 'mock', 'real_llm': True,
                 'initial_hit': marker in answer, 'updated_org_has_no_hit': marker not in missing,
-                'recovered_hit': marker in recovered, 'wire_counts': await mock.counts()}, secrets=(api_key,))
+                'recovered_hit': recovery_marker in recovered, 'wire_counts': await mock.counts()}, secrets=(api_key,))

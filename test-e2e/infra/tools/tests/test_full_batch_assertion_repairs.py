@@ -118,7 +118,9 @@ async def test_memory_observations_are_scoped_without_mutating_default_headers()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('fault', [None, 'stale-org', 'no-search', 'old-answer', 'no-missing-answer'])
+@pytest.mark.parametrize('fault', [None, 'stale-org', 'no-search', 'old-answer', 'no-missing-answer',
+                                 'recovery-no-search', 'recovery-wrong-answer', 'recovery-missing-seed',
+                                 'recovery-internal-seed', 'recovery-polluted', 'recovery-mixed-answer'])
 async def test_memory_hot_update_isolated_inputs_and_wire_guards(monkeypatch, fault):
     module = case_module('AGT-071')
     writes, counts = [], Counter()
@@ -139,16 +141,32 @@ async def test_memory_hot_update_isolated_inputs_and_wire_guards(monkeypatch, fa
             if path == '/memory/long-term/user/versions':
                 assert state.get('hot_checked'), 'Local long-term memory polluted the empty-scope acceptance'
                 state['local_marker'] = json['content'].split()[-1]
+                state['local_lookup'] = json['content'].split()[2]
                 return response({}, 201)
             if path == '/memory/providers':
                 return response({'provider_config_id': 1})
             if path.endswith('/test-ingest'):
-                state['marker'] = json['units'][0]['unit_content'].split()[-1]
+                content = json['units'][0]['unit_content']
+                if state.get('hot_checked'):
+                    state['recovery_seeded'] = True
+                    assert content.split()[2] != state['lookup']
+                    assert content.split()[-1] not in (state['marker'], state['local_marker'])
+                    assert not mock.fault.await_args.args, 'Recovery must remove the scoped fault first'
+                state['lookup'], state['marker'] = content.split()[2], content.split()[-1]
                 state['ingested'] = True
                 return response({'accepted_count': 1, 'rejected_count': 0})
             if path.endswith('/test-search'):
-                if state.get('hot_checked'):
+                if mock.fault.await_args and mock.fault.await_args.args:
                     return response({}, 400)
+                if state.get('recovery_seeded'):
+                    assert json['query'] == state['lookup']
+                    if fault == 'recovery-missing-seed':
+                        return response({'items': []})
+                    if fault == 'recovery-internal-seed':
+                        return response({'items': [{'content': state['marker'], 'is_external': False}]})
+                    if fault == 'recovery-polluted':
+                        return response({'items': [{'content': state['marker'] + ' ' + state['local_marker'],
+                                                    'is_external': True}]})
                 return response({'items': [{'content': state['marker'], 'is_external': True}]
                                  if state['ingested'] and state['org'] == 'old' else []})
             raise AssertionError(path)
@@ -158,14 +176,24 @@ async def test_memory_hot_update_isolated_inputs_and_wire_guards(monkeypatch, fa
         async def get(self, path):
             code = ('timeout' if mock.fault.await_args.args[1] else 'provider_error') if mock.fault.await_args else None
             return response({'timeout_seconds': 2, 'last_error_code': code})
-    async def run(identity, agent, query, phase):
+    async def run(identity, agent, query, phase, *, expected_external=None):
         assert state['marker'] not in query, 'Answer must never be supplied by the question'
         if phase == 'hot-update':
             assert '/memory/long-term/user/versions' not in writes
             counts['old' if fault == 'stale-org' else state['org']] += fault != 'no-search'
             state['hot_checked'] = True
             return state['marker'] if fault == 'old-answer' else 'wrong' if fault == 'no-missing-answer' else 'NOT_FOUND'
-        counts[state['org']] += 1
+        if phase == 'recovery':
+            assert expected_external == state['marker']
+            assert state['recovery_seeded'] and query == state['lookup']
+            assert state['org'] == 'old' and writes.count('/memory/providers') == 1
+            assert state['local_lookup'].split('-', 1)[1] != query.split('-', 1)[1]
+            if fault == 'recovery-wrong-answer':
+                return state['local_marker']
+        if not (phase == 'recovery' and fault == 'recovery-no-search'):
+            counts[state['org']] += 1
+        if phase == 'recovery' and fault == 'recovery-mixed-answer':
+            return state['marker'] + ' ' + state['local_marker']
         return state['local_marker'] if phase.startswith('local-') else state['marker']
     @asynccontextmanager
     async def model(*args, **kwargs): yield 1
@@ -178,7 +206,8 @@ async def test_memory_hot_update_isolated_inputs_and_wire_guards(monkeypatch, fa
     if fault:
         with pytest.raises(AssertionError):
             await module.exercise_external_memory(SimpleNamespace(), mock, API())
-        assert '/memory/long-term/user/versions' not in writes
+        if not fault.startswith('recovery-'):
+            assert '/memory/long-term/user/versions' not in writes
     else:
         await module.exercise_external_memory(SimpleNamespace(), mock, API())
         assert writes.count('/memory/long-term/user/versions') == 1
@@ -264,16 +293,20 @@ function load(file) {
  assert.equal(kind.call({},Object.assign(new Error('dependency'),{name:'DependencyFailure'})),'BLOCKED_BY_DEPENDENCY');
  const browser=await chromium.launch({headless:true});
  let phase='setup';
- const deadline=setTimeout(()=>{console.error('debug fixture stalled: '+phase);void browser.close();},12000);
+ const deadline=setTimeout(()=>{console.error('debug fixture stalled: '+phase);void browser.close();},18000);
  const server=require('node:http').createServer((request,response)=>{
   response.writeHead(200,{'Content-Type':request.url.startsWith('/api/')?'text/event-stream':'text/html'});
-  response.end(request.url.startsWith('/api/')?'data: [DONE]\n\n':'<html><body></body></html>');
+  if(request.url==='/api/agent/run'){
+   response.write('data: {"type":"model_output_thinking","content":"not an answer"}\n\n');
+   setTimeout(()=>response.end('data: [DONE]\n\n'),250);
+  } else response.end(request.url.startsWith('/api/')?'data: [DONE]\n\n':'<html><body></body></html>');
  });
  try {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const page=await browser.newPage();
   await page.goto('http://127.0.0.1:'+server.address().port);
-  await page.setContent(`<section><h3>Debug</h3><textarea placeholder="发送消息..."></textarea><button>发送</button></section>
+  await page.setContent(`<style>.hidden{display:none}</style><section><h3>Debug</h3><textarea placeholder="发送消息..."></textarea><button>发送</button>
+   <div id="normal"></div><div class="hidden"><div data-slot="aui_assistant-message-root"><div data-citation-index-map><div class="aui-md">OLD_COMPARE</div></div></div></div></section>
    <script>document.querySelector('textarea').oninput=()=>{
     document.querySelector('button').disabled=!document.querySelector('textarea').value;
    };
@@ -281,10 +314,11 @@ function load(file) {
     const button=document.querySelector('button'); button.disabled=true;
     const answer=document.querySelector('textarea').value==='empty'?'':'REAL_RESULT';
     document.querySelector('textarea').value='';
+    document.querySelector('#normal').insertAdjacentHTML('beforeend',
+     "<div data-slot='aui_assistant-message-root'><div data-citation-index-map><div class='aui-md'></div></div></div>");
     await (await fetch('/api/agent/search_info',{method:'POST'})).text();
     await (await fetch('/api/agent/run',{method:'POST'})).text();
-    document.querySelector('section').insertAdjacentHTML('beforeend',
-     "<div data-slot='aui_assistant-message-root'><div data-citation-index-map><div class='aui-md'>"+answer+"</div></div></div>");
+    setTimeout(()=>{document.querySelector('#normal [data-slot=aui_assistant-message-root]:last-of-type .aui-md').textContent=answer;},100);
    };</script>`);
   const {AgentPage}=load('test-e2e/infra/automation/d4/pages/agent.page.ts');
   const agents=new AgentPage(page);

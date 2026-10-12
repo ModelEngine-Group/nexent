@@ -13,7 +13,7 @@ case:
   automation: automated
   objective: 验证资源管理聚合视图的列表/搜索/租户过滤。
   preconditions:
-  - 目标租户已有可用模型，并为本用例准备智能体、MCP、Skill 样本资源。
+  - 目标租户已有可用模型，并按现有模型配置创建本用例独占别名样本；智能体、MCP、Skill 样本同样按用例准备，结束时清理独占样本。
   - 另一个租户存在，且与目标租户不同。
   test_data:
     legacy_asset_declaration: config/users.yaml；预置run_id资源

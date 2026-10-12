@@ -18,7 +18,7 @@ case:
   test_data:
     plugin: mem0
     mock_service: memory-provider
-    isolation: 独占租户、用户、Provider 与组织命名空间；动态查询标识与答案标记不同。
+    isolation: 独占租户、用户、Provider 与组织命名空间；外部、本地和恢复阶段使用不同的随机查询标识，答案不包含在查询中。
   steps:
   - order: 1
     action: 创建独占租户/身份、配置模型、Agent 和 Provider，发布独占Agent；此阶段不写入本地长期记忆，确认外部查询初始为空。
@@ -36,8 +36,8 @@ case:
     action: 热更新验收完成后写入用户级本地记忆，再分别对本用例组织/用户注入 503、超时；验证 Nexent test-search 明确错误及 last_error_code，再运行查询本地记忆的真实 Agent。
     expected: Provider 分别显示 provider_error/timeout；外部失败不阻止本地记忆进入回答，不伪装外部检索成功。
   - order: 6
-    action: 撤销故障，开启新会话再次查询外部答案，保存脱敏 wire 和流式证据后清理。
-    expected: 外部检索恢复；清理独占 Agent、模型、Provider、Mock 数据/故障和身份，清理失败独立报告。
+    action: 撤销故障，保留同一 Provider、组织、Agent 和本地记忆；通过 Nexent 写入全新独立的外部恢复事实并直接检索，开启新会话只查询该事实的唯一查询标识，核对 Runtime wire 增量、外部记忆上下文和最终回答后清理。
+    expected: 同一 Provider 在故障解除后能够写入和检索，Runtime 确实调用外部检索并注入恢复事实，真实模型回答包含只存在于该事实中的答案。前序对话不能靠通用词匹配挤占恢复事实；不重建 Provider、不清空共享数据、不移除本地记忆来规避故障。清理独占资产，清理失败独立报告。
   expected_results:
   - 实际插件 HTTP 写入及检索成功，不伪造结果。
   - 真实 Agent 检索并消费外部记忆，而非仅测试 Mock 自身。

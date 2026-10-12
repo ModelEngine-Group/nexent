@@ -289,6 +289,23 @@ function load(relative) {
   assert.equal(await chat.currentThreadTitle(),'chat.[manual]+');
   await page.locator('#thread span[title]').evaluate(node=>node.remove());
   assert.equal(await chat.threadButton('chat.[manual]+').count(),1);
+  const markdownTitle='```mermaid\n graph LR\n NX_A[Alpha] --> NX_B[Beta]\n```\n标题：Alpha至Beta关系';
+  await page.locator('#thread span').evaluate((node,title)=>node.textContent=title,markdownTitle);
+  assert.equal(await chat.threadButton(markdownTitle).count(),1);
+  await chat.openThread(markdownTitle,'first');
+  assert.equal(await chat.threadButton('标题：Alpha至Beta关系').count(),0);
+  const {ResourcePage}=load('test-e2e/infra/automation/d4/pages/resource.page.ts');
+  await page.setContent(`<button role="tab" aria-selected="true">模型</button>
+   <div role="tabpanel" aria-label="模型"><table><tbody id="rows"></tbody></table>
+    <li class="ant-pagination-item-active">1</li><li class="ant-pagination-next"><button>Next</button></li></div>
+   <script>let index=1;function render(){document.getElementById('rows').innerHTML=
+    '<tr><td>'+(index===1?'other':'target-page-two')+'</td></tr>';
+    document.querySelector('.ant-pagination-item-active').textContent=String(index);
+    document.querySelector('.ant-pagination-next').classList.toggle('ant-pagination-disabled',index===2);}
+   document.querySelector('.ant-pagination-next button').onclick=()=>{index+=1;render();};render();</script>`);
+  const resources=new ResourcePage(page);
+  assert.equal(await (await resources.findResource('模型','target-page-two')).count(),1);
+  assert.equal(await (await resources.findResource('模型','absent')).count(),0);
   const {ModelPage}=load('test-e2e/infra/automation/d4/pages/model.page.ts');
   await page.setContent(`<section><h2>模型库</h2>
    <input placeholder="搜索模型名 / 自定义名称 / API 地址"><div id="rows"></div></section>

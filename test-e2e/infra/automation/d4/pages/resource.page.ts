@@ -90,6 +90,31 @@ export class ResourcePage {
     return this.page.getByRole("tab").allTextContents();
   }
 
+  async findResource(tab: string, name: string, placeholder?: string): Promise<Locator> {
+    await this.openTab(tab);
+    const panel = this.page.getByRole("tabpanel", { name: tab, exact: true });
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("table").first()).toBeVisible();
+    const row = panel.getByRole("row").filter({ hasText: name });
+    if (placeholder && await panel.getByPlaceholder(placeholder).count()) {
+      await this.searchCurrentTab(placeholder, name);
+    }
+    const seen = new Set<string>();
+    for (let index = 0; index < 100; index += 1) {
+      await expect(panel.locator(".ant-spin-spinning")).toHaveCount(0);
+      if (await row.count()) return row;
+      const next = panel.locator(".ant-pagination-next:not(.ant-pagination-disabled) button");
+      if (!await next.count() || !await next.isEnabled()) return row;
+      const active = panel.locator(".ant-pagination-item-active");
+      const current = (await active.innerText()).trim();
+      if (seen.has(current)) throw new Error(`${tab}: pagination did not advance`);
+      seen.add(current);
+      await next.click();
+      await expect(active).not.toHaveText(current);
+    }
+    throw new Error(`${tab}: resource search exceeded 100 pages`);
+  }
+
   async createGroup(name: string, description: string): Promise<void> {
     await this.openTab("用户组");
     await this.page.getByRole("button", { name: /创建用户组/ }).click();

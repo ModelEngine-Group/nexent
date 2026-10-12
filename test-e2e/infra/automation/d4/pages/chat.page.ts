@@ -239,9 +239,10 @@ export class ChatPage {
   threadButton(title: string): Locator {
     // Status badges contribute to the button's accessible name. Match only
     // the exact title node inside history rows, not badges or creation actions.
-    const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return this.page.locator('[class~="group/item"]').getByRole("button")
-      .filter({ has: this.page.locator("span.truncate").filter({ hasText: new RegExp(`^${escaped}$`) }) });
+      // Generated titles may contain newlines; exact text matching normalizes
+      // layout whitespace whereas the previous anchored raw regex did not.
+      .filter({ has: this.page.getByText(title, { exact: true }) });
   }
 
   async openThread(title: string, occurrence?: "first" | "last"): Promise<void> {

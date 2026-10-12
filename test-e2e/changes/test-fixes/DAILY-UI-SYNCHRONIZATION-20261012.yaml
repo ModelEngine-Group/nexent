@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-UI-SYNCHRONIZATION-20261012
+  change_type: test-fix
+  title: Repair whitespace, pagination and asynchronous UI acceptance timing
+  description: >-
+    The completed dc44d4aba Daily has a generated Markdown title that the raw
+    anchored regex cannot restore, a target model beyond the first resource
+    page, a valid SSE final_answer judged before transport/render completion,
+    and a scheduled-task confirmation attempted while its tool is still running.
+    Preserve exact history-title matching with normalized text. Traverse resource
+    pages for positive and negative assertions, prepare an owned configured-model
+    alias to avoid mistaking legitimate same-name tenant models for leakage,
+    and clean up under its owner identity. Await the exact Debug request's bounded
+    transport completion plus a short rendering commit window; reasoning is not
+    an answer. Await an enabled create button in the assistant proposal, inspect
+    title/instruction/interval within its card, and require successful confirmation.
+    These are candidate test fixes, not proof of live acceptance. No product,
+    global configuration, model budget, credentials, deployment or CI changes.
+  affected_features:
+    existing: [V5-PW-CHART-01, V5-PW-PROMPT-02, V5-PW-RESOURCE-04, V5-PW-TASK-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-CHART-01, PW-PROMPT-02, PW-RESOURCE-04, PW-TASK-01]
+    retired: []

@@ -340,7 +340,9 @@ export class AgentPage {
     const input = debugPanel.locator('textarea[placeholder="发送消息..."]:visible, textarea[placeholder*="输入测试问题"]:visible');
     // Empty completed replies can have zero layout height. Count their DOM
     // unit too; visibility must not turn an empty answer into a five-minute wait.
-    const messages = debugPanel.locator("[data-slot='aui_assistant-message-root']");
+    // Compare and normal histories stay mounted together. Exclude hidden
+    // panes, but still count an empty normal reply with zero layout height.
+    const messages = debugPanel.locator("[data-slot='aui_assistant-message-root']:not(.hidden *)");
     const before = await messages.count();
     await input.fill(prompt);
     const streamPromise = this.page.waitForResponse((r) => r.request().method() === "POST" && /\/agent\/run$/.test(new URL(r.url()).pathname), { timeout: 300000 });
@@ -348,10 +350,21 @@ export class AgentPage {
     await send.click();
     const stream = await streamPromise;
     if (stream.status() >= 500) throw new Error(`agent debug stream returned ${stream.status()}`);
+    // Headers and the assistant placeholder precede SSE final_answer. Absence
+    // of a Stop icon is also true before streaming mounts; it is not a terminal.
+    let streamDone = false;
+    let streamError: Error | null = null;
+    void stream.finished().then((error) => { streamError = error; streamDone = true; });
+    await expect.poll(() => streamDone, { timeout: 300000 }).toBe(true);
+    if (streamError) throw new Error(`agent debug stream interrupted: ${streamError}`);
     await expect(messages).toHaveCount(before + 1, { timeout: 300000 });
     const responseText = messages.last().locator("[data-citation-index-map] .aui-md:visible");
     await expect(debugPanel.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 300000 });
     await expect(send).toBeVisible({ timeout: 300000 });
+    // A short UI commit window, never five minutes on a completed empty reply.
+    // The selector still excludes reasoning and echoed user instructions.
+    await expect.poll(async () => (await responseText.allTextContents()).join("\n").trim(),
+      { timeout: 3000 }).not.toBe("").catch(() => undefined);
     const answer = (await responseText.allTextContents()).join("\n").trim();
     if (!answer || (expectedMarker && !answer.includes(expectedMarker))) {
       const error = new Error(!answer ? "agent debug completed without a rendered response"
