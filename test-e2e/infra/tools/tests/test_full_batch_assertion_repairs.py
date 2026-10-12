@@ -429,6 +429,47 @@ assert.equal(asset.provider,'fixture-provider');assert.equal(asset.secret,'synth
     assert 'synthetic' not in result.stdout
 
 
+def test_chart_restore_uses_only_its_owned_conversation_label():
+    script = r'''
+const assert=require('node:assert/strict'),fs=require('node:fs'),ts=require(__TS_PATH__);
+let pending,handlers,cleanup,title,seeded=false,opened=false,deleted=false;
+const page={request:{post:async(path,options)=>{
+ assert.equal(path,'/api/conversation/rename');assert.equal(options.data.conversation_id,7);
+ title=options.data.name;assert.equal(title,'chart-fixture');return {ok:()=>true,json:async()=>({code:0})};
+},get:async(path)=>{
+ assert.equal(path,'/api/conversation/7');return {ok:()=>true,json:async()=>({data:[
+  {conversation_id:8,message:[{role:'assistant',message_id:88}]},
+  {conversation_id:7,message:[{role:'assistant',message_id:90}]},
+ ]})};
+}},on:()=>{},reload:async()=>{assert.equal(seeded,true);}};
+const expect=value=>({toBe:other=>assert.equal(value,other),toBeGreaterThan:other=>assert(value>other)});
+const modules={
+ 'journey':{journey:(id,fn)=>pending=fn({page,expect,contract:{deferCleanup:fn=>cleanup=fn}})},
+ 'scenario':{executeFixedScenario:async(context,value)=>{handlers=value;}},
+ 'runtime-config':{runToken:()=> 'fixture'},'sessions':{},'assets':{},
+ 'chat.page':{ChatPage:class{
+  async sendAndWait(){} currentConversationId(){return 7;}
+  currentThreadTitle(){throw new Error('duplicate default titles must not select shared history');}
+  async persistedThreadTitle(id){assert.equal(id,7);return title;}
+  async openThread(label,occurrence){assert.equal(label,title);assert.equal(occurrence,undefined);opened=true;}
+  async deleteConversationById(id){assert.equal(id,7);deleted=true;}
+ }},
+};
+const mod={exports:{}};
+const source=ts.transpileModule(fs.readFileSync(__SOURCE_PATH__,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+new Function('require','module','exports',source)(name=>name==='node:child_process'?{
+ execFileSync:(python,args)=>{assert.equal(args[args.indexOf('--conversation-id')+1],'7');assert.equal(args[args.indexOf('--message-id')+1],'90');seeded=true;}
+}:modules[name.split('/').pop()]||require(name),mod,mod.exports);
+(async()=>{await pending;await handlers.steps[9]();assert.equal(opened,true);await cleanup();assert.equal(deleted,true);})()
+ .catch(error=>{console.error(error);process.exitCode=1;});
+'''
+    for name, value in [('__TS_PATH__', ROOT / 'frontend/node_modules/typescript/lib/typescript.js'),
+                        ('__SOURCE_PATH__', ROOT / 'test-e2e/cases/PW-CHART-01/test.spec.ts')]:
+        script = script.replace(name, json.dumps(str(value)))
+    result = subprocess.run(['node', '-'], input=script, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
 def test_skill_journey_actions_cover_every_contract_row():
     script = r'''
 const ts=require(__TYPESCRIPT_PATH__);
