@@ -1340,7 +1340,6 @@
   "modelConfig.slider.maximumChunkSize": "最大切片大小",
   "modelConfig.input.chunkingBatchSize": "单次请求切片量",
   "modelConfig.addDialog.rowSettingsDescEmbedding": "切片与多模态配置（留空使用默认值）",
-  "modelConfig.advancedConfig.voiceProviderHint": "volcengine 需要 App ID 与 Access Token，dashscope 使用 API Key",
   "businessLogic.title": "描述智能体应该如何工作",
   "businessLogic.placeholder": "请描述您的业务场景和需求...",
   "businessLogic.config.title": "配置智能体能力",

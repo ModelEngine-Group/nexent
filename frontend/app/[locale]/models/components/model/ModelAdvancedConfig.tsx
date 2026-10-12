@@ -304,12 +304,6 @@ export function ModelAdvancedConfig({
                 </SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              {t("modelConfig.advancedConfig.voiceProviderHint", {
-                defaultValue:
-                  "volcengine 需要 App ID 与 Access Token，dashscope 使用 API Key",
-              })}
-            </p>
           </div>
           <div className="space-y-1.5">
             <Label className="text-sm">
