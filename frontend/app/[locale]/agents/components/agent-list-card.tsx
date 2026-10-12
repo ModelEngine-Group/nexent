@@ -123,10 +123,7 @@ export default function AgentListCard({
         </div>
       </div>
 
-      <div
-        className="absolute right-[14px] top-[6px]"
-        onClick={(event) => event.stopPropagation()}
-      >
+      <div className="absolute right-[14px] top-[6px]">
         <AgentConfigActions
           agentId={agentId}
           readOnly={agent.permission === "READ_ONLY"}

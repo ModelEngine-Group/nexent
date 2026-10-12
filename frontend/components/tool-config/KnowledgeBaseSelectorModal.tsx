@@ -2,6 +2,8 @@
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useEmbeddingModelDialog } from "@/hooks/knowledge/useEmbeddingModelDialog";
+import { KnowledgeModelMismatchModal } from "@/components/tool-config/KnowledgeModelMismatchModal";
 
 import {
   Modal,
@@ -12,11 +14,7 @@ import {
   Checkbox,
   ConfigProvider,
 } from "antd";
-import {
-  SearchOutlined,
-  SyncOutlined,
-  ExclamationCircleOutlined,
-} from "@ant-design/icons";
+import { SearchOutlined, SyncOutlined } from "@ant-design/icons";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
@@ -200,17 +198,14 @@ export default function KnowledgeBaseSelectorModal({
   } | null>(null);
 
   // Embedding model config dialog state
-  const [embeddingModelDialogOpen, setEmbeddingModelDialogOpen] =
-    useState(false);
-  const [embeddingModelDialogData, setEmbeddingModelDialogData] = useState<{
-    indexName: string;
-    knowledgeName: string;
-  } | null>(null);
-  const [embeddingModelDialogMismatch, setEmbeddingModelDialogMismatch] =
-    useState(false);
-  const [configuringKbIds, setConfiguringKbIds] = useState<Set<string>>(
-    new Set()
-  );
+  const {
+    setEmbeddingModelDialogOpen,
+    setEmbeddingModelDialogData,
+    setEmbeddingModelDialogMismatch,
+    configuringKbIds,
+    setConfiguringKbIds,
+    embeddingModelDialogProps,
+  } = useEmbeddingModelDialog();
 
   // Track configured models for display - use model display name instead of ID
   const [configuredModels, setConfiguredModels] = useState<Map<string, string>>(
@@ -234,7 +229,13 @@ export default function KnowledgeBaseSelectorModal({
       setConfiguringKbIds(new Set());
       setConfiguredModels(new Map());
     }
-  }, [isOpen]);
+  }, [
+    isOpen,
+    setConfiguringKbIds,
+    setEmbeddingModelDialogData,
+    setEmbeddingModelDialogMismatch,
+    setEmbeddingModelDialogOpen,
+  ]);
 
   // Sync tempSelectedIds whenever selectedIds changes while modal is open
   // This ensures selected knowledge bases are always shown correctly
@@ -573,7 +574,14 @@ export default function KnowledgeBaseSelectorModal({
       setEmbeddingModelDialogMismatch(false);
       setConfiguringKbIds(new Set());
     },
-    [knowledgeBases, tempSelectedIds]
+    [
+      knowledgeBases,
+      setConfiguringKbIds,
+      setEmbeddingModelDialogData,
+      setEmbeddingModelDialogMismatch,
+      setEmbeddingModelDialogOpen,
+      tempSelectedIds,
+    ]
   );
 
   // Handle confirm
@@ -672,11 +680,15 @@ export default function KnowledgeBaseSelectorModal({
     onClose();
   }, [
     knowledgeBases,
-    tempSelectedIds,
-    configuringKbIds,
-    configuredKbIndexNames,
     onConfirm,
     onClose,
+    tempSelectedIds,
+    setEmbeddingModelDialogData,
+    setEmbeddingModelDialogMismatch,
+    setEmbeddingModelDialogOpen,
+    setConfiguringKbIds,
+    configuringKbIds,
+    configuredKbIndexNames,
   ]);
 
   // Handle cancel
@@ -688,7 +700,14 @@ export default function KnowledgeBaseSelectorModal({
     setEmbeddingModelDialogMismatch(false);
     setConfiguringKbIds(new Set());
     onClose();
-  }, [selectedIds, onClose]);
+  }, [
+    selectedIds,
+    setEmbeddingModelDialogOpen,
+    setEmbeddingModelDialogData,
+    setEmbeddingModelDialogMismatch,
+    setConfiguringKbIds,
+    onClose,
+  ]);
 
   // Default title based on tool type
   const defaultTitle = useMemo(() => {
@@ -1190,161 +1209,54 @@ export default function KnowledgeBaseSelectorModal({
       </div>
 
       {/* Model mismatch confirmation modal */}
-      <Modal
-        title={
-          <div className="flex items-center gap-2">
-            <ExclamationCircleOutlined
-              style={{ color: "#faad14", fontSize: 20 }}
-            />
-            <span>
-              {t(
-                "toolConfig.knowledgeBaseSelector.modelMismatch.title",
-                "模型不匹配"
-              )}
-            </span>
-          </div>
-        }
+      <KnowledgeModelMismatchModal
         open={confirmModalOpen}
+        info={modelMismatchInfo}
         onCancel={() => {
           setConfirmModalOpen(false);
           setPendingSelection(null);
           setModelMismatchInfo(null);
         }}
-        footer={[
-          <Button
-            key="cancel"
-            onClick={() => {
-              setConfirmModalOpen(false);
-              setPendingSelection(null);
-              setModelMismatchInfo(null);
-            }}
-          >
-            {t("common.cancel")}
-          </Button>,
-          <Button
-            key="confirm"
-            type="primary"
-            danger
-            onClick={() => {
-              if (pendingSelection) {
-                setTempSelectedIds((prev) => {
-                  // Remove all KBs with the old model
-                  const existingKBs = knowledgeBases.filter((k) =>
-                    prev.includes(k.id)
-                  );
-                  const existingModels = [
-                    ...new Set(
-                      existingKBs
-                        .map((k) => k.embeddingModel)
-                        .filter((m) => m && m !== "unknown")
-                    ),
-                  ];
-                  const idsToRemove = existingKBs
-                    .filter((k) => existingModels.includes(k.embeddingModel))
-                    .map((k) => k.id);
+        onConfirm={() => {
+          if (pendingSelection) {
+            setTempSelectedIds((prev) => {
+              // Remove all KBs with the old model
+              const existingKBs = knowledgeBases.filter((k) =>
+                prev.includes(k.id)
+              );
+              const existingModels = [
+                ...new Set(
+                  existingKBs
+                    .map((k) => k.embeddingModel)
+                    .filter((m) => m && m !== "unknown")
+                ),
+              ];
+              const idsToRemove = existingKBs
+                .filter((k) => existingModels.includes(k.embeddingModel))
+                .map((k) => k.id);
 
-                  // Update model filter
-                  if (
-                    pendingSelection.kb.embeddingModel &&
-                    pendingSelection.kb.embeddingModel !== "unknown"
-                  ) {
-                    setSelectedEmbeddingModel(
-                      pendingSelection.kb.embeddingModel
-                    );
-                    setSelectedModels([pendingSelection.kb.embeddingModel]);
-                  }
-
-                  // Return new selection (only the new KB with different model)
-                  return [pendingSelection.id];
-                });
+              // Update model filter
+              if (
+                pendingSelection.kb.embeddingModel &&
+                pendingSelection.kb.embeddingModel !== "unknown"
+              ) {
+                setSelectedEmbeddingModel(pendingSelection.kb.embeddingModel);
+                setSelectedModels([pendingSelection.kb.embeddingModel]);
               }
-              setConfirmModalOpen(false);
-              setPendingSelection(null);
-              setModelMismatchInfo(null);
-            }}
-          >
-            {t(
-              "toolConfig.knowledgeBaseSelector.modelMismatch.switchModel",
-              "切换模型"
-            )}
-          </Button>,
-        ]}
-      >
-        <div className="py-4">
-          <p className="mb-4 text-gray-600">
-            {t(
-              "toolConfig.knowledgeBaseSelector.modelMismatch.description",
-              "所选知识库的向量化模型与其他已选知识库不一致。"
-            )}
-          </p>
-          {modelMismatchInfo && (
-            <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-              <div className="flex items-start">
-                <span className="text-gray-500 w-20 flex-shrink-0">
-                  {t(
-                    "toolConfig.knowledgeBaseSelector.modelMismatch.existing",
-                    "已选知识库"
-                  )}
-                  :
-                </span>
-                <div className="flex-1">
-                  <div className="text-gray-800 font-medium">
-                    {modelMismatchInfo.existingKBName}
-                  </div>
-                  <div className="text-gray-500 text-sm">
-                    {t(
-                      "toolConfig.knowledgeBaseSelector.modelMismatch.model",
-                      "模型"
-                    )}
-                    : {modelMismatchInfo.existingModel}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-start">
-                <span className="text-gray-500 w-20 flex-shrink-0">
-                  {t(
-                    "toolConfig.knowledgeBaseSelector.modelMismatch.new",
-                    "新选择"
-                  )}
-                  :
-                </span>
-                <div className="flex-1">
-                  <div className="text-gray-800 font-medium">
-                    {modelMismatchInfo.newKBName}
-                  </div>
-                  <div className="text-gray-500 text-sm">
-                    {t(
-                      "toolConfig.knowledgeBaseSelector.modelMismatch.model",
-                      "模型"
-                    )}
-                    : {modelMismatchInfo.newModel}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          <p className="mt-4 text-gray-500 text-sm">
-            {t(
-              "toolConfig.knowledgeBaseSelector.modelMismatch.hint",
-              "提示：向量化模型不一致的知识库可能无法同时用于检索，建议选择相同模型的知识库。"
-            )}
-          </p>
-        </div>
-      </Modal>
+
+              // Return new selection (only the new KB with different model)
+              return [pendingSelection.id];
+            });
+          }
+          setConfirmModalOpen(false);
+          setPendingSelection(null);
+          setModelMismatchInfo(null);
+        }}
+      />
 
       {/* Embedding Model Config Dialog */}
       <EmbeddingModelConfigDialog
-        isOpen={embeddingModelDialogOpen}
-        knowledgeBaseName={embeddingModelDialogData?.knowledgeName || ""}
-        indexName={embeddingModelDialogData?.indexName || ""}
-        isModelMismatch={embeddingModelDialogMismatch}
-        kbIdsToUpdate={Array.from(configuringKbIds)}
-        onClose={() => {
-          setEmbeddingModelDialogOpen(false);
-          setEmbeddingModelDialogData(null);
-          setEmbeddingModelDialogMismatch(false);
-          setConfiguringKbIds(new Set());
-        }}
+        {...embeddingModelDialogProps}
         onConfigComplete={handleEmbeddingModelConfigComplete}
       />
     </KnowledgeSelectorContainer>

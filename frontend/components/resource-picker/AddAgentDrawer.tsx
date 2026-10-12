@@ -197,7 +197,7 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       (agent.tags ?? []).forEach((tag) => tags.add(tag))
     );
     return Array.from(tags)
-      .sort()
+      .sort((left, right) => (left < right ? -1 : Number(left > right)))
       .map((value) => ({ value, label: value }));
   }, [selectableInternalAgents]);
 
@@ -247,11 +247,18 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       return { id: `external-${id}`, label: agent?.name || String(id) };
     });
     return [...internalChips, ...externalChips];
-  }, [selectedExternalIds, selectedInternalIds, externalAgents, internalAgents]);
+  }, [
+    selectedExternalIds,
+    selectedInternalIds,
+    externalAgents,
+    internalAgents,
+  ]);
 
   const allSelected =
     filteredAgents.length > 0 &&
-    filteredAgents.every((item) => currentSelectedIds.includes(Number(item.id)));
+    filteredAgents.every((item) =>
+      currentSelectedIds.includes(Number(item.id))
+    );
 
   const applyInternalSelection = (nextIds: number[]) => {
     updateSubAgentIds(nextIds);
@@ -319,7 +326,9 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
   const removeSelected = (id: string) => {
     if (id.startsWith("internal-")) {
       const num = Number(id.slice("internal-".length));
-      applyInternalSelection(selectedInternalIds.filter((item) => item !== num));
+      applyInternalSelection(
+        selectedInternalIds.filter((item) => item !== num)
+      );
       return;
     }
     if (id.startsWith("external-")) {

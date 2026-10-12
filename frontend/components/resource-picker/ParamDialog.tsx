@@ -3,7 +3,7 @@
 import { Modal } from "antd";
 import { Input as AntInput, type InputProps } from "antd";
 import { RotateCw, X } from "lucide-react";
-import type { MouseEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -35,7 +35,11 @@ export function ParamDialog({
       closable={false}
       maskClosable={false}
       styles={{
-        container: { padding: 0, borderRadius: 8, boxShadow: "0 8px 30px rgba(0,0,0,.12)" },
+        container: {
+          padding: 0,
+          borderRadius: 8,
+          boxShadow: "0 8px 30px rgba(0,0,0,.12)",
+        },
         body: { padding: 0 },
       }}
     >
@@ -121,15 +125,49 @@ export function ParamSlider({
   const handleTrackClick = (e: MouseEvent<HTMLDivElement>) => {
     if (!onChange) return;
     const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const pct = Math.round(((e.clientX - rect.left) / rect.width) * 100);
     onChange(Math.max(0, Math.min(100, pct)));
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onChange) return;
+    let nextValue: number;
+    switch (event.key) {
+      case "ArrowRight":
+      case "ArrowUp":
+        nextValue = value + 1;
+        break;
+      case "ArrowLeft":
+      case "ArrowDown":
+        nextValue = value - 1;
+        break;
+      case "Home":
+        nextValue = 0;
+        break;
+      case "End":
+        nextValue = 100;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    onChange(Math.max(0, Math.min(100, nextValue)));
   };
 
   return (
     <div className="flex items-center gap-3">
       <div
         className="relative h-1 flex-1 cursor-pointer rounded-[2px] bg-[#E5E5E5]"
+        role="slider"
+        tabIndex={onChange ? 0 : -1}
+        aria-label={`${minLabel} — ${maxLabel}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={value}
+        aria-disabled={!onChange}
         onClick={handleTrackClick}
+        onKeyDown={handleKeyDown}
       >
         <div
           className="absolute left-0 top-0 h-1 rounded-[2px] bg-[#0567D1]"

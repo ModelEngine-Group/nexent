@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Database } from "lucide-react";
-import { Button, Empty, Modal, Spin } from "antd";
-import { ExclamationCircleOutlined } from "@ant-design/icons";
+import { Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
+import { useEmbeddingModelDialog } from "@/hooks/knowledge/useEmbeddingModelDialog";
+import { KnowledgeModelMismatchModal } from "@/components/tool-config/KnowledgeModelMismatchModal";
 
 import { cn } from "@/lib/utils";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -59,9 +60,7 @@ function toKnowledgeItem(
       id: kb.id,
       name: kb.display_name || kb.name,
       category:
-        kb.ingroup_permission === "PRIVATE"
-          ? "私有"
-          : options?.groupNames?.[0],
+        kb.ingroup_permission === "PRIVATE" ? "私有" : options?.groupNames?.[0],
       description: kb.description ?? "",
       iconBg: iconColorFor(kb.id),
       meta,
@@ -184,9 +183,7 @@ export function AddKnowledgeDrawer({
 
   // Self-fetching fallback (used by the standalone demo page).
   const selfFetch = useKnowledgeList(tenantId);
-  const { data: groupListData } = useGroupList(
-    isAidpSearch ? tenantId : null
-  );
+  const { data: groupListData } = useGroupList(isAidpSearch ? tenantId : null);
 
   const groupNameById = useMemo(
     () =>
@@ -242,20 +239,16 @@ export function AddKnowledgeDrawer({
   } | null>(null);
 
   // Embedding model config dialog state.
-  const [embeddingModelDialogOpen, setEmbeddingModelDialogOpen] =
-    useState(false);
-  const [embeddingModelDialogData, setEmbeddingModelDialogData] = useState<{
-    indexName: string;
-    knowledgeName: string;
-  } | null>(null);
-  const [embeddingModelDialogMismatch, setEmbeddingModelDialogMismatch] =
-    useState(false);
+  const {
+    setEmbeddingModelDialogOpen,
+    setEmbeddingModelDialogData,
+    setEmbeddingModelDialogMismatch,
+    setConfiguringKbIds,
+    embeddingModelDialogProps,
+  } = useEmbeddingModelDialog();
   const [configuredKbIndexNames, setConfiguredKbIndexNames] = useState<
     Set<string>
   >(new Set());
-  const [configuringKbIds, setConfiguringKbIds] = useState<Set<string>>(
-    new Set()
-  );
 
   useEffect(() => {
     if (open) {
@@ -377,7 +370,12 @@ export function AddKnowledgeDrawer({
       setEmbeddingModelDialogMismatch(false);
       setConfiguringKbIds(new Set());
     },
-    []
+    [
+      setConfiguringKbIds,
+      setEmbeddingModelDialogData,
+      setEmbeddingModelDialogMismatch,
+      setEmbeddingModelDialogOpen,
+    ]
   );
 
   const handleConfirm = useCallback(async () => {
@@ -447,7 +445,17 @@ export function AddKnowledgeDrawer({
 
     onConfirm?.(selectedKBs);
     onClose();
-  }, [knowledgeBases, selectedIdsSet, configuredKbIndexNames, onConfirm, onClose]);
+  }, [
+    knowledgeBases,
+    onConfirm,
+    onClose,
+    selectedIdsSet,
+    setEmbeddingModelDialogData,
+    setEmbeddingModelDialogMismatch,
+    setEmbeddingModelDialogOpen,
+    setConfiguringKbIds,
+    configuredKbIndexNames,
+  ]);
 
   // ---- Filters / pagination ----
   const tagOptions = useMemo(() => {
@@ -457,7 +465,7 @@ export function AddKnowledgeDrawer({
       if (item.category) sources.add(item.category);
     });
     return Array.from(sources)
-      .sort()
+      .sort((left, right) => (left < right ? -1 : Number(left > right)))
       .map((value) => ({ value, label: value }));
   }, [allItems, isAidpSearch]);
 
@@ -483,14 +491,12 @@ export function AddKnowledgeDrawer({
 
   const pagedItems = useMemo(
     () =>
-      filteredKbs
-        .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-        .map((kb) =>
-          toKnowledgeItem(kb, {
-            isAidp: isAidpSearch,
-            groupNames: groupNamesFor(kb),
-          })
-        ),
+      filteredKbs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((kb) =>
+        toKnowledgeItem(kb, {
+          isAidp: isAidpSearch,
+          groupNames: groupNamesFor(kb),
+        })
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [filteredKbs, page, isAidpSearch, groupNameById]
   );
@@ -504,7 +510,8 @@ export function AddKnowledgeDrawer({
   );
 
   const allSelected =
-    filteredKbs.length > 0 && filteredKbs.every((kb) => selectedIdsSet.has(kb.id));
+    filteredKbs.length > 0 &&
+    filteredKbs.every((kb) => selectedIdsSet.has(kb.id));
 
   const handleRefresh = () => {
     if (onRefresh) onRefresh();
@@ -584,132 +591,27 @@ export function AddKnowledgeDrawer({
       </AddResourceDrawer>
 
       {/* Model-mismatch confirmation modal */}
-      <Modal
-        title={
-          <div className="flex items-center gap-2">
-            <ExclamationCircleOutlined
-              style={{ color: "#faad14", fontSize: 20 }}
-            />
-            <span>
-              {t(
-                "toolConfig.knowledgeBaseSelector.modelMismatch.title",
-                "模型不匹配"
-              )}
-            </span>
-          </div>
-        }
+      <KnowledgeModelMismatchModal
         open={confirmModalOpen}
+        info={modelMismatchInfo}
         onCancel={() => {
           setConfirmModalOpen(false);
           setPendingSelection(null);
           setModelMismatchInfo(null);
         }}
-        footer={[
-          <Button
-            key="cancel"
-            onClick={() => {
-              setConfirmModalOpen(false);
-              setPendingSelection(null);
-              setModelMismatchInfo(null);
-            }}
-          >
-            {t("common.cancel")}
-          </Button>,
-          <Button
-            key="confirm"
-            type="primary"
-            danger
-            onClick={() => {
-              if (pendingSelection) {
-                setSelectedIdsSet(new Set([pendingSelection.id]));
-              }
-              setConfirmModalOpen(false);
-              setPendingSelection(null);
-              setModelMismatchInfo(null);
-            }}
-          >
-            {t(
-              "toolConfig.knowledgeBaseSelector.modelMismatch.switchModel",
-              "切换模型"
-            )}
-          </Button>,
-        ]}
-      >
-        <div className="py-4">
-          <p className="mb-4 text-gray-600">
-            {t(
-              "toolConfig.knowledgeBaseSelector.modelMismatch.description",
-              "所选知识库的向量化模型与其他已选知识库不一致。"
-            )}
-          </p>
-          {modelMismatchInfo && (
-            <div className="space-y-3 rounded-lg bg-gray-50 p-4">
-              <div className="flex items-start">
-                <span className="w-20 shrink-0 text-gray-500">
-                  {t(
-                    "toolConfig.knowledgeBaseSelector.modelMismatch.existing",
-                    "已选知识库"
-                  )}
-                  :
-                </span>
-                <div className="flex-1">
-                  <div className="font-medium text-gray-800">
-                    {modelMismatchInfo.existingKBName}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {t(
-                      "toolConfig.knowledgeBaseSelector.modelMismatch.model",
-                      "模型"
-                    )}
-                    : {modelMismatchInfo.existingModel}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-start">
-                <span className="w-20 shrink-0 text-gray-500">
-                  {t(
-                    "toolConfig.knowledgeBaseSelector.modelMismatch.new",
-                    "新选择"
-                  )}
-                  :
-                </span>
-                <div className="flex-1">
-                  <div className="font-medium text-gray-800">
-                    {modelMismatchInfo.newKBName}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {t(
-                      "toolConfig.knowledgeBaseSelector.modelMismatch.model",
-                      "模型"
-                    )}
-                    : {modelMismatchInfo.newModel}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          <p className="mt-4 text-sm text-gray-500">
-            {t(
-              "toolConfig.knowledgeBaseSelector.modelMismatch.hint",
-              "提示：向量化模型不一致的知识库可能无法同时用于检索，建议选择相同模型的知识库。"
-            )}
-          </p>
-        </div>
-      </Modal>
+        onConfirm={() => {
+          if (pendingSelection) {
+            setSelectedIdsSet(new Set([pendingSelection.id]));
+          }
+          setConfirmModalOpen(false);
+          setPendingSelection(null);
+          setModelMismatchInfo(null);
+        }}
+      />
 
       {/* Embedding model config dialog */}
       <EmbeddingModelConfigDialog
-        isOpen={embeddingModelDialogOpen}
-        knowledgeBaseName={embeddingModelDialogData?.knowledgeName || ""}
-        indexName={embeddingModelDialogData?.indexName || ""}
-        isModelMismatch={embeddingModelDialogMismatch}
-        kbIdsToUpdate={Array.from(configuringKbIds)}
-        onClose={() => {
-          setEmbeddingModelDialogOpen(false);
-          setEmbeddingModelDialogData(null);
-          setEmbeddingModelDialogMismatch(false);
-          setConfiguringKbIds(new Set());
-        }}
+        {...embeddingModelDialogProps}
         onConfigComplete={handleEmbeddingModelConfigComplete}
       />
     </>

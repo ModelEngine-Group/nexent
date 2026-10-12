@@ -337,7 +337,7 @@ function AgentCard({
         <p className="min-w-0 flex-1 truncate pt-2 text-[16px] font-bold leading-[24px] text-[#1a1a1a]">
           {displayName}
         </p>
-        <span className="shrink-0" onClick={(event) => event.stopPropagation()}>
+        <span className="shrink-0">
           <Dropdown
             menu={{ items: menuItems, onClick: handleMenuClick }}
             trigger={["click"]}
@@ -345,6 +345,8 @@ function AgentCard({
             <button
               type="button"
               aria-label={t("chat.agentLanding.cardMenu")}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
               className="flex size-6 cursor-pointer items-center justify-center rounded-[4px] text-[#191919] hover:bg-[#f0f0f0]"
             >
               <MoreHorizontal className="size-4" aria-hidden />
