@@ -186,7 +186,7 @@ const AidpCreateKbPage: React.FC = () => {
 
   /** Jump to the created knowledge base file view. */
   const openCreatedKb = (kbId: string) => {
-    router.push(`/${locale}/knowledges?kb=${encodeURIComponent(kbId)}`);
+    router.push(`/${locale}/knowledges/detail?kb=${encodeURIComponent(kbId)}`);
   };
 
   const handleSubmit = async () => {

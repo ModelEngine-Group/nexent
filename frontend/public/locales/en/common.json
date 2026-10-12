@@ -5429,6 +5429,7 @@
   "aidpKnowledge.detailCreator": "Created by",
   "aidpKnowledge.detailGroups": "Groups {{count}}",
   "aidpKnowledge.detailTabFiles": "Files",
+  "aidpKnowledge.detailTabUploadedFiles": "Uploaded files",
   "aidpKnowledge.detailTabTasks": "Upload tasks",
   "aidpKnowledge.detailTabInformation": "Details",
   "aidpKnowledge.detailFileSearch": "Enter a file name",
@@ -5499,5 +5500,7 @@
   "aidpKnowledge.detailEditTopK": "Edit vector retrieval TOP K",
   "aidpKnowledge.detailSettingSaved": "Configuration updated",
   "aidpKnowledge.detailSettingSaveFailed": "Failed to update configuration",
-  "aidpKnowledge.deleteDocTitle": "Delete this file?"
+  "aidpKnowledge.deleteDocTitle": "Delete this file?",
+  "aidpKnowledge.deleteDocsTitle": "Delete {{count}} selected files?",
+  "aidpKnowledge.deleteDocsPartial": "{{count}} file(s) failed to delete"
 }

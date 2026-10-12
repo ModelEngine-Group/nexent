@@ -5443,6 +5443,7 @@
   "aidpKnowledge.detailCreator": "创建人",
   "aidpKnowledge.detailGroups": "用户组 {{count}}",
   "aidpKnowledge.detailTabFiles": "文件",
+  "aidpKnowledge.detailTabUploadedFiles": "已上传文件",
   "aidpKnowledge.detailTabTasks": "上传任务",
   "aidpKnowledge.detailTabInformation": "详细信息",
   "aidpKnowledge.detailFileSearch": "请输入文件名称",
@@ -5513,5 +5514,7 @@
   "aidpKnowledge.detailEditTopK": "编辑向量检索 TOP K 值",
   "aidpKnowledge.detailSettingSaved": "配置已更新",
   "aidpKnowledge.detailSettingSaveFailed": "配置更新失败",
-  "aidpKnowledge.deleteDocTitle": "确定删除此文件吗？"
+  "aidpKnowledge.deleteDocTitle": "确定删除此文件吗？",
+  "aidpKnowledge.deleteDocsTitle": "确定删除选中的 {{count}} 个文件吗？",
+  "aidpKnowledge.deleteDocsPartial": "{{count}} 个文件删除失败"
 }

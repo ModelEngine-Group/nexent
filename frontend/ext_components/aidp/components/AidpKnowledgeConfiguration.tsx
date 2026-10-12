@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import { App, Modal } from "antd";
 
@@ -15,7 +15,6 @@ import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import log from "@/lib/logger";
 
-import AidpKnowledgeDetail from "./AidpKnowledgeDetail";
 import AidpKnowledgeList, {
   AIDP_KB_DEFAULT_COLUMNS,
   type AidpKbColumnKey,
@@ -28,7 +27,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const { message } = App.useApp();
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams();
   const locale = (params?.locale as string) || "zh";
   const [kbs, setKbs] = useState<AidpKnowledgeBaseItem[]>([]);
   const [loadingKbs, setLoadingKbs] = useState(false);
@@ -40,9 +38,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [visibleColumns, setVisibleColumns] = useState<AidpKbColumnKey[]>([
     ...AIDP_KB_DEFAULT_COLUMNS,
   ]);
-  const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(
-    null
-  );
   const [kbPage, setKbPage] = useState(1);
   const [kbPageSize, setKbPageSize] = useState(10);
   const [kbKeyword, setKbKeyword] = useState("");
@@ -54,7 +49,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   >(null);
   const quickImportPendingIdsRef = useRef<string[]>([]);
   const quickImportWatchStartedAtRef = useRef(0);
-  const openedRequestedKbRef = useRef<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -109,43 +103,15 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     }
   }, []);
 
-  const handleSelectKb = useCallback((kb: AidpKnowledgeBaseItem) => {
-    setSelectedKb(kb);
-  }, []);
-
-  const openKbById = useCallback(
-    async (kbId: string) => {
-      try {
-        const detail = await aidpKnowledgeService.getKb(kbId);
-        const item = {
-          ...detail,
-          kds_id: kbId,
-          kds_name: detail.kds_name || kbId,
-        } as AidpKnowledgeBaseItem;
-        setSelectedKb(item);
-      } catch (error) {
-        log.error("Failed to open AIDP knowledge base from query:", error);
-        message.error(t("aidpKnowledge.detailLoadFailed"));
-      }
+  const handleSelectKb = useCallback(
+    (kb: AidpKnowledgeBaseItem) => {
+      // The detail view lives on its own route so the URL survives refreshes.
+      router.push(
+        `/${locale}/knowledges/detail?kb=${encodeURIComponent(kb.kds_id)}`
+      );
     },
-    [message, t]
+    [locale, router]
   );
-
-  const requestedKbId = searchParams?.get("kb") || null;
-  useEffect(() => {
-    if (!requestedKbId || openedRequestedKbRef.current === requestedKbId)
-      return;
-    openedRequestedKbRef.current = requestedKbId;
-    void openKbById(requestedKbId);
-  }, [openKbById, requestedKbId]);
-
-  const handleBackToList = useCallback(() => {
-    setSelectedKb(null);
-    if (requestedKbId && typeof window !== "undefined") {
-      window.history.replaceState(null, "", `/${locale}/knowledges`);
-      openedRequestedKbRef.current = null;
-    }
-  }, [locale, requestedKbId]);
 
   const handleDeleteKb = useCallback(
     (kb: AidpKnowledgeBaseItem) => {
@@ -160,7 +126,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           try {
             await aidpKnowledgeService.deleteKb(kb.kds_id);
             message.success(t("aidpKnowledge.deleteKbSuccess"));
-            setSelectedKb(null);
             void fetchKbs(kbPage, debouncedKbKeyword, kbPageSize);
           } catch {
             message.error(t("aidpKnowledge.deleteKbFailed"));
@@ -170,15 +135,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
     },
     [debouncedKbKeyword, fetchKbs, kbPage, kbPageSize, message, t]
   );
-
-  const handleUpdatedKb = useCallback((updatedKb: AidpKnowledgeBaseItem) => {
-    setSelectedKb(updatedKb);
-    setKbs((current) =>
-      current.map((kb) =>
-        kb.kds_id === updatedKb.kds_id ? { ...kb, ...updatedKb } : kb
-      )
-    );
-  }, []);
 
   const handleQuickDocsUploaded = useCallback(
     (uploadedFileIds: string[]) => {
@@ -239,22 +195,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const handleCreateNew = useCallback(() => {
     router.push(`/${locale}/knowledges/create`);
   }, [locale, router]);
-
-  if (selectedKb) {
-    return (
-      <div className="flex h-full w-full min-w-0 flex-col">
-        <div className="mt-4 min-h-0 flex-1 overflow-hidden">
-          <AidpKnowledgeDetail
-            key={selectedKb.kds_id}
-            knowledgeBase={selectedKb}
-            onBack={handleBackToList}
-            onDelete={handleDeleteKb}
-            onUpdated={handleUpdatedKb}
-          />
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col">

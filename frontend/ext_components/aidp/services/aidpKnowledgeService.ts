@@ -298,6 +298,9 @@ export interface AidpUploadTaskListResponse {
   value: AidpDocumentItem[];
   total_count: number;
   has_more: boolean;
+  /** Whether `total_count` is an exact upstream total; when false the
+   * frontend should treat it as a lower bound and rely on `has_more`. */
+  total_reliable: boolean;
   stats: AidpUploadTaskStats;
   retention_days: number;
 }
@@ -733,6 +736,7 @@ class AidpKnowledgeService {
       value: Array.isArray(result.value) ? result.value : [],
       total_count: Number(result.total_count) || 0,
       has_more: result.has_more === true,
+      total_reliable: result.total_reliable !== false,
       stats: {
         total: Number(result.stats?.total) || 0,
         extracting: Number(result.stats?.extracting) || 0,
@@ -770,6 +774,17 @@ class AidpKnowledgeService {
     id: string,
     fileUuid: string
   ): Promise<AidpDocumentRemoveResponse> {
+    return this.removeDocs(id, [fileUuid]);
+  }
+
+  /**
+   * Remove multiple documents from an AIDP knowledge base in one request.
+   * AIDP reports per-file outcomes via summary/success_list/failed_list.
+   */
+  async removeDocs(
+    id: string,
+    fileUuids: string[]
+  ): Promise<AidpDocumentRemoveResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.removeKbDocuments(id), {});
     const response = await fetchWithErrorHandling(url, {
       method: "POST",
@@ -777,7 +792,7 @@ class AidpKnowledgeService {
         ...getAuthHeaders(),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ file_uuids: [fileUuid] }),
+      body: JSON.stringify({ file_uuids: fileUuids }),
     });
     const result =
       (await response.json()) as Partial<AidpDocumentRemoveResponse>;

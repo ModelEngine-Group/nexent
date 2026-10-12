@@ -251,6 +251,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
 
   const [fileKeyword, setFileKeyword] = useState("");
   const [files, setFiles] = useState<AidpDocumentItem[]>([]);
+  const [selectedFileKeys, setSelectedFileKeys] = useState<React.Key[]>([]);
   const [fileTotal, setFileTotal] = useState(0);
   const [fileHasMore, setFileHasMore] = useState(false);
   const [fileTotalReliable, setFileTotalReliable] = useState(true);
@@ -261,6 +262,8 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
   const [taskStatus, setTaskStatus] = useState<TaskFilter>(0);
   const [tasks, setTasks] = useState<AidpDocumentItem[]>([]);
   const [taskTotal, setTaskTotal] = useState(0);
+  const [taskTotalReliable, setTaskTotalReliable] = useState(true);
+  const [taskHasMore, setTaskHasMore] = useState(false);
   const [taskStats, setTaskStats] = useState({
     total: 0,
     extracting: 0,
@@ -339,6 +342,9 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         setFileHasMore(false);
         setFileTotalReliable(false);
       } finally {
+        // Drop the row selection whenever the list reloads so stale keys from
+        // a previous page or keyword filter are never submitted for deletion.
+        setSelectedFileKeys([]);
         setLoadingFiles(false);
       }
     },
@@ -364,12 +370,16 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         );
         setTasks(result.value);
         setTaskTotal(result.total_count);
+        setTaskTotalReliable(result.total_reliable !== false);
+        setTaskHasMore(result.has_more ?? false);
         setTaskStats(result.stats);
         setTaskPage(page);
       } catch {
         if (!silent) message.error(t("aidpKnowledge.detailTasksLoadFailed"));
         setTasks([]);
         setTaskTotal(0);
+        setTaskTotalReliable(false);
+        setTaskHasMore(false);
       } finally {
         if (!silent) setLoadingTasks(false);
       }
@@ -466,6 +476,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
       Modal.confirm({
         title: t("aidpKnowledge.deleteDocTitle"),
         content: file.file_name,
+        centered: true,
         okButtonProps: { danger: true },
         onOk: async () => {
           try {
@@ -493,6 +504,55 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
       t,
     ]
   );
+
+  const handleBatchDeleteFiles = useCallback(() => {
+    // Selection keys can fall back to file_ino_no; map them back to the
+    // current page records so only real file UUIDs are sent to AIDP.
+    const fileUuids = files
+      .filter((file) =>
+        selectedFileKeys.includes(file.file_uuid || file.file_ino_no)
+      )
+      .map((file) => file.file_uuid)
+      .filter(Boolean);
+    if (fileUuids.length === 0) return;
+    Modal.confirm({
+      title: t("aidpKnowledge.deleteDocsTitle", { count: fileUuids.length }),
+      centered: true,
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          const result = await aidpKnowledgeService.removeDocs(
+            knowledgeBase.kds_id,
+            fileUuids
+          );
+          if (result.summary.failed > 0) {
+            message.error(
+              t("aidpKnowledge.deleteDocsPartial", {
+                count: result.summary.failed,
+              })
+            );
+          } else {
+            message.success(t("aidpKnowledge.deleteDocSuccess"));
+          }
+          void fetchFiles(filePage, fileKeyword, filePageSize);
+          void refreshDetail();
+        } catch {
+          message.error(t("aidpKnowledge.deleteDocFailed"));
+        }
+      },
+    });
+  }, [
+    fetchFiles,
+    fileKeyword,
+    filePage,
+    filePageSize,
+    files,
+    knowledgeBase.kds_id,
+    message,
+    refreshDetail,
+    selectedFileKeys,
+    t,
+  ]);
 
   const handleRetry = useCallback(
     async (task: AidpDocumentItem) => {
@@ -615,7 +675,6 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
             {canEdit && (
               <Button
                 type="link"
-                danger
                 size="small"
                 className="px-0"
                 onClick={() => handleDeleteFile(record)}
@@ -721,15 +780,17 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
           if (code !== 3 && code !== 5) return null;
           return (
             <div className="flex items-center gap-3 whitespace-nowrap">
-              <Button
-                type="link"
-                size="small"
-                className="px-0"
-                loading={retryingFileUuid === record.file_uuid}
-                onClick={() => void handleRetry(record)}
-              >
-                {t("aidpKnowledge.retryTask")}
-              </Button>
+              {canEdit && (
+                <Button
+                  type="link"
+                  size="small"
+                  className="px-0"
+                  loading={retryingFileUuid === record.file_uuid}
+                  onClick={() => void handleRetry(record)}
+                >
+                  {t("aidpKnowledge.retryTask")}
+                </Button>
+              )}
               <Button
                 type="link"
                 size="small"
@@ -812,7 +873,6 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
           <div className="flex shrink-0 items-center gap-2">
             {canEdit && (
               <Button
-                danger
                 icon={<DeleteOutlined />}
                 onClick={() => onDelete(knowledgeBase)}
               >
@@ -879,7 +939,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         className="shrink-0 [&>.ant-tabs-nav]:mb-0 [&>.ant-tabs-content-holder]:hidden"
         tabBarStyle={{ marginBottom: 0 }}
         items={[
-          { key: "files", label: t("aidpKnowledge.detailTabFiles") },
+          { key: "files", label: t("aidpKnowledge.detailTabUploadedFiles") },
           { key: "tasks", label: t("aidpKnowledge.detailTabTasks") },
           {
             key: "information",
@@ -909,6 +969,14 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
                   }
                 />
               </Tooltip>
+              {canEdit && (
+                <Button
+                  disabled={selectedFileKeys.length === 0}
+                  onClick={handleBatchDeleteFiles}
+                >
+                  {t("common.delete")}
+                </Button>
+              )}
               {canEdit && isAvailable && (
                 <Button
                   type="primary"
@@ -926,6 +994,14 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
               columns={fileColumns}
               dataSource={files}
               loading={loadingFiles}
+              rowSelection={
+                canEdit
+                  ? {
+                      selectedRowKeys: selectedFileKeys,
+                      onChange: (keys) => setSelectedFileKeys(keys),
+                    }
+                  : undefined
+              }
               pagination={false}
               components={{
                 header: { cell: ResizableTitle },
@@ -1049,8 +1125,8 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
               currentPage={taskPage}
               pageSize={taskPageSize}
               total={taskTotal}
-              totalReliable
-              hasMore={taskPage * taskPageSize < taskTotal}
+              totalReliable={taskTotalReliable}
+              hasMore={taskHasMore}
               onPageChange={(page) =>
                 void fetchTasks(page, taskKeyword, taskStatus, taskPageSize)
               }
@@ -1155,10 +1231,6 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         open={Boolean(failureTask)}
         onClose={() => setFailureTask(null)}
         size={640}
-        styles={{
-          header: { padding: "0 20px" },
-          body: { padding: "16px 20px" },
-        }}
       >
         {failureTask && (
           <div className="space-y-4">
