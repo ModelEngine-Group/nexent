@@ -1,0 +1,34 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-OUTPUT
+case:
+  case_id: TPC-D1-006
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  title: Python data containing protocol-like tags is preserved
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Python data containing protocol-like tags is preserved
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Classify actions whose strings/comments contain think and code markers.
+    expected: Python data remains unchanged and executable.
+  expected_results:
+  - Only outer reasoning prefix is normalized.
+  forbidden_side_effects:
+  - No global tag replacement in action or final data.
+  unit_boundary: classify_model_output Python data boundaries
+  inputs:
+  - Python literal/comment protocol-like text
+  assertions:
+  - Exact code body retained.

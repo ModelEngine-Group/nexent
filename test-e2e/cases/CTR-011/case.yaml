@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: CTR-011
+  feature_id: F-180
+  business_rule_ids:
+  - F-180-RULE-01
+  title: 临时模型连接超时、读取超时与错误信息契约
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: 临时模型连接超时、读取超时与错误信息契约
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/images/；${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/images/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json'
+  steps:
+  - order: 1
+    action: 从 ${NEXENT_TEST_HOME}/config/models.yaml 读取本用例要求的真实 Provider/模型配置；密钥仅从 secrets.env/系统环境变量注入。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 调用 Nexent 实际模型配置 API 创建或选取测试模型，确认数据库中的 provider、model、model_type、dimension/capacity 等字段与本地配置一致。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 执行 Nexent 自带的模型连通性/健康检查，真实请求外部 Provider；保存实际 HTTP 状态、响应耗时和脱敏后的错误信息。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 按“模型 Provider Gateway 的参数映射、错误标准化、超时/重试｜外部依赖异常与超时”执行目标操作；若涉及 LLM/Embedding/Rerank/VLM/STT/TTS，必须触发一次真实推理/向量化/重排/识别/合成，而不是只检查配置保存成功。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 对 LLM 检查 stream 正常结束、回答非空、model_id/model_name 正确；对 Embedding 检查向量维度；对 Rerank 检查目标文档进入期望 Top-N。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 6
+    action: 对 VLM 使用固定图片并检查唯一标记（如 7429）；对 STT 使用固定音频并检查关键词/CER 阈值；对 TTS 检查生成音频可解码、duration>0，必要时再用 STT 做闭环验证。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 7
+    action: 检查 Telemetry/服务日志中模型名、TTFT/token 或错误信息合理，且 API Key 不得明文出现。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 8
+    action: '删除本用例创建的临时模型/Provider记录或恢复原主模型，避免污染后续每日用例。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 69
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

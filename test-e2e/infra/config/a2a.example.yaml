@@ -1,0 +1,9 @@
+schema_version: '1.0'
+# Copy into the machine-local test home's config/a2a.yaml.
+mock:
+  control_url: http://127.0.0.1:8888
+  product_url: http://a2a-agent:8888
+  control_token_env_key: A2A_CONTROL_TOKEN
+  fault_proxy_control_url: http://127.0.0.1:8474
+  nacos_proxy_product_url: http://a2a-fault-proxy:18848
+# The control token is read from secrets.env or the existing environment.

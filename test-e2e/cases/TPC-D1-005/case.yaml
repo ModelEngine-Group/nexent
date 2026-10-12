@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-OUTPUT
+case:
+  case_id: TPC-D1-005
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  - TPC-RULE-002
+  title: Ordinary explicit finals tolerate thinking prefix and keep boundaries
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Ordinary explicit finals tolerate thinking prefix and keep boundaries
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Classify compatible prefix before valid ordinary final envelope.
+    expected: Only the payload is ExplicitFinalAnswer.
+  - order: 2
+    action: Classify duplicates, incomplete envelopes, suffix text and specialized
+      prefixed envelopes.
+    expected: Protocol errors remain.
+  expected_results:
+  - Ordinary terminal prefix accepted.
+  - Specialized exact-envelope behavior retained.
+  forbidden_side_effects:
+  - No prefix in terminal payload.
+  - No malformed final accepted.
+  unit_boundary: classify_model_output terminal branch
+  inputs:
+  - prefix matrix
+  - final envelope matrix
+  - final_envelope protocol
+  assertions:
+  - Exact final payload.
+  - Malformed and specialized prefixed forms reject.

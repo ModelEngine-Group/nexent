@@ -1,0 +1,69 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-39A8846CFEA5224E
+  feature_id: F-036
+  business_rule_ids:
+  - F-036-RULE-01
+  title: HybridSearchRequest.tag_predicates 默认空与 {definition_id, value_ids} 分组序列化/校验的往返一致｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: HybridSearchRequest.tag_predicates 默认空与 {definition_id, value_ids} 分组序列化/校验的往返一致｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - backend/consts/model.py 可在测试进程中正常导入，且不触达数据库或外部服务。
+  test_data:
+    legacy_asset_declaration: '- 无额外本地资产：本用例仅加载 backend/consts/model.py 中的 Pydantic 模型，不读取本地配置/凭据文件。'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与 tag_predicates 序列化/校验相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: 未提供 tag_predicates 时，实例的 tag_predicates 等于空列表 []。
+  - order: 2
+    action: 直接导入 backend/consts/model.py 中的 HybridSearchRequest，构造仅含必填字段（query、index_names）的最小有效请求，不提供 tag_predicates。
+    expected: 提供 tag_predicates 时，model_dump()/model_dump_json() 输出完整保留每个分组 {definition_id, value_ids} 的结构、值及顺序，不丢失、不变形。
+  - order: 3
+    action: 对未提供 tag_predicates 的实例执行 model_dump() 与 model_dump_json()，记录 tag_predicates 的默认输出。
+    expected: 从 dict/JSON 经 model_validate()/model_validate_json() 往返重建后，tag_predicates 与原对象完全一致。
+  - order: 4
+    action: 再构造包含 tag_predicates 的输入：单个 {definition_id, value_ids} 分组、同一 definition 下多个 value_id（OR-within）、多个 definition
+      分组（AND-across），分别执行 model_dump()/model_dump_json()，再经 model_validate()/model_validate_json() 往返重建。
+    expected: HybridSearchRequest 既有约束继续生效：query 最小长度 1、index_names 至少 1 项、top_k 在 1..100、weight_accurate 在 0.0..1.0，越界抛 pydantic
+      ValidationError。
+  - order: 5
+    action: 针对边界值分别执行：tag_predicates 为空列表、value_ids 为空列表；同时对 query 空串、index_names 空列表、top_k 越界（<1 或 >100）、weight_accurate
+      越界（<0.0 或 >1.0）执行校验。
+    expected: 序列化/校验过程无未处理异常，功能结果与代码契约一致。
+  - order: 6
+    action: 比对序列化与往返结果：字段结构、值、顺序是否与输入一致，无不期望的额外字段或丢失字段。
+    expected: 序列化/校验过程无未处理异常，功能结果与代码契约一致。
+  - order: 7
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 序列化/校验过程无未处理异常，功能结果与代码契约一致。
+  - order: 8
+    action: 测试结束后释放临时对象，确保可重复执行。
+    expected: 序列化/校验过程无未处理异常，功能结果与代码契约一致。
+  expected_results:
+  - 未提供 tag_predicates 时，实例的 tag_predicates 等于空列表 []。
+  - 提供 tag_predicates 时，model_dump()/model_dump_json() 输出完整保留每个分组 {definition_id, value_ids} 的结构、值及顺序，不丢失、不变形。
+  - 从 dict/JSON 经 model_validate()/model_validate_json() 往返重建后，tag_predicates 与原对象完全一致。
+  - HybridSearchRequest 既有约束继续生效：query 最小长度 1、index_names 至少 1 项、top_k 在 1..100、weight_accurate 在 0.0..1.0，越界抛 pydantic ValidationError。
+  - 序列化/校验过程无未处理异常，功能结果与代码契约一致。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 393
+  unit_boundary: 混合检索
+  inputs:
+  - '- 无额外本地资产：本用例仅加载 backend/consts/model.py 中的 Pydantic 模型，不读取本地配置/凭据文件。'
+  assertions:
+  - 未提供 tag_predicates 时，实例的 tag_predicates 等于空列表 []。
+  - 提供 tag_predicates 时，model_dump()/model_dump_json() 输出完整保留每个分组 {definition_id, value_ids} 的结构、值及顺序，不丢失、不变形。
+  - 从 dict/JSON 经 model_validate()/model_validate_json() 往返重建后，tag_predicates 与原对象完全一致。
+  - HybridSearchRequest 既有约束继续生效：query 最小长度 1、index_names 至少 1 项、top_k 在 1..100、weight_accurate 在 0.0..1.0，越界抛 pydantic ValidationError。
+  - 序列化/校验过程无未处理异常，功能结果与代码契约一致。

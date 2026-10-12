@@ -1,0 +1,42 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-OUTPUT
+case:
+  case_id: TPC-D1-002
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  - TPC-RULE-003
+  title: Skill reads execute rather than finalize at first and third generations
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Skill reads execute rather than finalize at first and third generations
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run complete skill read under every compatible prefix with prior error
+      counters zero and two.
+    expected: One read executes; its result is an observation; no final answer is
+      returned.
+  expected_results:
+  - Exactly one tool effect per action.
+  - Model attempt commits.
+  forbidden_side_effects:
+  - No raw final answer.
+  - No extra model request.
+  unit_boundary: CoreAgent._step_stream and Python executor boundary
+  inputs:
+  - prefix matrix
+  - prior errors zero/two
+  assertions:
+  - Skill call count one.
+  - ActionOutput.is_final_answer false.
+  - Accepted attempt commits without rollback.

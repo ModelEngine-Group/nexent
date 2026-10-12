@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-OUTPUT
+case:
+  case_id: TPC-D1-004
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-002
+  title: Thinking-only and invalid marked output never use exhausted raw final
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Thinking-only and invalid marked output never use exhausted raw final
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run thinking-only and malformed action or final outputs with two prior
+      protocol errors.
+    expected: The attempt rolls back and no raw final is accepted.
+  - order: 2
+    action: Run eligible complete plain text at exhaustion.
+    expected: Existing raw candidate remains accepted.
+  expected_results:
+  - Marked failures cannot finalize.
+  - Eligible plain text keeps existing fallback.
+  forbidden_side_effects:
+  - No invalid action final.
+  - No reasoning final.
+  unit_boundary: CoreAgent._accept_exhausted_raw_output and _step_stream
+  inputs:
+  - marked output
+  - plain text
+  - error count two
+  assertions:
+  - Failed attempt rollback.
+  - No executor call on invalid output.
+  - Plain raw fallback preserved.

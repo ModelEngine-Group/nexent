@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-040
+  name: STT/TTS connectivity 检查与配置错误映射
+  status: active
+  description: '模型与多模态 / 语音: STT/TTS connectivity 检查与配置错误映射'
+  business_rules:
+  - rule_id: F-040-RULE-01
+    description: STT/TTS connectivity 检查与配置错误映射
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

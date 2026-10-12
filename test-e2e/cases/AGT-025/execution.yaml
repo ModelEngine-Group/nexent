@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: AGT-025
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AGT-025
+- framework: pytest
+  file: test-e2e/infra/automation/shared/case_evidence.py
+  selector: AGT-025
+notes: Owned real-model Planning with observable deterministic MCP failure, repeated twice; transport timeout coverage is not claimed.
+timeout_seconds: 900
+acceptance_bindings:
+  AC-01: [test_agt_025]
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []

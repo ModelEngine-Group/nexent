@@ -304,12 +304,20 @@ export function useMcpSpaceController() {
     setSelectedLocal(null);
   };
 
+  const [mineTagRefreshKeys, setMineTagRefreshKeys] = useState<
+    Record<number, number>
+  >({});
+
   const handleToggled = async (mcpId: number) => {
     const result = await localList.refetch();
     const updated = result.data?.find((s) => s.mcpId === mcpId);
     if (updated && detailMcpIdRef.current === mcpId) {
       setSelectedLocal(updated);
     }
+  };
+
+  const handleTagsChanged = (mcpId: number) => {
+    setMineTagRefreshKeys((prev) => ({ ...prev, [mcpId]: (prev[mcpId] ?? 0) + 1 }));
   };
 
   const handleRepositoryOffline = (service: CommunityMcpCard) => {
@@ -375,6 +383,7 @@ export function useMcpSpaceController() {
           selectedService={selectedLocal}
           onClose={closeLocalDetail}
           onToggled={handleToggled}
+          onTagsChanged={handleTagsChanged}
         />
       ) : null}
 
@@ -460,6 +469,7 @@ export function useMcpSpaceController() {
       onEditLocal: openLocalDetail,
       onEditCommunity: setSelectedPublished,
       onToggled: handleToggled,
+      tagRefreshKeys: mineTagRefreshKeys,
     },
     reviewProps: {
       browser: reviewBrowser,

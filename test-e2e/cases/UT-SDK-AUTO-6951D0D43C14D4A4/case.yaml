@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-6951D0D43C14D4A4
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: get_fallback_thread_manager 惰性创建默认 Lane 策略线程池、run_blocking 在当前/默认/回退 manager 间选择、shutdown_fallback_thread_manager
+    幂等关停｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: get_fallback_thread_manager 惰性创建默认 Lane 策略线程池、run_blocking 在当前/默认/回退 manager 间选择、shutdown_fallback_thread_manager
+    幂等关停｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 可直接导入 sdk/nexent/core/concurrency 包（helpers/manager/context/models），无公网或外部服务依赖。
+  test_data:
+    legacy_asset_declaration: '- 无特殊本地资产；使用 sdk/nexent/core/concurrency 模块内联对象与临时同步函数。'
+  steps:
+  - order: 1
+    action: 从 sdk/nexent/core/concurrency 导入 get_fallback_thread_manager、run_blocking、shutdown_fallback_thread_manager、set_default_thread_manager、clear_default_thread_manager、ThreadManager、ManagerState、LanePolicy，并记录模块级回退管理器初始为空。
+    expected: get_fallback_thread_manager 首次调用返回 ThreadManager 实例，snapshot().service_name 为 "sdk-fallback"，state 为 ManagerState.RUNNING。
+  - order: 2
+    action: 调用 get_fallback_thread_manager()，记录返回对象 m1 及其 snapshot() 的 service_name、state 与 lanes 列表（各 lane 的 name/max_workers/max_queue_size）。
+    expected: lanes 包含 7 条策略且与默认契约一致：agent-run(4,16)、model-tool-io(4,16)、control-io(2,8)、evaluation(2,8)、background-service(2,4)、mcp-session(4,0)、sandbox(2,4)，且每条
+      queue_timeout_seconds=0、cancel_grace_seconds=5、shutdown_grace_seconds=15。
+  - order: 3
+    action: 再次调用 get_fallback_thread_manager()，记录返回对象 m2，比较 m1 与 m2 是否为同一实例。
+    expected: 第二次调用返回与 m1 相同的实例（惰性单例，不重复创建）。
+  - order: 4
+    action: 构造一个返回固定标记值并记录当前执行线程名的同步函数 fn，在未设置默认/当前 manager 的情况下调用 run_blocking("probe", fn)，记录返回值与执行线程名。
+    expected: 无默认/当前 manager 时 run_blocking 经回退 manager 的 model-tool-io Lane 执行并返回 fn 的固定标记值，执行线程名前缀为 "nexent-sdk-fallback-model-tool-io"。
+  - order: 5
+    action: 构造自定义 ThreadManager 并通过 set_default_thread_manager(custom) 安装，再次调用 run_blocking("probe", fn)，验证其经默认 manager 路径执行后，使用
+      clear_default_thread_manager(custom) 清理。
+    expected: 设置默认 manager 后 run_blocking 经默认 manager 执行；处于受管执行上下文内时经当前 manager 执行，提交的 lane 为默认 "model-tool-io"、owner 为 "sdk"。
+  - order: 6
+    action: 在回退 manager 的一个受管执行上下文内调用 run_blocking("probe", fn)，验证其经当前 manager 路径执行（记录提交的 lane 与 owner）。
+    expected: shutdown_fallback_thread_manager 首次调用返回 DrainResult 且全局回退引用被清空；再次调用返回 None（幂等，不抛异常）。
+  - order: 7
+    action: 调用 shutdown_fallback_thread_manager(timeout=15.0)，记录返回值；紧接着再次调用 shutdown_fallback_thread_manager()，记录第二次返回值，验证幂等行为。
+    expected: 关停后 get_fallback_thread_manager 返回新的 RUNNING 实例且 lane 策略名称集合一致；全程无未处理异常，日志不输出 Token/密钥等明文凭据。
+  - order: 8
+    action: 关停后再次调用 get_fallback_thread_manager()，记录重建实例的 snapshot() 与 lane 策略名称；测试结束释放临时对象，确保可重复执行。
+    expected: 关停后 get_fallback_thread_manager 返回新的 RUNNING 实例且 lane 策略名称集合一致；全程无未处理异常，日志不输出 Token/密钥等明文凭据。
+  expected_results:
+  - get_fallback_thread_manager 首次调用返回 ThreadManager 实例，snapshot().service_name 为 "sdk-fallback"，state 为 ManagerState.RUNNING。
+  - lanes 包含 7 条策略且与默认契约一致：agent-run(4,16)、model-tool-io(4,16)、control-io(2,8)、evaluation(2,8)、background-service(2,4)、mcp-session(4,0)、sandbox(2,4)，且每条
+    queue_timeout_seconds=0、cancel_grace_seconds=5、shutdown_grace_seconds=15。
+  - 第二次调用返回与 m1 相同的实例（惰性单例，不重复创建）。
+  - 无默认/当前 manager 时 run_blocking 经回退 manager 的 model-tool-io Lane 执行并返回 fn 的固定标记值，执行线程名前缀为 "nexent-sdk-fallback-model-tool-io"。
+  - 设置默认 manager 后 run_blocking 经默认 manager 执行；处于受管执行上下文内时经当前 manager 执行，提交的 lane 为默认 "model-tool-io"、owner 为 "sdk"。
+  - shutdown_fallback_thread_manager 首次调用返回 DrainResult 且全局回退引用被清空；再次调用返回 None（幂等，不抛异常）。
+  - 关停后 get_fallback_thread_manager 返回新的 RUNNING 实例且 lane 策略名称集合一致；全程无未处理异常，日志不输出 Token/密钥等明文凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 467
+  unit_boundary: 并发调度框架
+  inputs:
+  - '- 无特殊本地资产；使用 sdk/nexent/core/concurrency 模块内联对象与临时同步函数。'
+  assertions:
+  - get_fallback_thread_manager 首次调用返回 ThreadManager 实例，snapshot().service_name 为 "sdk-fallback"，state 为 ManagerState.RUNNING。
+  - lanes 包含 7 条策略且与默认契约一致：agent-run(4,16)、model-tool-io(4,16)、control-io(2,8)、evaluation(2,8)、background-service(2,4)、mcp-session(4,0)、sandbox(2,4)，且每条
+    queue_timeout_seconds=0、cancel_grace_seconds=5、shutdown_grace_seconds=15。
+  - 第二次调用返回与 m1 相同的实例（惰性单例，不重复创建）。
+  - 无默认/当前 manager 时 run_blocking 经回退 manager 的 model-tool-io Lane 执行并返回 fn 的固定标记值，执行线程名前缀为 "nexent-sdk-fallback-model-tool-io"。
+  - 设置默认 manager 后 run_blocking 经默认 manager 执行；处于受管执行上下文内时经当前 manager 执行，提交的 lane 为默认 "model-tool-io"、owner 为 "sdk"。
+  - shutdown_fallback_thread_manager 首次调用返回 DrainResult 且全局回退引用被清空；再次调用返回 None（幂等，不抛异常）。
+  - 关停后 get_fallback_thread_manager 返回新的 RUNNING 实例且 lane 策略名称集合一致；全程无未处理异常，日志不输出 Token/密钥等明文凭据。

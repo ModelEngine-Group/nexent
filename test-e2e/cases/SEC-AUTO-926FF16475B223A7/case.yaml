@@ -1,0 +1,69 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: SEC-AUTO-926FF16475B223A7
+  feature_id: V5-SEC-AUTO-926FF16475B223A7
+  business_rule_ids:
+  - V5-SEC-AUTO-926FF16475B223A7-RULE-01
+  title: 检索高亮词 retrieval_highlight_terms 外部注入点的 XSS 与正则转义防护
+  type: SECURITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: retrieval_highlight_terms 为外部数据源（检索/ES 结果）注入点，需确保其在来源卡片 <mark> 高亮与 hover 卡片预览渲染时不产生 XSS：含 HTML/事件的载荷仅以纯文本展示，正则特殊字符经
+    escapeRegExp 转义后 matcher 不抛异常，hover 文本经 HTML 白名单过滤，历史重载仍保持一致。
+  preconditions:
+  - 无额外本地资产；复用前端组件 frontend/lib/citationHighlight.ts、frontend/components/common/highlightedSourceText.tsx、frontend/app/[locale]/newchat/ui/cite-marker.tsx、frontend/app/[locale]/newchat/ui/sources-panel.tsx
+  test_data:
+    legacy_asset_declaration: 无额外本地资产；复用前端组件 frontend/lib/citationHighlight.ts、frontend/components/common/highlightedSourceText.tsx、frontend/app/[locale]/newchat/ui/cite-marker.tsx、frontend/app/[locale]/newchat/ui/sources-panel.tsx
+  steps:
+  - order: 1
+    action: 构造含恶意 retrieval_highlight_terms 的对话来源检索记录（经后端 create_source_search 持久化 conversation_source_search_t.retrieval_highlight_terms），检索词注入
+      <img src=x onerror=alert(document.cookie)>、<script>alert(1)</script>、onerror="alert(1)"、正则特殊字符 (a+)+$、.*、[ ] \ $& 等。
+    expected: 对含 <script> 或 on* 事件属性的检索词，来源卡片与 hover 卡片仅出现纯文本，DOM 无新增 script/img 元素、无 window.alert 触发。
+  - order: 2
+    action: 打开新对话来源面板选中该 source card，触发 HighlightedChunkText 以 terms 构建 RegExp（highlightedSourceText.tsx:44-47），核对术语经 escapeRegExp
+      转义（citationHighlight.ts:7-8），matcher 不抛 SyntaxError。
+    expected: 含正则特殊字符的 term（[、(、\、.+ 等）经 escapeRegExp 转义后 matcher 构造不抛异常，高亮行为正常。
+  - order: 3
+    action: 校验卡片渲染结果：匹配片段以 React 文本节点渲染于 <mark>（highlightedSourceText.tsx:53-58），<script>/<img> 载荷以纯文本显示，不解析为 DOM 元素也不执行脚本（无
+      window.alert、无新增 script 节点）。
+    expected: hover 预览经 renderSafeHtml 白名单过滤后仅允许列表内标签渲染，所有 on* 事件属性被移除。
+  - order: 4
+    action: 将 hover 卡片 source chunk 文本（cite-marker.tsx:98-112）注入 <img onerror=...> 与不允许标签（span/div/a 等），核对 template.innerHTML
+      后经 renderSafeHtml 白名单（cite-marker.tsx:40-96）过滤，仅保留 p/br/strong/b/em/i/table/thead/tbody/tr/th/td，事件属性 on* 均被丢弃，仅纯文本展示。
+    expected: 历史重载后高亮与安全过滤行为一致，未新增 XSS 面。
+  - order: 5
+    action: 历史会话重载后从 conversation_source_search_t JSONB 恢复 retrieval_highlight_terms，重复步骤 2-4，确认持久化/重载路径无二次注入。
+    expected: 历史重载后高亮与安全过滤行为一致，未新增 XSS 面。
+  expected_results:
+  - 对含 <script> 或 on* 事件属性的检索词，来源卡片与 hover 卡片仅出现纯文本，DOM 无新增 script/img 元素、无 window.alert 触发。
+  - 含正则特殊字符的 term（[、(、\、.+ 等）经 escapeRegExp 转义后 matcher 构造不抛异常，高亮行为正常。
+  - hover 预览经 renderSafeHtml 白名单过滤后仅允许列表内标签渲染，所有 on* 事件属性被移除。
+  - 历史重载后高亮与安全过滤行为一致，未新增 XSS 面。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 70
+  risk_type: SECURITY
+  risk: retrieval_highlight_terms 为外部数据源（检索/ES 结果）注入点，需确保其在来源卡片 <mark> 高亮与 hover 卡片预览渲染时不产生 XSS：含 HTML/事件的载荷仅以纯文本展示，正则特殊字符经
+    escapeRegExp 转义后 matcher 不抛异常，hover 文本经 HTML 白名单过滤，历史重载仍保持一致。
+  condition:
+  - 无额外本地资产；复用前端组件 frontend/lib/citationHighlight.ts、frontend/components/common/highlightedSourceText.tsx、frontend/app/[locale]/newchat/ui/cite-marker.tsx、frontend/app/[locale]/newchat/ui/sources-panel.tsx
+  metrics:
+  - 对含 <script> 或 on* 事件属性的检索词，来源卡片与 hover 卡片仅出现纯文本，DOM 无新增 script/img 元素、无 window.alert 触发。
+  - 含正则特殊字符的 term（[、(、\、.+ 等）经 escapeRegExp 转义后 matcher 构造不抛异常，高亮行为正常。
+  - hover 预览经 renderSafeHtml 白名单过滤后仅允许列表内标签渲染，所有 on* 事件属性被移除。
+  - 历史重载后高亮与安全过滤行为一致，未新增 XSS 面。
+  thresholds:
+  - 对含 <script> 或 on* 事件属性的检索词，来源卡片与 hover 卡片仅出现纯文本，DOM 无新增 script/img 元素、无 window.alert 触发。
+  - 含正则特殊字符的 term（[、(、\、.+ 等）经 escapeRegExp 转义后 matcher 构造不抛异常，高亮行为正常。
+  - hover 预览经 renderSafeHtml 白名单过滤后仅允许列表内标签渲染，所有 on* 事件属性被移除。
+  - 历史重载后高亮与安全过滤行为一致，未新增 XSS 面。
+  recovery_expectations:
+  - 对含 <script> 或 on* 事件属性的检索词，来源卡片与 hover 卡片仅出现纯文本，DOM 无新增 script/img 元素、无 window.alert 触发。
+  - 含正则特殊字符的 term（[、(、\、.+ 等）经 escapeRegExp 转义后 matcher 构造不抛异常，高亮行为正常。
+  - hover 预览经 renderSafeHtml 白名单过滤后仅允许列表内标签渲染，所有 on* 事件属性被移除。
+  - 历史重载后高亮与安全过滤行为一致，未新增 XSS 面。

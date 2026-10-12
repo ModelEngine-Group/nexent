@@ -1,0 +1,21 @@
+# Read-only fallback IDs are machine-local; never copy IDs across deployments.
+schema_version: 2
+identity:
+  tenant_a_id: {value: null, state: MISSING}
+  tenant_b_id: {value: null, state: MISSING}
+models:
+  primary_llm_id: {value: null, state: MISSING}
+  secondary_llm_id: {value: null, state: MISSING}
+  primary_embedding_id: {value: null, state: MISSING}
+  primary_vlm_id: {value: null, state: MISSING}
+  secondary_vlm_id: {value: null, state: MISSING}
+agents:
+  basic_id: null
+  basic_name: ""
+knowledge:
+  basic_index: ""
+automation:
+  seeded_task_id: null
+performance:
+  large_kb_indices: []
+  evaluation_200_run_id: null

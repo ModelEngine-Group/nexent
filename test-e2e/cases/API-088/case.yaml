@@ -1,0 +1,55 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-088
+  feature_id: F-084
+  business_rule_ids:
+  - F-084-RULE-01
+  title: 端口 check/suggest 与 cache header｜核心流程
+  type: API-IT
+  priority: P2
+  status: active
+  automation: automated
+  objective: 验证 MCP 端口检查的实时响应、禁止缓存头、可用端口建议和数值边界；不涉及创建 MCP 或工具调用。
+  preconditions:
+  - Nexent config 服务已启动并通过健康检查。
+  - 通过已有测试配置 helper 获取同租户管理员会话；凭据不得写入用例或证据。
+  - 设置仓库外的 NEXENT_TEST_HOME；Docker 容器端口查询可用。
+  test_data:
+    checked_port: 9
+    invalid_ports:
+    - 0
+    - 70000
+  steps:
+  - order: 1
+    action: 使用管理员会话请求 GET /mcp/port/check?port=9。
+    expected: 返回 200、status=success、data.available 为布尔值；Cache-Control 包含 no-store，Pragma=no-cache，Expires=0。
+  - order: 2
+    action: 请求 GET /mcp/port/suggest。
+    expected: 返回 200、status=success、data.port 为 1–65535 的整数；禁止缓存头约束属于 check，不对 suggest
+      声明额外缓存契约。
+  - order: 3
+    action: 分别请求 GET /mcp/port/check?port=0 和 port=70000。
+    expected: 两个越界请求均返回 422，不创建 MCP 配置、容器或 Agent。
+  expected_results:
+  - 返回 200、status=success、data.available 为布尔值；Cache-Control 包含 no-store，Pragma=no-cache，Expires=0。
+  - 返回 200、status=success、data.port 为 1–65535 的整数；禁止缓存头约束属于 check，不对 suggest 声明额外缓存契约。
+  - 两个越界请求均返回 422，不创建 MCP 配置、容器或 Agent。
+  forbidden_side_effects:
+  - 不得创建 MCP 配置、容器或 Agent。
+  - 不得将凭据写入运行日志。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 165
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 使用管理员会话请求 GET /mcp/port/check?port=9。
+    - 请求 GET /mcp/port/suggest。
+    - 分别请求 GET /mcp/port/check?port=0 和 port=70000。
+    response_expectations:
+    - 返回 200、status=success、data.available 为布尔值；Cache-Control 包含 no-store，Pragma=no-cache，Expires=0。
+    - 返回 200、status=success、data.port 为 1–65535 的整数；禁止缓存头约束属于 check，不对 suggest 声明额外缓存契约。
+    - 两个越界请求均返回 422，不创建 MCP 配置、容器或 Agent。

@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-AF6CA560E762D682
+  name: config_lifespan 启动恢复顺序与失败容错及关闭优雅停止
+  status: active
+  description: 配置服务启动时 recover_config_tasks、evaluation_maintenance.start、schedule_interrupted_upload_cleanup 若顺序错乱或异常被吞，将导致运行中任务恢复缺失、评估维护未启动、中断上传清理遗漏；关闭时未按序停止
+    dreaming/eval maintenance 且未清理 config_thread_manager，会使线程残留、调度器泄漏并令 /health/ready 返回错误健康态。
+  business_rules:
+  - rule_id: V5-REL-AUTO-AF6CA560E762D682-RULE-01
+    description: config_lifespan 启动恢复顺序与失败容错及关闭优雅停止
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

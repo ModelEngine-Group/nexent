@@ -1,0 +1,11 @@
+schema_version: '1.0'
+case_id: CTR-031
+implementations:
+- framework: pytest
+  file: test.py
+  selector: CTR-031
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

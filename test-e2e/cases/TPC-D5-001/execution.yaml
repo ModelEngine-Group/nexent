@@ -1,0 +1,8 @@
+schema_version: '1.0'
+case_id: TPC-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_tpc_d5_001
+  profiles:
+  - mock

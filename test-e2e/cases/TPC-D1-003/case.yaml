@@ -1,0 +1,37 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-OUTPUT
+case:
+  case_id: TPC-D1-003
+  feature_id: TPC-001
+  requirement_ids:
+  - TPC-001
+  business_rule_ids:
+  - TPC-RULE-001
+  - TPC-RULE-002
+  title: Malformed actions retain structural rejection
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Malformed actions retain structural rejection
+  preconditions:
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
+    tool.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Classify invalid Python, empty/unclosed action, inter-block text, trailing
+      text, unknown tags and truncated output.
+    expected: Protocol error occurs; no executor is called.
+  expected_results:
+  - Invalid action bodies and boundaries remain rejected.
+  forbidden_side_effects:
+  - No execution of invalid code.
+  unit_boundary: classify_model_output
+  inputs:
+  - invalid action/control matrix
+  - length finish reason
+  assertions:
+  - Expected stable protocol-error reason.
