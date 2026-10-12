@@ -24,7 +24,6 @@ import {
   PinOffIcon,
   ArrowDownIcon,
   Repeat2Icon,
-  CheckIcon,
   XIcon,
   ChevronRight,
   LayoutGrid,
@@ -311,14 +310,8 @@ export const BatchSidebarFooter: FC<{ onSwitchToLegacy?: () => void }> = ({
   onSwitchToLegacy,
 }) => {
   const { t } = useTranslation();
-  const {
-    batchMode,
-    selectedIds,
-    enter,
-    exit,
-    selectAllVisible,
-    deleteSelected,
-  } = useBatchSelection()!;
+  const { batchMode, selectedIds, exit, selectAllVisible, deleteSelected } =
+    useBatchSelection()!;
 
   if (batchMode) {
     return (
@@ -356,26 +349,18 @@ export const BatchSidebarFooter: FC<{ onSwitchToLegacy?: () => void }> = ({
     );
   }
 
+  if (!onSwitchToLegacy) return null;
+
   return (
     <div className="flex flex-col gap-1.5">
       <button
         type="button"
         className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
-        onClick={enter}
+        onClick={onSwitchToLegacy}
       >
-        <CheckIcon className="size-4 shrink-0" />
-        <span>{t("chat.threadList.batchManage")}</span>
+        <Repeat2Icon className="size-4 shrink-0" />
+        <span>{t("chat.sidebar.switchToLegacy")}</span>
       </button>
-      {onSwitchToLegacy && (
-        <button
-          type="button"
-          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
-          onClick={onSwitchToLegacy}
-        >
-          <Repeat2Icon className="size-4 shrink-0" />
-          <span>{t("chat.sidebar.switchToLegacy")}</span>
-        </button>
-      )}
     </div>
   );
 };

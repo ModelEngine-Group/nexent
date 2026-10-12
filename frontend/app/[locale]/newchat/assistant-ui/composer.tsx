@@ -12,6 +12,8 @@ import { useTranslation } from "react-i18next";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
+import { App, Modal, Spin } from "antd";
+import log from "@/lib/logger";
 import { SelectedResourceChips } from "@/features/workbench/components/SelectedResourceChips";
 import { CreationExamples } from "@/features/workbench/components/CreationExamples";
 import {
@@ -35,6 +37,7 @@ import {
   MessagesSquare,
   SearchIcon,
   Settings,
+  SlidersHorizontal,
   PlusIcon,
   Sparkles,
   X,
@@ -86,8 +89,16 @@ import type {
   KnowledgeCapabilities,
   KnowledgeScopeEffectivePreview,
 } from "@/types/knowledgeScope";
+import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
+import type { ToolParam } from "@/types/agentConfig";
 import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
+import { useToolList } from "@/hooks/agent/useToolList";
+import {
+  AIDP_NON_PERSISTED_PARAM_NAMES,
+  getSemanticToolName,
+} from "@/lib/managedKnowledgeTools";
 import type { SkillFileContent } from "@/types/skill";
 import { SkillFileMentionPopover } from "../ui/skill-file-mention";
 import { DirectiveChip } from "../ui/directive-text";
@@ -415,12 +426,37 @@ export const Composer: FC<ComposerProps> = ({
     });
   };
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+  const [retrievalConfigOpen, setRetrievalConfigOpen] = useState(false);
+  const [retrievalConfigDraft, setRetrievalConfigDraft] = useState<
+    Record<string, unknown>
+  >({});
+  const [retrievalConfigSaving, setRetrievalConfigSaving] = useState(false);
   const [localSkillModalOpen, setLocalSkillModalOpen] = useState(false);
   const router = useRouter();
   const params = useParams<{ locale: string }>();
   const queryClient = useQueryClient();
+  const { message } = App.useApp();
+  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
+  const { availableTools, isLoading: retrievalToolsLoading } = useToolList({
+    enabled: retrievalConfigOpen && isDeploymentReady,
+  });
+  const retrievalKnowledgeTool = availableTools.find(
+    (tool) =>
+      getSemanticToolName(tool) ===
+      (enableAidpKnowledge ? "aidp_search" : "knowledge_base_search")
+  );
+  const retrievalConfigParams: ToolParam[] = (
+    retrievalKnowledgeTool?.initParams || []
+  ).filter(
+    (param: ToolParam) =>
+      !["index_names", "kds_list"].includes(param.name) &&
+      !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
+  );
   const { data: knowledgeBases = [], isLoading: kbLoading } =
-    useComposerKnowledgeBases(newChatDesign);
+    useComposerKnowledgeBases(
+      newChatDesign && isDeploymentReady,
+      enableAidpKnowledge
+    );
   const { data: skills = [], isLoading: skillsLoading } =
     useComposerSkills(newChatDesign);
   // Category tabs derive from the configured skills' tags (design: 全部 + tags).
@@ -449,8 +485,39 @@ export const Composer: FC<ComposerProps> = ({
   }, [skills, skillTab, skillSearch]);
 
   const [actionPanel, setActionPanel] = useState<
-    "plus" | "plus-skill" | "plus-kb" | "kb" | null
+    "plus" | "plus-skill" | "plus-kb" | null
   >(null);
+  const openRetrievalConfig = () => {
+    setRetrievalConfigDraft(
+      structuredClone(knowledgeScope?.retrieval_config || {})
+    );
+    setActionPanel(null);
+    setRetrievalConfigOpen(true);
+  };
+  const saveRetrievalConfig = async () => {
+    if (!onKnowledgeScopeChange) return;
+    const nextScope = structuredClone(
+      knowledgeScope || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE
+    );
+    if (Object.keys(retrievalConfigDraft).length) {
+      nextScope.retrieval_config = structuredClone(retrievalConfigDraft);
+    } else {
+      delete nextScope.retrieval_config;
+    }
+
+    setRetrievalConfigSaving(true);
+    try {
+      await onKnowledgeScopeChange(nextScope);
+      setRetrievalConfigOpen(false);
+    } catch (error) {
+      log.error(
+        "Failed to update conversation knowledge retrieval config",
+        error
+      );
+    } finally {
+      setRetrievalConfigSaving(false);
+    }
+  };
   useEffect(() => {
     if (!newChatDesign || !actionPanel) return;
 
@@ -470,9 +537,7 @@ export const Composer: FC<ComposerProps> = ({
     return () =>
       document.removeEventListener("pointerdown", handleOutsidePointerDown);
   }, [actionPanel, newChatDesign]);
-  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
-  // TODO(mock): knowledge-base / skill selection is visual only until the
-  // conversation scope APIs are wired into the quick panels.
+  // TODO(mock): skill selection remains visual until skill scope APIs are wired.
   const [selectedSkillNames, setSelectedSkillNames] = useState<string[]>([]);
   // Overflow menu ("＋") with second-level submenus for the workbench
   // toolbar, so right-side functions stay reachable on narrow windows.
@@ -489,7 +554,90 @@ export const Composer: FC<ComposerProps> = ({
       ? workbenchPresentation.mode
       : null;
 
-  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
+  const [knowledgeSaving, setKnowledgeSaving] = useState(false);
+  const knowledgeSource = enableAidpKnowledge ? "aidp" : "local";
+  const sourceScope = knowledgeScope?.[knowledgeSource];
+  const selectedKbIds =
+    sourceScope?.mode === "disabled"
+      ? []
+      : sourceScope?.mode === "override"
+        ? knowledgeSource === "local"
+          ? knowledgeScope!.local.knowledge_ids
+          : knowledgeScope!.aidp.kds_ids
+        : knowledgeCapabilities?.sources[knowledgeSource]
+            .default_knowledge_ids || [];
+  const selectedKnowledgeBaseChips = selectedKbIds.map((id) => {
+    const knowledgeBase = knowledgeBases.find((item) => item.id === id);
+    const previewNames =
+      knowledgeSource === "local"
+        ? knowledgePreview?.local.display_names
+        : knowledgePreview?.aidp.display_names;
+    const previewIds =
+      knowledgeSource === "local"
+        ? knowledgePreview?.local.knowledge_ids
+        : knowledgePreview?.aidp.kds_ids;
+    const previewIndex = previewIds?.indexOf(id) ?? -1;
+    return {
+      id,
+      name:
+        knowledgeBase?.name ||
+        (previewIndex >= 0 ? previewNames?.[previewIndex] : undefined) ||
+        id,
+    };
+  });
+  const toggleKnowledgeBase = async (id: string) => {
+    if (
+      isRunning ||
+      knowledgeSaving ||
+      !isDeploymentReady ||
+      !onKnowledgeScopeChange
+    )
+      return;
+    const capabilities = knowledgeCapabilities?.sources[knowledgeSource];
+    const ids = selectedKbIds.includes(id)
+      ? selectedKbIds.filter((value) => value !== id)
+      : [...selectedKbIds, id];
+    const maxSelect =
+      capabilities?.max_select ?? (enableAidpKnowledge ? 10 : 50);
+    if (maxSelect > 0 && ids.length > maxSelect) {
+      message.warning(t("chat.knowledgeScope.maxSelect", { count: maxSelect }));
+      return;
+    }
+    if (
+      !enableAidpKnowledge &&
+      new Set(
+        knowledgeBases
+          .filter((kb) => ids.includes(kb.id))
+          .map((kb) => kb.embeddingModel)
+          .filter(Boolean)
+      ).size > 1
+    ) {
+      message.error(t("chat.knowledgeScope.embeddingMismatch"));
+      return;
+    }
+    const scope: ConversationKnowledgeScope = {
+      schema_version: 1,
+      ...(knowledgeScope?.retrieval_config
+        ? { retrieval_config: knowledgeScope.retrieval_config }
+        : {}),
+      local: {
+        mode: !enableAidpKnowledge && ids.length ? "override" : "disabled",
+        knowledge_ids: enableAidpKnowledge ? [] : ids,
+      },
+      aidp: {
+        mode: enableAidpKnowledge && ids.length ? "override" : "disabled",
+        kds_ids: enableAidpKnowledge ? ids : [],
+      },
+    };
+    setKnowledgeSaving(true);
+    try {
+      await onKnowledgeScopeChange(scope);
+    } catch (error) {
+      log.error("Failed to update composer knowledge scope", error);
+    } finally {
+      setKnowledgeSaving(false);
+    }
+  };
   const hasIncompatibleScope = Boolean(
     isDeploymentReady &&
     knowledgeScope &&
@@ -678,6 +826,61 @@ export const Composer: FC<ComposerProps> = ({
                     workbenchPresentation && !newChatDesign ? "px-0" : undefined
                   }
                 />
+              )}
+            {newChatDesign &&
+              (selectedSkillNames.length > 0 ||
+                selectedKnowledgeBaseChips.length > 0) && (
+                <div className="flex min-w-0 flex-wrap gap-2 px-2">
+                  {selectedSkillNames.map((name) => (
+                    <span
+                      key={`skill-${name}`}
+                      className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
+                    >
+                      <Layers
+                        className="size-3.5 shrink-0 text-[#666]"
+                        aria-hidden
+                      />
+                      <span className="truncate" title={name}>
+                        {name}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`${t("common.delete")} ${name}`}
+                        className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-[#808080] hover:bg-[#e9e9e9] hover:text-[#191919]"
+                        onClick={() =>
+                          setSelectedSkillNames((current) =>
+                            current.filter((skillName) => skillName !== name)
+                          )
+                        }
+                      >
+                        <X className="size-3" aria-hidden />
+                      </button>
+                    </span>
+                  ))}
+                  {selectedKnowledgeBaseChips.map(({ id, name }) => (
+                    <span
+                      key={id}
+                      className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
+                    >
+                      <Database
+                        className="size-3.5 shrink-0 text-[#666]"
+                        aria-hidden
+                      />
+                      <span className="truncate" title={name}>
+                        {name}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isRunning || knowledgeSaving}
+                        aria-label={`${t("common.delete")} ${name}`}
+                        className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-[#808080] hover:bg-[#e9e9e9] hover:text-[#191919] disabled:cursor-not-allowed"
+                        onClick={() => void toggleKnowledgeBase(id)}
+                      >
+                        <X className="size-3" aria-hidden />
+                      </button>
+                    </span>
+                  ))}
+                </div>
               )}
             {skillFiles ? (
               <LexicalComposerInput
@@ -900,6 +1103,7 @@ export const Composer: FC<ComposerProps> = ({
                                 <button
                                   key={skill.id}
                                   type="button"
+                                  aria-pressed={selected}
                                   onClick={() =>
                                     setSelectedSkillNames((prev) =>
                                       prev.includes(skill.name)
@@ -1035,16 +1239,13 @@ export const Composer: FC<ComposerProps> = ({
                                   <button
                                     key={kb.id}
                                     type="button"
+                                    disabled={isRunning || knowledgeSaving}
+                                    aria-pressed={selected}
                                     onClick={() =>
-                                      setSelectedKbIds((prev) =>
-                                        prev.includes(kb.id)
-                                          ? prev.filter((id) => id !== kb.id)
-                                          : [...prev, kb.id]
-                                      )
+                                      void toggleKnowledgeBase(kb.id)
                                     }
                                     className={cn(
-                                      "flex w-full flex-col items-start gap-0.5 rounded-[6px] px-2 py-2 text-left hover:bg-[#f5f5f5]",
-                                      selected && "bg-[#f5f5f5]"
+                                      "flex w-full flex-col items-start gap-0.5 rounded-[6px] px-2 py-2 text-left hover:bg-[#f5f5f5]"
                                     )}
                                   >
                                     <span className="text-[14px] leading-[22px] text-[#191919]">
@@ -1061,6 +1262,23 @@ export const Composer: FC<ComposerProps> = ({
                           )}
                         </div>
                         <div className="mt-2 border-t border-[#f0f0f0] pt-2">
+                          <button
+                            type="button"
+                            disabled={
+                              isRunning ||
+                              knowledgeSaving ||
+                              !onKnowledgeScopeChange ||
+                              !isDeploymentReady
+                            }
+                            className="flex w-full items-center gap-2 rounded-[4px] px-1 py-1.5 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={openRetrievalConfig}
+                          >
+                            <SlidersHorizontal
+                              className="size-4 shrink-0"
+                              aria-hidden
+                            />
+                            <span>{t("agent.knowledge.button.configure")}</span>
+                          </button>
                           <button
                             type="button"
                             className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
@@ -1121,90 +1339,6 @@ export const Composer: FC<ComposerProps> = ({
                       />
                     ) : null}
                   </button>
-                </div>
-              ) : null}
-
-              {newChatDesign && actionPanel === "kb" ? (
-                <div
-                  data-composer-action-panel
-                  className="absolute bottom-full left-0 z-20 mb-2 w-[320px] rounded-xl border border-[#e5e5e5] bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
-                >
-                  <div className="flex items-center gap-2 text-[14px] text-[#191919]">
-                    <Database className="size-4" aria-hidden />
-                    <span>{t("chat.composer.knowledge")}</span>
-                  </div>
-                  <StandardInput
-                    value={kbSearch}
-                    onChange={(event) => setKbSearch(event.target.value)}
-                    placeholder={t("chat.composer.searchKnowledge")}
-                    prefix={
-                      <SearchIcon
-                        className="size-3.5 text-[#808080]"
-                        aria-hidden
-                      />
-                    }
-                    className="mt-2"
-                  />
-                  <div className="mt-2 max-h-64 overflow-y-auto">
-                    {kbLoading ? (
-                      <p className="px-2 py-3 text-[12px] text-[#808080]">
-                        {t("chat.composer.loading")}
-                      </p>
-                    ) : knowledgeBases.length === 0 ? (
-                      <p className="px-2 py-3 text-[12px] text-[#808080]">
-                        {t("chat.composer.emptyKnowledge")}
-                      </p>
-                    ) : (
-                      knowledgeBases
-                        .filter((kb) =>
-                          (kb.name + (kb.description || ""))
-                            .toLowerCase()
-                            .includes(kbSearch.trim().toLowerCase())
-                        )
-                        .map((kb) => {
-                          const selected = selectedKbIds.includes(kb.id);
-                          return (
-                            <button
-                              key={kb.id}
-                              type="button"
-                              onClick={() =>
-                                setSelectedKbIds((prev) =>
-                                  prev.includes(kb.id)
-                                    ? prev.filter((id) => id !== kb.id)
-                                    : [...prev, kb.id]
-                                )
-                              }
-                              className={cn(
-                                "flex w-full flex-col items-start gap-0.5 rounded-[6px] px-2 py-2 text-left hover:bg-[#f5f5f5]",
-                                selected && "bg-[#f5f5f5]"
-                              )}
-                            >
-                              <span className="text-[14px] leading-[22px] text-[#191919]">
-                                {kb.name}
-                              </span>
-                              {kb.description ? (
-                                <span className="text-[12px] leading-[20px] text-[#808080]">
-                                  {kb.description}
-                                </span>
-                              ) : null}
-                            </button>
-                          );
-                        })
-                    )}
-                  </div>
-                  <div className="mt-2 border-t border-[#f0f0f0] pt-2">
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 rounded-[4px] px-1 py-1.5 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                      onClick={() => {
-                        setActionPanel(null);
-                        router.push(`/${params.locale || "en"}/knowledges`);
-                      }}
-                    >
-                      <Settings className="size-4" aria-hidden />
-                      <span>{t("chat.composer.manageKnowledge")}</span>
-                    </button>
-                  </div>
                 </div>
               ) : null}
 
@@ -1373,23 +1507,7 @@ export const Composer: FC<ComposerProps> = ({
                     </Popover>
                   </>
                 )}
-                {newChatDesign ? (
-                  <button
-                    type="button"
-                    data-composer-action-trigger
-                    className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[4px] px-2 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                    onClick={() =>
-                      setActionPanel((panel) => (panel === "kb" ? null : "kb"))
-                    }
-                  >
-                    <Database className="size-4" aria-hidden />
-                    <span>{t("chat.composer.knowledge")}</span>
-                    <ChevronDown
-                      className="size-3.5 text-[#808080]"
-                      aria-hidden
-                    />
-                  </button>
-                ) : (
+                {!newChatDesign &&
                   !compact &&
                   !creationMode &&
                   (workbenchPresentation ||
@@ -1443,19 +1561,7 @@ export const Composer: FC<ComposerProps> = ({
                         </PopoverContent>
                       ) : null}
                     </Popover>
-                  )
-                )}
-                {newChatDesign && (
-                  <ComposerPrimitive.AddAttachment asChild>
-                    <button
-                      type="button"
-                      className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[4px] px-2 text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                    >
-                      <Link2 className="size-4" aria-hidden />
-                      <span>{t("chat.composer.uploadFile")}</span>
-                    </button>
-                  </ComposerPrimitive.AddAttachment>
-                )}
+                  )}
                 {!compact && workbenchPresentation && (
                   <ComposerAddAttachment
                     label={t("chat.composer.uploadFile")}
@@ -1585,7 +1691,7 @@ export const Composer: FC<ComposerProps> = ({
                 )}
                 <ComposerSendOrCancel
                   onSend={prepareSend}
-                  disabled={disabled}
+                  disabled={disabled || knowledgeSaving}
                   workbench={Boolean(workbenchPresentation)}
                   newChatDesign={newChatDesign}
                   configurationLayout={configurationLayout}
@@ -1606,6 +1712,47 @@ export const Composer: FC<ComposerProps> = ({
               }}
             />
           )}
+          <Modal
+            open={retrievalConfigOpen}
+            title={t("agent.knowledge.configModal.title")}
+            okText={t("common.confirm")}
+            cancelText={t("common.cancel")}
+            confirmLoading={retrievalConfigSaving}
+            okButtonProps={{
+              disabled:
+                retrievalToolsLoading ||
+                !retrievalKnowledgeTool ||
+                !onKnowledgeScopeChange,
+            }}
+            onCancel={() => setRetrievalConfigOpen(false)}
+            onOk={() => void saveRetrievalConfig()}
+          >
+            <Spin spinning={retrievalToolsLoading}>
+              <KnowledgeRetrievalParamsForm
+                params={retrievalConfigParams}
+                values={Object.fromEntries(
+                  retrievalConfigParams.map((param) => [
+                    param.name,
+                    retrievalConfigDraft[param.name] ??
+                      knowledgeCapabilities?.sources[
+                        enableAidpKnowledge ? "aidp" : "local"
+                      ].default_retrieval_config?.[param.name] ??
+                      param.value ??
+                      param.default,
+                  ])
+                )}
+                onChange={(name, nextValue) =>
+                  setRetrievalConfigDraft((current) => {
+                    const next = { ...current };
+                    if (nextValue === null || nextValue === undefined)
+                      delete next[name];
+                    else next[name] = nextValue;
+                    return next;
+                  })
+                }
+              />
+            </Spin>
+          </Modal>
         </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       </fieldset>
       {newChatDesign && localSkillModalOpen && (
