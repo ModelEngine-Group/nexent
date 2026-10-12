@@ -8,6 +8,7 @@ import json
 import os
 import uuid
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
 import pytest
 
@@ -601,8 +602,29 @@ async def _relationship(identity, valid: bool) -> None:
 
 
 async def _export_import(identity) -> None:
-    async with _draft_agent(identity, name_prefix="export") as (agent_id, _):
+    # A skill-bound agent must exercise the ZIP export path whose filename is
+    # derived from the agent display name with RFC 5987 encoding.
+    from shared.factories.skill import prepare_skill
+
+    await prepare_skill(identity, role="configurable", cleanup_identity=identity.id, owner="API-066")
+    async with _draft_agent(identity, name_prefix="export") as (agent_id, payload):
         async with client("config", token=identity.access_token) as api:
+            registered = resolve_asset(
+                "skills", "configurable_id", required=False,
+                consumer_case_id="API-066", dependency_case_id="API-066",
+            )
+            if registered is None:
+                from shared.asset_registry import AssetDependencyError
+                raise AssetDependencyError(
+                    "skills", "configurable_id", "API-066", "API-066",
+                    detail="case-owned Skill preparation did not register its identity",
+                )
+            skill_id = int(registered)
+            bound = await api.post("/agent/update", json={
+                **payload, "enabled_skill_ids": [skill_id],
+                "skill_instances": [{"skill_id": skill_id, "enabled": True, "config_values": {}}],
+            })
+            assert_status(bound, 200)
             exported = await api.post("/agent/export", json={"agent_id": agent_id})
             assert_status(exported, 200)
             assert exported.headers["content-type"].startswith(("application/json", "application/zip"))
@@ -619,6 +641,13 @@ async def _export_import(identity) -> None:
                     removed = await api.request("DELETE", "/agent", json={"agent_id": imported_id})
                     assert_status(removed, (200,404))
                     mark_asset_state('owned_agents', str(imported_id), 'DELETED')
+            else:
+                disposition = exported.headers["content-disposition"]
+                expected_name = quote(f"{payload['display_name']}.zip")
+                assert disposition == f"attachment; filename*=UTF-8''{expected_name}", (
+                    f"ZIP export filename must use the RFC 5987 encoded display name: {disposition}"
+                )
+                assert len(exported.content) > 0, 'ZIP export returned an empty body'
             invalid = await api.post("/agent/import", json={"agent_info": {"agent_id": -1}})
             assert invalid.status_code in {400, 409, 422}
 
