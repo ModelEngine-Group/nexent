@@ -6,6 +6,7 @@ import os
 from collections import Counter, deque
 from pathlib import Path
 import re
+import time
 
 from shared.config import load_secret_env
 from shared.sse import read_sse
@@ -63,6 +64,9 @@ async def read_sse_with_evidence(response, name, *, secrets=(), limit=1000):
     counts = Counter()
     pending = []
     ending = 'interrupted'
+    started = time.monotonic()
+    timings, content_characters = {}, Counter()
+    milestones = deque(maxlen=64)
 
     def observe_frame():
         if not pending:
@@ -78,6 +82,24 @@ async def read_sse_with_evidence(response, name, *, secrets=(), limit=1000):
             payload = {'type': 'raw', 'content': raw}
         kind = str(payload.get('type', 'unknown')) if isinstance(payload, dict) else 'unknown'
         counts[kind] += 1
+        elapsed = round(time.monotonic() - started, 3)
+        timing = timings.setdefault(kind, {'first_seconds': elapsed, 'last_seconds': elapsed})
+        timing['last_seconds'] = elapsed
+        if isinstance(payload, dict):
+            content = payload.get('content')
+            if isinstance(content, str):
+                # Characters/event fragments are NOT provider token counts.
+                content_characters[kind] += len(content)
+            if kind in {'agent_new_run', 'step_count', 'model_attempt_control',
+                        'parse', 'tool', 'execution_logs', 'nl2a', 'nl2a_state',
+                        'error', 'final_answer'}:
+                milestone = {'type': kind, 'elapsed_seconds': elapsed}
+                for key in ('phase', 'depth', 'step_number', 'attempt_index', 'attempt', 'tool_name'):
+                    if isinstance(payload.get(key), (str, int, float)):
+                        milestone[key] = payload[key]
+                if kind == 'step_count' and isinstance(content, (str, int)):
+                    milestone['step'] = str(content)[:32]
+                milestones.append(milestone)
         tail.append(payload)
         if kind in {'error', 'plan', 'execution_logs', 'nl2a', 'nl2a_state'}:
             selected.append(payload)
@@ -103,4 +125,7 @@ async def read_sse_with_evidence(response, name, *, secrets=(), limit=1000):
         write_case_evidence(name, {
             'ending': ending, 'types': dict(counts), 'protocol_events': list(selected),
             'tail': list(tail), 'incomplete_frame_pending': bool(pending),
+            'duration_seconds': round(time.monotonic() - started, 3),
+            'event_timings': timings, 'content_characters': dict(content_characters),
+            'milestones': list(milestones),
         }, secrets=secrets)

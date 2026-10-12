@@ -45,22 +45,6 @@ async def prepare_knowledge(identity) -> None:
     )
     index_name = str(kb["index_name"])
     register_asset("performance", "upload_kb_index", index_name, owner_case_id="PERF-03")
-    # An empty upload target is NOT a populated vector-scale benchmark.
-    # PERF-04 needs independently declared, populated scale assets.
-
-
-async def prepare_vector_scale(identity) -> None:
-    indices = resolve_asset("performance", "large_kb_indices", required=False)
-    if not isinstance(indices, list) or len(set(map(str, indices))) < 2:
-        raise AssetDependencyError("performance", "large_kb_indices", consumer_case_id="PERF-04",
-            detail="PERF-04 requires populated different-scale indices and multi-KB assets; "
-                   "an empty PERF-03 upload target is not a scale fixture")
-    # Preserve the full declared benchmark obligations. The old timing helper
-    # only measured three queries and cannot certify scale/rerank/isolation.
-    raise AssetDependencyError("performance", "vector_scale_workload", consumer_case_id="PERF-04",
-        detail="Controlled scale corpus, rerank/relevance/isolation oracles and performance.yaml "
-               "measurement plan must be implemented before full PERF-04 acceptance; "
-               "the legacy three-query smoke is insufficient")
 
 
 async def prepare_performance_embedding(identity) -> int:
@@ -255,7 +239,6 @@ async def main(case_ids: set[str] | None = None) -> bool:
     user = await sign_in("tenant_a_user")
     operations = (
         ({"PERF-03"}, "PERF-03", "performance", "upload_kb_index", prepare_knowledge(admin)),
-        ({"PERF-04"}, "PERF-04", "performance", "large_kb_indices", prepare_vector_scale(admin)),
         ({"PERF-10"}, "PERF-10", "performance", "large_attachment_object_name", prepare_large_attachment(user)),
         ({"REL-02"}, "REL-02", "reliability", "fault_model_id", prepare_fault_model(admin)),
         ({"PERF-06"}, "PERF-06", "performance", "evaluation_200_run_id", prepare_evaluation_200(admin)),

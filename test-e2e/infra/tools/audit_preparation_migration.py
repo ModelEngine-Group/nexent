@@ -69,7 +69,7 @@ def build(source, repo, report):
             row["candidate"] = {
                 "families": original["case_factory_families"].get(cid, []),
                 "anchors": cid in online,
-                "special_assets": cid in {"PERF-03", "PERF-04", "PERF-06", "PERF-10", "REL-02"},
+                "special_assets": cid in {"PERF-03", "PERF-06", "PERF-10", "REL-02"},
                 "d4_groups": [],
             }
             if record["stage"] == "D4":

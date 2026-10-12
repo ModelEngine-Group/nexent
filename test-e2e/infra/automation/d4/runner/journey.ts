@@ -164,6 +164,7 @@ export class ContractExecution {
     if (/Cleanup/i.test(name)) return "AUTOMATION_ERROR";
     if (/DependencyFailure/i.test(name)) return "BLOCKED_BY_DEPENDENCY";
     if (/ProductFailure/i.test(name)) return "FAIL";
+    if (name === "AssertionError" || (error !== null && typeof error === "object" && "matcherResult" in error)) return "FAIL";
     if (/Timeout/i.test(name)) return "TIMEOUT";
     return this.currentKind === "assertions" ? "FAIL" : "AUTOMATION_ERROR";
   }

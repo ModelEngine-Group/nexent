@@ -72,10 +72,6 @@ async def exercise_external_memory(identity, mock, api):
                 'version_name': 'case-memory', 'release_note': 'Owned external memory acceptance'})
             assert_status(published, 200)
             assert_status(await api.post('/memory/config/set', json={'key': 'MEMORY_SWITCH', 'value': True}), 200)
-            local = await api.post('/memory/long-term/user/versions', json={
-                'content': f'Local lookup LOCALLOOKUP-{nonce} has unique answer {local_marker}',
-                'expected_active_version_id': None})
-            assert_status(local, 201)
             created = await api.post("/memory/providers", json={
                 "provider_name": name,
                 "connection_type": "plugin",
@@ -107,15 +103,36 @@ async def exercise_external_memory(identity, mock, api):
             assert marker in answer, 'Agent final answer did not use retrieved external memory'
             # Hot-update only this owned Provider to an empty org. Fresh
             # conversations prevent an old answer in chat history from passing.
+            empty_org = mock.org + '-empty'
             updated = await api.put(prefix, json={'provider_name': name + '-updated',
-                'timeout_seconds': 2, 'params': mock.provider_params(org=mock.org + '-empty')})
+                'timeout_seconds': 2, 'params': mock.provider_params(org=empty_org)})
             assert_status(updated, 200)
             reread = await api.get(prefix)
             assert_status(reread, 200)
             assert reread.json()['timeout_seconds'] == 2 and api_key not in reread.text
+            empty_search = await api.post(prefix + '/test-search', json={'query': lookup, 'top_k': 10})
+            assert_status(empty_search, 200)
+            assert empty_search.json()['items'] == [], 'Updated organization unexpectedly returned memories'
+            old_before, new_before = await mock.counts(), await mock.counts(org=empty_org)
             missing = await run_memory_agent(identity, agent_id, query, 'hot-update')
-            assert marker not in missing and 'NOT_FOUND' in missing, 'Hot-updated configuration did not affect later runs'
+            old_after, new_after = await mock.counts(), await mock.counts(org=empty_org)
+            write_case_evidence(CASE_ID + '-hot-update-wire', {
+                'old_scope_search_delta': old_after.get('search', 0) - old_before.get('search', 0),
+                'new_scope_search_delta': new_after.get('search', 0) - new_before.get('search', 0),
+                'empty_scope_items': len(empty_search.json()['items']),
+                'old_answer_present': marker in missing,
+                'missing_answer_present': 'NOT_FOUND' in missing,
+            })
+            assert old_after.get('search', 0) == old_before.get('search', 0), 'Runtime searched the stale organization'
+            assert new_after.get('search', 0) > new_before.get('search', 0), 'Runtime did not search the updated organization'
+            assert marker not in missing and 'NOT_FOUND' in missing, 'Updated empty memory context did not produce NOT_FOUND'
             assert_status(await api.put(prefix, json={'params': params}), 200)
+            # User long-term memory is loaded in full, not query-filtered.
+            # Seed it only after the empty-organization acceptance is complete.
+            local = await api.post('/memory/long-term/user/versions', json={
+                'content': f'Local lookup LOCALLOOKUP-{nonce} has unique answer {local_marker}',
+                'expected_active_version_id': None})
+            assert_status(local, 201)
             for phase, status, delay in (('unavailable', 503, 0), ('timeout', 200, 3)):
                 await mock.fault(status, delay)
                 failed = await api.post(prefix + '/test-search', json={'query': lookup, 'top_k': 10})

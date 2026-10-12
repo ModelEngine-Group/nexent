@@ -18,7 +18,8 @@ import pytest
 
 from shared.auth import TestIdentity
 from shared.http import MODEL_TIMEOUT, assert_status, client, response_message
-from shared.asset_registry import AssetDependencyError, register_asset
+from shared.asset_registry import AssetDependencyError, mark_asset_state, register_asset
+from shared.case_evidence import write_case_evidence
 from shared.factories.ownership import register_owned_http
 from d3.assets import model_id as configured_model_id, model_request
 
@@ -160,14 +161,32 @@ async def _delete_document(identity, index_name, path_or_url=None, file_id=None,
         return await api.delete('/indices/' + index_name + '/documents', params=params)
 
 
-async def _cleanup_kb(identity, index_name):
+async def _cleanup_kb(identity, index_name, *, timeout=180.0):
+    """Wait only for the documented in-flight guard on this owned index."""
+    deadline = time.monotonic() + timeout
+    attempts = 0
     try:
-        async with client('config', token=identity.access_token) as api:
-            response = await api.delete('/indices/' + index_name)
-        if response.status_code not in (200, 404):
-            response.read()
-    except Exception:
-        pass
+        while True:
+            attempts += 1
+            async with client('config', token=identity.access_token) as api:
+                response = await api.delete('/indices/' + index_name)
+            if response.status_code in (200, 404):
+                mark_asset_state('owned_knowledge_bases', str(index_name), 'DELETED')
+                write_case_evidence('document-scope-cleanup', {
+                    'result': 'DELETED', 'http_status': response.status_code, 'attempts': attempts,
+                })
+                return
+            body = response.json()
+            if response.status_code != 409 or not isinstance(body, dict) or body.get('code') != '060109':
+                raise RuntimeError(f'Owned KB cleanup failed: HTTP {response.status_code}')
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Owned KB processing did not drain before cleanup deadline')
+            await asyncio.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    except BaseException as error:
+        write_case_evidence('document-scope-cleanup', {
+            'result': 'ORPHANED', 'attempts': attempts, 'error_type': type(error).__name__,
+        })
+        raise
 
 
 @pytest.mark.asyncio
@@ -178,6 +197,7 @@ async def test_delete_document_by_scope(tenant_a_admin: TestIdentity) -> None:
     run = _run_id()
     kb_name = 'api-auto-del-' + run
     created = []
+    primary = None
 
     try:
         index_name = await _create_knowledge_base(identity, kb_name)
@@ -260,6 +280,19 @@ async def test_delete_document_by_scope(tenant_a_admin: TestIdentity) -> None:
             remaining_b = await _find_file(identity, index_name, object_b, file_id_b)
             assert remaining_b is None
 
+    except BaseException as error:
+        primary = error
+        raise
     finally:
+        cleanup_errors = []
         for created_index in created:
-            await _cleanup_kb(identity, created_index)
+            try:
+                await _cleanup_kb(identity, created_index)
+            except Exception as error:
+                cleanup_errors.append(type(error).__name__)
+        if cleanup_errors:
+            message = 'Owned KB cleanup failed: ' + ', '.join(cleanup_errors)
+            if primary is not None:
+                primary.add_note(message)
+            else:
+                raise RuntimeError(message)

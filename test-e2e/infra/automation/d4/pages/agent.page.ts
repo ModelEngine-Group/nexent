@@ -338,22 +338,27 @@ export class AgentPage {
       .locator("xpath=ancestor::section[1]");
     await expect(debugPanel).toBeVisible();
     const input = debugPanel.locator('textarea[placeholder="发送消息..."]:visible, textarea[placeholder*="输入测试问题"]:visible');
-    const messages = debugPanel.locator("[data-slot='aui_assistant-message-root']:visible");
+    // Empty completed replies can have zero layout height. Count their DOM
+    // unit too; visibility must not turn an empty answer into a five-minute wait.
+    const messages = debugPanel.locator("[data-slot='aui_assistant-message-root']");
     const before = await messages.count();
     await input.fill(prompt);
-    const streamPromise = this.page.waitForResponse((r) => r.request().method() === "POST" && /agent|chat|conversation/.test(r.url()), { timeout: 300000 });
+    const streamPromise = this.page.waitForResponse((r) => r.request().method() === "POST" && /\/agent\/run$/.test(new URL(r.url()).pathname), { timeout: 300000 });
     const send = debugPanel.getByRole("button", { name: "发送", exact: true });
     await send.click();
     const stream = await streamPromise;
     if (stream.status() >= 500) throw new Error(`agent debug stream returned ${stream.status()}`);
     await expect(messages).toHaveCount(before + 1, { timeout: 300000 });
     const responseText = messages.last().locator("[data-citation-index-map] .aui-md:visible");
-    if (expectedMarker) await expect.poll(async () => (await responseText.allTextContents()).join("\n"), { timeout: 300000 }).toContain(expectedMarker);
     await expect(debugPanel.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 300000 });
     await expect(send).toBeVisible({ timeout: 300000 });
     const answer = (await responseText.allTextContents()).join("\n").trim();
-    if (!answer) throw new Error("agent debug completed without a rendered response");
-    if (expectedMarker && !answer.includes(expectedMarker)) throw new Error(`agent debug response omitted marker ${expectedMarker}`);
+    if (!answer || (expectedMarker && !answer.includes(expectedMarker))) {
+      const error = new Error(!answer ? "agent debug completed without a rendered response"
+        : `completed agent debug response omitted required marker ${expectedMarker}`);
+      error.name = "ProductFailure"; // Business outcome, not a product/root-cause attribution.
+      throw error;
+    }
     return answer;
   }
 

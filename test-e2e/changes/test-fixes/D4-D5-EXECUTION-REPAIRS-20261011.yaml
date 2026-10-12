@@ -76,5 +76,5 @@ change:
     added: []
     modified: [PW-CHAT-01, PW-CHAT-05, PW-MODEL-01,
                PW-MEMORY-PROVIDER-01, PW-NL2AGENT-01,
-               PERF-03, PERF-04, SEC-09]
+               PERF-03, SEC-09]
     retired: []

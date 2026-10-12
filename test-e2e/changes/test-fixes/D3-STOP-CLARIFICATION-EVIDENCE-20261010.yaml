@@ -29,5 +29,5 @@ change:
   affected_cases:
     existing: []
     added: []
-    modified: [AGT-005, AGT-018, AGT-019, AGT-025, AGT-AUTO-6A6BC7594487E771]
+    modified: [AGT-018, AGT-019, AGT-025, AGT-AUTO-6A6BC7594487E771]
     retired: []

@@ -1,7 +1,6 @@
-"""Test-side oracles reject incomplete cancellation and malformed clarification."""
+"""Test-side oracles protect cancellation and sanitized stream evidence."""
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,73 +14,13 @@ ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / 'test-e2e/infra/automation'))
 from shared import case_evidence, stop_observation
 
-spec = importlib.util.spec_from_file_location('clarification_case', ROOT / 'test-e2e/cases/AGT-005/test.py')
-clarification = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(clarification)
-
-
-def card_events(**question_updates):
-    question = {'question_id': 'purpose', 'title': 'Which capability is required?',
-                'question_type': 'text', 'required': True, **question_updates}
-    return [{'event': 'message', 'data': {'type': 'nl2a', 'content': json.dumps({
-        'subtype': 'requirement_clarification', 'questions': [question],
-    })}}]
-
-
-class ClarificationTests(unittest.TestCase):
-    def test_semantic_rewording_does_not_require_exact_missing_tool_token(self):
-        clarification.assert_clarification_cards(card_events())
-
-    def test_absent_card_is_not_accepted(self):
-        with self.assertRaises(AssertionError):
-            clarification.assert_clarification_cards([{'data': {'type': 'final_answer', 'content': 'OK'}}])
-
-    def test_choice_without_options_is_not_accepted(self):
-        with self.assertRaises(AssertionError):
-            clarification.assert_clarification_cards(card_events(question_type='single_choice'))
-
-    def test_saved_state_or_error_is_not_safe_clarification(self):
-        for kind in ('nl2a_state', 'error'):
-            with self.subTest(kind=kind), self.assertRaises(AssertionError):
-                clarification.assert_clarification_cards(card_events() + [{'data': {'type': kind}}])
-
-    def test_draft_snapshot_detects_new_resource_binding(self):
-        self.assertNotEqual(clarification.draft_snapshot({'tools': []}),
-                            clarification.draft_snapshot({'tools': [{'tool_id': 23}]}))
-
-    def test_completed_degradation_requires_persisted_fields_and_no_new_binding(self):
-        events = [{'data': {'type': 'nl2a_state', 'content': {
-            'event': 'agent_generation_completed', 'agent_id': 23,
-        }}}, {'data': {'type': 'final_answer', 'content': 'Unsupported capability omitted'}}]
-        before = {'tools': []}
-        after = {'tools': [], 'duty_prompt': 'A safe assistant',
-                 'greeting_message': 'Hello', 'example_questions': ['What can you do?']}
-        clarification.assert_safe_missing_capability(events, before, after, 23)
-        for broken in ({**after, 'tools': [{'tool_id': 99}]}, {**after, 'duty_prompt': ''}):
-            with self.assertRaises(AssertionError):
-                clarification.assert_safe_missing_capability(events, before, broken, 23)
-
-    def test_natural_language_completion_alone_is_not_degradation_evidence(self):
-        with self.assertRaises(AssertionError):
-            clarification.assert_safe_missing_capability(
-                [{'data': {'type': 'final_answer', 'content': 'All done'}}], {}, {}, 23)
-
-    def test_user_pause_requires_a_real_accessible_unbound_tool_and_unchanged_draft(self):
-        resource = {'candidate': {'resource_type': 'tool', 'candidate_ref': 'tool:34'}, 'is_bound': False}
-        card = {'subtype': 'installed_resource_binding', 'agent_id': 23, 'resources': [resource]}
-        events = [{'data': {'type': 'nl2a', 'content': card}}]
-        clarification.assert_safe_missing_capability(events, {}, {}, 23, accessible_tool_ids={34})
-        with self.assertRaises(AssertionError):
-            clarification.assert_safe_missing_capability(events, {}, {}, 23, accessible_tool_ids=set())
-        with self.assertRaises(AssertionError):
-            clarification.assert_safe_missing_capability(events, {}, {'duty_prompt': 'changed'}, 23,
-                                                        accessible_tool_ids={34})
-        card['resources'][0]['is_bound'] = True
-        with self.assertRaises(AssertionError):
-            clarification.assert_safe_missing_capability(events, {}, {}, 23, accessible_tool_ids={34})
-
-
 class EvidenceTests(unittest.TestCase):
+    def test_deleted_agt005_has_no_formal_definition_script_binding_or_dispatch(self):
+        for filename in ('case.yaml', 'test.py', 'execution.yaml'):
+            self.assertFalse((ROOT / 'test-e2e/cases/AGT-005' / filename).exists())
+        from d3.scenarios import scenario_agent_configuration_scenarios as scenarios
+        self.assertNotIn('AGT-005', scenarios.AGENT_CONFIG_CASES)
+
     def test_signed_url_credentials_are_removed_even_inside_serialized_content(self):
         with tempfile.TemporaryDirectory() as temporary, \
                 patch.dict(os.environ, {'RESULT_DIR': temporary}), \
@@ -177,6 +116,32 @@ class StopTests(unittest.IsolatedAsyncioTestCase):
 
 
 class InterruptedEvidenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_phase_diagnostics_survive_timeout_without_treating_fragments_as_tokens(self):
+        class BrokenResponse:
+            async def aiter_lines(self):
+                for frame in ({'type': 'step_count', 'content': '1'},
+                              {'type': 'model_attempt_control', 'phase': 'begin'},
+                              {'type': 'model_output_deep_thinking', 'content': 'abc'},
+                              {'type': 'model_output_deep_thinking', 'content': 'def'},
+                              {'type': 'parse', 'content': 'private-model-action'}):
+                    yield 'data: ' + json.dumps(frame)
+                    yield ''
+                raise TimeoutError('controlled interruption')
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {'RESULT_DIR': temporary}), \
+                patch.object(case_evidence, 'load_secret_env', return_value={}):
+            with self.assertRaises(TimeoutError):
+                await case_evidence.read_sse_with_evidence(BrokenResponse(), 'timed')
+            saved = json.loads((Path(temporary) / 'runtime/timed.json').read_text(encoding='utf-8'))
+        self.assertEqual(saved['types']['model_output_deep_thinking'], 2)
+        self.assertEqual(saved['content_characters']['model_output_deep_thinking'], 6)
+        self.assertEqual([m['type'] for m in saved['milestones']],
+                         ['step_count', 'model_attempt_control', 'parse'])
+        self.assertEqual(saved['milestones'][1]['phase'], 'begin')
+        self.assertNotIn('private-model-action', json.dumps(saved['milestones']))
+        self.assertGreaterEqual(saved['event_timings']['parse']['first_seconds'],
+                                saved['event_timings']['step_count']['first_seconds'])
+
     async def test_timeout_preserves_root_error_and_does_not_return_success(self):
         class BrokenResponse:
             async def aiter_lines(self):

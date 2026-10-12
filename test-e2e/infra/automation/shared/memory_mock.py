@@ -54,8 +54,10 @@ class MemoryMock:
         # Never include fixture credentials in assertion output.
         assert response.status_code == 200, f'Memory fault control HTTP {response.status_code}'
 
-    async def counts(self):
-        response = await self.api.get('/__control/observations', params={'user_id': self.user_id})
+    async def counts(self, org=None):
+        headers = {'X-Org-Id': org} if org is not None else {}
+        response = await self.api.get('/__control/observations', headers=headers,
+                                      params={'user_id': self.user_id})
         assert response.status_code == 200, f'Memory observations HTTP {response.status_code}'
         return response.json()['counts']
 

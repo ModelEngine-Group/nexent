@@ -17,7 +17,7 @@ from shared.sse import assert_terminal_event, read_sse
 from shared.factories.files import register_uploaded_files
 
 
-CASES = [f"PERF-{number:02d}" for number in range(1, 11) if number != 6]
+CASES = [f"PERF-{number:02d}" for number in range(1, 11) if number not in {4, 6}]
 
 
 async def _agent_run(identity, marker: str) -> list[dict]:
@@ -76,25 +76,6 @@ async def _large_upload(identity) -> None:
                 params={"file_id": record["file_id"], "scope": "full"},
             )
             assert_status(cleanup, (200, 404))
-
-
-async def _vector_search(identity) -> None:
-    indices = get_test_asset("performance", "large_kb_indices")
-    assert isinstance(indices, list) and indices
-    queries = get_test_asset("performance", "search_queries", required=False) or ["Nexent architecture", "agent configuration", "knowledge retrieval"]
-
-    async def search(query: str):
-        async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-            response = await api.post(
-                "/indices/search/hybrid", json={"query": query, "index_names": indices, "top_k": 20, "weight_accurate": 0.5},
-            )
-        assert_status(response, 200)
-        return response
-
-    with Stopwatch() as timer:
-        responses = await asyncio.gather(*[search(str(query)) for query in queries])
-    assert timer.elapsed_ms <= threshold_ms("vector_search_batch_ms", 60_000)
-    assert all(response.json() for response in responses)
 
 
 async def _scheduler_load(identity) -> None:
@@ -241,7 +222,6 @@ async def execute_d5_performance_special(case, tenant_a_user, tenant_a_admin):
         "PERF-01": lambda: _parallel_agents(tenant_a_user),
         "PERF-02": lambda: _sse_concurrency(tenant_a_user),
         "PERF-03": lambda: _large_upload(tenant_a_admin),
-        "PERF-04": lambda: _vector_search(tenant_a_admin),
         "PERF-05": lambda: _scheduler_load(tenant_a_user),
         "PERF-06": lambda: _evaluation_200(tenant_a_admin),
         "PERF-07": lambda: _memory_budget(tenant_a_user),

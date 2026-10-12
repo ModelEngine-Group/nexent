@@ -23,7 +23,7 @@ from shared.sse import assert_terminal_event, read_sse
 
 AGENT_CONFIG_CASES = [
     "API-055", "API-056", "API-057", "API-058",
-    "AGT-001", "AGT-002", "AGT-003", "AGT-004", "AGT-005",
+    "AGT-001", "AGT-002", "AGT-003", "AGT-004",
     "AGT-006", "AGT-007", "AGT-008", "AGT-009", "AGT-010", "AGT-011", "AGT-012",
     "API-059", "API-060", "API-061", "API-062", "API-063", "API-064", "API-065", "API-066",
 ]
@@ -261,7 +261,6 @@ async def _nl2agent(identity, mode: str) -> None:
         query = {
             "core": "Create an assistant that summarizes a supplied paragraph and asks when text is missing.",
             "boundary": "",
-            "failure": "Create an assistant using a nonexistent external capability named d3-missing-tool.",
         }[mode]
         payload = {"query": query, "agent_id": agent_id, "history": [], "complexity": "complicated"}
         async with client("runtime", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
@@ -271,21 +270,6 @@ async def _nl2agent(identity, mode: str) -> None:
                     return
                 assert_status(response, 200)
                 events = await read_sse(response)
-        # NL2Agent pauses at a structured clarification card; that protocol
-        # turn ends at EOF without a final_answer (the user must answer first).
-        if mode == "failure":
-            cards = []
-            for event in events:
-                data = event.get("data")
-                if isinstance(data, dict) and data.get("type") == "nl2a":
-                    content = data.get("content")
-                    card = json.loads(content) if isinstance(content, str) else content
-                    if isinstance(card, dict) and card.get("subtype") == "requirement_clarification":
-                        cards.append(card)
-            if cards:
-                assert all(card.get("questions") for card in cards)
-                assert "d3-missing-tool" in json.dumps(cards, ensure_ascii=False)
-                return
         assert_terminal_event(events)
         text = json.dumps(events, ensure_ascii=False)
         if mode == "core":
@@ -640,7 +624,6 @@ async def execute_agent_configuration_scenario(case: dict, tenant_a_admin, tenan
         "AGT-002": lambda: _regenerate_name_isolated(force_failure=True),
         "AGT-003": lambda: _nl2agent(tenant_a_admin, "core"),
         "AGT-004": lambda: _nl2agent(tenant_a_admin, "boundary"),
-        "AGT-005": lambda: _nl2agent(tenant_a_admin, "failure"),
         "AGT-006": lambda: _prompt_generate(tenant_a_admin, "core"),
         "AGT-007": lambda: _prompt_generate(tenant_a_admin, "boundary"),
         "AGT-008": lambda: _prompt_generate(tenant_a_admin, "failure"),

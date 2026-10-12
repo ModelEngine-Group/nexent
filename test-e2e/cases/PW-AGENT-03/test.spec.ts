@@ -14,6 +14,8 @@ journey("PW-AGENT-03", async (context) => {
   const wirePath = process.env.NEXENT_TEST_MCP_WIRE_LOG || "";
   let agentDisplay = "";
   let skillName = "";
+  const skillMarker = `SKILL_RESULT_${token}`;
+  let skillCreated = false;
   let alternateId = 0;
   let alternateDisplay = "";
   let wireOffset = 0;
@@ -34,6 +36,14 @@ journey("PW-AGENT-03", async (context) => {
   };
 
   contract.deferCleanup(async () => {
+    if (!skillCreated) return;
+    const removed = await page.request.delete(`/api/skills/${encodeURIComponent(skillName)}`);
+    expect([200, 404]).toContain(removed.status());
+    const absent = await page.request.get(`/api/skills/${encodeURIComponent(skillName)}`);
+    expect(absent.status()).toBe(404);
+  });
+  // Cleanup callbacks run in reverse: detach/delete Agents before the Skill.
+  contract.deferCleanup(async () => {
     if (alternateId > 0) await agents.delete(alternateId);
     if (agentId > 0) await agents.delete(agentId);
   });
@@ -53,9 +63,18 @@ journey("PW-AGENT-03", async (context) => {
         return `created isolated Draft with exact model ${modelName}; controlled Test MCP tool ${toolName} is expected from the locally managed service`;
       },
       async () => {
-        skillName = resolveReadyAsset("skills", "configurable_name", "PW-AGENT-03");
-        expect(skillName).not.toBe("");
-        return `resolved fixed READY Skill ${skillName}`;
+        skillName = `d4-verify-${token}`;
+        const created = await page.request.post("/api/skills", { data: {
+          name: skillName, description: "Use this verification skill when asked to run the bound validation skill.",
+          content: `---\nname: ${skillName}\ndescription: Run the bound validation skill.\n---\n\n`
+            + "# Validation procedure\nRead references/check.txt with read_skill_md before answering. "
+            + "Return exactly its verification result. Do not reuse a previous Tool answer or call get_test_code.\n",
+          source: "custom", tags: ["automation"],
+          files: [{ path: "references/check.txt", content: `Verification result: ${skillMarker}\n` }],
+        } });
+        expect(created.status()).toBe(201);
+        skillCreated = true;
+        return `created owned Skill ${skillName} with an independent reference-only result; the answer is absent from the question`;
       },
       async () => {
         serviceName = resolveReadyAsset("mcp", "service_name", "PW-AGENT-03");
@@ -113,8 +132,16 @@ journey("PW-AGENT-03", async (context) => {
         return "the visible tool execution reached a terminal state and final answer contained NX-92831";
       },
       async () => {
-        skillAnswer = await agents.sendDebug(`根据当前绑定技能的指导回答，并在答案中原样包含技能名称：${skillName}`, skillName);
-        return `a second completed Debug turn used the bound Skill context and returned ${skillName}`;
+        // A page reload resets the debug-only local runtime. The prior Tool
+        // turn's "reply only with the code" instruction must not contaminate
+        // an independent Skill-consumption acceptance.
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await agents.select(agentDisplay);
+        await agents.openDebug();
+        const panel = page.getByRole("heading", { name: /^(调试|Debug)$/ }).locator("xpath=ancestor::section[1]");
+        await expect(panel.locator("[data-slot='aui_assistant-message-root']")).toHaveCount(0);
+        skillAnswer = await agents.sendDebug("执行当前绑定的验证技能：先读取技能指南及 references/check.txt，再只回复其中规定的验证结果。", skillMarker);
+        return "an independent fresh Debug session returned the reference-only Skill result, not a question echo or previous Tool result";
       },
       async () => {
         const delta = readFileSync(wirePath, "utf8").slice(wireOffset);
@@ -140,8 +167,11 @@ journey("PW-AGENT-03", async (context) => {
       async () => {
         const delta = readFileSync(wirePath, "utf8").slice(wireOffset);
         expect(delta).toContain('"tool": "get_test_code"');
-        expect(skillAnswer).toContain(skillName);
-        return "wire evidence proves the request reached Test MCP and the Skill turn completed independently";
+        return "wire evidence proves the request reached Test MCP";
+      },
+      async () => {
+        expect(skillAnswer).toContain(skillMarker);
+        return "the independent Skill turn returned its reference-only answer; owned resources are covered by deferred cleanup";
       },
     ],
   });

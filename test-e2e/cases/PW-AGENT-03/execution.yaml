@@ -5,9 +5,12 @@ implementations:
   file: test.spec.ts
   selector: PW-AGENT-03
 notes: V5 source binding migrated; runtime parity is not yet certified.
+acceptance_bindings:
+  AC-BINDING: [PW-AGENT-03]
+  AC-TOOL: [PW-AGENT-03]
+  AC-SKILL: [PW-AGENT-03]
 preparation:
-  families:
-  - configurable_skill
+  families: []
   anchors: true
   special_assets: false
   d4_groups:

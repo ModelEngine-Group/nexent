@@ -39,7 +39,7 @@ case:
     expected: Only corrected raw model output is stored; its fragments appeared before completion.
   - order: 5
     action: Return three truncated code responses with finish_reason length and inspect SSE and persisted assistant units.
-    expected: All attempts roll back; no rejected code is parsed, executed or persisted.
+    expected: All attempts roll back and terminate with an error; no rejected code is parsed, executed or persisted. Pre-Step-1 memory tools/logs may persist only when their content and order exactly match the observed pre-run SSE; they are not model code execution. The history view may append its empty synthetic final-answer placeholder, but no persisted or emitted final answer is allowed.
   expected_results:
   - Step 1 precedes its model chunks and is stored once despite retry; the explicit final-answer turn may emit Step 2 without another code action.
   - Successful text is incremental.

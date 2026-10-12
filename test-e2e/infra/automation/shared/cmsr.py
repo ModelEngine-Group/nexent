@@ -1,5 +1,6 @@
 """Owned CMSR fixtures; existing runner owns the HTTP service lifetime."""
 import asyncio
+import json
 import os
 import uuid
 
@@ -83,6 +84,54 @@ async def setup(case_id, *, publish=False):
 
 class HistoryVerificationError(AssertionError):
     """Expose only controller-authored diagnostics, never history text."""
+
+
+def verify_rejected_history(body, events, nonce):
+    """Permit exact pre-run memory logs, never rejected model action units."""
+    first_step = next(index for index, event in enumerate(events) if event.get('type') == 'step_count')
+    # The product performs memory pre-search before Step 1. These independent
+    # logs may be persisted even when every subsequent model attempt rolls back.
+    def pre_run_unit(part):
+        return part.get('type'), json.dumps(part.get('content') or '', sort_keys=True)
+    allowed_prefix = [pre_run_unit(event) for event in events[:first_step]
+                      if event.get('type') in {'tool', 'tool-call', 'execution_logs'}]
+    observed_prefix = []
+    if any(event.get('type') == 'final_answer' for event in events):
+        raise HistoryVerificationError('Rejected SSE unexpectedly emitted a final answer')
+    assistants = [message for row in body.get('data', []) for message in row.get('message', [])
+                  if message.get('role') == 'assistant']
+    if len(assistants) != 1:
+        raise HistoryVerificationError('Rejected run must have one persisted assistant message')
+    parts = [part for part in assistants[0].get('message', []) if isinstance(part, dict)]
+    if sum(part.get('type') == 'step_count' for part in parts) != 1:
+        raise HistoryVerificationError('Rejected run must retain exactly one Step 1')
+    in_step = False
+    for index, part in enumerate(parts):
+        kind, content = part.get('type', ''), part.get('content') or ''
+        if kind == 'step_count':
+            in_step = True
+        if kind.startswith('model_output_') or kind == 'parse':
+            raise HistoryVerificationError('Rejected model output/action persisted')
+        if kind == 'final_answer':
+            # The history formatter appends this empty view-only placeholder
+            # when no final-answer unit was stored. A stored unit carries its
+            # unit metadata; neither that nor a nonempty answer is permitted.
+            if (set(part) != {'type', 'content'} or part['content'] != ''
+                    or index != len(parts) - 1):
+                raise HistoryVerificationError('Rejected run persisted a final answer')
+        if 'CMSR_REJECTED_' + nonce in str(content):
+            raise HistoryVerificationError('Rejected fixture marker persisted')
+        if kind in {'tool', 'tool-call'} and (in_step or content):
+            raise HistoryVerificationError('Rejected run persisted a model tool action')
+        if kind in {'tool', 'tool-call', 'execution_logs'}:
+            if in_step:
+                raise HistoryVerificationError('Rejected run persisted unmatched execution logs')
+            observed_prefix.append(pre_run_unit(part))
+    if observed_prefix != allowed_prefix:
+        raise HistoryVerificationError('History pre-run tools/logs differ from observed SSE order/content')
+    return {'assistant_count': 1, 'step_count': 1,
+            'pre_run_log_count': sum(event.get('type') == 'execution_logs' for event in events[:first_step]),
+            'rejected_action_persisted': False}
 
 
 def history_diagnostics(body, nonce):

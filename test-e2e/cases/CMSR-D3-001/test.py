@@ -5,7 +5,7 @@ import json
 import pytest
 
 from shared.auth import sign_in
-from shared.cmsr import control, setup, verify_history, history_diagnostics, wait_paused
+from shared.cmsr import control, setup, verify_history, verify_rejected_history, history_diagnostics, wait_paused
 from shared.case_evidence import write_case_evidence
 from shared.factories.conversation import owned_conversation
 from shared.http import client, assert_status, MODEL_TIMEOUT
@@ -144,12 +144,14 @@ async def test_cmsr_d3_001_truncated_repairs_never_execute():
             first_step = next(index for index, event in enumerate(events) if event.get('type') == 'step_count')
             assert not any(event.get('type') in {'parse', 'tool', 'tool-call', 'execution_logs'}
                            for event in events[first_step:])
-            parts = [part for row in history.json().get('data', []) for message in row.get('message', [])
-                     if message.get('role') == 'assistant' for part in message.get('message', [])
-                     if isinstance(part, dict)]
-            assert not any(part.get('type', '').startswith('model_output_') for part in parts)
-            assert not any(part.get('type') in {'parse', 'execution_logs'} for part in parts)
-            assert not any(part.get('type') in {'tool', 'tool-call'} and part.get('content') for part in parts)
-            assert not any('CMSR_REJECTED_' + nonce in str(part.get('content', '')) for part in parts)
+            assert any(event.get('type') == 'error' for event in events), 'Exhausted repairs must report failure'
+            try:
+                diagnostic = verify_rejected_history(history.json(), events, nonce)
+            except AssertionError as error:
+                write_case_evidence('cmsr-truncated-history', {
+                    'history': history_diagnostics(history.json(), nonce), 'error': str(error),
+                })
+                raise
+            write_case_evidence('cmsr-truncated-history', diagnostic)
     finally:
         await control(nonce, 'delete')

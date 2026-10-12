@@ -21,7 +21,7 @@ case:
     isolation: 独占租户、用户、Provider 与组织命名空间；动态查询标识与答案标记不同。
   steps:
   - order: 1
-    action: 创建独占租户/身份、配置模型、Agent、Provider 和用户级本地记忆，发布独占Agent。确认外部查询初始为空。
+    action: 创建独占租户/身份、配置模型、Agent 和 Provider，发布独占Agent；此阶段不写入本地长期记忆，确认外部查询初始为空。
     expected: 不借用共享资源或历史记忆，不修改共享账户的 Provider 和记忆配置。
   - order: 2
     action: 通过 Nexent test-ingest 写入一个含查询标识和独立答案的真实 HTTP 单元，再通过 test-search 检索。
@@ -30,10 +30,10 @@ case:
     action: 使用正常对话（非Debug）创建新会话，只询问查询标识；比较 Mock 请求计数并读取真实 Agent 最终回答。
     expected: Runtime 确实检索外部 Provider，最终回答包含仅存在于外部记忆中的答案；查询回显不能算命中。
   - order: 4
-    action: 将独占 Provider 的组织参数热更新为空组织，读回参数；新会话再次查询，然后恢复原组织。
-    expected: 后续新会话不能取得旧组织答案且返回 NOT_FOUND；此前运行的脱敏证据保留，密钥不回传。此用例不宣称覆盖更新发生在运行中的并发快照语义。
+    action: 将独占 Provider 的组织参数热更新为空组织，读回参数并确认 test-search 无结果；记录新旧组织 wire 计数，新会话再次查询，然后恢复原组织。
+    expected: Runtime 只查询更新后的组织，后续新会话不能取得旧组织答案且返回 NOT_FOUND；此时没有本地记忆干扰。此前运行的脱敏证据保留，密钥不回传。此用例不宣称覆盖更新发生在运行中的并发快照语义。
   - order: 5
-    action: 分别对本用例组织/用户注入 503、超时；验证 Nexent test-search 明确错误及 last_error_code，再运行查询本地记忆的真实 Agent。
+    action: 热更新验收完成后写入用户级本地记忆，再分别对本用例组织/用户注入 503、超时；验证 Nexent test-search 明确错误及 last_error_code，再运行查询本地记忆的真实 Agent。
     expected: Provider 分别显示 provider_error/timeout；外部失败不阻止本地记忆进入回答，不伪装外部检索成功。
   - order: 6
     action: 撤销故障，开启新会话再次查询外部答案，保存脱敏 wire 和流式证据后清理。

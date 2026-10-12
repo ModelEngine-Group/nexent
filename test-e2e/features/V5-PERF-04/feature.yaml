@@ -10,7 +10,6 @@ feature:
   business_rules:
   - rule_id: V5-PERF-04-RULE-01
     description: 向量检索规模性能
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

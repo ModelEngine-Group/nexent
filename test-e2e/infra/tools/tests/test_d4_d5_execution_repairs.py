@@ -22,6 +22,21 @@ from shared.asset_registry import AssetDependencyError
 from shared import preparation_evidence
 
 
+def test_removed_perf04_is_not_an_executable_case_or_special_dispatch():
+    import importlib.util
+    assert not (REPO / 'test-e2e/cases/PERF-04/case.yaml').exists()
+    assert not (REPO / 'test-e2e/cases/PERF-04/execution.yaml').exists()
+    assert not (REPO / 'test-e2e/cases/PERF-04/test.py').exists()
+    path = REPO / 'test-e2e/infra/automation/d5/scenarios/scenario_performance_special.py'
+    spec = importlib.util.spec_from_file_location('removed_perf04_dispatch', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert 'PERF-04' not in module.CASES
+    assert not hasattr(special, 'prepare_vector_scale')
+    feature = yaml.safe_load((REPO / 'test-e2e/features/V5-PERF-04/feature.yaml').read_text(encoding='utf-8'))
+    assert feature['feature']['required_test_stages'] == []
+
+
 def machine(tmp_path, monkeypatch):
     for key in run_cases.MEMORY_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
@@ -118,8 +133,7 @@ async def test_empty_upload_target_never_becomes_large_vector_fixture(monkeypatc
     monkeypatch.setattr(special, 'register_asset', register)
     await special.prepare_knowledge(SimpleNamespace())
     register.assert_not_called()
-    with pytest.raises(AssetDependencyError, match='different-scale'):
-        await special.prepare_vector_scale(SimpleNamespace())
+    assert not hasattr(special, 'prepare_vector_scale')
 
 
 @pytest.mark.asyncio
