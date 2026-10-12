@@ -1186,7 +1186,9 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           </Tooltip>
           {!newChatDesign &&
             (variant === "time" ? (
-              <ThreadRowEndStatus />
+              <ThreadRowEndStatus
+                completedConversations={completedConversations}
+              />
             ) : (
               <ConversationStatusIndicatorWrapper
                 completedConversations={completedConversations}
@@ -1264,20 +1266,33 @@ const ConversationStatusIndicatorWrapper: FC<{
   completedConversations: Set<string>;
 }> = ({ completedConversations }) => {
   const aui = useAui();
-  const status = aui.threadListItem().getState().status as string;
-  const isRunning = status === "running" || status === "streaming";
+  const threadId = aui.threadListItem().getState().id;
+  const isRunning = useAuiState(
+    (state) => state.thread.isRunning && state.threads.mainThreadId === threadId
+  );
 
   return (
-    <ConversationStatusIndicator isStreaming={isRunning} isCompleted={false} />
+    <ConversationStatusIndicator
+      isStreaming={isRunning}
+      isCompleted={!isRunning && completedConversations.has(threadId)}
+    />
   );
 };
 
 // End-of-row status icon for the workbench time-group list: running shows an
 // inline spinner; an error status (when surfaced) shows an orange alert.
-const ThreadRowEndStatus: FC = () => {
+const ThreadRowEndStatus: FC<{ completedConversations: Set<string> }> = ({
+  completedConversations,
+}) => {
   const aui = useAui();
-  const status = aui.threadListItem().getState().status as string;
-  const isRunning = status === "running" || status === "streaming";
+  const { t } = useTranslation();
+  const item = aui.threadListItem().getState();
+  const status = item.status as string;
+  const runtimeRunning = useAuiState(
+    (state) => state.thread.isRunning && state.threads.mainThreadId === item.id
+  );
+  const isRunning =
+    runtimeRunning || status === "running" || status === "streaming";
   const isError = status === "error";
 
   if (isRunning) {
@@ -1291,6 +1306,14 @@ const ThreadRowEndStatus: FC = () => {
   if (isError) {
     return (
       <CircleAlertIcon className="size-4 shrink-0 text-amber-500" aria-hidden />
+    );
+  }
+  if (completedConversations.has(item.id)) {
+    return (
+      <span
+        className="size-2 shrink-0 rounded-full bg-blue-500"
+        title={t("chat.threadList.completed")}
+      />
     );
   }
   return null;
