@@ -1,0 +1,28 @@
+schema_version: '1.0'
+module:
+  id: NAV-MENU
+  name: Sidebar navigation
+feature:
+  feature_id: NAV-MENU-VISIBILITY
+  name: Functional sidebar menu visibility
+  status: active
+  description: Only functional sidebar controls are shown while existing routing and
+    access rules remain intact.
+  business_rules:
+  - rule_id: NAV-MENU-RULE-001
+    description: Hide inert sections and speed notification without hiding authorized
+      children or avatar.
+  - rule_id: NAV-MENU-RULE-002
+    description: Preserve permission filtering, locale routing, chat alias, workbench
+      gate, auth and ordinary notification actions.
+  - rule_id: NAV-MENU-RULE-003
+    description: Authorized enabled workbench menu is labeled 工作台 / Workbench and
+      appears immediately after Home, before Start Chat.
+  required_test_stages:
+  - D1
+  - D4
+  source:
+    requirement_ids:
+    - NAV-MENU-REQ-001
+    - NAV-MENU-REQ-002
+    spec_path: ../nexent-doc/docs/Developing/nav-sidebar-menu-visibility/proposal.md
