@@ -47,3 +47,14 @@ case:
     - name: mock
       required_services:
       - model-provider
+  acceptance:
+  - id: AC-01
+    description: Authenticated browser journey displays skill execution and valid
+      final, then reload preserves the single tool result and business outcome.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

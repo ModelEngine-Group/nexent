@@ -36,3 +36,22 @@ change:
     - TPC-D5-001
     modified: []
     retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Accept incomplete, repeated and narrated reasoning prefixes while preserving
+      exact code bodies.
+    - Reject malformed protocol-marked output at exhaustion without execution, memory
+      commit or raw final.
+    - Preserve ordinary final payloads and specialized strict final-envelope boundaries.
+    reason: Strengthened existing isolated SDK UT separately from formal component/runtime/journey
+      cases; reuse surrounding compatibility and guardrail regressions.
+    test_selectors:
+    - test/sdk/core/agents/test_output_protocol.py::test_thinking_prefix_does_not_require_a_complete_single_block
+    - test/sdk/core/agents/test_output_protocol.py::test_ordinary_final_envelope_accepts_descriptive_prefix
+    - test/sdk/core/agents/test_core_agent.py::TestRunStreamRealExecution::test_oc_029_strict_third_invalid_output_still_fails
+    - test/sdk/core/agents/test_pr4005_continuation.py::test_oc_028_alternating_malformed_and_bare_rejects_marked_final
+  notes: 'Current PR adds these Cases relative to develop; all require explicit acceptance
+    obligations. D1 IDs and original classifier checks are preserved; component collaboration
+    assertions are added rather than relabeling or deleting Cases. SPEC: codeagent-explicit-termination/changes/codeagent-think-prefix-compatibility.
+    D3 mock and real-smoke observations remain separately recorded.'

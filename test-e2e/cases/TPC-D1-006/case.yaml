@@ -32,3 +32,21 @@ case:
   - Python literal/comment protocol-like text
   assertions:
   - Exact code body retained.
+  acceptance:
+  - id: AC-01
+    description: Literal thinking and action tags in Python strings/comments remain
+      unchanged.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Literal thinking tags in final payload remain unchanged.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

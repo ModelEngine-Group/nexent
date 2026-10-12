@@ -6,3 +6,8 @@ implementations:
   selector: test_tpc_d5_001
   profiles:
   - mock
+acceptance_bindings:
+  AC-01:
+  - test_tpc_d5_001_rejections_do_not_execute_or_finalize
+  AC-02:
+  - test_tpc_d5_001_rejections_do_not_execute_or_finalize

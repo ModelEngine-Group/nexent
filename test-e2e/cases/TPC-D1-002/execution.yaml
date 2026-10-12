@@ -6,3 +6,6 @@ implementations:
   selector: test_tpc_d1_002
   profiles:
   - mock
+acceptance_bindings:
+  AC-01:
+  - test_tpc_d1_002_skill_action_executes_once

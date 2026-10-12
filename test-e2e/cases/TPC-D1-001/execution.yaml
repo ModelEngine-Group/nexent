@@ -6,3 +6,7 @@ implementations:
   selector: test_tpc_d1_001
   profiles:
   - mock
+acceptance_bindings:
+  AC-01:
+  - test_tpc_d1_001_compatible_prefix
+  - test_tpc_d1_001_component_accepts_exact_action

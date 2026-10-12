@@ -70,6 +70,7 @@ def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, tmp
         assert not any(e.get('type') == 'error' for e in events)
     finally:
         request(cfg, 'DELETE', f'/conversation/{cid}')
+        request(cfg, 'POST', '/__control', {'responses': ['<final_answer>TPC ready</final_answer>']}, provider=True)
 
 
 def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(tmp_path):
@@ -95,6 +96,7 @@ def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(tmp_path):
         assert stats['request_count'] == 3
     finally:
         request(cfg, 'DELETE', f'/conversation/{cid}')
+        request(cfg, 'POST', '/__control', {'responses': ['<final_answer>TPC ready</final_answer>']}, provider=True)
 
 
 def test_tpc_d3_001_real_model_reads_skill(tmp_path):

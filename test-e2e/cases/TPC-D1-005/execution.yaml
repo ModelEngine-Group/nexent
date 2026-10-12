@@ -6,3 +6,10 @@ implementations:
   selector: test_tpc_d1_005
   profiles:
   - mock
+acceptance_bindings:
+  AC-01:
+  - test_tpc_d1_005_ordinary_final_prefix
+  - test_tpc_d1_005_component_final_preserves_payload
+  AC-02:
+  - test_tpc_d1_005_final_boundaries_remain_strict
+  - test_tpc_d1_005_component_final_rejects_boundaries

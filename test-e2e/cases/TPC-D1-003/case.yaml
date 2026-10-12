@@ -35,3 +35,13 @@ case:
   - length finish reason
   assertions:
   - Expected stable protocol-error reason.
+  acceptance:
+  - id: AC-01
+    description: Malformed and truncated actions retain stable error classification
+      and never reach the executor.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

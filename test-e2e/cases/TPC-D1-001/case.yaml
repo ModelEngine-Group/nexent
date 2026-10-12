@@ -34,3 +34,13 @@ case:
   - code/run envelopes
   assertions:
   - Exact executable body and legacy flag.
+  acceptance:
+  - id: AC-01
+    description: Compatible code and legacy actions preserve the exact executable
+      body and exclude prefix text.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

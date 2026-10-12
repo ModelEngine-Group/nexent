@@ -6,3 +6,8 @@ implementations:
   selector: test_tpc_d1_004
   profiles:
   - mock
+acceptance_bindings:
+  AC-01:
+  - test_tpc_d1_004_marked_output_never_raw_final
+  AC-02:
+  - test_tpc_d1_004_plain_exhaustion_remains_compatible

@@ -6,3 +6,7 @@ implementations:
   selector: test_tpc_d1_003
   profiles:
   - mock
+acceptance_bindings:
+  AC-01:
+  - test_tpc_d1_003_invalid_action_remains_error
+  - test_tpc_d1_003_component_rejects_without_execution

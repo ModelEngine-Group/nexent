@@ -42,3 +42,22 @@ case:
   - Failed attempt rollback.
   - No executor call on invalid output.
   - Plain raw fallback preserved.
+  acceptance:
+  - id: AC-01
+    description: Thinking-only and malformed marked output rolls back at exhaustion
+      without execution or final.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: Eligible plain text retains the existing final fallback without tool
+      execution.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects: []

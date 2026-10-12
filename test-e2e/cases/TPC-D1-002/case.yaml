@@ -40,3 +40,15 @@ case:
   - Skill call count one.
   - ActionOutput.is_final_answer false.
   - Accepted attempt commits without rollback.
+  acceptance:
+  - id: AC-01
+    description: Skill action executes exactly once with an observation and committed
+      attempt, without raw final or extra generation.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2

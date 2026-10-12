@@ -42,3 +42,22 @@ case:
   assertions:
   - Exact final payload.
   - Malformed and specialized prefixed forms reject.
+  acceptance:
+  - id: AC-01
+    description: Ordinary explicit final preserves only its payload with compatible
+      prefixes.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Malformed ordinary and prefixed specialized final envelopes remain
+      rejected.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 2
