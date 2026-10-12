@@ -1,7 +1,6 @@
 import React from "react";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Modal } from "antd";
 import {
   advance,
   base,
@@ -205,11 +204,23 @@ describe("AIDP-FE-FILES-01", () => {
       file_uuids: [file.file_uuid],
     });
   });
-  it("file deletion failure keeps the file and rejects confirmation", async () => {
-    const original = server.handler;
-    server.handler = (request) =>
-      request.url.pathname === removePath
-        ? reply({
+  it.each(["retry", "cancel"])(
+    "file deletion failure keeps the dialog for %s without an unhandled rejection",
+    async (action) => {
+      const original = server.handler;
+      let attempts = 0;
+      let deleted = false;
+      server.handler = (request) => {
+        if (request.url.pathname === removePath) {
+          if (++attempts > 1) {
+            deleted = true;
+            return reply({
+              summary: { total: 1, success: 1, failed: 0 },
+              success_list: [{ file_uuid: file.file_uuid }],
+              failed_list: [],
+            });
+          }
+          return reply({
             summary: { total: 1, success: 0, failed: 1 },
             success_list: [],
             failed_list: [
@@ -218,26 +229,21 @@ describe("AIDP-FE-FILES-01", () => {
                 reason_zh: "File deletion rejected",
               },
             ],
-          })
-        : original(request);
-    mount(page());
-    await screen.findByText(file.file_name);
-    let confirmation!: Parameters<typeof Modal.confirm>[0];
-    // Own the rejected confirmation promise; AntD's static button rethrows it.
-    const prompt = vi.spyOn(Modal, "confirm").mockImplementation((options) => {
-      confirmation = options;
-      return { destroy: vi.fn(), update: vi.fn() };
-    });
-    try {
+          });
+        }
+        if (request.url.pathname === path && deleted)
+          return reply(filesResponse([], 0));
+        return original(request);
+      };
+      mount(page());
+      await screen.findByText(file.file_name);
       fireEvent.click(screen.getByRole("button", { name: t("common.delete") }));
+      await screen.findByRole("button", { name: /确\s*定/ });
       const before = matching(path).length;
-      await act(async () => {
-        await expect(confirmation.onOk!()).rejects.toThrow(
-          "File deletion rejected",
-        );
-      });
+      confirm();
       await screen.findByText("File deletion rejected");
-      expect(screen.getByText(file.file_name)).toBeInTheDocument();
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getAllByText(file.file_name)).toHaveLength(2);
       expect(matching(path)).toHaveLength(before);
       expect(
         screen.queryByText(t("aidpKnowledge.deleteDocSuccess")),
@@ -245,8 +251,21 @@ describe("AIDP-FE-FILES-01", () => {
       expect(matching(removePath, "POST")[0].body).toEqual({
         file_uuids: [file.file_uuid],
       });
-    } finally {
-      prompt.mockRestore();
-    }
-  });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /确\s*定/ })).toBeEnabled(),
+      );
+      if (action === "retry") {
+        confirm();
+        await screen.findByText(t("aidpKnowledge.detailFilesEmpty"));
+        expect(matching(removePath, "POST")).toHaveLength(2);
+        expect(matching(path)).toHaveLength(before + 1);
+        expect(headerCount()).toHaveTextContent("0");
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: /取\s*消/ }));
+        expect(matching(removePath, "POST")).toHaveLength(1);
+        expect(matching(path)).toHaveLength(before);
+      }
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    },
+  );
 });

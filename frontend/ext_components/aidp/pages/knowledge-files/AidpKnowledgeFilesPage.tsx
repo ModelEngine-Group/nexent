@@ -10,7 +10,6 @@ import {
   Button,
   Empty,
   Input,
-  Modal,
   Table,
   Tabs,
   Tooltip,
@@ -114,7 +113,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   pollingPaused = false,
 }) => {
   const { t, i18n } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { groupOptions, canReadGroups, groupsError } = useAidpGroupOptions();
   const { can } = usePermission();
   const detailQuery = useAidpKnowledgeDetail(knowledgeBase.kds_id);
@@ -239,9 +238,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   );
 
   const handleDeleteFile = useCallback(
-    (file: AidpDocumentItem) => {
+    async (file: AidpDocumentItem) => {
       setDeleteConfirmOpen(true);
-      Modal.confirm({
+      // Await mode keeps failed confirmations open without rethrowing globally.
+      await modal.confirm({
         title: t("aidpKnowledge.deleteDocTitle"),
         centered: true,
         okText: t("common.confirm"),
@@ -290,7 +290,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         },
       });
     },
-    [refreshFiles, i18n.language, knowledgeBase.kds_id, message, t]
+    [refreshFiles, i18n.language, knowledgeBase.kds_id, message, modal, t]
   );
 
   const fileColumns: ColumnsType<AidpDocumentItem> = [

@@ -18,4 +18,7 @@ acceptance_bindings:
   AC-04:
   - AIDP-FE-FILES-01 > file deletion success respects cancellation and refreshes the
     count
-  - AIDP-FE-FILES-01 > file deletion failure keeps the file and rejects confirmation
+  - AIDP-FE-FILES-01 > file deletion failure keeps the dialog for retry without an
+    unhandled rejection
+  - AIDP-FE-FILES-01 > file deletion failure keeps the dialog for cancel without an
+    unhandled rejection
