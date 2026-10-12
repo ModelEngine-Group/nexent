@@ -135,6 +135,28 @@ export const ModelEditDialog = ({
         ([k, v]) => [k, formatCustomValueForEditing(v)] as [string, string]
       );
     }
+    // Type-specific dedicated fields (edit parity with the add-dialog gear
+    // panel): embedding chunk fields, voice credentials, rerank/tts max
+    // tokens.
+    if (
+      model.type === MODEL_TYPES.EMBEDDING ||
+      model.type === MODEL_TYPES.MULTI_EMBEDDING
+    ) {
+      if (model.expectedChunkSize != null)
+        next.expected_chunk_size = model.expectedChunkSize;
+      if (model.maximumChunkSize != null)
+        next.maximum_chunk_size = model.maximumChunkSize;
+      if (model.chunkingBatchSize != null)
+        next.chunk_batch = model.chunkingBatchSize;
+    }
+    if (model.type === MODEL_TYPES.STT || model.type === MODEL_TYPES.TTS) {
+      if (model.modelFactory) next.model_factory = model.modelFactory;
+      if (model.modelAppid) next.model_appid = model.modelAppid;
+      if (model.accessToken) next.access_token = model.accessToken;
+    }
+    if (model.type === MODEL_TYPES.RERANK || model.type === MODEL_TYPES.TTS) {
+      if (model.maxTokens != null) next.max_tokens = model.maxTokens;
+    }
     setAdvanced(next);
   }, [model]);
 
@@ -201,6 +223,17 @@ export const ModelEditDialog = ({
         modelId: model.id,
         modelFactory: model.source || "OpenAI-API-Compatible",
         ...buildInferenceParamsPayload(advanced, reasoningCapability),
+        // stt/tts: settings-level factory + Volcano credentials ride along
+        // (the verify builder only reads the camelCase fields).
+        ...(advanced.model_factory != null
+          ? { modelFactory: String(advanced.model_factory) }
+          : {}),
+        ...(advanced.model_appid != null
+          ? { modelAppid: String(advanced.model_appid) }
+          : {}),
+        ...(advanced.access_token != null
+          ? { accessToken: String(advanced.access_token) }
+          : {}),
       });
       setProbe(result.connectivity ? "available" : "unavailable");
     } catch {
@@ -260,6 +293,22 @@ export const ModelEditDialog = ({
       ) {
         params.capacitySource = "operator";
       }
+      // Type-specific dedicated fields (chunk / voice credentials / max
+      // tokens) — updateSingleModel reads camelCase keys, while the payload
+      // builder only emits the snake_case ones.
+      if (advanced.expected_chunk_size != null)
+        params.expectedChunkSize = advanced.expected_chunk_size;
+      if (advanced.maximum_chunk_size != null)
+        params.maximumChunkSize = advanced.maximum_chunk_size;
+      if (advanced.chunk_batch != null)
+        params.chunkingBatchSize = advanced.chunk_batch;
+      if (advanced.model_factory != null)
+        params.modelFactory = String(advanced.model_factory);
+      if (advanced.model_appid != null)
+        params.modelAppid = String(advanced.model_appid);
+      if (advanced.access_token != null)
+        params.accessToken = String(advanced.access_token);
+      if (advanced.max_tokens != null) params.maxTokens = advanced.max_tokens;
 
       await modelService.updateSingleModel(params as any);
       onSuccess();

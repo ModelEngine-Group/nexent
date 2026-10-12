@@ -44,7 +44,15 @@ import {
   buildInferenceParamsPayload,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
-import { TYPE_BADGE_CLASS, useTypeOptions } from "./modelTypeUi";
+import {
+  DEFAULT_EXPECTED_CHUNK_SIZE,
+  DEFAULT_MAXIMUM_CHUNK_SIZE,
+} from "./ModelChunkSizeSilder";
+import {
+  isEmbeddingModelType,
+  TYPE_BADGE_CLASS,
+  useTypeOptions,
+} from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): the add-model dialog.
@@ -271,6 +279,33 @@ async function createModel(
 }
 
 /**
+ * Always send chunk params for embedding-family rows (old-dialog parity):
+ * saved gear values win, otherwise the same defaults the backend would
+ * apply (expected 1024 / maximum 1536 / batch 10) become explicit.
+ */
+function applyEmbeddingChunkParams(
+  params: Record<string, unknown>,
+  settings?: ModelAdvancedSettingsValue
+) {
+  if (!isEmbeddingModelType(params.type as string | undefined)) return;
+  const expected =
+    typeof settings?.expected_chunk_size === "number"
+      ? settings.expected_chunk_size
+      : DEFAULT_EXPECTED_CHUNK_SIZE;
+  const maximum =
+    typeof settings?.maximum_chunk_size === "number"
+      ? settings.maximum_chunk_size
+      : DEFAULT_MAXIMUM_CHUNK_SIZE;
+  const batch =
+    typeof settings?.chunk_batch === "number" && settings.chunk_batch > 0
+      ? settings.chunk_batch
+      : 10;
+  params.expectedChunkSize = expected;
+  params.maximumChunkSize = maximum;
+  params.chunkingBatchSize = batch;
+}
+
+/**
  * Merge an advanced-settings value (snake_case spec keys) into the create
  * params. buildInferenceParamsPayload emits snake_case top-level keys, but
  * buildCapacityRequestBody in modelService only reads camelCase — without
@@ -304,6 +339,17 @@ function applyAdvancedSettingsToParams(
   if (payload.tokenizer_family != null)
     params.tokenizerFamily = payload.tokenizer_family;
   if (hasCapacity) params.capacitySource = "operator";
+  // rerank / stt / tts dedicated fields (old spec field set). The service
+  // request builders only read the camelCase keys, so map them explicitly;
+  // for stt/tts a settings-level factory override wins over the form's
+  // provider key (V2 parity).
+  if (payload.max_tokens != null) params.maxTokens = payload.max_tokens;
+  if (payload.model_factory != null)
+    params.modelFactory = String(payload.model_factory);
+  if (payload.model_appid != null)
+    params.modelAppid = String(payload.model_appid);
+  if (payload.access_token != null)
+    params.accessToken = String(payload.access_token);
 }
 
 /* ------------------------------ 单个添加 ------------------------------ */
@@ -443,6 +489,19 @@ function SingleAddForm({
         ...(effective?.settings
           ? buildInferenceParamsPayload(effective.settings)
           : {}),
+        // stt/tts: settings-level factory + Volcano credentials ride along
+        // (V2 parity). The snake_case payload keys are not read by the
+        // verify builder, so the camelCase fields are passed explicitly and
+        // override the form-level provider key above.
+        ...(effective?.settings?.model_factory != null
+          ? { modelFactory: String(effective.settings.model_factory) }
+          : {}),
+        ...(effective?.settings?.model_appid != null
+          ? { modelAppid: String(effective.settings.model_appid) }
+          : {}),
+        ...(effective?.settings?.access_token != null
+          ? { accessToken: String(effective.settings.access_token) }
+          : {}),
       });
       setProbe(result.connectivity ? "available" : "unavailable");
     } catch {
@@ -469,7 +528,9 @@ function SingleAddForm({
         url: baseUrl.trim(),
         apiKey: apiKey.trim(),
         displayName: displayName.trim() || name.trim(),
-        maxTokens: type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
+        // Embedding-family rows use max_tokens as the vector-dimension
+        // placeholder (V2 parity); other types keep the generic default.
+        maxTokens: isEmbeddingModelType(type) ? 1024 : 4096,
         modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
         // The gate above guarantees a passing probe with these exact values.
         connectStatus: "available",
@@ -477,6 +538,8 @@ function SingleAddForm({
       if (effective?.settings) {
         applyAdvancedSettingsToParams(params, effective.settings, capability);
       }
+      // Embedding rows always carry chunk params (gear values or defaults).
+      applyEmbeddingChunkParams(params, effective?.settings);
       await createModel(tenantId, params);
       onSuccess({ name: name.trim(), type });
       onDone();
@@ -718,7 +781,8 @@ function SingleAddForm({
         </div>
       </div>
 
-      {/* Advanced settings (capacity + inference params) */}
+      {/* Advanced settings (capacity + inference params; embedding rows get
+          the chunk/multimodal panel instead) */}
       {showSettings && (
         <RowSettingsDialog
           key="single"
@@ -729,6 +793,10 @@ function SingleAddForm({
           }}
           override={effective}
           reasoningCapability={capability}
+          onModelTypeChange={(next) => {
+            setType(next);
+            setProbe("idle");
+          }}
           onSave={(next) => {
             setOverride(next);
             setProbe("idle");
@@ -940,11 +1008,25 @@ function BatchAddForm({
   async function checkRow(row: FetchedRow) {
     setRowCheck((s) => ({ ...s, [row.id]: "checking" }));
     try {
+      // stt/tts rows: settings-level factory + Volcano credentials ride
+      // along with the probe (V2 parity); overrides win over nothing since
+      // the batch tab has no form-level factory for the verify call.
+      const settings =
+        rowOverrides[row.id]?.settings ?? rowSuggestions[row.id]?.settings;
       const result = await modelService.verifyModelConfigConnectivity({
         modelName: row.model_name,
         modelType: row.model_type,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
+        ...(settings?.model_factory != null
+          ? { modelFactory: String(settings.model_factory) }
+          : {}),
+        ...(settings?.model_appid != null
+          ? { modelAppid: String(settings.model_appid) }
+          : {}),
+        ...(settings?.access_token != null
+          ? { accessToken: String(settings.access_token) }
+          : {}),
       });
       setRowCheck((s) => ({
         ...s,
@@ -995,7 +1077,7 @@ function BatchAddForm({
           // the default display name; a collision with an existing row is
           // reported as a per-row failure instead of silently suffixed.
           displayName: override?.displayName?.trim() || row.model_name,
-          maxTokens: row.model_type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
+          maxTokens: isEmbeddingModelType(row.model_type) ? 1024 : 4096,
           modelFactory:
             provider === CUSTOM_PROVIDER_KEY
               ? "OpenAI-API-Compatible"
@@ -1018,6 +1100,8 @@ function BatchAddForm({
             rowCapabilities[row.id]
           );
         }
+        // Embedding rows always carry chunk params (gear values or defaults).
+        applyEmbeddingChunkParams(params, override?.settings);
         await createModel(tenantId, params);
         createdDisplayNames.push(
           override?.displayName?.trim() || row.model_name
@@ -1384,6 +1468,7 @@ function BatchAddForm({
             rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
           }
           reasoningCapability={rowCapabilities[settingsRowId]}
+          onModelTypeChange={(next) => updateRowType(settingsRowId, next)}
           onSave={(next) => {
             setRowOverrides((prev) => ({
               ...prev,
@@ -1404,24 +1489,32 @@ function RowSettingsDialog({
   row,
   override,
   reasoningCapability,
+  onModelTypeChange,
   onSave,
   onClose,
 }: {
   row: FetchedRow | null;
   override?: RowOverride;
   reasoningCapability?: ReasoningCapability;
+  /** Live type updates for the multimodal switch (embedding ↔
+   *  multi_embedding). The switch mirrors the old dialog: it edits the
+   *  row's type immediately, like the row type Select itself. */
+  onModelTypeChange?: (next: ModelType) => void;
   onSave: (next: RowOverride) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   // One flat value drives the whole form — ModelAdvancedConfig renders the
-  // fixed v0 field set (capacity + inference + custom params).
+  // type-aware v0 field set (capacity + inference for LLM family; chunk /
+  // multimodal for embedding; voice credentials for stt/tts).
   const [settings, setSettings] = useState<ModelAdvancedSettingsValue>(
     override?.settings ?? {}
   );
   const [displayName, setDisplayName] = useState(override?.displayName ?? "");
 
   if (!row) return null;
+
+  const isEmbedding = isEmbeddingModelType(row.model_type);
 
   function handleSave() {
     onSave({
@@ -1438,9 +1531,13 @@ function RowSettingsDialog({
             {row.model_name}
           </DialogTitle>
           <DialogDescription>
-            {t("modelConfig.addDialog.rowSettingsDesc", {
-              defaultValue: "容量与推理参数（留空使用默认值）",
-            })}
+            {isEmbedding
+              ? t("modelConfig.addDialog.rowSettingsDescEmbedding", {
+                  defaultValue: "切片与多模态配置（留空使用默认值）",
+                })
+              : t("modelConfig.addDialog.rowSettingsDesc", {
+                  defaultValue: "容量与推理参数（留空使用默认值）",
+                })}
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
@@ -1463,11 +1560,15 @@ function RowSettingsDialog({
               })}
             />
           </div>
+
+          {/* Type-aware fields: embedding rows get the chunk/multimodal
+              panel, rerank gets max tokens, stt/tts get voice credentials */}
           <ModelAdvancedConfig
             value={settings}
             onChange={setSettings}
             modelType={row.model_type}
             reasoningCapability={reasoningCapability}
+            onModelTypeChange={onModelTypeChange}
           />
         </div>
         <div className="flex justify-end gap-2 border-t px-6 py-4">
