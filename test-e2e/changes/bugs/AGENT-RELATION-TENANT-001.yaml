@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-RELATION-TENANT-001
+  change_type: bugfix
+  bug_id: AGENT-RELATION-TENANT-001
+  title: Reject unauthorized Agent updates and cross-tenant A2A bindings
+  description: Authorize parent edits, validate both binding identifiers, and tenant-filter external joins.
+  observed_behavior: Foreign identifiers can create relations; arbitrary updates bypass edit permission unless a protocol boolean is supplied.
+  expected_behavior: Unauthorized writes return 403/404 before mutations; owned editable bindings continue to work.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: API-095 covers two foreign identifiers but lacks mixed-tenant parent/child selections and update-path rejection.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: add
+    reason: Existing relation tests do not prove identifier ownership or unconditional edit authorization.
+    behaviors:
+    - Reject foreign, missing or deleted references before creating or restoring relations.
+    - Reject read-only updates even without a protocol-repair field.
+    - Preserve owned editable success and duplicate behavior.
+    test_selectors:
+    - test/backend/database/test_a2a_relation_tenant_boundary.py
+    - test/backend/services/test_agent_update_edit_boundary.py
+    - test/backend/services/test_a2a_relation_service.py
+    - test/backend/app/test_a2a_relation_authorization.py
+  affected_features:
+    existing: [F-094]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [API-094]
+    added: []
+    modified: [API-095]
+    retired: []
+  notes: Design at nexent-doc/docs/Developing/dev-agent-relation-tenant-isolation/design.md. Supplied execution blocked by missing A2A mock token; retain that as blocked, not passed.

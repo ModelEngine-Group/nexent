@@ -1,0 +1,62 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: CTR-034
+  feature_id: F-090
+  business_rule_ids: [F-090-RULE-01]
+  title: Nacos config CRUD/active/discover｜核心流程
+  type: CONTRACT
+  priority: P2
+  status: active
+  automation: automated
+  objective: Nacos config CRUD/active/discover｜核心流程
+  preconditions:
+  - Nexent 测试服务和租户管理员身份可用。
+  - 受控 A2A Mock 与真实 Nacos 就绪，config/a2a.yaml 符合维护的 Schema。
+  - Mock 控制令牌从已声明配置获取，故障代理没有其他批次的注入。
+  test_data:
+    resource_ownership: 每次执行生成唯一名称和动态资源 ID，凭据由受保护 Mock fixture 提供。
+  steps:
+  - order: 1
+    action: 创建独立 Nacos 配置并读取详情
+    expected: 配置名称及动态 config_id 一致
+  - order: 2
+    action: 更新名称，停用配置并按停用状态过滤
+    expected: 列表包含当前配置，停用配置发现返回 400
+  - order: 3
+    action: 启用配置并按启用状态过滤
+    expected: 配置出现在启用列表
+  - order: 4
+    action: 通过真实 Nacos 发现已注册 Mock Agent，重复发现
+    expected: 返回 source_type=nacos，同一配置和 Agent 名称复用同一动态 ID
+  - order: 5
+    action: 删除本用例发现的 Agent 与配置并回读
+    expected: 均返回 404，无残留资源
+  expected_results:
+  - 配置名称及动态 config_id 一致
+  - 列表包含当前配置，停用配置发现返回 400
+  - 配置出现在启用列表
+  - 返回 source_type=nacos，同一配置和 Agent 名称复用同一动态 ID
+  - 均返回 404，无残留资源
+  forbidden_side_effects:
+  - 不覆盖已有 Nacos 配置、不删除其他批次资源、不泄露密码。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 177
+  contract:
+  contract:
+    protocol: Nexent Nacos management API and real Nacos A2A discovery
+    request_expectations:
+    - 创建独立 Nacos 配置并读取详情
+    - 更新名称，停用配置并按停用状态过滤
+    - 启用配置并按启用状态过滤
+    - 通过真实 Nacos 发现已注册 Mock Agent，重复发现
+    - 删除本用例发现的 Agent 与配置并回读
+    response_expectations:
+    - 配置名称及动态 config_id 一致
+    - 列表包含当前配置，停用配置发现返回 400
+    - 配置出现在启用列表
+    - 返回 source_type=nacos，同一配置和 Agent 名称复用同一动态 ID
+    - 均返回 404，无残留资源

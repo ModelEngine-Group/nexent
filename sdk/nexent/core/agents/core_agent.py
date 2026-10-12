@@ -63,6 +63,7 @@ from .output_protocol import (
     RuntimeFinalAnswer,
     classify_model_output,
     has_meaningful_visible_content,
+    is_raw_final_answer_candidate,
     unicode_category_summary,
 )
 from .context.budget import message_role
@@ -1028,7 +1029,7 @@ Additional Args:
             or getattr(self, "_consecutive_protocol_errors", 0) < 2
             or self.stop_event.is_set()
             or getattr(memory_step, "tool_calls", None)
-            or not has_meaningful_visible_content(model_output)
+            or not is_raw_final_answer_candidate(model_output)
         ):
             return False
         diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
@@ -1244,7 +1245,6 @@ Additional Args:
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
         Returns None if the step is not final.
         """
-        suppress_repair_generation_stream = False
         strict_code_action = (
             getattr(self, "output_protocol", "code_action") == "code_action"
             and getattr(self, "enable_protocol_repair_retry", False)
@@ -1314,8 +1314,9 @@ Additional Args:
                 additional_args["_retry_empty_response"] = False
 
         repair_messages = getattr(self, "_protocol_repair_messages", [])
-        if repair_messages:
-            suppress_repair_generation_stream = True
+        # Code actions retain their accepted raw stream; final envelopes keep
+        # the existing presentation policy that hides the protocol wrapper.
+        if repair_messages and getattr(self, "output_protocol", "code_action") == "final_envelope":
             if getattr(self.model, "supports_suppressed_attempt_stream", False) is True:
                 additional_args["_suppress_attempt_stream"] = True
         if legacy_code_action:
@@ -1512,7 +1513,7 @@ Additional Args:
                     raise RunTerminated()
                 self._resolve_deferred_model_attempt(
                     memory_step.model_output_message,
-                    accepted=not suppress_repair_generation_stream,
+                    accepted=True,
                 )
                 self._log_protocol_repair_accepted(memory_step.model_output_message)
                 getattr(self, "_protocol_repair_messages", []).clear()
@@ -1527,7 +1528,7 @@ Additional Args:
             memory_step.code_action = code_action
             self._resolve_deferred_model_attempt(
                 memory_step.model_output_message,
-                accepted=not suppress_repair_generation_stream,
+                accepted=True,
             )
 
             self._log_protocol_repair_accepted(memory_step.model_output_message)

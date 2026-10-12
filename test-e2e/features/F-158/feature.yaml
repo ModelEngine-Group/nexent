@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-158
+  name: orphaned agent workspace cleanup 不误删活跃资源
+  status: active
+  description: '平台运维能力 / 工作空间清理: orphaned agent workspace cleanup 不误删活跃资源'
+  business_rules:
+  - rule_id: F-158-RULE-01
+    description: orphaned agent workspace cleanup 不误删活跃资源
+  required_test_stages:
+  - D5
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

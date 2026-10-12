@@ -11,7 +11,7 @@ import shutil
 import tarfile
 import time
 from concurrent.futures import CancelledError
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
@@ -37,6 +37,7 @@ from .tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,
     apply_user_context_to_mcp_tool,
 )
+from .tool_parameters import apply_mcp_tool_parameters
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
@@ -549,6 +550,9 @@ class NexentAgent:
         )
         if tool_obj is None:
             raise ValueError(f"{class_name} not found in MCP server")
+        # Collections may be shared by multiple runs; never wrap their template.
+        tool_obj = copy(tool_obj)
+        tool_obj.inputs = deepcopy(tool_obj.inputs)
         return apply_user_context_to_mcp_tool(tool_obj, self.user_context)
 
     def create_builtin_tool(self, tool_config: ToolConfig):
@@ -666,6 +670,7 @@ class NexentAgent:
                 tool_obj = self.create_local_tool(tool_config)
             elif source == "mcp":
                 tool_obj = self.create_mcp_tool(class_name)
+                tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
             elif source == "langchain":
                 tool_obj = self.create_langchain_tool(tool_config)
             elif source == "builtin":

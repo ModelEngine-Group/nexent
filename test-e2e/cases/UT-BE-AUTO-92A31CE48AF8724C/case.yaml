@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-92A31CE48AF8724C
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: 外部记忆提供者摄取编排：全局白名单过滤、确定性幂等键、事件日志落库｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 外部记忆提供者摄取编排：全局白名单过滤、确定性幂等键、事件日志落库｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 测试使用本地 mock 依赖对象（MemoryProviderConfigService / MemoryExternalProviderService / 参数与事件日志 DB 访问层），不依赖真实 provider、数据库或外部模型服务。
+  test_data:
+    legacy_asset_declaration: '- 本地测试代码内固定 fixture：mock provider config 与 MemoryIngestUnit 样例（含命中/未命中全局白名单的 unit_type）'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“外部记忆提供者摄取编排”相关的固定 fixture；测试代码不得读取生产凭据。
+    expected: 只有 unit_type 命中全局白名单 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES 的 unit 进入 provider_service.ingest；未命中的被过滤；过滤后为空时返回
+      status="ok"、accepted_count=0 且不调用 provider_service.ingest。
+  - order: 2
+    action: 直接导入 backend/services/memory_ingestion_event_service.py 的 MemoryIngestionEventService，注入 mock 的 MemoryProviderConfigService、MemoryExternalProviderService，并
+      mock memory_provider_config_param_db.get_params 与 memory_external_ingest_event_log_db.insert_event_log。
+    expected: 幂等键严格等于 "nexent:{tenant}:{agent}:{user}:{conversation}:{event_type}:{event_id}"，相同入参产生稳定且唯一的键。
+  - order: 3
+    action: 构造 enabled 的 provider config（provider_name、provider_config_id、enabled=True），以若干 MemoryIngestUnit（unit_type 分别命中/未命中全局白名单
+      EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES）调用 send_ingest，记录返回的 MemoryIngestResult、provider_service.ingest 收到的 MemoryIngestRequest（含
+      units 与 idempotency_key）及事件日志落库参数。
+    expected: config 缺失或 enabled=False 时返回 status="disabled"，不调用 provider_service.ingest、不写事件日志。
+  - order: 4
+    action: 验证白名单过滤：断言传给 provider_service.ingest 的 units 仅保留 unit_type 命中全局白名单的 unit，未命中的 unit 被剔除；当过滤后为空时断言返回 status="ok"、accepted_count=0
+      且不调用 provider_service.ingest、不写事件日志。
+    expected: 成功/失败路径均调用 memory_external_ingest_event_log_db.insert_event_log 一次，response_status=result.status，response_summary=result.message（无
+      message 时等于 "status={status}"），unit_ids 为命中白名单 unit 的 event_id 逗号拼接，idempotency_key 与生成的键一致。
+  - order: 5
+    action: 验证幂等键：对固定 tenant_id/agent_id/user_id/conversation_id/event_type/event_id 断言生成 "nexent:{tenant}:{agent}:{user}:{conversation}:{event_type}:{event_id}"，且相同入参重复调用结果稳定一致。
+    expected: 失败路径（status="error"）的事件日志 response_status="error" 且 response_summary 承载失败原因，不被吞成伪成功。
+  - order: 6
+    action: 验证 disabled/不存在分支：config 为 None 或 enabled=False 时断言返回 status="disabled"，不调用 provider_service.ingest 且不写事件日志。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志、Trace、报告中不出现明文 API Key/Token/密码/模型密钥。
+  - order: 7
+    action: 验证事件日志落库：断言 insert_event_log 被调用一次，log_data 的 idempotency_key、event_id、unit_ids（逗号拼接命中白名单 unit 的 event_id）、response_status、response_summary
+      字段正确；失败路径（result.status="error" 且带 message）断言 response_status="error"、response_summary 承载失败原因。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志、Trace、报告中不出现明文 API Key/Token/密码/模型密钥。
+  - order: 8
+    action: 对边界/异常路径：provider_service.ingest 抛异常时按契约记录或返回错误结果，不吞异常返回伪成功；确认日志不输出 API Key/Token/密码/模型密钥；测试结束后释放临时对象，确保可重复执行。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常；日志、Trace、报告中不出现明文 API Key/Token/密码/模型密钥。
+  expected_results:
+  - 只有 unit_type 命中全局白名单 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES 的 unit 进入 provider_service.ingest；未命中的被过滤；过滤后为空时返回 status="ok"、accepted_count=0
+    且不调用 provider_service.ingest。
+  - 幂等键严格等于 "nexent:{tenant}:{agent}:{user}:{conversation}:{event_type}:{event_id}"，相同入参产生稳定且唯一的键。
+  - config 缺失或 enabled=False 时返回 status="disabled"，不调用 provider_service.ingest、不写事件日志。
+  - 成功/失败路径均调用 memory_external_ingest_event_log_db.insert_event_log 一次，response_status=result.status，response_summary=result.message（无
+    message 时等于 "status={status}"），unit_ids 为命中白名单 unit 的 event_id 逗号拼接，idempotency_key 与生成的键一致。
+  - 失败路径（status="error"）的事件日志 response_status="error" 且 response_summary 承载失败原因，不被吞成伪成功。
+  - 功能结果与代码契约一致，测试过程无未处理异常；日志、Trace、报告中不出现明文 API Key/Token/密码/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 406
+  unit_boundary: 外部提供者摄取编排
+  inputs:
+  - '- 本地测试代码内固定 fixture：mock provider config 与 MemoryIngestUnit 样例（含命中/未命中全局白名单的 unit_type）'
+  assertions:
+  - 只有 unit_type 命中全局白名单 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES 的 unit 进入 provider_service.ingest；未命中的被过滤；过滤后为空时返回 status="ok"、accepted_count=0
+    且不调用 provider_service.ingest。
+  - 幂等键严格等于 "nexent:{tenant}:{agent}:{user}:{conversation}:{event_type}:{event_id}"，相同入参产生稳定且唯一的键。
+  - config 缺失或 enabled=False 时返回 status="disabled"，不调用 provider_service.ingest、不写事件日志。
+  - 成功/失败路径均调用 memory_external_ingest_event_log_db.insert_event_log 一次，response_status=result.status，response_summary=result.message（无
+    message 时等于 "status={status}"），unit_ids 为命中白名单 unit 的 event_id 逗号拼接，idempotency_key 与生成的键一致。
+  - 失败路径（status="error"）的事件日志 response_status="error" 且 response_summary 承载失败原因，不被吞成伪成功。
+  - 功能结果与代码契约一致，测试过程无未处理异常；日志、Trace、报告中不出现明文 API Key/Token/密码/模型密钥。

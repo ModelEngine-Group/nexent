@@ -1,0 +1,12 @@
+# Copy to NEXENT_TEST_HOME/config/pipeline.yaml. Never put credentials in argv.
+# Hooks run without a shell. Supported tokens: {python}, {repo}, {home}, {run}.
+# Daily refuses execution until build, deploy and preflight commands are supplied.
+schema_version: 1
+case_timeout_seconds: 1800
+command_timeout_seconds: 3600
+notify: false
+hooks:
+  build: []
+  deploy: []
+  preflight: []
+# Prerequisites belong in each Case's execution.yaml, not in machine settings.

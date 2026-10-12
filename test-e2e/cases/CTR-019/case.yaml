@@ -1,0 +1,77 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: CTR-019
+  feature_id: F-068
+  business_rule_ids:
+  - F-068-RULE-01
+  title: publish_as_a2a 与 Agent Card/版本一致性｜外部依赖异常与超时
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: publish_as_a2a 与 Agent Card/版本一致性｜外部依赖异常与超时
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/a2a.yaml；${NEXENT_TEST_HOME}/services/test-a2a/；${NEXENT_TEST_HOME}/assets/agents/
+  - Test A2A Server/Registry 已启动并清空本次 wire log。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/a2a.yaml
+
+      - ${NEXENT_TEST_HOME}/services/test-a2a/
+
+      - ${NEXENT_TEST_HOME}/assets/agents/'
+  steps:
+  - order: 1
+    action: 准备一个可运行测试 Agent/Skill 和两个隔离租户，版本名称均带 RunID。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 按“publish_as_a2a 与 Agent Card/版本一致性｜外部依赖异常与超时”通过实际 API 执行发布、比较、状态迁移、回滚、仓库审核或跨租户安装。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 每次状态变化后重新读取详情/列表，确认 current_version、status、diff 和审计信息一致。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 回滚后执行一次真实 Agent Chat，确认 Runtime 使用回滚版本而不是仅 UI 标签变化。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 市场场景以另一租户检索/安装，检查安装后生成独立资源副本或正确引用，不能泄露原租户私有配置。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 6
+    action: 非法状态迁移、重复发布或无权限审核必须明确拒绝。
+    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  - order: 7
+    action: '删除市场测试条目与临时版本/Agent。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 136
+  integration_boundary:
+  - LOCAL_REAL_PROTOCOL：连接本地 Test A2A Agent/Registry，走真实 A2A 协议；Header/JWT/metadata 必须抓取实际请求验证。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

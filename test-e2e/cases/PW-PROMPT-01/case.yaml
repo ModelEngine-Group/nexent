@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-PROMPT-01
+  feature_id: V5-PW-PROMPT-01
+  business_rule_ids:
+  - V5-PW-PROMPT-01-RULE-01
+  title: 智能生成修改职责Prompt→手动微调与autosave
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证当前Agent智能生成面板通过真实模型修订职责Prompt，回写配置后可手动微调且持久化；不假设独立Prompt优化弹窗或模板入口。
+  preconditions:
+  - 可编辑Draft Agent，作者、描述及真实LLM均已持久化。
+  - 智能生成面板可用，准备独立职责、使用要求和示例Prompt。
+  - 使用run_id唯一标记限定本次职责Prompt修订。
+  test_data:
+    legacy_asset_declaration: config/models.yaml；expected/prompt_expected.json
+  steps:
+  - order: 1
+    action: 在Basic→Role & Model定位职责、使用要求、示例三个Prompt页签，并确认智能生成面板的“生成提示词”建议可见。
+    expected: 真实智能生成请求完成且职责Prompt发生预期修订。
+  - order: 2
+    action: 录入固定基础Prompt、使用要求和示例，等待autosave。
+    expected: 未请求修改的使用要求、示例、描述和模型保持不变。
+  - order: 3
+    action: 点击“生成提示词”，在智能生成输入框明确要求只修订职责Prompt并保留run_id标记，其他配置不变。
+    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+  - order: 4
+    action: 提交并确认真实POST /agent/nl2agent/run请求成功。
+    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+  - order: 5
+    action: 等待职责Prompt回写为非空新内容，含标记；核对使用要求和示例未被覆盖。
+    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+  - order: 6
+    action: 在现有放大编辑器内手动追加固定标记并等待autosave。
+    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+  - order: 7
+    action: 切换至另一Agent再切回，核对最终职责Prompt。
+    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+  - order: 8
+    action: 刷新页面，核对最终职责Prompt仍为服务器持久化值。
+    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+  expected_results:
+  - 真实智能生成请求完成且职责Prompt发生预期修订。
+  - 未请求修改的使用要求、示例、描述和模型保持不变。
+  - 手动微调后的Prompt在切换Agent和刷新后仍存在。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 21
+  actor: Nexent browser user
+  journey:
+  - 在Basic→Role & Model定位职责、使用要求、示例三个Prompt页签，并确认智能生成面板的“生成提示词”建议可见。
+  - 录入固定基础Prompt、使用要求和示例，等待autosave。
+  - 点击“生成提示词”，在智能生成输入框明确要求只修订职责Prompt并保留run_id标记，其他配置不变。
+  - 提交并确认真实POST /agent/nl2agent/run请求成功。
+  - 等待职责Prompt回写为非空新内容，含标记；核对使用要求和示例未被覆盖。
+  - 在现有放大编辑器内手动追加固定标记并等待autosave。
+  - 切换至另一Agent再切回，核对最终职责Prompt。
+  - 刷新页面，核对最终职责Prompt仍为服务器持久化值。
+  final_business_result:
+  - 真实智能生成请求完成且职责Prompt发生预期修订。
+  - 未请求修改的使用要求、示例、描述和模型保持不变。
+  - 手动微调后的Prompt在切换Agent和刷新后仍存在。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-PROMPT-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

@@ -1,0 +1,87 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-B0D94398CE6971A3
+  feature_id: F-018
+  business_rule_ids:
+  - F-018-RULE-01
+  title: current_user_info 会话响应 username 与 auth_provider 序列化契约｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: current_user_info 会话响应 username 与 auth_provider 序列化契约｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/auth-providers.yaml
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录（local 本地认证）；为覆盖 CAS 分支，另需一个已链接 provider='cas' 且 provider_username 非空的 OAuth
+    账号的用户，并可取得其 CAS 会话（CAS 服务不可用时跳过该分支并标记 INFRA，不影响 local 分支断言的判定）。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/auth-providers.yaml'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号与租户关系；密码/Token 仅从 secrets.env 注入，测试代码不得读取生产凭据。
+    expected: local 用户 GET /user/current_user_info 返回 HTTP 200，响应 data.user.auth_provider 等于字符串 "local"，且 data.user 中不存在 username
+      字段。
+  - order: 2
+    action: 启动本地完整认证依赖并通过 health check；准备一个 local 认证用户，以及（可选）一个已链接 provider='cas' 且 provider_username 非空的 CAS 账号用户。
+    expected: CAS 用户 GET /user/current_user_info 返回 HTTP 200，响应 data.user.auth_provider 等于字符串 "cas"，且 data.user.username 等于
+      oauth_accounts 表中该用户 provider='cas' 的 provider_username（trim 后非空）；若无已链接账号，username 字段存在且值为 null。
+  - order: 3
+    action: 用 local 用户登录，携带其 Authorization Header 通过实际 HTTP 请求 GET /user/current_user_info，记录状态码与响应 body。
+    expected: 字段类型契约：auth_provider 恒为 "local" 或 "cas" 字符串；username 仅在 CAS 分支出现（字符串或 null），local 分支不返回该字段。
+  - order: 4
+    action: 检查响应 data.user 中 auth_provider 字段值以及是否包含 username 字段，并核对 data.user 其余字段（user_id/group_ids/tenant_id/user_email/user_role/permissions/accessibleRoutes）仍完整返回。
+    expected: 前端映射契约：authService.getCurrentUserInfo 将 data.user.username 映射为 user.username（缺失时为 undefined）、data.user.auth_provider
+      映射为 user.authProvider；local 用户 username 为 undefined 时不影响 username→email 回退展示。
+  - order: 5
+    action: 用 CAS 用户获取会话后，携带该会话的 Authorization Header 再次请求 GET /user/current_user_info。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥；不出现跨租户或跨用户数据串用。
+  - order: 6
+    action: 记录 CAS 分支响应 data.user.auth_provider 与 username 字段值，并与 oauth_accounts 表中该用户 provider='cas' 的 provider_username
+      比对。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥；不出现跨租户或跨用户数据串用。
+  - order: 7
+    action: 检查前端 authService.getCurrentUserInfo 对 data.user.username 与 data.user.auth_provider 的映射结果；确认响应与日志不出现明文 password/token/API
+      key；清理临时账号。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥；不出现跨租户或跨用户数据串用。
+  expected_results:
+  - local 用户 GET /user/current_user_info 返回 HTTP 200，响应 data.user.auth_provider 等于字符串 "local"，且 data.user 中不存在 username 字段。
+  - CAS 用户 GET /user/current_user_info 返回 HTTP 200，响应 data.user.auth_provider 等于字符串 "cas"，且 data.user.username 等于 oauth_accounts
+    表中该用户 provider='cas' 的 provider_username（trim 后非空）；若无已链接账号，username 字段存在且值为 null。
+  - 字段类型契约：auth_provider 恒为 "local" 或 "cas" 字符串；username 仅在 CAS 分支出现（字符串或 null），local 分支不返回该字段。
+  - 前端映射契约：authService.getCurrentUserInfo 将 data.user.username 映射为 user.username（缺失时为 undefined）、data.user.auth_provider 映射为
+    user.authProvider；local 用户 username 为 undefined 时不影响 username→email 回退展示。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥；不出现跨租户或跨用户数据串用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 505
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取隔离测试账号与租户关系；密码/Token 仅从 secrets.env 注入，测试代码不得读取生产凭据。
+    - 启动本地完整认证依赖并通过 health check；准备一个 local 认证用户，以及（可选）一个已链接 provider='cas' 且 provider_username 非空的 CAS 账号用户。
+    - 用 local 用户登录，携带其 Authorization Header 通过实际 HTTP 请求 GET /user/current_user_info，记录状态码与响应 body。
+    - 检查响应 data.user 中 auth_provider 字段值以及是否包含 username 字段，并核对 data.user 其余字段（user_id/group_ids/tenant_id/user_email/user_role/permissions/accessibleRoutes）仍完整返回。
+    - 用 CAS 用户获取会话后，携带该会话的 Authorization Header 再次请求 GET /user/current_user_info。
+    - 记录 CAS 分支响应 data.user.auth_provider 与 username 字段值，并与 oauth_accounts 表中该用户 provider='cas' 的 provider_username 比对。
+    - 检查前端 authService.getCurrentUserInfo 对 data.user.username 与 data.user.auth_provider 的映射结果；确认响应与日志不出现明文 password/token/API
+      key；清理临时账号。
+    response_expectations:
+    - local 用户 GET /user/current_user_info 返回 HTTP 200，响应 data.user.auth_provider 等于字符串 "local"，且 data.user 中不存在 username
+      字段。
+    - CAS 用户 GET /user/current_user_info 返回 HTTP 200，响应 data.user.auth_provider 等于字符串 "cas"，且 data.user.username 等于 oauth_accounts
+      表中该用户 provider='cas' 的 provider_username（trim 后非空）；若无已链接账号，username 字段存在且值为 null。
+    - 字段类型契约：auth_provider 恒为 "local" 或 "cas" 字符串；username 仅在 CAS 分支出现（字符串或 null），local 分支不返回该字段。
+    - 前端映射契约：authService.getCurrentUserInfo 将 data.user.username 映射为 user.username（缺失时为 undefined）、data.user.auth_provider
+      映射为 user.authProvider；local 用户 username 为 undefined 时不影响 username→email 回退展示。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥；不出现跨租户或跨用户数据串用。

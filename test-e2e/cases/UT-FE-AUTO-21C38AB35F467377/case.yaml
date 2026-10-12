@@ -1,0 +1,77 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-21C38AB35F467377
+  feature_id: F-137
+  business_rule_ids:
+  - F-137-RULE-01
+  title: 评价详情页 all/pass/fail Tab/排序/session/标注过滤切换时 case 总数标签与当前查询一致｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 评价详情页 all/pass/fail Tab/排序/session/标注过滤切换时 case 总数标签与当前查询一致｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+  - 测试通过 mock fetch 固定评价详情页所需接口响应（run 详情、stats、cases），不使用真实后端或模型服务。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载评价详情页组件（frontend/app/[locale]/evaluation/[id]/page.tsx 的 EvaluationDetailPage），mock 全局 fetch 与 getAuthHeaders，注入最小
+      props、路由 params.id 及本地固定 run/stats/cases 响应数据。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 首次渲染后断言默认选中 "all" Tab，caseLoading 为 true，且初始化阶段 caseTotal 标签不显示旧总计（caseTotalQueryKey 初始为 null，hasCurrentCaseTotal
+      为 false）。
+    expected: Tab 计数仅在 caseTotalQueryKey === getCaseTotalQueryKey(caseTab, annoFilters, sessionIdFilter) 时展示 caseTotal，否则回退
+      stats totalCases/passCount/failCount，不显示旧 total。
+  - order: 3
+    action: 模拟 stats 与 cases 接口成功返回，断言 all Tab 标签在 query key 匹配后展示当前查询返回的 data.total，并与分页总数一致。
+    expected: 竞态下旧响应被 AbortController 取消，不覆盖新查询的 rows 与 total，计数标签与当前查询一致。
+  - order: 4
+    action: 使用真实用户事件点击 "pass" Tab，断言在 pass 请求返回前 Tab 标签不显示 all 的旧 caseTotal，而是回退到 stats 的 passCount；返回后展示 pass 查询自身 total。
+    expected: getCaseTotalQueryKey 对 filters 按 schema_id 数值升序归一化，相同语义不同插入顺序产出相同 key；sessionId 空值归一为 null。
+  - order: 5
+    action: 快速连续切换 all→pass→fail（触发竞态），断言旧请求经 AbortController 取消后不覆盖新 rows 与 total，最终 fail Tab 展示 fail 查询 total，caseTotalQueryKey
+      与当前 caseTab 一致。
+    expected: 失败路径回退展示 stats fallback 值，不出现半更新或重复副作用，页面其它 Tab 计数不受影响。
+  - order: 6
+    action: 依次切换排序（点击评分列 sorter）、session 过滤（session 列下拉 filter）与标注过滤（anno_ 列 filter），断言每次加载态下 Tab 计数不显示旧 total，完成后展示新查询 data.total；同语义过滤条件仅
+      schema_id 插入顺序不同时 getCaseTotalQueryKey 产出相同 key。
+    expected: 日志、DOM 中不输出明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 模拟 cases 接口 4xx/5xx/timeout，断言失败不影响 Tab 计数回退值（stats totalCases/passCount/failCount fallback），不显示陈旧 total，且不阻断其它
+      Tab 计数。
+    expected: 日志、DOM 中不输出明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 卸载后重新渲染组件，确认 caseTotalQueryKey 复位、不残留上一次查询的旧 total；确认过程无未处理异常且日志/DOM 不含明文密钥。
+    expected: 日志、DOM 中不输出明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - Tab 计数仅在 caseTotalQueryKey === getCaseTotalQueryKey(caseTab, annoFilters, sessionIdFilter) 时展示 caseTotal，否则回退 stats totalCases/passCount/failCount，不显示旧
+    total。
+  - 竞态下旧响应被 AbortController 取消，不覆盖新查询的 rows 与 total，计数标签与当前查询一致。
+  - getCaseTotalQueryKey 对 filters 按 schema_id 数值升序归一化，相同语义不同插入顺序产出相同 key；sessionId 空值归一为 null。
+  - 失败路径回退展示 stats fallback 值，不出现半更新或重复副作用，页面其它 Tab 计数不受影响。
+  - 日志、DOM 中不输出明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 426
+  unit_boundary: 评测详情页
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - Tab 计数仅在 caseTotalQueryKey === getCaseTotalQueryKey(caseTab, annoFilters, sessionIdFilter) 时展示 caseTotal，否则回退 stats totalCases/passCount/failCount，不显示旧
+    total。
+  - 竞态下旧响应被 AbortController 取消，不覆盖新查询的 rows 与 total，计数标签与当前查询一致。
+  - getCaseTotalQueryKey 对 filters 按 schema_id 数值升序归一化，相同语义不同插入顺序产出相同 key；sessionId 空值归一为 null。
+  - 失败路径回退展示 stats fallback 值，不出现半更新或重复副作用，页面其它 Tab 计数不受影响。
+  - 日志、DOM 中不输出明文 API Key/Token/Password/模型密钥。

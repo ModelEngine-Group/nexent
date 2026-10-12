@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-VERSION-01
+  name: Publish→Version Manage→切换/比较→回到Draft
+  status: active
+  description: 验证发布和版本管理真实生命周期。
+  business_rules:
+  - rule_id: V5-PW-VERSION-01-RULE-01
+    description: Publish→Version Manage→切换/比较→回到Draft
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

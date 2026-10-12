@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-107
+  name: URL规范化/parts构建/鉴权透传/上游404/redirect
+  status: active
+  description: '知识库与文件 / DataMate下载: URL规范化/parts构建/鉴权透传/上游404/redirect'
+  business_rules:
+  - rule_id: F-107-RULE-01
+    description: URL规范化/parts构建/鉴权透传/上游404/redirect
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

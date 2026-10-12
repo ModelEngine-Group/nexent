@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-PROFILE-01
+  name: 个人安全设置：修改密码→AK/SK生成/复制/重生成/删除
+  status: active
+  description: 覆盖/users真实安全操作，修正v4把Token管理混在注册场景。
+  business_rules:
+  - rule_id: V5-PW-PROFILE-01-RULE-01
+    description: 个人安全设置：修改密码→AK/SK生成/复制/重生成/删除
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

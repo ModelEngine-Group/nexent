@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MEDIA-STT-01
+  feature_id: V5-PW-MEDIA-STT-01
+  business_rule_ids:
+  - V5-PW-MEDIA-STT-01-RULE-01
+  title: 真实STT配置→Chat语音输入→转写→发送
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证Composer真实语音/STT浏览器链，不虚构TTS播放UI。
+  preconditions:
+  - 真实STT通过预检
+  - 浏览器虚拟麦克风/固定媒体注入可用
+  - 音频含Nexent和92831
+  test_data:
+    legacy_asset_declaration: config/models.yaml；assets/audio/stt_zh_number.wav；expected/stt_expected.json
+  steps:
+  - order: 1
+    action: 在/models确认STT已配置并通过真实连通性检查。
+    expected: 真实STT被调用且转写满足关键词/CER阈值。
+  - order: 2
+    action: 打开/newchat选择测试Agent。
+    expected: 转写可直接作为消息发送。
+  - order: 3
+    action: 点击Composer语音/麦克风入口。
+    expected: 连接结束后UI无悬挂。
+  - order: 4
+    action: 用绑定固定WAV的虚拟麦克风播放stt_zh_number.wav，等待wire和Composer均出现完整92831后再停止。
+    expected: 连接结束后UI无悬挂。
+  - order: 5
+    action: 等待停止/转写完成，确认Composer文本被填充。
+    expected: 连接结束后UI无悬挂。
+  - order: 6
+    action: 按oracle检查转写含Nexent和92831（允许标点/数字表示差异）。
+    expected: 连接结束后UI无悬挂。
+  - order: 7
+    action: 点击发送并等待Chat完成。
+    expected: 连接结束后UI无悬挂。
+  - order: 8
+    action: 关闭/重新打开语音入口，确认状态可恢复。
+    expected: 连接结束后UI无悬挂。
+  expected_results:
+  - 真实STT被调用且转写满足关键词/CER阈值。
+  - 转写可直接作为消息发送。
+  - 连接结束后UI无悬挂。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 15
+  actor: Nexent browser user
+  journey:
+  - 在/models确认STT已配置并通过真实连通性检查。
+  - 打开/newchat选择测试Agent。
+  - 点击Composer语音/麦克风入口。
+  - 用绑定固定WAV的虚拟麦克风播放stt_zh_number.wav，等待wire和Composer均出现完整92831后再停止。
+  - 等待停止/转写完成，确认Composer文本被填充。
+  - 按oracle检查转写含Nexent和92831（允许标点/数字表示差异）。
+  - 点击发送并等待Chat完成。
+  - 关闭/重新打开语音入口，确认状态可恢复。
+  final_business_result:
+  - 真实STT被调用且转写满足关键词/CER阈值。
+  - 转写可直接作为消息发送。
+  - 连接结束后UI无悬挂。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MEDIA-STT-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

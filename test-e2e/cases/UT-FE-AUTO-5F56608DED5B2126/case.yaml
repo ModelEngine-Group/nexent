@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-5F56608DED5B2126
+  feature_id: F-098
+  business_rule_ids:
+  - F-098-RULE-01
+  title: 文档列表标签筛选、投影状态徽标、标签分配及 datamate/只读隐藏｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 文档列表标签筛选、投影状态徽标、标签分配及 datamate/只读隐藏｜核心流程
+  preconditions:
+  - 本地组件测试环境可运行；不要求外部模型服务或真实接口在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需 mock 数据就绪：documents 固定列表、tagLibraries（含 bucket_key=knowledge_content）、assignDefinitions、documentBatchStatus 条目。
+  test_data:
+    legacy_asset_declaration: 无强制文件资产；组件级注入内存 mock（documents、tagLibraries、assignDefinitions、documentBatchStatus）与 mock 的 useTagLibraries/useTagDefinitions/tagManagementApi.getDocumentBatchStatus。
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 DocumentList（frontend/app/[locale]/knowledges/components/document/DocumentList.tsx），注入最小 props（documents、knowledgeBaseId、knowledgeBaseSource=""、permission="EDIT"）及
+      mock hooks/api。
+    expected: 存在 knowledge_content 库时正确展示标签筛选与标签管理，入口由 documentLibrary/assignDefinitions/isDataMate 共同决定，渲染过程无未处理异常。
+  - order: 2
+    action: 首次渲染后检查：存在 knowledge_content 库（documentLibrary 非空）且 assignDefinitions 非空时，标题栏右侧显示标签筛选 Popover（内含 TagFilterControls）与“标签管理”按钮；文档列表按
+      create_time 降序渲染。
+    expected: getDocumentBatchStatus 在 250ms 防抖后以 provider="local"、documentIds 截断至 200 调用一次，pending 显示 amber、failed 显示 red
+      徽标，卸载/变更后旧请求不覆盖新状态。
+  - order: 3
+    action: mock tagManagementApi.getDocumentBatchStatus 返回含 projection_status.status=pending 与 failed 的条目，断言文档名旁渲染 amber/red
+      徽标及对应 tooltip；再校验 250ms 防抖与取消：快速连续变更 documents 后仅最后一次请求生效，卸载时旧请求（cancelled）不覆盖状态。
+    expected: 标签筛选按 TagDocumentPredicate 过滤文档且可清除恢复；ResourceTagAssignmentModal 的 resourceType/resourceId/canEdit 与源码契约一致。
+  - order: 4
+    action: 点击文档行“分配标签”按钮，断言 setAssignTarget 打开 ResourceTagAssignmentModal，且 resourceType="knowledge_document"、resourceId=doc.id、canEdit=!isReadOnlyMode。
+    expected: datamate 与 READ_ONLY 模式下相关标签入口按权限隐藏，不出现半写入或 UI 状态不一致。
+  - order: 5
+    action: 通过 TagFilterControls 选择标签谓词，断言 documentPredicates 更新、列表按 activeDocumentIds 过滤，且出现“清除”按钮；清空谓词后恢复全量列表。
+    expected: datamate 与 READ_ONLY 模式下相关标签入口按权限隐藏，不出现半写入或 UI 状态不一致。
+  - order: 6
+    action: 切换 knowledgeBaseSource="datamate"（isDataMate），断言标签筛选、标签管理、分配标签列与投影徽标相关入口不渲染，仅展示 datamate 只读态。
+    expected: datamate 与 READ_ONLY 模式下相关标签入口按权限隐藏，不出现半写入或 UI 状态不一致。
+  - order: 7
+    action: 传入 permission="READ_ONLY"（isReadOnlyMode），断言“标签管理”与删除操作隐藏，分配标签按钮 canEdit=false。
+    expected: datamate 与 READ_ONLY 模式下相关标签入口按权限隐藏，不出现半写入或 UI 状态不一致。
+  - order: 8
+    action: mock getDocumentBatchStatus 抛错，断言组件清空 batch status 且不抛出未捕获异常、不阻塞列表渲染。
+    expected: datamate 与 READ_ONLY 模式下相关标签入口按权限隐藏，不出现半写入或 UI 状态不一致。
+  expected_results:
+  - 存在 knowledge_content 库时正确展示标签筛选与标签管理，入口由 documentLibrary/assignDefinitions/isDataMate 共同决定，渲染过程无未处理异常。
+  - getDocumentBatchStatus 在 250ms 防抖后以 provider="local"、documentIds 截断至 200 调用一次，pending 显示 amber、failed 显示 red 徽标，卸载/变更后旧请求不覆盖新状态。
+  - 标签筛选按 TagDocumentPredicate 过滤文档且可清除恢复；ResourceTagAssignmentModal 的 resourceType/resourceId/canEdit 与源码契约一致。
+  - datamate 与 READ_ONLY 模式下相关标签入口按权限隐藏，不出现半写入或 UI 状态不一致。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 434
+  unit_boundary: 文档标签
+  inputs:
+  - 无强制文件资产；组件级注入内存 mock（documents、tagLibraries、assignDefinitions、documentBatchStatus）与 mock 的 useTagLibraries/useTagDefinitions/tagManagementApi.getDocumentBatchStatus。
+  assertions:
+  - 存在 knowledge_content 库时正确展示标签筛选与标签管理，入口由 documentLibrary/assignDefinitions/isDataMate 共同决定，渲染过程无未处理异常。
+  - getDocumentBatchStatus 在 250ms 防抖后以 provider="local"、documentIds 截断至 200 调用一次，pending 显示 amber、failed 显示 red 徽标，卸载/变更后旧请求不覆盖新状态。
+  - 标签筛选按 TagDocumentPredicate 过滤文档且可清除恢复；ResourceTagAssignmentModal 的 resourceType/resourceId/canEdit 与源码契约一致。
+  - datamate 与 READ_ONLY 模式下相关标签入口按权限隐藏，不出现半写入或 UI 状态不一致。

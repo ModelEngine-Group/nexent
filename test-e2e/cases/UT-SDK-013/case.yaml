@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-013
+  feature_id: F-168
+  business_rule_ids:
+  - F-168-RULE-01
+  title: 索引/写入/删除/搜索/filter/multi-tenant｜异常/边界/越权
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 索引/写入/删除/搜索/filter/multi-tenant｜异常/边界/越权
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/assets/knowledge/；${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“索引/写入/删除/搜索/filter/multi-tenant｜异常/边界/越权”相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 直接导入 sdk/nexent/vector_database 对应的函数/类，构造最小有效输入与必要依赖对象。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 先执行正常输入，记录返回值、状态变化和关键调用参数。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 针对边界值分别执行：空值、最小/最大值、重复调用、非法枚举或缺失字段（按该功能实际入参选择）。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 对有副作用的逻辑检查：对象状态、缓存/计数器、序列化结果以及是否出现重复写入。
+    expected: _extract_highlight_terms({}) 与无命中片段返回空列表 []；重复 term 去重且空白 strip；不含标记的片段不产生 term。
+  - order: 6
+    action: 对异常路径断言领域异常类型/错误码，不允许吞异常后返回伪成功。
+    expected: title 与 content 多字段片段合并为去重后的纯文本词列表；命中项缺失 highlight 时结果仍携带 highlight_terms 字段且搜索不报错。
+  - order: 7
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: title 与 content 多字段片段合并为去重后的纯文本词列表；命中项缺失 highlight 时结果仍携带 highlight_terms 字段且搜索不报错。
+  - order: 8
+    action: 测试结束后释放临时文件/临时对象，确保可重复执行。
+    expected: title 与 content 多字段片段合并为去重后的纯文本词列表；命中项缺失 highlight 时结果仍携带 highlight_terms 字段且搜索不报错。
+  - order: 9
+    action: 直接调用 _extract_highlight_terms 覆盖边界输入：传入空 dict {}；传入 title/content 多字段片段，片段内包含重复命中词、命中词前后空白、以及不含 __nexent_hit_start__/__nexent_hit_end__
+      标记的片段。
+    expected: title 与 content 多字段片段合并为去重后的纯文本词列表；命中项缺失 highlight 时结果仍携带 highlight_terms 字段且搜索不报错。
+  - order: 10
+    action: 通过 mock Elasticsearch client 构造命中：一条含 highlight 命中片段（title 命中 + content 三段命中），一条不含 highlight；分别执行 exec_query 与
+      accurate_search，检查结果项中的 highlight_terms 字段。
+    expected: title 与 content 多字段片段合并为去重后的纯文本词列表；命中项缺失 highlight 时结果仍携带 highlight_terms 字段且搜索不报错。
+  - order: 11
+    action: 对 hybrid_search 验证 accurate 命中项透传 highlight_terms、semantic 命中项缺省为 []。
+    expected: title 与 content 多字段片段合并为去重后的纯文本词列表；命中项缺失 highlight 时结果仍携带 highlight_terms 字段且搜索不报错。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - _extract_highlight_terms({}) 与无命中片段返回空列表 []；重复 term 去重且空白 strip；不含标记的片段不产生 term。
+  - title 与 content 多字段片段合并为去重后的纯文本词列表；命中项缺失 highlight 时结果仍携带 highlight_terms 字段且搜索不报错。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 310
+  unit_boundary: Vector DB
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/assets/knowledge/
+
+    - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - _extract_highlight_terms({}) 与无命中片段返回空列表 []；重复 term 去重且空白 strip；不含标记的片段不产生 term。
+  - title 与 content 多字段片段合并为去重后的纯文本词列表；命中项缺失 highlight 时结果仍携带 highlight_terms 字段且搜索不报错。

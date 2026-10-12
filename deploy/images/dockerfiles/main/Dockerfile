@@ -3,6 +3,7 @@ ARG MIRROR
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
+ENV TZ=Asia/Shanghai
 
 # Set correct permissions as root
 USER root
@@ -24,8 +25,9 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
         done; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         curl \
+        tzdata \
         postgresql-client \
         fontconfig \
         fonts-noto-cjk && \

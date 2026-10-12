@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-26CACDB11BC3E466
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: 我的Agent列表 new_agent_padding 占位项插入、分页偏移与 total+1 生效条件｜核心流程与边界
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 我的Agent列表 new_agent_padding 占位项插入、分页偏移与 total+1 生效条件｜核心流程与边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 本用例为纯内存分页函数单测，不依赖数据库、模型或外部服务；以内存构造的 (agent, meta) 元组列表作为 filtered_agents 输入。
+  test_data:
+    legacy_asset_declaration: '- 无额外本地资产；使用内存构造的 (agent, meta) 元组列表作为 filtered_agents 输入。'
+  steps:
+  - order: 1
+    action: 直接导入 backend/services/agent_repository_service.py 的 _paginate_mine_agents_with_optional_padding 函数，构造包含 3 个 (agent,
+      meta) 元组的 filtered_agents 列表。
+    expected: 'include_padding=True、page=1 时，返回首项为 {"new_agent_padding": true} 占位项，其后依次为 filtered_agents[0]、filtered_agents[1]…，total
+      == len(filtered_agents)+1。'
+  - order: 2
+    action: 以 include_padding=True、page=1、page_size=10 调用，记录返回的 paged_entries 与 total。
+    expected: include_padding=False 时，不出现占位项，首项为 filtered_agents[0]，total == len(filtered_agents)。
+  - order: 3
+    action: 以 include_padding=False、page=1、page_size=10 调用同一输入，记录返回。
+    expected: include_padding=True、page=2 时，不出现占位项，条目从 agent_index=slot-1 对应元素起，total 仍 == len(filtered_agents)+1。
+  - order: 4
+    action: 以 include_padding=True、page=2、page_size=2 调用，记录返回。
+    expected: 'filtered_agents=[] 且 include_padding=True 返回 ([{"new_agent_padding": true}], 1)；include_padding=False 返回 ([],
+      0)。'
+  - order: 5
+    action: 分别以 filtered_agents=[] 且 include_padding=True/False 调用，记录返回。
+    expected: 仅当 ownership=all 且无 search、无 tag_predicates、agent_id 为 None 时 include_padding 生效；任一条件不满足则无占位项且 total 不 +1。
+  - order: 6
+    action: 结合 list_my_editable_agents_impl 中 include_padding 判定条件，分别以 ownership=created、ownership=others、非空 search、非空 tag_predicates、非
+      None agent_id 验证占位不生效。
+    expected: 全过程无未处理异常、无索引越界。
+  expected_results:
+  - 'include_padding=True、page=1 时，返回首项为 {"new_agent_padding": true} 占位项，其后依次为 filtered_agents[0]、filtered_agents[1]…，total
+    == len(filtered_agents)+1。'
+  - include_padding=False 时，不出现占位项，首项为 filtered_agents[0]，total == len(filtered_agents)。
+  - include_padding=True、page=2 时，不出现占位项，条目从 agent_index=slot-1 对应元素起，total 仍 == len(filtered_agents)+1。
+  - 'filtered_agents=[] 且 include_padding=True 返回 ([{"new_agent_padding": true}], 1)；include_padding=False 返回 ([], 0)。'
+  - 仅当 ownership=all 且无 search、无 tag_predicates、agent_id 为 None 时 include_padding 生效；任一条件不满足则无占位项且 total 不 +1。
+  - 全过程无未处理异常、无索引越界。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 391
+  unit_boundary: Agent空间与仓库
+  inputs:
+  - '- 无额外本地资产；使用内存构造的 (agent, meta) 元组列表作为 filtered_agents 输入。'
+  assertions:
+  - 'include_padding=True、page=1 时，返回首项为 {"new_agent_padding": true} 占位项，其后依次为 filtered_agents[0]、filtered_agents[1]…，total
+    == len(filtered_agents)+1。'
+  - include_padding=False 时，不出现占位项，首项为 filtered_agents[0]，total == len(filtered_agents)。
+  - include_padding=True、page=2 时，不出现占位项，条目从 agent_index=slot-1 对应元素起，total 仍 == len(filtered_agents)+1。
+  - 'filtered_agents=[] 且 include_padding=True 返回 ([{"new_agent_padding": true}], 1)；include_padding=False 返回 ([], 0)。'
+  - 仅当 ownership=all 且无 search、无 tag_predicates、agent_id 为 None 时 include_padding 生效；任一条件不满足则无占位项且 total 不 +1。
+  - 全过程无未处理异常、无索引越界。

@@ -1,0 +1,90 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: SEC-AUTO-54F2ABC236F8E944
+  feature_id: V5-SEC-AUTO-54F2ABC236F8E944
+  business_rule_ids:
+  - V5-SEC-AUTO-54F2ABC236F8E944-RULE-01
+  title: 外部记忆提供者 EAV 秘密参数掩码与明文泄露防护：list/get/create/update 响应掩码、日志/Trace 无明文凭据、前端编辑回显掩码占位且未改动不回传明文
+  type: SECURITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 威胁/风险：外部记忆提供者 EAV 参数中，键以 api_key 结尾或 config_schema type=secret 的凭据（如 mem0、AIDP_Memorybank 插件的 api_key）若在 list/get/create/update
+    响应、后端日志或 OTel Trace 中以明文返回/记录，会造成 API 凭据外泄，被越权调用外部记忆服务或横向渗透。风险目标：所有秘密参数在 API 响应一律掩码（长度≤8 显示 ***，长度>8 显示 前3字符***后4字符），日志/Trace
+    不出现明文凭据，前端编辑仅回显掩码占位且未修改时不回传明文/占位。
+  preconditions:
+  - '- backend/memory_provider_plugins/mem0/plugin.yaml（api_key 字段 type=secret）
+
+    - backend/memory_provider_plugins/aidp_mem_plugin/plugin.yaml（api_key 字段 type=secret）
+
+    - 掩码规则实现 backend/services/memory_provider_config_service.py 的 _mask_params/_mask_value
+
+    - 前端编辑回显 frontend/app/[locale]/memory/ProviderConfigDialog.tsx 的 SECRET_MASK 占位符'
+  test_data:
+    legacy_asset_declaration: '- backend/memory_provider_plugins/mem0/plugin.yaml（api_key 字段 type=secret）
+
+      - backend/memory_provider_plugins/aidp_mem_plugin/plugin.yaml（api_key 字段 type=secret）
+
+      - 掩码规则实现 backend/services/memory_provider_config_service.py 的 _mask_params/_mask_value
+
+      - 前端编辑回显 frontend/app/[locale]/memory/ProviderConfigDialog.tsx 的 SECRET_MASK 占位符'
+  steps:
+  - order: 1
+    action: 以具备 MEM.PROVIDER 权限的 ADMIN 账号，通过 POST /memory/providers 创建两条 mem0 外部记忆提供者配置：plugin.api_key 分别取长度≤8（如 shortkey）与长度>8（如
+      sk-abcdef123456）的固定测试凭据，并写入非秘密参数 plugin.base_url、plugin.org_id。
+    expected: list/get/create/update 任一响应中，所有 secret 参数（键以 api_key 结尾或 config_schema type=secret）均无明文：长度≤8 显示 ***，长度>8 显示
+      前3字符***后4字符。
+  - order: 2
+    action: 分别调用 GET /memory/providers 与 GET /memory/providers/{provider_id}，检查响应 params：长度≤8 的 api_key 掩码为 ***；长度>8 的 api_key
+      掩码为 前3字符***后4字符（如 sk-***3456）；plugin.base_url、plugin.org_id 等非秘密参数保持原值。
+    expected: 后端日志与 OTel Trace 中未出现任何明文 API Key/凭据。
+  - order: 3
+    action: 调用 PUT /memory/providers/{provider_id} 仅更新 enabled 等非敏感字段，确认响应中 secret 参数仍被掩码、未明文回显。
+    expected: 前端编辑回显仅显示掩码占位符；未修改 secret 时提交 payload 不包含明文或占位符回传。
+  - order: 4
+    action: 检查后端日志与 OTel Trace/span 属性（memory_external_provider_service 的 telemetry 属性与 logger 输出），断言仅含 provider_name、operation、error_code
+      等元数据，不出现 api_key 明文。
+    expected: 非秘密参数保持原值，掩码不影响配置功能正确性。
+  - order: 5
+    action: 前端编辑回显：打开 ProviderConfigDialog 编辑已保存配置，断言 secret 字段回显掩码占位符（••••••••）而非明文；不修改 secret 直接保存时，捕获提交 payload，断言未回传明文或掩码占位（handleSave
+      对未变更 secret 走 continue 跳过）。
+    expected: 非秘密参数保持原值，掩码不影响配置功能正确性。
+  expected_results:
+  - list/get/create/update 任一响应中，所有 secret 参数（键以 api_key 结尾或 config_schema type=secret）均无明文：长度≤8 显示 ***，长度>8 显示 前3字符***后4字符。
+  - 后端日志与 OTel Trace 中未出现任何明文 API Key/凭据。
+  - 前端编辑回显仅显示掩码占位符；未修改 secret 时提交 payload 不包含明文或占位符回传。
+  - 非秘密参数保持原值，掩码不影响配置功能正确性。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 69
+  risk_type: SECURITY
+  risk: 威胁/风险：外部记忆提供者 EAV 参数中，键以 api_key 结尾或 config_schema type=secret 的凭据（如 mem0、AIDP_Memorybank 插件的 api_key）若在 list/get/create/update
+    响应、后端日志或 OTel Trace 中以明文返回/记录，会造成 API 凭据外泄，被越权调用外部记忆服务或横向渗透。风险目标：所有秘密参数在 API 响应一律掩码（长度≤8 显示 ***，长度>8 显示 前3字符***后4字符），日志/Trace
+    不出现明文凭据，前端编辑仅回显掩码占位且未修改时不回传明文/占位。
+  condition:
+  - '- backend/memory_provider_plugins/mem0/plugin.yaml（api_key 字段 type=secret）
+
+    - backend/memory_provider_plugins/aidp_mem_plugin/plugin.yaml（api_key 字段 type=secret）
+
+    - 掩码规则实现 backend/services/memory_provider_config_service.py 的 _mask_params/_mask_value
+
+    - 前端编辑回显 frontend/app/[locale]/memory/ProviderConfigDialog.tsx 的 SECRET_MASK 占位符'
+  metrics:
+  - list/get/create/update 任一响应中，所有 secret 参数（键以 api_key 结尾或 config_schema type=secret）均无明文：长度≤8 显示 ***，长度>8 显示 前3字符***后4字符。
+  - 后端日志与 OTel Trace 中未出现任何明文 API Key/凭据。
+  - 前端编辑回显仅显示掩码占位符；未修改 secret 时提交 payload 不包含明文或占位符回传。
+  - 非秘密参数保持原值，掩码不影响配置功能正确性。
+  thresholds:
+  - list/get/create/update 任一响应中，所有 secret 参数（键以 api_key 结尾或 config_schema type=secret）均无明文：长度≤8 显示 ***，长度>8 显示 前3字符***后4字符。
+  - 后端日志与 OTel Trace 中未出现任何明文 API Key/凭据。
+  - 前端编辑回显仅显示掩码占位符；未修改 secret 时提交 payload 不包含明文或占位符回传。
+  - 非秘密参数保持原值，掩码不影响配置功能正确性。
+  recovery_expectations:
+  - list/get/create/update 任一响应中，所有 secret 参数（键以 api_key 结尾或 config_schema type=secret）均无明文：长度≤8 显示 ***，长度>8 显示 前3字符***后4字符。
+  - 后端日志与 OTel Trace 中未出现任何明文 API Key/凭据。
+  - 前端编辑回显仅显示掩码占位符；未修改 secret 时提交 payload 不包含明文或占位符回传。
+  - 非秘密参数保持原值，掩码不影响配置功能正确性。
