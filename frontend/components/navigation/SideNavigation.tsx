@@ -243,17 +243,11 @@ export function SideNavigation() {
       return [];
     }
 
-    return ROUTE_CONFIG.filter((route) => {
-      if (route.isSection) {
-        return ROUTE_CONFIG.some(
-          (child) =>
-            child.parentKey === route.path &&
-            isRouteAccessible(child, accessibleRoutes, enableAgentWorkbench)
-        );
-      }
-
-      return isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench);
-    }).sort((a, b) => a.order - b.order);
+    return ROUTE_CONFIG.filter(
+      (route) =>
+        !route.isSection &&
+        isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench)
+    ).sort((a, b) => a.order - b.order);
   }, [accessibleRoutes, enableAgentWorkbench]);
 
   const handleRouteClick = (route: RouteConfig) => {
@@ -273,35 +267,34 @@ export function SideNavigation() {
     router.push(navigationPath);
   };
 
-  const notificationAction =
-    isAuthenticated && !isSpeedMode ? (
-      <NotificationBell
-        rail
-        unreadCount={unreadCount}
-        items={items}
-        isLoading={isNotificationsLoading}
-        isMarkingAllRead={markAllNotificationsReadMutation.isPending}
-        onMarkRead={async (receiverId) => {
-          await markNotificationReadMutation.mutateAsync(receiverId);
-        }}
-        onMarkAllRead={async () => {
-          await markAllNotificationsReadMutation.mutateAsync();
-        }}
-      />
-    ) : (
-      <button
-        type="button"
-        aria-label={t("notifications.bell.label")}
-        className={RAIL_ITEM_CLASS}
-        onClick={() => {
-          if (!isAuthenticated && !isSpeedMode) {
-            openAuthPromptModal("/");
-          }
-        }}
-      >
-        <Bell className={RAIL_ICON_CLASS} />
-      </button>
-    );
+  const notificationAction = isSpeedMode ? null : isAuthenticated ? (
+    <NotificationBell
+      rail
+      unreadCount={unreadCount}
+      items={items}
+      isLoading={isNotificationsLoading}
+      isMarkingAllRead={markAllNotificationsReadMutation.isPending}
+      onMarkRead={async (receiverId) => {
+        await markNotificationReadMutation.mutateAsync(receiverId);
+      }}
+      onMarkAllRead={async () => {
+        await markAllNotificationsReadMutation.mutateAsync();
+      }}
+    />
+  ) : (
+    <button
+      type="button"
+      aria-label={t("notifications.bell.label")}
+      className={RAIL_ITEM_CLASS}
+      onClick={() => {
+        if (!isAuthenticated && !isSpeedMode) {
+          openAuthPromptModal("/");
+        }
+      }}
+    >
+      <Bell className={RAIL_ICON_CLASS} />
+    </button>
+  );
 
   return (
     <div className="flex h-full w-full flex-col items-center bg-[#f0f0f0] p-2">
@@ -339,7 +332,7 @@ export function SideNavigation() {
         </div>
       </nav>
 
-      <div className="flex h-24 w-12 shrink-0 flex-col items-center">
+      <div className="flex w-12 shrink-0 flex-col items-center">
         {notificationAction}
         <AvatarDropdown rail />
       </div>
