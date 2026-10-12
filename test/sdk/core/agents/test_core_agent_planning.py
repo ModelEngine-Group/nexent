@@ -8,6 +8,7 @@ branches. We construct a CoreAgent by faking the smolagents CodeAgent parent
 so the heavy smolagents machinery never runs.
 """
 
+import importlib.machinery
 import importlib.util
 import sys
 from pathlib import Path
@@ -55,6 +56,7 @@ class _CodeAgent:
         self.tools = kwargs.get("tools", {}) or {}
         self.managed_agents = kwargs.get("managed_agents", {}) or {}
         self.code_block_tags = ["python", ""]
+        self.python_executor = SimpleNamespace(functions={}, tools={})
 
 
 mock_agents.CodeAgent = _CodeAgent
@@ -66,7 +68,6 @@ mock_smolagents.agents = mock_agents
 sys.modules["smolagents.agents"] = mock_agents
 
 mock_lpe = _mock_module("smolagents.local_python_executor")
-mock_lpe.fix_final_answer_code = lambda x: x
 sys.modules["smolagents.local_python_executor"] = mock_lpe
 
 mock_memory = _mock_module("smolagents.memory")
@@ -211,6 +212,11 @@ contracts_mod.ContextRuntime = type("ContextRuntime", (), {})
 token_mod = _sdk_pkg("sdk.nexent.core.utils.token_estimation")
 token_mod.msg_token_count = lambda *a, **k: 0
 
+# Agent prompt composer stub
+prompt_mod = _sdk_pkg("sdk.nexent.core.agents.prompt")
+prompt_mod.__path__ = [str(REPO_ROOT / "sdk/nexent/core/agents/prompt")]
+prompt_mod.AgentPromptComposer = MagicMock()
+
 # context budget helper stub
 budget_mod = _sdk_pkg("sdk.nexent.core.agents.context.budget")
 budget_mod.message_role = lambda message: getattr(message, "role", "")
@@ -285,6 +291,8 @@ agents_mod = sys.modules["sdk.nexent.core.agents"]
 agents_mod.__path__ = [str(OUTPUT_PROTOCOL_PATH.parent)]
 agents_mod.output_protocol = output_protocol_module
 assert output_protocol_spec and output_protocol_spec.loader
+sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk/nexent/core")]
+sys.modules["sdk.nexent.core"].__spec__ = importlib.machinery.ModuleSpec("sdk.nexent.core", loader=None, is_package=True)
 output_protocol_spec.loader.exec_module(output_protocol_module)
 
 CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "core_agent.py"

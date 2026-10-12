@@ -31,7 +31,7 @@ from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_NAME,
 )
 from management.services.skill.service import install_skills_from_zip_for_tenant
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class SystemAgentProvider:
             LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
         )
         return str(
-            get_prompt_template("workbench_main", template_language).get(
+            load_prompt(template_language, "agent/workbench_main").get(
                 "system_prompt", ""
             )
         )

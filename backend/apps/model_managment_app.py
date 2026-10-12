@@ -10,7 +10,8 @@ layer contract:
 Authorization: Mutating endpoints require RBAC permissions (model:create /
 model:update / model:delete) via ``permissions.depends.require``; read endpoints
 require ``model:read``. Cross-tenant ``/manage/*`` endpoints additionally
-require the SU role. Identity is resolved from the bearer token into a
+require the SU role, or the ADMIN role when the targeted tenant is the
+caller's own. Identity is resolved from the bearer token into a
 ``CurrentUser`` and propagated as ``user_id`` / ``tenant_id`` to services.
 """
 
@@ -20,6 +21,7 @@ import re
 
 from consts.model import (
     BatchCreateModelsRequest,
+    BackfillDefaultsRequest,
     CapacitySuggestionFields,
     ModelRequest,
     ModelProbeRequest,
@@ -39,11 +41,12 @@ from consts.model import (
 )
 from consts.const import CAPACITY_SUGGESTION_ENABLED
 
-from fastapi import APIRouter, Depends, Header, Query, HTTPException
+from fastapi import APIRouter, Depends, Header, Query, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
 from typing import Annotated, Any, List, Optional
+from services.audit_service import record_security_event
 from services.model_health_service import (
     check_model_connectivity,
     verify_model_config_connectivity,
@@ -64,6 +67,8 @@ from services.model_management_service import (
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
     get_model_reasoning_capability,
+    _ids_for_created_models,
+    _backfill_default_model_slots,
 )
 from permissions.depends import authenticate, require
 from permissions.models import CurrentUser
@@ -77,9 +82,11 @@ MODEL_CREATE_PERMISSION = "model:create"
 MODEL_READ_PERMISSION = "model:read"
 MODEL_UPDATE_PERMISSION = "model:update"
 MODEL_DELETE_PERMISSION = "model:delete"
-# Cross-tenant manage endpoints are SU-only; ADMIN shares the same MODEL seeds
-# so permission strings cannot separate them.
-_MANAGE_ALLOWED_ROLES = ("SU",)
+# Roles allowed on the cross-tenant /manage/* endpoints. ADMIN shares the same
+# MODEL permission seeds as SU, so permission strings cannot separate the two
+# and the role itself must be checked. ADMIN is scoped to its own tenant by
+# ``_require_manage_scope``; SU may target any tenant.
+_MANAGE_ALLOWED_ROLES = ("SU", "ADMIN")
 
 # Model Catalog loader (with graceful fallback)
 try:
@@ -111,6 +118,18 @@ except Exception as _exc:  # noqa: BLE001
 
 router = APIRouter(prefix="/model")
 logger = logging.getLogger("model_management_app")
+
+# Allowlisted payload keys that are safe to copy into audit entries; anything
+# credential-like (api_key, access_token, ...) must never reach the log.
+_AUDIT_SAFE_MODEL_KEYS = (
+    "model_name", "display_name", "model_repo", "model_type",
+    "model_factory", "base_url", "provider", "type",
+)
+
+
+def _audit_safe_model_fields(data: dict) -> dict:
+    """Pick the allowlisted, non-credential fields of a model payload for audit details."""
+    return {key: data[key] for key in _AUDIT_SAFE_MODEL_KEYS if data.get(key) not in (None, "")}
 
 # Shared response message for every catalog endpoint's failure branch.
 _CATALOG_UNAVAILABLE_MESSAGE = "catalog unavailable"
@@ -147,12 +166,25 @@ def _log_safe(value: Any) -> str:
     return _LOG_UNSAFE_CHARS.sub("", str(value))
 
 
-def _require_manage_role(current_user: CurrentUser) -> None:
-    """Restrict cross-tenant manage endpoints to super admins."""
-    if current_user.normalized_role not in _MANAGE_ALLOWED_ROLES:
+def _require_manage_scope(current_user: CurrentUser, target_tenant_id: str) -> None:
+    """Authorize a /manage/* call against the tenant it targets.
+
+    SU may manage any tenant. ADMIN may manage only the tenant its token
+    belongs to -- the tenant-resource page always passes the caller's own
+    tenant_id, so restricting ADMIN outright would break tenant admins
+    managing their own models while blocking no cross-tenant access. Any
+    other role, or an ADMIN naming a foreign tenant, is rejected.
+    """
+    role = current_user.normalized_role
+    if role not in _MANAGE_ALLOWED_ROLES:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
-            detail="This operation requires SU role",
+            detail="This operation requires SU or tenant ADMIN role",
+        )
+    if role != "SU" and target_tenant_id != current_user.tenant_id:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Tenant admins may only manage models of their own tenant",
         )
 
 
@@ -233,6 +265,7 @@ def _capacity_suggestion_for_model_request(request: ModelRequest):
 @router.post("/create")
 async def create_model(
     request: ModelRequest,
+    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Create a single model record for the current tenant.
@@ -250,13 +283,21 @@ async def create_model(
         user_id, tenant_id = current_user.user_id, current_user.tenant_id
         model_data = request.model_dump()
         accept_signal = pop_capacity_accept_signal(model_data)
+        # Batch-import flow control flag: popped here so it never reaches
+        # the service/DB layer (same contract as the accept-signal fields).
+        skip_backfill = bool(model_data.pop("skip_default_backfill", None))
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
-        create_result = await create_model_for_tenant(user_id, tenant_id, model_data)
+        create_result = await create_model_for_tenant(
+            user_id, tenant_id, model_data,
+            skip_default_backfill=skip_backfill)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
+        record_security_event("model_create", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details=_audit_safe_model_fields(model_data))
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully"
@@ -270,6 +311,44 @@ async def create_model(
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/backfill_defaults")
+async def backfill_default_model_slots(
+    request: BackfillDefaultsRequest,
+    http_request: Request,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
+    """Finalize default-model auto-configuration after a batch import.
+
+    The batch dialog creates its rows one HTTP call at a time with
+    skip_default_backfill set; this endpoint runs the auto-configuration
+    ONCE with the whole batch's models as candidates, so empty slots get
+    the best model of the batch instead of whichever row happened to be
+    created first. Occupied slots (user- or system-configured) are never
+    touched.
+    """
+    try:
+        user_id, tenant_id = current_user.user_id, current_user.tenant_id
+        created_ids = _ids_for_created_models(
+            request.display_names, tenant_id)
+        auto_configured = _backfill_default_model_slots(
+            user_id, tenant_id, new_model_ids=created_ids)
+        record_security_event("model_defaults_backfill", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"display_names": request.display_names,
+                                       "auto_configured_defaults": auto_configured})
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": auto_configured,
+            "message": "Default model backfill completed"
+        })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to backfill default model slots: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -366,6 +445,7 @@ async def create_provider_model(
 @router.post("/provider/batch_create")
 async def batch_create_models(
     request: BatchCreateModelsRequest,
+    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Synchronize provider models for a tenant by creating/updating/deleting records.
@@ -393,6 +473,15 @@ async def batch_create_models(
         provider = batch_model_config.get("provider")
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], provider)
+        audit_models = [
+            _audit_safe_model_fields(model) for model in batch_model_config.get("models", [])
+        ]
+        record_security_event("model_batch_import", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"provider": provider,
+                                       "model_type": batch_model_config.get("type"),
+                                       "models_count": len(audit_models),
+                                       "models": audit_models})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully",
             "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
@@ -443,6 +532,7 @@ async def get_provider_list(
 @router.post("/update")
 async def update_single_model(
     request: dict,
+    http_request: Request,
     display_name: str = Query(..., description="Current display name of the model to update"),
     current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
@@ -467,6 +557,10 @@ async def update_single_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.get("model_factory")
             )
+        record_security_event("model_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"display_name": display_name,
+                                       "updated_fields": sorted(request.keys())})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model updated successfully"
         })
@@ -490,6 +584,7 @@ async def update_single_model(
 @router.post("/batch_update")
 async def batch_update_models(
     request: List[dict],
+    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Batch update multiple models for the current tenant.
@@ -500,6 +595,11 @@ async def batch_update_models(
     try:
         user_id, tenant_id = current_user.user_id, current_user.tenant_id
         await batch_update_models_for_tenant(user_id, tenant_id, request)
+        record_security_event("model_batch_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"models_count": len(request),
+                                       "model_ids": [item.get("model_id") for item in request
+                                                     if isinstance(item, dict)]})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch update models successfully"
         })
@@ -514,6 +614,7 @@ async def batch_update_models(
 
 @router.post("/delete")
 async def delete_model(
+    http_request: Request,
     display_name: str = Query(..., embed=True),
     current_user: CurrentUser = Depends(require(MODEL_DELETE_PERMISSION)),
 ):
@@ -531,6 +632,9 @@ async def delete_model(
         logger.info(
             f"Start to delete model, user_id: {user_id}, tenant_id: {tenant_id}")
         model_name = await delete_model_for_tenant(user_id, tenant_id, display_name)
+        record_security_event("model_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"display_name": display_name})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model deleted successfully",
             "data": model_name
@@ -716,7 +820,7 @@ async def manage_check_model_health(
     Returns:
         Connectivity check result with updated status.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to check model connectivity for tenant, user_id: {current_user.user_id}, "
@@ -748,6 +852,7 @@ async def manage_check_model_health(
 @router.post("/manage/create")
 async def manage_create_model(
     request: ManageTenantModelCreateRequest,
+    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Create a model in a specified tenant (admin/manage operation).
@@ -760,7 +865,7 @@ async def manage_create_model(
     Returns:
         Success message on successful creation.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -779,6 +884,10 @@ async def manage_create_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
+        record_security_event("tenant_model_create", request=http_request,
+                              user_id=user_id, tenant_id=current_user.tenant_id,
+                              details={"target_tenant_id": request.tenant_id,
+                                       **_audit_safe_model_fields(model_data)})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully",
@@ -799,6 +908,7 @@ async def manage_create_model(
 @router.post("/manage/update")
 async def manage_update_model(
     request: ManageTenantModelUpdateRequest,
+    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
 ):
     """Update a model in a specified tenant (admin/manage operation).
@@ -811,7 +921,7 @@ async def manage_update_model(
     Returns:
         Success message on successful update.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -829,6 +939,11 @@ async def manage_update_model(
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
+        record_security_event("tenant_model_update", request=http_request,
+                              user_id=user_id, tenant_id=current_user.tenant_id,
+                              details={"target_tenant_id": request.tenant_id,
+                                       "current_display_name": request.current_display_name,
+                                       **_audit_safe_model_fields(model_data)})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model updated successfully",
             "data": {"tenant_id": request.tenant_id}
@@ -851,6 +966,7 @@ async def manage_update_model(
 @router.post("/manage/delete")
 async def manage_delete_model(
     request: ManageTenantModelDeleteRequest,
+    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_DELETE_PERMISSION)),
 ):
     """Delete a model from a specified tenant (admin/manage operation).
@@ -863,7 +979,7 @@ async def manage_delete_model(
     Returns:
         Success message with deleted model name.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -873,6 +989,10 @@ async def manage_delete_model(
         model_name = await delete_model_for_tenant(
             user_id, request.tenant_id, request.display_name
         )
+        record_security_event("tenant_model_delete", request=http_request,
+                              user_id=user_id, tenant_id=current_user.tenant_id,
+                              details={"target_tenant_id": request.tenant_id,
+                                       "display_name": request.display_name})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model deleted successfully",
             "data": {
@@ -895,6 +1015,7 @@ async def manage_delete_model(
 @router.post("/manage/batch_create")
 async def manage_batch_create_models(
     request: ManageBatchCreateModelsRequest,
+    http_request: Request,
     current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
 ):
     """Batch create/update models in a specified tenant (admin/manage operation).
@@ -908,7 +1029,7 @@ async def manage_batch_create_models(
     Returns:
         Success message on completion.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         user_id = current_user.user_id
         logger.debug(
@@ -927,6 +1048,16 @@ async def manage_batch_create_models(
         batch_result = await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], request.provider)
+        audit_models = [
+            _audit_safe_model_fields(model) for model in batch_model_config.get("models", [])
+        ]
+        record_security_event("tenant_model_batch_import", request=http_request,
+                              user_id=user_id, tenant_id=current_user.tenant_id,
+                              details={"target_tenant_id": request.tenant_id,
+                                       "provider": request.provider,
+                                       "model_type": request.type,
+                                       "models_count": len(audit_models),
+                                       "models": audit_models})
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully",
             "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
@@ -960,7 +1091,7 @@ async def manage_list_models(
     Returns:
         Paginated model list for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to list models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
@@ -1001,7 +1132,7 @@ async def manage_list_provider_models(
     Returns:
         List of available provider models for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to list provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "
@@ -1039,7 +1170,7 @@ async def manage_create_provider_models(
     Returns:
         List of available provider models for the specified tenant.
     """
-    _require_manage_role(current_user)
+    _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to create provider models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "

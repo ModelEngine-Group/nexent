@@ -11,10 +11,10 @@ import {
   Eye,
   MoreHorizontal,
   Pencil,
-  Power,
   Search,
   Tag,
   Trash2,
+  Upload,
 } from "lucide-react";
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
@@ -418,19 +418,33 @@ const MINE_SKILL_STATUS_CLASS: Record<SkillRepositoryListingStatus, string> = {
 };
 
 function getMineSkillMenuItems({
+  canApplyListing,
+  canEdit,
   canPublish,
   hasRepositoryInfo,
   t,
+  onApplyListing,
   onViewReview,
   onDelete,
 }: {
+  canApplyListing: boolean;
+  canEdit: boolean;
   canPublish: boolean;
   hasRepositoryInfo: boolean;
   t: (key: string) => string;
+  onApplyListing: () => void;
   onViewReview: () => void;
   onDelete: () => void;
 }): MenuProps["items"] {
   const items: MenuProps["items"] = [];
+  if (canApplyListing) {
+    items.push({
+      key: "apply-listing",
+      label: t("skillRepository.mine.button.apply"),
+      icon: <Upload className="size-3.5" aria-hidden />,
+      onClick: onApplyListing,
+    });
+  }
   if (canPublish && hasRepositoryInfo) {
     items.push({
       key: "review",
@@ -439,13 +453,15 @@ function getMineSkillMenuItems({
       onClick: onViewReview,
     });
   }
-  items.push({
-    key: "delete",
-    label: t("common.delete"),
-    icon: <Trash2 className="size-3.5" aria-hidden />,
-    danger: true,
-    onClick: onDelete,
-  });
+  if (canEdit) {
+    items.push({
+      key: "delete",
+      label: t("common.delete"),
+      icon: <Trash2 className="size-3.5" aria-hidden />,
+      danger: true,
+      onClick: onDelete,
+    });
+  }
   return items;
 }
 
@@ -477,9 +493,12 @@ function MineSkillCard({
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
   const canApplyListing = canPublish && !hasRepositoryInfo;
   const menuItems = getMineSkillMenuItems({
+    canApplyListing,
+    canEdit,
     canPublish,
     hasRepositoryInfo,
     t,
+    onApplyListing,
     onViewReview,
     onDelete,
   });
@@ -488,11 +507,13 @@ function MineSkillCard({
     <ResourceCard
       title={skill.name || t("skillRepository.common.untitled")}
       className="h-full min-h-[200px] p-4"
+      onClick={onView}
       icon={
         <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Bot className="size-5" aria-hidden />
         </div>
       }
+      fixedHeaderLayout
       description={
         skill.description || t("skillRepository.common.noDescription")
       }
@@ -520,40 +541,35 @@ function MineSkillCard({
       }
       footerLayout="inline"
       headerActions={
-        <div className="flex flex-col items-end gap-1">
-          {canEdit ? (
-            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-              <Button
-                type="text"
-                size="small"
-                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-                icon={<MoreHorizontal className="size-4" aria-hidden />}
-                aria-label={t("skillRepository.common.moreActions")}
-              />
-            </Dropdown>
-          ) : null}
-          {hasRepositoryInfo ? (
-            <span
-              className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
-            >
-              {getSkillRepositoryStatusLabel(t, repositoryStatus)}
-            </span>
-          ) : null}
-        </div>
+        canEdit || canApplyListing || hasRepositoryInfo ? (
+          <div className="grid h-[60px] max-w-[120px] grid-rows-2">
+            <div className="flex items-center justify-end">
+              {canEdit || canApplyListing ? (
+                <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+                  <Button
+                    type="text"
+                    size="small"
+                    className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                    icon={<MoreHorizontal className="size-4" aria-hidden />}
+                    aria-label={t("skillRepository.common.moreActions")}
+                  />
+                </Dropdown>
+              ) : null}
+            </div>
+            <div className="flex min-w-0 items-center justify-end">
+              {hasRepositoryInfo ? (
+                <span
+                  className={`block max-w-full truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium ${MINE_SKILL_STATUS_CLASS[repositoryStatus]}`}
+                >
+                  {getSkillRepositoryStatusLabel(t, repositoryStatus)}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : undefined
       }
       footer={
         <div className="flex items-center gap-2">
-          {canApplyListing ? (
-            <Button
-              type="primary"
-              size="small"
-              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
-              icon={<Power className="size-3.5" aria-hidden />}
-              onClick={onApplyListing}
-            >
-              {t("skillRepository.mine.button.apply")}
-            </Button>
-          ) : null}
           {canEdit ? (
             <Button
               type="text"

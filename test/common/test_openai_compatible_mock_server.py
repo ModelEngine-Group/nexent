@@ -66,7 +66,7 @@ def test_cmsr_mock_stream_matches_nexent_openai_contract(mock_server):
     assert status == 200
     assert b'"object": "chat.completion.chunk"' in body
     assert b'"reasoning_content": "Deterministic mock reasoning. "' in body
-    assert _stream_content(body) == '<code>final_answer("CONTRACT_OK")</code>'
+    assert _stream_content(body) == '<final_answer>CONTRACT_OK</final_answer>'
     assert b'"finish_reason": "stop"' in body
     assert b'"prompt_tokens": 100' in body
     assert body.endswith(b"data: [DONE]\n\n")
@@ -150,7 +150,7 @@ def test_cmsr_mock_partial_then_success_is_deterministic(mock_server):
         {"model": "nexent-mock-model", "messages": [], "stream": True},
     )
     assert status == 200
-    assert _stream_content(body) == '<code>final_answer("RECOVERED")</code>'
+    assert _stream_content(body) == '<final_answer>RECOVERED</final_answer>'
     assert server.mock_state.snapshot()["request_count"] == 2
 
 

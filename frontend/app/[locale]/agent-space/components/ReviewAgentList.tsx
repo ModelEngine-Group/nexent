@@ -100,7 +100,7 @@ export function ReviewAgentList({
                   </h3>
                 </div>
 
-                <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                <div className="min-w-0 truncate text-sm font-medium text-slate-900 dark:text-slate-100">
                   {versionLabel}
                 </div>
 

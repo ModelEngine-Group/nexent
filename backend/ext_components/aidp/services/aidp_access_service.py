@@ -11,6 +11,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 from ext_components.aidp.services import aidp_permission_service
 from ext_components.aidp.services.aidp_service import fetch_all_aidp_knowledge_bases_impl
 
@@ -19,6 +21,12 @@ logger = logging.getLogger("aidp_access_service")
 
 _CATALOG_CACHE_TTL_SECONDS = 30.0
 _CATALOG_CACHE_MAX_ENTRIES = 32
+_CATALOG_FAILURE_COOLDOWN_SECONDS = 5.0
+_TRANSIENT_CATALOG_ERROR_CODES = {
+    ErrorCode.AIDP_CONNECTION_ERROR,
+    ErrorCode.AIDP_RATE_LIMIT,
+    ErrorCode.AIDP_SERVICE_ERROR,
+}
 _DETAIL_CACHE_TTL_SECONDS = 60.0
 _DETAIL_CACHE_MAX_ENTRIES = 256
 _DOC_COUNT_CACHE_TTL_SECONDS = 30.0
@@ -30,6 +38,7 @@ _detail_cache: OrderedDict[tuple[str, str, str], tuple[float, dict]] = OrderedDi
 _doc_count_cache: OrderedDict[tuple[str, str, str], tuple[float, int]] = OrderedDict()
 _channels_cache: OrderedDict[tuple[str, str], tuple[float, list[dict]]] = OrderedDict()
 _catalog_inflight: dict[tuple[str, str], Future[Any]] = {}
+_catalog_failures: OrderedDict[tuple[str, str], tuple[float, AppException]] = OrderedDict()
 _detail_inflight: dict[tuple[str, str, str], Future[Any]] = {}
 _doc_count_inflight: dict[tuple[str, str, str], Future[Any]] = {}
 _channels_inflight: dict[tuple[str, str], Future[Any]] = {}
@@ -42,6 +51,7 @@ _channels_versions: dict[tuple[str, str], int] = {}
 # silently hide KBs from every non-search caller for the rest of the TTL.
 _search_catalog_cache: OrderedDict[tuple[str, str, str], tuple[float, list[dict]]] = OrderedDict()
 _search_catalog_inflight: dict[tuple[str, str, str], Future[Any]] = {}
+_search_catalog_failures: OrderedDict[tuple[str, str, str], tuple[float, AppException]] = OrderedDict()
 _search_catalog_versions: dict[tuple[str, str, str], int] = {}
 _cache_lock = threading.RLock()
 
@@ -97,10 +107,17 @@ def _get_or_load_cached(
     max_entries: int,
     loader: Callable[[], _T],
     force_refresh: bool,
+    failures: OrderedDict | None = None,
 ) -> _T:
     """Return a cached value while coalescing concurrent loads for the same key."""
     now = time.monotonic()
     with _cache_lock:
+        if failures is not None:
+            failed = failures.get(key)
+            if not force_refresh and failed and failed[0] > now:
+                error = failed[1]
+                raise AppException(error.error_code, error.message, copy.deepcopy(error.details))
+            failures.pop(key, None)
         if not force_refresh:
             cached = cache.get(key)
             if cached and cached[0] > now:
@@ -127,6 +144,8 @@ def _get_or_load_cached(
         stored_value = copy.deepcopy(value)
         with _cache_lock:
             if versions.get(key, 0) == load_version:
+                if failures is not None:
+                    failures.pop(key, None)
                 cache[key] = (time.monotonic() + ttl_seconds, stored_value)
                 cache.move_to_end(key)
                 while len(cache) > max_entries:
@@ -134,6 +153,23 @@ def _get_or_load_cached(
         future.set_result(copy.deepcopy(value))
         return value
     except BaseException as exc:
+        if (
+            failures is not None
+            and isinstance(exc, AppException)
+            and exc.error_code in _TRANSIENT_CATALOG_ERROR_CODES
+        ):
+            with _cache_lock:
+                if versions.get(key, 0) == load_version:
+                    # Keep an error without traceback frames and never reuse
+                    # a stale catalog to authorize access during an outage.
+                    cache.pop(key, None)
+                    failures[key] = (
+                        time.monotonic() + _CATALOG_FAILURE_COOLDOWN_SECONDS,
+                        AppException(exc.error_code, exc.message, copy.deepcopy(exc.details)),
+                    )
+                    failures.move_to_end(key)
+                    while len(failures) > max_entries:
+                        failures.popitem(last=False)
         future.set_exception(exc)
         raise
     finally:
@@ -173,6 +209,7 @@ def _get_remote_catalog(
                 )
             ),
             force_refresh=force_refresh,
+            failures=_search_catalog_failures,
         )
 
     return _get_or_load_cached(
@@ -186,6 +223,7 @@ def _get_remote_catalog(
             fetch_all_aidp_knowledge_bases_impl(server_url, api_key)
         ),
         force_refresh=force_refresh,
+        failures=_catalog_failures,
     )
 
 
@@ -357,9 +395,11 @@ def invalidate_aidp_catalog_cache(
     with _cache_lock:
         if server_url is None or api_key is None:
             _catalog_cache.clear()
+            _catalog_failures.clear()
             for key in set(_catalog_versions) | set(_catalog_inflight):
                 _catalog_versions[key] = _catalog_versions.get(key, 0) + 1
             _search_catalog_cache.clear()
+            _search_catalog_failures.clear()
             for search_key in set(_search_catalog_versions) | set(_search_catalog_inflight):
                 _search_catalog_versions[search_key] = (
                     _search_catalog_versions.get(search_key, 0) + 1
@@ -367,6 +407,7 @@ def invalidate_aidp_catalog_cache(
             return
         key = _cache_key(server_url, aidp_tenant_id)
         _catalog_cache.pop(key, None)
+        _catalog_failures.pop(key, None)
         _catalog_versions[key] = _catalog_versions.get(key, 0) + 1
 
         # Search keys are ``(*catalog_key, keyword)``; match them by prefix.
@@ -375,9 +416,11 @@ def invalidate_aidp_catalog_cache(
             for candidate in set(_search_catalog_cache)
             | set(_search_catalog_versions)
             | set(_search_catalog_inflight)
+            | set(_search_catalog_failures)
             if candidate[:2] == key
         ]:
             _search_catalog_cache.pop(search_key, None)
+            _search_catalog_failures.pop(search_key, None)
             _search_catalog_versions[search_key] = (
                 _search_catalog_versions.get(search_key, 0) + 1
             )

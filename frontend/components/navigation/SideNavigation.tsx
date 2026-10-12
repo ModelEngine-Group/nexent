@@ -58,7 +58,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/chat",
     Icon: Blocks,
     labelKey: "sidebar.startChat",
-    order: 1,
+    order: 1.5,
     parentKey: null,
     navigationPath: "/newchat",
   },
@@ -191,7 +191,7 @@ export function SideNavigation() {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { isSpeedMode, enableAgentWorkbench } = useDeployment();
+  const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
   const params = useParams<{ locale: string }>();
@@ -246,9 +246,10 @@ export function SideNavigation() {
     return ROUTE_CONFIG.filter(
       (route) =>
         !route.isSection &&
+        !(route.path === "/" && hideHomePage) &&
         isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench)
     ).sort((a, b) => a.order - b.order);
-  }, [accessibleRoutes, enableAgentWorkbench]);
+  }, [accessibleRoutes, enableAgentWorkbench, hideHomePage]);
 
   const handleRouteClick = (route: RouteConfig) => {
     if (route.isSection) {

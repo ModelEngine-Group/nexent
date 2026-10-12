@@ -981,6 +981,7 @@ function BatchAddForm({
     setSubmitting(true);
     let created = 0;
     const failed: string[] = [];
+    const createdDisplayNames: string[] = [];
     for (const row of rows) {
       // User-modified overrides win; otherwise use catalog suggestions.
       const override = rowOverrides[row.id] ?? rowSuggestions[row.id];
@@ -1004,6 +1005,11 @@ function BatchAddForm({
           // carry the verified result into the created record instead of
           // resetting to not_detected.
           connectStatus: "available",
+          // Batch rows leave default-slot auto-configuration to the single
+          // finalize call after the loop, so the whole batch competes for
+          // empty slots at once (and occupied slots stay untouched) instead
+          // of the first row permanently claiming them.
+          skipDefaultBackfill: true,
         };
         if (override?.settings) {
           applyAdvancedSettingsToParams(
@@ -1013,10 +1019,27 @@ function BatchAddForm({
           );
         }
         await createModel(tenantId, params);
+        createdDisplayNames.push(
+          override?.displayName?.trim() || row.model_name
+        );
         created++;
       } catch (error: any) {
         failed.push(row.model_name);
         log.error("batch add model failed", row.model_name, error);
+      }
+    }
+    if (created > 0) {
+      // Single finalize for the whole batch: empty slots get the best model
+      // among the freshly created ones; occupied slots are never touched.
+      // Only the user-facing flow (no tenantId override) — the manage-tenant
+      // path targets another tenant and keeps its own behavior.
+      // Best-effort — a failure here does not fail the import.
+      if (!tenantId) {
+        try {
+          await modelService.backfillDefaults(createdDisplayNames);
+        } catch (error) {
+          log.warn("Failed to finalize default-model backfill:", error);
+        }
       }
     }
     setSubmitting(false);

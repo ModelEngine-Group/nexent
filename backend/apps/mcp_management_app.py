@@ -33,6 +33,7 @@ from services.mcp_management_service import (
     delete_community_mcp_service,
 )
 from database.market_mcp_db import increment_mcp_market_download_count
+from services.audit_service import record_security_event
 from utils.auth_utils import get_current_user_info
 
 router = APIRouter(prefix="/mcp-tools")
@@ -369,6 +370,13 @@ async def create_community_mcp_service_api(
             shared_fields=payload.shared_fields,
             content=payload.content,
         )
+        # config_json may carry credentials via env blocks and never reaches
+        # the log; mcp_server (the endpoint the MCP exposes) stays auditable.
+        record_security_event("mcp_market_publish", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"market_id": market_id,
+                                       "mcp_id": payload.mcp_id,
+                                       "mcp_server": payload.mcp_server})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success", "data": {"market_id": market_id}},
@@ -417,6 +425,11 @@ async def update_community_mcp_service_api(
             shared_fields=payload.shared_fields,
             content=payload.content,
         )
+        # config_json may carry credentials; content is free-form review text.
+        record_security_event("mcp_market_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"market_id": market_id,
+                                       "mcp_server": payload.mcp_server})
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
@@ -450,6 +463,9 @@ async def delete_community_mcp_service_api(
             user_id=user_id,
             market_id=market_id,
         )
+        record_security_event("mcp_market_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"market_id": market_id})
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
@@ -482,6 +498,11 @@ async def change_community_mcp_status_api(
             new_status=payload.status,
             content=payload.content,
         )
+        # payload.content is free-form review text and never reaches the log.
+        record_security_event("mcp_market_status_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"market_id": market_id,
+                                       "status": payload.status})
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
@@ -509,8 +530,11 @@ async def increment_community_mcp_download_count_api(
 ):
     """Increment the download counter when a user installs a community MCP."""
     try:
-        get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
         increment_mcp_market_download_count(market_id)
+        record_security_event("mcp_market_download", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"market_id": market_id})
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success", "data": None})
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))

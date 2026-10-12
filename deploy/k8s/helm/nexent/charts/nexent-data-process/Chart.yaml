@@ -1,6 +1,6 @@
 apiVersion: v2
 name: nexent-data-process
-description: Nexent Data Process Service - Data processing with Ray and Celery
+description: Nexent Data Process Service - Data processing with Celery prefork and threads
 type: application
 version: 0.1.0
 appVersion: "latest"
@@ -8,7 +8,6 @@ keywords:
   - nexent
   - data
   - processing
-  - ray
 maintainers:
   - name: Nexent Team
 dependencies:

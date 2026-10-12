@@ -105,6 +105,7 @@ export default function AgentsPage() {
     search,
     page,
     pageSize,
+    includeRepositoryInfo: true,
   });
   const isEmptyAgentList =
     !isLoading &&

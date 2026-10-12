@@ -797,6 +797,7 @@ async def test_check_model_health_lookup_error(client, auth_header, user_credent
 @pytest.mark.asyncio
 async def test_verify_model_config_success(client, auth_header, sample_model_data, mocker):
     """Test successful model config verification."""
+    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={"connectivity": True, "model_name": "gpt-4"}
@@ -826,6 +827,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
 @pytest.mark.asyncio
 async def test_verify_model_config_failure_with_error(client, auth_header, sample_model_data, mocker):
     """Test model config verification failure with detailed error message."""
+    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={
@@ -855,6 +857,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
 @pytest.mark.asyncio
 async def test_verify_model_config_exception(client, auth_header, sample_model_data, mocker):
     """Test model config verification with exception."""
+    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity',
         side_effect=Exception("err")
@@ -2034,3 +2037,92 @@ def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]
+
+
+class TestModelAuditEntries:
+    """Security audit entries emitted by model configuration endpoints."""
+
+    def test_model_create_emits_audit_entry_without_credentials(self, client, caplog):
+        import logging
+        from unittest.mock import AsyncMock, patch
+
+        with patch("backend.apps.model_managment_app.create_model_for_tenant",
+                   new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = {"auto_configured_defaults": []}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/model/create",
+                    json={"model_name": "gpt-x", "model_type": "llm",
+                          "base_url": "https://api.example.com/v1",
+                          "api_key": "sk-secret", "display_name": "GPT X"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=model_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=test_user" in messages[0]
+        assert "tenant_id=test_tenant" in messages[0]
+        assert '"model_name":"gpt-x"' in messages[0]
+        assert '"base_url":"https://api.example.com/v1"' in messages[0]
+        assert "sk-secret" not in messages[0]
+
+    def test_manage_batch_import_emits_audit_entry(self, client, caplog):
+        import logging
+        from unittest.mock import AsyncMock, patch
+
+        with patch("backend.apps.model_managment_app.batch_create_models_for_tenant",
+                   new_callable=AsyncMock) as mock_batch:
+            mock_batch.return_value = {"auto_configured_defaults": []}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/model/manage/batch_create",
+                    json={"tenant_id": "tenant-9", "provider": "silicon", "type": "llm",
+                          "api_key": "sk-batch",
+                          "models": [
+                              {"model_name": "Qwen/Qwen2.5-7B", "model_repo": "Qwen",
+                               "display_name": "qwen-7b"},
+                              {"model_name": "Qwen/Qwen2.5-14B", "model_repo": "Qwen"},
+                          ]},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tenant_model_batch_import" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=test_user" in messages[0]
+        assert '"target_tenant_id":"tenant-9"' in messages[0]
+        assert '"provider":"silicon"' in messages[0]
+        assert '"models_count":2' in messages[0]
+        assert '"model_repo":"Qwen"' in messages[0]
+        assert "sk-batch" not in messages[0]
+
+    def test_backfill_defaults_emits_audit_entry(self, client, caplog):
+        import logging
+        from unittest.mock import patch
+
+        with patch("backend.apps.model_managment_app._ids_for_created_models") as mock_ids, \
+                patch("backend.apps.model_managment_app._backfill_default_model_slots") as mock_backfill:
+            mock_ids.return_value = [11, 12]
+            mock_backfill.return_value = ["llm"]
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/model/backfill_defaults",
+                    json={"display_names": ["qwen-7b", "qwen-14b"]},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=model_defaults_backfill" in messages[0]
+        assert "result=success" in messages[0]
+        assert '"display_names":["qwen-7b","qwen-14b"]' in messages[0]
+        assert '"auto_configured_defaults":["llm"]' in messages[0]

@@ -11,6 +11,7 @@ import { MyAgentCard } from "../../app/[locale]/agent-space/components/MyAgentCa
 import { a2aClientService } from "@/services/a2aService";
 import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import { configService } from "@/services/configService";
+import agentRepositoryService from "@/services/agentRepositoryService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 
 vi.mock("react-i18next", () => ({
@@ -107,6 +108,123 @@ beforeEach(() => {
 });
 
 describe("Agent usage guide component coverage", () => {
+  it("shows apply listing from the paged agent data without another request", async () => {
+    const fetchListings = vi
+      .spyOn(agentRepositoryService, "fetchAgentRepositoryListings")
+      .mockResolvedValue({ items: [] });
+    const onApplyListing = vi.fn();
+    const onGuideMenuOpenChange = vi.fn();
+    renderWithProviders(
+      <MyAgentCard
+        agent={editableAgent}
+        onEdit={vi.fn()}
+        onView={vi.fn()}
+        onApplyListing={onApplyListing}
+        onViewReview={vi.fn()}
+        onDelete={vi.fn()}
+        onEvaluate={vi.fn()}
+        onUsageGuide={vi.fn()}
+        onGuideMenuOpenChange={onGuideMenuOpenChange}
+      />
+    );
+
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
+      );
+    const applyItem = await screen.findByRole("menuitem", {
+      name: "agentRepository.mine.menu.apply",
+    });
+    expect(fetchListings).not.toHaveBeenCalled();
+    expect(onGuideMenuOpenChange.mock.calls[0]?.[0]).toBe(true);
+    await userEvent.setup().click(applyItem);
+    expect(onApplyListing).toHaveBeenCalledOnce();
+    fetchListings.mockRestore();
+  });
+
+  it("shows review status from the paged agent data", async () => {
+    const fetchListings = vi
+      .spyOn(agentRepositoryService, "fetchAgentRepositoryListings")
+      .mockResolvedValue({
+        items: [
+          {
+            agent_repository_id: 12,
+            agent_id: 41,
+            name: "Demo Agent",
+            status: "shared",
+            version_no: 3,
+          },
+        ],
+      });
+    renderCard(
+      {
+        ...editableAgent,
+        repository_info: [
+          {
+            agent_repository_id: 12,
+            status: "shared",
+            version_no: 3,
+          },
+        ],
+      },
+      vi.fn(),
+      {
+        onGuideMenuOpenChange: vi.fn(),
+      }
+    );
+
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
+      );
+    expect(
+      await screen.findByRole("menuitem", {
+        name: "agentRepository.mine.menu.review",
+      })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("repository.status.listed · v3")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", {
+        name: "agentRepository.mine.menu.apply",
+      })
+    ).not.toBeInTheDocument();
+    expect(fetchListings).not.toHaveBeenCalled();
+    fetchListings.mockRestore();
+  });
+
+  it("shows update review when an older version is listed", async () => {
+    renderCard({
+      ...editableAgent,
+      repository_info: [
+        { agent_repository_id: 12, status: "pending_review", version_no: 3 },
+        { agent_repository_id: 10, status: "shared", version_no: 1 },
+      ],
+    });
+
+    expect(
+      screen.getByText("agentRepository.mine.status.updateReviewing · v3")
+    ).toBeInTheDocument();
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
+      );
+    expect(
+      screen.getByRole("menuitem", {
+        name: "agentRepository.mine.menu.reviewUpdate",
+      })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", {
+        name: "agentRepository.mine.menu.apply",
+      })
+    ).not.toBeInTheDocument();
+  });
+
   it("UT-FE-AGUG-004 opens the selected published Agent guide from the keyboard-accessible card menu", async () => {
     const user = userEvent.setup();
     const onUsageGuide = renderCard(editableAgent);

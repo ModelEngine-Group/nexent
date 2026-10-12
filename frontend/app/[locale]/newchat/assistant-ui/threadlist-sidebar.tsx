@@ -11,6 +11,7 @@ import {
   Sidebar,
   SidebarContent,
   SidebarHeader,
+  SidebarFooter,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import type { SidebarProps } from "@/components/ui/sidebar";
@@ -21,6 +22,7 @@ import {
 } from "@assistant-ui/react";
 import {
   BatchSelectionProvider,
+  BatchSidebarFooter,
   PinnedThreadsProvider,
   ThreadList,
 } from "./thread-list";
@@ -32,13 +34,21 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { Agent } from "@/types/agentConfig";
 
+type RenameSuccessHandler = (
+  threadId: string,
+  remoteId: string | undefined,
+  title: string
+) => void;
+
 interface ThreadListSidebarProps extends SidebarProps {
   selectedAgent?: Agent | null;
   activeThreadId?: string;
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
+  serverConversationIds?: ReadonlyMap<string, string>;
   onPrepareNewConversation?: () => void;
   onNewConversation?: () => void | Promise<void>;
+  onRenameSuccess?: RenameSuccessHandler;
   onAgentSelected?: (agent: Agent) => void;
   newChatDesign?: boolean;
   /** Accepted for backward compatibility; the design removed the legacy switch. */
@@ -63,9 +73,11 @@ export function ThreadListSidebar({
   selectedAgent,
   activeThreadId,
   generatedTitles,
+  serverConversationIds,
   onPrepareNewConversation,
   onNewConversation,
   onAgentSelected,
+  onRenameSuccess,
   newChatDesign = false,
   ...props
 }: ThreadListSidebarProps) {
@@ -128,7 +140,10 @@ export function ThreadListSidebar({
         style={{ backgroundColor: sidebarBackground }}
       >
         <PinnedThreadsProvider>
-          <BatchSelectionProvider onNewConversation={onNewConversation}>
+          <BatchSelectionProvider
+            onNewConversation={onNewConversation}
+            serverConversationIds={serverConversationIds}
+          >
             <Sidebar
               {...props}
               collapsible="none"
@@ -208,6 +223,15 @@ export function ThreadListSidebar({
                       <DiscoverAgentsIcon className="size-4" />
                       {t("chat.sidebar.discoverAgents")}
                     </ThreadListPrimitive.New>
+                  ) : onNewConversation ? (
+                    <button
+                      type="button"
+                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
+                      onClick={onNewConversation}
+                    >
+                      <PlusIcon className="size-4 shrink-0" />
+                      {t("chat.sidebar.newConversation")}
+                    </button>
                   ) : (
                     <ThreadListPrimitive.New
                       className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
@@ -223,12 +247,17 @@ export function ThreadListSidebar({
                 <ThreadList
                   activeThreadId={activeThreadId}
                   generatedTitles={generatedTitles}
+                  serverConversationIds={serverConversationIds}
+                  onRenameSuccess={onRenameSuccess}
                   searchQuery={
                     newChatDesign ? conversationSearch : legacySearchQuery
                   }
                   newChatDesign={newChatDesign}
                 />
               </SidebarContent>
+              <SidebarFooter>
+                <BatchSidebarFooter />
+              </SidebarFooter>
             </Sidebar>
           </BatchSelectionProvider>
         </PinnedThreadsProvider>

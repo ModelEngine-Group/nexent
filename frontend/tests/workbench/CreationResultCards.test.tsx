@@ -30,10 +30,7 @@ it("shows the completed Agent's summary and links to its development page", () =
   const card = screen.getByRole("link", { name: /进入智能体开发/ });
   expect(card).toHaveClass("w-full");
   expect(card).not.toHaveClass("max-w-xl");
-  expect(card).toHaveAttribute(
-    "href",
-    "/agents?agent_id=42"
-  );
+  expect(card).toHaveAttribute("href", "/zh/agents/42");
 });
 
 it("loads the generated Agent details when restored from a message", async () => {
@@ -50,17 +47,13 @@ it("loads the generated Agent details when restored from a message", async () =>
   expect(screen.getByText("回答售前与售后问题")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /进入智能体开发/ })).toHaveAttribute(
     "href",
-    "/agents?agent_id=42"
+    "/zh/agents/42"
   );
 });
 
 it("does not claim completion when only an Agent draft was saved", () => {
   render(
-    <AgentCreationResultCard
-      agentId={42}
-      name="客服助手"
-      completed={false}
-    />
+    <AgentCreationResultCard agentId={42} name="客服助手" completed={false} />
   );
   expect(screen.getByText("草稿已保存")).toBeInTheDocument();
   expect(screen.queryByText("草稿已生成")).not.toBeInTheDocument();
@@ -109,7 +102,7 @@ it("restores a saved Skill card from the user's Skills after reopening history",
   );
   expect(
     await screen.findByRole("link", { name: "查看我的 Skills" })
-  ).toHaveAttribute("href", "/skill-space?tab=mine");
+  ).toHaveAttribute("href", "/zh/skill-space?tab=mine");
   expect(screen.queryByRole("button", { name: "保存 Skill" })).toBeNull();
   expect(onSave).not.toHaveBeenCalled();
   expect(fetchMyEditableSkills).toHaveBeenCalledWith(

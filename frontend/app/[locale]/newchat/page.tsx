@@ -255,7 +255,9 @@ const HomeContent: FC<{
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
     new Map()
   );
-  const [, forceServerIdTick] = useState(0);
+  const [serverConversationIds, setServerConversationIds] = useState<
+    Map<string, string>
+  >(new Map());
 
   const handleServerConversationId = useCallback(
     (threadId: string, serverId: string, initialQuestion?: string) => {
@@ -265,10 +267,8 @@ const HomeContent: FC<{
       if (previous !== numericId) {
         map.set(threadId, numericId);
         cacheHistoricalChatMode(numericId, chatMode);
-        // Trigger a re-render so the `setRunConfig` effect below picks up the
-        // new id. We don't store the map in state because we never need to
-        // diff/render it directly — only react when an entry changes.
-        forceServerIdTick((tick) => tick + 1);
+        // Keep the sidebar and run configuration in sync with the server id.
+        setServerConversationIds(new Map(map));
       }
 
       if (initialQuestion && previous !== numericId) {
@@ -277,6 +277,7 @@ const HomeContent: FC<{
             setGeneratedTitles((titles) => {
               const next = new Map(titles);
               next.set(threadId, title);
+              next.set(numericId, title);
               return next;
             });
           })
@@ -289,6 +290,18 @@ const HomeContent: FC<{
       }
     },
     [chatMode]
+  );
+
+  const handleConversationRenamed = useCallback(
+    (threadId: string, remoteId: string | undefined, title: string) => {
+      setGeneratedTitles((titles) => {
+        const next = new Map(titles);
+        next.set(threadId, title);
+        if (remoteId) next.set(remoteId, title);
+        return next;
+      });
+    },
+    []
   );
 
   const handleGenerationStopped = useCallback((conversationId: number) => {
@@ -734,8 +747,14 @@ const HomeContent: FC<{
 
   const handleThreadBack = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
-    await runtime.threads.switchToNewThread();
-    onBack();
+    try {
+      await runtime.threads.switchToNewThread();
+      await runtime.threads.reload();
+    } catch (error) {
+      log.error("[HomeContent] Failed to return to agent list:", error);
+    } finally {
+      onBack();
+    }
   }, [onBack, runtime]);
 
   const handlePrepareNewConversation = useCallback(() => {
@@ -745,9 +764,16 @@ const HomeContent: FC<{
   }, [onBack]);
 
   const handleNewConversation = useCallback(async () => {
-    handlePrepareNewConversation();
-    await runtime.threads.switchToNewThread();
-  }, [handlePrepareNewConversation, runtime]);
+    shouldRestoreAgentRef.current = false;
+    try {
+      await runtime.threads.switchToNewThread();
+      await runtime.threads.reload();
+    } catch (error) {
+      log.error("[HomeContent] Failed to start a new conversation:", error);
+    } finally {
+      onBack();
+    }
+  }, [onBack, runtime]);
 
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
@@ -783,6 +809,8 @@ const HomeContent: FC<{
             newChatDesign
             activeThreadId={selectedAgent ? runtimeMainThreadId : undefined}
             generatedTitles={generatedTitles}
+            serverConversationIds={serverConversationIds}
+            onRenameSuccess={handleConversationRenamed}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
             selectedAgent={selectedAgent}

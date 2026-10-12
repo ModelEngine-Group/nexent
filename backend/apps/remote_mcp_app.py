@@ -54,6 +54,7 @@ from services.remote_mcp_service import (
 )
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from services.mcp_container_service import MCPContainerManager
+from services.audit_service import record_security_event
 from utils.auth_utils import get_current_user_info
 
 router = APIRouter(prefix="/mcp")
@@ -194,6 +195,17 @@ async def add_mcp_service_endpoint(
             skip_health_check=payload.skip_health_check if payload.skip_health_check is not None else False,
         )
 
+        # Credential-bearing fields (authorization_token, custom_headers,
+        # container_config, config_json, registry_json) never reach the log;
+        # server_url is the exfiltration channel itself and stays auditable.
+        record_security_event("mcp_add", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"name": payload.name,
+                                       "source": payload.source.value if hasattr(payload.source, 'value') else payload.source,
+                                       "server_url": payload.server_url,
+                                       "enabled": payload.enabled if payload.enabled is not None else False,
+                                       "market_id": payload.market_id})
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Successfully added MCP service", "status": "success"}
@@ -250,6 +262,14 @@ async def add_container_mcp_service_endpoint(
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
         )
+
+        # mcp_config may carry credentials via env blocks and never reaches the log.
+        record_security_event("mcp_add", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"name": payload.name,
+                                       "source": payload.source.value if hasattr(payload.source, 'value') else payload.source,
+                                       "port": payload.port,
+                                       "market_id": payload.market_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -343,6 +363,14 @@ async def add_container_mcp_service_stream_endpoint(
             yield f"data: {json.dumps({'status': 'container_started', 'data': container_info}, ensure_ascii=False)}\n\n"
 
             result = await deployment_task
+            # Audit only after the deployment task fully succeeds; failures
+            # stay in the business error logs.
+            record_security_event("mcp_add", request=http_request,
+                                  user_id=user_id, tenant_id=tenant_id,
+                                  details={"name": payload.name,
+                                           "source": payload.source.value if hasattr(payload.source, "value") else payload.source,
+                                           "port": payload.port,
+                                           "market_id": payload.market_id})
             yield f"data: {json.dumps({'status': 'success', 'data': result}, ensure_ascii=False)}\n\n"
         except TenantResourceLimitError as exc:
             logger.warning("Streaming MCP creation rejected by tenant resource limit: %s", exc)
@@ -400,6 +428,14 @@ async def update_mcp_service_endpoint(
             shared_fields=payload.shared_fields,
         )
 
+        # authorization_token/custom_headers/config_json never reach the log;
+        # server_url retargeting is the exfiltration channel and stays auditable.
+        record_security_event("mcp_update", request=http_request,
+                              user_id=user_id, tenant_id=effective_tenant_id,
+                              details={"mcp_id": payload.mcp_id,
+                                       "name": payload.name,
+                                       "server_url": payload.server_url})
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Successfully updated MCP service", "status": "success"}
@@ -441,6 +477,10 @@ async def delete_mcp_by_id(
             user_id=user_id,
             mcp_id=mcp_id
         )
+
+        record_security_event("mcp_delete", request=http_request,
+                              user_id=user_id, tenant_id=effective_tenant_id,
+                              details={"mcp_id": mcp_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -486,6 +526,9 @@ async def stop_mcp_container(
                 user_id=user_id,
                 container_id=container_id,
             )
+            record_security_event("mcp_container_delete", request=http_request,
+                                  user_id=user_id, tenant_id=effective_tenant_id,
+                                  details={"container_id": container_id})
             return JSONResponse(
                 status_code=HTTPStatus.OK,
                 content={
@@ -875,6 +918,10 @@ async def enable_mcp_service(
             enabled=True,
         )
 
+        record_security_event("mcp_enable", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"mcp_id": payload.mcp_id})
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success"}
@@ -917,6 +964,10 @@ async def disable_mcp_service(
             mcp_id=payload.mcp_id,
             enabled=False,
         )
+
+        record_security_event("mcp_disable", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"mcp_id": payload.mcp_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -990,6 +1041,13 @@ if ENABLE_UPLOAD_IMAGE:
                 container_info = container_started.result()
                 yield f"data: {json.dumps({'status': 'container_started', 'data': container_info}, ensure_ascii=False)}\n\n"
                 result = await deployment_task
+                # env_vars may carry credentials and never reaches the log.
+                record_security_event("mcp_image_upload", request=http_request,
+                                      user_id=user_id, tenant_id=effective_tenant_id,
+                                      details={"filename": file.filename,
+                                               "size": len(content),
+                                               "port": port,
+                                               "service_name": service_name})
                 yield f"data: {json.dumps({'status': 'success', 'data': result}, ensure_ascii=False)}\n\n"
             except MCPNameIllegal as exc:
                 logger.warning(f"MCP service name conflict during image upload: {exc}")
@@ -1050,6 +1108,15 @@ if ENABLE_UPLOAD_IMAGE:
                 ingroup_permission=ingroup_permission,
                 shared_fields=json.loads(shared_fields) if shared_fields else None,
             )
+
+            # env_vars may carry credentials and never reaches the log; the
+            # image filename/size document what was deployed.
+            record_security_event("mcp_image_upload", request=http_request,
+                                  user_id=user_id, tenant_id=effective_tenant_id,
+                                  details={"filename": file.filename,
+                                           "size": len(content),
+                                           "port": port,
+                                           "service_name": service_name})
 
             return JSONResponse(status_code=HTTPStatus.OK, content=result)
 

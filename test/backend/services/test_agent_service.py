@@ -1,3 +1,5 @@
+import importlib.machinery
+from pathlib import Path
 import sys
 import asyncio
 import json
@@ -118,6 +120,8 @@ nexent_agent_model_mock = MagicMock()
 nexent_agent_model_mock.ToolConfig = MockToolConfig
 sys.modules["nexent"] = MagicMock()
 sys.modules["nexent.core"] = MagicMock()
+sys.modules["nexent.core"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 _concurrency_module = types.ModuleType("nexent.core.concurrency")
 
 
@@ -178,6 +182,8 @@ _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
 sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
+sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
 sys.modules["nexent.core.agents.agent_model"] = nexent_agent_model_mock
 sys.modules["nexent.core.agents.run_agent"] = MagicMock()
 context_input_mock = types.ModuleType("nexent.core.agents.context_input")
@@ -201,7 +207,6 @@ memory_models_module = types.ModuleType("nexent.memory.models")
 memory_models_module.MemoryIngestUnit = MagicMock
 sys.modules["nexent.memory.models"] = memory_models_module
 knowledge_scope_service_module = types.ModuleType("services.knowledge_scope_service")
-knowledge_scope_service_module.build_runtime_knowledge_policy = MagicMock
 knowledge_scope_service_module.build_runtime_knowledge_resources = MagicMock
 knowledge_scope_service_module.resolve_knowledge_scope = MagicMock
 sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_module
@@ -390,7 +395,6 @@ setattr(
 
 # Load real asset_owner_visibility (agent_service imports resolve_agent_list_permission)
 import importlib.util
-from pathlib import Path
 
 _asset_owner_path = (
     Path(__file__).resolve().parents[3]
@@ -509,7 +513,11 @@ elasticsearch_client_mock = MagicMock()
 nexent_mock = MagicMock()
 sys.modules["nexent"] = nexent_mock
 sys.modules["nexent.core"] = MagicMock()
+sys.modules["nexent.core"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 sys.modules["nexent.core.agents"] = MagicMock()
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
+sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
 sys.modules["nexent.core.models"] = MagicMock()
 sys.modules["nexent.core.utils"] = MagicMock()
 
@@ -3238,6 +3246,120 @@ async def test_list_agent_page_impl_filters_before_paginating(monkeypatch):
         "total": 2,
         "total_pages": 2,
     }
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_includes_repository_info_only_for_current_page(monkeypatch):
+    agents = [
+        {"agent_id": 1, "name": "First", "created_by": "alice"},
+        {"agent_id": 2, "name": "Second", "created_by": "alice"},
+    ]
+    _mock_paged_agent_candidates(monkeypatch, agents)
+
+    async def enrich_page(*, agent_ids, **_kwargs):
+        return [{"agent_id": agent_id, "current_version_no": 3} for agent_id in agent_ids]
+
+    repository_calls = []
+
+    def repository_rows(agent_ids, *, statuses, publisher_tenant_id):
+        repository_calls.append((agent_ids, set(statuses), publisher_tenant_id))
+        return [record for record in [
+            {"agent_repository_id": 12, "agent_id": 2, "status": "pending_review",
+             "version_no": 3, "version_name": "v3", "create_time": None, "content": "Update"},
+            {"agent_repository_id": 10, "agent_id": 2, "status": "shared",
+             "version_no": 1, "version_name": "v1", "create_time": None, "content": None},
+        ] if record["status"] in statuses]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", enrich_page)
+    monkeypatch.setattr(agent_management, "batch_search_version_names", lambda *_args: [])
+    monkeypatch.setattr(agent_management, "list_agent_repository_by_agent_ids", repository_rows)
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", caller_tenant_id="tenant_123",
+        page=2, page_size=1,
+        include_repository_info=True,
+    )
+
+    assert [item["agent_id"] for item in result["items"]] == [2]
+    assert repository_calls == [
+        ([2], {"shared"}, "tenant_123"),
+        ([2], {"pending_review", "rejected", "shared"}, "tenant_123"),
+    ]
+    assert result["items"][0]["repository_info"] == [
+        {"agent_repository_id": 12, "status": "pending_review", "version_no": 3,
+         "version_label": "v3", "create_time": None, "content": "Update"},
+        {"agent_repository_id": 10, "status": "shared", "version_no": 1,
+         "version_label": "v1", "create_time": None, "content": None},
+    ]
+
+    empty_page = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=3, page_size=1,
+        include_repository_info=True,
+    )
+    assert empty_page["items"] == []
+    assert len(repository_calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "caller_tenant", "scope_tenant", "expected_statuses", "expected_content"),
+    [
+        ("USER", "tenant-a", "tenant-a", ["shared"], [None]),
+        ("ADMIN", "tenant-a", "asset-owner", ["shared"], [None]),
+        ("DEV", "tenant-a", "tenant-a", ["pending_review", "shared"], ["my review", None]),
+    ],
+)
+async def test_list_agent_page_repository_review_visibility(
+    monkeypatch, role, caller_tenant, scope_tenant, expected_statuses, expected_content,
+):
+    monkeypatch.setattr(
+        agent_management, "get_user_tenant_by_user_id", lambda _user_id: {"user_role": role}
+    )
+    monkeypatch.setattr(agent_management, "query_group_ids_by_user", lambda _user_id: [])
+    monkeypatch.setattr(
+        agent_management, "query_agent_list_candidates_by_tenant_id",
+        lambda tenant_id, **_kwargs: [
+            {"agent_id": 7, "tenant_id": tenant_id, "created_by": "alice", "enabled": True}
+        ],
+    )
+
+    async def enrich(*, agent_ids, **_kwargs):
+        return [{"agent_id": agent_id, "current_version_no": 0} for agent_id in agent_ids]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", enrich)
+    rows = [
+        {"agent_repository_id": 1, "agent_id": 7, "status": "pending_review",
+         "version_no": 2, "version_name": "v2", "create_time": "2026-09-29",
+         "content": "my review", "publisher_user_id": "alice"},
+        {"agent_repository_id": 2, "agent_id": 7, "status": "rejected",
+         "version_no": 3, "version_name": "v3", "create_time": "2026-09-28",
+         "content": "other review", "publisher_user_id": "bob"},
+        {"agent_repository_id": 3, "agent_id": 7, "status": "shared",
+         "version_no": 1, "version_name": "v1", "create_time": "2026-09-27",
+         "content": "old feedback", "publisher_user_id": "bob"},
+    ]
+    calls = []
+
+    def repository_rows(agent_ids, *, statuses, publisher_tenant_id, publisher_user_id=None):
+        calls.append((set(statuses), publisher_tenant_id, publisher_user_id))
+        assert agent_ids == [7]
+        return [row for row in rows if row["status"] in statuses and
+                (publisher_user_id is None or row["publisher_user_id"] == publisher_user_id)]
+
+    monkeypatch.setattr(agent_management, "list_agent_repository_by_agent_ids", repository_rows)
+
+    result = await list_agent_page_impl(
+        tenant_id=scope_tenant, caller_tenant_id=caller_tenant,
+        user_id="alice", include_repository_info=True,
+    )
+
+    info = result["items"][0]["repository_info"]
+    assert [record["status"] for record in info] == expected_statuses
+    assert [record["content"] for record in info] == expected_content
+    assert calls[0] == ({"shared"}, scope_tenant, None)
+    assert len(calls) == (2 if role == "DEV" else 1)
+    if role == "DEV":
+        assert calls[1] == ({"pending_review", "rejected", "shared"}, scope_tenant, "alice")
 
 
 @pytest.mark.asyncio
@@ -8591,17 +8713,7 @@ async def test_import_agent_all_model_fields_in_database(
 def test_render_prompt_template_success(monkeypatch):
     """_render_prompt_template should render a jinja2 template successfully."""
 
-    class FakeTemplate:
-        def __init__(self, template_str):
-            self.template_str = template_str
-
-        def render(self, **context):
-            # Very small fake renderer for test purposes
-            return self.template_str.format(**context)
-
-    monkeypatch.setattr(naming_service, "Template", FakeTemplate, raising=False)
-
-    tpl = "Hello {name}"
+    tpl = "Hello {{ name }}"
     rendered = _render_prompt_template(tpl, name="World")
     assert rendered == "Hello World"
 
@@ -8616,7 +8728,7 @@ def test_render_prompt_template_on_error_returns_original(monkeypatch):
         def render(self, **context):
             raise ValueError("render failed")
 
-    monkeypatch.setattr(naming_service, "Template", FailingTemplate, raising=False)
+    monkeypatch.setitem(_render_prompt_template.__globals__, "Template", FailingTemplate)
 
     tpl = "Broken {template"
     # Should not raise; should return original string
@@ -19688,7 +19800,7 @@ def test_inject_user_timezone_time_with_valid_timezone():
         result = prepend_current_time(
             "What time is it?", request.headers.get("x-user-timezone")
         )
-    assert result.startswith("[Current time:")
+    assert result.startswith("What time is it?\n\n[Current time:")
     assert "What time is it?" in result
 
 
@@ -19704,13 +19816,13 @@ def test_inject_user_timezone_time_without_header():
     assert result == "What time is it?"
 
 
-def test_inject_user_timezone_time_with_existing_prefix():
-    """Should not double-inject when query already has [Current time:] prefix."""
+def test_inject_user_timezone_time_with_existing_marker():
+    """Do not append a second runtime time marker."""
     from unittest.mock import MagicMock
 
     request = MagicMock()
     request.headers = {"x-user-timezone": "Asia/Shanghai"}
-    prefixed = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    prefixed = "What time is it?\n\n[Current time: 2026-01-01 20:00:00]"
     result = prepend_current_time(prefixed, request.headers.get("x-user-timezone"))
     assert result == prefixed
 
@@ -19742,13 +19854,9 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
 
     mock_create_conversation = mocker.patch.object(
@@ -19813,8 +19921,8 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(
     }
     assert mock_agent_request.tool_params == {"index_names": ["pool-a"]}
     assert mock_agent_request.__dict__["_runtime_knowledge_context"] == {
-        "policy": "scope policy",
-        "resources": "scope resources",
+        "scope": {"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                  "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     }
     event = mock_agent_request.__dict__["_resolved_knowledge_scope_event"]
     assert event["warnings"] == ["warn-1"]
@@ -19836,13 +19944,9 @@ async def test_run_agent_stream_persists_request_scope_on_existing_conversation(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mocker.patch.object(
         agent_run_service,
@@ -19920,13 +20024,9 @@ async def test_run_agent_stream_uses_stored_scope_when_request_has_none(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mock_get_conversation = mocker.patch.object(
         agent_run_service,
@@ -19994,13 +20094,9 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mocker.patch.object(
         agent_run_service,

@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import threading
+import jinja2
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
@@ -48,7 +49,12 @@ def _create_mock_smolagents():
             # the parent's kwargs; always set enable_planning from the class-level
             # default above (CoreAgent already assigned it before calling super).
             self.enable_planning = kwargs.pop("enable_planning", self.enable_planning)
-            self.tools = kwargs.pop("tools", {}) or {}
+            supplied_tools = kwargs.pop("tools", {}) or {}
+            self.tools = dict(supplied_tools) if isinstance(supplied_tools, dict) else {
+                getattr(tool, "name", str(index)): tool
+                for index, tool in enumerate(supplied_tools)
+            }
+            self.tools.setdefault("final_answer", object())
             self.managed_agents = kwargs.pop("managed_agents", {}) or {}
             self.prompt_templates = kwargs.pop("prompt_templates", {}) or {}
             self.max_steps = kwargs.pop("max_steps", 10)
@@ -77,7 +83,6 @@ def _create_mock_smolagents():
 
     # local_python_executor submodule
     local_python_mod = ModuleType("smolagents.local_python_executor")
-    setattr(local_python_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     setattr(mock_smolagents, "local_python_executor", local_python_mod)
 
     # memory submodule
@@ -147,10 +152,8 @@ def _create_mock_modules():
     setattr(mock_rich, "text", mock_rich_text)
     setattr(mock_rich_console, "Group", MagicMock(side_effect=lambda *args: args))
 
-    # Mock jinja2
-    mock_jinja2 = ModuleType("jinja2")
-    setattr(mock_jinja2, "Template", MagicMock())
-    setattr(mock_jinja2, "StrictUndefined", MagicMock())
+    # Prompt composition uses the real strict Jinja environment.
+    mock_jinja2 = jinja2
 
     # Mock langchain_core
     mock_langchain_core = ModuleType("langchain_core")
@@ -344,6 +347,21 @@ def test_remove_parallel_executor_import_preserves_unrelated_code():
     code = "from other_module import parallel_executor_helper\nprint(parallel_executor_helper)"
 
     assert core_agent_module._remove_parallel_executor_import(code) == code
+
+
+def test_ut_sdk_cftp_003_core_agent_removes_framework_final_answer_tool():
+    """UT-SDK-cftp-003: CoreAgent exposes no callable final-answer tool."""
+    agent = core_agent_module.CoreAgent(
+        observer=MagicMock(),
+        tools={},
+        model=MagicMock(),
+        name="agent",
+        description="test",
+        prompt_templates={},
+    )
+
+    assert "final_answer" not in agent.tools
+    assert "final_answer" not in agent._verification_tool_names()
 
 
 def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
@@ -609,9 +627,9 @@ second_block"""
 
 
 def test_parse_code_blobs_run_format_without_end_code():
-    """Test parse_code_blobs with ```<RUN>\\ncontent\\n``` pattern (without END_CODE)."""
+    """Test parse_code_blobs with ```<run>\\ncontent\\n``` pattern (without END_CODE)."""
     text = """Here is some code:
-```<RUN>
+```<run>
 print("Hello World")
 ```
 And some more text."""
@@ -622,9 +640,9 @@ And some more text."""
 
 
 def test_parse_code_blobs_run_incomplete_no_closing_backticks():
-    """Test parse_code_blobs when ```<RUN> tag has no closing ```."""
+    """Test parse_code_blobs when ```<run> tag has no closing ```."""
     text = """Here is some code:
-```<RUN>
+```<run>
 incomplete code without closing backticks"""
 
     # Incomplete block is skipped, ast.parse raises ValueError for non-Python text
@@ -633,11 +651,11 @@ incomplete code without closing backticks"""
 
 
 def test_parse_code_blobs_multiple_run_blocks_one_incomplete():
-    """Test parse_code_blobs with multiple ```<RUN> blocks where one has no closing ```."""
-    text = """```<RUN>
+    """Test parse_code_blobs with multiple ```<run> blocks where one has no closing ```."""
+    text = """```<run>
 first_block()
 ```
-```<RUN>
+```<run>
 second_block"""
 
     result = core_agent_module.parse_code_blobs(text)
@@ -647,13 +665,13 @@ second_block"""
 
 
 def test_parse_code_blobs_multiple_run_blocks():
-    """Test parse_code_blobs with multiple ```<RUN> blocks."""
-    text = """```<RUN>
+    """Test parse_code_blobs with multiple ```<run> blocks."""
+    text = """```<run>
 first_block()
-```<END_CODE>
-```<RUN>
+```<end_code>
+```<run>
 second_block()
-```<END_CODE>"""
+```<end_code>"""
 
     result = core_agent_module.parse_code_blobs(text)
     expected = "first_block()\n\nsecond_block()"
@@ -724,7 +742,7 @@ def test_parse_code_blobs_direct_python_code():
     """Test parse_code_blobs with direct Python code (no code blocks).
 
     Direct Python code without code blocks will raise ValueError because
-    it's not wrapped in <code>...</code> or ```<RUN>...</RUN>``` format.
+    it's not wrapped in <code>...</code> or ```<run>...</run>``` format.
     """
     text = '''print("Hello World")
 x = 42
@@ -753,10 +771,10 @@ Just plain text that should fail."""
 def test_parse_code_blobs_display_only_raises():
     """Test parse_code_blobs raises ValueError when only DISPLAY code blocks are present."""
     text = """Here is some code:
-```<DISPLAY:python>
+```<display:python>
 def hello():
     return "Hello"
-```<END_DISPLAY_CODE>
+```<end_display_code>
 And some more text."""
 
     with pytest.raises(ValueError) as exc_info:
@@ -875,11 +893,11 @@ The result is 8."""
 # ----------------------------------------------------------------------------
 
 def test_convert_code_format_display_new_format():
-    """Validate convert_code_format correctly transforms new <DISPLAY:language>...</DISPLAY> format to standard markdown."""
+    """Validate convert_code_format correctly transforms new <display:language>...</display> format to standard markdown."""
     original_text = """Here is code:
-<DISPLAY:python>
+<display:python>
 print('hello')
-</DISPLAY>
+</display>
 And some more text."""
 
     expected_text = """Here is code:
@@ -893,11 +911,11 @@ And some more text."""
 
 
 def test_convert_code_format_display_replacements():
-    """Validate convert_code_format correctly transforms legacy <DISPLAY:language> format to standard markdown."""
+    """Validate convert_code_format correctly transforms legacy <display:language> format to standard markdown."""
     original_text = """Here is code:
-```<DISPLAY:python>
+```<display:python>
 print('hello')
-```<END_DISPLAY_CODE>
+```<end_display_code>
 And some more text."""
 
     expected_text = """Here is code:
@@ -911,9 +929,9 @@ And some more text."""
 
 
 def test_convert_code_format_display_without_end_code():
-    """Validate convert_code_format handles <DISPLAY:language> without <END_DISPLAY_CODE>."""
+    """Validate convert_code_format handles <display:language> without <end_display_code>."""
     original_text = """Here is code:
-```<DISPLAY:python>
+```<display:python>
 print('hello')
 ```
 And some more text."""
@@ -947,10 +965,10 @@ And some more text."""
 
 
 def test_convert_code_format_restore_end_code():
-    """Test that <END_CODE> is properly restored after replacements."""
-    original_text = """```<DISPLAY:python>
+    """Test that <end_code> is properly restored after replacements."""
+    original_text = """```<display:python>
 print('hello')
-```<END_CODE>"""
+```<end_code>"""
 
     expected_text = """```python
 print('hello')
@@ -972,12 +990,12 @@ print('hello')
 
 def test_convert_code_format_multiple_displays():
     """Test convert_code_format with multiple DISPLAY blocks (both new and legacy format)."""
-    original_text = """<DISPLAY:python>
+    original_text = """<display:python>
 first()
-</DISPLAY>
-<DISPLAY:javascript>
+</display>
+<display:javascript>
 second()
-</DISPLAY>"""
+</display>"""
 
     expected_text = """```python
 first()
@@ -993,9 +1011,9 @@ second()
 def test_convert_code_format_mixed_with_code():
     """Test convert_code_format with mixed content."""
     original_text = """Some text before
-```<DISPLAY:python>
+```<display:python>
 print('displayed')
-```<END_DISPLAY_CODE>
+```<end_display_code>
 Some text after"""
 
     expected_text = """Some text before
@@ -1147,11 +1165,11 @@ But this should not match."""
 
 def test_convert_code_format_preserves_content():
     """Test that convert_code_format preserves actual code content."""
-    code = '''```<DISPLAY:python>
+    code = '''```<display:python>
 def complex_function():
     """Docstring with special chars: <>&'"""
     return "Hello 世界"
-```<END_DISPLAY_CODE>'''
+```<end_display_code>'''
 
     transformed = core_agent_module.convert_code_format(code)
 
@@ -1162,8 +1180,8 @@ def complex_function():
 
 def test_convert_code_format_handles_empty_end_tags():
     """Test convert_code_format with empty DISPLAY blocks."""
-    text = """```<DISPLAY:python>
-```<END_DISPLAY_CODE>"""
+    text = """```<display:python>
+```<end_display_code>"""
     transformed = core_agent_module.convert_code_format(text)
     expected = """```python
 ```"""
@@ -1173,13 +1191,13 @@ def test_convert_code_format_handles_empty_end_tags():
 def test_convert_code_format_complex_nested():
     """Test convert_code_format with complex nested structures."""
     text = '''# Start
-```<DISPLAY:python>
+```<display:python>
 # Python code
-```<END_DISPLAY_CODE>
+```<end_display_code>
 Middle
-```<DISPLAY:javascript>
+```<display:javascript>
 // JavaScript
-```<END_DISPLAY_CODE>
+```<end_display_code>
 End'''
 
     transformed = core_agent_module.convert_code_format(text)
@@ -1195,25 +1213,25 @@ End'''
 # ----------------------------------------------------------------------------
 
 def test_convert_code_format_code_end_tag_restoration():
-    """Test that ```<END_CODE> is properly restored to ```."""
+    """Test that ```<end_code> is properly restored to ```."""
     text = """Some code:
-```<DISPLAY:python>
+```<display:python>
 print('hello')
-```<END_CODE>
+```<end_code>
 More text."""
 
     transformed = core_agent_module.convert_code_format(text)
 
     assert "```python" in transformed
-    assert "```<END_CODE>" not in transformed
+    assert "```<end_code>" not in transformed
     assert "```\n" in transformed or '```"' in transformed or transformed.endswith("```")
 
 
 def test_parse_code_blobs_whitespace_only_run_block():
     """Test parse_code_blobs with whitespace-only RUN block."""
-    text = """```<RUN>
+    text = """```<run>
 
-```<END_CODE>"""
+```<end_code>"""
 
     result = core_agent_module.parse_code_blobs(text)
     assert result.strip() == ""
@@ -1239,11 +1257,11 @@ w = '''triple single'''
 
 def test_convert_code_format_unicode_content():
     """Test convert_code_format preserves Unicode content."""
-    text = """```<DISPLAY:python>
+    text = """```<display:python>
 def hello():
     return "你好世界"
 print("🎉")
-```<END_DISPLAY_CODE>"""
+```<end_display_code>"""
 
     transformed = core_agent_module.convert_code_format(text)
 
@@ -1254,10 +1272,10 @@ print("🎉")
 
 def test_convert_code_format_dedent_removal():
     """Test that extra backticks from dedent pattern are removed."""
-    text = """```<DISPLAY:python>
+    text = """```<display:python>
 def test():
     pass
-```<END_DISPLAY_CODE>"""
+```<end_display_code>"""
 
     transformed = core_agent_module.convert_code_format(text)
     # Should not have leftover ```< patterns
@@ -1268,7 +1286,7 @@ def test_parse_code_blobs_only_whitespace_text():
     """Test parse_code_blobs raises ValueError for whitespace-only text.
 
     Whitespace-only text is not valid executable code because it's not
-    wrapped in <code>...</code> or ```<RUN>...</RUN>``` format.
+    wrapped in <code>...</code> or ```<run>...</run>``` format.
     """
     text = "   \n\n   \t\t   "
 
@@ -1316,16 +1334,16 @@ def test_convert_code_format_both_legacy_and_display():
     """Test convert_code_format handles both legacy and new format together."""
     text = """```code:python
 legacy_code()
-```<END_CODE>
-```<DISPLAY:python>
+```<end_code>
+```<display:python>
 new_code()
-```<END_DISPLAY_CODE>"""
+```<end_display_code>"""
 
     transformed = core_agent_module.convert_code_format(text)
 
     assert "```python" in transformed
     assert "code:python" not in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "<display:" not in transformed
 
 
 # ----------------------------------------------------------------------------
@@ -1334,32 +1352,32 @@ new_code()
 
 def test_convert_code_format_single_backtick_display():
     """Test convert_code_format with single backtick prefix."""
-    text = """` <DISPLAY:python>
+    text = """` <display:python>
 print('hello')
-</DISPLAY>"""
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "<display:" not in transformed
 
 
 def test_convert_code_format_double_backtick_display():
     """Test convert_code_format with double backtick prefix."""
-    text = """`` <DISPLAY:python>
+    text = """`` <display:python>
 print('hello')
-</DISPLAY>"""
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "``python" in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "<display:" not in transformed
 
 
 def test_convert_code_format_multiple_displays_mixed():
     """Test convert_code_format with mixed display formats."""
-    text = """<DISPLAY:python>
+    text = """<display:python>
 first()
-</DISPLAY>
-```<DISPLAY:javascript>
+</display>
+```<display:javascript>
 second()
-```<END_DISPLAY_CODE>
+```<end_display_code>
 ```code:ruby
 third()
 ```"""
@@ -1381,19 +1399,19 @@ print('hello')
 
 def test_convert_code_format_empty_content():
     """Test convert_code_format with empty content."""
-    text = """<DISPLAY:python>
-</DISPLAY>"""
+    text = """<display:python>
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
-    assert "</DISPLAY>" not in transformed
+    assert "</display>" not in transformed
 
 
 def test_convert_code_format_unicode_in_display():
     """Test convert_code_format preserves unicode in display blocks."""
-    text = """<DISPLAY:python>
+    text = """<display:python>
 def hello():
     return "你好世界"
-</DISPLAY>"""
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
     assert "你好世界" in transformed
@@ -1401,11 +1419,11 @@ def hello():
 
 def test_convert_code_format_special_chars_in_display():
     """Test convert_code_format preserves special characters."""
-    text = '''<DISPLAY:python>
+    text = '''<display:python>
 x = "!@#$%^&*()"
 y = 'single quotes'
 z = "double quotes"
-</DISPLAY>'''
+</display>'''
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
     assert "!@#$%^&*()" in transformed
@@ -1413,36 +1431,36 @@ z = "double quotes"
 
 def test_convert_code_format_nested_display():
     """Test convert_code_format with nested-like content."""
-    text = """<DISPLAY:python>
+    text = """<display:python>
 def foo():
-    return "<DISPLAY:text>" * 5
-</DISPLAY>"""
+    return "<display:text>" * 5
+</display>"""
     transformed = core_agent_module.convert_code_format(text)
     assert "```python" in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "<display:" not in transformed
 
 
 def test_convert_code_format_closing_tag_only():
     """Test convert_code_format with orphaned closing tags."""
     text = """Some text
-</DISPLAY>
+</display>
 More text"""
     transformed = core_agent_module.convert_code_format(text)
     # Should not replace orphan closing tag
-    assert "</DISPLAY>" not in transformed
+    assert "</display>" not in transformed
 
 
 def test_convert_code_format_mixed_backtick_counts():
     """Test convert_code_format with different backtick counts in opening."""
-    text1 = """` <DISPLAY:python>
+    text1 = """` <display:python>
 print('one')
-</DISPLAY>"""
-    text2 = """`` <DISPLAY:python>
+</display>"""
+    text2 = """`` <display:python>
 print('two')
-</DISPLAY>"""
-    text3 = """```<DISPLAY:python>
+</display>"""
+    text3 = """```<display:python>
 print('three')
-</DISPLAY>"""
+</display>"""
 
     t1 = core_agent_module.convert_code_format(text1)
     t2 = core_agent_module.convert_code_format(text2)
@@ -1456,32 +1474,32 @@ print('three')
 def test_convert_code_format_end_display_code_only():
     """Test convert_code_format with orphaned END_DISPLAY_CODE."""
     text = """Some text
-```<END_DISPLAY_CODE>
+```<end_display_code>
 More text"""
     transformed = core_agent_module.convert_code_format(text)
     # Should replace the orphaned END_DISPLAY_CODE
-    assert "```<END_DISPLAY_CODE>" not in transformed
+    assert "```<end_display_code>" not in transformed
 
 
 def test_convert_code_format_end_code_only():
     """Test convert_code_format with orphaned END_CODE."""
     text = """Some text
-```<END_CODE>
+```<end_code>
 More text"""
     transformed = core_agent_module.convert_code_format(text)
     # Should replace the orphaned END_CODE
-    assert "```<END_CODE>" not in transformed
+    assert "```<end_code>" not in transformed
 
 
 def test_convert_code_format_complex_real_world():
     """Test convert_code_format with complex real-world output."""
     text = """Here is the result of my analysis:
 
-```<DISPLAY:python>
+```<display:python>
 import json
 data = {"result": "success", "value": 42}
 print(json.dumps(data, indent=2))
-```<END_DISPLAY_CODE>
+```<end_display_code>
 
 This code demonstrates how to work with JSON in Python."""
 
@@ -1489,8 +1507,8 @@ This code demonstrates how to work with JSON in Python."""
 
     assert "```python" in transformed
     assert "import json" in transformed
-    assert "```<END_DISPLAY_CODE>" not in transformed
-    assert "<DISPLAY:" not in transformed
+    assert "```<end_display_code>" not in transformed
+    assert "<display:" not in transformed
 
 
 # ----------------------------------------------------------------------------
@@ -1498,9 +1516,9 @@ This code demonstrates how to work with JSON in Python."""
 # ----------------------------------------------------------------------------
 
 def test_convert_code_format_display_no_closing_angle_bracket():
-    """Test convert_code_format handles <DISPLAY:language without closing > gracefully."""
+    """Test convert_code_format handles <display:language without closing > gracefully."""
     # This covers line 133: if lang_end == -1: break
-    text = """```<DISPLAY:python
+    text = """```<display:python
 print('hello')
 ```"""
     # The opening tag has no closing >, so it should be left as-is
@@ -1522,25 +1540,25 @@ print('hello')
 
 
 def test_convert_code_format_display_tag_no_closing_bracket():
-    """Test convert_code_format handles <DISPLAY:language without closing >."""
+    """Test convert_code_format handles <display:language without closing >."""
     # This covers line 163: if lang_end == -1: break
-    text = """<DISPLAY:python
+    text = """<display:python
 print('hello')
-</DISPLAY>"""
+</display>"""
     # The opening tag has no closing >, so conversion should stop
     transformed = core_agent_module.convert_code_format(text)
     # Should not crash, closing tag should still be converted
-    assert "</DISPLAY>" not in transformed
+    assert "</display>" not in transformed
 
 
 def test_convert_code_format_multiple_display_tags_partial():
     """Test convert_code_format with multiple display tags, some invalid."""
-    text = """<DISPLAY:python
+    text = """<display:python
 first()
-</DISPLAY>
-<DISPLAY:javascript
+</display>
+<display:javascript
 second()
-</DISPLAY>"""
+</display>"""
     # First has closing >, second doesn't
     transformed = core_agent_module.convert_code_format(text)
     assert isinstance(transformed, str)
@@ -1950,10 +1968,8 @@ class TestRunStreamRealExecution:
         mock_modules['rich.console'] = mock_rich.console
         mock_modules['rich.text'] = mock_rich.Text
 
-        # Create mock jinja2
-        mock_jinja2 = MagicMock()
-        mock_jinja2.Template = MagicMock()
-        mock_jinja2.StrictUndefined = MagicMock()
+        # Prompt composition uses the real strict Jinja environment.
+        mock_jinja2 = jinja2
         mock_modules['jinja2'] = mock_jinja2
 
         # Create mock smolagents with REAL CodeAgent base
@@ -1973,7 +1989,6 @@ class TestRunStreamRealExecution:
 
         # local_python_executor
         mock_local_python = MagicMock()
-        mock_local_python.fix_final_answer_code = lambda x: x
         mock_modules['smolagents.local_python_executor'] = mock_local_python
         mock_smolagents.local_python_executor = mock_local_python
 
@@ -2499,10 +2514,10 @@ class TestRunStreamRealExecution:
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
         agent._protocol_repair_messages = []
-        agent.output_protocol = "final_answer_envelope"
+        agent.output_protocol = "final_envelope"
         agent.verification_controller = None
         response = SimpleNamespace(
-            content="<FINAL_ANSWER>ok</FINAL_ANSWER>",
+            content="<final_answer>ok</final_answer>",
             token_usage=None,
         )
         agent.model = MagicMock(return_value=response)
@@ -2532,11 +2547,11 @@ class TestRunStreamRealExecution:
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
         agent._protocol_repair_messages = []
-        agent.output_protocol = "final_answer_envelope"
+        agent.output_protocol = "final_envelope"
         agent.verification_controller = None
         agent.model = MagicMock(
             return_value=SimpleNamespace(
-                content="<FINAL_ANSWER>ok</FINAL_ANSWER>",
+                content="<final_answer>ok</final_answer>",
                 token_usage=None,
             )
         )
@@ -2547,7 +2562,7 @@ class TestRunStreamRealExecution:
         assert len(actual_messages) == 3
         continuation = module.ChatMessage.call_args.kwargs["content"][0]["text"]
         assert "Do not repeat any completed action" in continuation
-        assert "<FINAL_ANSWER>" in continuation
+        assert "<final_answer>" in continuation
 
     def test_step_stream_rolls_back_interstitial_text_before_protocol_repair(self):
         """Text between executable blocks is rolled back before protocol repair."""
@@ -2572,7 +2587,7 @@ class TestRunStreamRealExecution:
         agent.verification_controller = None
 
         response = SimpleNamespace(
-            content='<code>print("first")</code>explanation<code>final_answer("ok")</code>',
+            content='<code>print("first")</code>explanation<code>print("ok")</code>',
             token_usage=None,
             model_attempt_id="semantic-attempt",
             model_attempt_number=1,
@@ -2607,8 +2622,8 @@ class TestRunStreamRealExecution:
         assert len(step_labels) == 1
         assert step_labels[0].args[2] == 1
 
-    def test_step_stream_commits_valid_repair_generation_raw_stream(self):
-        """A valid semantic repair commits its streamed output and action."""
+    def test_step_stream_suppresses_valid_repair_generation_raw_stream(self):
+        """A valid repair executes its action while the repair stream stays suppressed."""
         module = core_agent_module
         agent = object.__new__(module.CoreAgent)
         agent.agent_name = "test"
@@ -2624,12 +2639,12 @@ class TestRunStreamRealExecution:
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
         agent._protocol_repair_messages = [MagicMock()]
-        agent.output_protocol = "final_answer_envelope"
+        agent.output_protocol = "final_envelope"
         agent.verification_controller = None
         agent.stop_event = MagicMock(is_set=MagicMock(return_value=False))
 
         response = SimpleNamespace(
-            content="<FINAL_ANSWER>recovered</FINAL_ANSWER>",
+            content="<final_answer>recovered</final_answer>",
             token_usage=None,
             model_attempt_id="repair-attempt",
             model_attempt_number=2,
@@ -2652,9 +2667,60 @@ class TestRunStreamRealExecution:
 
         assert outputs
         assert action_step.action_output == "recovered"
-        assert "_suppress_attempt_stream" not in model.call_args.kwargs
+        assert model.call_args.kwargs["_suppress_attempt_stream"] is True
+        agent.observer.rollback_model_attempt.assert_called_once_with("repair-attempt", 2)
+        agent.observer.commit_model_attempt.assert_not_called()
+        assert response.model_attempt_commit_deferred is False
+        assert agent._protocol_repair_messages == []
+
+    def test_step_stream_hides_valid_repair_generation_raw_stream(self):
+        """A valid semantic repair keeps its result but rolls back raw reasoning."""
+        module = core_agent_module
+        agent = object.__new__(module.CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[])
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._protocol_repair_messages = [MagicMock()]
+        agent.output_protocol = "final_envelope"
+        agent.verification_controller = None
+        agent.stop_event = threading.Event()
+
+        response = SimpleNamespace(
+            content="<final_answer>recovered</final_answer>",
+            token_usage=None,
+            model_attempt_id="repair-attempt",
+            model_attempt_number=2,
+            model_attempt_commit_deferred=False,
+        )
+        model = MagicMock(return_value=response)
+        model.supports_deferred_attempt_commit = True
+        model.supports_suppressed_attempt_stream = True
+        model.last_finish_reason = "stop"
+        agent.model = model
+        action_step = SimpleNamespace(
+            model_output=None,
+            model_output_message=None,
+            token_usage=None,
+            model_input_messages=None,
+            action_output=None,
+        )
+
+        outputs = list(agent._step_stream(action_step))
+
+        assert outputs
+        assert action_step.action_output == "recovered"
+        assert model.call_args.kwargs["_suppress_attempt_stream"] is True
         agent.observer.rollback_model_attempt.assert_not_called()
-        agent.observer.commit_model_attempt.assert_called_once_with("repair-attempt", 2)
+        agent.observer.commit_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
         assert agent._protocol_repair_messages == []
 
@@ -2964,6 +3030,7 @@ class TestRunStreamRealExecution:
         """Build one deferred model generation for the legacy-output compatibility cases."""
         module = core_agent_module
         agent = object.__new__(module.CoreAgent)
+        agent.prompt_templates = {}
         agent.stop_event = threading.Event()
         agent.agent_name = "test"
         agent.name = "test"
@@ -3029,54 +3096,52 @@ class TestRunStreamRealExecution:
         assert agent.model.call_args.kwargs["_retry_empty_response"] is False
 
     @pytest.mark.parametrize("format_name", ["code", "run"])
-    def test_cmsr_007_disabled_legacy_code_with_outer_text_executes_once(self, monkeypatch, format_name):
+    def test_cmsr_007_disabled_legacy_code_with_outer_text_is_nonterminal(self, monkeypatch, format_name):
         """CMSR-007 / AC-022: old block extraction ignores surrounding prose."""
         module = core_agent_module
-        monkeypatch.setattr(module, "fix_final_answer_code", lambda code: code)
         monkeypatch.setattr(module, "ActionOutput", lambda output, is_final_answer: SimpleNamespace(
             output=output, is_final_answer=is_final_answer,
         ))
         code = (
-            "Intro <code>a = 1</code>explanation<code>final_answer(a + 1)</code> tail"
+            "Intro <code>a = 1</code>explanation<code>print(a + 1)</code> tail"
             if format_name == "code"
-            else "Intro ```<RUN>\na = 1\n``` explanation ```<RUN>\nfinal_answer(a + 1)\n``` tail"
+            else "Intro ```<run>\na = 1\n``` explanation ```<run>\nprint(a + 1)\n``` tail"
         )
         agent, action_step, response = self._create_cmsr_007_step_agent(code)
         agent.python_executor = MagicMock(return_value=SimpleNamespace(
-            output="2", is_final_answer=True, logs="",
+            output="2", is_final_answer=False, logs="",
         ))
         outputs = list(agent._step_stream(action_step))
 
         assert len(outputs) == 1
-        assert outputs[0].is_final_answer is True
-        assert action_step.code_action == "a = 1\n\nfinal_answer(a + 1)"
+        assert outputs[0].is_final_answer is False
+        assert action_step.code_action == "a = 1\n\nprint(a + 1)"
         agent.python_executor.assert_called_once_with(action_step.code_action)
         agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
 
-    def test_cmsr_008_disabled_final_answer_with_clarification_enabled_executes_once(
+    def test_cmsr_008_disabled_code_with_clarification_enabled_is_nonterminal(
         self, monkeypatch
     ):
-        """UT-SDK-CMSR-008-005: production clarification support cannot re-enable strict mode."""
+        """Clarification support preserves nonterminal code-action execution."""
         module = core_agent_module
-        monkeypatch.setattr(module, "fix_final_answer_code", lambda code: code)
         monkeypatch.setattr(module, "ActionOutput", lambda output, is_final_answer: SimpleNamespace(
             output=output, is_final_answer=is_final_answer,
         ))
         agent, action_step, response = self._create_cmsr_007_step_agent(
-            '<code>final_answer("正常答案")</code>'
+            '<code>print("正常答案")</code>'
         )
         agent.clarification_tool_name = "ask_user"
         agent.python_executor = MagicMock(return_value=SimpleNamespace(
-            output="正常答案", is_final_answer=True, logs="",
+            output="正常答案", is_final_answer=False, logs="",
         ))
         outputs = list(agent._step_stream(action_step))
 
         assert len(outputs) == 1
         assert outputs[0].output == "正常答案"
-        assert outputs[0].is_final_answer is True
-        agent.python_executor.assert_called_once_with('final_answer("正常答案")')
+        assert outputs[0].is_final_answer is False
+        agent.python_executor.assert_called_once_with('print("正常答案")')
         agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
@@ -3197,7 +3262,6 @@ class TestRunStreamRealExecution:
     def test_cmsr_008_disabled_length_or_empty_code_reaches_executor(self, monkeypatch, content):
         """UT-SDK-CMSR-008-003: pre-whitelist code was not rejected by these guards."""
         module = core_agent_module
-        monkeypatch.setattr(module, "fix_final_answer_code", lambda code: code)
         monkeypatch.setattr(module, "ActionOutput", lambda output, is_final_answer: SimpleNamespace(
             output=output, is_final_answer=is_final_answer,
         ))
@@ -3224,7 +3288,7 @@ class TestRunStreamRealExecution:
 
         monkeypatch.setattr(module, "AgentExecutionError", LegacyExecutionError)
         monkeypatch.setattr(module, "AgentGenerationError", LegacyExecutionError)
-        monkeypatch.setattr(module, "fix_final_answer_code", MagicMock(side_effect=ValueError("bad code")))
+        monkeypatch.setattr(module, "_remove_parallel_executor_import", MagicMock(side_effect=ValueError("bad code")))
         agent, action_step, response = self._create_cmsr_007_step_agent("<code>bad()</code>")
         agent.python_executor = MagicMock()
 
@@ -3410,7 +3474,7 @@ class TestRunStreamRealExecution:
         monkeypatch.setattr(module, "handle_agent_output_types", lambda output: output)
         agent, _, first_response = self._create_cmsr_007_step_agent("<code>final_answer(")
         second_response = SimpleNamespace(
-            content='<code>final_answer("答案是 4")</code>', token_usage=None, model_attempt_id="legacy-second",
+            content="答案是 4", token_usage=None, model_attempt_id="legacy-second",
             model_attempt_number=1, model_attempt_commit_deferred=True,
         )
         agent.model.side_effect = [first_response, second_response]
@@ -3623,7 +3687,7 @@ class TestHandleMaxStepsReached:
         # Mock the model to return a final answer
         mock_chat_message = MagicMock()
         mock_chat_message.role = "assistant"
-        mock_chat_message.content = "This is the summary after reaching max steps."
+        mock_chat_message.content = "<final_answer>This is the summary after reaching max steps.</final_answer>"
         mock_chat_message.token_usage = MagicMock()
         mock_chat_message.token_usage.input_tokens = 100
         mock_chat_message.token_usage.output_tokens = 50
@@ -3667,8 +3731,8 @@ class TestHandleMaxStepsReached:
         # Call the method
         result = agent._handle_max_steps_reached("original task")
 
-        # Should return error message
-        assert "Error in generating final LLM output" in result
+        # A non-envelope provider failure is converted to the controlled protocol failure.
+        assert "failed to follow the Agent output protocol" in result
 
         # Verify logger was called with error
         agent.logger.log.assert_called()
@@ -4177,18 +4241,18 @@ def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones()
     agent.managed_agents = {"planner": planner}
 
     assert module.CoreAgent._known_tool_names(agent) == {"search", "7", "planner"}
-    assert module.CoreAgent._managed_agent_names(agent) == {"planner"}
+    assert module.CoreAgent._worker_agent_names(agent) == {"planner"}
     assert module.CoreAgent._non_emitting_tool_names(agent) == {"7"}
 
     agent.tools = ["not-a-mapping"]
     agent.managed_agents = None
 
     assert module.CoreAgent._known_tool_names(agent) == set()
-    assert module.CoreAgent._managed_agent_names(agent) == set()
+    assert module.CoreAgent._worker_agent_names(agent) == set()
     assert module.CoreAgent._non_emitting_tool_names(agent) == set()
 
 
-def test_managed_agent_names_reads_names_from_sequence_containers():
+def test_worker_agent_names_reads_names_from_sequence_containers():
     """Collect managed-agent names when the registry is a sequence."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = type("Agent", (), {})()
@@ -4198,7 +4262,7 @@ def test_managed_agent_names_reads_names_from_sequence_containers():
         type("NamedAgent", (), {"name": "researcher"})(),
     ]
 
-    assert module.CoreAgent._managed_agent_names(agent) == {"planner", "researcher"}
+    assert module.CoreAgent._worker_agent_names(agent) == {"planner", "researcher"}
 
 
 def test_wrap_visible_tool_events_supports_sequence_containers_and_skips_hidden_tools():
@@ -4269,11 +4333,11 @@ def _create_minimal_core_agent_for_time_tests():
     return agent
 
 
-def test_run_preserves_existing_current_time_prefix():
-    """When task already has [Current time: ...] prefix, run() should not re-inject."""
+def test_run_preserves_existing_current_time_marker():
+    """A current runtime suffix must not be appended twice."""
     agent = _create_minimal_core_agent_for_time_tests()
 
-    prefixed_task = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    prefixed_task = "What time is it?\n\n[Current time: 2026-01-01 20:00:00]"
     list(agent.run(task=prefixed_task, stream=True))
 
     assert agent.task == prefixed_task
@@ -4285,24 +4349,26 @@ def test_run_injects_current_time_when_missing():
 
     list(agent.run(task="What time is it?", stream=True))
 
-    assert agent.task.startswith("[Current time:")
+    assert agent.task.startswith("What time is it?\n\n[Current time:")
     assert "What time is it?" in agent.task
 
 
-def test_run_records_task_echo_into_model_call_log(caplog):
-    """The run task echo is written to the model_call file record at DEBUG."""
+def test_ut_sdk_dpr_005_run_does_not_append_hitl_policy_as_task_step():
+    """UT-SDK-DPR-005: HITL policy remains system context and never becomes a user task."""
     agent = _create_minimal_core_agent_for_time_tests()
-    caplog.set_level(logging.INFO, logger="model_call.core_agent")
+    agent.human_interaction = SimpleNamespace(
+        preserves_executor=True,
+        restore=MagicMock(return_value=False),
+        instructions="Localized clarification policy",
+    )
 
-    list(agent.run(task="你好", stream=True))
+    list(agent.run(task="Hello", stream=True))
 
-    records = [r for r in caplog.records if r.name == "model_call.core_agent"]
-    assert any("NEW RUN TASK" in r.getMessage() for r in records)
-    assert any("你好" in r.getMessage() for r in records)
+    assert agent.memory.steps.append.call_count == 1
 
 
-def test_managed_agent_call_injects_workspace_instructions(tmp_path):
-    """Managed sub-agents receive the run output path in their delegated task."""
+def test_managed_agent_call_injects_only_dynamic_workspace_paths(tmp_path):
+    """Delegated tasks carry run paths while generic rules remain system context."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     module.RunResult = type("RunResult", (), {})
     workspace = tmp_path / "user" / "run"
@@ -4322,16 +4388,25 @@ def test_managed_agent_call_injects_workspace_instructions(tmp_path):
 
     agent("create test.txt")
 
-    render_payload = module.Template.return_value.render.call_args_list[0].args[0]
-    managed_task = render_payload["task"]
-    assert "[Nexent run workspace]" in managed_task
-    assert str(workspace / "outputs") in managed_task
-    assert "current working directory" in managed_task
-    assert "Never prefix a relative output path" in managed_task
-    assert "pass the same bare relative path" in managed_task
-    assert "use its permanent s3_url in Markdown" in managed_task
-    assert "Never use a local path or presigned_url" in managed_task
-    assert "only call .save() on PIL images" in managed_task
+    managed_task = agent.run.call_args.args[0]
+    assert f"Run workspace: {workspace}" in managed_task
+    assert str(workspace / "outputs") not in managed_task
+    assert str(workspace / "inputs") not in managed_task
+    assert "current working directory" not in managed_task
+    assert "Never prefix a relative output path" not in managed_task
+    assert "upload_to_s3" not in managed_task
+
+
+def test_run_records_task_echo_into_model_call_log(caplog):
+    """The run task echo is written to the model_call file record at DEBUG."""
+    agent = _create_minimal_core_agent_for_time_tests()
+    caplog.set_level(logging.INFO, logger="model_call.core_agent")
+
+    list(agent.run(task="你好", stream=True))
+
+    records = [r for r in caplog.records if r.name == "model_call.core_agent"]
+    assert any("NEW RUN TASK" in r.getMessage() for r in records)
+    assert any("你好" in r.getMessage() for r in records)
 
 
 def test_run_with_metadata_injects_untrusted_metadata_block():
@@ -4366,7 +4441,7 @@ def test_run_with_metadata_skips_optional_sections():
 
 
 def test_call_forwards_metadata_to_sub_agent_run():
-    """__call__ must exclude metadata from the template state and pass it via additional_args."""
+    """__call__ passes run metadata separately and preserves the report."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = module.CoreAgent.__new__(module.CoreAgent)
     agent.workspace_path = None
@@ -4383,8 +4458,8 @@ def test_call_forwards_metadata_to_sub_agent_run():
     agent.python_executor = None
     agent.prompt_templates = {
         "managed_agent": {
-            "task": "Task for {name}: {task}",
-            "report": "Report {name}: {final_answer}",
+            "task": "{{task}}",
+            "report": "{{final_answer}}",
         }
     }
     agent.provide_run_summary = False
@@ -4393,20 +4468,6 @@ def test_call_forwards_metadata_to_sub_agent_run():
     # smolagents mock leaves it as a MagicMock, which isinstance rejects).
     fake_run_result = type("FakeRunResult", (), {})
     module.RunResult = fake_run_result
-
-    # Replace the mocked jinja Template with a recorder so we can assert on the
-    # rendered context (template_state must drop metadata but keep state keys).
-    recorded_renders = []
-
-    class _RecorderTemplate:
-        def __init__(self, template, **kwargs):
-            self._template = template
-
-        def render(self, context, **kwargs):
-            recorded_renders.append({"template": self._template, "context": dict(context)})
-            return f"RENDERED-{len(recorded_renders)}"
-
-    module.Template = _RecorderTemplate
 
     calls = {}
     def fake_run(full_task, **kwargs):
@@ -4420,11 +4481,6 @@ def test_call_forwards_metadata_to_sub_agent_run():
 
     answer = agent(task="summarize")
 
-    task_render = recorded_renders[0]["context"]
-    # metadata was kept out of the rendered template state
-    assert "metadata" not in task_render
-    assert task_render["region"] == "cn"
-    assert "Task for {name}: {task}" in recorded_renders[0]["template"]
-    assert "Report {name}: {final_answer}" in recorded_renders[1]["template"]
+    assert calls["full_task"] == "summarize"
     assert calls["kwargs"]["additional_args"] == {"metadata": {"session": "abc"}}
-    assert answer == "RENDERED-2"
+    assert answer == "sub-agent-output"

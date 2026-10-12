@@ -23,6 +23,7 @@ import {
   PinIcon,
   PinOffIcon,
   ArrowDownIcon,
+  Repeat2Icon,
   CheckIcon,
   XIcon,
   ChevronRight,
@@ -36,6 +37,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -53,6 +55,7 @@ import {
 import type { PublishedAgent } from "@/types/agentConfig";
 import type { FC } from "react";
 import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
+import { getVisibleThreadIds } from "./visible-thread-ids";
 import { getVisibleAgentThreads } from "./thread-list-visibility";
 
 // Conversation status indicator component
@@ -164,7 +167,8 @@ const useBatchSelection = (): BatchSelectionValue | null =>
 export const BatchSelectionProvider: FC<{
   children: ReactNode;
   onNewConversation?: () => void | Promise<void>;
-}> = ({ children, onNewConversation }) => {
+  serverConversationIds?: ReadonlyMap<string, string>;
+}> = ({ children, onNewConversation, serverConversationIds }) => {
   const { t } = useTranslation();
   const aui = useAui();
   const { confirm } = useConfirmModal();
@@ -184,8 +188,13 @@ export const BatchSelectionProvider: FC<{
   }, []);
 
   const selectAllVisible = useCallback(() => {
-    setSelectedIds(() => new Set(threadIds));
-  }, [threadIds]);
+    setSelectedIds(
+      () =>
+        new Set(
+          getVisibleThreadIds(threadIds, threadItems, serverConversationIds)
+        )
+    );
+  }, [threadIds, threadItems, serverConversationIds]);
 
   const clear = useCallback(() => setSelectedIds(new Set()), []);
 
@@ -207,9 +216,10 @@ export const BatchSelectionProvider: FC<{
     );
     const conversationIds: number[] = [];
     for (const id of selectedIds) {
-      const remoteId = itemsById.get(id)?.remoteId;
-      const num = Number(remoteId);
-      if (remoteId && Number.isInteger(num) && num > 0) {
+      const conversationId =
+        serverConversationIds?.get(id) || itemsById.get(id)?.remoteId;
+      const num = Number(conversationId);
+      if (conversationId && Number.isInteger(num) && num > 0) {
         conversationIds.push(num);
       }
     }
@@ -219,7 +229,8 @@ export const BatchSelectionProvider: FC<{
     // If so, the main panel must switch to a fresh thread after reload,
     // otherwise it would keep pointing at a now-deleted conversation.
     const activeRemoteId = mainThreadId
-      ? itemsById.get(mainThreadId)?.remoteId
+      ? serverConversationIds?.get(mainThreadId) ||
+        itemsById.get(mainThreadId)?.remoteId
       : undefined;
     const activeConversationId = Number(activeRemoteId);
     const activeDeleted =
@@ -259,6 +270,7 @@ export const BatchSelectionProvider: FC<{
     selectedIds,
     threadItems,
     mainThreadId,
+    serverConversationIds,
     confirm,
     t,
     aui,
@@ -295,9 +307,90 @@ export const BatchSelectionProvider: FC<{
   );
 };
 
+export const BatchSidebarFooter: FC<{ onSwitchToLegacy?: () => void }> = ({
+  onSwitchToLegacy,
+}) => {
+  const { t } = useTranslation();
+  const {
+    batchMode,
+    selectedIds,
+    enter,
+    exit,
+    selectAllVisible,
+    deleteSelected,
+  } = useBatchSelection()!;
+
+  if (batchMode) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+          <span>
+            {t("chat.threadList.selectedCount", { count: selectedIds.size })}
+          </span>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={exit}
+          >
+            {t("chat.threadList.cancel")}
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="flex h-9 flex-1 items-center justify-center rounded-lg border px-3 text-sm hover:bg-muted"
+            onClick={selectAllVisible}
+          >
+            {t("chat.threadList.selectAll")}
+          </button>
+          <button
+            type="button"
+            className="flex h-9 flex-1 items-center justify-center rounded-lg border border-destructive/30 px-3 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            disabled={selectedIds.size === 0}
+            onClick={deleteSelected}
+          >
+            {t("chat.threadList.delete")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
+        onClick={enter}
+      >
+        <CheckIcon className="size-4 shrink-0" />
+        <span>{t("chat.threadList.batchManage")}</span>
+      </button>
+      {onSwitchToLegacy && (
+        <button
+          type="button"
+          className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
+          onClick={onSwitchToLegacy}
+        >
+          <Repeat2Icon className="size-4 shrink-0" />
+          <span>{t("chat.sidebar.switchToLegacy")}</span>
+        </button>
+      )}
+    </div>
+  );
+};
+
+type RenameSuccessHandler = (
+  threadId: string,
+  remoteId: string | undefined,
+  title: string
+) => void;
+
 interface ThreadListProps {
+  serverConversationIds?: ReadonlyMap<string, string>;
   activeThreadId?: string;
   generatedTitles?: ReadonlyMap<string, string>;
+  onRenameSuccess?: RenameSuccessHandler;
   searchQuery?: string;
   newChatDesign?: boolean;
 }
@@ -305,14 +398,45 @@ interface ThreadListProps {
 export const ThreadList: FC<ThreadListProps> = ({
   activeThreadId,
   generatedTitles,
+  serverConversationIds,
+  onRenameSuccess,
   searchQuery = "",
   newChatDesign = false,
 }) => {
   const { t } = useTranslation();
-  const completedConversations = useMemo(() => new Set<string>(), []);
+  const [completedConversations, setCompletedConversations] = useState(
+    () => new Set<string>()
+  );
+  const isThreadRunning = useAuiState((s) => s.thread.isRunning);
+  const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
+  const runningThreadId = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (isThreadRunning) {
+      runningThreadId.current = mainThreadId;
+      return;
+    }
+
+    if (runningThreadId.current) {
+      const completedThreadId = runningThreadId.current;
+      setCompletedConversations((previous) => {
+        const next = new Set(previous);
+        next.add(completedThreadId);
+        return next;
+      });
+      runningThreadId.current = undefined;
+    }
+  }, [isThreadRunning, mainThreadId]);
   const isLoading = useAuiState((s) => s.threads.isLoading);
   const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  const threadIds = useAuiState((state) => state.threads.threadIds);
+  const threadItems = useAuiState((state) => state.threads.threadItems);
+  const visibleThreadIds = getVisibleThreadIds(
+    threadIds,
+    threadItems,
+    serverConversationIds
+  );
   const [expandedAgentKeys, setExpandedAgentKeys] = useState<Set<string>>(
     () => new Set()
   );
@@ -331,21 +455,19 @@ export const ThreadList: FC<ThreadListProps> = ({
         <ThreadListSkeleton />
       </AuiIf>
       <AuiIf
-        condition={(s) =>
-          !s.threads.isLoading && s.threads.threadIds.length === 0
-        }
+        condition={(s) => !s.threads.isLoading && visibleThreadIds.length === 0}
       >
         <ThreadListEmpty />
       </AuiIf>
       <AuiIf
-        condition={(s) =>
-          !s.threads.isLoading && s.threads.threadIds.length > 0
-        }
+        condition={(s) => !s.threads.isLoading && visibleThreadIds.length > 0}
       >
         <ThreadListItems
           activeThreadId={activeThreadId}
+          visibleThreadIds={visibleThreadIds}
           completedConversations={completedConversations}
           generatedTitles={generatedTitles}
+          onRenameSuccess={onRenameSuccess}
           searchQuery={searchQuery}
           newChatDesign={newChatDesign}
           expandedAgentKeys={expandedAgentKeys}
@@ -385,9 +507,11 @@ const ThreadListEmpty: FC = () => {
 };
 
 interface ThreadListItemsProps {
+  visibleThreadIds: string[];
   activeThreadId?: string;
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onRenameSuccess?: RenameSuccessHandler;
   searchQuery?: string;
   newChatDesign: boolean;
   expandedAgentKeys: ReadonlySet<string>;
@@ -396,8 +520,10 @@ interface ThreadListItemsProps {
 
 const ThreadListItems: FC<ThreadListItemsProps> = ({
   activeThreadId,
+  visibleThreadIds,
   completedConversations,
   generatedTitles,
+  onRenameSuccess,
   searchQuery = "",
   newChatDesign,
   expandedAgentKeys,
@@ -408,9 +534,14 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   const agentGroups = useThreadListAgentGroups(
     searchQuery,
     newChatDesign,
-    generatedTitles
+    generatedTitles,
+    visibleThreadIds
   );
-  const timeGroups = useThreadListGroups(generatedTitles, searchQuery);
+  const timeGroups = useThreadListGroups(
+    generatedTitles,
+    searchQuery,
+    visibleThreadIds
+  );
   const pinned = usePinnedThreads();
 
   const GroupedThreadListItem = useMemo<FC>(
@@ -420,11 +551,12 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            onRenameSuccess={onRenameSuccess}
             newChatDesign={newChatDesign}
           />
         );
       },
-    [completedConversations, generatedTitles, newChatDesign]
+    [completedConversations, generatedTitles, newChatDesign, onRenameSuccess]
   );
 
   const TimeGroupThreadListItem = useMemo<FC>(
@@ -434,11 +566,12 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            onRenameSuccess={onRenameSuccess}
             variant="time"
           />
         );
       },
-    [completedConversations, generatedTitles, newChatDesign]
+    [completedConversations, generatedTitles, newChatDesign, onRenameSuccess]
   );
 
   // Workbench (and legacy) sidebar: recency buckets (Today / Last 7 Days /
@@ -451,6 +584,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             <ThreadListItem
               completedConversations={completedConversations}
               generatedTitles={generatedTitles}
+              onRenameSuccess={onRenameSuccess}
             />
           )}
         </ThreadListPrimitive.Items>
@@ -493,6 +627,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            onRenameSuccess={onRenameSuccess}
             newChatDesign
           />
         )}
@@ -586,7 +721,8 @@ type AgentThreadGroup = {
 const useThreadListAgentGroups = (
   searchQuery: string,
   newChatDesign: boolean,
-  generatedTitles?: ReadonlyMap<string, string>
+  generatedTitles: ReadonlyMap<string, string> | undefined,
+  visibleThreadIds: readonly string[]
 ): AgentThreadGroup[] | null => {
   const { t } = useTranslation();
   const threadIds = useAuiState((s) => s.threads.threadIds);
@@ -628,6 +764,7 @@ const useThreadListAgentGroups = (
       dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const indices = threadIds
       .map((_, index) => index)
+      .filter((index) => visibleThreadIds.includes(threadIds[index]))
       .sort((a, b) => time(b) - time(a));
 
     const query = searchQuery.trim().toLowerCase();
@@ -695,6 +832,7 @@ const useThreadListAgentGroups = (
     t,
     searchQuery,
     newChatDesign,
+    visibleThreadIds,
   ]);
   return newChatDesign ? groups : null;
 };
@@ -727,7 +865,8 @@ const dateGroupLabel = (
 // empty result yields an empty group list so the caller renders nothing.
 const useThreadListGroups = (
   generatedTitles: ReadonlyMap<string, string> | undefined,
-  searchQuery: string
+  searchQuery: string,
+  visibleThreadIds: readonly string[]
 ): ThreadTimeGroup[] | null => {
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
@@ -760,13 +899,15 @@ const useThreadListGroups = (
     if (!dates.some(Boolean)) {
       // No usable timestamps: keep the flat-list fallback for the unfiltered
       // view, and bucket search matches under a single label when filtering.
-      if (!query) return null;
       return [
         {
           label: "chat.threadList.recentConversations",
           entries: threadIds
             .map((id, index) => ({ id, index }))
-            .filter((_, index) => matches[index]),
+            .filter(
+              (_, index) =>
+                matches[index] && visibleThreadIds.includes(threadIds[index])
+            ),
         },
       ];
     }
@@ -782,7 +923,10 @@ const useThreadListGroups = (
       dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const indices = threadIds
       .map((_, index) => index)
-      .filter((_, index) => matches[index])
+      .filter(
+        (_, index) =>
+          matches[index] && visibleThreadIds.includes(threadIds[index])
+      )
       .sort((a, b) => time(b) - time(a));
 
     const result: ThreadTimeGroup[] = [];
@@ -817,7 +961,14 @@ const useThreadListGroups = (
       }
     }
     return result;
-  }, [threadIds, threadItems, generatedTitles, searchQuery, pinnedIds]);
+  }, [
+    threadIds,
+    threadItems,
+    generatedTitles,
+    searchQuery,
+    pinnedIds,
+    visibleThreadIds,
+  ]);
 };
 
 const ThreadListSkeleton: FC = () => {
@@ -846,6 +997,7 @@ const ThreadListSkeleton: FC = () => {
 interface ThreadListItemProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onRenameSuccess?: RenameSuccessHandler;
   newChatDesign?: boolean;
 }
 
@@ -871,6 +1023,7 @@ const ThreadListItem: FC<
 > = ({
   completedConversations,
   generatedTitles,
+  onRenameSuccess,
   newChatDesign = false,
   variant = "agent",
 }) => {
@@ -885,6 +1038,7 @@ const ThreadListItem: FC<
       <ThreadListItemContent
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        onRenameSuccess={onRenameSuccess}
         variant={variant}
         newChatDesign={newChatDesign}
       />
@@ -895,6 +1049,7 @@ const ThreadListItem: FC<
 interface ThreadListItemContentProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onRenameSuccess?: RenameSuccessHandler;
   variant?: "agent" | "time";
   newChatDesign: boolean;
 }
@@ -902,6 +1057,7 @@ interface ThreadListItemContentProps {
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   completedConversations,
   generatedTitles,
+  onRenameSuccess,
   variant = "agent",
   newChatDesign,
 }) => {
@@ -917,7 +1073,10 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const isRunning = useAuiState((s) => s.threadListItem.isRunning);
   const threadListItem = aui.threadListItem;
   const title =
-    generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
+    generatedTitles?.get(thread.id) ??
+    (thread.remoteId ? generatedTitles?.get(thread.remoteId) : undefined) ??
+    thread.title ??
+    t("chat.thread.newChat");
 
   const pinned = usePinnedThreads();
   const isPinned = pinned?.pinnedIds.has(thread.id) ?? false;
@@ -928,6 +1087,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     setPendingThreadOperationId(thread.id);
     try {
       await threadListItem.rename(normalized);
+      onRenameSuccess?.(thread.id, thread.remoteId, normalized);
       setIsEditing(false);
     } catch (error) {
       log.error("[ThreadList] Failed to rename thread:", error);

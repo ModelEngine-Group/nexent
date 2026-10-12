@@ -3,7 +3,8 @@ import types
 import pytest
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
-from sqlalchemy import Boolean, Integer, String, column, literal_column, table
+from sqlalchemy import Boolean, Column, Integer, MetaData, String, Table, column, create_engine, literal_column, table
+from sqlalchemy.orm import Session
 
 # 首先模拟consts模块，避免ModuleNotFoundError
 consts_mock = MagicMock()
@@ -730,6 +731,8 @@ def agent_list_info_columns(monkeypatch):
         "version_no": Integer,
         "delete_flag": String,
         "enabled": Boolean,
+        "agent_origin": String,
+        "system_key": String,
     }
     agent_table = table(
         "agent_info", *(column(name, kind) for name, kind in fields.items())
@@ -775,11 +778,74 @@ def test_query_agent_list_candidates_by_tenant_id(
         "agent_info.version_no = 0",
         "agent_info.delete_flag != 'Y'",
         "agent_info.enabled IS true",
+        "agent_info.agent_origin IS NULL OR agent_info.agent_origin != 'SYSTEM'",
+        "agent_info.system_key IS NULL OR agent_info.system_key = ''",
     ]
     assert [_sql(order) for order in query.filter.return_value.order_by.call_args.args] == [
         "agent_info.create_time DESC", "agent_info.agent_id DESC",
     ]
     assert result == [{"agent_id": 7, "name": "Agent 7"}]
+
+
+def test_agent_list_candidates_exclude_system_agents_before_page_slicing(monkeypatch):
+    from backend.database.agent_db import query_agent_list_candidates_by_tenant_id
+
+    metadata = MetaData()
+    agent_table = Table(
+        "agent_info", metadata,
+        Column("agent_id", Integer, primary_key=True),
+        Column("tenant_id", String),
+        Column("name", String),
+        Column("display_name", String),
+        Column("created_by", String),
+        Column("create_time", Integer),
+        Column("group_ids", String),
+        Column("ingroup_permission", String),
+        Column("description", String),
+        Column("version_no", Integer),
+        Column("delete_flag", String),
+        Column("enabled", Boolean),
+        Column("agent_origin", String),
+        Column("system_key", String),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(agent_table.insert(), [
+            {
+                "agent_id": agent_id, "tenant_id": "tenant1", "name": f"Agent {agent_id}",
+                "create_time": agent_id, "version_no": 0, "delete_flag": "N",
+                "enabled": True, "agent_origin": "USER", "system_key": None,
+            }
+            for agent_id in range(1, 12)
+        ] + [
+            {"agent_id": 12, "tenant_id": "tenant1", "name": "Legacy agent",
+             "create_time": 12, "version_no": 0, "delete_flag": "N",
+             "enabled": True, "agent_origin": None, "system_key": None},
+            {"agent_id": 13, "tenant_id": "tenant1", "name": "Workbench",
+             "create_time": 13, "version_no": 0, "delete_flag": "N",
+             "enabled": True, "agent_origin": "SYSTEM", "system_key": "workbench_main"},
+            {"agent_id": 14, "tenant_id": "tenant1", "name": "Keyed system agent",
+             "create_time": 14, "version_no": 0, "delete_flag": "N",
+             "enabled": True, "agent_origin": "USER", "system_key": "workbench_other"},
+            {"agent_id": 15, "tenant_id": "tenant1", "name": "Origin-only system agent",
+             "create_time": 15, "version_no": 0, "delete_flag": "N",
+             "enabled": True, "agent_origin": "SYSTEM", "system_key": None},
+        ])
+
+    monkeypatch.setattr(
+        "backend.database.agent_db.AgentInfo",
+        SimpleNamespace(**agent_table.c),
+    )
+    monkeypatch.setattr(
+        "backend.database.agent_db.get_db_session", lambda: Session(engine),
+    )
+
+    candidates = query_agent_list_candidates_by_tenant_id("tenant1")
+
+    assert len(candidates) == 12
+    assert len(candidates[:11]) == 11
+    assert {candidate["agent_id"] for candidate in candidates} == set(range(1, 13))
 
 
 def test_query_agent_info_by_ids_skips_empty_ids(monkeypatch):

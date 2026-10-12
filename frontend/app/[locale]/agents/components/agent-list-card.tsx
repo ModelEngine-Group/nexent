@@ -8,6 +8,7 @@ import type { Agent } from "@/types/agentConfig";
 
 import AgentAvatar from "./agent-avatar";
 import AgentConfigActions from "./agent-config-actions";
+import AgentListIndicators from "./agent-list-indicators";
 
 export interface AgentListCardProps {
   agent: Agent;
@@ -67,6 +68,7 @@ export default function AgentListCard({
               {category}
             </span>
           ) : null}
+          <AgentListIndicators agent={agent} />
         </div>
         <p className="mt-1 h-[42px] line-clamp-2 w-full text-[12px] font-normal leading-5 ![letter-spacing:0px] text-[#777777]">
           {agent.description || t("agentRepository.card.noDescription")}

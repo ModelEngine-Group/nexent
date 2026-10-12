@@ -3,13 +3,12 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment
 
-
-PROMPT_DIR = Path(__file__).parents[3] / "backend" / "prompts" / "utils"
+PROMPT_DIR = Path(__file__).parents[3] / "sdk" / "nexent" / "core" / "prompts"
 PROMPT_FILES = [
-    PROMPT_DIR / "prompt_generate_zh.yaml",
-    PROMPT_DIR / "prompt_generate_en.yaml",
-    PROMPT_DIR / "prompt_optimize_zh.yaml",
-    PROMPT_DIR / "prompt_optimize_en.yaml",
+    PROMPT_DIR / "zh/meta/generate_prompt.yaml",
+    PROMPT_DIR / "en/meta/generate_prompt.yaml",
+    PROMPT_DIR / "zh/meta/optimize_prompt.yaml",
+    PROMPT_DIR / "en/meta/optimize_prompt.yaml",
 ]
 
 
@@ -46,7 +45,7 @@ def test_knowledge_prompt_templates_do_not_embed_resource_ranges():
 
 
 def test_builtin_prompt_templates_do_not_guide_observation_markers():
-    prompt_root = Path(__file__).parents[3] / "backend" / "prompts"
+    prompt_root = PROMPT_DIR
     forbidden_terms = ("Observation", "Observe Results", "观察结果")
 
     for path in prompt_root.rglob("*.yaml"):

@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { StandardTable } from "@/components/common/StandardTable";
 import AgentConfigActions from "./agent-config-actions";
+import AgentListIndicators from "./agent-list-indicators";
 import type { Agent } from "@/types/agentConfig";
 
 export interface AgentListTableProps {
@@ -115,6 +116,7 @@ export default function AgentListTable({
             {t(
               isOnline ? "agentConfig.list.online" : "agentConfig.list.offline"
             )}
+            <AgentListIndicators agent={agent} />
           </span>
         );
       },

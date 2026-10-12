@@ -291,7 +291,8 @@ def test_jsonable_handles_paths_model_dump_public_objects_and_depth_limit():
         def model_dump(self, **kwargs):
             raise ValueError("cannot dump")
 
-    assert _jsonable(Path("/tmp/file")) == "/tmp/file"
+    path = Path("/tmp/file")
+    assert _jsonable(path) == str(path)
     assert _jsonable(Model()) == {"value": 1, "api_key": "[REDACTED]"}
     assert _jsonable(BrokenModel()) == {"visible": "fallback"}
     assert _jsonable([], _depth=50) == "[MAX_DEPTH:list]"
