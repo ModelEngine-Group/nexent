@@ -181,7 +181,7 @@ cases:
   - Missing controls, clipped content, or mismatched saved fixture values.
   source:
     bug_ids: [AGENT-CONFIG-BUG-001]
-    handoff: docs/handoffs/2026-10-10-selected-tools-child-agents.md
+    handoff: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/source-notes/2026-10-10-selected-tools-child-agents.md
   execution:
     profiles:
     - name: mock

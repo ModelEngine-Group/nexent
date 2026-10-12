@@ -22,4 +22,4 @@ changes:
       added: []
       modified: [AGENT-CONFIG-D1-003, AGENT-CONFIG-D4-001]
       retired: []
-    notes: Direct update of the existing editor SPEC and REQ-002; stable Feature/Case IDs and historical evidence are preserved. The selected shell reuses previously inspector-confirmed knowledge-row geometry; descendant values are screenshot-based choices recorded in docs/handoffs/2026-10-10-selected-tools-child-agents.md, not new inspector measurements. Exact artwork and font parity remains unverified without original assets.
+    notes: Direct update of the existing editor SPEC and REQ-002; stable Feature/Case IDs and historical evidence are preserved. The selected shell reuses previously inspector-confirmed knowledge-row geometry; descendant values are screenshot-based choices recorded in ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/source-notes/2026-10-10-selected-tools-child-agents.md, not new inspector measurements. Exact artwork and font parity remains unverified without original assets.
