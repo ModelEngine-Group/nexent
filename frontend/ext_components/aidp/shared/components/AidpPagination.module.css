@@ -1,7 +1,7 @@
 .pagination {
   --aidp-primary: #0067d1;
   --aidp-text: #191919;
-  --aidp-secondary: rgba(25, 25, 25, 0.7);
+  --aidp-secondary: #595959;
   --aidp-muted: #777777;
   --aidp-outline: rgba(201, 201, 201, 0.4);
   color: var(--aidp-text);
