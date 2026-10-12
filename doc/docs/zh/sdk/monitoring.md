@@ -343,9 +343,6 @@ with monitoring_manager.start_agent_run(metadata):
             documents = search_knowledge_base("你好")
             monitoring_manager.set_retriever_output(documents)
 
-        with monitoring_manager.trace_tool_call("FinalAnswerTool", "TestAgent", {"query": "你好"}):
-            monitoring_manager.set_tool_output({"answer": result})
-
         monitoring_manager.set_openinference_output({"answer": result})
 ```
 

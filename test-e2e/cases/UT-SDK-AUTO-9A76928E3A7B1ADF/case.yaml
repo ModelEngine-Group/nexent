@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-9A76928E3A7B1ADF
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: ModelConcurrencyLimiter acquire/release、同key冲突limit、等待超时、stop_event取消与引用归零回收｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: ModelConcurrencyLimiter acquire/release、同key冲突limit、等待超时、stop_event取消与引用归零回收｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  test_data:
+    legacy_asset_declaration: '- 无本地固定文件/配置；ModelConcurrencyLimiter 为进程内纯逻辑限流器。'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“ModelConcurrencyLimiter acquire/release、同key冲突limit、等待超时、stop_event取消与引用归零回收｜核心流程”相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: acquire 正常返回 ModelConcurrencyPermit 实例；同 key 复用同一条目（limit 一致时不冲突），不同 key 相互独立。
+  - order: 2
+    action: 直接导入 sdk/nexent/core/models/model_concurrency.py 的 ModelConcurrencyLimiter、ModelConcurrencyPermit、ModelConcurrencyExceeded，每个用例新建独立
+      ModelConcurrencyLimiter 实例，不使用模块级全局 model_concurrency_limiter，避免用例串扰。
+    expected: limit<=0 或 timeout_seconds<=0 时 acquire 抛 ValueError，且不留残留的 _entries 条目。
+  - order: 3
+    action: 对其正常路径执行 acquire：构造 key=("tenant","provider","model")、limit=2、timeout_seconds=1.0、未置位的 threading.Event，记录返回 permit
+      类型与内部状态变化。
+    expected: 同一 key 以不同 limit 调用 acquire 抛 ValueError（conflicting concurrency limits for the same model key）。
+  - order: 4
+    action: 针对边界值执行：limit<=0（0、-1）时 acquire、timeout_seconds<=0 时 acquire、以及同一 key 第二次以不同 limit 调用 acquire。
+    expected: 许可耗尽后等待超时抛 ModelConcurrencyExceeded（TimeoutError 子类），异常路径引用计数回退，不泄漏 permit。
+  - order: 5
+    action: 对有副作用的逻辑检查：先耗尽 limit 个 permit 后信号量状态、permit.release() 是否放回许可、对同一 permit 重复调用 release() 是否幂等、_entries 引用计数是否增减一致。
+    expected: stop_event 置位时 acquire 抛 RuntimeError（model concurrency wait cancelled），引用计数回退。
+  - order: 6
+    action: 对异常路径断言领域异常：limit 已耗尽时以极短 timeout_seconds 再次 acquire 应抛 ModelConcurrencyExceeded；stop_event 预先置位（is_set 为 True）时
+      acquire 应抛 RuntimeError，且异常路径后引用计数回退。
+    expected: permit.release() 幂等：同一 permit 重复 release 只真正发放一次许可、不重复递减引用计数。
+  - order: 7
+    action: 检查引用归零回收：所有 permit release 后，_entries 中该 key 条目应被移除；随后可用相同或新的 limit 重新 create，无冲突。
+    expected: 引用归零后该 key 条目从 _entries 移除，条目按引用计数正确回收。
+  - order: 8
+    action: 确认测试不调用真实模型、不访问第三方 Provider，日志不输出 API Key/Token/Password/模型密钥。
+    expected: 引用归零后该 key 条目从 _entries 移除，条目按引用计数正确回收。
+  - order: 9
+    action: 测试结束后释放 Event/线程等临时对象，确保可重复执行。
+    expected: 引用归零后该 key 条目从 _entries 移除，条目按引用计数正确回收。
+  expected_results:
+  - acquire 正常返回 ModelConcurrencyPermit 实例；同 key 复用同一条目（limit 一致时不冲突），不同 key 相互独立。
+  - limit<=0 或 timeout_seconds<=0 时 acquire 抛 ValueError，且不留残留的 _entries 条目。
+  - 同一 key 以不同 limit 调用 acquire 抛 ValueError（conflicting concurrency limits for the same model key）。
+  - 许可耗尽后等待超时抛 ModelConcurrencyExceeded（TimeoutError 子类），异常路径引用计数回退，不泄漏 permit。
+  - stop_event 置位时 acquire 抛 RuntimeError（model concurrency wait cancelled），引用计数回退。
+  - permit.release() 幂等：同一 permit 重复 release 只真正发放一次许可、不重复递减引用计数。
+  - 引用归零后该 key 条目从 _entries 移除，条目按引用计数正确回收。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 474
+  unit_boundary: 模型并发限流
+  inputs:
+  - '- 无本地固定文件/配置；ModelConcurrencyLimiter 为进程内纯逻辑限流器。'
+  assertions:
+  - acquire 正常返回 ModelConcurrencyPermit 实例；同 key 复用同一条目（limit 一致时不冲突），不同 key 相互独立。
+  - limit<=0 或 timeout_seconds<=0 时 acquire 抛 ValueError，且不留残留的 _entries 条目。
+  - 同一 key 以不同 limit 调用 acquire 抛 ValueError（conflicting concurrency limits for the same model key）。
+  - 许可耗尽后等待超时抛 ModelConcurrencyExceeded（TimeoutError 子类），异常路径引用计数回退，不泄漏 permit。
+  - stop_event 置位时 acquire 抛 RuntimeError（model concurrency wait cancelled），引用计数回退。
+  - permit.release() 幂等：同一 permit 重复 release 只真正发放一次许可、不重复递减引用计数。
+  - 引用归零后该 key 条目从 _entries 移除，条目按引用计数正确回收。

@@ -209,7 +209,7 @@ services:
     networks:
       - nexent
     ports:
-      - "3000:3000"
+      - "${NEXENT_WEB_PORT:-3000}:3000"
     volumes:
       - ${ROOT_DIR}/project-config:/mnt/nexent-data/project-config
     environment:
@@ -225,6 +225,26 @@ services:
         max-size: "10m"  # Maximum size of a single log file
         max-file: "3"    # Maximum number of log files to keep
 
+
+  nexent-nginx:
+    image: ${NGINX_IMAGE:-nginx:alpine}
+    container_name: nexent-nginx
+    restart: always
+    profiles:
+      - https
+    networks:
+      - nexent
+    ports:
+      - "${NEXENT_HTTPS_PORT:-3100}:3100"
+    volumes:
+      - ${ROOT_DIR}/nginx/ssl:/etc/nginx/ssl:ro
+      - ../assets/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   nexent-data-process:
     image: ${NEXENT_DATA_PROCESS_IMAGE}
     container_name: nexent-data-process
@@ -239,7 +259,6 @@ services:
       NEXENT_SQL_STARTUP_MODE: "off"
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       DOCKER_ENVIRONMENT: "true"
-      DISABLE_RAY_DASHBOARD: ${DISABLE_RAY_DASHBOARD:-false}
       DISABLE_CELERY_FLOWER: ${DISABLE_CELERY_FLOWER:-false}
       PYTHONPATH: "/opt/backend"
       skip_proxy: "true"
@@ -259,7 +278,7 @@ services:
       - nexent
     entrypoint: >
       /bin/sh -c "
-        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py || (cd /opt/backend && OPENBLAS_NUM_THREADS=1 UVICORN_LOOP=asyncio uvicorn data_process_service:app --host 0.0.0.0 --port 5012)'
+        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py'
       "
 
   redis:

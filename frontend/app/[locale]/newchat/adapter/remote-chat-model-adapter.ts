@@ -25,6 +25,7 @@ import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
 import { stripStreamedFinalAnswerEcho } from "@/lib/streamFinalAnswer";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 import type { HumanInteractionEvent } from "@/types/clarification";
 import { extractMinioFiles } from "../utils/history-attachments";
@@ -290,7 +291,6 @@ interface NexentRunConfig {
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
   ) => void;
   draftSnapshot?: Record<string, unknown>;
-  complexity?: "simple" | "complicated";
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
@@ -1283,14 +1283,13 @@ export function pushStepTokenCount(step: StepTokenCount): void {
 }
 
 /**
- * Clears the global step token counts registry and resets the shared plan
- * state. Called from `remoteChatModelAdapter.run()` so a fresh assistant
- * turn never inherits the previous run's plan panel.
+ * Clear per-turn timing while retaining the conversation's latest plan.
+ * Conversation switches restore or clear the plan in the history adapter;
+ * a later plan event replaces it when a new planning turn creates a plan.
  */
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
   accumulatedDuration = 0;
-  planRegistry.set(null);
 }
 
 /**
@@ -1676,7 +1675,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             ? custom?.creationWorkbenchConfig
             : undefined,
           draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
-          complexity: isNl2Skill ? custom?.complexity : undefined,
           language: isNl2Skill ? custom?.language : undefined,
           model_id: isNl2Skill
             ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
@@ -2319,6 +2317,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         for (const line of lines) {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
+          if (chunk.type === "final_answer") {
+            chunk.content = unwrapFinalAnswer(chunk.content);
+          }
 
           if (isHumanInteractionEvent(chunk)) {
             flushOpenReasoning();
@@ -2826,6 +2827,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
           if (!isHumanInteractionEvent(chunk)) {
+            if (chunk.type === "final_answer") {
+              chunk.content = unwrapFinalAnswer(chunk.content);
+            }
             if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
             if (chunk.type === "step_count") {
               flushOpenReasoning(chunk.invocation_id);

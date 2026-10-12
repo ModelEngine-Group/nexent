@@ -1,3 +1,5 @@
+import importlib.machinery
+from pathlib import Path
 import sys
 import asyncio
 import json
@@ -118,6 +120,8 @@ nexent_agent_model_mock = MagicMock()
 nexent_agent_model_mock.ToolConfig = MockToolConfig
 sys.modules["nexent"] = MagicMock()
 sys.modules["nexent.core"] = MagicMock()
+sys.modules["nexent.core"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 _concurrency_module = types.ModuleType("nexent.core.concurrency")
 
 
@@ -178,6 +182,8 @@ _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
 sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
+sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
 sys.modules["nexent.core.agents.agent_model"] = nexent_agent_model_mock
 sys.modules["nexent.core.agents.run_agent"] = MagicMock()
 context_input_mock = types.ModuleType("nexent.core.agents.context_input")
@@ -201,7 +207,6 @@ memory_models_module = types.ModuleType("nexent.memory.models")
 memory_models_module.MemoryIngestUnit = MagicMock
 sys.modules["nexent.memory.models"] = memory_models_module
 knowledge_scope_service_module = types.ModuleType("services.knowledge_scope_service")
-knowledge_scope_service_module.build_runtime_knowledge_policy = MagicMock
 knowledge_scope_service_module.build_runtime_knowledge_resources = MagicMock
 knowledge_scope_service_module.resolve_knowledge_scope = MagicMock
 sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_module
@@ -390,7 +395,6 @@ setattr(
 
 # Load real asset_owner_visibility (agent_service imports resolve_agent_list_permission)
 import importlib.util
-from pathlib import Path
 
 _asset_owner_path = (
     Path(__file__).resolve().parents[3]
@@ -509,7 +513,11 @@ elasticsearch_client_mock = MagicMock()
 nexent_mock = MagicMock()
 sys.modules["nexent"] = nexent_mock
 sys.modules["nexent.core"] = MagicMock()
+sys.modules["nexent.core"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
+sys.modules["nexent.core"].__spec__ = importlib.machinery.ModuleSpec("nexent.core", loader=None, is_package=True)
 sys.modules["nexent.core.agents"] = MagicMock()
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
+sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
 sys.modules["nexent.core.models"] = MagicMock()
 sys.modules["nexent.core.utils"] = MagicMock()
 
@@ -715,8 +723,10 @@ from consts.model import (
 
 
 @pytest.fixture(autouse=True)
-def reset_mocks():
+def reset_mocks(mocker, request):
     """Reset all mocks before each test to ensure a clean test environment."""
+    if request.node.name.startswith(("test_update_agent_info", "test_cmsr_006")):
+        mocker.patch.object(agent_service, "resolve_agent_list_permission", return_value="EDIT")
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
     agent_run_service.get_conversation_service.reset_mock(
@@ -8705,17 +8715,7 @@ async def test_import_agent_all_model_fields_in_database(
 def test_render_prompt_template_success(monkeypatch):
     """_render_prompt_template should render a jinja2 template successfully."""
 
-    class FakeTemplate:
-        def __init__(self, template_str):
-            self.template_str = template_str
-
-        def render(self, **context):
-            # Very small fake renderer for test purposes
-            return self.template_str.format(**context)
-
-    monkeypatch.setattr(naming_service, "Template", FakeTemplate, raising=False)
-
-    tpl = "Hello {name}"
+    tpl = "Hello {{ name }}"
     rendered = _render_prompt_template(tpl, name="World")
     assert rendered == "Hello World"
 
@@ -8730,7 +8730,7 @@ def test_render_prompt_template_on_error_returns_original(monkeypatch):
         def render(self, **context):
             raise ValueError("render failed")
 
-    monkeypatch.setattr(naming_service, "Template", FailingTemplate, raising=False)
+    monkeypatch.setitem(_render_prompt_template.__globals__, "Template", FailingTemplate)
 
     tpl = "Broken {template"
     # Should not raise; should return original string
@@ -11376,11 +11376,16 @@ def test_get_agent_by_name_impl_success(mock_search, mock_query_versions):
 @patch("management.services.agent.management.query_version_list")
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
-    """Test that agent not found raises Exception."""
-    mock_search.side_effect = Exception("Agent not found")
+    """An expected Agent lookup miss retains its domain exception."""
+    from consts.exceptions import AgentNotFoundError
 
-    with pytest.raises(Exception, match="agent not found"):
+    lookup_error = AgentNotFoundError("agent not found")
+    mock_search.side_effect = lookup_error
+
+    with pytest.raises(AgentNotFoundError, match="agent not found") as excinfo:
         get_agent_by_name_impl("nonexistent_agent", "tenant_1")
+    assert excinfo.value is lookup_error
+    mock_query_versions.assert_not_called()
 
 
 @patch("management.services.agent.management.query_version_list")
@@ -11391,15 +11396,29 @@ def test_get_agent_by_name_impl_empty_name_service(mock_search, mock_query_versi
         get_agent_by_name_impl("", "tenant_1")
 
 
-# Tests for get_agent_by_name_impl (different path)
+# Unexpected lookup failures must remain distinct from an Agent lookup miss.
+@pytest.mark.parametrize("failure_stage", ["lookup", "versions"])
 @patch("management.services.agent.management.query_version_list")
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
-def test_get_agent_by_impl_agent_not_found(mock_search, mock_query_versions):
-    """Test agent not found error in get_agent_by_name_impl."""
-    mock_search.side_effect = Exception("Not found")
+def test_get_agent_by_name_impl_preserves_internal_errors(
+    mock_search, mock_query_versions, failure_stage
+):
+    """Internal failures must not be reclassified as missing resources."""
+    lookup_error = RuntimeError("database unavailable")
+    mock_search.return_value = 123
+    if failure_stage == "lookup":
+        mock_search.side_effect = lookup_error
+    else:
+        mock_query_versions.side_effect = lookup_error
 
-    with pytest.raises(Exception, match="agent not found"):
+    with pytest.raises(RuntimeError, match="database unavailable") as excinfo:
         get_agent_by_name_impl("missing_agent", "tenant_1")
+    assert excinfo.value is lookup_error
+    mock_search.assert_called_once_with("missing_agent", "tenant_1")
+    if failure_stage == "lookup":
+        mock_query_versions.assert_not_called()
+    else:
+        mock_query_versions.assert_called_once_with(123, "tenant_1")
 
 
 # Tests for delete_related_agent_impl
@@ -11521,6 +11540,7 @@ async def test_update_agent_info_impl_skill_update_exception(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = [1, 2]
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
@@ -12144,6 +12164,7 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = [2, 3]
+    mock_request.related_agents = None
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
@@ -12152,9 +12173,9 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.greeting_message = None
 
     # Make query_sub_agents_id_list raise exception during circular check
-    mock_query_sub.side_effect = Exception("Query error")
+    mock_query_sub.side_effect = RuntimeError("Query error")
 
-    with pytest.raises(ValueError, match="Failed to update related agents"):
+    with pytest.raises(RuntimeError, match="Query error"):
         await update_agent_info_impl(mock_request, authorization="Bearer token")
 
 
@@ -12194,6 +12215,7 @@ async def test_update_agent_info_impl_related_external_agents(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100, 200]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12252,6 +12274,7 @@ async def test_update_agent_info_impl_external_agent_remove_relation(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = []  # Remove existing relation
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12312,6 +12335,7 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12439,6 +12463,7 @@ async def test_update_agent_info_impl_skill_unselected(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = [2]  # Only want skill 2
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = None  # Add this field
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12503,6 +12528,7 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
         )
     ]
     request.related_agent_ids = None
+    request.related_agents = None
     request.related_external_agent_ids = None
     request.group_ids = None
     request.ingroup_permission = None
@@ -12529,6 +12555,50 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
         "max_results": 5,
     }
     assert enabled_call.kwargs["version_no"] == 4
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.service.skill_db.get_valid_skill_ids")
+@patch("management.services.agent.service.skill_db.query_skill_instances_by_agent_id")
+@patch("management.services.agent.service.get_current_user_info")
+async def test_update_agent_info_impl_rejects_unavailable_skill_id(
+    mock_get_user,
+    mock_query_skills,
+    mock_get_valid_skill_ids,
+):
+    """Updating with a skill id that does not exist must raise a domain error, not 500."""
+    from backend.consts.model import AgentInfoRequest, AgentSkillInstanceRequest
+    from consts.exceptions import AppException
+    from management.services.agent.service import update_agent_info_impl
+
+    mock_get_user.return_value = ("user_1", "tenant_1", "en")
+    mock_get_valid_skill_ids.return_value = set()
+    mock_query_skills.return_value = []
+
+    request = AgentInfoRequest(
+        agent_id=1,
+        name="Test",
+        display_name="Test Display",
+        description="Desc",
+        business_description="Biz Desc",
+        author="Author",
+        model_ids=[],
+        max_steps=5,
+        provide_run_summary=True,
+        duty_prompt="Duty",
+        constraint_prompt="Constraint",
+        few_shots_prompt="Few shots",
+        enabled=True,
+        enabled_skill_ids=[9999],
+        skill_instances=[AgentSkillInstanceRequest(skill_id=9999, enabled=True)],
+        version_no=1,
+    )
+    assert request.related_agents is None
+
+    with pytest.raises(AppException, match="invalid or unavailable skill IDs: \\[9999\\]"):
+        await update_agent_info_impl(request, authorization="Bearer token")
+    mock_get_valid_skill_ids.assert_called_once_with(tenant_id="tenant_1", skill_ids=[9999])
+    mock_query_skills.assert_not_called()
 
 
 # Test for generate_stream unexpected exception (lines 1889-1896)
@@ -12883,6 +12953,7 @@ async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -16739,8 +16810,9 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("version_no", [None, 1])
 async def test_stream_agent_chunks_debug_run_skips_conversation_persistence(
-    monkeypatch,
+    monkeypatch, version_no,
 ):
     """Debug runs stream normally without creating or finalizing chat rows."""
     from management.services.agent import service as agent_service
@@ -16749,6 +16821,7 @@ async def test_stream_agent_chunks_debug_run_skips_conversation_persistence(
         agent_id=1,
         conversation_id=999,
         query="debug",
+        version_no=version_no,
         history=[],
         minio_files=[],
         is_debug=True,
@@ -19802,7 +19875,7 @@ def test_inject_user_timezone_time_with_valid_timezone():
         result = prepend_current_time(
             "What time is it?", request.headers.get("x-user-timezone")
         )
-    assert result.startswith("[Current time:")
+    assert result.startswith("What time is it?\n\n[Current time:")
     assert "What time is it?" in result
 
 
@@ -19818,13 +19891,13 @@ def test_inject_user_timezone_time_without_header():
     assert result == "What time is it?"
 
 
-def test_inject_user_timezone_time_with_existing_prefix():
-    """Should not double-inject when query already has [Current time:] prefix."""
+def test_inject_user_timezone_time_with_existing_marker():
+    """Do not append a second runtime time marker."""
     from unittest.mock import MagicMock
 
     request = MagicMock()
     request.headers = {"x-user-timezone": "Asia/Shanghai"}
-    prefixed = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    prefixed = "What time is it?\n\n[Current time: 2026-01-01 20:00:00]"
     result = prepend_current_time(prefixed, request.headers.get("x-user-timezone"))
     assert result == prefixed
 
@@ -19856,13 +19929,9 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
 
     mock_create_conversation = mocker.patch.object(
@@ -19927,8 +19996,8 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(
     }
     assert mock_agent_request.tool_params == {"index_names": ["pool-a"]}
     assert mock_agent_request.__dict__["_runtime_knowledge_context"] == {
-        "policy": "scope policy",
-        "resources": "scope resources",
+        "scope": {"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                  "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     }
     event = mock_agent_request.__dict__["_resolved_knowledge_scope_event"]
     assert event["warnings"] == ["warn-1"]
@@ -19950,13 +20019,9 @@ async def test_run_agent_stream_persists_request_scope_on_existing_conversation(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mocker.patch.object(
         agent_run_service,
@@ -20034,13 +20099,9 @@ async def test_run_agent_stream_uses_stored_scope_when_request_has_none(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mock_get_conversation = mocker.patch.object(
         agent_run_service,
@@ -20108,13 +20169,9 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
     mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
         agent_run_service,
-        "build_runtime_knowledge_policy",
-        return_value="scope policy",
-    )
-    mocker.patch.object(
-        agent_run_service,
         "build_runtime_knowledge_resources",
-        return_value="scope resources",
+        return_value={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                      "aidp_disabled": False, "local_display_names": ["KB A"], "aidp_display_names": []},
     )
     mocker.patch.object(
         agent_run_service,

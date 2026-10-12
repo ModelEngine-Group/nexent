@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AUTH-02
+  feature_id: V5-PW-AUTH-02
+  business_rule_ids:
+  - V5-PW-AUTH-02-RULE-01
+  title: 邀请码注册→首次登录→普通用户自助注销
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 覆盖邀请码驱动的新用户生命周期，不把Token管理混在本场景。
+  preconditions:
+  - Tenant Admin/SU storageState
+  - 未注册run_id邮箱
+  - 目标租户允许邀请注册
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/secrets.env
+  steps:
+  - order: 1
+    action: 管理员进入/resource-manage，选择测试租户→【Invitations/邀请码】。
+    expected: 邀请码按设计消费，用户进入正确租户。
+  - order: 2
+    action: 点击创建邀请码，填写run_id备注/有效期等必填项并提交，记录邀请码。
+    expected: 注销需要确认，完成后旧session失效。
+  - order: 3
+    action: 新无登录Context打开注册入口，填写新邮箱、密码、邀请码并提交。
+    expected: 管理员端状态与用户生命周期一致。
+  - order: 4
+    action: 按产品流程首次登录，确认用户进入目标租户。
+    expected: 级联资源完整性由API-IT验证。
+  - order: 5
+    action: 打开/users，确认普通本地用户【删除账号/注销账号】可用。
+    expected: 级联资源完整性由API-IT验证。
+  - order: 6
+    action: 点击删除账号并在二次确认中确认。
+    expected: 级联资源完整性由API-IT验证。
+  - order: 7
+    action: 再次用该账号登录或访问受保护页面，确认不能继续使用。
+    expected: 级联资源完整性由API-IT验证。
+  - order: 8
+    action: 管理员端确认邀请码已消费且用户状态已更新。
+    expected: 级联资源完整性由API-IT验证。
+  expected_results:
+  - 邀请码按设计消费，用户进入正确租户。
+  - 注销需要确认，完成后旧session失效。
+  - 管理员端状态与用户生命周期一致。
+  - 级联资源完整性由API-IT验证。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 3
+  actor: Nexent browser user
+  journey:
+  - 管理员进入/resource-manage，选择测试租户→【Invitations/邀请码】。
+  - 点击创建邀请码，填写run_id备注/有效期等必填项并提交，记录邀请码。
+  - 新无登录Context打开注册入口，填写新邮箱、密码、邀请码并提交。
+  - 按产品流程首次登录，确认用户进入目标租户。
+  - 打开/users，确认普通本地用户【删除账号/注销账号】可用。
+  - 点击删除账号并在二次确认中确认。
+  - 再次用该账号登录或访问受保护页面，确认不能继续使用。
+  - 管理员端确认邀请码已消费且用户状态已更新。
+  final_business_result:
+  - 邀请码按设计消费，用户进入正确租户。
+  - 注销需要确认，完成后旧session失效。
+  - 管理员端状态与用户生命周期一致。
+  - 级联资源完整性由API-IT验证。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-AUTH-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

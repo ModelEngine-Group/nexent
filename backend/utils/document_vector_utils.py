@@ -13,20 +13,17 @@ import random
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from jinja2 import Template, StrictUndefined
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
+from nexent.core.agents.prompt.document import compose_document_cluster_summary
 
 from consts.const import LANGUAGE
 from database.model_management_db import get_model_by_model_id
 from nexent.core.utils.observer import MessageObserver
 from nexent.vector_database.base import VectorDatabaseCore
 from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import (
-    get_document_summary_prompt_template,
-    get_cluster_summary_reduce_prompt_template
-)
 
 logger = logging.getLogger("document_vector_utils")
 
@@ -506,17 +503,12 @@ def summarize_document(document_content: str, filename: str, language: str = LAN
         Document summary text
     """
     try:
-        # Get prompt template from prompt_template_utils
-        prompts = get_document_summary_prompt_template(language)
-        
-        system_prompt = prompts.get('system_prompt', '')
-        user_prompt_template = prompts.get('user_prompt', '')
-        
-        user_prompt = Template(user_prompt_template, undefined=StrictUndefined).render(
-            filename=filename,
-            content=document_content,
-            max_words=max_words
-        )
+        prompt = compose_auxiliary_prompt(language, "document_summary", {
+            "filename": filename,
+            "content": document_content,
+            "max_words": max_words,
+        })
+        system_prompt, user_prompt = prompt.system, prompt.user
         
         logger.info(f"Document summary prompt generated for {filename} (max_words: {max_words})")
         
@@ -563,19 +555,8 @@ def summarize_cluster(document_summaries: List[str], language: str = LANGUAGE["Z
         Cluster summary text
     """
     try:
-        # Get prompt template from prompt_template_utils
-        prompts = get_cluster_summary_reduce_prompt_template(language)
-        
-        system_prompt = prompts.get('system_prompt', '')
-        user_prompt_template = prompts.get('user_prompt', '')
-        
-        # Format document summaries
-        summaries_text = "\n\n".join([f"Document {i+1}: {summary}" for i, summary in enumerate(document_summaries)])
-        
-        user_prompt = Template(user_prompt_template, undefined=StrictUndefined).render(
-            document_summaries=summaries_text,
-            max_words=max_words
-        )
+        prompt = compose_document_cluster_summary(language, document_summaries, max_words)
+        system_prompt, user_prompt = prompt.system, prompt.user
         
         logger.info(f"Cluster summary prompt generated (language: {language}, max_words: {max_words})")
         

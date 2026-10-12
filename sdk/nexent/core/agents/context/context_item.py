@@ -13,7 +13,7 @@ class ContextItemType(str, Enum):
     SKILL = "skill"
     MEMORY = "memory"
     KNOWLEDGE_BASE = "knowledge_base"
-    MANAGED_AGENT = "managed_agent"
+    WORKER_AGENT = "worker_agent"
     EXTERNAL_AGENT = "external_agent"
     HISTORY_TURN = "history_turn"
     TOOL_CALL_RESULT = "tool_call_result"

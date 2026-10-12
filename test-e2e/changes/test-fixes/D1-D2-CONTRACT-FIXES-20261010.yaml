@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: D1-D2-CONTRACT-FIXES-20261010
+  change_type: test-fix
+  title: Repair six stale test contracts and fixture boundaries
+  description: >-
+    Use the real SDK prompt bundle through the backend context entry point;
+    keep static platform identity and authority checks across both languages.
+    Align independent AIDP recommendation and manual selectability with the
+    current contract without enabling AIDP services. Preserve assistant-ui
+    model-selection isolation by mocking unrelated Markdown rendering and
+    aligning local renderer peers with the existing dependency preparation script.
+    Scope tag assertions to unique
+    run-owned tags while retaining exact counts, sorting, draft exclusion and
+    cross-tenant isolation. Do not change product code or deployment settings.
+  affected_features:
+    existing: [F-156, F-045, F-131, F-069, F-065, F-112]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - UT-BE-AUTO-3B69B045EA9A318F
+    - UT-BE-AUTO-696FDBCE6806523B
+    - API-AUTO-19E0779FED1B649A
+    - UT-FE-AUTO-02FA904A1C3AD386
+    - UT-FE-AUTO-ED44D96A53903DD0
+    - API-AUTO-13ACE833D2DCAA16
+    retired: []

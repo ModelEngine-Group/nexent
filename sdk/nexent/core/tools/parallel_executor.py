@@ -13,54 +13,37 @@ class ParallelExecutorTool(Tool):
     category = None
     tool_sign = None
     description = (
-        "Run multiple independent tool or agent calls in parallel. "
-        "parallel_executor is already injected into the Python environment: "
-        "call it directly and never import it. "
-        "Example when knowledge_base_search is available (no import needed): "
-        "parallel_executor(tasks=[(knowledge_base_search, "
-        "{\"query\": \"test\", \"index_names\": [\"KB-A\"]}, \"kb_a\"), "
-        "(knowledge_base_search, {\"query\": \"test\", "
-        "\"index_names\": [\"KB-B\"]}, \"kb_b\")], max_workers=2). "
-        "Each task must be (available_tool_or_agent, kwargs_dict) or "
-        "(available_tool_or_agent, kwargs_dict, result_key); do not mix formats. "
-        "Use only tools or agents listed in Available Resources; do not import "
-        "or create the callable. "
-        "All 2-tuples return a list in input order; all 3-tuples return a dict "
-        "keyed by result_key. "
-        "Only include independent tasks; dependent calls must be sequential. "
-        "Timeouts and failures are returned as error strings; successful results "
-        "keep their original type. timeout is per task and max_workers controls "
-        "the maximum concurrency."
+        "Run independent available tools or sub-agents in parallel. "
+        "Dependent calls must run sequentially. Example:\n"
+        "<code>\n"
+        "# Search KB-A and KB-B concurrently\n"
+        'parallel_executor(tasks=[(knowledge_base_search, {"query": "test", "index_names": ["KB-A"]}, "kb_a"), '
+        '(knowledge_base_search, {"query": "test", "index_names": ["KB-B"]}, "kb_b")])\n'
+        "</code>"
     )
     description_zh = (
-        "并行执行多个互不依赖的工具或助手调用。"
-        "parallel_executor 已直接注入当前 Python 环境，必须直接调用，禁止使用 import 获取。"
-        "示例（knowledge_base_search 已在可用资源中时，无需 import）："
-        "parallel_executor(tasks=[(knowledge_base_search, "
-        "{\"query\": \"test\", \"index_names\": [\"KB-A\"]}, \"kb_a\"), "
-        "(knowledge_base_search, {\"query\": \"test\", "
-        "\"index_names\": [\"KB-B\"]}, \"kb_b\")], max_workers=2)。"
-        "每个任务必须是二元组（可用工具或助手对象，参数字典）或三元组（可用工具或助手对象，参数字典，结果名称）；同一次调用不能混用两种格式。"
-        "只能传入“可用资源”中已经列出的工具或助手，不要导入或创建函数。"
-        "全部使用二元组时返回按输入顺序排列的列表；全部使用三元组时返回以结果名称为 key 的字典。"
-        "任务之间必须互不依赖；有依赖关系时必须串行调用。"
-        "单个任务超时（默认120秒）或失败时返回错误字符串；成功结果保留原始类型。"
-        "timeout 控制单个任务的超时时间，max_workers 控制最大并发数。"
+        "并行执行多个互不依赖的可用工具或子智能体调用。有依赖的调用须串行执行。示例：\n"
+        "<code>\n"
+        "# 并发调用知识库工具检索知识库 KB-A 与 KB-B\n"
+        'parallel_executor(tasks=[(knowledge_base_search, {"query": "test", "index_names": ["KB-A"]}, "kb_a"), '
+        '(knowledge_base_search, {"query": "test", "index_names": ["KB-B"]}, "kb_b")])\n'
+        "</code>"
     )
     inputs = {
         "tasks": {
             "type": "array",
             "description": (
-                "A list of tasks. Each task is (available_tool_or_agent, kwargs_dict) "
-                "or (available_tool_or_agent, kwargs_dict, result_key). "
-                "Use only already available tools or agents; never import "
-                "parallel_executor or the task callable. Do not mix the two formats."
+                "Each task is (available_tool_or_agent, kwargs_dict) or "
+                "(available_tool_or_agent, kwargs_dict, result_key). "
+                "Use only listed resources and do not mix formats. "
+                "Two-tuples return a list in input order; three-tuples return a dict keyed by result_key. "
+                "Failures return error strings; successes retain their original types."
             ),
             "description_zh": (
-                "任务列表。每个任务是二元组（可用工具或助手对象，参数字典） "
-                "或三元组（可用工具或助手对象，参数字典，结果名称）。"
-                "只能使用已经注入且列在可用资源中的工具或助手；禁止 import parallel_executor 或任务对象。"
-                "同一次调用不能混用两种格式。"
+                "每个任务是二元组（可用工具或子智能体对象，参数字典）或三元组"
+                "（可用工具或子智能体对象，参数字典，结果名称）。仅使用已列出的资源，"
+                "同次调用不得混用格式。二元组返回按输入顺序排列的列表，三元组返回"
+                "以结果名称为键的字典；失败返回错误字符串，成功结果保留原始类型。"
             ),
         },
         "timeout": {

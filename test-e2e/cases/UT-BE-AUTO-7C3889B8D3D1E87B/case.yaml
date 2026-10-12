@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-7C3889B8D3D1E87B
+  feature_id: F-123
+  business_rule_ids:
+  - F-123-RULE-01
+  title: 外部记忆 provider 扇出写入：无启用 provider 跳过/多 provider 并行/部分失败降级与 ok-degraded 计数｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 外部记忆 provider 扇出写入：无启用 provider 跳过/多 provider 并行/部分失败降级与 ok-degraded 计数｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 本用例为纯 mock 级单元测试：mock backend/services/memory_external_provider_service.py 的 get_memory_external_provider_service 与 backend/services/memory_ingestion_event_service.py
+    的 MemoryIngestionEventService.send_ingest_all_enabled，不依赖真实外部 memory provider、数据库或模型。
+  test_data:
+    legacy_asset_declaration: '- 无：纯 mock 级单元测试，不依赖本地固定资产。'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“外部记忆 provider 扇出写入”相关的 fixture/配置；测试代码不得读取生产凭据。
+    expected: 无启用 provider 时 _fanout_external_ingest 短路返回且不调用 send_ingest_all_enabled。
+  - order: 2
+    action: 直接导入 backend/services/memory_backend_adapter.py 的 _fanout_external_ingest 与 _backend_store_hook，构造最小 payload（tenant_id/user_id/content）与
+      result（memory_id）；mock provider_service 的 _config_service.get_enabled_providers 与 MemoryIngestionEventService.send_ingest_all_enabled
+      返回值。
+    expected: 有启用 provider 时 send_ingest_all_enabled 以单个 MemoryIngestUnit（event_type=memory_stored、event_id=result，memory_id、unit_content=payload，content）调用一次。
+  - order: 3
+    action: 场景A-无启用 provider：get_enabled_providers 返回空列表；断言 send_ingest_all_enabled 未被调用，_fanout_external_ingest 返回 None，日志含
+      external_memory_ingest_skipped 且 reason=no_enabled_providers。
+    expected: 成功率统计仅将 status 为 ok 或 degraded 计入 success_count，failure_count=len(ingest_results)-success_count，与代码契约一致。
+  - order: 4
+    action: 场景B-多 provider 正常：get_enabled_providers 返回两条 enabled config（provider_name 分别为 p1/p2），send_ingest_all_enabled 返回
+      status 均为 ok 的两条结果；断言以单个 MemoryIngestUnit（event_type=memory_stored、event_id=result，memory_id、unit_content=payload，content）调用一次，日志
+      external_memory_ingest_completed 中 success_count=2、failure_count=0。
+    expected: 部分失败或异常不阻断本地 create_memory 结果返回；_backend_store_hook 仅记录 warning，不吞掉 result。
+  - order: 5
+    action: 场景C-部分失败/degraded：send_ingest_all_enabled 返回 status 分别为 ok/degraded/failed 的三条结果；断言仅 ok 与 degraded 计入 success_count=2、failure_count=1，且函数正常返回不抛异常。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 场景D-扇出异常不影响本地写入：send_ingest_all_enabled 抛异常时，_backend_store_hook 捕获后仅记录 warning external_memory_ingest_failed，并仍返回
+      create_memory 的 result，不向上抛异常。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 对副作用的检查：MemoryIngestUnit 的 event_id 取自 result，memory_id、unit_type 取自 payload 的 layer 字符串值；确认日志不输出 API Key、Token、用户密码或模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 测试结束后释放临时 mock/临时对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 无启用 provider 时 _fanout_external_ingest 短路返回且不调用 send_ingest_all_enabled。
+  - 有启用 provider 时 send_ingest_all_enabled 以单个 MemoryIngestUnit（event_type=memory_stored、event_id=result，memory_id、unit_content=payload，content）调用一次。
+  - 成功率统计仅将 status 为 ok 或 degraded 计入 success_count，failure_count=len(ingest_results)-success_count，与代码契约一致。
+  - 部分失败或异常不阻断本地 create_memory 结果返回；_backend_store_hook 仅记录 warning，不吞掉 result。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 405
+  unit_boundary: 记忆后端适配
+  inputs:
+  - '- 无：纯 mock 级单元测试，不依赖本地固定资产。'
+  assertions:
+  - 无启用 provider 时 _fanout_external_ingest 短路返回且不调用 send_ingest_all_enabled。
+  - 有启用 provider 时 send_ingest_all_enabled 以单个 MemoryIngestUnit（event_type=memory_stored、event_id=result，memory_id、unit_content=payload，content）调用一次。
+  - 成功率统计仅将 status 为 ok 或 degraded 计入 success_count，failure_count=len(ingest_results)-success_count，与代码契约一致。
+  - 部分失败或异常不阻断本地 create_memory 结果返回；_backend_store_hook 仅记录 warning，不吞掉 result。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

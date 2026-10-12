@@ -43,13 +43,13 @@ import { useConfig } from "@/hooks/useConfig";
  * Handles streaming cases where closing tags may not be present yet
  * - <code>...</code> → ```python ... ```
  * - <code>... (incomplete) → ```python (open code fence, no content yet)
- * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
- * - <DISPLAY:language>... (incomplete) → ```language (open code fence, no content yet)
+ * - <display:language>...</display> → ```language ... ```
+ * - <display:language>... (incomplete) → ```language (open code fence, no content yet)
  */
 const convertToMarkdownCodeFences = (content: string): string => {
-  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
+  // Step 1: Handle complete <display:language>...</display> blocks
   content = content.replace(
-    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    /<display:(\w+)>([\s\S]*?)<\/display>/g,
     (_match, language, code) => {
       return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
     }
@@ -61,10 +61,10 @@ const convertToMarkdownCodeFences = (content: string): string => {
   });
 
   // Step 3: Handle incomplete tags during streaming
-  // <DISPLAY:language> without closing </DISPLAY> → ```language\n (open fence)
+  // <display:language> without closing </display> → ```language\n (open fence)
   // Only match if there's no closing tag later in the content
   content = content.replace(
-    /<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g,
+    /<display:(\w+)>(?![\s\S]*<\/display>)/g,
     (_match, language) => {
       return `\`\`\`${language}\n`;
     }
@@ -81,7 +81,7 @@ const convertToMarkdownCodeFences = (content: string): string => {
 
 /**
  * Extract code content and language from model_output_code content
- * Handles both <code> and legacy <RUN> / <DISPLAY:language> formats
+ * Handles both <code> and legacy <run> / <display:language> formats
  * Supports streaming mode where end markers may not be present yet
  * @param content - Raw code content from stream
  * @returns Object with codeContent and language
@@ -149,17 +149,17 @@ const extractCodeInfo = (
     return { codeContent: processed.trim(), language: "python" };
   }
 
-  // 2. NEW <DISPLAY:language>...</DISPLAY> format (display only)
-  const displayStart = processed.indexOf("<DISPLAY:");
+  // 2. NEW <display:language>...</display> format (display only)
+  const displayStart = processed.indexOf("<display:");
   if (displayStart !== -1) {
     const langEnd = processed.indexOf(">", displayStart);
     if (langEnd !== -1) {
       const language = processed.substring(
-        displayStart + "<DISPLAY:".length,
+        displayStart + "<display:".length,
         langEnd
       );
       const contentStart = langEnd + 1;
-      const displayEnd = processed.indexOf("</DISPLAY>", contentStart);
+      const displayEnd = processed.indexOf("</display>", contentStart);
       processed =
         displayEnd !== -1
           ? processed.substring(contentStart, displayEnd)
@@ -174,24 +174,24 @@ const extractCodeInfo = (
     }
   }
 
-  // 3. LEGACY ```<DISPLAY:language> format with backticks
-  const legacyDisplayStart = processed.indexOf("```<DISPLAY:");
+  // 3. LEGACY ```<display:language> format with backticks
+  const legacyDisplayStart = processed.indexOf("```<display:");
   if (legacyDisplayStart !== -1) {
     const langEnd = processed.indexOf(
       ">",
-      legacyDisplayStart + "```<DISPLAY:".length
+      legacyDisplayStart + "```<display:".length
     );
     if (langEnd !== -1) {
       const language = processed.substring(
-        legacyDisplayStart + "```<DISPLAY:".length,
+        legacyDisplayStart + "```<display:".length,
         langEnd
       );
       const contentStart = langEnd + 1;
       const endCodeIdx = processed.indexOf(
-        "```<END_DISPLAY_CODE>",
+        "```<end_display_code>",
         contentStart
       );
-      const endCodeIdx2 = processed.indexOf("<END_DISPLAY_CODE>", contentStart);
+      const endCodeIdx2 = processed.indexOf("<end_display_code>", contentStart);
       const endPos = endCodeIdx !== -1 ? endCodeIdx : endCodeIdx2;
       processed =
         endPos !== -1
@@ -207,12 +207,12 @@ const extractCodeInfo = (
     }
   }
 
-  // 4. LEGACY ```<RUN> format (executable, default python)
-  const runStart = processed.indexOf("```<RUN>");
+  // 4. LEGACY ```<run> format (executable, default python)
+  const runStart = processed.indexOf("```<run>");
   if (runStart !== -1) {
-    const contentStart = runStart + "```<RUN>".length;
-    const endCodeIdx = processed.indexOf("```<END_CODE>", contentStart);
-    const endCodeIdx2 = processed.indexOf("<END_CODE>", contentStart);
+    const contentStart = runStart + "```<run>".length;
+    const endCodeIdx = processed.indexOf("```<end_code>", contentStart);
+    const endCodeIdx2 = processed.indexOf("<end_code>", contentStart);
     const endPos = endCodeIdx !== -1 ? endCodeIdx : endCodeIdx2;
     processed =
       endPos !== -1
@@ -230,7 +230,7 @@ const extractCodeInfo = (
     return { codeContent: "", language: "python" };
   }
 
-  const incompleteDisplayRun = /^<(DISPLAY:[a-z0-9]*|RUN)$/i.test(processed);
+  const incompleteDisplayRun = /^<(display:[a-z0-9]*|run)$/.test(processed);
   if (incompleteDisplayRun) {
     const colonIdx = processed.lastIndexOf(":");
     return {
@@ -255,12 +255,12 @@ const extractCodeInfo = (
   }
 
   // 6. Inline DISPLAY/RUN detection (handles case where backticks may have been stripped)
-  const inlineDisplayIdx = processed.indexOf("<DISPLAY:");
+  const inlineDisplayIdx = processed.indexOf("<display:");
   if (inlineDisplayIdx !== -1) {
     const langEnd = processed.indexOf(">", inlineDisplayIdx);
     if (langEnd !== -1) {
       const language = processed.substring(
-        inlineDisplayIdx + "<DISPLAY:".length,
+        inlineDisplayIdx + "<display:".length,
         langEnd
       );
       const contentStart = langEnd + 1;
@@ -271,9 +271,9 @@ const extractCodeInfo = (
     }
   }
 
-  const inlineRunIdx = processed.indexOf("<RUN>");
+  const inlineRunIdx = processed.indexOf("<run>");
   if (inlineRunIdx !== -1) {
-    const contentStart = inlineRunIdx + "<RUN>".length;
+    const contentStart = inlineRunIdx + "<run>".length;
     processed = processed.substring(contentStart);
     processed = stripIncompleteEndMarkers(processed);
     processed = stripTrailingMarkers(processed);

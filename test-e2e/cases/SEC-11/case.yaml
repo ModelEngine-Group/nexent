@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: SEC-11
+  feature_id: V5-SEC-11
+  business_rule_ids:
+  - V5-SEC-11-RULE-01
+  title: 运行控制跨租户隔离、事件脱敏与重放防护
+  type: SECURITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: run/conversation/decision/event 标识不可被跨租户猜测；steer/decision 内容与模型密钥不泄露。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: TenantA 创建等待审批的运行并记录 run/conversation/event cursor。
+    expected: 跨租户全部 401/403/404 且无状态变化。
+  - order: 2
+    action: TenantB 对 snapshot/events/decision/pause/steer/terminate 全部直访。
+    expected: 重复决定不重复执行。
+  - order: 3
+    action: 重放旧 decision/idempotency/cursor，提交超长和含 secret marker 的 steer。
+    expected: 敏感内容按契约脱敏。
+  - order: 4
+    action: 检查响应、数据库、日志和事件流。
+    expected: 事件游标不可越权复用。
+  expected_results:
+  - 跨租户全部 401/403/404 且无状态变化。
+  - 重复决定不重复执行。
+  - 敏感内容按契约脱敏。
+  - 事件游标不可越权复用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 32
+  risk_type: SECURITY
+  risk: run/conversation/decision/event 标识不可被跨租户猜测；steer/decision 内容与模型密钥不泄露。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  metrics:
+  - 跨租户全部 401/403/404 且无状态变化。
+  - 重复决定不重复执行。
+  - 敏感内容按契约脱敏。
+  - 事件游标不可越权复用。
+  thresholds:
+  - 跨租户全部 401/403/404 且无状态变化。
+  - 重复决定不重复执行。
+  - 敏感内容按契约脱敏。
+  - 事件游标不可越权复用。
+  recovery_expectations:
+  - 跨租户全部 401/403/404 且无状态变化。
+  - 重复决定不重复执行。
+  - 敏感内容按契约脱敏。
+  - 事件游标不可越权复用。

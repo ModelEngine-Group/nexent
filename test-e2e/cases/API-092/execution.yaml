@@ -1,0 +1,11 @@
+schema_version: '1.0'
+case_id: API-092
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-092
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

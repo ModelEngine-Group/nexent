@@ -19,7 +19,6 @@ from consts.const import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
-    ENABLE_AIDP_KNOWLEDGE,
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
     MCP_REQUEST_TIMEOUT_SECONDS,
@@ -71,6 +70,7 @@ from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
 from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from nexent.core.concurrency import run_blocking
 from management.services.knowledge_base.service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
@@ -83,18 +83,15 @@ _ALWAYS_HIDDEN_KNOWLEDGE_TOOLS = frozenset({
     "knowledge_base_search",
     "aidp_search",
 })
-_INDEPENDENT_AIDP_SEARCH_TOOL = "ind_aidp_search"
 
 
-def _get_deployment_user_selectability(
+def _get_user_selectability(
     tool_name: str,
     default: bool,
 ) -> bool:
-    """Return the deployment-controlled user selection state for a tool."""
+    """Keep managed knowledge tools hidden from manual selection."""
     if tool_name in _ALWAYS_HIDDEN_KNOWLEDGE_TOOLS:
         return False
-    if tool_name == _INDEPENDENT_AIDP_SEARCH_TOOL:
-        return not ENABLE_AIDP_KNOWLEDGE
     return default
 
 
@@ -309,7 +306,7 @@ def get_local_tools() -> List[ToolInfo]:
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             labels=getattr(tool_class, 'labels', None),
-            is_user_selectable=_get_deployment_user_selectability(
+            is_user_selectable=_get_user_selectability(
                 getattr(tool_class, 'name'),
                 getattr(tool_class, 'is_user_selectable', True),
             ),
@@ -920,7 +917,7 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
-            "is_user_selectable": _get_deployment_user_selectability(
+            "is_user_selectable": _get_user_selectability(
                 tool_name,
                 tool.get("is_user_selectable", True),
             ),
@@ -1416,7 +1413,11 @@ async def validate_tool_impl(
             else:
                 return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
         elif source == ToolSourceEnum.LOCAL.value:
-            return _validate_local_tool(tool_name, inputs, params, tenant_id, user_id)
+            return await run_blocking(
+                "validate-local-tool", _validate_local_tool,
+                tool_name, inputs, params, tenant_id, user_id,
+                lane="model-tool-io", owner="services.tool_configuration_service",
+            )
         elif source == ToolSourceEnum.LANGCHAIN.value:
             return _validate_langchain_tool(tool_name, inputs)
         else:

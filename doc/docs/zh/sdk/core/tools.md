@@ -51,7 +51,6 @@
 ### 技能与任务工具（系统内部管理）
 - **ReadSkillConfigTool / ReadSkillMdTool**: 读取技能目录下的 config.yaml 与 SKILL.md
 - **RunSkillScriptTool**: 执行技能脚本
-- **WriteSkillFileTool**: 向租户隔离的技能目录写入文件
 - **CreateScheduledTaskProposalTool**: 创建待用户确认的定时任务提案（仅保存提案，不执行业务任务）
 
 > 注：以上工具由系统内部管理，未在 `nexent.core.tools` 的 `__init__.py` 中统一导出。

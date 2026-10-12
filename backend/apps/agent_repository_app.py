@@ -27,6 +27,7 @@ from services.agent_repository_service import (
     update_agent_repository_status_impl,
     upload_agent_repository_icon_impl,
 )
+from services.audit_service import record_security_event
 from services.official_agent_sync_service import sync_official_agents
 from utils.auth_utils import get_current_user_context, get_current_user_id
 from utils.agent_transfer_utils import AgentToolImportError
@@ -39,14 +40,20 @@ agent_repository_router = APIRouter(prefix="/repository/agent")
 async def upload_agent_repository_icon_api(
     agent_id: int,
     version_no: int,
+    http_request: Request,
     file: UploadFile = File(...),
     authorization: str = Header(None),
 ):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        content = await file.read()
         result = await upload_agent_repository_icon_impl(
-            agent_id, version_no, tenant_id, user_id, await file.read()
+            agent_id, version_no, tenant_id, user_id, content
         )
+        record_security_event("agent_repository_icon_upload", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no,
+                                       "filename": file.filename})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
@@ -92,12 +99,18 @@ async def list_official_agent_management_api(
 
 @agent_repository_router.delete("/official/management/{agent_repository_id}")
 async def delete_official_agent_api(
-    agent_repository_id: int, authorization: str = Header(None)
+    agent_repository_id: int,
+    http_request: Request,
+    authorization: str = Header(None)
 ):
     try:
         user_id, _, user_role = get_current_user_context(authorization)
         _require_super_admin(user_role)
-        return JSONResponse(content=delete_official_agent_impl(agent_repository_id, user_id))
+        result = delete_official_agent_impl(agent_repository_id, user_id)
+        record_security_event("agent_repository_official_delete", request=http_request,
+                              user_id=user_id,
+                              details={"repository_id": agent_repository_id})
+        return JSONResponse(content=result)
     except UnauthorizedError as error:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(error))
     except ValueError as error:
@@ -299,6 +312,7 @@ async def get_agent_repository_listing_detail_api(
 @agent_repository_router.patch("/{agent_repository_id}/status")
 async def update_agent_repository_status_api(
     agent_repository_id: int,
+    http_request: Request,
     status: str = Body(
         ...,
         embed=True,
@@ -330,6 +344,12 @@ async def update_agent_repository_status_api(
             notify_content=notify_content,
             content=content,
         )
+        # Reviewer messages (notify_content/content) are free-form text and
+        # stay out of the audit line.
+        record_security_event("agent_repository_status_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"repository_id": agent_repository_id,
+                                       "status": status})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(
@@ -349,6 +369,7 @@ async def update_agent_repository_status_api(
 async def create_agent_repository_listing_api(
     agent_id: int,
     version_no: int,
+    http_request: Request,
     payload: Optional[AgentRepositoryListingCreateRequest] = Body(None),
     authorization: str = Header(None),
 ):
@@ -363,6 +384,9 @@ async def create_agent_repository_listing_api(
             version_no=version_no,
             card_fields=card_fields,
         )
+        record_security_event("agent_repository_listing_create", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(
@@ -408,6 +432,7 @@ async def check_repository_import_precheck_api(
 @agent_repository_router.post("/{agent_repository_id}/import")
 async def import_agent_from_repository_api(
     agent_repository_id: int,
+    http_request: Request,
     payload: Optional[object] = Body(default=None),
     authorization: Optional[str] = Header(None),
 ):
@@ -443,6 +468,9 @@ async def import_agent_from_repository_api(
             user_id=user_id,
             return_root_id=True,
         )
+        record_security_event("agent_repository_import", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"repository_id": agent_repository_id})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(

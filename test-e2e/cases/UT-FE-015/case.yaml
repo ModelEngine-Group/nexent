@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-015
+  feature_id: V5-UT-FE-015
+  business_rule_ids:
+  - V5-UT-FE-015-RULE-01
+  title: Agent选择器URL单一事实来源：搜索/选择/NEW badge、切换顺序守卫与非法agent_id清理
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Agent选择器URL单一事实来源：搜索/选择/NEW badge、切换顺序守卫与非法agent_id清理
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 agent-selector-header.tsx 与 page.tsx，注入 useAgentStore、useAgentList 及本地固定 agents fixture（含 is_new 与不同
+      agent_id 的 Agent 项），不依赖外部模型服务。
+    expected: 点击选择仅更新 URL 的 agent_id 参数，不触发额外 searchAgentInfo/initialize 调用，URL 是选择状态的唯一事实来源。
+  - order: 2
+    action: 打开选择器下拉并输入搜索关键词，断言下拉列表仅展示 display_name/name/description 命中关键词的 Agent，无结果时展示空态文案。
+    expected: 快速连续切换后，陈旧 searchAgentInfo 响应被 requestedAgentIdRef 守卫丢弃，最终展示最新选择且无旧数据覆盖。
+  - order: 3
+    action: 点击下拉中某 Agent 项，断言 handleSelectAgent 仅通过 router.replace 将 agent_id 写入 URL，该处理器内不调用 searchAgentInfo/initialize（URL
+      为单一事实来源）。
+    expected: 非法或不存在的 agent_id 触发 reset() 并清理 URL 中的 agent_id，页面回到未选中状态，无残留查询参数或跨账号残留。
+  - order: 4
+    action: 模拟 URL 的 agent_id 变化触发同步 effect，断言 requestedAgentIdRef 更新为 parsedAgentId，并以该 id 调用 loadAgent→searchAgentInfo。
+    expected: 切换期间出现 role="status" 加载遮罩且内容面板 visibility=hidden，加载完成后恢复，无白屏或闪跳。
+  - order: 5
+    action: 快速连续切换 A→B，令 A 的 searchAgentInfo 响应延迟返回，断言旧响应因 requestedAgentIdRef.current !== A 被丢弃，最终 currentAgentId 与面板展示均为
+      B。
+    expected: 选择 NEW Agent 调用 clearAgentNewMark，成功/失败路径下的 badge 与查询失效处理符合契约。
+  - order: 6
+    action: 将 URL 的 agent_id 置为非法值（0、-1、非整数），断言调用 reset() 且 URL 中 agent_id 参数被删除、页面回到未选中状态。
+    expected: 测试过程无未处理异常，无明文 API Key/Token/Password 泄露，失败路径展示明确错误提示。
+  - order: 7
+    action: 将 URL 的 agent_id 置为列表中不存在但合法的正整数，断言 agents 加载成功后调用 reset() 且 agent_id 参数被清理。
+    expected: 测试过程无未处理异常，无明文 API Key/Token/Password 泄露，失败路径展示明确错误提示。
+  - order: 8
+    action: 断言切换期间（requestedAgentId !== currentAgentId）配置/生成面板 visibility 为 hidden，并出现 role="status" 的加载遮罩（Spin+加载文案）；加载完成后遮罩消失、面板恢复可见。
+    expected: 测试过程无未处理异常，无明文 API Key/Token/Password 泄露，失败路径展示明确错误提示。
+  - order: 9
+    action: 点击 is_new 的 Agent，断言调用 clearAgentNewMark，成功后 NEW badge 移除并触发 agents 查询失效刷新。
+    expected: 测试过程无未处理异常，无明文 API Key/Token/Password 泄露，失败路径展示明确错误提示。
+  expected_results:
+  - 点击选择仅更新 URL 的 agent_id 参数，不触发额外 searchAgentInfo/initialize 调用，URL 是选择状态的唯一事实来源。
+  - 快速连续切换后，陈旧 searchAgentInfo 响应被 requestedAgentIdRef 守卫丢弃，最终展示最新选择且无旧数据覆盖。
+  - 非法或不存在的 agent_id 触发 reset() 并清理 URL 中的 agent_id，页面回到未选中状态，无残留查询参数或跨账号残留。
+  - 切换期间出现 role="status" 加载遮罩且内容面板 visibility=hidden，加载完成后恢复，无白屏或闪跳。
+  - 选择 NEW Agent 调用 clearAgentNewMark，成功/失败路径下的 badge 与查询失效处理符合契约。
+  - 测试过程无未处理异常，无明文 API Key/Token/Password 泄露，失败路径展示明确错误提示。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 328
+  unit_boundary: Agent选择器
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - 点击选择仅更新 URL 的 agent_id 参数，不触发额外 searchAgentInfo/initialize 调用，URL 是选择状态的唯一事实来源。
+  - 快速连续切换后，陈旧 searchAgentInfo 响应被 requestedAgentIdRef 守卫丢弃，最终展示最新选择且无旧数据覆盖。
+  - 非法或不存在的 agent_id 触发 reset() 并清理 URL 中的 agent_id，页面回到未选中状态，无残留查询参数或跨账号残留。
+  - 切换期间出现 role="status" 加载遮罩且内容面板 visibility=hidden，加载完成后恢复，无白屏或闪跳。
+  - 选择 NEW Agent 调用 clearAgentNewMark，成功/失败路径下的 badge 与查询失效处理符合契约。
+  - 测试过程无未处理异常，无明文 API Key/Token/Password 泄露，失败路径展示明确错误提示。

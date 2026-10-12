@@ -658,7 +658,10 @@ class CapacityCoverageResponse(BaseModel):
 
 
 class ProviderModelRequest(BaseModel):
-    provider: str
+    # min_length=1 rejects the blank provider at the API boundary (422) instead
+    # of letting it reach the discovery fetch, where a provider-less request can
+    # only fail as an opaque upstream connection error.
+    provider: str = Field(..., min_length=1)
     # v2.6.0: model_type is now optional. When omitted, the backend fetches all
     # models from the OpenAI-compatible /v1/models endpoint and infers each
     # model's type from its name via _infer_model_type_from_name. When provided,
@@ -1056,7 +1059,6 @@ class NL2SkillRunRequest(BaseModel):
     persist_history: bool = False
     workbench_config: Optional[Dict[str, Any]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
-    complexity: Literal["simple", "complicated"] = "complicated"
     language: Optional[Literal["zh", "en"]] = None
     model_id: Optional[int] = Field(
         default=None,
@@ -1092,6 +1094,7 @@ class ConversationResponse(BaseModel):
 class RenameRequest(BaseModel):
     conversation_id: int
     name: str
+    only_if_default_title: bool = False
 
 
 class BatchDeleteConversationRequest(BaseModel):
@@ -1195,6 +1198,13 @@ class GeneratePromptRequest(BaseModel):
         None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
     has_selected_resources: bool = Field(
         True, description="Whether tools or sub-agents are selected; when False, skips generating constraint and few_shots sections")
+
+    @field_validator("task_description")
+    @classmethod
+    def validate_task_description(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("task_description must not be blank")
+        return value
 
 
 class PromptTemplateContentRequest(BaseModel):
@@ -2182,7 +2192,7 @@ class ManageProviderModelListRequest(BaseModel):
 class ManageProviderModelCreateRequest(BaseModel):
     """Request model for creating provider models in a specific tenant (admin/manage operation)"""
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create provider models for")
-    provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
+    provider: str = Field(..., min_length=1, description="Model provider (e.g., 'silicon', 'modelengine')")
     # v2.6.0: model_type is now optional. When omitted, returns all models and
     # infers type from model name. When provided, behavior is unchanged.
     model_type: Optional[str] = Field(None, description="Model type (e.g., 'llm', 'embedding'). Optional since v2.6.0.")

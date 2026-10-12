@@ -24,12 +24,19 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
+type RenameSuccessHandler = (
+  threadId: string,
+  remoteId: string | undefined,
+  title: string
+) => void;
+
 interface ThreadListSidebarProps extends SidebarProps {
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
   serverConversationIds?: ReadonlyMap<string, string>;
   onPrepareNewConversation?: () => void;
   onNewConversation?: () => void | Promise<void>;
+  onRenameSuccess?: RenameSuccessHandler;
   showLegacySwitch?: boolean;
 }
 
@@ -38,6 +45,7 @@ export function ThreadListSidebar({
   serverConversationIds,
   onPrepareNewConversation,
   onNewConversation,
+  onRenameSuccess,
   showLegacySwitch = true,
   ...props
 }: ThreadListSidebarProps) {
@@ -144,6 +152,7 @@ export function ThreadListSidebar({
               <ThreadList
                 generatedTitles={generatedTitles}
                 serverConversationIds={serverConversationIds}
+                onRenameSuccess={onRenameSuccess}
               />
             </SidebarContent>
             <SidebarFooter>

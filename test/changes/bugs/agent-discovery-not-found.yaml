@@ -1,0 +1,16 @@
+schema_version: '1.0'
+changes:
+  - change_id: AGENT-DISCOVERY-404-20261010
+    change_type: bugfix
+    bug_id: AGENT-DISCOVERY-404-20261010
+    title: Agent discovery maps missing or tenant-invisible resources to 500
+    description: Restore the existing 404 contract for missing Agent details and names. External nexent-test-suite owns F-042 and API-056; reuse that regression without registering external IDs in this repository.
+    observed_behavior: Cross-tenant POST /agent/search_info returns 500 Agent search info error; missing by-name lookups also map to 500.
+    expected_behavior: Missing or tenant-invisible Agents return a generic 404 without resource data; unexpected failures remain 500 and accessible Agents retain their success response.
+    escaped_stage: D3
+    coverage_gap:
+      type: missing_boundary
+      description: Legacy tests covered generic failures but did not distinguish an expected lookup miss from an internal failure; external API-056 detects this boundary.
+    feature_contract_changed: false
+    affected_features: {existing: [], added: [], modified: [], retired: []}
+    affected_cases: {existing: [], added: [], modified: [], retired: []}

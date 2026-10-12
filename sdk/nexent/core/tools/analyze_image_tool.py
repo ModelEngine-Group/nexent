@@ -15,7 +15,7 @@ from smolagents.tools import Tool
 
 from ...core.gateway.modality import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
-from ...core.utils.prompt_template_utils import get_prompt_template
+from ..prompts import load_prompt
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
 from ...storage import MinIOStorageClient
 from ...multi_modal.load_save_object import LoadSaveObjectManager
@@ -157,8 +157,7 @@ class AnalyzeImageTool(Tool):
 
         # Load prompts from yaml file
         language = self.observer.lang if self.observer else "en"
-        prompts = get_prompt_template(
-            template_type='analyze_image', language=language)
+        prompts = load_prompt(language, "tool/analyze_image")
         system_prompt = Template(
             prompts['system_prompt'], undefined=StrictUndefined).render({'query': query})
 

@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-012
+  feature_id: V5-UT-FE-012
+  business_rule_ids:
+  - V5-UT-FE-012-RULE-01
+  title: quota 单位转换、unlimited 空输入走 DELETE、source_size/ES 物理容量展示、warning/hard-limit 冲突提示
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: quota 单位转换、unlimited 空输入走 DELETE、source_size/ES 物理容量展示、warning/hard-limit 冲突提示
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 QuotaSettingsModal（ADMIN，full quota management）与 SuQuotaModal（SU，tenant storage allocation），注入 tenantId、最小
+      props，并 mock quotaService（getQuotaConfig/getQuotaUsage/updateTenantQuota/deleteTenantQuota/getPlatformOverview）与本地固定
+      fixture（TenantQuotaConfig、QuotaUsageResponse 含 source-only 的 total_bytes/total_readable 与 es_physical_bytes/es_physical_readable
+      字段）。
+    expected: 空输入保存时，QuotaSettingsModal 调用顺序为 updateTenantQuota（仅预警配置）→ deleteTenantQuota，SuQuotaModal 仅调用 deleteTenantQuota，请求体不含
+      hard_limit_gb/hard_limit_mb，租户恢复 unlimited 且预警配置不被重置。
+  - order: 2
+    action: 首次渲染后断言硬限额输入为受控数字文本 Input（非 InputNumber），仅接受空串或纯数字（正则 /^\d+$/），非法字符不进入 quotaInput；GB/MB Segmented 可切换，placeholder
+      显示 Unlimited。
+    expected: 源文件用量列渲染 quotaData.actual_readable，ES 物理索引列渲染 quotaData.es_physical_readable，汇总/租户/平台面板分别以 total_readable（source-only）与
+      es_physical_readable 独立展示，不混用。
+  - order: 3
+    action: 验证知识库列表 store_size 列已改为 source_size 列并渲染 quotaData.actual_readable，同时新增 es_physical_size 列渲染 quotaData.es_physical_readable，两列数据来源互不混用。
+    expected: 非数字字符无法进入配额输入框；数字输入按 GB/MB 单位正确映射为 hard_limit_gb 或 hard_limit_mb 请求参数。
+  - order: 4
+    action: 清空硬限额输入（unlimited）后点击保存：断言 QuotaSettingsModal 先调用 updateTenantQuota 仅保存预警配置（warning_enabled/threshold 字段），再调用
+      deleteTenantQuota 清除硬限额；SuQuotaModal 直接调用 deleteTenantQuota，均不发送 hard_limit_gb/hard_limit_mb。
+    expected: 冲突错误码经 getQuotaConflictTranslationKey 映射为对应翻译键并展示错误提示，无半写入、重复副作用或错误提交。
+  - order: 5
+    action: 输入有效数值并切换 GB/MB 单位，断言按 GB=1024^3、MB=1024^2 换算并映射到 updateTenantQuota 的 hard_limit_gb 或 hard_limit_mb 参数。
+    expected: 测试过程无未处理异常；日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: mock 服务端返回配额冲突（TenantQuotaBelowUsage/PlatformCapacityExceeded/PlatformCapacityBelowAllocation），断言 getQuotaConflictTranslationKey
+      返回对应翻译键并展示错误提示，不出现半写入或重复副作用。
+    expected: 测试过程无未处理异常；日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 模拟接口 4xx/5xx/timeout，验证错误提示与 saving/loading 状态复位，页面状态不被错误提交。
+    expected: 测试过程无未处理异常；日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 重新渲染回显：断言硬限额按字节数（<GB 显示 MB，>=GB 显示 GB）四舍五入回填；源文件用量与 ES 物理容量分别显示各自字段。
+    expected: 测试过程无未处理异常；日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 空输入保存时，QuotaSettingsModal 调用顺序为 updateTenantQuota（仅预警配置）→ deleteTenantQuota，SuQuotaModal 仅调用 deleteTenantQuota，请求体不含 hard_limit_gb/hard_limit_mb，租户恢复
+    unlimited 且预警配置不被重置。
+  - 源文件用量列渲染 quotaData.actual_readable，ES 物理索引列渲染 quotaData.es_physical_readable，汇总/租户/平台面板分别以 total_readable（source-only）与
+    es_physical_readable 独立展示，不混用。
+  - 非数字字符无法进入配额输入框；数字输入按 GB/MB 单位正确映射为 hard_limit_gb 或 hard_limit_mb 请求参数。
+  - 冲突错误码经 getQuotaConflictTranslationKey 映射为对应翻译键并展示错误提示，无半写入、重复副作用或错误提交。
+  - 测试过程无未处理异常；日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 325
+  unit_boundary: 配额UI
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - 空输入保存时，QuotaSettingsModal 调用顺序为 updateTenantQuota（仅预警配置）→ deleteTenantQuota，SuQuotaModal 仅调用 deleteTenantQuota，请求体不含 hard_limit_gb/hard_limit_mb，租户恢复
+    unlimited 且预警配置不被重置。
+  - 源文件用量列渲染 quotaData.actual_readable，ES 物理索引列渲染 quotaData.es_physical_readable，汇总/租户/平台面板分别以 total_readable（source-only）与
+    es_physical_readable 独立展示，不混用。
+  - 非数字字符无法进入配额输入框；数字输入按 GB/MB 单位正确映射为 hard_limit_gb 或 hard_limit_mb 请求参数。
+  - 冲突错误码经 getQuotaConflictTranslationKey 映射为对应翻译键并展示错误提示，无半写入、重复副作用或错误提交。
+  - 测试过程无未处理异常；日志、Trace、报告不出现明文 API Key/Token/Password/模型密钥。
