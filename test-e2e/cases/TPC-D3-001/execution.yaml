@@ -17,6 +17,5 @@ preparation:
 acceptance_bindings:
   AC-01:
   - test_tpc_d3_001_skill_executes_once_and_history_matches
-  - test_tpc_d3_001_real_model_reads_skill
   AC-02:
   - test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes

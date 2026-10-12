@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 import requests
 
 CODE = '<code>skill_content = read_skill_md(skill_name="tpc-quality-check")\nprint(skill_content)</code>'
@@ -17,7 +18,12 @@ PREFIXES = ['</think>', '<think>unfinished thought', '<think>reasoning</think> R
 
 
 def config():
-    return json.loads(Path(os.environ['NEXENT_TEST_CREDENTIALS']).read_text())
+    cfg = json.loads(Path(os.environ['NEXENT_TEST_CREDENTIALS']).read_text())
+    schema_path = Path(__file__).parents[2] / 'infra/automation/shared/think_prefix_fixture.schema.json'
+    schema = json.loads(schema_path.read_text())
+    if not Draft202012Validator(schema).is_valid(cfg):
+        raise RuntimeError('Private TPC fixture does not match its maintained schema')
+    return cfg
 
 
 def request(cfg, method, path, body=None, *, provider=False):
