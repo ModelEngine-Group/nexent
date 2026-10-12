@@ -40,7 +40,12 @@ import {
   formatCustomValueForEditing,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
-import { TYPE_BADGE_CLASS, useTypeOptions } from "./modelTypeUi";
+import {
+  isEmbeddingModelType,
+  isVoiceModelType,
+  TYPE_BADGE_CLASS,
+  useTypeOptions,
+} from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): the per-model edit dialog.
@@ -159,7 +164,9 @@ export const ModelEditDialog = ({
       if (model.accessToken) next.access_token = model.accessToken;
     }
     if (model.type === MODEL_TYPES.RERANK || model.type === MODEL_TYPES.TTS) {
-      if (model.maxTokens != null) next.max_tokens = model.maxTokens;
+      // > 0: the list mapper falls back to 0 for an unset max_tokens, and a
+      // literal 0 in the field reads worse than the empty default.
+      if (model.maxTokens > 0) next.max_tokens = model.maxTokens;
     }
     setAdvanced(next);
   }, [model]);
@@ -228,14 +235,16 @@ export const ModelEditDialog = ({
         modelFactory: model.source || "OpenAI-API-Compatible",
         ...buildInferenceParamsPayload(advanced, reasoningCapability),
         // stt/tts: settings-level factory + Volcano credentials ride along
-        // (the verify builder only reads the camelCase fields).
-        ...(advanced.model_factory != null
+        // (the verify builder only reads the camelCase fields). Voice-only
+        // gate: values prefilled for the original type must not leak into a
+        // probe after the operator retypes the model.
+        ...(isVoiceModelType(type) && advanced.model_factory != null
           ? { modelFactory: String(advanced.model_factory) }
           : {}),
-        ...(advanced.model_appid != null
+        ...(isVoiceModelType(type) && advanced.model_appid != null
           ? { modelAppid: String(advanced.model_appid) }
           : {}),
-        ...(advanced.access_token != null
+        ...(isVoiceModelType(type) && advanced.access_token != null
           ? { accessToken: String(advanced.access_token) }
           : {}),
       });
@@ -299,20 +308,32 @@ export const ModelEditDialog = ({
       }
       // Type-specific dedicated fields (chunk / voice credentials / max
       // tokens) — updateSingleModel reads camelCase keys, while the payload
-      // builder only emits the snake_case ones.
-      if (advanced.expected_chunk_size != null)
-        params.expectedChunkSize = advanced.expected_chunk_size;
-      if (advanced.maximum_chunk_size != null)
-        params.maximumChunkSize = advanced.maximum_chunk_size;
-      if (advanced.chunk_batch != null)
-        params.chunkingBatchSize = advanced.chunk_batch;
-      if (advanced.model_factory != null)
-        params.modelFactory = String(advanced.model_factory);
-      if (advanced.model_appid != null)
-        params.modelAppid = String(advanced.model_appid);
-      if (advanced.access_token != null)
-        params.accessToken = String(advanced.access_token);
-      if (advanced.max_tokens != null) params.maxTokens = advanced.max_tokens;
+      // builder only emits the snake_case ones. Each mapping is gated by the
+      // CURRENT type: the type select is editable here (only the embedding
+      // pair is locked) and advanced values prefilled for the original type
+      // must not leak into the record when the operator retypes the model.
+      if (isEmbeddingModelType(type)) {
+        if (advanced.expected_chunk_size != null)
+          params.expectedChunkSize = advanced.expected_chunk_size;
+        if (advanced.maximum_chunk_size != null)
+          params.maximumChunkSize = advanced.maximum_chunk_size;
+        if (advanced.chunk_batch != null)
+          params.chunkingBatchSize = advanced.chunk_batch;
+      }
+      if (isVoiceModelType(type)) {
+        if (advanced.model_factory != null)
+          params.modelFactory = String(advanced.model_factory);
+        if (advanced.model_appid != null)
+          params.modelAppid = String(advanced.model_appid);
+        if (advanced.access_token != null)
+          params.accessToken = String(advanced.access_token);
+      }
+      if (
+        (type === MODEL_TYPES.RERANK || type === MODEL_TYPES.TTS) &&
+        advanced.max_tokens != null
+      ) {
+        params.maxTokens = advanced.max_tokens;
+      }
 
       await modelService.updateSingleModel(params as any);
       onSuccess();
