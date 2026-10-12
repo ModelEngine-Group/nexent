@@ -365,12 +365,12 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
 
 def _agent_run_thread(agent_run_info: AgentRunInfo):
+    mcp_host = getattr(agent_run_info, "mcp_host", None)
     try:
         # Keep the runner compatible with legacy/lightweight AgentRunInfo
         # stand-ins used by integrations.  Full AgentRunInfo instances always
         # define this field, but its absence must not prevent a run that does
         # not need tool-side authorization context.
-        user_context = getattr(agent_run_info, "user_context", None)
         set_monitoring_capacity_snapshot(
             getattr(agent_run_info, "capacity_snapshot", None)
         )
@@ -379,11 +379,97 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         )
         _emit_uncertainty_reserve_warning(agent_run_info)
         mcp_host = agent_run_info.mcp_host
-        if mcp_host is None or len(mcp_host) == 0:
+        from .core_adapters import AgentCoreFactory
+
+        adapter = AgentCoreFactory.create(agent_run_info, smolagents_executor=_run_smolagents)
+        try:
+            adapter.validate()
+            adapter.prepare()
+            adapter.run()
+        finally:
+            adapter.close()
+
+        agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
+    except (RunTerminated, CancelledError):
+        agent_run_info.attempt_outcome = "stopped"
+    except (ModelInvocationTerminalError, ModelOutputProtocolExhaustedError):
+        agent_run_info.attempt_outcome = "failed"
+        raise
+    except Exception as e:
+        agent_run_info.attempt_outcome = "failed"
+        agent_run_info.observer.add_message(
+            "",
+            ProcessType.FINAL_ANSWER,
+            _agent_run_error_message(agent_run_info, mcp_host, e),
+        )
+        raise ValueError(f"Error in agent_run_thread: {e}")
+    finally:
+        # Agent construction, MCP setup, and executor initialization can fail
+        # before NexentAgent.agent_run_with_observer() enters its own cleanup
+        # block. This idempotent outer guard owns the complete worker lifetime.
+        cleanup_run_workspace(
+            getattr(agent_run_info, "workspace_path", None),
+            getattr(agent_run_info, "workspace_run_id", None),
+            logger,
+        )
+
+
+def _run_smolagents(agent_run_info: AgentRunInfo):
+    """Execute the preserved smolagents resource and observer path."""
+    user_context = getattr(agent_run_info, "user_context", None)
+    mcp_host = agent_run_info.mcp_host
+    if mcp_host is None or len(mcp_host) == 0:
+        nexent = NexentAgent(
+            observer=agent_run_info.observer,
+            model_config_list=agent_run_info.model_config_list,
+            stop_event=agent_run_info.stop_event,
+            redis_client=agent_run_info.redis_client,
+            user_context=user_context,
+            sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+            minio_client=getattr(agent_run_info, "minio_client", None),
+            conversation_id=agent_run_info.conversation_id,
+            user_id=agent_run_info.user_id,
+            tenant_id=getattr(agent_run_info, "tenant_id", None),
+            workspace_path=getattr(agent_run_info, "workspace_path", None),
+            workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
+            minio_files=getattr(agent_run_info, "minio_files", None),
+            cancellation_scope=agent_run_info.cancellation_scope,
+        )
+        agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
+            agent_run_info.agent_config,
+            context_items_override=_get_authorized_context_items(agent_run_info),
+        )
+        nexent.set_agent(agent)
+
+        nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
+        try:
+            nexent.agent_run_with_observer(
+                query=agent_run_info.query,
+                reset=False,
+                additional_args=build_run_additional_args(agent_run_info),
+            )
+        finally:
+            _log_memory_value_assessment(agent)
+    else:
+        agent_run_info.observer.add_message("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
+        mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
+        mcp_cancellation_scope = agent_run_info.cancellation_scope or RunCancellationScope(
+            agent_run_info.stop_event
+        )
+
+        with ManagedMCPToolCollection(
+            manager=agent_run_info.thread_manager or _get_default_agent_thread_manager(),
+            server_parameters=mcp_client_list,
+            cancellation_scope=mcp_cancellation_scope,
+            tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
+            close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
+            connect_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
+        ) as tool_collection:
             nexent = NexentAgent(
                 observer=agent_run_info.observer,
                 model_config_list=agent_run_info.model_config_list,
                 stop_event=agent_run_info.stop_event,
+                mcp_tool_collection=tool_collection,
                 redis_client=agent_run_info.redis_client,
                 user_context=user_context,
                 sandbox_config=getattr(agent_run_info, "sandbox_config", None),
@@ -411,77 +497,7 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 )
             finally:
                 _log_memory_value_assessment(agent)
-        else:
-            agent_run_info.observer.add_message("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
-            mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
-            mcp_cancellation_scope = agent_run_info.cancellation_scope or RunCancellationScope(
-                agent_run_info.stop_event
-            )
 
-            with ManagedMCPToolCollection(
-                manager=agent_run_info.thread_manager or _get_default_agent_thread_manager(),
-                server_parameters=mcp_client_list,
-                cancellation_scope=mcp_cancellation_scope,
-                tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
-                close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
-                connect_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
-            ) as tool_collection:
-                nexent = NexentAgent(
-                    observer=agent_run_info.observer,
-                    model_config_list=agent_run_info.model_config_list,
-                    stop_event=agent_run_info.stop_event,
-                    mcp_tool_collection=tool_collection,
-                    redis_client=agent_run_info.redis_client,
-                    user_context=user_context,
-                    sandbox_config=getattr(agent_run_info, "sandbox_config", None),
-                    minio_client=getattr(agent_run_info, "minio_client", None),
-                    conversation_id=agent_run_info.conversation_id,
-                    user_id=agent_run_info.user_id,
-                    tenant_id=getattr(agent_run_info, "tenant_id", None),
-                    workspace_path=getattr(agent_run_info, "workspace_path", None),
-                    workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
-                    minio_files=getattr(agent_run_info, "minio_files", None),
-                    cancellation_scope=agent_run_info.cancellation_scope,
-                )
-                agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
-                    agent_run_info.agent_config,
-                    context_items_override=_get_authorized_context_items(agent_run_info),
-                )
-                nexent.set_agent(agent)
-
-                nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
-                try:
-                    nexent.agent_run_with_observer(
-                        query=agent_run_info.query,
-                        reset=False,
-                        additional_args=build_run_additional_args(agent_run_info),
-                    )
-                finally:
-                    _log_memory_value_assessment(agent)
-
-        agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
-    except (RunTerminated, CancelledError):
-        agent_run_info.attempt_outcome = "stopped"
-    except (ModelInvocationTerminalError, ModelOutputProtocolExhaustedError):
-        agent_run_info.attempt_outcome = "failed"
-        raise
-    except Exception as e:
-        agent_run_info.attempt_outcome = "failed"
-        agent_run_info.observer.add_message(
-            "",
-            ProcessType.FINAL_ANSWER,
-            _agent_run_error_message(agent_run_info, mcp_host, e),
-        )
-        raise ValueError(f"Error in agent_run_thread: {e}")
-    finally:
-        # Agent construction, MCP setup, and executor initialization can fail
-        # before NexentAgent.agent_run_with_observer() enters its own cleanup
-        # block. This idempotent outer guard owns the complete worker lifetime.
-        cleanup_run_workspace(
-            getattr(agent_run_info, "workspace_path", None),
-            getattr(agent_run_info, "workspace_run_id", None),
-            logger,
-        )
 
 
 async def agent_run(

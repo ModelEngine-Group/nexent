@@ -718,6 +718,7 @@ async def update_agent_info_impl(
             user_group_ids = _get_user_group_ids(user_id, tenant_id)
             created = create_agent(
                 agent_info={
+                    "agent_core": request.agent_core or "smolagents",
                     "name": request.name,
                     "display_name": request.display_name,
                     "description": request.description,

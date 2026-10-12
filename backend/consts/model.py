@@ -1313,6 +1313,7 @@ class RelatedAgentInfo(BaseModel):
 
 
 class AgentInfoRequest(BaseModel):
+    agent_core: Optional[Literal["smolagents", "jiuwen"]] = None
     agent_id: Optional[int] = None
     name: Optional[str] = None
     display_name: Optional[str] = None
@@ -1433,6 +1434,7 @@ class MessageIdRequest(BaseModel):
 
 
 class ExportAndImportAgentInfo(BaseModel):
+    agent_core: Literal["smolagents", "jiuwen"] = "smolagents"
     agent_id: int
     tenant_id: Optional[str] = None
     name: str

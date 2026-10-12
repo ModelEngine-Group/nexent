@@ -669,6 +669,11 @@ class AgentInfo(TableBase):
     __tablename__ = "ag_tenant_agent_t"
     __table_args__ = {"schema": SCHEMA}
 
+    agent_core = Column(
+        String(30), nullable=False, default="smolagents", server_default=text("'smolagents'"),
+        comment="Execution core for this immutable agent version: smolagents or jiuwen",
+    )
+
     agent_id = Column(Integer, Sequence(
         "ag_tenant_agent_t_agent_id_seq", schema=SCHEMA), nullable=False, primary_key=True, autoincrement=True, doc="ID")
     version_no = Column(Integer, default=0, nullable=False, primary_key=True,

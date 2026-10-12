@@ -262,6 +262,10 @@ class AgentVerificationConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    agent_core: str = Field(
+        default="smolagents", pattern=r"^[a-z][a-z0-9_]{0,29}$",
+        description="Execution core selected by the AgentCoreFactory",
+    )
     runtime_ref: Optional[str] = None
     origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
     agent_id: Optional[Union[int, str]] = Field(

@@ -522,6 +522,7 @@ async def export_agent_by_agent_id(
             "display_name") if business_logic_model_info is not None else None
 
     agent_info = ExportAndImportAgentInfo(agent_id=agent_id,
+                                          agent_core=agent_info.get("agent_core") or "smolagents",
                                           tenant_id=agent_info["tenant_id"],
                                           name=agent_info["name"],
                                           display_name=agent_info["display_name"],
@@ -701,6 +702,7 @@ async def import_agent_by_agent_id(
                                          "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
                                          "provide_run_summary": import_agent_info.provide_run_summary,
                                          "allow_chat_metadata": import_agent_info.allow_chat_metadata,
+                                         "agent_core": import_agent_info.agent_core,
                                          "enable_protocol_repair_retry": getattr(import_agent_info, "enable_protocol_repair_retry", False),
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
