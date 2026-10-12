@@ -171,9 +171,6 @@ const AidpKnowledgeDetailInformation = ({
             >
               {displayValue(graphConfig.disambiguation_enable)}
             </AidpDetailField>
-            <AidpDetailField label={t("aidpKnowledge.detailGraphModel")}>
-              {detail.llm_model_name || AIDP_UNKNOWN_VALUE}
-            </AidpDetailField>
             <AidpDetailField
               label={t("aidpKnowledge.detailGraphPromptLanguage")}
             >

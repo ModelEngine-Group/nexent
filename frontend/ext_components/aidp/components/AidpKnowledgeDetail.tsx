@@ -52,6 +52,7 @@ import AidpGroupNamesDisplay from "./AidpGroupNamesDisplay";
 import AidpKnowledgeDetailInformation, {
   AidpDetailField,
 } from "./AidpKnowledgeDetailInformation";
+import { ResizableTitle, type ResizableTitleProps } from "./AidpKnowledgeList";
 
 type DetailTab = "files" | "tasks" | "information";
 type TaskFilter = 0 | 1 | 2 | 3 | 4 | 5;
@@ -163,6 +164,69 @@ const graphConfigOf = (detail: AidpKbDetail): Record<string, unknown> => {
   return {};
 };
 
+const FILE_COLUMN_MIN_WIDTHS: Record<string, number> = {
+  file_name: 120,
+  file_type: 60,
+  file_size: 70,
+  import_mode: 80,
+  created_at: 100,
+  updated_at: 100,
+  actions: 120,
+};
+
+const TASK_COLUMN_MIN_WIDTHS: Record<string, number> = {
+  file_name: 120,
+  file_type: 60,
+  file_size: 70,
+  updated_at: 100,
+  status: 90,
+  actions: 175,
+};
+
+// Attach the resizable header cell to every column; the declared column width
+// acts as the baseline until the user drags a handle.
+const withResizableHeaders = (
+  columns: ColumnsType<AidpDocumentItem>,
+  columnWidths: Record<string, number>,
+  minWidths: Record<string, number>,
+  setColumnWidths: React.Dispatch<React.SetStateAction<Record<string, number>>>
+): ColumnsType<AidpDocumentItem> =>
+  columns.map((column) => {
+    const key = String(column.key);
+    const width =
+      columnWidths[key] ??
+      (typeof column.width === "number" ? column.width : undefined);
+    return {
+      ...column,
+      width,
+      onHeaderCell: () =>
+        ({
+          width,
+          minWidth: minWidths[key],
+          "data-column-key": key,
+          onResize: (
+            newWidth: number,
+            renderedWidths: Record<string, number>
+          ) => {
+            // Freeze the rendered widths first so only the dragged column
+            // changes and the browser does not redistribute spare space.
+            setColumnWidths((current) => ({
+              ...current,
+              ...renderedWidths,
+              [key]: newWidth,
+            }));
+          },
+        }) as ResizableTitleProps,
+    };
+  });
+
+const sumColumnWidths = (columns: ColumnsType<AidpDocumentItem>): number =>
+  columns.reduce(
+    (sum, column) =>
+      sum + (typeof column.width === "number" ? column.width : 0),
+    0
+  );
+
 const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
   knowledgeBase,
   onBack,
@@ -209,6 +273,12 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [failureTask, setFailureTask] = useState<AidpDocumentItem | null>(null);
   const [retryingFileUuid, setRetryingFileUuid] = useState<string | null>(null);
+  const [fileColumnWidths, setFileColumnWidths] = useState<
+    Record<string, number>
+  >({});
+  const [taskColumnWidths, setTaskColumnWidths] = useState<
+    Record<string, number>
+  >({});
   const graphConfig = useMemo(() => graphConfigOf(detail), [detail]);
   const groupNames = useMemo(() => {
     const names = new Map(
@@ -476,86 +546,91 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
     }
   };
 
-  const fileColumns: ColumnsType<AidpDocumentItem> = [
-    {
-      title: t("aidpKnowledge.detailFileName"),
-      dataIndex: "file_name",
-      key: "file_name",
-      fixed: "left",
-      width: 220,
-      ellipsis: true,
-      render: (value: string) => (
-        <span className="text-blue-600">{value || UNKNOWN}</span>
-      ),
-    },
-    {
-      title: t("aidpKnowledge.detailFileType"),
-      dataIndex: "file_type",
-      key: "file_type",
-      width: 75,
-      render: (value?: string) => value || UNKNOWN,
-    },
-    {
-      title: t("aidpKnowledge.detailFileSize"),
-      dataIndex: "file_size",
-      key: "file_size",
-      width: 85,
-      render: (value?: number) => formatFileSize(value),
-    },
-    {
-      title: t("aidpKnowledge.detailImportMode"),
-      dataIndex: "import_mode",
-      key: "import_mode",
-      width: 120,
-      ellipsis: true,
-      render: (value?: string) => value || UNKNOWN,
-    },
-    {
-      title: t("aidpKnowledge.detailFirstUploadTime"),
-      dataIndex: "created_at",
-      key: "created_at",
-      width: 150,
-      ellipsis: true,
-      render: (value?: string) => formatDetailDateTime(value),
-    },
-    {
-      title: t("aidpKnowledge.detailUpdateTime"),
-      dataIndex: "updated_at",
-      key: "updated_at",
-      width: 150,
-      ellipsis: true,
-      render: (value?: string) => formatDetailDateTime(value),
-    },
-    {
-      title: t("aidpKnowledge.detailOperation"),
-      key: "actions",
-      fixed: "right",
-      width: 120,
-      render: (_value, record) => (
-        <div className="flex items-center gap-3 whitespace-nowrap">
-          <Button
-            type="link"
-            size="small"
-            className="px-0"
-            onClick={() => void handleDownload(record)}
-          >
-            {t("aidpKnowledge.download")}
-          </Button>
-          {canEdit && (
+  const fileColumns = withResizableHeaders(
+    [
+      {
+        title: t("aidpKnowledge.detailFileName"),
+        dataIndex: "file_name",
+        key: "file_name",
+        fixed: "left",
+        width: 220,
+        ellipsis: true,
+        render: (value: string) => (
+          <span className="text-blue-600">{value || UNKNOWN}</span>
+        ),
+      },
+      {
+        title: t("aidpKnowledge.detailFileType"),
+        dataIndex: "file_type",
+        key: "file_type",
+        width: 75,
+        render: (value?: string) => value || UNKNOWN,
+      },
+      {
+        title: t("aidpKnowledge.detailFileSize"),
+        dataIndex: "file_size",
+        key: "file_size",
+        width: 85,
+        render: (value?: number) => formatFileSize(value),
+      },
+      {
+        title: t("aidpKnowledge.detailImportMode"),
+        dataIndex: "import_mode",
+        key: "import_mode",
+        width: 120,
+        ellipsis: true,
+        render: (value?: string) => value || UNKNOWN,
+      },
+      {
+        title: t("aidpKnowledge.detailFirstUploadTime"),
+        dataIndex: "created_at",
+        key: "created_at",
+        width: 150,
+        ellipsis: true,
+        render: (value?: string) => formatDetailDateTime(value),
+      },
+      {
+        title: t("aidpKnowledge.detailUpdateTime"),
+        dataIndex: "updated_at",
+        key: "updated_at",
+        width: 150,
+        ellipsis: true,
+        render: (value?: string) => formatDetailDateTime(value),
+      },
+      {
+        title: t("aidpKnowledge.detailOperation"),
+        key: "actions",
+        fixed: "right",
+        width: 120,
+        render: (_value, record) => (
+          <div className="flex items-center gap-3 whitespace-nowrap">
             <Button
               type="link"
-              danger
               size="small"
               className="px-0"
-              onClick={() => handleDeleteFile(record)}
+              onClick={() => void handleDownload(record)}
             >
-              {t("common.delete")}
+              {t("aidpKnowledge.download")}
             </Button>
-          )}
-        </div>
-      ),
-    },
-  ];
+            {canEdit && (
+              <Button
+                type="link"
+                danger
+                size="small"
+                className="px-0"
+                onClick={() => handleDeleteFile(record)}
+              >
+                {t("common.delete")}
+              </Button>
+            )}
+          </div>
+        ),
+      },
+    ],
+    fileColumnWidths,
+    FILE_COLUMN_MIN_WIDTHS,
+    setFileColumnWidths
+  );
 
   const taskStatusOptions = [
     { value: 0, label: t("aidpKnowledge.taskAll") },
@@ -566,105 +641,112 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
     { value: 5, label: t("aidpKnowledge.taskGraphFailed") },
   ];
 
-  const taskColumns: ColumnsType<AidpDocumentItem> = [
-    {
-      title: t("aidpKnowledge.detailFileName"),
-      dataIndex: "file_name",
-      key: "file_name",
-      fixed: "left",
-      width: 300,
-      ellipsis: true,
-    },
-    {
-      title: t("aidpKnowledge.detailFileType"),
-      dataIndex: "file_type",
-      key: "file_type",
-      width: 75,
-      render: (value?: string) => value || UNKNOWN,
-    },
-    {
-      title: t("aidpKnowledge.detailFileSize"),
-      dataIndex: "file_size",
-      key: "file_size",
-      width: 80,
-      render: (value?: number) => formatFileSize(value),
-    },
-    {
-      title: t("aidpKnowledge.detailUpdateTime"),
-      dataIndex: "updated_at",
-      key: "updated_at",
-      width: 135,
-      ellipsis: true,
-      render: (value?: string) => formatDetailDateTime(value),
-    },
-    {
-      title: t("aidpKnowledge.detailTaskStatus"),
-      dataIndex: "status",
-      key: "status",
-      width: 120,
-      filters: taskStatusOptions.map(({ value, label }) => ({
-        text: label,
-        value,
-      })),
-      filterMultiple: false,
-      filteredValue: [taskStatus],
-      render: (status: AidpDocumentItem["status"]) => {
-        const code = statusCode(status);
-        const labelKeys: Record<number, string> = {
-          1: "aidpKnowledge.taskSuccess",
-          2: "aidpKnowledge.taskExtracting",
-          3: "aidpKnowledge.taskVectorFailed",
-          4: "aidpKnowledge.taskQueued",
-          5: "aidpKnowledge.taskGraphFailed",
-        };
-        const dotColor =
-          code === 1
-            ? "bg-green-500"
-            : code === 3 || code === 5
-              ? "bg-red-500"
-              : code === 4
-                ? "bg-gray-400"
-                : "bg-blue-500";
-        return (
-          <span className="inline-flex items-center gap-2 whitespace-nowrap text-gray-700">
-            <i className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
-            {code && labelKeys[code] ? t(labelKeys[code]) : (status ?? UNKNOWN)}
-          </span>
-        );
+  const taskColumns = withResizableHeaders(
+    [
+      {
+        title: t("aidpKnowledge.detailFileName"),
+        dataIndex: "file_name",
+        key: "file_name",
+        fixed: "left",
+        width: 300,
+        ellipsis: true,
       },
-    },
-    {
-      title: t("aidpKnowledge.detailOperation"),
-      key: "actions",
-      fixed: "right",
-      width: 175,
-      render: (_value, record) => {
-        const code = statusCode(record.status);
-        if (code !== 3 && code !== 5) return null;
-        return (
-          <div className="flex items-center gap-3 whitespace-nowrap">
-            <Button
-              type="link"
-              size="small"
-              className="px-0"
-              loading={retryingFileUuid === record.file_uuid}
-              onClick={() => void handleRetry(record)}
-            >
-              {t("aidpKnowledge.retryTask")}
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              className="px-0"
-              onClick={() => setFailureTask(record)}
-            >
-              {t("aidpKnowledge.failureDetails")}
-            </Button>
-          </div>
-        );
+      {
+        title: t("aidpKnowledge.detailFileType"),
+        dataIndex: "file_type",
+        key: "file_type",
+        width: 75,
+        render: (value?: string) => value || UNKNOWN,
       },
-    },
-  ];
+      {
+        title: t("aidpKnowledge.detailFileSize"),
+        dataIndex: "file_size",
+        key: "file_size",
+        width: 80,
+        render: (value?: number) => formatFileSize(value),
+      },
+      {
+        title: t("aidpKnowledge.detailUpdateTime"),
+        dataIndex: "updated_at",
+        key: "updated_at",
+        width: 135,
+        ellipsis: true,
+        render: (value?: string) => formatDetailDateTime(value),
+      },
+      {
+        title: t("aidpKnowledge.detailTaskStatus"),
+        dataIndex: "status",
+        key: "status",
+        width: 120,
+        filters: taskStatusOptions.map(({ value, label }) => ({
+          text: label,
+          value,
+        })),
+        filterMultiple: false,
+        filteredValue: [taskStatus],
+        render: (status: AidpDocumentItem["status"]) => {
+          const code = statusCode(status);
+          const labelKeys: Record<number, string> = {
+            1: "aidpKnowledge.taskSuccess",
+            2: "aidpKnowledge.taskExtracting",
+            3: "aidpKnowledge.taskVectorFailed",
+            4: "aidpKnowledge.taskQueued",
+            5: "aidpKnowledge.taskGraphFailed",
+          };
+          const dotColor =
+            code === 1
+              ? "bg-green-500"
+              : code === 3 || code === 5
+                ? "bg-red-500"
+                : code === 4
+                  ? "bg-gray-400"
+                  : "bg-blue-500";
+          return (
+            <span className="inline-flex items-center gap-2 whitespace-nowrap text-gray-700">
+              <i className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
+              {code && labelKeys[code]
+                ? t(labelKeys[code])
+                : (status ?? UNKNOWN)}
+            </span>
+          );
+        },
+      },
+      {
+        title: t("aidpKnowledge.detailOperation"),
+        key: "actions",
+        fixed: "right",
+        width: 175,
+        render: (_value, record) => {
+          const code = statusCode(record.status);
+          if (code !== 3 && code !== 5) return null;
+          return (
+            <div className="flex items-center gap-3 whitespace-nowrap">
+              <Button
+                type="link"
+                size="small"
+                className="px-0"
+                loading={retryingFileUuid === record.file_uuid}
+                onClick={() => void handleRetry(record)}
+              >
+                {t("aidpKnowledge.retryTask")}
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                className="px-0"
+                onClick={() => setFailureTask(record)}
+              >
+                {t("aidpKnowledge.failureDetails")}
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    taskColumnWidths,
+    TASK_COLUMN_MIN_WIDTHS,
+    setTaskColumnWidths
+  );
 
   const privateScope = detail.ingroup_permission === "PRIVATE";
   const descriptionValue = (value: unknown): string => {
@@ -845,7 +927,10 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
               dataSource={files}
               loading={loadingFiles}
               pagination={false}
-              scroll={{ x: 930 }}
+              components={{
+                header: { cell: ResizableTitle },
+              }}
+              scroll={{ x: sumColumnWidths(fileColumns) }}
               locale={{
                 emptyText: (
                   <Empty description={t("aidpKnowledge.detailFilesEmpty")} />
@@ -947,7 +1032,10 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
                 );
               }}
               pagination={false}
-              scroll={{ x: 885 }}
+              components={{
+                header: { cell: ResizableTitle },
+              }}
+              scroll={{ x: sumColumnWidths(taskColumns) }}
               locale={{
                 emptyText: (
                   <Empty description={t("aidpKnowledge.detailTasksEmpty")} />

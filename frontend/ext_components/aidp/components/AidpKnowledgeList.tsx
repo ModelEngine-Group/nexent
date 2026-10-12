@@ -120,7 +120,7 @@ interface AidpKnowledgeListProps {
   onRetry: () => void;
 }
 
-interface ResizableTitleProps extends Omit<
+export interface ResizableTitleProps extends Omit<
   React.ThHTMLAttributes<HTMLTableCellElement>,
   "onResize"
 > {
@@ -129,7 +129,7 @@ interface ResizableTitleProps extends Omit<
   onResize?: (width: number, renderedWidths: Record<string, number>) => void;
 }
 
-const ResizableTitle: React.FC<ResizableTitleProps> = ({
+export const ResizableTitle: React.FC<ResizableTitleProps> = ({
   width,
   minWidth = 88,
   onResize,
