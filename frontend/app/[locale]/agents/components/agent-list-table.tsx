@@ -151,6 +151,7 @@ export default function AgentListTable({
       render: (_, agent) => {
         const agentId = Number(agent.id);
         const isOnline = Boolean(agent.current_version_no);
+        const agentName = agent.display_name || agent.name;
         return (
           <div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-[12px] leading-[18px]">
             <button
@@ -171,6 +172,7 @@ export default function AgentListTable({
             ) : null}
             <AgentConfigActions
               agentId={agentId}
+              agentName={agentName}
               readOnly={agent.permission === "READ_ONLY"}
               variant="table"
               onManageVersions={onManageVersions}

@@ -11781,7 +11781,7 @@ async def test_export_agent_with_skills_impl_with_zip(
     import zipfile
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
-    mock_search_info.return_value = {"name": "my_agent"}
+    mock_search_info.return_value = {"name": "my_agent", "display_name": "My Agent"}
     mock_collect_skills.return_value = [
         SkillZipEntry(skill_name="TestSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")
     ]
@@ -11793,7 +11793,7 @@ async def test_export_agent_with_skills_impl_with_zip(
 
     assert result["_zip"] is True
     assert "data" in result
-    assert result["filename"] == "my_agent.zip"
+    assert result["filename"] == "My Agent.zip"
     zip_data = io.BytesIO(result["data"])
     with zipfile.ZipFile(zip_data, "r") as zf:
         assert "agent.json" in zf.namelist()

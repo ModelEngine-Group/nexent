@@ -34,11 +34,13 @@ import { useAgentStore } from "@/stores/agentStore";
 
 export default function AgentConfigActions({
   agentId: agentIdProp,
+  agentName: agentNameProp,
   readOnly,
   variant = "buttons",
   onManageVersions,
 }: {
   agentId?: number | null;
+  agentName?: string;
   readOnly?: boolean;
   variant?: "buttons" | "menu" | "table";
   onManageVersions?: (agentId: number) => void;
@@ -56,7 +58,8 @@ export default function AgentConfigActions({
   const storeIsReadOnly = useAgentStore((state) => state.isReadOnly);
   const isReadOnly = readOnly ?? storeIsReadOnly;
   const reset = useAgentStore((state) => state.reset);
-  const agentName = editedAgent?.display_name || editedAgent?.name || "agent";
+  const agentName =
+    agentNameProp || editedAgent?.display_name || editedAgent?.name || "agent";
   const { agentInfo } = useAgentInfo(variant === "buttons" ? agentId : null);
   const [isRelationshipVisible, setIsRelationshipVisible] = useState(false);
   const [isA2ASettingsVisible, setIsA2ASettingsVisible] = useState(false);

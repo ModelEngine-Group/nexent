@@ -1443,8 +1443,9 @@ async def export_agent_with_skills_impl(
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
     )
-    agent_name = agent_info.get(
-        "name", "anonymous") if agent_info else "anonymous"
+    agent_name = "anonymous"
+    if agent_info:
+        agent_name = agent_info.get("display_name") or agent_info.get("name") or "anonymous"
 
     filename = f"{agent_name}.zip"
 
