@@ -1,16 +1,28 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Tooltip } from "antd";
+import { Button, Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
-import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
+import {
+  Blocks,
+  ChevronRight,
+  Settings,
+  Trash2,
+  X,
+  AlertTriangle,
+} from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
+import {
+  SelectedResourceRow,
+  SelectedResourceTag,
+} from "@/components/common/SelectedResourceRow";
 import ToolConfigModal from "../../../components/capability/tool/ToolConfigModal";
 import { useMergedToolParams } from "./tool/useMergedToolParams";
 import {
@@ -69,13 +81,20 @@ const SOURCE_META: Record<
 
 interface ToolManagementProps {
   currentAgentId?: number;
+  hideEmpty?: boolean;
+  highFidelity?: boolean;
+  addEntry?: ReactNode;
 }
 
-/** Display selected tools as grouped, collapsible cards (demo layout). */
+/** Display selected tools while retaining their existing configuration controller. */
 export default function ToolManagement({
   currentAgentId,
+  hideEmpty = false,
+  highFidelity = false,
+  addEntry,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
+  const isReadOnly = useAgentReadOnly();
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
   const {
     isImageUnderstandingAvailable,
@@ -156,7 +175,122 @@ export default function ToolManagement({
   const toggleCat = (cat: string) =>
     setCollapsedCats((p) => ({ ...p, [cat]: !p[cat] }));
 
+  const configModal = modalOpen ? (
+    <ToolConfigModal
+      isOpen={modalOpen}
+      onCancel={() => {
+        setModalOpen(false);
+        setConfigTool(null);
+        setConfigParams([]);
+      }}
+      tool={configTool!}
+      initialParams={configParams}
+      selectedTool={configTool}
+      currentAgentId={currentAgentId}
+    />
+  ) : null;
+
+  if (highFidelity) {
+    return (
+      <>
+        <div
+          data-testid="agent-selected-tool-grid"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+        >
+          {visibleSelectedTools.map((selectedTool) => {
+            const tool = mergeCanonicalTool(selectedTool, availableTools);
+            const labels = getToolLabels(tool);
+            const isModelUnavailable = tool.unavailable_reasons?.includes(
+              "mcp_model_unavailable"
+            );
+            const isCapabilityUnavailable =
+              isToolDisabledDueToVlm(
+                tool.name,
+                isImageUnderstandingAvailable,
+                isVideoUnderstandingAvailable,
+                isAudioUnderstandingAvailable
+              ) ||
+              isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
+
+            return (
+              <SelectedResourceRow
+                key={tool.id}
+                data-testid={`agent-selected-tool-${tool.id}`}
+                name={tool.name}
+                icon={
+                  <span
+                    aria-hidden="true"
+                    className="grid size-6 shrink-0 place-items-center rounded-md bg-gradient-to-br from-[#b9dcff] via-[#78a7f8] to-[#3978da] shadow-[0_2px_6px_rgba(57,120,218,0.24)]"
+                  >
+                    <Blocks size={16} strokeWidth={2} className="text-white" />
+                  </span>
+                }
+                metadata={
+                  <>
+                    {labels.slice(0, 2).map((label) => (
+                      <SelectedResourceTag key={label} title={label}>
+                        {label}
+                      </SelectedResourceTag>
+                    ))}
+                    {labels.length > 2 && (
+                      <SelectedResourceTag title={labels.slice(2).join(", ")}>
+                        +{labels.length - 2}
+                      </SelectedResourceTag>
+                    )}
+                  </>
+                }
+                actions={
+                  <>
+                    {isModelUnavailable ? (
+                      <Tooltip title={t("toolPool.mcpModelUnavailableTooltip")}>
+                        <AlertTriangle
+                          size={14}
+                          aria-label={t("toolPool.mcpModelUnavailableTooltip")}
+                          className="mr-2 shrink-0 text-orange-400"
+                        />
+                      </Tooltip>
+                    ) : isCapabilityUnavailable ? (
+                      <AlertTriangle
+                        size={14}
+                        className="mr-2 shrink-0 text-orange-400"
+                      />
+                    ) : null}
+                    <Tooltip title={t("toolPool.configure")}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<Settings size={14} />}
+                        aria-label={`${t("toolPool.configure")} ${tool.name}`}
+                        disabled={isReadOnly}
+                        onClick={() => openConfig(tool)}
+                        className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+                      />
+                    </Tooltip>
+                    <Tooltip title={t("toolPool.remove")}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<Trash2 size={14} />}
+                        aria-label={`${t("toolPool.remove")} ${tool.name}`}
+                        disabled={isReadOnly}
+                        onClick={() => removeTool(tool.id)}
+                        className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
+                      />
+                    </Tooltip>
+                  </>
+                }
+              />
+            );
+          })}
+          {addEntry}
+        </div>
+        {configModal}
+      </>
+    );
+  }
+
   if (grouped.length === 0) {
+    if (hideEmpty) return null;
     return (
       <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-200 py-10 text-sm text-gray-400">
         {t("toolPool.noToolsSelected")}
@@ -287,6 +421,8 @@ export default function ToolManagement({
                               </div>
 
                               <button
+                                type="button"
+                                disabled={isReadOnly}
                                 onClick={() => openConfig(tool)}
                                 className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
                                 title={t("toolPool.configure")}
@@ -295,6 +431,8 @@ export default function ToolManagement({
                               </button>
 
                               <button
+                                type="button"
+                                disabled={isReadOnly}
                                 onClick={() => removeTool(tool.id)}
                                 className="flex size-7 shrink-0 items-center justify-center rounded-md text-transparent transition-colors hover:bg-red-50 hover:text-red-500 group-hover:text-gray-400"
                                 title={t("toolPool.remove")}
@@ -314,20 +452,7 @@ export default function ToolManagement({
         ))}
       </div>
 
-      {modalOpen && (
-        <ToolConfigModal
-          isOpen={modalOpen}
-          onCancel={() => {
-            setModalOpen(false);
-            setConfigTool(null);
-            setConfigParams([]);
-          }}
-          tool={configTool!}
-          initialParams={configParams}
-          selectedTool={configTool}
-          currentAgentId={currentAgentId}
-        />
-      )}
+      {configModal}
     </div>
   );
 }
