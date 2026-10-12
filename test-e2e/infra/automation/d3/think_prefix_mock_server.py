@@ -1,16 +1,16 @@
 """TPC controlled provider: exact malformed/valid content, real deployed executor.
 
-Run: python test/common/think_prefix_mock_server.py --port 19091
+Run: python test-e2e/infra/automation/d3/think_prefix_mock_server.py --port 19091
 This fixture never contacts an external model and records no credentials.
 """
 import argparse
 import json
 import uuid
+import sys
+from pathlib import Path
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from test.common.openai_compatible_mock_server import MockState, OpenAICompatibleMockHandler
 
