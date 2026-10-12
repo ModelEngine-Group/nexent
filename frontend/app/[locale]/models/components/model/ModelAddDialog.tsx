@@ -42,15 +42,17 @@ import log from "@/lib/logger";
 import {
   ModelAdvancedSettingsValue,
   buildInferenceParamsPayload,
+  buildVoiceCredentialParams,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
 import {
+  DEFAULT_CHUNKING_BATCH_SIZE,
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
-} from "./ModelChunkSizeSilder";
+} from "./ModelChunkSizeSlider";
 import {
   isEmbeddingModelType,
-  isVoiceModelType,
+  supportsMaxTokensField,
   TYPE_BADGE_CLASS,
   useTypeOptions,
 } from "./modelTypeUi";
@@ -282,7 +284,7 @@ async function createModel(
 /**
  * Always send chunk params for embedding-family rows (old-dialog parity):
  * saved gear values win, otherwise the same defaults the backend would
- * apply (expected 1024 / maximum 1536 / batch 10) become explicit.
+ * apply become explicit.
  */
 function applyEmbeddingChunkParams(
   params: Record<string, unknown>,
@@ -300,7 +302,7 @@ function applyEmbeddingChunkParams(
   const batch =
     typeof settings?.chunk_batch === "number" && settings.chunk_batch > 0
       ? settings.chunk_batch
-      : 10;
+      : DEFAULT_CHUNKING_BATCH_SIZE;
   params.expectedChunkSize = expected;
   params.maximumChunkSize = maximum;
   params.chunkingBatchSize = batch;
@@ -340,26 +342,19 @@ function applyAdvancedSettingsToParams(
   if (payload.tokenizer_family != null)
     params.tokenizerFamily = payload.tokenizer_family;
   if (hasCapacity) params.capacitySource = "operator";
-  // rerank / stt / tts dedicated fields (old spec field set). The service
-  // request builders only read the camelCase keys, so map them explicitly.
-  // Each mapping is gated by the row's type: gear settings survive a row
-  // type change, and a stale rerank max_tokens must not overwrite an
-  // embedding row's 1024 dimension placeholder, nor stale voice
-  // credentials a non-voice model's factory.
+  // Type-specific spec fields, gated by the row's current type (stale gear
+  // values must survive a type change silently, not pollute the new type).
+  // max_tokens only exists for rerank/tts; voice credentials only for stt/tts.
   if (
-    (params.type === MODEL_TYPES.RERANK || params.type === MODEL_TYPES.TTS) &&
+    supportsMaxTokensField(params.type as string | undefined) &&
     payload.max_tokens != null
   ) {
     params.maxTokens = payload.max_tokens;
   }
-  if (isVoiceModelType(params.type as string | undefined)) {
-    if (payload.model_factory != null)
-      params.modelFactory = String(payload.model_factory);
-    if (payload.model_appid != null)
-      params.modelAppid = String(payload.model_appid);
-    if (payload.access_token != null)
-      params.accessToken = String(payload.access_token);
-  }
+  Object.assign(
+    params,
+    buildVoiceCredentialParams(params.type as string | undefined, payload)
+  );
 }
 
 /* ------------------------------ 单个添加 ------------------------------ */
@@ -499,21 +494,8 @@ function SingleAddForm({
         ...(effective?.settings
           ? buildInferenceParamsPayload(effective.settings)
           : {}),
-        // stt/tts: settings-level factory + Volcano credentials ride along
-        // (V2 parity). The snake_case payload keys are not read by the
-        // verify builder, so the camelCase fields are passed explicitly and
-        // override the form-level provider key above. Voice-only: settings
-        // survive a type change and stale credentials must not leak into a
-        // non-voice probe.
-        ...(isVoiceModelType(type) && effective?.settings?.model_factory != null
-          ? { modelFactory: String(effective.settings.model_factory) }
-          : {}),
-        ...(isVoiceModelType(type) && effective?.settings?.model_appid != null
-          ? { modelAppid: String(effective.settings.model_appid) }
-          : {}),
-        ...(isVoiceModelType(type) && effective?.settings?.access_token != null
-          ? { accessToken: String(effective.settings.access_token) }
-          : {}),
+        // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
+        ...buildVoiceCredentialParams(type, effective?.settings),
       });
       setProbe(result.connectivity ? "available" : "unavailable");
     } catch {
@@ -1020,28 +1002,17 @@ function BatchAddForm({
   async function checkRow(row: FetchedRow) {
     setRowCheck((s) => ({ ...s, [row.id]: "checking" }));
     try {
-      // stt/tts rows: settings-level factory + Volcano credentials ride
-      // along with the probe (V2 parity). Voice-only gate: settings survive
-      // a row type change and stale credentials must not leak into a
-      // non-voice probe. Only manual overrides are considered — catalog
-      // suggestions never carry voice credentials.
-      const voiceSettings = isVoiceModelType(row.model_type)
-        ? rowOverrides[row.id]?.settings
-        : undefined;
+      // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
+      // （只取手动 override——目录建议不携带语音凭证）
       const result = await modelService.verifyModelConfigConnectivity({
         modelName: row.model_name,
         modelType: row.model_type,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
-        ...(voiceSettings?.model_factory != null
-          ? { modelFactory: String(voiceSettings.model_factory) }
-          : {}),
-        ...(voiceSettings?.model_appid != null
-          ? { modelAppid: String(voiceSettings.model_appid) }
-          : {}),
-        ...(voiceSettings?.access_token != null
-          ? { accessToken: String(voiceSettings.access_token) }
-          : {}),
+        ...buildVoiceCredentialParams(
+          row.model_type,
+          rowOverrides[row.id]?.settings
+        ),
       });
       setRowCheck((s) => ({
         ...s,

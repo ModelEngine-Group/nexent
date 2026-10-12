@@ -37,12 +37,13 @@ import log from "@/lib/logger";
 import {
   ModelAdvancedSettingsValue,
   buildInferenceParamsPayload,
+  buildVoiceCredentialParams,
   formatCustomValueForEditing,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
 import {
   isEmbeddingModelType,
-  isVoiceModelType,
+  supportsMaxTokensField,
   TYPE_BADGE_CLASS,
   useTypeOptions,
 } from "./modelTypeUi";
@@ -234,19 +235,8 @@ export const ModelEditDialog = ({
         modelId: model.id,
         modelFactory: model.source || "OpenAI-API-Compatible",
         ...buildInferenceParamsPayload(advanced, reasoningCapability),
-        // stt/tts: settings-level factory + Volcano credentials ride along
-        // (the verify builder only reads the camelCase fields). Voice-only
-        // gate: values prefilled for the original type must not leak into a
-        // probe after the operator retypes the model.
-        ...(isVoiceModelType(type) && advanced.model_factory != null
-          ? { modelFactory: String(advanced.model_factory) }
-          : {}),
-        ...(isVoiceModelType(type) && advanced.model_appid != null
-          ? { modelAppid: String(advanced.model_appid) }
-          : {}),
-        ...(isVoiceModelType(type) && advanced.access_token != null
-          ? { accessToken: String(advanced.access_token) }
-          : {}),
+        // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
+        ...buildVoiceCredentialParams(type, advanced),
       });
       setProbe(result.connectivity ? "available" : "unavailable");
     } catch {
@@ -308,10 +298,10 @@ export const ModelEditDialog = ({
       }
       // Type-specific dedicated fields (chunk / voice credentials / max
       // tokens) — updateSingleModel reads camelCase keys, while the payload
-      // builder only emits the snake_case ones. Each mapping is gated by the
-      // CURRENT type: the type select is editable here (only the embedding
-      // pair is locked) and advanced values prefilled for the original type
-      // must not leak into the record when the operator retypes the model.
+      // builder only emits the snake_case ones. Gated by the CURRENT type:
+      // prefills for the original type must not leak when the operator
+      // retypes the model (chunk → embedding family, credentials → stt/tts,
+      // max tokens → rerank/tts).
       if (isEmbeddingModelType(type)) {
         if (advanced.expected_chunk_size != null)
           params.expectedChunkSize = advanced.expected_chunk_size;
@@ -320,18 +310,8 @@ export const ModelEditDialog = ({
         if (advanced.chunk_batch != null)
           params.chunkingBatchSize = advanced.chunk_batch;
       }
-      if (isVoiceModelType(type)) {
-        if (advanced.model_factory != null)
-          params.modelFactory = String(advanced.model_factory);
-        if (advanced.model_appid != null)
-          params.modelAppid = String(advanced.model_appid);
-        if (advanced.access_token != null)
-          params.accessToken = String(advanced.access_token);
-      }
-      if (
-        (type === MODEL_TYPES.RERANK || type === MODEL_TYPES.TTS) &&
-        advanced.max_tokens != null
-      ) {
+      Object.assign(params, buildVoiceCredentialParams(type, advanced));
+      if (supportsMaxTokensField(type) && advanced.max_tokens != null) {
         params.maxTokens = advanced.max_tokens;
       }
 

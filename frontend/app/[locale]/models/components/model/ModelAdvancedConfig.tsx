@@ -29,10 +29,11 @@ import type {
 } from "@/types/modelConfig";
 import { MODEL_TYPES } from "@/const/modelConfig";
 import {
+  DEFAULT_CHUNKING_BATCH_SIZE,
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
   ModelChunkSizeSlider,
-} from "./ModelChunkSizeSilder";
+} from "./ModelChunkSizeSlider";
 import {
   isEmbeddingModelType,
   isVoiceModelType,
@@ -249,7 +250,7 @@ export function ModelAdvancedConfig({
             <Input
               type="number"
               min="1"
-              placeholder="10"
+              placeholder={String(DEFAULT_CHUNKING_BATCH_SIZE)}
               value={
                 typeof value.chunk_batch === "number" ? value.chunk_batch : ""
               }

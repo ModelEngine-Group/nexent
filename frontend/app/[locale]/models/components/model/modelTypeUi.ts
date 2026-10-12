@@ -77,6 +77,10 @@ export const supportsCapacityGrid = (type: string | undefined): boolean =>
 export const isVoiceModelType = (type: string | undefined): boolean =>
   type === MODEL_TYPES.STT || type === MODEL_TYPES.TTS;
 
+/** Types whose spec carries a max-tokens field (rerank / tts). */
+export const supportsMaxTokensField = (type: string | undefined): boolean =>
+  type === MODEL_TYPES.RERANK || type === MODEL_TYPES.TTS;
+
 /** Localized {value, label} options for every model type, in map order. */
 export function useTypeOptions() {
   const { t } = useTranslation();
